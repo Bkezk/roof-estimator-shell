@@ -360,7 +360,11 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
                   a.account_manager_id ? (userName.get(a.account_manager_id) ?? null) : null,
                   // "Property" since Oct 6 (owner, Oct 7: the list still said "2 sites").
                   `${a.site_count} propert${a.site_count === 1 ? "y" : "ies"}`,
-                  a.open_jobs ? `${a.open_jobs} open ticket${a.open_jobs === 1 ? "" : "s"}` : null,
+                  // Open, Scheduled, Done or Authorized — not yet invoiced or closed (owner, Oct
+                  // 12, item 6: the same set as the "Tickets in progress" tile above).
+                  a.open_jobs
+                    ? `${a.open_jobs} ticket${a.open_jobs === 1 ? "" : "s"} in progress`
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

@@ -6,12 +6,19 @@
  * the Service / Opportunities lists use the same predicates when a tile's link presets them, so a
  * tile's number and the list it opens agree.
  *
- *   Open tickets           live, stage open / scheduled / done (not invoiced / closed)
- *   Overdue tickets        Open / Scheduled tickets whose scheduled_date is before today — never a
- *                          Done ticket (owner, Oct 12, item 11: Done is finished work waiting to
- *                          be authorized and invoiced; it is "waiting", not overdue). One rule for
- *                          the tiles, the red Overdue tag, the Tickets list's Overdue filter, the
- *                          Owner view's Past due and Work Overview's Overdue group.
+ *   Tickets in progress    live, stage open / scheduled / done / authorized — everything not yet
+ *                          invoiced or closed (owner, Oct 12, item 6: Work Overview lists Open /
+ *                          Scheduled as work, Done under Needs authorization and Authorized under
+ *                          To invoice; the tile counts all of it, so it is labelled honestly)
+ *   Overdue tickets        Open / Scheduled tickets WITH a technician whose scheduled_date is
+ *                          before today — never a Done ticket (owner, Oct 12, item 11: Done is
+ *                          finished work waiting to be authorized and invoiced; it is "waiting",
+ *                          not overdue), never a ticket with no technician (item 6: that is
+ *                          Unassigned on Work Overview, not overdue), and not one whose follow-up
+ *                          is on hold (snoozed_until on a later day: Work Overview files it under
+ *                          Waiting). One rule for the tiles, the red Overdue tag, the Tickets
+ *                          list's Overdue filter, the Owner view's Past due and Work Overview's
+ *                          Overdue group.
  *   Open opportunities     live, status not closing (not won / lost / no response)
  *   Overdue opportunities  open opportunities whose expected_close is before today
  *   Overdue bids           DRAFT bids whose due_date is before today (owner, Oct 12): the Bids
@@ -24,6 +31,7 @@
  * Eastern day while Work Overview used the browser's, so at 23:30 in Chicago they disagreed.
  */
 import { asBidStatus } from "@/lib/bid-status";
+import { isHeldOn } from "@/lib/my-work";
 import { localYmd as easternYmd } from "@/lib/tasks";
 
 /**
@@ -45,8 +53,13 @@ export const parseTodayInput = (d: unknown): { today?: string } => {
   return typeof v === "string" && YMD.test(v) ? { today: v } : {};
 };
 
-/** Ticket stages that are still work (the same three as Work Overview and the Tech Board load). */
-export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/**
+ * Ticket stages still in progress — everything not yet invoiced or closed (owner, Oct 12, item 6).
+ * Work Overview shows the same set across its groups: Open / Scheduled as work (my-work.ts
+ * WORK_TICKET_STAGES), Done under Needs authorization and Authorized under To invoice. The same
+ * four stages keep a customer from being deleted (crm-account.ts OPEN_TICKET_STAGES).
+ */
+export const OPEN_TICKET_STAGES = ["open", "scheduled", "done", "authorized"] as const;
 /**
  * The stages a ticket can be overdue at (owner, Oct 12): its day has passed and the work has
  * not been done. Done, Authorized, Invoiced and Closed are never overdue.
@@ -72,11 +85,55 @@ export function isOverdue(dateYmd: string | null | undefined, todayYmd: string):
 /**
  * An Open / Scheduled ticket whose day has passed (the Overdue tickets tile, the red tag, the
  * list's Overdue filter, the Owner view's Past due). A Done ticket is never overdue (Oct 12).
+ * A ticket with no technician (`technician_id` null) is never overdue either (owner, Oct 12,
+ * item 6): Work Overview files it under Unassigned, where it carries its own flag — the fix is a
+ * person, not a date. A caller that does not know the technician leaves the field out and the
+ * date alone decides.
  */
 export const isOverdueTicket = (
-  j: { stage: string; scheduled_date: string | null },
+  j: { stage: string; scheduled_date: string | null; technician_id?: string | null },
   todayYmd: string,
-): boolean => isOverdueTicketStage(j.stage) && isOverdue(j.scheduled_date, todayYmd);
+): boolean =>
+  j.technician_id !== null &&
+  isOverdueTicketStage(j.stage) &&
+  isOverdue(j.scheduled_date, todayYmd);
+
+/** What `heldTicketIds` reads of an open follow-up row. */
+export interface HeldFollowupIn {
+  kind: string;
+  item_id: string;
+  status: string;
+  snoozed_until: string | null;
+}
+
+/**
+ * The tickets whose follow-up is on hold on `today` (owner, Oct 12, item 6): an open ticket
+ * follow-up whose snoozed_until falls on a later day — my-work.ts isHeldOn, the rule that files
+ * the item under Waiting on Work Overview. Such a ticket is not counted overdue by the Overdue
+ * tickets tile or the Owner view's Past due while it waits. The day of the hold is the office's
+ * (America/New_York) unless the caller says otherwise, as the Owner view reads it.
+ */
+export function heldTicketIds(
+  followups: readonly HeldFollowupIn[],
+  todayYmd: string,
+  toYmd: (iso: string) => string = (iso) => easternYmd(new Date(iso)),
+): Set<string> {
+  const out = new Set<string>();
+  for (const f of followups)
+    if (f.kind === "ticket" && isHeldOn(f, todayYmd, toYmd)) out.add(f.item_id);
+  return out;
+}
+
+/**
+ * The Overdue tickets tile's rule, whole (owner, Oct 12, item 6): `isOverdueTicket` (Open /
+ * Scheduled, past its day, with a technician) and the ticket's follow-up not on hold. The same
+ * for the Owner view's Past due.
+ */
+export const countsAsOverdueTicket = (
+  j: { id: string; stage: string; scheduled_date: string | null; technician_id?: string | null },
+  todayYmd: string,
+  held: ReadonlySet<string>,
+): boolean => isOverdueTicket(j, todayYmd) && !held.has(j.id);
 
 /** An open opportunity past its expected close (the tile and the list's Overdue filter). */
 export const isOverdueOpp = (
@@ -93,7 +150,7 @@ export interface WorkCounts {
 
 export type TileKind = keyof WorkCounts;
 
-/** The Service list's "Open work" chip (open + scheduled + done) as a URL value: ?stage=openwork. */
+/** The Service list's "Open work" chip (OPEN_TICKET_STAGES) as a URL value: ?stage=openwork. */
 export const SERVICE_OPEN_WORK = "openwork";
 /** The Opportunities list's "All open" chip (every non-closing status): ?status=allopen. */
 export const OPP_ALL_OPEN = "allopen";
@@ -118,7 +175,9 @@ export function tileHref(kind: TileKind): TileHref {
 
 /** The strip's four tiles, in order. Overdue tiles are tinted red when above zero. */
 export const WORK_TILES: readonly { kind: TileKind; label: string; overdue: boolean }[] = [
-  { kind: "openTickets", label: "Open tickets", overdue: false },
+  // "Tickets in progress", not "Open tickets" (owner, Oct 12, item 6): the count takes in Done
+  // and Authorized tickets too — everything not yet invoiced or closed.
+  { kind: "openTickets", label: "Tickets in progress", overdue: false },
   { kind: "overdueTickets", label: "Overdue tickets", overdue: true },
   { kind: "openOpps", label: "Open opportunities", overdue: false },
   { kind: "overdueOpps", label: "Overdue opportunities", overdue: true },
@@ -136,10 +195,11 @@ function daysBetween(fromYmd: string, toYmd: string): number {
 /**
  * The red "Overdue" tag on a ticket (owner, Oct 2): how many days past its day an Open / Scheduled
  * ticket is, or null when it is not overdue — exactly the rule of the Overdue filter and tile
- * (isOverdueTicket; a Done ticket shows no tag).
+ * (isOverdueTicket; a Done ticket shows no tag, nor does a ticket with no technician — the list
+ * shows its Unassigned flag instead; owner, Oct 12, item 6). The days are the ticket's own.
  */
 export function ticketOverdueDays(
-  j: { stage: string; scheduled_date: string | null },
+  j: { stage: string; scheduled_date: string | null; technician_id?: string | null },
   todayYmd: string,
 ): number | null {
   return isOverdueTicket(j, todayYmd) ? daysBetween(j.scheduled_date!, todayYmd) : null;

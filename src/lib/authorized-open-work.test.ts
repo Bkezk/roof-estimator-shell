@@ -3,8 +3,8 @@
  * crm-account.ts was open / scheduled / done, so a customer with an Authorized, not yet invoiced
  * ticket could be deleted — and the ticket count on the Customers list left it out.
  *
- * Work Overview's counts (work-counts.ts) keep their own three stages: the owner said the Work
- * Overview lists stay as they are.
+ * The Customers page's counts (work-counts.ts) kept their own three stages until Oct 12, when the
+ * owner (item 6) made "Tickets in progress" the same four: everything not yet invoiced or closed.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -42,9 +42,9 @@ describe("the server uses the one constant", () => {
       /import \{[^}]*OPEN_TICKET_STAGES[^}]*\} from "@\/lib\/work-counts"/,
     );
   });
-  it("Work Overview's own set is untouched (owner: the lists stay as they are)", () => {
+  it("the Customers page's counts use the same four stages since Oct 12 (item 6: 'Tickets in progress')", () => {
     expect(read("src/lib/work-counts.ts")).toContain(
-      'export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;',
+      'export const OPEN_TICKET_STAGES = ["open", "scheduled", "done", "authorized"] as const;',
     );
   });
 });

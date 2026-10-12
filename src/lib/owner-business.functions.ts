@@ -12,7 +12,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { businessNumbers, type BusinessNumbers } from "@/lib/owner-business";
 import { visibleToOwner } from "@/lib/owner-view";
-import { parseTodayInput, viewerToday } from "@/lib/work-counts";
+import { heldTicketIds, parseTodayInput, viewerToday } from "@/lib/work-counts";
 
 const LIMIT = 1000;
 type Sb = SupabaseClient<Database>;
@@ -55,11 +55,14 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
     const today = viewerToday(data.today, now);
 
     const [tickets, invoices, pos, opps, snoozed, untouched] = await Promise.all([
+      // Open / Scheduled for Past due, Done for the "awaiting authorization" line, Authorized for
+      // the Waiting to invoice tile (owner, Oct 12, item 6: the Authorized queue, as Work
+      // Overview and the Invoices badge count it).
       sb
         .from("service_jobs")
-        .select("stage, stage_changed_at, scheduled_date, invoice_id")
+        .select("id, stage, stage_changed_at, scheduled_date, invoice_id, technician_id")
         .is("deleted_at", null)
-        .in("stage", ["open", "scheduled", "done"])
+        .in("stage", ["open", "scheduled", "done", "authorized"])
         .limit(LIMIT),
       sb.from("invoices").select("status, total, invoice_date").limit(LIMIT),
       sb
@@ -72,15 +75,20 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         .select("status, est_value, expected_close, updated_at")
         .is("deleted_at", null)
         .limit(LIMIT),
+      // Every open follow-up with a hold: the "snoozed right now" count, and the ticket holds
+      // that keep a ticket out of Past due (work-counts.ts heldTicketIds).
       sb
         .from("crm_followups")
-        .select("snoozed_until")
+        .select("kind, item_id, status, snoozed_until")
         .eq("status", "open")
         .not("snoozed_until", "is", null)
         .limit(LIMIT),
       untouchedCounts(sb),
     ]);
     const nowIso = now.toISOString();
+    const holds = must<
+      { kind: string; item_id: string; status: string; snoozed_until: string | null }[]
+    >("follow-ups", snoozed);
     return businessNumbers({
       today,
       now: nowIso,
@@ -88,9 +96,8 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
       invoices: must("invoices", invoices),
       pos: must("purchase orders", pos),
       opps: must("opportunities", opps),
-      snoozed: must<{ snoozed_until: string | null }[]>("follow-ups", snoozed).filter(
-        (f) => !!f.snoozed_until && f.snoozed_until > nowIso,
-      ).length,
+      snoozed: holds.filter((f) => !!f.snoozed_until && f.snoozed_until > nowIso).length,
       untouched,
+      heldTickets: heldTicketIds(holds, today),
     });
   });

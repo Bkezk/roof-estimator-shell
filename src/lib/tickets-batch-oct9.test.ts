@@ -94,13 +94,13 @@ describe("B1. the Awaiting invoice queue lists the Authorized tickets", () => {
     expect(invoices).toContain("const since = waitingSince(j);");
     expect(AWAITING_INVOICE_TITLE).toBe("Tickets marked Authorized with no finalised invoice yet");
   });
-  it("the Owner tile still counts Done tickets with no invoice, and now links to them", () => {
-    expect([...TO_INVOICE_STAGES]).toEqual(["done"]);
-    expect(BUSINESS_HREFS.toInvoice).toBe("/service?stage=done");
+  it("the Owner tile counts the Authorized tickets with no invoice since Oct 12 (item 6), and links to the Awaiting invoice queue", () => {
+    expect([...TO_INVOICE_STAGES]).toEqual(["authorized"]);
+    expect(BUSINESS_HREFS.toInvoice).toBe("/service/invoices?tab=to-invoice");
     expect(parseServiceSearch({ stage: "done" })).toEqual({ stage: "done" });
-    // The query behind it reads open / scheduled / done rows only (owner-business.functions.ts).
+    // The query behind it reads the Authorized rows too (owner-business.functions.ts).
     expect(read("src/lib/owner-business.functions.ts")).toContain(
-      '.in("stage", ["open", "scheduled", "done"])',
+      '.in("stage", ["open", "scheduled", "done", "authorized"])',
     );
   });
 });

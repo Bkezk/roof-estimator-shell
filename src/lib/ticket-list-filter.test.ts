@@ -67,11 +67,17 @@ describe("the filters that were already there keep working", () => {
   it("Mine, Open work, Overdue, Type, search over job # and technician name", () => {
     expect(nums({ mineId: "u-donnie" })).toEqual([6002]);
     expect(nums({ stage: "openwork" })).toEqual([6001, 6002, 6003, 6004]);
+    // With a technician: an unassigned ticket past its day is Unassigned, not overdue (owner,
+    // Oct 12, item 6; work-counts.ts isOverdueTicket).
     expect(
-      filterTickets([t(1, { scheduled_date: "2026-10-01" }), t(2)], {
-        ...ALL,
-        overdueOnly: true,
-      }).map((j) => j.number),
+      filterTickets(
+        [
+          t(1, { scheduled_date: "2026-10-01", technician_id: "u-trace" }),
+          t(2),
+          t(3, { scheduled_date: "2026-10-01" }),
+        ],
+        { ...ALL, overdueOnly: true },
+      ).map((j) => j.number),
     ).toEqual([1]);
     expect(nums({ type: "scope" })).toEqual([]);
     expect(

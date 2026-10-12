@@ -183,9 +183,13 @@ describe("5. Dates: managers move them; every move is logged", () => {
   });
 });
 
-describe("6. The counts strip and the Overdue filters are unchanged", () => {
-  it("work-counts.ts does not know about follow-up snoozes", () => {
+describe("6. The counts strip and the Overdue filters", () => {
+  // Owner, Oct 12 (counts agree with Work Overview): the Overdue tickets tile now leaves out a
+  // ticket whose follow-up is on hold (snoozed_until ahead), the same rule as Work Overview's
+  // Waiting group — so work-counts.ts reads the hold date; it still never reads closed_by_sync.
+  it("work-counts.ts reads the hold date only, never closed_by_sync", () => {
     const counts = read("src/lib/work-counts.ts");
-    expect(counts).not.toMatch(/snooz|closed_by_sync/);
+    expect(counts).toContain("snoozed_until");
+    expect(counts).not.toMatch(/closed_by_sync/);
   });
 });

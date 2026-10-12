@@ -1,8 +1,9 @@
 /**
- * The Owner view's Business tab (owner, Oct 8): four money tiles — Waiting to invoice, Unpaid,
- * Invoiced this month, Pipeline — then purchase orders waiting, Won / Lost, and a "Going stale"
- * strip. Every tile is a link to the list already filtered to what it counts. Blank until the
- * numbers arrive (never a placeholder 0); an empty queue reads "—".
+ * The Owner view's Business tab (owner, Oct 8): four money tiles — Authorized, not invoiced (the
+ * Awaiting invoice queue, with the Done tickets still to be authorized as its second line; owner,
+ * Oct 12, item 6), Unpaid, Invoiced this month, Pipeline — then purchase orders waiting, Won /
+ * Lost, and a "Going stale" strip. Every tile is a link to the list already filtered to what it
+ * counts. Blank until the numbers arrive (never a placeholder 0); an empty queue reads "—".
  */
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -28,10 +29,13 @@ const days = (n: number | null) =>
 function Go({
   href,
   className,
+  title,
   children,
 }: {
   href: string;
   className?: string;
+  /** Help text (the browser's tooltip) saying what the number counts. */
+  title?: string | undefined;
   children: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -39,6 +43,7 @@ function Go({
     <a
       href={href}
       className={className}
+      title={title}
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
@@ -55,17 +60,21 @@ function Tile({
   value,
   sub,
   href,
+  help,
   tone = "",
 }: {
   title: string;
   value: ReactNode;
   sub?: ReactNode;
   href: string;
+  /** What the number counts, as the tile's tooltip. */
+  help?: string;
   tone?: string;
 }) {
   return (
     <Go
       href={href}
+      title={help}
       className={`block rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50 ${tone}`}
     >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
@@ -109,15 +118,26 @@ export function OwnerBusiness() {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Tile
-          title="Waiting to invoice"
+          title="Authorized, not invoiced"
+          help="Tickets marked Authorized that have no invoice yet — the Invoices page's Awaiting invoice queue and Work Overview's Authorized — to invoice group. Aged from the day they were authorized."
           href={BUSINESS_HREFS.toInvoice}
           value={d ? (d.toInvoice.count === 0 ? "—" : d.toInvoice.count) : ""}
           sub={
-            d
-              ? d.toInvoice.count
-                ? `Done tickets · ${days(d.toInvoice.oldestDays)}`
-                : "Nothing waiting"
-              : ""
+            d ? (
+              <>
+                {d.toInvoice.count
+                  ? `Authorized tickets with no invoice yet · ${days(d.toInvoice.oldestDays)}`
+                  : "Nothing authorized is waiting for an invoice"}
+                {d.toAuthorize.count > 0 && (
+                  <>
+                    <br />
+                    {`${d.toAuthorize.count} done, awaiting authorization · ${days(d.toAuthorize.oldestDays)}`}
+                  </>
+                )}
+              </>
+            ) : (
+              ""
+            )
           }
           tone={d && d.toInvoice.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
         />
@@ -178,13 +198,17 @@ export function OwnerBusiness() {
         <h2 className="text-sm font-semibold">Going stale</h2>
         <ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
           <li>
-            <Go href={BUSINESS_HREFS.pastDue} className="hover:underline">
+            <Go
+              href={BUSINESS_HREFS.pastDue}
+              className="hover:underline"
+              title="Open or Scheduled tickets with a technician whose day has passed and whose follow-up is not on hold — the Overdue tickets tile's rule"
+            >
               <span className="font-semibold tabular-nums">{d ? d.stale.pastDue : ""}</span> tickets
               past their scheduled day
             </Go>
           </li>
           <li>
-            <Go href={BUSINESS_HREFS.untouched} className="hover:underline">
+            <Go href={BUSINESS_HREFS.untouchedTickets} className="hover:underline">
               <span className="font-semibold tabular-nums">
                 {d ? (d.stale.untouchedTickets ?? "n/a") : ""}
               </span>{" "}
@@ -192,7 +216,7 @@ export function OwnerBusiness() {
             </Go>
           </li>
           <li>
-            <Go href={BUSINESS_HREFS.untouched} className="hover:underline">
+            <Go href={BUSINESS_HREFS.untouchedOpps} className="hover:underline">
               <span className="font-semibold tabular-nums">
                 {d ? (d.stale.untouchedOpps ?? "n/a") : ""}
               </span>{" "}

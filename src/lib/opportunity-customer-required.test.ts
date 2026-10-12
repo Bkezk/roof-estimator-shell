@@ -437,7 +437,8 @@ describe("4. Start a ticket", () => {
     const opened = page.indexOf('data-line="opened"');
     const note = page.indexOf("<FromOpportunityNote");
     expect(note).toBeGreaterThan(opened);
-    expect(note - opened).toBeLessThan(400);
+    // The Opened badge grew a technician_id prop (Oct 12: unassigned tickets carry no overdue tag).
+    expect(note - opened).toBeLessThan(700);
     expect(page).toContain("fromOpportunityLabel(q.data.title)");
   });
   it("the column: migration (idempotent, nullable, no backfill) and types", () => {

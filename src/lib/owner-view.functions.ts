@@ -22,7 +22,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { WORK_TICKET_STAGES, addDays, mergeWork, type TicketIn } from "@/lib/my-work";
+import {
+  WORK_TICKET_STAGES,
+  addDays,
+  mergeWork,
+  type FollowupIn,
+  type TicketIn,
+} from "@/lib/my-work";
 import {
   DONE_TICKET_STAGES,
   bucketCounts,
@@ -47,6 +53,31 @@ import {
 } from "@/lib/owner-view";
 import { localYmd, zonedTime } from "@/lib/tasks";
 import { OPEN_OPP_STATUSES, parseTodayInput, viewerToday } from "@/lib/work-counts";
+
+/**
+ * A crm_followups row as Work Overview reads it (my-work.functions.ts), the hold included: a
+ * follow-up snoozed past today sits under Waiting there and so counts neither Due today nor
+ * Overdue here (owner, Oct 12, item 7 — the Owner view used to drop snoozed_until and count a
+ * held follow-up as overdue). The hold columns are missing until 20261009150000_followup_holds.sql
+ * is applied, hence the `?? null`.
+ */
+function followupIn(f: Database["public"]["Tables"]["crm_followups"]["Row"]): FollowupIn {
+  return {
+    id: f.id,
+    title: f.title,
+    url: f.url,
+    due_at: f.due_at,
+    status: f.status,
+    kind: f.kind,
+    item_id: f.item_id,
+    assignee_id: f.assignee_id,
+    every_days: f.every_days ?? null,
+    snoozed_until: f.snoozed_until ?? null,
+    hold_reason: f.hold_reason ?? null,
+    held_by_name: f.held_by_name ?? null,
+    hold_count: f.hold_count ?? null,
+  };
+}
 
 export interface OwnerViewResult {
   /** The day (YYYY-MM-DD) the numbers are for: the viewer's (sent by the browser, as Work Overview
@@ -155,16 +186,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
       {
         tickets: must("Tickets", tickets) as TicketIn[],
         tasks: must("Tasks", tasks),
-        followups: followupRows.map((f) => ({
-          id: f.id,
-          title: f.title,
-          url: f.url,
-          due_at: f.due_at,
-          status: f.status,
-          kind: f.kind,
-          item_id: f.item_id,
-          assignee_id: f.assignee_id,
-        })),
+        followups: followupRows.map(followupIn),
         bids: must("Bids", bids),
       },
       (iso) => localYmd(new Date(iso)),
@@ -453,14 +475,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
         tickets: ticketRows,
         tasks: taskRows.map((t) => ({ ...t, building_label: label(t.building_id) })),
         followups: followupRows.map((f) => ({
-          id: f.id,
-          title: f.title,
-          url: f.url,
-          due_at: f.due_at,
-          status: f.status,
-          kind: f.kind,
-          item_id: f.item_id,
-          assignee_id: f.assignee_id,
+          ...followupIn(f),
           account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
         })),
         bids: bidRows.map((b) => ({

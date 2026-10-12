@@ -141,8 +141,9 @@ describe("businessNumbers", () => {
     untouched: { tickets: 2, opps: 1 },
   };
   const n = businessNumbers(input);
-  it("Waiting to invoice: Done tickets with no invoice (the Awaiting invoice queue), oldest first", () => {
-    expect(n.toInvoice).toEqual({ count: 2, oldestDays: 7 });
+  it("Authorized, not invoiced: Authorized tickets with no invoice (the Awaiting invoice queue), oldest first; Done tickets on the second line", () => {
+    expect(n.toInvoice).toEqual({ count: 1, oldestDays: 6 });
+    expect(n.toAuthorize).toEqual({ count: 2, oldestDays: 7 });
   });
   it("Unpaid: final + sent, their total and the oldest invoice date", () => {
     expect(n.unpaid).toEqual({ count: 2, total: 2000.5, oldestDays: 28 });
@@ -270,7 +271,9 @@ describe("listOwnerBusiness (server)", () => {
   it("an admin gets the numbers: deleted rows and approved orders left out, the rpc's untouched counts, snoozed = still snoozed", async () => {
     const r = await call(world("admin"));
     expect(r.today).toBe("2026-10-08");
-    expect(r.toInvoice.count).toBe(1);
+    // j1 is Done (the second line); nothing Authorized in this world.
+    expect(r.toInvoice.count).toBe(0);
+    expect(r.toAuthorize.count).toBe(1);
     expect(r.unpaid).toMatchObject({ count: 1, total: 100 });
     expect(r.invoiced.month).toEqual({ count: 2, total: 150 });
     expect(r.pos).toEqual({ count: 1, total: 10 });
@@ -305,14 +308,16 @@ describe("the click-throughs", () => {
   });
   it("every tile goes to the list filtered to what it counts", () => {
     expect(BUSINESS_HREFS).toEqual({
-      // The Done tickets it counts (the Awaiting invoice queue is the Authorized ones; Oct 9).
-      toInvoice: "/service?stage=done",
+      // The Authorized tickets it counts: the Awaiting invoice queue (owner, Oct 12, item 6).
+      toInvoice: "/service/invoices?tab=to-invoice",
       unpaid: "/service/invoices?status=unpaid",
       invoiced: "/service/invoices",
       pipeline: "/opportunities?status=allopen",
       pos: "/service?stage=openwork",
       pastDue: "/service?overdue=1",
-      untouched: "/my-work?bucket=overdue",
+      // The untouched items sit in each page's Needs action strip; neither page takes a filter.
+      untouchedTickets: "/service",
+      untouchedOpps: "/opportunities",
       snoozed: "/my-work",
     });
   });
@@ -322,7 +327,7 @@ describe("the click-throughs", () => {
     expect(view).toContain("<OwnerBusiness />");
     const biz = read("src/components/owner-business.tsx");
     expect(biz).toContain("enabled: !!session && visibleToOwner(profile),");
-    expect(biz).toContain('title="Waiting to invoice"');
+    expect(biz).toContain('title="Authorized, not invoiced"');
     expect(biz).toContain('title="Unpaid"');
     expect(biz).toContain('title="Invoiced this month"');
     expect(biz).toContain('title="Pipeline"');

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { OPEN_TICKET_STAGES as CUSTOMER_OPEN_STAGES } from "@/lib/crm-account";
 import { OPP_CLOSING, OPP_STATUSES } from "@/lib/opportunities.functions";
 import { SERVICE_STAGES, TECH_STAGES } from "@/lib/service.functions";
 import { LOAD_STAGES } from "@/lib/service-schedule";
@@ -36,12 +37,15 @@ describe("isOverdue", () => {
 });
 
 describe("open sets", () => {
-  it("open tickets are open / scheduled / done (the stages My Work and the board load use)", () => {
-    expect([...OPEN_TICKET_STAGES]).toEqual(["open", "scheduled", "done"]);
-    expect([...OPEN_TICKET_STAGES]).toEqual([...TECH_STAGES]);
-    expect([...OPEN_TICKET_STAGES]).toEqual([...LOAD_STAGES]);
+  it("tickets in progress are open / scheduled / done / authorized — everything not yet invoiced or closed (owner, Oct 12, item 6)", () => {
+    expect([...OPEN_TICKET_STAGES]).toEqual(["open", "scheduled", "done", "authorized"]);
+    // The same set keeps a customer from being deleted (crm-account.ts); the technician's own
+    // stages and the Board's load (open / scheduled / done) are a smaller set on purpose.
+    expect([...OPEN_TICKET_STAGES]).toEqual([...CUSTOMER_OPEN_STAGES]);
+    expect([...TECH_STAGES]).toEqual([...LOAD_STAGES]);
+    expect([...OPEN_TICKET_STAGES].slice(0, 3)).toEqual([...TECH_STAGES]);
     for (const s of SERVICE_STAGES)
-      expect(isOpenTicketStage(s)).toBe(s !== "authorized" && s !== "invoiced" && s !== "closed");
+      expect(isOpenTicketStage(s)).toBe(s !== "invoiced" && s !== "closed");
   });
   it("open opportunities are every status that is not closing", () => {
     expect([...OPEN_OPP_STATUSES]).toEqual(OPP_STATUSES.filter((s) => !OPP_CLOSING.includes(s)));
@@ -81,7 +85,7 @@ describe("tileHref", () => {
   });
   it("the strip has exactly the four tiles, overdue ones flagged", () => {
     expect(WORK_TILES.map((t) => [t.kind, t.label, t.overdue])).toEqual([
-      ["openTickets", "Open tickets", false],
+      ["openTickets", "Tickets in progress", false],
       ["overdueTickets", "Overdue tickets", true],
       ["openOpps", "Open opportunities", false],
       ["overdueOpps", "Overdue opportunities", true],

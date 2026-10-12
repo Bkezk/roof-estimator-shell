@@ -528,6 +528,8 @@ const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced
  * `before` (the technician and day as they were, from the paths that may change them: the save,
  * the Board's drop) the technician hears of a reassignment or a moved day (owner, Oct 12, item
  * 9; ticket-events.server.ts afterTicketDispatch) — once, from here, whichever path it was.
+ * `quiet` (followups.server.ts SyncArgs): a timer started here sends the technician no "assigned"
+ * notice — the restore of a deleted ticket (owner, Oct 12, item 5), which is not a new assignment.
  */
 async function syncTicketFollowup(
   row: ServiceJobRow,
@@ -535,6 +537,7 @@ async function syncTicketFollowup(
   sb: SupabaseClient<Database>,
   prevStage: string | null,
   before?: { technician_id: string | null; scheduled_date: string | null },
+  opts: { quiet?: boolean } = {},
 ): Promise<void> {
   const { syncFollowup } = await import("@/lib/followups.server");
   const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
@@ -553,6 +556,7 @@ async function syncTicketFollowup(
       dueDate: row.scheduled_date,
       actorId: actor.id,
       actorName: actor.name,
+      ...(opts.quiet ? { quiet: true } : {}),
     },
     sb,
   );
@@ -751,17 +755,37 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
       );
   });
 
+/**
+ * Undo a soft delete. The delete closed the ticket's follow-ups ("deleted"); the restore runs the
+ * same sync a save does (owner, Oct 12, item 5), so an Open / Scheduled ticket with a technician
+ * gets its timer back — quietly: the technician never heard of the delete, so no second
+ * "assigned" notice (SyncArgs.quiet) — a Done ticket gets its Authorize timer back through
+ * afterTicketStage (the stage is passed as unchanged, so no fresh "ready for your review"
+ * broadcast; the one authorizer the timer lands on hears of it as its assignee), and a ticket
+ * with no technician gets nothing.
+ */
 export const restoreServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
     if (!managesTickets(p)) throw new Error("Ask a manager to restore a ticket");
-    const { error } = await context.supabase
+    const { data: row, error } = await context.supabase
       .from("service_jobs")
-      .update({ deleted_at: null })
-      .eq("id", data.id);
+      .update({ deleted_at: null, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .select("*")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (row)
+      await syncTicketFollowup(
+        row,
+        { id: context.userId, name: nameOf(p) },
+        context.supabase,
+        row.stage,
+        undefined,
+        { quiet: true },
+      );
   });
 
 export const listDeletedServiceJobs = createServerFn({ method: "GET" })

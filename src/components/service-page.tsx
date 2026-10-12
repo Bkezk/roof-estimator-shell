@@ -278,7 +278,7 @@ export function ServicePage({
   site?: string | undefined;
   /** New ticket: from this opportunity (its customer, site and description). */
   opportunity?: string | undefined;
-  /** The list: preset the stage chip (`?stage=`; "openwork" = open + scheduled + done). */
+  /** The list: preset the stage chip (`?stage=`; "openwork" = open / scheduled / done / authorized). */
   stage?: Exclude<StageFilter, "all"> | undefined;
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
   overdue?: boolean | undefined;
@@ -2357,7 +2357,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {opened}
             <OverdueBadge
               days={ticketOverdueDays(
-                { stage: asStage(job.stage), scheduled_date: job.scheduled_date },
+                {
+                  stage: asStage(job.stage),
+                  scheduled_date: job.scheduled_date,
+                  // No technician: Unassigned, not overdue (owner, Oct 12, item 6).
+                  technician_id: job.technician_id,
+                },
                 localYmd(new Date()),
               )}
               what="Was due"

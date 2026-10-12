@@ -40,6 +40,7 @@ import {
   bucketOf,
   ticketKind,
   weekday,
+  type BucketIn,
   type FollowupIn,
   type WorkItem,
   type WorkKind,
@@ -142,15 +143,17 @@ const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
   bid: "bids",
 };
 
+/** What `bucketCounts` reads of an item: its person and kind, and what `bucketOf` reads. */
+export type CountIn = Pick<WorkItem, "kind" | "assigneeId"> & BucketIn;
+
 /**
  * Due today and overdue per person (`assigneeId`), from Work Overview items (`mergeWork`), bucketed
  * exactly as Work Overview's List does (`bucketOf`) so a number and the list it opens agree.
- * Every kind counts, draft bids included (their person is created_by).
+ * Every kind counts, draft bids included (their person is created_by). A follow-up on hold
+ * (`followup.snoozed_until` on a later day; my-work.ts isHeldOn) is under Waiting there, so it
+ * counts nowhere here (owner, Oct 12, item 7).
  */
-export function bucketCounts(
-  items: Pick<WorkItem, "kind" | "date" | "done" | "assigneeId">[],
-  today: string,
-): Record<string, PersonBuckets> {
+export function bucketCounts(items: CountIn[], today: string): Record<string, PersonBuckets> {
   const out: Record<string, PersonBuckets> = {};
   for (const it of items) {
     if (!it.assigneeId) continue;

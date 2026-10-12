@@ -25,7 +25,8 @@ const PAST = "2026-10-01";
 describe("the rule", () => {
   it("Open / Scheduled past their day; Done, Authorized, Invoiced, Closed never", () => {
     expect([...OVERDUE_TICKET_STAGES]).toEqual(["open", "scheduled"]);
-    expect([...OPEN_TICKET_STAGES]).toEqual(["open", "scheduled", "done"]); // open work still counts Done
+    // Open work still counts Done — and, since Oct 12 (item 6), Authorized: not yet invoiced.
+    expect([...OPEN_TICKET_STAGES]).toEqual(["open", "scheduled", "done", "authorized"]);
     for (const stage of ["open", "scheduled"]) {
       expect(isOverdueTicketStage(stage)).toBe(true);
       expect(isOverdueTicket({ stage, scheduled_date: PAST }, TODAY)).toBe(true);
@@ -45,8 +46,9 @@ describe("where it applies", () => {
     const base = {
       number: 1,
       service_type: "leak",
-      technician_id: null,
-      technician_name: null,
+      // With a technician: one without is Unassigned, never overdue (owner, Oct 12, item 6).
+      technician_id: "tech",
+      technician_name: "Ted",
       customer_name: "Acme",
       site_name: null,
       site_address: null,
@@ -72,7 +74,8 @@ describe("where it applies", () => {
     expect(out.map((j) => j.number)).toEqual([1]);
     // The server's counts read the same stages for the overdue tile.
     const counts = read("src/lib/work-counts.functions.ts");
-    expect(counts).toContain('tickets(OVERDUE_TICKET_STAGES).lt("scheduled_date", today)');
+    expect(counts).toContain('.in("stage", [...OVERDUE_TICKET_STAGES])');
+    expect(counts).toContain('.lt("scheduled_date", today)');
   });
   it("the Owner view's Past due is the same rule (a Done ticket past its day is not stale)", () => {
     const n = businessNumbers({
@@ -91,9 +94,7 @@ describe("where it applies", () => {
       untouched: null,
     });
     expect(n.stale.pastDue).toBe(2);
-    expect(read("src/lib/owner-business.ts")).toContain(
-      "i.tickets.filter((t) => isOverdueTicket(t, i.today))",
-    );
+    expect(read("src/lib/owner-business.ts")).toContain("isOverdueTicket(t, i.today) &&");
   });
   it("Work Overview puts a Done ticket in no group — never Overdue, whatever its day (Oct 12: no Done group)", () => {
     const done = ticketItem({
