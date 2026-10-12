@@ -8,6 +8,12 @@
  *
  * Access: Service. A technician saves only their own ticket's inspection, not once the office
  * has invoiced or closed it; only the office creates the repair ticket.
+ *
+ * Owner, Oct 12 (the inspection close-out flow): the checklist saves as it is answered (the
+ * close-out and the ticket page autosave through saveTicketInspection; no Save button), the
+ * "Recommend repairs" switch rides in the same JSON, and what the office chose afterwards is
+ * recorded on the ticket (inspection_outcome: repair_ticket by createRepairFromInspection, bid or
+ * none by setInspectionOutcome) with who and when, for the "Outcome: …" line.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -15,7 +21,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import { canAccess, dispatchesTickets, isOffice, managesTickets } from "@/lib/access";
+import { INSPECTION_OUTCOMES, type InspectionOutcome } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { ticketDateProblem } from "@/lib/ticket-date";
 import {
@@ -130,11 +137,20 @@ export interface LinkedTicket {
   service_type: string;
   stage: string;
 }
+/** What the office chose after the inspection, as the panel shows it. */
+export interface OutcomeRecord {
+  outcome: InspectionOutcome;
+  at: string | null;
+  /** The chooser's name (profiles), or null when unknown. */
+  by: string | null;
+}
 export interface TicketInspection {
   inspection: Inspection | null;
   checklist: ChecklistItem[];
   /** Tickets created from this inspection (repair tickets). */
   created: LinkedTicket[];
+  /** The recorded outcome (service_jobs.inspection_outcome*), null until chosen. */
+  outcome: OutcomeRecord | null;
   /** The site's address parts, for "Create bid". */
   site: {
     address1: string | null;
@@ -153,12 +169,14 @@ export const getTicketInspection = createServerFn({ method: "GET" })
     const sb = context.supabase;
     const { data: job, error } = await sb
       .from("service_jobs")
-      .select("id, site_id, inspection")
+      .select(
+        "id, site_id, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by",
+      )
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!job) throw new Error("Ticket not found");
-    const [items, created, site] = await Promise.all([
+    const [items, created, site, chooser] = await Promise.all([
       sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
       sb
         .from("service_jobs")
@@ -173,25 +191,49 @@ export const getTicketInspection = createServerFn({ method: "GET" })
             .eq("id", job.site_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      job.inspection_outcome_by
+        ? sb
+            .from("profiles")
+            .select("full_name, email")
+            .eq("id", job.inspection_outcome_by)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
     if (items.error) throw new Error(items.error.message);
     if (created.error) throw new Error(created.error.message);
+    const outcome = asOutcome(job.inspection_outcome);
     return {
       inspection: parseInspection(job.inspection),
       checklist: items.data ?? [],
       created: created.data ?? [],
+      outcome: outcome
+        ? {
+            outcome,
+            at: job.inspection_outcome_at ?? null,
+            by: chooser.data ? nameOf(chooser.data) : null,
+          }
+        : null,
       site: site.data ?? null,
     };
   });
 
-/** Save the checklist answers and notes (the tech on their own ticket, or the office). */
+const asOutcome = (v: string | null | undefined): InspectionOutcome | null =>
+  (INSPECTION_OUTCOMES as readonly string[]).includes(v ?? "") ? (v as InspectionOutcome) : null;
+
+/**
+ * Save the checklist answers, the "Recommend repairs" switch and the (legacy) notes — the tech on
+ * their own ticket, or the office. The close-out and the ticket page autosave here as the
+ * answers change (owner, Oct 12: no Save button); a field left out keeps its saved value.
+ */
 export const saveTicketInspection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z
       .object({
         id: z.string().uuid(),
-        inspection: inspectionSchema.pick({ items: true, notes: true }),
+        inspection: inspectionSchema
+          .pick({ items: true, notes: true, recommend_repairs: true })
+          .partial({ notes: true, recommend_repairs: true }),
       })
       .parse(d),
   )
@@ -201,13 +243,14 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: job, error: jErr } = await sb
       .from("service_jobs")
-      .select("id, technician_id, stage, service_type")
+      .select("id, technician_id, stage, service_type, inspection")
       .eq("id", data.id)
       .maybeSingle();
     if (jErr) throw new Error(jErr.message);
     if (!job) throw new Error("Ticket not found");
     if (job.service_type !== "inspection")
       throw new Error("Only an Inspection ticket has an inspection checklist");
+    const before = parseInspection(job.inspection);
     if (isTech(p)) {
       if (job.technician_id !== context.userId)
         throw new Error("This ticket is assigned to someone else");
@@ -218,7 +261,8 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
     const ins: Inspection = {
       v: 1,
       items: data.inspection.items,
-      notes: data.inspection.notes,
+      notes: data.inspection.notes ?? before?.notes ?? "",
+      recommend_repairs: data.inspection.recommend_repairs ?? before?.recommend_repairs ?? false,
       saved_at: new Date().toISOString(),
       saved_by: nameOf(p),
     };
@@ -247,7 +291,8 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        service_type: z.enum(["leak", "other"]),
+        /** Leak, Warranty (owner, Oct 12) or Other: the repair ticket's type. */
+        service_type: z.enum(["leak", "warranty", "other"]),
         /** The repair ticket's date (every ticket has one — owner, Oct 1). */
         scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       })
@@ -278,7 +323,12 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       if (!ins) throw new Error("The inspection checklist has not been saved on this ticket");
       const dateProblem = ticketDateProblem({ scheduled_date: data.scheduled_date });
       if (dateProblem) throw new Error(dateProblem);
-      const text = repairTicketText(job.number, ins);
+      // The findings note is the ticket's closing_notes since Oct 12 (one notes box); an older
+      // inspection's own notes still win when it has them.
+      const text = repairTicketText(job.number, {
+        items: ins.items,
+        notes: ins.notes.trim() || (job.closing_notes ?? ""),
+      });
       const { data: row, error: iErr } = await sb
         .from("service_jobs")
         .insert({
@@ -318,9 +368,76 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
         by_name: nameOf(p),
         meta: { created_job_id: row.id } as Json,
       });
+      // The outcome (owner, Oct 12): a repair ticket came of this inspection.
+      await recordOutcome(sb, job.id, "repair_ticket", context.userId, nameOf(p));
       return { ...row, existing: false };
     },
   );
+
+/** Stamp what came of the inspection: the choice, who, when (service_jobs.inspection_outcome*). */
+async function recordOutcome(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  outcome: InspectionOutcome,
+  userId: string,
+  name: string,
+): Promise<{ at: string }> {
+  const at = new Date().toISOString();
+  const { error } = await sb
+    .from("service_jobs")
+    .update({
+      inspection_outcome: outcome,
+      inspection_outcome_at: at,
+      inspection_outcome_by: userId,
+      updated_by_name: name,
+    })
+    .eq("id", jobId);
+  if (error) throw new Error(error.message);
+  return { at };
+}
+
+/**
+ * "No action needed" or "Create bid" pressed on a completed inspection (owner, Oct 12): records
+ * the outcome on the ticket — the office or a manager (dispatchesTickets: anyone with Service
+ * access who is not technician-only, the people the After the inspection panel shows to). A
+ * repair ticket records itself (createRepairFromInspection). The choice can be changed: the
+ * latest press wins, and the timeline keeps each.
+ */
+export const setInspectionOutcome = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), outcome: z.enum(["bid", "none"]) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<OutcomeRecord> => {
+    const p = await me(context);
+    if (!dispatchesTickets(p))
+      throw new Error("Only the office or a manager records the inspection's outcome");
+    const sb = context.supabase;
+    const { data: job, error } = await sb
+      .from("service_jobs")
+      .select("id, number, service_type, stage")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!job) throw new Error("Ticket not found");
+    if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+    if (!inspectionComplete(job.stage))
+      throw new Error("The inspection is not done yet; mark it Done first");
+    const name = nameOf(p);
+    const { at } = await recordOutcome(sb, job.id, data.outcome, context.userId, name);
+    await sb.from("service_job_events").insert({
+      service_job_id: job.id,
+      kind: "note",
+      note:
+        data.outcome === "none"
+          ? "Inspection outcome: no action needed"
+          : "Inspection outcome: a bid was started from this inspection",
+      by_user: context.userId,
+      by_name: name,
+      meta: { inspection_outcome: data.outcome } as Json,
+    });
+    return { outcome: data.outcome, at, by: name };
+  });
 
 /** The inspection's live (not deleted) repair ticket, the first made; null when none. */
 async function repairTicketOf(

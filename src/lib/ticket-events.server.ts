@@ -13,6 +13,7 @@
  * No notice to the person who made the change, none for a PO or for Closed (owner).
  */
 import { longDay } from "@/lib/followup-rules";
+import { inspectionDoneTitle, parseInspection } from "@/lib/inspection";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { syncFollowup } from "@/lib/followups.server";
 
@@ -26,10 +27,32 @@ type JobRow = {
   technician_id: string | null;
   created_by: string | null;
   deleted_at: string | null;
+  /**
+   * The Done notice of an INSPECTION (owner, Oct 12) counts its issues and names what it
+   * recommends from the row every caller already holds (service_jobs.*: no extra read); an
+   * older caller without these fields gets the ticket wording.
+   */
+  service_type?: string | undefined;
+  inspection?: unknown;
+  recommend_new_roof?: boolean | undefined;
 };
 
 const ticketTitle = (j: JobRow) =>
   `Ticket #${j.number} ${j.customer_name}${j.description ? ` — ${j.description}` : ""}`;
+
+/**
+ * The Done notice's title. A ticket: "Ticket #N <customer> — <description> is done — ready for
+ * your review". An inspection (owner, Oct 12): "Inspection #N <customer> is done — 2 issues
+ * found, recommends repairs — ready for your review" (inspection.ts inspectionDoneTitle); with
+ * no saved checklist the counts are left out.
+ */
+export function doneTitle(j: JobRow): string {
+  if (j.service_type === "inspection") {
+    const ins = parseInspection(j.inspection ?? null);
+    return inspectionDoneTitle(j.number, j.customer_name, ins, j.recommend_new_roof === true);
+  }
+  return `${ticketTitle(j)} is done — ready for your review`;
+}
 
 /**
  * Office users (Service without the technician tick, and admins), from the roster RPC. Under
@@ -108,7 +131,7 @@ export async function afterTicketStage(
         others,
         {
           kind: "ticket_done",
-          title: `${ticketTitle(row)} is done — ready for your review`,
+          title: doneTitle(row),
           body: `${actor.name ?? "The technician"} marked it done. Review it and mark it Authorized; the invoice is made after that.`,
           url: `/service?id=${row.id}`,
         },

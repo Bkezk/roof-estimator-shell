@@ -6,7 +6,23 @@
  * runs the same rules (`closeoutGaps`, service-field.functions.ts setFieldStatus "done"): a
  * technician's Complete is refused while anything is missing (the list comes back in the
  * message, `closeoutRefusal`); a manager's goes through. Pure, so it is tested without the screen.
+ *
+ * An INSPECTION (owner, Oct 12; closeout-steps.ts closeoutSteps): no repair or photo is ever a
+ * gap and the signature is optional, so its list is the checklist — every visible item answered
+ * ("N checklist items unanswered") and saved on the server — and the time. The server merges
+ * the saved answers (service_jobs.inspection) with the live checklist (inspection_checklist_items)
+ * the way the screen does (inspection.ts unansweredCount), so an item added since counts.
  */
+import {
+  mergeChecklist,
+  parseInspection,
+  unansweredGap,
+  unansweredItems,
+  type ChecklistItem,
+  type InspectionStatus,
+} from "@/lib/inspection";
+
+const isInspection = (service_type: string) => service_type === "inspection";
 
 export interface CheckRepair {
   id: string;
@@ -35,8 +51,10 @@ export interface CloseoutCheckInput {
 /** The repair lines: none recorded (repair tickets), then each repair's missing photos. */
 function repairGaps(service_type: string, repairs: CheckRepair[], photos: CheckPhoto[]) {
   const out: string[] = [];
-  // An inspection's findings are the checklist; a repair ticket should say what was fixed.
-  if (repairs.length === 0 && service_type !== "inspection") out.push("No repairs recorded");
+  // An inspection's findings are the checklist (its own flow since Oct 12): no repair or photo
+  // is ever a gap on one. A repair ticket should say what was fixed.
+  if (isInspection(service_type)) return out;
+  if (repairs.length === 0) out.push("No repairs recorded");
   for (const r of repairs) {
     const mine = photos.filter((p) => p.repair_id === r.id);
     const name = r.name.trim() || "A repair";
@@ -50,7 +68,22 @@ function repairGaps(service_type: string, repairs: CheckRepair[], photos: CheckP
 export function missingForComplete(c: CloseoutCheckInput): string[] {
   const out = repairGaps(c.service_type, c.repairs, c.photos);
   if (c.time_hours !== undefined && !(c.time_hours > 0)) out.push("No time logged");
-  if (!c.signature_path) out.push("No customer signature");
+  if (!c.signature_path && !isInspection(c.service_type)) out.push("No customer signature");
+  return out;
+}
+
+/** A checklist row as the gap check needs it (the screen's draft, or the server's merge). */
+export interface CheckItem {
+  label: string;
+  status: InspectionStatus | null;
+}
+
+/** The inspection lines: the unanswered rows, then an unsaved draft. [] on a repair ticket. */
+function checklistGaps(items: readonly CheckItem[], saved: boolean): string[] {
+  const out: string[] = [];
+  const open = unansweredItems(items).length;
+  if (open > 0) out.push(unansweredGap(open));
+  if (!saved) out.push("The checklist is not saved yet");
   return out;
 }
 
@@ -70,6 +103,13 @@ export interface CompleteGapsInput {
   repairs: CheckRead<CheckRepair[]>;
   photos: CheckRead<CheckPhoto[]>;
   time: CheckRead<{ hours: number | string }[]>;
+  /**
+   * An inspection (owner, Oct 12): the checklist rows as the screen holds them (visible, with
+   * the draft's answers) and whether that draft is what the server has. Ignored on a repair
+   * ticket; an inspection without them (an older caller) checks only the time.
+   */
+  checklist?: CheckRead<CheckItem[]> | undefined;
+  checklist_saved?: boolean | undefined;
 }
 
 export interface CompleteGaps {
@@ -97,13 +137,27 @@ export interface CloseoutRows {
   repairs: CheckRepair[];
   photos: CheckPhoto[];
   time: { hours: number | string }[];
+  /** An inspection: the saved answers (service_jobs.inspection, raw) and the live checklist. */
+  inspection?: unknown;
+  checklist?: ChecklistItem[] | undefined;
 }
 
 /**
  * The same gap list from rows already in hand (the server's check, Oct 12): exactly what
- * `completeGaps` gives the screen once its three reads have answered.
+ * `completeGaps` gives the screen once its reads have answered. On an inspection the saved
+ * answers are merged with the live checklist (an item added since is unanswered); what the
+ * server holds is by definition saved.
  */
 export function closeoutGaps(rows: CloseoutRows): string[] {
+  const inspection = isInspection(rows.service_type)
+    ? {
+        checklist: {
+          data: mergeChecklist(parseInspection(rows.inspection ?? null), rows.checklist ?? []),
+          error: null,
+        },
+        checklist_saved: true,
+      }
+    : {};
   return completeGaps({
     finished: false,
     service_type: rows.service_type,
@@ -112,6 +166,7 @@ export function closeoutGaps(rows: CloseoutRows): string[] {
     repairs: { data: rows.repairs, error: null },
     photos: { data: rows.photos, error: null },
     time: { data: rows.time, error: null },
+    ...inspection,
   }).gaps;
 }
 
@@ -132,7 +187,18 @@ export function completeGaps(c: CompleteGapsInput): CompleteGaps {
   if (c.finished) return { gaps: [], unread: false };
   const gaps: string[] = [];
   let unread = false;
-  if (c.repairs.data && c.photos.data)
+  const inspection = isInspection(c.service_type);
+  if (inspection) {
+    // The checklist stands where the repairs do; the repairs and photos reads are not judged.
+    if (c.checklist) {
+      if (c.checklist.data)
+        gaps.push(...checklistGaps(c.checklist.data, c.checklist_saved !== false));
+      else {
+        unread = true;
+        gaps.push(readGap("checklist", c.checklist));
+      }
+    }
+  } else if (c.repairs.data && c.photos.data)
     gaps.push(...repairGaps(c.service_type, c.repairs.data, c.photos.data));
   else {
     unread = true;
@@ -148,6 +214,7 @@ export function completeGaps(c: CompleteGapsInput): CompleteGaps {
       gaps.push(readGap("time", c.time));
     }
   }
-  if (!c.signature_path) gaps.push("No customer signature");
+  // The signature is optional on an inspection (owner, Oct 12).
+  if (!c.signature_path && !inspection) gaps.push("No customer signature");
   return { gaps, unread };
 }

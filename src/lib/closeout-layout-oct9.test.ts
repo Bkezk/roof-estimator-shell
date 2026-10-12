@@ -168,7 +168,7 @@ describe("no box in a box: the step is the card", () => {
     expect(card).toMatch(/status === "current" \? "border-l-4 border-primary" : ""/);
     // Locked: still one muted line naming the step to finish.
     expect(card).toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
-    expect(card).toContain("{lockedLine(open)}");
+    expect(card).toContain("{lockedLine(open, serviceType)}");
   });
   it("the sections pass only a title; the icons and asides sit on the step cards", () => {
     for (const t of ["Time", "Notes", "Signature"])
@@ -222,8 +222,8 @@ describe("no box in a box: the step is the card", () => {
 
 describe("the compact strip", () => {
   it("one line: the headline, seven dots (tick / number / lock), a chevron for the full list", () => {
-    expect(strip).toContain(
-      '<p className="min-w-0 flex-1 truncate text-sm font-semibold">{stepHeadline(open)}</p>',
+    expect(strip).toMatch(
+      /<p className="min-w-0 flex-1 truncate text-sm font-semibold">\s*\{stepHeadline\(open, serviceType\)\}\s*<\/p>/,
     );
     expect(strip).toContain('aria-label="Jump to a step"');
     expect(strip).toContain('aria-disabled={status === "locked" || undefined}');
@@ -244,7 +244,7 @@ describe("the compact strip", () => {
     // Not sticky; still first in the form.
     expect(strip).not.toContain("sticky");
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} \/>/,
+      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
     );
   });
 });

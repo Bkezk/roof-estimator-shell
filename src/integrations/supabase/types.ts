@@ -2772,6 +2772,7 @@ export type Database = {
           file_name: string | null;
           file_size: number | null;
           id: string;
+          item_key: string | null;
           lat: number | null;
           lng: number | null;
           repair_id: string | null;
@@ -2787,6 +2788,7 @@ export type Database = {
           file_name?: string | null;
           file_size?: number | null;
           id?: string;
+          item_key?: string | null;
           lat?: number | null;
           lng?: number | null;
           repair_id?: string | null;
@@ -2802,6 +2804,7 @@ export type Database = {
           file_name?: string | null;
           file_size?: number | null;
           id?: string;
+          item_key?: string | null;
           lat?: number | null;
           lng?: number | null;
           repair_id?: string | null;
@@ -3084,6 +3087,9 @@ export type Database = {
           helper_count: number;
           id: string;
           inspection: Json | null;
+          inspection_outcome: string | null;
+          inspection_outcome_at: string | null;
+          inspection_outcome_by: string | null;
           invoice_id: string | null;
           job_number: string | null;
           labor_rate_kind: string;
@@ -3134,6 +3140,9 @@ export type Database = {
           helper_count?: number;
           id?: string;
           inspection?: Json | null;
+          inspection_outcome?: string | null;
+          inspection_outcome_at?: string | null;
+          inspection_outcome_by?: string | null;
           invoice_id?: string | null;
           job_number?: string | null;
           labor_rate_kind?: string;
@@ -3184,6 +3193,9 @@ export type Database = {
           helper_count?: number;
           id?: string;
           inspection?: Json | null;
+          inspection_outcome?: string | null;
+          inspection_outcome_at?: string | null;
+          inspection_outcome_by?: string | null;
           invoice_id?: string | null;
           job_number?: string | null;
           labor_rate_kind?: string;

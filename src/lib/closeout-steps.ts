@@ -27,9 +27,31 @@
  * enabled once the step's rule holds and, until then, disabled beside one line saying exactly
  * what is still needed (stepMissing). Pressing it moves `onStep` forward. shownOpenStep picks
  * the card shown as current from `onStep` and the real first open step.
+ *
+ * Owner, Oct 12: an INSPECTION ticket (service_type "inspection") has its own six steps
+ * (closeoutSteps): 1 Who is here · 2 Checklist (every item answered OK / Issue / N/A and saved on
+ * the server) · 3 Findings (one note — the ticket's closing_notes — the "Recommend repairs" and
+ * "Recommend a new roof" switches, an optional photo roll; done with a note, a switch on, or
+ * "Nothing to add") · 4 Materials (never blocks an inspection: Nothing used is pre-set, a row
+ * logged is fine too) · 5 Time (required, as on a repair) · 6 Signature (OPTIONAL: never a gap,
+ * the pad says "Optional for an inspection", Complete does not wait for it). Photos are optional
+ * everywhere in the inspection flow. Leak, warranty, SCOPE and other keep the seven repair steps
+ * (the owner did not say otherwise for scope). Every helper that walks the list takes the
+ * service type (default: the repair flow), or reads it off the StepState.
  */
 
-export type StepId = "crew" | "before" | "work" | "materials" | "time" | "notes" | "signature";
+import { inspectionSummary, recommendationText } from "@/lib/inspection";
+
+export type StepId =
+  | "crew"
+  | "before"
+  | "work"
+  | "materials"
+  | "time"
+  | "notes"
+  | "signature"
+  | "checklist"
+  | "findings";
 export type StepStatus = "done" | "current" | "locked";
 
 export interface CloseoutStep {
@@ -58,6 +80,31 @@ export const CLOSEOUT_STEPS: readonly CloseoutStep[] = [
 
 export const STEP_COUNT = CLOSEOUT_STEPS.length;
 
+/** The inspection flow (owner, Oct 12): six steps, the checklist and the findings in place of the repairs. */
+export const INSPECTION_STEPS: readonly CloseoutStep[] = [
+  { id: "crew", n: 1, title: "Who is here", unlocks: "Open from the start" },
+  { id: "checklist", n: 2, title: "Checklist", unlocks: "Answer who is on the job" },
+  { id: "findings", n: 3, title: "Findings", unlocks: "Every checklist item answered and saved" },
+  {
+    id: "materials",
+    n: 4,
+    title: "Materials",
+    unlocks: "Findings written, a recommendation, or Nothing to add",
+  },
+  { id: "time", n: 5, title: "Time", unlocks: "Materials logged, or Nothing used" },
+  { id: "signature", n: 6, title: "Signature", unlocks: "Time on the ticket" },
+];
+
+export const INSPECTION = "inspection";
+export const isInspection = (serviceType: string | null | undefined) => serviceType === INSPECTION;
+
+/** The ordered steps for a ticket of this type: six for an inspection, else the seven repair steps. */
+export function closeoutSteps(serviceType?: string | null): readonly CloseoutStep[] {
+  return isInspection(serviceType) ? INSPECTION_STEPS : CLOSEOUT_STEPS;
+}
+/** How many steps the flow has (the headline's "of 6" / "of 7"). */
+export const stepCount = (serviceType?: string | null) => closeoutSteps(serviceType).length;
+
 export interface StepRepair {
   id: string;
   resolution_text: string | null;
@@ -72,7 +119,7 @@ export interface StepState {
   /** Already Done / Invoiced / Closed: every step is done (Complete checks nothing either). */
   finished: boolean;
   crewAnswered: boolean;
-  /** "inspection" needs no repair (closeout-check.ts: the checklist is its findings). */
+  /** "inspection" takes the six-step flow (closeoutSteps); anything else the seven repair steps. */
   serviceType: string;
   repairs: readonly StepRepair[];
   photos: readonly StepPhoto[];
@@ -95,6 +142,19 @@ export interface StepState {
   materialItems: number;
   /** The "Signed by" box (the draft, like the notes). */
   signedBy: string;
+  /**
+   * The inspection flow (owner, Oct 12). `checklist`: the visible rows with their answers (the
+   * screen's draft, hidden "Recommend repairs" row left out); `checklistSaved`: the draft is what
+   * the server holds (the autosave landed); `recommendRepairs`: the findings switch. All optional
+   * so a repair ticket's state needs none of them.
+   */
+  checklist?: readonly StepChecklistItem[] | undefined;
+  checklistSaved?: boolean | undefined;
+  recommendRepairs?: boolean | undefined;
+  recommendNewRoof?: boolean | undefined;
+}
+export interface StepChecklistItem {
+  status: "ok" | "issue" | "na" | null;
 }
 
 /** A ledger row as listServiceJobMaterials returns it: one cell, qty negative = used. */
@@ -120,18 +180,27 @@ export function countMaterialItems(rows: readonly MaterialLedgerRow[]): number {
   return n;
 }
 
-export function stepOf(id: StepId): CloseoutStep {
-  const s = CLOSEOUT_STEPS.find((x) => x.id === id);
+export function stepOf(id: StepId, serviceType?: string | null): CloseoutStep {
+  const s = closeoutSteps(serviceType).find((x) => x.id === id);
   if (!s) throw new Error(`Unknown close-out step: ${id}`);
   return s;
 }
-export const stepIndex = (id: StepId) => stepOf(id).n - 1;
+export const stepIndex = (id: StepId, serviceType?: string | null) => stepOf(id, serviceType).n - 1;
 
 const hasPhoto = (photos: readonly StepPhoto[], repairId: string, role: string) =>
   photos.some((p) => p.repair_id === repairId && p.role === role);
 
 /** Repairs are required unless the ticket is an inspection (mirrors missingForComplete). */
-const repairsSuffice = (s: StepState) => s.serviceType === "inspection" || s.repairs.length > 0;
+const repairsSuffice = (s: StepState) => isInspection(s.serviceType) || s.repairs.length > 0;
+
+/** The checklist rows still unanswered (the inspection flow's step 2). */
+const openItems = (s: StepState) => (s.checklist ?? []).filter((i) => i.status === null).length;
+/** Step 3 of an inspection: a note, a switch on, or "Nothing to add" pressed. */
+const findingsGiven = (s: StepState) =>
+  s.closingNotes.trim().length > 0 ||
+  s.recommendRepairs === true ||
+  s.recommendNewRoof === true ||
+  s.notesSkipped;
 
 /** Whether the ticket's data satisfies the step's rule. */
 export function stepDone(id: StepId, s: StepState): boolean {
@@ -139,6 +208,10 @@ export function stepDone(id: StepId, s: StepState): boolean {
   switch (id) {
     case "crew":
       return s.crewAnswered;
+    case "checklist":
+      return openItems(s) === 0 && s.checklistSaved !== false;
+    case "findings":
+      return findingsGiven(s);
     case "before":
       return repairsSuffice(s) && s.repairs.every((r) => hasPhoto(s.photos, r.id, "before"));
     case "work":
@@ -149,19 +222,21 @@ export function stepDone(id: StepId, s: StepState): boolean {
         )
       );
     case "materials":
-      return s.materialsTouched;
+      // An inspection never waits on materials (owner, Oct 12): Nothing used is pre-set.
+      return s.materialsTouched || isInspection(s.serviceType);
     case "time":
       return !!s.onSiteAt || s.timeHours > 0;
     case "notes":
       return s.closingNotes.trim().length > 0 || s.notesSkipped;
     case "signature":
-      return !!s.signaturePath;
+      // Optional on an inspection (owner, Oct 12): the step is never a gap.
+      return !!s.signaturePath || isInspection(s.serviceType);
   }
 }
 
-/** The first step not done, in order; null when all seven are (Complete is ready). */
+/** The first step not done, in the flow's order; null when all are (Complete is ready). */
 export function firstOpenStep(s: StepState): StepId | null {
-  for (const step of CLOSEOUT_STEPS) if (!stepDone(step.id, s)) return step.id;
+  for (const step of closeoutSteps(s.serviceType)) if (!stepDone(step.id, s)) return step.id;
   return null;
 }
 
@@ -186,18 +261,21 @@ export function stepStatuses(
   s: StepState,
   open: StepId | null = firstOpenStep(s),
 ): { step: CloseoutStep; status: StepStatus }[] {
-  return CLOSEOUT_STEPS.map((step) => ({ step, status: stepStatus(step.id, s, open) }));
+  return closeoutSteps(s.serviceType).map((step) => ({
+    step,
+    status: stepStatus(step.id, s, open),
+  }));
 }
 
-/** The step after `id` in CLOSEOUT_STEPS order; null after Signature (Complete follows). */
-export function nextStep(id: StepId): StepId | null {
-  return CLOSEOUT_STEPS[stepIndex(id) + 1]?.id ?? null;
+/** The step after `id` in the flow's order; null after Signature (Complete follows). */
+export function nextStep(id: StepId, serviceType?: string | null): StepId | null {
+  return closeoutSteps(serviceType)[stepIndex(id, serviceType) + 1]?.id ?? null;
 }
 
 /** The button at the foot of the current step's card: "Next step: The work". null on Signature. */
-export function nextStepLabel(id: StepId): string | null {
-  const next = nextStep(id);
-  return next === null ? null : `Next step: ${stepOf(next).title}`;
+export function nextStepLabel(id: StepId, serviceType?: string | null): string | null {
+  const next = nextStep(id, serviceType);
+  return next === null ? null : `Next step: ${stepOf(next, serviceType).title}`;
 }
 
 /**
@@ -210,9 +288,13 @@ export function nextStepLabel(id: StepId): string | null {
  * notes) the real open step shows, so what must be fixed is the current card. Every step done
  * (`open` null) with an `onStep`: that step stays shown, the bar says Complete.
  */
-export function shownOpenStep(open: StepId | null, onStep: StepId | null): StepId | null {
+export function shownOpenStep(
+  open: StepId | null,
+  onStep: StepId | null,
+  serviceType?: string | null,
+): StepId | null {
   if (onStep === null) return open;
-  if (open !== null && stepIndex(open) < stepIndex(onStep)) return open;
+  if (open !== null && stepIndex(open, serviceType) < stepIndex(onStep, serviceType)) return open;
   return onStep;
 }
 
@@ -229,6 +311,12 @@ export function stepMissing(id: StepId, s: StepState): string | null {
   switch (id) {
     case "crew":
       return "Answer who is on the job";
+    case "checklist": {
+      const n = openItems(s);
+      return n > 0 ? `Answer every item (${n} left)` : "Save the checklist";
+    }
+    case "findings":
+      return "Write what you found, turn a switch on, or press Nothing to add";
     case "before": {
       if (!repairsSuffice(s)) return "Add at least one repair";
       const n = s.repairs.filter((r) => !hasPhoto(s.photos, r.id, "before")).length;
@@ -256,17 +344,18 @@ export function stepMissing(id: StepId, s: StepState): string | null {
   }
 }
 
-/** The strip's header: "Step 3 of 7 · The work", or that all are done. */
-export function stepHeadline(open: StepId | null): string {
-  if (open === null) return `All ${STEP_COUNT} steps done — press Complete`;
-  const s = stepOf(open);
-  return `Step ${s.n} of ${STEP_COUNT} · ${s.title}`;
+/** The strip's header: "Step 3 of 7 · The work" ("of 6" on an inspection), or that all are done. */
+export function stepHeadline(open: StepId | null, serviceType?: string | null): string {
+  const count = stepCount(serviceType);
+  if (open === null) return `All ${count} steps done — press Complete`;
+  const s = stepOf(open, serviceType);
+  return `Step ${s.n} of ${count} · ${s.title}`;
 }
 
 /** The muted line in a locked step's place: what to finish first (the step open now). */
-export function lockedLine(open: StepId | null): string {
+export function lockedLine(open: StepId | null, serviceType?: string | null): string {
   if (open === null) return "Locked";
-  const s = stepOf(open);
+  const s = stepOf(open, serviceType);
   return `Locked — finish step ${s.n}: ${s.title} first`;
 }
 
@@ -288,6 +377,19 @@ export function stepSummary(id: StepId, s: StepState): string {
       return s.crewOthers > 0
         ? `With ${s.crewOthers} ${s.crewOthers === 1 ? "other" : "others"}`
         : "Alone";
+    case "checklist":
+      return inspectionSummary(s.checklist ?? []);
+    case "findings": {
+      const t = s.closingNotes.trim().replace(/\s+/g, " ");
+      if (t)
+        return t.length > SUMMARY_NOTES_CHARS ? `${t.slice(0, SUMMARY_NOTES_CHARS).trimEnd()}…` : t;
+      const rec = recommendationText({
+        recommend_repairs: s.recommendRepairs === true,
+        recommend_new_roof: s.recommendNewRoof === true,
+      });
+      if (rec) return `Recommends ${rec}`;
+      return s.notesSkipped ? "Nothing to add" : "No findings";
+    }
     case "before": {
       const n = s.repairs.length;
       if (n === 0) return s.serviceType === "inspection" ? "Inspection — no repairs" : "No repairs";
@@ -324,8 +426,8 @@ export function stepSummary(id: StepId, s: StepState): string {
 }
 
 /** The sticky bar's label while a step before Signature is still open. */
-export function finishStepLabel(open: StepId): string {
-  const s = stepOf(open);
+export function finishStepLabel(open: StepId, serviceType?: string | null): string {
+  const s = stepOf(open, serviceType);
   return `Finish step ${s.n}: ${s.title}`;
 }
 
@@ -338,6 +440,7 @@ export const nothingUsedKey = (jobId: string) => `bid-o-matic:closeout-nothing-u
 /**
  * Where step 6's "Skip — nothing to add" mark lives (owner, Oct 9: the notes are "kind of
  * redundant" after What was wrong / What you did): the same per-ticket localStorage, cleared
- * on Complete like the rest; it records nothing on the server.
+ * on Complete like the rest; it records nothing on the server. The inspection flow's Findings
+ * step uses the same mark for its "Nothing to add" (owner, Oct 12).
  */
 export const notesSkippedKey = (jobId: string) => `bid-o-matic:closeout-notes-skipped:${jobId}`;

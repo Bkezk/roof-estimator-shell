@@ -23,13 +23,13 @@ describe("the step strip", () => {
     expect(src).toContain("function StepStrip({");
     // The SHOWN open step (owner, Oct 9, later: the step the tech is inside stays open).
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} \/>/,
+      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
     );
     const strip = src.slice(
       src.indexOf("function StepStrip({"),
       src.indexOf("function StepCard({"),
     );
-    expect(strip).toContain("{stepHeadline(open)}");
+    expect(strip).toContain("{stepHeadline(open, serviceType)}");
     expect(strip).toContain('aria-label="Close-out steps"');
     expect(strip).toContain('aria-current={status === "current" ? "step" : undefined}');
     expect(strip).toContain('disabled={status === "locked"}');
@@ -91,10 +91,22 @@ describe("the sections in step order", () => {
       expect(positions[i], `${order[i - 1]} before ${order[i]}`).toBeGreaterThan(positions[i - 1]!);
     // Time is above Notes now (it used to follow it).
     expect(at('<Section title="Time">')).toBeLessThan(at('<Section title="Notes">'));
-    // Every step is one card (StepCard; the per-step props come from card(id)).
-    for (const id of ["crew", "before", "work", "materials", "time", "notes", "signature"])
+    // Every step is one card (StepCard; the per-step props come from card(id)). Since Oct 12 the
+    // inspection flow adds its two cards (checklist, findings) in place of Before / The work
+    // (inspection-flow.test.ts): nine StepCards in the source, seven on a repair ticket.
+    for (const id of [
+      "crew",
+      "before",
+      "work",
+      "materials",
+      "time",
+      "notes",
+      "signature",
+      "checklist",
+      "findings",
+    ])
       expect(form.match(new RegExp(`\\{\\.\\.\\.card\\("${id}"\\)\\}`, "g"))).toHaveLength(1);
-    expect(form.match(/<StepCard/g)).toHaveLength(7);
+    expect(form.match(/<StepCard/g)).toHaveLength(9);
   });
   it("a locked step is one muted line naming the step to finish; open ones are the card, the current one with the accent bar", () => {
     const slot = src.slice(
@@ -102,7 +114,7 @@ describe("the sections in step order", () => {
       src.indexOf("function CloseoutForm("),
     );
     expect(slot).toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
-    expect(slot).toContain("{lockedLine(open)}");
+    expect(slot).toContain("{lockedLine(open, serviceType)}");
     expect(slot).toContain('<Lock className="h-4 w-4 shrink-0" />');
     expect(slot).toContain("{children}");
     // Owner, Oct 9 (later): the ring-offset frame around a Section card read as a box in a box;
@@ -142,7 +154,7 @@ describe("the Complete bar", () => {
     expect(form).toContain("onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}");
     expect(form).toContain('variant={stepToFinish ? "secondary" : "default"}');
     expect(form).toMatch(
-      /\{stepToFinish\s*\?\s*finishStepLabel\(stepToFinish\)\s*:\s*finished\s*\?\s*"Finish"\s*:\s*"Complete"\}/,
+      /\{stepToFinish\s*\?\s*finishStepLabel\(stepToFinish, job\.service_type\)\s*:\s*finished\s*\?\s*"Finish"\s*:\s*"Complete"\}/,
     );
     // The Before-you-finish dialog, Retry and Complete anyway stay.
     expect(form).toContain("Complete anyway");
@@ -152,7 +164,10 @@ describe("the Complete bar", () => {
 
 describe("the Nothing used mark (step 4)", () => {
   it("is a button under the materials and POs while nothing is logged; pressed, a ticked line with Undo", () => {
-    expect(form).toMatch(/\{\(materialsQ\.data \?\? \[\]\)\.length === 0 &&\s*\(nothingUsed \? \(/);
+    // Since Oct 12 an inspection shows the mark pre-set (inspection-flow.test.ts).
+    expect(form).toMatch(
+      /\{\(materialsQ\.data \?\? \[\]\)\.length === 0 &&\s*\(nothingUsed \|\| inspection \? \(/,
+    );
     expect(form).toContain("onClick={() => markNothingUsed(true)}");
     expect(form).toContain("onClick={() => markNothingUsed(false)}");
     expect(form.match(/Nothing used on this ticket/g)).toHaveLength(2);
@@ -173,8 +188,9 @@ describe("the Nothing used mark (step 4)", () => {
 
 describe("no toast when a step unlocks (owner, Oct 9, later: the tech presses Next step)", () => {
   it("the reads still settle first; the unlock toast and its scroll are gone — closeout-next-step.test.ts has the button", () => {
-    expect(form).toContain(
-      "const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);",
+    // Since Oct 12 an inspection's checklist read settles with the rest.
+    expect(form).toMatch(
+      /const ready =\s*!\[repairsQ, photosQ, timeQ, materialsQ\]\.some\(\(q\) => q\.isLoading\) && !insp\.loading;/,
     );
     expect(form).not.toContain("prevOpen");
     expect(form).not.toContain("unlockToast(");

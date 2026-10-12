@@ -326,12 +326,18 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       // stamp supplies it) or there is no signature; the gaps come back in the message. A manager
       // completes anyway. A ticket the office already finished is only stamped (above).
       if (!finished && !managesTickets(p)) {
-        const [repairs, photos, time] = await Promise.all([
+        // An inspection (owner, Oct 12): its gaps are the checklist's unanswered items (the
+        // saved answers merged with the live checklist) and the time; no photo, no signature.
+        const inspection = job.service_type === "inspection";
+        const [repairs, photos, time, checklist] = await Promise.all([
           sb.from("service_job_repairs").select("id, name").eq("service_job_id", job.id),
           sb.from("service_job_photos").select("repair_id, role").eq("service_job_id", job.id),
           sb.from("service_time_entries").select("hours").eq("service_job_id", job.id),
+          inspection
+            ? sb.from("inspection_checklist_items").select("id, label, sort")
+            : Promise.resolve({ data: [], error: null }),
         ]);
-        const readErr = repairs.error ?? photos.error ?? time.error;
+        const readErr = repairs.error ?? photos.error ?? time.error ?? checklist.error;
         if (readErr) throw new Error(`Could not check the close-out: ${readErr.message}`);
         const gaps = closeoutGaps({
           service_type: job.service_type,
@@ -340,6 +346,8 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           repairs: repairs.data ?? [],
           photos: photos.data ?? [],
           time: time.data ?? [],
+          inspection: job.inspection,
+          checklist: checklist.data ?? [],
         });
         if (gaps.length) throw new Error(closeoutRefusal(gaps));
       }
@@ -800,6 +808,12 @@ const photoSchema = z.object({
   service_job_id: z.string().uuid(),
   repair_id: z.string().uuid().nullable().optional(),
   role: z.enum(["before", "after", "other", "signature"]).default("other"),
+  /**
+   * The inspection checklist item a photo was taken for (owner, Oct 12; role "other", no
+   * repair): inspection_checklist_items.id as kept in the ticket's inspection JSON. Null for a
+   * repair's photo or the findings step's general roll.
+   */
+  item_key: z.string().min(1).max(60).nullable().optional(),
   storage_path: z.string().min(1).max(300),
   file_name: z.string().max(200).nullable().optional(),
   file_size: z.number().int().nonnegative().nullable().optional(),
@@ -822,6 +836,7 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
         service_job_id: job.id,
         repair_id: data.repair_id ?? null,
         role: data.role,
+        item_key: data.item_key ?? null,
         storage_path: data.storage_path,
         file_name: data.file_name ?? null,
         file_size: data.file_size ?? null,
@@ -843,7 +858,14 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
       await logEvent(
         context,
         job.id,
-        { kind: "photo", meta: { role: data.role, repair_id: data.repair_id ?? null } },
+        {
+          kind: "photo",
+          meta: {
+            role: data.role,
+            repair_id: data.repair_id ?? null,
+            item_key: data.item_key ?? null,
+          },
+        },
         nameOf(p),
       );
     }

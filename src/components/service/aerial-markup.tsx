@@ -159,7 +159,16 @@ const TOOLS: { id: Tool; label: string; icon: typeof Hand }[] = [
 ];
 
 /** The Aerial section; shown when the ticket has an address (its own or its site's). */
-export function AerialSection({ job, canEdit }: { job: ServiceJobRow; canEdit: boolean }) {
+export function AerialSection({
+  job,
+  canEdit,
+  plain,
+}: {
+  job: ServiceJobRow;
+  canEdit: boolean;
+  /** Inside a step card already (the inspection close-out's Checklist card): no box of its own. */
+  plain?: boolean | undefined;
+}) {
   const { session } = useAuth();
   const photosFn = useServerFn(listJobPhotos);
   // The same query (and key) the ticket's photo sections read: the header needs no lookup.
@@ -180,6 +189,7 @@ export function AerialSection({ job, canEdit }: { job: ServiceJobRow; canEdit: b
       defaultOpen={false}
       storageKey="aerial"
       summary={saved ? `markup saved ${whenShort(saved.created_at)}` : "the property from above"}
+      plain={plain}
     >
       <AerialBody job={job} canEdit={canEdit} />
     </Box>

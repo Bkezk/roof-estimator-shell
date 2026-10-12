@@ -256,10 +256,13 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     expect(form).toMatch(
       /const started = useRef\(false\);\s*useEffect\(\(\) => \{\s*if \(!ready \|\| started\.current\) return;\s*started\.current = true;\s*setOnStep\(open\);\s*\}, \[ready, open\]\);/,
     );
-    expect(form).toContain("const shownOpen = shownOpenStep(open, onStep);");
+    // Since Oct 12 the helpers take the ticket's type: an inspection walks its own six steps.
+    expect(form).toContain("const shownOpen = shownOpenStep(open, onStep, job.service_type);");
     expect(form).toContain("const statuses = stepStatuses(stepState, shownOpen);");
     expect(form).toContain("const status = (id: StepId) => stepStatus(id, stepState, shownOpen);");
-    expect(form).toContain("<StepStrip statuses={statuses} open={shownOpen} />");
+    expect(form).toContain(
+      "<StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />",
+    );
     expect(form).not.toMatch(/localStorage[^\n]*onStep/);
     // The step just left folds: the per-step Edit state still resets when the shown step moves.
     expect(form).toContain("useEffect(() => setEditing({}), [shownOpen]);");
@@ -270,7 +273,7 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
       /const goTo = \(id: StepId\) => \{\s*flushSync\(\(\) => setOnStep\(id\)\);\s*jumpTo\(id\);\s*\};/,
     );
     expect(form).toMatch(
-      /const goNext = \(id: StepId\) => \{\s*const next = nextStep\(id\);\s*if \(next\) goTo\(next\);\s*\};/,
+      /const goNext = \(id: StepId\) => \{\s*const next = nextStep\(id, job\.service_type\);\s*if \(next\) goTo\(next\);\s*\};/,
     );
     expect(form).toMatch(/missing: stepMissing\(id, stepState\),\s*onNext: \(\) => goNext\(id\),/);
     expect(form).toContain("onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}");
@@ -282,7 +285,7 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
   it("every current card except Signature ends in the button: enabled when nothing is missing, else disabled over the line that says what is", () => {
     expect(card).toContain("missing: string | null;");
     expect(card).toContain("onNext: () => void;");
-    expect(card).toContain("const nextLabel = nextStepLabel(id);");
+    expect(card).toContain("const nextLabel = nextStepLabel(id, serviceType);");
     expect(card).toContain('{status === "current" && nextLabel !== null && (');
     expect(card).toMatch(
       /<Button\s+type="button"\s+className="h-12 w-full text-base font-semibold"\s+disabled=\{missing !== null\}[\s\S]*?onClick=\{onNext\}\s*>\s*\{nextLabel\} <ArrowRight/,

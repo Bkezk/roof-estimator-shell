@@ -42,6 +42,7 @@ const done: Inspection = {
     item("c8", "Debris", "na"),
   ],
   notes: "Roof is 20+ years old. Owner asked about replacement.",
+  recommend_repairs: false,
   saved_at: "2026-09-30T14:00:00.000Z",
   saved_by: "Tech Tom",
 };

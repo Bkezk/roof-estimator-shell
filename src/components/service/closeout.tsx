@@ -37,6 +37,18 @@
  * on and scrolls the next card into view; the step left folds to its summary. "Nothing used" and
  * "Skip — nothing to add" only mark their step done; Next is the one way forward. The sticky
  * bar's "Finish step N" names the REAL first open step and takes the tech there the same way.
+ *
+ * Owner, Oct 12: an INSPECTION ticket (service_type "inspection") closes out through its own six
+ * steps (closeout-steps.ts closeoutSteps; the cards are inspection-closeout.tsx): 1 Who is here,
+ * 2 Checklist (every item OK / Issue / N/A, saved as you go — inspection-draft.ts; the Aerial
+ * fold once above it, plain; no repair picker), 3 Findings (ONE note — the closing_notes box
+ * moved here, step 6 is not shown — the Recommend repairs / Recommend a new roof switches, an
+ * optional photo roll, "Nothing to add"), 4 Materials (Nothing used pre-set: never blocks),
+ * 5 Time (required), 6 Signature (optional: "Optional for an inspection", never a gap). Photos
+ * are optional everywhere on an inspection. The same StepCard / StepStrip / Next step mechanics,
+ * the same server-side gap list ("N checklist items unanswered") and Complete anyway for
+ * managers. Leak, warranty, SCOPE and other keep the seven repair steps (the owner did not say
+ * otherwise for scope).
  */
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -53,6 +65,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  ClipboardCheck,
   ClipboardList,
   Hammer,
   Loader2,
@@ -121,6 +134,12 @@ import { MaterialsSection } from "@/components/service/materials-section";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { TicketExtras } from "@/components/service/ticket-extras";
 import {
+  InspectionChecklistStep,
+  InspectionFindingsStep,
+} from "@/components/service/inspection-closeout";
+import { useInspectionCamera } from "@/components/service/inspection-camera";
+import { clearInspectionDraft, useInspectionDraft } from "@/components/service/inspection-draft";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -144,10 +163,10 @@ import {
   type RepairPhase,
 } from "@/lib/closeout-repairs";
 import {
-  STEP_COUNT,
   countMaterialItems,
   finishStepLabel,
   firstOpenStep,
+  isInspection,
   lockedLine,
   nextStep,
   nextStepLabel,
@@ -174,6 +193,7 @@ import {
   localYmd,
   loudError,
   removeFromServiceBucket,
+  shrinkPhoto,
   uploadToServiceBucket,
   useAutosave,
   useSignedUrl,
@@ -264,28 +284,6 @@ const FINISHED = ["done", "authorized", "invoiced", "closed"];
 const asStage = (s: string): ServiceStage =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? (s as ServiceStage) : "open";
 
-/** Shrink a big camera photo (to 2048 px, JPEG) so it uploads on one bar of signal. */
-async function shrinkPhoto(file: File): Promise<{ blob: Blob; type: string; name: string }> {
-  const keep = { blob: file as Blob, type: file.type || "image/jpeg", name: file.name };
-  if (file.size < 1_500_000 || typeof createImageBitmap === "undefined") return keep;
-  try {
-    const img = await createImageBitmap(file);
-    const scale = Math.min(1, 2048 / Math.max(img.width, img.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return keep;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    img.close();
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
-    if (!blob || blob.size >= file.size) return keep;
-    return { blob, type: "image/jpeg", name: file.name.replace(/\.[^.]+$/, "") + ".jpg" };
-  } catch {
-    return keep; // A format the browser cannot decode (e.g. HEIC): upload it as taken.
-  }
-}
-
 // ---------------------------------------------------------------------------------------------
 
 export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
@@ -371,15 +369,20 @@ function jumpTo(id: StepId) {
 function StepStrip({
   statuses,
   open,
+  serviceType,
 }: {
   statuses: { step: CloseoutStep; status: StepStatus }[];
   open: StepId | null;
+  /** The ticket's type: the inspection flow has six steps, the repair flow seven. */
+  serviceType: string;
 }) {
   const [listOpen, setListOpen] = useState(false);
   return (
     <nav aria-label="Close-out steps" className="rounded-xl border bg-card px-3 py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{stepHeadline(open)}</p>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {stepHeadline(open, serviceType)}
+        </p>
         <ol className="flex items-center gap-1" aria-label="Jump to a step">
           {statuses.map(({ step, status }) => (
             <li key={step.id}>
@@ -387,7 +390,7 @@ function StepStrip({
                 type="button"
                 aria-current={status === "current" ? "step" : undefined}
                 aria-disabled={status === "locked" || undefined}
-                aria-label={`Step ${step.n} of ${STEP_COUNT}: ${step.title}${
+                aria-label={`Step ${step.n} of ${statuses.length}: ${step.title}${
                   status === "locked" ? ` — locked: ${step.unlocks}` : ""
                 }`}
                 title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}
@@ -483,6 +486,7 @@ function StepCard({
   id,
   status,
   open,
+  serviceType,
   icon: Icon,
   aside,
   summary,
@@ -495,6 +499,8 @@ function StepCard({
   id: StepId;
   status: StepStatus;
   open: StepId | null;
+  /** The ticket's type (closeout-steps.ts closeoutSteps): which list numbers and orders the steps. */
+  serviceType: string;
   icon: typeof Wrench;
   aside?: React.ReactNode;
   summary: string;
@@ -505,8 +511,8 @@ function StepCard({
   onNext: () => void;
   children: React.ReactNode;
 }) {
-  const step = stepOf(id);
-  const nextLabel = nextStepLabel(id);
+  const step = stepOf(id, serviceType);
+  const nextLabel = nextStepLabel(id, serviceType);
   if (status === "locked")
     return (
       <p
@@ -518,7 +524,7 @@ function StepCard({
           <span className="font-medium">
             {step.n} · {step.title}
           </span>{" "}
-          · {lockedLine(open)}
+          · {lockedLine(open, serviceType)}
         </span>
       </p>
     );
@@ -613,6 +619,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
   const [draft, setDraft] = useState<TextDraft>(() => stored ?? fromJob(job));
   const latest = useRef(draft);
+  // Owner, Oct 12: an inspection takes its own six steps (closeout-steps.ts closeoutSteps); its
+  // checklist draft saves as it is answered (inspection-draft.ts) and its photos have their own
+  // camera (inspection-closeout.tsx). Both hooks run on every ticket, idle on a repair.
+  const inspection = isInspection(job.service_type);
+  const insp = useInspectionDraft(job, { enabled: inspection });
+  const inspCamera = useInspectionCamera(job.id);
 
   const input = (d: TextDraft) => ({
     id: job.id,
@@ -659,6 +671,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const complete = useMutation({
     mutationFn: async () => {
       autosave.cancel();
+      // An inspection's checklist waiting on its autosave goes first (the server checks it).
+      if (inspection) await insp.saveNow();
       const row = await saveFn({ data: input(latest.current) });
       // Already finished and stamped: nothing more to record. A ticket the office set Done /
       // Invoiced / Closed from the stage picker is still stamped here (owner, Oct 5: #6004).
@@ -674,6 +688,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       clearDraft(job.id);
       clearNothingUsed(job.id);
       clearNotesSkipped(job.id);
+      clearInspectionDraft(job.id);
       for (const k of [
         fieldKeys.today,
         fieldKeys.job(job.id),
@@ -746,6 +761,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       // Labor from an On site stamp (older tickets) is added by Complete itself.
       on_site_at: job.on_site_at,
       ...reads,
+      // An inspection (owner, Oct 12): its checklist, answered and saved, stands where the
+      // repairs do; no photo or signature is a gap.
+      ...(inspection
+        ? {
+            checklist: { data: insp.data ? insp.items : undefined, error: insp.error },
+            checklist_saved: insp.saved,
+          }
+        : {}),
     });
   const judge = (g: CompleteGaps) => {
     if (g.gaps.length > 0) {
@@ -813,12 +836,18 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     crewOthers: job.helper_count,
     materialItems: countMaterialItems(materialsQ.data ?? []),
     signedBy: draft.signed_by,
+    // The inspection flow's steps (owner, Oct 12): the checklist draft and its saved state, the
+    // two switches (the roof one is the text draft's, as on a repair).
+    checklist: insp.items,
+    checklistSaved: insp.saved,
+    recommendRepairs: insp.recommendRepairs,
+    recommendNewRoof: draft.recommend_new_roof,
   };
   const open = firstOpenStep(stepState);
   // Until the reads answer every list is empty, so the strip would say Before with the rest
   // locked and then jump: the steps wait for the first answers (a failed read counts — its
-  // section says so, loudly).
-  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);
+  // section says so, loudly). An inspection waits for its checklist too.
+  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading) && !insp.loading;
   // Owner, Oct 9 ("instead of auto swapping to the next step it should have a go to next step
   // button at the bottom"): the step the tech is ON. Set once from the first open step when the
   // reads settle, then moved only by the Next step button and the bar's Finish step N — never by
@@ -838,10 +867,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     jumpTo(id);
   };
   const goNext = (id: StepId) => {
-    const next = nextStep(id);
+    const next = nextStep(id, job.service_type);
     if (next) goTo(next);
   };
-  const shownOpen = shownOpenStep(open, onStep);
+  const shownOpen = shownOpenStep(open, onStep, job.service_type);
   const statuses = stepStatuses(stepState, shownOpen);
   const status = (id: StepId) => stepStatus(id, stepState, shownOpen);
   // Owner, Oct 9: a done step folds to its summary unless Edit was pressed on it. Component
@@ -855,6 +884,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     id,
     status: status(id),
     open: shownOpen,
+    serviceType: job.service_type,
     summary: stepSummary(id, stepState),
     expanded: editing[id] === true,
     onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),
@@ -882,10 +912,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // while the tech is still on an earlier step.
   const stepToFinish = open === null || open === "signature" ? null : open;
   const camera = useRepairCamera(job.id);
+  const photoRows = photosQ.data ?? [];
 
   return (
     <div className="space-y-5">
-      <StepStrip statuses={statuses} open={shownOpen} />
+      <StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
           answered. The card's own line says so; no second paragraph under it. */}
@@ -900,38 +931,91 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       ) : (
         <>
           {camera.inputs}
+          {inspCamera.inputs}
 
-          {/* Step 2 · Before: the Inspection checklist (Inspection tickets) and the Aerial markup,
+          {inspection ? (
+            <>
+              {/* Step 2 · Checklist (an inspection; owner, Oct 12): the Aerial fold once, then
+                  every item with OK / Issue / N/A, a note and an optional photo — saved as you
+                  go. No repair picker. */}
+              <StepCard
+                {...card("checklist")}
+                icon={ClipboardCheck}
+                aside={
+                  insp.items.length > 0 ? (
+                    <span>
+                      {insp.items.filter((i) => i.status !== null).length} of {insp.items.length}{" "}
+                      answered
+                    </span>
+                  ) : undefined
+                }
+              >
+                <InspectionChecklistStep
+                  job={job}
+                  draft={insp}
+                  photos={photoRows}
+                  camera={inspCamera}
+                />
+              </StepCard>
+
+              {/* Step 3 · Findings: the one notes box (closing_notes), Recommend repairs,
+                  Recommend a new roof, an optional photo roll, Nothing to add. */}
+              <StepCard {...card("findings")} icon={ClipboardList}>
+                <InspectionFindingsStep
+                  job={job}
+                  notes={draft.closing_notes}
+                  onNotes={(v) => update({ closing_notes: v })}
+                  recommendRepairs={insp.recommendRepairs}
+                  onRecommendRepairs={insp.setRecommendRepairs}
+                  recommendNewRoof={draft.recommend_new_roof}
+                  onRecommendNewRoof={(v) => update({ recommend_new_roof: v })}
+                  skipped={notesSkipped}
+                  onSkip={markNotesSkipped}
+                  photos={photoRows}
+                  camera={inspCamera}
+                />
+              </StepCard>
+            </>
+          ) : (
+            <>
+              {/* Step 2 · Before: the Inspection checklist (Inspection tickets) and the Aerial markup,
               then the repairs — pick them, take each one's Before photo. */}
-          <StepCard
-            {...card("before")}
-            icon={Wrench}
-            aside={repairRows.length > 0 ? <span>{repairRows.length} added</span> : undefined}
-          >
-            <TicketExtras job={job} canEdit />
-            <RepairsSection
-              jobId={job.id}
-              ticketNumber={job.number}
-              phase="before"
-              camera={camera}
-            />
-          </StepCard>
+              <StepCard
+                {...card("before")}
+                icon={Wrench}
+                aside={repairRows.length > 0 ? <span>{repairRows.length} added</span> : undefined}
+              >
+                <TicketExtras job={job} canEdit />
+                <RepairsSection
+                  jobId={job.id}
+                  ticketNumber={job.number}
+                  phase="before"
+                  camera={camera}
+                />
+              </StepCard>
 
-          {/* Step 3 · The work: what was wrong and what was done for each repair, then its After
+              {/* Step 3 · The work: what was wrong and what was done for each repair, then its After
               photo. */}
-          <StepCard
-            {...card("work")}
-            icon={Hammer}
-            aside={
-              repairRows.length > 0 ? (
-                <span>
-                  {workDone} of {repairRows.length} done
-                </span>
-              ) : undefined
-            }
-          >
-            <RepairsSection jobId={job.id} ticketNumber={job.number} phase="work" camera={camera} />
-          </StepCard>
+              <StepCard
+                {...card("work")}
+                icon={Hammer}
+                aside={
+                  repairRows.length > 0 ? (
+                    <span>
+                      {workDone} of {repairRows.length} done
+                    </span>
+                  ) : undefined
+                }
+              >
+                <RepairsSection
+                  jobId={job.id}
+                  ticketNumber={job.number}
+                  phase="work"
+                  camera={camera}
+                />
+              </StepCard>
+            </>
+          )}
 
           {/* Step 4 · Materials, the purchase orders (material bought for the job; never the
               Approved toggle here) and, with nothing logged, the "Nothing used" mark. */}
@@ -949,21 +1033,28 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             <MaterialsSection jobId={job.id} />
             {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
             <PurchaseOrdersSection jobId={job.id} field />
+            {/* An inspection (owner, Oct 12): Nothing used is pre-set — the step never blocks;
+                a material logged above is fine too. */}
             {(materialsQ.data ?? []).length === 0 &&
-              (nothingUsed ? (
+              (nothingUsed || inspection ? (
                 <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
                   <span className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     Nothing used on this ticket
+                    {inspection && (
+                      <span className="text-muted-foreground">· pre-set for an inspection</span>
+                    )}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-10"
-                    onClick={() => markNothingUsed(false)}
-                  >
-                    Undo
-                  </Button>
+                  {!inspection && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-10"
+                      onClick={() => markNothingUsed(false)}
+                    >
+                      Undo
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Button
@@ -1006,85 +1097,101 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           {/* Step 6 · Notes — skippable (owner, Oct 9: "kind of redundant" after each repair's
               What was wrong / What you did). The button shows only while the notes are blank;
               pressed, a ticked line with Undo. Checked in / out with and the roof switch stay
-              optional. */}
-          <StepCard {...card("notes")} icon={ClipboardList}>
-            <Section title="Notes">
-              <div className="space-y-1">
-                <Label htmlFor="co-notes">Closing notes</Label>
-                <Textarea
-                  id="co-notes"
-                  rows={5}
-                  className="text-base"
-                  placeholder="What you found and did (the keyboard's microphone works here)"
-                  value={draft.closing_notes}
-                  onChange={(e) => update({ closing_notes: e.target.value })}
-                />
-              </div>
-              {!draft.closing_notes.trim() &&
-                (notesSkipped ? (
-                  <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
-                    <span className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                      Skipped — nothing to add
-                    </span>
+              optional. Not on an inspection (owner, Oct 12): its one notes box is step 3's
+              Findings, and the roof switch sits there too. */}
+          {!inspection && (
+            <StepCard {...card("notes")} icon={ClipboardList}>
+              <Section title="Notes">
+                <div className="space-y-1">
+                  <Label htmlFor="co-notes">Closing notes</Label>
+                  <Textarea
+                    id="co-notes"
+                    rows={5}
+                    className="text-base"
+                    placeholder="What you found and did (the keyboard's microphone works here)"
+                    value={draft.closing_notes}
+                    onChange={(e) => update({ closing_notes: e.target.value })}
+                  />
+                </div>
+                {!draft.closing_notes.trim() &&
+                  (notesSkipped ? (
+                    <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
+                      <span className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        Skipped — nothing to add
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-10"
+                        onClick={() => markNotesSkipped(false)}
+                      >
+                        Undo
+                      </Button>
+                    </div>
+                  ) : (
                     <Button
                       type="button"
-                      variant="ghost"
-                      className="h-10"
-                      onClick={() => markNotesSkipped(false)}
+                      variant="outline"
+                      className="h-11 w-full text-base"
+                      onClick={() => markNotesSkipped(true)}
                     >
-                      Undo
+                      Skip — nothing to add
                     </Button>
+                  ))}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="co-in">Checked in with</Label>
+                    <Input
+                      id="co-in"
+                      className="h-11 text-base"
+                      maxLength={200}
+                      value={draft.checked_in_with}
+                      onChange={(e) => update({ checked_in_with: e.target.value })}
+                    />
                   </div>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full text-base"
-                    onClick={() => markNotesSkipped(true)}
-                  >
-                    Skip — nothing to add
-                  </Button>
-                ))}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="co-in">Checked in with</Label>
-                  <Input
-                    id="co-in"
-                    className="h-11 text-base"
-                    maxLength={200}
-                    value={draft.checked_in_with}
-                    onChange={(e) => update({ checked_in_with: e.target.value })}
-                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="co-out">Checked out with</Label>
+                    <Input
+                      id="co-out"
+                      className="h-11 text-base"
+                      maxLength={200}
+                      value={draft.checked_out_with}
+                      onChange={(e) => update({ checked_out_with: e.target.value })}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="co-out">Checked out with</Label>
-                  <Input
-                    id="co-out"
-                    className="h-11 text-base"
-                    maxLength={200}
-                    value={draft.checked_out_with}
-                    onChange={(e) => update({ checked_out_with: e.target.value })}
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
+                  <span className="font-medium">Recommend a new roof</span>
+                  <Switch
+                    checked={draft.recommend_new_roof}
+                    onCheckedChange={(v) => update({ recommend_new_roof: v })}
                   />
-                </div>
-              </div>
-              <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-                <span className="font-medium">Recommend a new roof</span>
-                <Switch
-                  checked={draft.recommend_new_roof}
-                  onCheckedChange={(v) => update({ recommend_new_roof: v })}
-                />
-              </label>
-            </Section>
-          </StepCard>
+                </label>
+              </Section>
+            </StepCard>
+          )}
 
-          {/* Step 7 · Signature */}
+          {/* Step 7 · Signature (step 6 of an inspection, where it is optional — owner, Oct 12:
+              never a gap; Next / Complete do not wait for it). */}
           <StepCard
             {...card("signature")}
             icon={PenLine}
-            aside={job.signature_path ? <span>Signed</span> : undefined}
+            aside={
+              job.signature_path ? (
+                <span>Signed</span>
+              ) : inspection ? (
+                <span>Optional</span>
+              ) : undefined
+            }
           >
             <Section title="Signature">
+              {inspection && (
+                <p className="text-sm text-muted-foreground" data-line="signature-optional">
+                  Optional for an inspection — take it when the customer is there; Complete does not
+                  wait for it.
+                </p>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="co-signed-by">Signed by</Label>
                 <Input
@@ -1121,7 +1228,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               ) : (
                 <CheckCircle2 className="mr-2 h-5 w-5" />
               )}
-              {stepToFinish ? finishStepLabel(stepToFinish) : finished ? "Finish" : "Complete"}
+              {stepToFinish
+                ? finishStepLabel(stepToFinish, job.service_type)
+                : finished
+                  ? "Finish"
+                  : "Complete"}
             </Button>
           </div>
           <AlertDialog open={missing.length > 0} onOpenChange={(o) => !o && setMissing([])}>

@@ -68,6 +68,28 @@ export function useAutosave<T>(
   return { push: saver.push, flush: saver.flush, cancel: saver.cancel, state };
 }
 
+/** Shrink a big camera photo (to 2048 px, JPEG) so it uploads on one bar of signal. */
+export async function shrinkPhoto(file: File): Promise<{ blob: Blob; type: string; name: string }> {
+  const keep = { blob: file as Blob, type: file.type || "image/jpeg", name: file.name };
+  if (file.size < 1_500_000 || typeof createImageBitmap === "undefined") return keep;
+  try {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, 2048 / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return keep;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    img.close();
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+    if (!blob || blob.size >= file.size) return keep;
+    return { blob, type: "image/jpeg", name: file.name.replace(/\.[^.]+$/, "") + ".jpg" };
+  } catch {
+    return keep; // A format the browser cannot decode (e.g. HEIC): upload it as taken.
+  }
+}
+
 /** Today as YYYY-MM-DD on the phone's own calendar (not UTC). */
 export const localYmd = (d: Date = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

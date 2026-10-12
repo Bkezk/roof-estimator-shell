@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOSEOUT_STEPS,
   STEP_COUNT,
+  closeoutSteps,
   finishStepLabel,
   firstOpenStep,
   lockedLine,
@@ -202,17 +203,26 @@ describe("the unlock order", () => {
 });
 
 describe("an inspection ticket", () => {
+  // Since Oct 12 an inspection has its own six steps (closeoutSteps("inspection"); the rules in
+  // inspection-flow.test.ts): Before and The work are not among them.
   const inspection: StepState = { ...full, serviceType: "inspection", repairs: [], photos: [] };
   it("needs no repair: Before and The work are done with none (missingForComplete's rule)", () => {
     expect(stepDone("before", inspection)).toBe(true);
     expect(stepDone("work", inspection)).toBe(true);
     expect(firstOpenStep(inspection)).toBeNull();
   });
-  it("a repair it does record still needs its photos and text", () => {
+  it("walks the inspection steps, never Before / The work: a repair row on it changes nothing", () => {
     const withOne = { ...inspection, repairs: [{ id: "r1", resolution_text: null }] };
-    expect(stepDone("before", withOne)).toBe(false);
-    expect(stepDone("work", withOne)).toBe(false);
-    expect(firstOpenStep(withOne)).toBe("before");
+    expect(closeoutSteps("inspection").map((s) => s.id)).not.toContain("before");
+    expect(firstOpenStep(withOne)).toBeNull();
+    expect(stepStatuses(withOne).map((x) => x.step.id)).toEqual([
+      "crew",
+      "checklist",
+      "findings",
+      "materials",
+      "time",
+      "signature",
+    ]);
   });
 });
 
