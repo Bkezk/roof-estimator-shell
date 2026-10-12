@@ -203,10 +203,10 @@ describe("the setting and the database", () => {
       "grant execute on function public.ticket_authorizers() to authenticated, service_role;",
     );
   });
-  it("Setup › Service rates: 'Authorizes Done tickets', Every admin or a manager; only admins / managers saved", () => {
+  it("Setup › Service rates: 'Authorizes Done tickets', Admins and managers or one manager; only admins / managers saved", () => {
     const ui = read("src/components/service-rates-settings.tsx");
     expect(ui).toContain('<Label htmlFor="rates-authorizer">Authorizes Done tickets</Label>');
-    expect(ui).toContain("<SelectItem value={ADMINS}>Every admin</SelectItem>");
+    expect(ui).toContain("<SelectItem value={ADMINS}>Admins and managers</SelectItem>");
     const fns = read("src/lib/invoices.functions.ts");
     expect(fns).toContain("authorizer_id: z.string().uuid().nullable(),");
     expect(fns).toContain("throw new Error(AUTHORIZER_NOT_MANAGER);");

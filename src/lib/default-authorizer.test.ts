@@ -32,12 +32,12 @@ describe("the default authorizer", () => {
 
 describe("the Setup › Service rates picker's help text", () => {
   const roanna = { id: "r", name: "RoAnna Sims", email: "roanna@flatroofonline.com" };
-  it("nothing picked, Brandon not a user yet: says so, and that every admin gets it until then", () => {
+  it("nothing picked, Brandon not a user yet: says so, and that the admins and managers get it until then", () => {
     expect(authorizerFallbackLabel({ authorizer_id: null }, [roanna])).toBe(
-      "Default: Brandon (Brandon@flatroofonline.com) — not added as a user yet; until then every admin",
+      "Default: Brandon (Brandon@flatroofonline.com) — not added as a user yet; until then the admins and managers",
     );
     expect(authorizerFallbackLabel({ authorizer_id: "" }, [])).toBe(
-      "Default: Brandon (Brandon@flatroofonline.com) — not added as a user yet; until then every admin",
+      "Default: Brandon (Brandon@flatroofonline.com) — not added as a user yet; until then the admins and managers",
     );
   });
   it("nothing picked, Brandon among the admins / managers: names him", () => {

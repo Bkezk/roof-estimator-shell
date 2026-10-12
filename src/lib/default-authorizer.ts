@@ -33,5 +33,5 @@ export function authorizerFallbackLabel(
   const brandon = people.find((p) => isDefaultAuthorizerEmail(p.email));
   return brandon
     ? `Default: ${brandon.name}`
-    : `Default: ${DEFAULT_AUTHORIZER_SHOWN} — not added as a user yet; until then every admin`;
+    : `Default: ${DEFAULT_AUTHORIZER_SHOWN} — not added as a user yet; until then the admins and managers`;
 }

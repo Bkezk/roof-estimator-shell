@@ -58,11 +58,11 @@ interface SettingsDraft {
   invoice_contact: string;
   email_subject: string;
   email_message: string;
-  /** Who reviews Done tickets (M9); "" = every admin. */
+  /** Who owns the Authorize reminder (M9); "" = the admins and managers in order. */
   authorizer_id: string;
 }
 
-/** The authorizer select's "Every admin" item (a Select item cannot have an empty value). */
+/** The authorizer select's "Admins and managers" item (a Select item cannot have an empty value). */
 const ADMINS = "admins";
 
 export function ServiceRatesSettings() {
@@ -261,7 +261,7 @@ export function ServiceRatesSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={ADMINS}>Every admin</SelectItem>
+                    <SelectItem value={ADMINS}>Admins and managers</SelectItem>
                     {(q.data?.managers ?? []).map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.name}
