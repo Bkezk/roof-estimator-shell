@@ -18,6 +18,7 @@ import { isOffice, seesEveryone, seesInvoices } from "@/lib/access";
 import {
   TO_INVOICE_STAGE,
   UNASSIGNED_OVERDUE_DAYS_DEFAULT,
+  UNASSIGNED_TICKET_STAGES,
   WORK_TICKET_STAGES,
   visibleUserIds,
   type FollowupIn,
@@ -49,7 +50,8 @@ export interface MyWorkResult {
   /** Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? */
   authorizer: boolean;
   /**
-   * Nobody's work (owner, Oct 7): tickets without a technician, open opportunities without an
+   * Nobody's work (owner, Oct 7): Open / Scheduled tickets without a technician (a Done one is
+   * finished work, under Done; Oct 12), open opportunities without an
    * assignee and, since Oct 9, open tasks without one, for everyone but a technician-only user
    * (`isOffice`), whatever `who` asks for — null for a technician. No date window: an unassigned
    * ticket stays listed however old.
@@ -97,6 +99,24 @@ export const listMyWork = createServerFn({ method: "GET" })
       .order("scheduled_date", { ascending: true, nullsFirst: false })
       .limit(LIMIT);
     tq = scope === "all" ? tq.not("technician_id", "is", null) : tq.in("technician_id", scope);
+    // Owner, Oct 12: a Done ticket nobody is on (closed out by the office, or its technician
+    // removed) is finished work, not nobody's to-do. The Everyone view lists it with the tickets,
+    // so it sits under "Done — waiting on the office" (or, through its Authorize follow-up, under
+    // Needs authorization — mergeWork keeps one row), never under Unassigned. "Mine" and one
+    // person's view are that person's own work: nobody's Done ticket is not on them.
+    const dq =
+      scope === "all"
+        ? sb
+            .from("service_jobs")
+            .select(
+              "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+            )
+            .is("deleted_at", null)
+            .eq("stage", "done")
+            .is("technician_id", null)
+            .order("scheduled_date", { ascending: true, nullsFirst: false })
+            .limit(LIMIT)
+        : Promise.resolve({ data: [] as TicketIn[], error: null });
 
     let kq = sb
       .from("tasks")
@@ -118,6 +138,8 @@ export const listMyWork = createServerFn({ method: "GET" })
 
     // Unassigned work (owner, Oct 7): everyone but a technician-only user. RLS still applies — a
     // user without Customers or Estimate access reads no opportunities and simply gets none.
+    // Open / Scheduled tickets only (owner, Oct 12: a Done ticket nobody is on is finished work,
+    // listed under Done by `dq` above, never "Unassigned" and never overdue for want of a person).
     const showUnassigned = isOffice(me);
     const uTickets = showUnassigned
       ? sb
@@ -126,7 +148,7 @@ export const listMyWork = createServerFn({ method: "GET" })
             "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, created_at",
           )
           .is("deleted_at", null)
-          .in("stage", [...WORK_TICKET_STAGES])
+          .in("stage", [...UNASSIGNED_TICKET_STAGES])
           .is("technician_id", null)
           .order("scheduled_date", { ascending: true, nullsFirst: false })
           .limit(LIMIT)
@@ -188,19 +210,31 @@ export const listMyWork = createServerFn({ method: "GET" })
       : Promise.resolve({ data: [] as TicketIn[], error: null });
 
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days, toInvoice] =
-      await Promise.all([
-        tq,
-        kq,
-        fq,
-        sb.rpc("ticket_authorizers"),
-        uTickets,
-        uOpps,
-        uTasks,
-        uDays,
-        iTickets,
-      ]);
+    const [
+      tickets,
+      doneNobody,
+      tasks,
+      followups,
+      auth,
+      unTickets,
+      unOpps,
+      unTasks,
+      days,
+      toInvoice,
+    ] = await Promise.all([
+      tq,
+      dq,
+      kq,
+      fq,
+      sb.rpc("ticket_authorizers"),
+      uTickets,
+      uOpps,
+      uTasks,
+      uDays,
+      iTickets,
+    ]);
     if (toInvoice.error) throw new Error(`Tickets to invoice: ${toInvoice.error.message}`);
+    if (doneNobody.error) throw new Error(`Done tickets: ${doneNobody.error.message}`);
     const unassignedOverdueDays =
       !days.error && typeof days.data?.unassigned_overdue_days === "number"
         ? days.data.unassigned_overdue_days
@@ -261,7 +295,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     names[context.userId] ??= nameOf(me);
 
     return {
-      tickets: (tickets.data ?? []) as TicketIn[],
+      tickets: [...(tickets.data ?? []), ...(doneNobody.data ?? [])] as TicketIn[],
       tasks: (tasks.data ?? []).map(withBuilding),
       followups: (followups.data ?? []).map((f) => ({
         id: f.id,

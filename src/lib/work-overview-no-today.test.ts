@@ -93,8 +93,8 @@ describe("the List without Today", () => {
   it("the page lays out the columns and rings the preset's column", () => {
     const page = readFileSync("src/components/my-work-page.tsx", "utf8");
     // As many columns as the user shows (Oct 7: up to seven, fewer when some are hidden; eight
-    // since Oct 9 with Waiting).
-    expect(page).toContain("listGridClass(shown.length)");
+    // since Oct 9 with Waiting) and have something in them (Oct 12: an empty group is a chip).
+    expect(page).toContain("listGridClass(columns.length)");
     expect(page).toContain('7: "xl:grid-cols-7"');
     expect(page).toContain('8: "xl:grid-cols-8"');
     expect(page).toContain('5: "xl:grid-cols-5"');

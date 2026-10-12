@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   ChevronRight,
   GripVertical,
+  Info,
   List,
   ListTodo,
   Loader2,
@@ -60,7 +61,9 @@ import {
   presetBucket,
   waitingDays,
   ymdParts,
+  splitEmptyGroups,
   BUCKET_EMPTY,
+  BUCKET_HELP,
   BUCKET_LABELS,
   type BucketPreset,
   type WorkBucket,
@@ -87,6 +90,7 @@ import { useFollowupActions } from "@/components/followups-shared";
 import { OwnerView } from "@/components/owner-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import {
   Select,
@@ -297,6 +301,32 @@ function WaitingToInvoice({ since, today }: { since: string | null; today: strin
   );
 }
 
+/**
+ * The ⓘ beside a column title, a tab or an empty-column chip (owner, Oct 12): a tooltip saying
+ * in one or two plain sentences what the column holds (my-work.ts BUCKET_HELP). A button, so a
+ * keyboard or a phone (tap / focus) opens it too; the shell's TooltipProvider (ui/sidebar)
+ * supplies the delay. It stops the click so a heading's drag or a tab's pick is not started.
+ */
+function BucketHelp({ bucket, label }: { bucket: WorkBucket; label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          onClick={(e) => e.stopPropagation()}
+          className="rounded text-muted-foreground hover:text-foreground"
+        >
+          <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs font-normal">
+        {BUCKET_HELP[bucket]}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ListView({
   items,
   today,
@@ -338,6 +368,9 @@ function ListView({
   // Owner (Oct 7): the columns are the user's to arrange — drag a heading onto another column
   // to move it, the X in a heading hides that column, the "Hidden" chips bring one back, and
   // "Reset layout" restores the default order (lib/work-layout.ts).
+  // Owner (Oct 12): a shown group with nothing in it folds into a small "Label 0" chip on an
+  // "Empty:" row above the columns (splitEmptyGroups) instead of a whole empty column; the
+  // layout (order, hidden) is untouched by the fold, and the "Hidden:" row stays its own.
   const groups = useMemo(
     () => listGroups(items, today, { authorize, invoice, unassigned }),
     [items, today, authorize, invoice, unassigned],
@@ -347,6 +380,7 @@ function ListView({
     () => applyWorkLayout(groups, layout, keep),
     [groups, layout, keep],
   );
+  const { columns, empty } = useMemo(() => splitEmptyGroups(shown, keep), [shown, keep]);
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
   const [prevPreset, setPrevPreset] = useState(preset);
@@ -431,18 +465,44 @@ function ListView({
       )}
     </div>
   );
+  // The empty groups as chips (owner, Oct 12), in order, each with its ⓘ; they wrap on a phone.
+  // Not the Hidden row: a hidden column is out of the list entirely until its chip brings it back.
+  const emptyBar = empty.length > 0 && (
+    <div
+      className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+      data-row="empty"
+    >
+      <span>Empty:</span>
+      {empty.map((g) => (
+        <span
+          key={g.bucket}
+          data-chip="empty"
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
+        >
+          <span>{g.label}</span>
+          <span className="tabular-nums">{g.items.length}</span>
+          <BucketHelp bucket={g.bucket} label={g.label} />
+        </span>
+      ))}
+    </div>
+  );
+  const nothing = columns.length === 0 && (
+    <p className="text-sm text-muted-foreground">Nothing to do: every group is empty.</p>
+  );
 
   return (
     <>
       {/* Desktop: the shown columns across, every group's items in view at once. */}
       <div className="hidden space-y-3 lg:block">
         {layoutBar}
+        {emptyBar}
+        {nothing}
         {/* Owner (Oct 7): a column grows with its items until it reaches the bottom of the screen,
           then scrolls inside itself, heading and count staying put (items-start keeps a short
           column short beside a long one). The 13rem is the shell header, the title, the toolbar
           and the paddings above the columns. */}
-        <div className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}>
-          {shown.map((g) => (
+        <div className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(columns.length)}`}>
+          {columns.map((g) => (
             <section
               key={g.bucket}
               aria-labelledby={`work-col-${g.bucket}`}
@@ -485,6 +545,7 @@ function ListView({
                     aria-hidden="true"
                   />
                   <span className="min-w-0 break-words">{g.label}</span>
+                  <BucketHelp bucket={g.bucket} label={g.label} />
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
                   <span className="font-normal tabular-nums text-muted-foreground">
@@ -510,43 +571,52 @@ function ListView({
       {/* Phone and tablet: a row of tabs, the selected group's items below. */}
       <div className="space-y-4 lg:hidden">
         {layoutBar}
-        <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
-          {shown.map((g) => {
-            const selected = g.bucket === bucket;
-            const alert = isAlert(g);
-            return (
-              <button
-                key={g.bucket}
-                type="button"
-                role="tab"
-                id={`work-tab-${g.bucket}`}
-                aria-selected={selected}
-                aria-controls="work-tab-panel"
-                onClick={() => pick(g.bucket)}
-                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
-                  selected
-                    ? "border-primary font-semibold"
-                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-                } ${alert ? "text-destructive" : ""}`}
-              >
-                {g.label}{" "}
-                <span
-                  className={`font-normal tabular-nums ${alert ? "" : "text-muted-foreground"}`}
-                >
-                  ({g.items.length})
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <section
-          id="work-tab-panel"
-          role="tabpanel"
-          aria-labelledby={`work-tab-${group.bucket}`}
-          className="space-y-2"
-        >
-          {rows(group)}
-        </section>
+        {emptyBar}
+        {nothing}
+        {columns.length > 0 && (
+          <>
+            <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
+              {columns.map((g) => {
+                const selected = g.bucket === bucket;
+                const alert = isAlert(g);
+                return (
+                  // The ⓘ sits beside the tab, not inside it (a button holds no button).
+                  <span key={g.bucket} className="-mb-px flex items-center gap-1">
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`work-tab-${g.bucket}`}
+                      aria-selected={selected}
+                      aria-controls="work-tab-panel"
+                      onClick={() => pick(g.bucket)}
+                      className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
+                        selected
+                          ? "border-primary font-semibold"
+                          : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                      } ${alert ? "text-destructive" : ""}`}
+                    >
+                      {g.label}{" "}
+                      <span
+                        className={`font-normal tabular-nums ${alert ? "" : "text-muted-foreground"}`}
+                      >
+                        ({g.items.length})
+                      </span>
+                    </button>
+                    <BucketHelp bucket={g.bucket} label={g.label} />
+                  </span>
+                );
+              })}
+            </div>
+            <section
+              id="work-tab-panel"
+              role="tabpanel"
+              aria-labelledby={`work-tab-${group.bucket}`}
+              className="space-y-2"
+            >
+              {rows(group)}
+            </section>
+          </>
+        )}
       </div>
     </>
   );
@@ -1034,7 +1104,7 @@ export function MyWorkPage(props: {
           unassignedPane={!!q.data?.unassigned}
         />
       ) : (
-        // Nothing at all still shows the six headings, each "(0)" with its empty line.
+        // Nothing at all shows every heading as an "Empty:" chip (Oct 12), no columns.
         <ListView
           items={items}
           today={today}

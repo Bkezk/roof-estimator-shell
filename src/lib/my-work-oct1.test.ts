@@ -189,9 +189,10 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.
     // Six when the Needs authorization column shows (M9, owner Oct 5); five otherwise since
     // Today was folded into This week (owner, Oct 6).
-    // As many as the user shows (owner, Oct 7: drag to reorder, X to hide): listGridClass.
+    // As many as the user shows (owner, Oct 7: drag to reorder, X to hide): listGridClass — of
+    // the columns with items in them (Oct 12: an empty group is a chip, not a column).
     expect(list).toContain(
-      "className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}",
+      "className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(columns.length)}`}",
     );
     // Owner, Oct 7: a column grows to the bottom of the screen, then scrolls inside itself.
     expect(list).toContain("flex max-h-[calc(100vh-13rem)] min-w-0 flex-col rounded-lg border");

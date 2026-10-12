@@ -41,6 +41,13 @@ const OPP_STATUS_LABELS: Record<string, string> = {
 /** The ticket stages Work Overview lists (Invoiced / Closed are the office's, not anyone's to-do). */
 export const WORK_TICKET_STAGES = ["open", "scheduled", "done"] as const;
 /**
+ * The stages a ticket without a technician is "Unassigned" in (owner, Oct 12): Open or
+ * Scheduled — work still to be done, so it needs a person. A Done ticket nobody is on (closed
+ * out by the office, or its technician removed) is finished work waiting on the office: it sits
+ * under Done, never under Unassigned and never flagged overdue there (#6013, #6012, #6002 did).
+ */
+export const UNASSIGNED_TICKET_STAGES = ["open", "scheduled"] as const;
+/**
  * The stage whose tickets wait to be invoiced (owner, Oct 12): listed for whoever sees invoices
  * (`seesInvoices`), under "Authorized — to invoice". Not a reminder timer (accounting is in
  * Sage): the row shows how long it has waited, as the Invoices queue does.
@@ -430,11 +437,12 @@ export const UNASSIGNED_OVERDUE_DAYS_DEFAULT = 1;
  * 0 days → the day it is entered.
  */
 export function unassignedOverdue(
-  item: Pick<WorkItem, "date" | "since" | "unassigned">,
+  item: Pick<WorkItem, "date" | "since" | "unassigned"> & { done?: boolean },
   today: string,
   days: number = UNASSIGNED_OVERDUE_DAYS_DEFAULT,
 ): boolean {
-  if (!item.unassigned) return false;
+  // Finished work (a Done ticket) is never overdue, whoever is or is not on it (Oct 12).
+  if (!item.unassigned || item.done) return false;
   if (item.date && item.date < today) return true;
   if (!item.since) return false;
   return addDays(item.since, Math.max(0, Math.floor(days))) <= today;
@@ -455,8 +463,12 @@ export function unassignedItems(
   toYmd: (iso: string) => string = localYmd,
 ): WorkItem[] {
   if (!rows) return [];
+  // Open / Scheduled only (UNASSIGNED_TICKET_STAGES): a Done ticket nobody is on is not nobody's
+  // to-do — it is finished, waiting on the office (owner, Oct 12).
   const tickets = rows.tickets
-    .filter((t) => (WORK_TICKET_STAGES as readonly string[]).includes(t.stage) && !t.technician_id)
+    .filter(
+      (t) => (UNASSIGNED_TICKET_STAGES as readonly string[]).includes(t.stage) && !t.technician_id,
+    )
     .map((t) => ({
       ...ticketItem(t, {}, null, toYmd),
       unassigned: true,
@@ -558,6 +570,28 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   done: "Done — waiting on the office",
 };
 
+/**
+ * What each column holds, in one or two plain sentences (owner, Oct 12): the ⓘ beside every
+ * column title and every empty-column chip shows it (the page's BucketHelp tooltip).
+ */
+export const BUCKET_HELP: Record<WorkBucket, string> = {
+  unassigned:
+    "Tickets and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+  overdue:
+    "Scheduled tickets whose day has passed and opportunities past their expected close. The assignee is reminded on the Reminders schedule.",
+  today: "Due today.",
+  week: "Due later this week.",
+  later: "Due after this week.",
+  waiting:
+    "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
+  authorize:
+    "Tickets the technician has completed. The authorizer reviews the close-out and marks them Authorized; reminders repeat until then.",
+  invoice:
+    "Authorized tickets waiting for an invoice, with how long they have waited. Shown to the people who invoice.",
+  nodate: "Items with no scheduled day or due date.",
+  done: "Tickets you completed that are waiting on authorization or an invoice. Nothing for you to do here.",
+};
+
 // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done";
 // Oct 9: Waiting after Later, before No date; Oct 12: "Authorized — to invoice" right after
 // Needs authorization (the next step of the same flow).
@@ -626,11 +660,13 @@ export function bucketOf(
   today: string,
   toYmd: (iso: string) => string = localYmd,
 ): WorkBucket {
+  // A Done ticket is finished work, whoever is or is not on it (owner, Oct 12: Done tickets with
+  // no technician sat under Unassigned, flagged overdue): Done before Unassigned.
+  if (item.done) return "done";
   // Nobody's work sits under Unassigned whatever its date (overdue or not): the fix is a person.
   if (item.unassigned) return "unassigned";
   if (item.needsAuth) return "authorize";
   if (item.toInvoice) return "invoice";
-  if (item.done) return "done";
   if (isHeldOn(item.followup, today, toYmd)) return "waiting";
   if (!item.date) return "nodate";
   if (item.date < today) return "overdue";
@@ -711,6 +747,23 @@ export function listGroups(
           ? opts.unassigned || filled.has("unassigned")
           : true,
   ).map((b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] });
+}
+
+/**
+ * The fold (owner, Oct 12: "9 columns, most empty"): a group with nothing in it is not a column
+ * but a small "Label 0" chip in one row above the columns, in the groups' order; the groups with
+ * items stay columns. `keep` (the ?bucket= preset's bucket) stays a column even when empty, so
+ * the preset has a column to ring and a tab to open. Pure: the layout (order, hidden) is
+ * untouched — a hidden column is out entirely and listed among the "Hidden" chips, never here.
+ */
+export function splitEmptyGroups<T extends { bucket: WorkBucket; items: unknown[] }>(
+  groups: T[],
+  keep: WorkBucket | null = null,
+): { columns: T[]; empty: T[] } {
+  const columns: T[] = [];
+  const empty: T[] = [];
+  for (const g of groups) (g.items.length > 0 || g.bucket === keep ? columns : empty).push(g);
+  return { columns, empty };
 }
 
 /** A List preset from the URL (?bucket=today|overdue — the Owner view's links). */
