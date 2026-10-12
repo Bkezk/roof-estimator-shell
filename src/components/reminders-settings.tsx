@@ -191,9 +191,12 @@ export function RemindersSettings() {
     mutationFn: () => runFn(),
     onSuccess: (r) => {
       // Owner, Oct 12 (item 8): the whole pass — reminders, escalations, task notices, failures.
-      if (r.ran) toast.success(`Reminders ran: ${reminderRunSummary(r)}`);
-      else
+      // B1: the follow-up pass throwing is its own headline; the notices ran regardless.
+      if (!r.ran)
         toast.info("Skipped: the last pass ran under 10 minutes ago. Try again in a few minutes.");
+      else if (r.problem)
+        toast.error(`Follow-up pass failed: ${r.problem} · ${reminderRunSummary(r)}`);
+      else toast.success(`Reminders ran: ${reminderRunSummary(r)}`);
       void qc.invalidateQueries({ queryKey: ["notification-health"] });
       void qc.invalidateQueries({ queryKey: ["followups"] });
     },
@@ -400,6 +403,12 @@ export function RemindersSettings() {
             <p className="text-sm" data-health="last-run-here">
               Last run from here: {run.data.ran ? "ran" : "skipped (ran under 10 minutes ago)"} ·{" "}
               {reminderRunSummary(run.data)}
+              {run.data.problem && (
+                <span className="text-destructive">
+                  {" "}
+                  · Follow-up pass failed: {run.data.problem}
+                </span>
+              )}
             </p>
           )}
           {health.error ? (
@@ -544,6 +553,40 @@ export function RemindersSettings() {
                             <TableCell>{t.title}</TableCell>
                             <TableCell>{t.assignee_name ?? "—"}</TableCell>
                             <TableCell className="text-destructive">{t.notify_error}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+
+              {/* "Bid due tomorrow" notices record their failures on the bid (bids.notify_error;
+                  owner, Oct 12, B4); the stamp is put back, so each retries on the next pass. */}
+              <div className="space-y-2" data-health="bid-failures">
+                <p className="text-sm font-semibold">Bid notice failures</p>
+                {health.data.bid_failures.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No failed bid notices.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Updated</TableHead>
+                          <TableHead>Bid</TableHead>
+                          <TableHead>Due</TableHead>
+                          <TableHead>Problem</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {health.data.bid_failures.map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell className="whitespace-nowrap">
+                              {whenTime(b.updated_at)}
+                            </TableCell>
+                            <TableCell>{b.name}</TableCell>
+                            <TableCell className="whitespace-nowrap">{b.due_date ?? "—"}</TableCell>
+                            <TableCell className="text-destructive">{b.notify_error}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

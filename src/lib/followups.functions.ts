@@ -509,7 +509,12 @@ export const setCrmSettings = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
-/** What a reminder pass run from the app did (dispatchRemindersIfDue; the Admin toast). */
+/**
+ * What a reminder pass run from the app did (dispatchRemindersIfDue; the Admin toast). The pass
+ * is three passes — the follow-up reminders (with the escalations), the task notices and the
+ * "Bid due tomorrow" notices — each run on its own (owner, Oct 12, B1): one failing never stops
+ * the others, and each says why it did not run in its own `*problem` field.
+ */
 export interface ReminderRunResult {
   /** False when the last pass ran under ten minutes ago, or the caller may not run one. */
   ran: boolean;
@@ -521,8 +526,15 @@ export interface ReminderRunResult {
   bidNotices: number;
   /** Sends that failed, reminders, task and bid notices together; each retries next pass. */
   failed: number;
-  /** Why the task / bid notices did not run on this pass (no server key on the preview), or null. */
+  /**
+   * Why the follow-up pass (reminders and escalations) failed as a whole (it threw), or null. The
+   * toast reads "Follow-up pass failed: …"; the task and bid notices ran regardless.
+   */
+  problem: string | null;
+  /** Why the task notices did not run on this pass (no server key on the preview; a throw), or null. */
   taskProblem: string | null;
+  /** Why the bid notices did not run on this pass (the same key; a throw of their own), or null. */
+  bidProblem: string | null;
 }
 
 const notRun = (): ReminderRunResult => ({
@@ -532,39 +544,65 @@ const notRun = (): ReminderRunResult => ({
   taskNotices: 0,
   bidNotices: 0,
   failed: 0,
+  problem: null,
   taskProblem: null,
+  bidProblem: null,
 });
 
 /**
  * The Admin "Run reminders now" toast: "2 reminded · 0 escalated · 1 task notices · 1 bid
- * notices · 0 failed".
+ * notices · 0 failed", then why a notice pass was skipped — "task and bid notices skipped: …"
+ * when both were, for the same reason (the server key), else each on its own. The follow-up
+ * pass's own failure (`problem`) is the toast's headline, not part of this line.
  */
-export function reminderRunSummary(r: Omit<ReminderRunResult, "ran">): string {
+export function reminderRunSummary(
+  r: Omit<ReminderRunResult, "ran" | "problem"> & { problem?: string | null },
+): string {
   const line = `${r.reminded} reminded · ${r.escalated} escalated · ${r.taskNotices} task notices · ${r.bidNotices} bid notices · ${r.failed} failed`;
-  return r.taskProblem ? `${line} · task notices skipped: ${r.taskProblem}` : line;
+  if (r.taskProblem && r.taskProblem === r.bidProblem)
+    return `${line} · task and bid notices skipped: ${r.taskProblem}`;
+  return (
+    line +
+    (r.taskProblem ? ` · task notices skipped: ${r.taskProblem}` : "") +
+    (r.bidProblem ? ` · bid notices skipped: ${r.bidProblem}` : "")
+  );
 }
 
 export const TASK_NOTICES_NEED_KEY =
   "the server key (SUPABASE_SERVICE_ROLE_KEY) is not set on this server; the scheduled job sends them";
 
 /**
- * The scheduled job's office hours (.github/workflows/reminders.yml: every 30 minutes, 8am–7pm
- * Eastern). Admin › Reminders turns amber when it has not run for over two hours inside them.
+ * When the scheduled job is expected (owner, Oct 12, C): the GitHub Actions workflow
+ * (.github/workflows/reminders.yml) is scheduled for office hours, but GitHub runs it a few times
+ * a day, not on the half hour — a few runs a day is sufficient. So Admin › Reminders turns amber
+ * only when there has been NO scheduled run in the last 24 hours, and only looks Monday–Friday,
+ * 10:00–19:00 Eastern (a weekend, a night or an early morning is never a failure).
  */
-export const CRON_OFFICE_HOURS = { from: 8, to: 19, tz: "America/New_York" } as const;
-export const CRON_STALE_HOURS = 2;
-export const CRON_STALE_LINE = "The scheduled job has not run in over 2 hours during office hours";
+export const CRON_OFFICE_HOURS = { from: 10, to: 19, tz: "America/New_York" } as const;
+export const CRON_STALE_HOURS = 24;
+export const CRON_STALE_LINE = "The scheduled job has not run in the last day";
+
+const weekdayFmt = new Map<string, Intl.DateTimeFormat>();
+/** The local weekday ("Mon" … "Sun") of an instant. */
+function localWeekday(at: Date, tz: string): string {
+  let f = weekdayFmt.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" });
+    weekdayFmt.set(tz, f);
+  }
+  return f.format(at);
+}
 
 /**
- * Is the scheduled run overdue (owner, Oct 12, item 8)? Yes when `now` is inside office hours,
- * at least two hours after they open (the overnight gap before the first run of the day is
- * expected, not a failure), and the last run (crm_settings.last_cron_at, stamped by the cron
- * route alone) is missing or over two hours old. Outside office hours: never.
+ * Is the scheduled run overdue (owner, Oct 12, item 8, then C)? Yes when `now` is a weekday
+ * between 10:00 and 19:00 Eastern and the last run (crm_settings.last_cron_at, stamped by the cron
+ * route alone) is missing or over 24 hours old. Any other time: never.
  */
 export function scheduledRunStale(lastCronAt: string | null | undefined, now: Date): boolean {
+  const day = localWeekday(now, CRON_OFFICE_HOURS.tz);
+  if (day === "Sat" || day === "Sun") return false;
   const hour = Number(localHm(now, CRON_OFFICE_HOURS.tz).slice(0, 2));
-  if (hour < CRON_OFFICE_HOURS.from + CRON_STALE_HOURS || hour >= CRON_OFFICE_HOURS.to)
-    return false;
+  if (hour < CRON_OFFICE_HOURS.from || hour >= CRON_OFFICE_HOURS.to) return false;
   if (!lastCronAt) return true;
   const last = Date.parse(lastCronAt);
   return !Number.isFinite(last) || now.getTime() - last > CRON_STALE_HOURS * 3600_000;
@@ -572,8 +610,10 @@ export function scheduledRunStale(lastCronAt: string | null | undefined, now: Da
 
 /**
  * The lazy dispatcher: an office user's app calls this on load; if the last pass is older than
- * ten minutes it fires the due reminders, then the task notices (owner, Oct 12, item 8: they used
- * to go out from the scheduled job alone, so with it down a task's "due today" never came). The
+ * ten minutes it fires the due reminders, then the task notices and the bid notices (owner, Oct
+ * 12, item 8: they used to go out from the scheduled job alone, so with it down a task's "due
+ * today" never came). Each of the three runs in its own try / catch (owner, Oct 12, B1): the
+ * follow-up pass throwing is reported in `problem`, and the task and bid passes still run. The
  * cron route does the same on a schedule and is the one that stamps last_cron_at. Returns what
  * ran, for the Admin toast (reminderRunSummary).
  */
@@ -590,6 +630,7 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
     const last = s?.last_dispatch_at ? Date.parse(s.last_dispatch_at) : 0;
     if (Date.now() - last < 10 * 60 * 1000) return notRun();
     const out: ReminderRunResult = { ...notRun(), ran: true };
+    const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
     try {
       const { dispatchDueReminders } = await import("@/lib/notify.server");
       const r = await dispatchDueReminders(context.supabase);
@@ -597,31 +638,44 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
       out.escalated = r.escalated;
       out.failed = r.failed;
     } catch (e) {
-      // Never take the app down over a reminder pass; the Reminders settings page shows it.
+      // Never take the app down over a reminder pass; the toast and the Reminders page say so,
+      // and the notices below still run.
       console.error("Reminder dispatch failed", e);
-      return notRun();
+      out.problem = errText(e);
     }
     // The task notices read every open task and stamp it: the service-role client, as the cron
     // route uses (a signed-in user's client reads and writes only their own tasks under RLS).
     // Without the key (the preview) they are skipped, and the result says so.
+    const { hasServiceRole } = await import("@/lib/notify.server");
+    const adminClient = async () => {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      return supabaseAdmin as unknown as SupabaseClient<Database>;
+    };
     try {
-      const { hasServiceRole } = await import("@/lib/notify.server");
       if (!hasServiceRole()) out.taskProblem = TASK_NOTICES_NEED_KEY;
       else {
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const { dispatchTaskNotices } = await import("@/lib/tasks-notify.server");
-        const t = await dispatchTaskNotices(supabaseAdmin as unknown as SupabaseClient<Database>);
+        const t = await dispatchTaskNotices(await adminClient());
         out.taskNotices = t.tasks_created + t.tasks_morning + t.tasks_overdue;
         out.failed += t.tasks_errors;
-        // "Bid due tomorrow" (owner, Oct 12), the same client, right after the task notices.
+      }
+    } catch (e) {
+      console.error("Task notice dispatch failed", e);
+      out.taskProblem = errText(e);
+    }
+    // "Bid due tomorrow" (owner, Oct 12), the same client, right after the task notices, on its
+    // own: a task pass that threw does not stop it.
+    try {
+      if (!hasServiceRole()) out.bidProblem = TASK_NOTICES_NEED_KEY;
+      else {
         const { dispatchBidDueNotices } = await import("@/lib/bids-notify.server");
-        const b = await dispatchBidDueNotices(supabaseAdmin as unknown as SupabaseClient<Database>);
+        const b = await dispatchBidDueNotices(await adminClient());
         out.bidNotices = b.bids_notified;
         out.failed += b.bids_errors;
       }
     } catch (e) {
-      console.error("Task notice dispatch failed", e);
-      out.taskProblem = e instanceof Error ? e.message : String(e);
+      console.error("Bid due notice dispatch failed", e);
+      out.bidProblem = errText(e);
     }
     return out;
   });
@@ -653,6 +707,8 @@ export const notificationHealth = createServerFn({ method: "GET" })
       }[];
       /** Tasks whose notice (created / morning / overdue) failed: tasks.notify_error. */
       task_failures: TaskNoticeFailure[];
+      /** Bids whose "Bid due tomorrow" notice failed: bids.notify_error (owner, Oct 12, B4). */
+      bid_failures: BidNoticeFailure[];
     }> => {
       const p = await me(context);
       if (p.role !== "admin") throw new Error("Forbidden: admin access required");
@@ -676,7 +732,20 @@ export const notificationHealth = createServerFn({ method: "GET" })
       };
       // Real failures only: a user with push on and no device is not one (Oct 12, item 10b;
       // notify() no longer records it, and the migration clears the old rows).
-      const [s, { data: fails }, { data: taskFails }] = await Promise.all([
+      // bids.notify_error arrives with 20261012180000 (the generated types do not list it yet,
+      // so the read is untyped); until it is applied the select fails and the list is empty.
+      const bidFails = async (): Promise<BidNoticeFailure[]> => {
+        const q = await context.supabase
+          .from("bids")
+          .select("id, name, due_date, notify_error, updated_at")
+          .not("notify_error", "is", null)
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false })
+          .limit(20);
+        if (q.error) return [];
+        return ((q.data ?? []) as unknown as BidNoticeFailure[]).filter((b) => !!b.notify_error);
+      };
+      const [s, { data: fails }, { data: taskFails }, bidFailures] = await Promise.all([
         stamps(),
         context.supabase
           .from("notifications")
@@ -690,6 +759,7 @@ export const notificationHealth = createServerFn({ method: "GET" })
           .not("notify_error", "is", null)
           .order("updated_at", { ascending: false })
           .limit(20),
+        bidFails(),
       ]);
       return {
         last_dispatch_at: s?.last_dispatch_at ?? null,
@@ -701,9 +771,19 @@ export const notificationHealth = createServerFn({ method: "GET" })
         from: fromAddress(),
         recent_failures: fails ?? [],
         task_failures: (taskFails ?? []).filter((t): t is TaskNoticeFailure => !!t.notify_error),
+        bid_failures: bidFailures,
       };
     },
   );
+
+/** A bid whose "Bid due tomorrow" notice failed (Admin › Reminders; owner, Oct 12, B4). */
+export interface BidNoticeFailure {
+  id: string;
+  name: string;
+  due_date: string | null;
+  notify_error: string;
+  updated_at: string;
+}
 
 /** A task whose notice failed (Admin › Reminders, audit Oct 2: it showed only on the task). */
 export interface TaskNoticeFailure {

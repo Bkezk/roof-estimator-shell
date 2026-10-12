@@ -580,6 +580,8 @@ export const listOpportunityTickets = createServerFn({ method: "GET" })
  * able to read both the opportunity (its RLS: Customers, Estimate, or the assignee) and the bid
  * (Estimate); an opportunity already linked to another bid keeps that link. The write itself is
  * the server's (an estimator without Customers access cannot update the opportunity under RLS).
+ * Once both links are written the bid drives the opportunity (syncOpportunityFromBid; owner, Oct
+ * 12, A), so a bid already Submitted / Won / Lost moves it the moment it is linked.
  */
 export const linkBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -618,6 +620,10 @@ export const linkBid = createServerFn({ method: "POST" })
         .update({ opportunity_id: data.opportunityId })
         .eq("id", data.bidId);
       if (bErr) throw new Error(bErr.message);
+      // Owner, Oct 12 (A): the bid drives its opportunity from the moment they are linked — a
+      // bid saved as Submitted / Won / Lost before the link moves the opportunity now (a draft
+      // moves nothing; the function answers 'unchanged'). Both links are written first.
+      await syncOpportunityFromBid(context, data.bidId);
     }
     return { linked };
   });

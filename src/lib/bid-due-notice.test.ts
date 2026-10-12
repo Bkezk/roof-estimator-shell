@@ -4,6 +4,10 @@
  * moving the due date re-arms it. Sent by the reminder pass — the cron route and the app's own
  * pass, beside the task notices — through notify() with the admin client; skipped without the
  * server key, with the task notices' reason. Inbox kind bid_due, labelled "Bid due".
+ *
+ * Owner, Oct 12 (B2): the bid is CLAIMED before the send (notified_due_at = now where still
+ * null); a send that fails puts the stamp back where it is still this pass's and keeps the error
+ * on bids.notify_error (20261012180000), so the next pass retries; two passes at once send once.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +146,7 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
       bids_notified: 1,
       bids_silent: 0,
       bids_errors: 0,
+      bids_skipped: 0,
     });
     expect(inbox()).toHaveLength(1);
     expect(inbox()[0]).toMatchObject({
@@ -173,6 +178,7 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
       bids_notified: 0,
       bids_silent: 0,
       bids_errors: 0,
+      bids_skipped: 0,
     });
     expect(inbox()).toEqual([]);
     for (const id of ["later", "sub", "won", "lost", "gone", "undated"])
@@ -224,7 +230,97 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
       bids_errors: 1,
     });
     expect(row()["notified_due_at"]).toBeNull();
+    expect(row()["notify_error"]).toBe("down");
     expect(log).toHaveBeenCalledWith(expect.stringContaining("bid b1"), "down");
+    log.mockRestore();
+  });
+  it("B2: the claim is a conditional update before the send; a failed send puts the stamp back and keeps the error; the next pass retries and clears it", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    let down = true;
+    env = fakeSupabase(
+      {
+        profiles: [{ id: EST, email: "eve@example.com" }],
+        bids: [bid({ notify_error: null })],
+        crm_accounts: [],
+        notifications: [],
+        push_subscriptions: [],
+      },
+      {
+        rpc: (fn) =>
+          fn === "notify_recipients" && down
+            ? { data: null, error: { message: "down" } }
+            : undefined,
+        rpcs: { notify_recipients: recipients },
+      },
+    );
+    const client = env.db as unknown as Client;
+    expect(await run(client)).toMatchObject({ bids_errors: 1, bids_notified: 0, bids_skipped: 0 });
+    // 1. The claim: the stamp, only where it is still null, clearing the last error.
+    const writes = env.writes.filter((w) => w.table === "bids");
+    expect(writes[0]).toMatchObject({
+      op: "update",
+      payload: { notified_due_at: NOW.toISOString(), notify_error: null },
+      filters: ["eq id=b1", "is notified_due_at=null"],
+      rows: 1,
+    });
+    // 2. Put back after the failure, only where the row still carries this pass's stamp.
+    expect(writes[1]).toMatchObject({
+      op: "update",
+      payload: { notified_due_at: null, notify_error: "down" },
+      filters: ["eq id=b1", `eq notified_due_at=${NOW.toISOString()}`],
+      rows: 1,
+    });
+    expect(writes).toHaveLength(2);
+    expect(inbox()).toEqual([]);
+    // 3. The next pass sends it, stamps it, and the error is gone.
+    down = false;
+    expect(await run(client, new Date("2026-10-12T16:00:00Z"))).toMatchObject({
+      bids_notified: 1,
+      bids_errors: 0,
+    });
+    expect(inbox()).toHaveLength(1);
+    expect(row()).toMatchObject({
+      notified_due_at: "2026-10-12T16:00:00.000Z",
+      notify_error: null,
+    });
+    log.mockRestore();
+  });
+  it("B2: two passes at once (the cron and a page load) claim once: one notice, the other skipped", async () => {
+    const client = world([bid()]);
+    const [a, b] = await Promise.all([run(client), run(client)]);
+    expect(a.bids_checked + b.bids_checked).toBe(2);
+    expect(a.bids_notified + b.bids_notified).toBe(1);
+    expect(a.bids_skipped + b.bids_skipped).toBe(1);
+    expect(a.bids_errors + b.bids_errors).toBe(0);
+    expect(inbox()).toHaveLength(1);
+    expect(env.writes.filter((w) => w.table === "bids")).toHaveLength(1);
+  });
+  it("B2: a stamp that moved during the send (a due-date change) is left alone, and said", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    env = fakeSupabase(
+      {
+        profiles: [{ id: EST, email: "eve@example.com" }],
+        bids: [bid()],
+        crm_accounts: [],
+        notifications: [],
+      },
+      {
+        rpcs: {
+          notify_recipients: (_args, tables) => {
+            // The estimator moved the due date mid-send: the trigger cleared the stamp.
+            Object.assign(tables["bids"]![0]!, { due_date: "2026-10-30", notified_due_at: null });
+            throw new Error("down");
+          },
+        },
+      },
+    );
+    expect(await run(env.db as unknown as Client)).toMatchObject({ bids_errors: 1 });
+    // Left as the trigger left it; the error is not written over a row that is no longer ours
+    // (the claim had cleared notify_error).
+    expect(row()).toMatchObject({ due_date: "2026-10-30", notified_due_at: null });
+    expect(row()["notify_error"]).toBeNull();
+    expect(env.writes.filter((w) => w.table === "bids")).toHaveLength(1);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("stamp had already moved"));
     log.mockRestore();
   });
   it("reads with the admin client as the task notices do, and selects drafts due by tomorrow", () => {
@@ -235,6 +331,16 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
     expect(src).toContain('.is("notified_due_at", null)');
     expect(src).toContain('.lte("due_date", bidDayPlus(today, 1))');
     expect(src).toContain("await notify([b.created_by], msg, admin);");
+    // B2: the claim before the send, the put-back after a failure, both conditional.
+    const claim = src.indexOf("async function claimBidNotice");
+    const unclaim = src.indexOf("async function unclaimBidNotice");
+    expect(src.slice(claim, unclaim)).toContain('.is("notified_due_at", null)');
+    expect(src.slice(unclaim)).toContain('.eq("notified_due_at", stamp)');
+    expect(src.indexOf("if (!(await claimBidNotice(admin, b.id, stamp)))")).toBeLessThan(
+      src.indexOf("await notify([b.created_by], msg, admin);"),
+    );
+    expect(src).toContain("await unclaimBidNotice(admin, b.id, stamp, errText(e));");
+    expect(src).toContain("bids_skipped: number;");
   });
 });
 

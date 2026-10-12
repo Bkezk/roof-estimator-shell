@@ -2,8 +2,13 @@
  * The app's own reminder pass runs the task notices too (owner, Oct 12, item 8): they used to go
  * out from the scheduled job alone, so with it down a task's "due today" never came. The Admin
  * toast reports the whole pass; Delivery health tells the SCHEDULED job's last run (last_cron_at,
- * stamped by the cron route alone) from any pass, and turns amber when the job is quiet for over
- * two hours inside office hours (8am–7pm Eastern, .github/workflows/reminders.yml).
+ * stamped by the cron route alone) from any pass, and turns amber when the job has not run in the
+ * last 24 hours — looked at Monday–Friday, 10:00–19:00 Eastern only (owner, Oct 12, C: GitHub runs
+ * the job a few times a day, not every 30 minutes, and that is sufficient).
+ *
+ * Owner, Oct 12 (B1): the follow-up pass, the task notices and the bid notices each run in their
+ * own try / catch — the follow-up pass throwing is reported (`problem`, the toast's "Follow-up
+ * pass failed: …"), and the notices still go.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,17 +107,75 @@ describe("dispatchRemindersIfDue", () => {
       taskNotices: 4,
       bidNotices: 1,
       failed: 3, // one reminder, one task notice, one bid notice
+      problem: null,
       taskProblem: null,
+      bidProblem: null,
     });
   });
-  it("without the server key (the preview) the task notices are skipped and the result says so", async () => {
+  it("without the server key (the preview) the task and bid notices are skipped and the result says so, for each", async () => {
     hasKey.value = false;
     const r = await call<ReminderRunResult>(dispatchRemindersIfDue, world(null));
     expect(taskNotices).not.toHaveBeenCalled();
     expect(bidNotices).not.toHaveBeenCalled();
     expect(r.ran).toBe(true);
     expect(r.reminded).toBe(2);
+    expect(r.problem).toBeNull();
     expect(r.taskProblem).toBe(TASK_NOTICES_NEED_KEY);
+    expect(r.bidProblem).toBe(TASK_NOTICES_NEED_KEY);
+  });
+  it("B1: the follow-up pass throwing is reported in `problem`; the task and bid notices still run and are counted", async () => {
+    reminders.mockRejectedValue(new Error("crm_followups: permission denied"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await call<ReminderRunResult>(dispatchRemindersIfDue, world(null));
+    expect(taskNotices).toHaveBeenCalledTimes(1);
+    expect(bidNotices).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({
+      ran: true,
+      reminded: 0,
+      escalated: 0,
+      taskNotices: 4,
+      bidNotices: 1,
+      failed: 2, // the task notice and the bid notice; the follow-up pass itself is `problem`
+      problem: "crm_followups: permission denied",
+      taskProblem: null,
+      bidProblem: null,
+    });
+  });
+  it("B1: the task pass throwing does not stop the bid pass (each in its own try / catch)", async () => {
+    taskNotices.mockRejectedValue(new Error("tasks table locked"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await call<ReminderRunResult>(dispatchRemindersIfDue, world(null));
+    expect(bidNotices).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({
+      ran: true,
+      reminded: 2,
+      taskNotices: 0,
+      taskProblem: "tasks table locked",
+      bidNotices: 1,
+      bidProblem: null,
+      failed: 2,
+    });
+    bidNotices.mockRejectedValue(new Error("bids table locked"));
+    taskNotices.mockResolvedValue({
+      tasks_checked: 0,
+      tasks_created: 0,
+      tasks_morning: 0,
+      tasks_overdue: 0,
+      tasks_silent: 0,
+      tasks_errors: 0,
+    });
+    const r2 = await call<ReminderRunResult>(dispatchRemindersIfDue, world(null));
+    expect(r2).toMatchObject({ taskProblem: null, bidProblem: "bids table locked", bidNotices: 0 });
+  });
+  it("the throttle is kept: the follow-up pass is what stamps last_dispatch_at (the pass throwing leaves it unstamped, so the next load tries again)", () => {
+    const src = read("src/lib/followups.functions.ts");
+    expect(src).toContain("if (Date.now() - last < 10 * 60 * 1000) return notRun();");
+    expect(src).toContain("if (!hasServiceRole()) out.taskProblem = TASK_NOTICES_NEED_KEY;");
+    expect(src).toContain("if (!hasServiceRole()) out.bidProblem = TASK_NOTICES_NEED_KEY;");
+    expect(src).toContain("out.problem = errText(e);");
+    expect(src).not.toContain(
+      'console.error("Reminder dispatch failed", e);\n      return notRun();',
+    );
   });
   it("the ten-minute throttle covers both passes", async () => {
     const r = await call<ReminderRunResult>(
@@ -138,54 +201,85 @@ describe("dispatchRemindersIfDue", () => {
 
 describe("the Admin toast", () => {
   it("reads 'N reminded · N escalated · N task notices · N bid notices · N failed'", () => {
+    const base = {
+      reminded: 2,
+      escalated: 1,
+      taskNotices: 4,
+      bidNotices: 1,
+      failed: 0,
+      taskProblem: null,
+      bidProblem: null,
+    };
+    expect(reminderRunSummary(base)).toBe(
+      "2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed",
+    );
+    // Both notice passes skipped for the one reason (no server key): said once, for both.
     expect(
       reminderRunSummary({
-        reminded: 2,
-        escalated: 1,
-        taskNotices: 4,
-        bidNotices: 1,
-        failed: 0,
-        taskProblem: null,
-      }),
-    ).toBe("2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed");
-    expect(
-      reminderRunSummary({
+        ...base,
         reminded: 0,
         escalated: 0,
         taskNotices: 0,
         bidNotices: 0,
-        failed: 0,
         taskProblem: TASK_NOTICES_NEED_KEY,
+        bidProblem: TASK_NOTICES_NEED_KEY,
       }),
     ).toBe(
-      `0 reminded · 0 escalated · 0 task notices · 0 bid notices · 0 failed · task notices skipped: ${TASK_NOTICES_NEED_KEY}`,
+      `0 reminded · 0 escalated · 0 task notices · 0 bid notices · 0 failed · task and bid notices skipped: ${TASK_NOTICES_NEED_KEY}`,
+    );
+    // One of them, or each for its own reason.
+    expect(reminderRunSummary({ ...base, taskProblem: "tasks table locked" })).toBe(
+      "2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed · task notices skipped: tasks table locked",
+    );
+    expect(reminderRunSummary({ ...base, bidProblem: "bids table locked" })).toBe(
+      "2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed · bid notices skipped: bids table locked",
+    );
+    expect(
+      reminderRunSummary({ ...base, taskProblem: "tasks locked", bidProblem: "bids locked" }),
+    ).toBe(
+      "2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed · task notices skipped: tasks locked · bid notices skipped: bids locked",
+    );
+    // The follow-up pass's own failure is the toast's headline, not part of the line.
+    expect(reminderRunSummary({ ...base, problem: "permission denied" })).toBe(
+      "2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed",
     );
     const page = read("src/components/reminders-settings.tsx");
     expect(page).toContain("toast.success(`Reminders ran: ${reminderRunSummary(r)}`)");
+    expect(page).toContain(
+      "toast.error(`Follow-up pass failed: ${r.problem} · ${reminderRunSummary(r)}`)",
+    );
+    expect(page).toContain("Follow-up pass failed: {run.data.problem}");
     expect(page).not.toContain("${r.reminded} sent");
   });
 });
 
 describe("the scheduled job's last run", () => {
-  // Eastern wall-clock instants on Mon Oct 12, 2026 (EDT, UTC-4).
-  const at = (hm: string) => new Date(`2026-10-12T${hm}:00-04:00`);
+  // Eastern wall-clock instants (EDT, UTC-4); Oct 12, 2026 is a Monday.
+  const at = (hm: string, ymd = "2026-10-12") => new Date(`${ymd}T${hm}:00-04:00`);
   const hoursAgo = (now: Date, h: number) => new Date(now.getTime() - h * 3600_000).toISOString();
-  it("is stale when quiet for over two hours inside office hours; never outside them", () => {
+  it("C: is stale only when there has been no scheduled run in the last 24 hours, looked at Mon–Fri 10:00–19:00 Eastern", () => {
     const noon = at("12:00");
-    expect(scheduledRunStale(hoursAgo(noon, 3), noon)).toBe(true);
+    expect(scheduledRunStale(hoursAgo(noon, 25), noon)).toBe(true);
     expect(scheduledRunStale(null, noon)).toBe(true);
-    expect(scheduledRunStale(hoursAgo(noon, 1), noon)).toBe(false);
-    expect(scheduledRunStale(hoursAgo(noon, 2) /* exactly 2h */, noon)).toBe(false);
-    // 7pm and later, and before 8am: the job is not expected to run.
+    expect(scheduledRunStale("not a date", noon)).toBe(true);
+    // A few runs a day is sufficient (owner): a run 3 or 23 hours ago is fine; exactly 24 too.
+    expect(scheduledRunStale(hoursAgo(noon, 3), noon)).toBe(false);
+    expect(scheduledRunStale(hoursAgo(noon, 23), noon)).toBe(false);
+    expect(scheduledRunStale(hoursAgo(noon, 24), noon)).toBe(false);
+    // Before 10am and from 7pm: not looked at, whatever the stamp.
+    expect(scheduledRunStale(null, at("09:59"))).toBe(false);
+    expect(scheduledRunStale(null, at("10:00"))).toBe(true);
+    expect(scheduledRunStale(null, at("18:59"))).toBe(true);
     expect(scheduledRunStale(null, at("19:00"))).toBe(false);
     expect(scheduledRunStale(null, at("23:30"))).toBe(false);
-    expect(scheduledRunStale(null, at("07:59"))).toBe(false);
-    // The first two office hours: last night's silence is expected, not a failure.
-    expect(scheduledRunStale(hoursAgo(at("09:30"), 14), at("09:30"))).toBe(false);
-    expect(scheduledRunStale(hoursAgo(at("10:00"), 14), at("10:00"))).toBe(true);
-    expect(CRON_STALE_LINE).toBe(
-      "The scheduled job has not run in over 2 hours during office hours",
-    );
+    // The weekend is never a failure; Friday and Tuesday are looked at.
+    expect(scheduledRunStale(null, at("12:00", "2026-10-17"))).toBe(false); // Sat
+    expect(scheduledRunStale(null, at("12:00", "2026-10-18"))).toBe(false); // Sun
+    expect(scheduledRunStale(null, at("12:00", "2026-10-16"))).toBe(true); // Fri
+    expect(
+      scheduledRunStale(hoursAgo(at("12:00", "2026-10-13"), 30), at("12:00", "2026-10-13")),
+    ).toBe(true); // Tue, last run Monday 6am
+    expect(CRON_STALE_LINE).toBe("The scheduled job has not run in the last day");
   });
   it("notificationHealth hands the page both stamps and the last pass's failed count", async () => {
     const r = await call<{

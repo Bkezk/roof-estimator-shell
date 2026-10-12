@@ -385,6 +385,98 @@ describe("A. linkBid writes both sides", () => {
   });
 });
 
+describe("A. the sync on the first save and on link (owner, Oct 12)", () => {
+  const BID3 = "99999999-9999-4999-8999-999999999999";
+  const save = (status: string, over: Row = {}) =>
+    call<Row>(
+      saveBid,
+      { id: BID, name: "Gym reroof bid", data: {}, grandTotal: 48250, status, ...over },
+      EST,
+    );
+  /** A new bid: the stand-in's ids are not uuids (linkBid validates one), so the row is re-keyed. */
+  const makeBid = async (status: string) => {
+    const made = await call<Row>(
+      saveBid,
+      { name: "New bid", data: {}, grandTotal: 100, status, dueDate: "2026-10-20" },
+      EST,
+    );
+    const row = env.tables["bids"]!.find((r) => r["id"] === made["id"])!;
+    row["id"] = BID3;
+    return row;
+  };
+  it("a new bid saved as submitted, then linked: the opportunity is quoted the moment it is linked", async () => {
+    setup({ opp: { bid_id: null } });
+    const made = await makeBid("submitted");
+    // The insert names no opportunity: nothing to sync yet, and no warning.
+    expect(made["opportunity_id"]).toBeUndefined();
+    expect(syncCalls()).toEqual([]);
+    expect(oppRow()["status"]).toBe("open");
+    await expect(call(linkBid, { opportunityId: OPP, bidId: BID3 }, EST)).resolves.toEqual({
+      linked: true,
+    });
+    expect(oppRow()["bid_id"]).toBe(BID3);
+    expect(bidRow(BID3)["opportunity_id"]).toBe(OPP);
+    // Both links are written before the sync runs (whose follow-up sync writes after them).
+    const writes = env.writes.map((w) => w.table);
+    expect(writes.slice(0, 3)).toEqual(["bids", "crm_opportunities", "bids"]);
+    expect(syncCalls()).toEqual([{ fn: "sync_opportunity_from_bid", args: { p_bid: BID3 } }]);
+    expect(oppRow()["status"]).toBe("quoted");
+  });
+  it("a bid saved as won before the link wins the opportunity on link and closes its follow-up; a draft linked moves nothing", async () => {
+    setup({ opp: { bid_id: null, status: "quoted" }, followups: [followup()] });
+    await makeBid("won");
+    await call(linkBid, { opportunityId: OPP, bidId: BID3 }, EST);
+    expect(oppRow()["status"]).toBe("won");
+    expect(followups()[0]).toMatchObject({ status: "closed", closed_reason: "status won" });
+    setup({ opp: { bid_id: null } });
+    await call(linkBid, { opportunityId: OPP, bidId: BID }, EST); // BID is a draft
+    expect(syncCalls()).toHaveLength(1);
+    expect(oppRow()["status"]).toBe("open");
+  });
+  it("a save at the same won status calls the sync again (idempotent): the opportunity stays won, and one moved back by hand catches up", async () => {
+    setup({ opp: { status: "won" }, bid: { status: "won", opportunity_id: OPP } });
+    await save("won", { grandTotal: 50000 });
+    expect(syncCalls()).toEqual([{ fn: "sync_opportunity_from_bid", args: { p_bid: BID } }]);
+    expect(oppRow()["status"]).toBe("won");
+    expect(bidRow()["grand_total"]).toBe(50000);
+    // The opportunity was set back to quoted by hand: the next save of the won bid wins it again.
+    setup({ opp: { status: "quoted" }, bid: { status: "won", opportunity_id: OPP } });
+    await save("won");
+    expect(oppRow()["status"]).toBe("won");
+  });
+  it("a bid with no opportunity: a same-status save calls no sync and raises nothing; a draft save never syncs", async () => {
+    setup({ opp: { bid_id: null }, bid: { status: "won" } });
+    await expect(save("won", { grandTotal: 1 })).resolves.toMatchObject({ status: "won" });
+    expect(syncCalls()).toEqual([]);
+    expect(oppRow()["status"]).toBe("open");
+    // Linked, but a draft: nothing to drive.
+    setup({ bid: { opportunity_id: OPP } });
+    await save("draft");
+    expect(syncCalls()).toEqual([]);
+  });
+  it("linkBid runs the sync after both links; the save path's rule, in code", () => {
+    const opps = src("src/lib/opportunities.functions.ts");
+    const link = opps.slice(
+      opps.indexOf("export const linkBid"),
+      opps.indexOf("export const deleteOpportunity"),
+    );
+    const bidSide = link.indexOf(
+      'await admin .from("bids") .update({ opportunity_id: data.opportunityId })',
+    );
+    const sync = link.indexOf("await syncOpportunityFromBid(context, data.bidId);");
+    expect(bidSide).toBeGreaterThan(-1);
+    expect(sync).toBeGreaterThan(bidSide);
+    const bids = src("src/lib/bids.functions.ts");
+    expect(bids).toContain(
+      'if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id)) await syncOpportunityFromBid(context, bid.id);',
+    );
+    // The insert path is as it was.
+    expect(bids).toContain(
+      'if (status !== "draft" && bid.opportunity_id) await syncOpportunityFromBid(context, bid.id);',
+    );
+  });
+});
+
 describe("A. what the pages read", () => {
   it("the opportunity carries the bid's name, status, grand total and submitted_at (withNames)", async () => {
     setup({ bid: { status: "submitted", submitted_at: "2026-10-11T14:00:00Z" } });
@@ -685,7 +777,9 @@ describe("the migration, 20261012100000_bid_drives_opportunity.sql", () => {
   });
   it("the server calls it after the bid write, in both paths, then syncs the follow-up", () => {
     const bids = src("src/lib/bids.functions.ts");
-    expect(bids).toContain("if (statusChanged) await syncOpportunityFromBid(context, bid.id);");
+    expect(bids).toContain(
+      'if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id)) await syncOpportunityFromBid(context, bid.id);',
+    );
     expect(bids).toContain(
       "if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);",
     );

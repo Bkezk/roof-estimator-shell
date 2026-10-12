@@ -446,10 +446,11 @@ async function recordFailure(admin: Client, f: FollowupRow, step: string, e: unk
  * Each follow-up is CLAIMED before anything is sent: one conditional update moves
  * next_remind_at on (and stamps last_reminded_at / reminders_sent) only where it still holds the
  * value this pass read. Two passes at once (the cron and an office user's page load) both read
- * the item, but only one update matches; the other affects no row and sends nothing. The claim
- * is never rolled back: if a send then fails, the failure is recorded on the row and logged,
- * and the item waits for its next reminder. A missed reminder is better than a duplicate, and an
- * escalation failure can no longer make the assignee hear the same reminder twice.
+ * the item, but only one update matches; the other affects no row and sends nothing. If a send
+ * then fails the claim is put back (unclaimReminder; owner, Oct 12, item 10a) — only where the
+ * row still holds what the claim wrote — the failure is recorded on the row and logged, and the
+ * next pass retries it. A reminder is never sent twice for one claim, and an escalation failure
+ * cannot make the assignee hear the same reminder twice (the escalation has its own claim).
  *
  * Each follow-up is handled on its own: an error on one is recorded and the pass goes on.
  */
@@ -578,9 +579,10 @@ const daysSince = (u: UntouchedItem, now: Date) =>
  * The item's escalated_at (migration 20261002110000) records the last escalation; the pass
  * CLAIMS it before sending, with one conditional update that only matches while escalated_at
  * still holds the value this pass read, so two passes at once (the cron and a page load)
- * escalate once. As with the reminders the claim is never rolled back: a failed send is
- * recorded (on the item's open follow-up, if any, and in the log) and the item waits for its
- * next turn. A re-assignment clears escalated_at (the stamp_assigned triggers).
+ * escalate once. As with the reminders, a send that fails after the claim puts escalated_at back
+ * to what this pass read (only where the row still carries this pass's stamp; owner, Oct 12,
+ * item 10a), is recorded (on the item's open follow-up, if any, and in the log), and the next
+ * pass escalates again. A re-assignment clears escalated_at (the stamp_assigned triggers).
  *
  * An item whose follow-up is on hold (snoozed_until ahead; owner, Oct 9) is skipped: someone
  * decided it waits, with a reason on the record, so it is not "untouched".

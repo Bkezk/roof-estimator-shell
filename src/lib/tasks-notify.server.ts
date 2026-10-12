@@ -20,6 +20,7 @@ import {
   type TaskNoticeKind,
   type TaskRow,
 } from "@/lib/tasks";
+import type { Database } from "@/integrations/supabase/types";
 import { notify, sendEmail, serverClient, type Client } from "@/lib/notify.server";
 
 const INBOX_KIND: Record<TaskNoticeKind, string> = {
@@ -44,6 +45,8 @@ export interface SendResult {
   users: number;
   emails: number;
   errors: string[];
+  /** The inbox send (notify()) threw: nobody inside heard this notice (its error is in `errors`). */
+  inboxFailed: boolean;
 }
 
 /**
@@ -60,6 +63,7 @@ export async function sendTaskNotice(
   const errors: string[] = [];
   const label = await buildingLabel(admin, task.building_id);
   let users = 0;
+  let inboxFailed = false;
   if (to.users.length) {
     const msg = buildTaskEmail(task, kind, { audience: "user", buildingLabel: label });
     try {
@@ -69,6 +73,7 @@ export async function sendTaskNotice(
         admin,
       );
     } catch (e) {
+      inboxFailed = true;
       errors.push(`inbox: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -82,7 +87,7 @@ export async function sendTaskNotice(
       else errors.push(`email to ${addr}: ${r.error}`);
     }
   }
-  return { users, emails, errors };
+  return { users, emails, errors, inboxFailed };
 }
 
 const STAMP: Record<
@@ -95,9 +100,29 @@ const STAMP: Record<
 };
 
 /**
+ * A notice whose inbox send threw is retried on the next pass (its stamp is left unset) this many
+ * times in all; on the last failure it is stamped anyway, so a task that can never be told stops
+ * (owner, Oct 12, B3). The count is tasks.notify_failures (20261012180000_bid_notice_claim.sql),
+ * one per failing pass, reset by a pass with no failure.
+ */
+export const TASK_NOTICE_MAX_TRIES = 3;
+
+type TaskPatch = Database["public"]["Tables"]["tasks"]["Update"];
+/** PostgREST's "unknown column" (PGRST204): the Oct 12 migration is not applied yet. */
+const isMissingColumn = (e: { code?: string; message?: string }) =>
+  e.code === "PGRST204" || /Could not find the '.*' column/i.test(e.message ?? "");
+
+/**
  * The reminder pass for tasks: every open task with a notice due now (dueTaskNotices) gets it,
  * and the notice is stamped so it fires once. Runs from /api/cron/reminders right after the
- * follow-up reminders. Returns counts for the route's JSON.
+ * follow-up reminders, and from the app's own pass. Returns counts for the route's JSON.
+ *
+ * Failures (owner, Oct 12, B3): a notice whose inbox send threw is NOT stamped — nobody inside
+ * heard it — so the next pass sends it again; the failure is kept on tasks.notify_error (Admin ›
+ * Reminders lists them) and counted on tasks.notify_failures, and on the third failing pass the
+ * notice is stamped so it stops (TASK_NOTICE_MAX_TRIES). A pass that sends clean clears both.
+ * An outside email (Resend) that failed is recorded the same way but the notice is stamped as
+ * before: the inbox notice went, and sending it again would tell the same people twice.
  */
 export async function dispatchTaskNotices(
   sb: Client,
@@ -135,11 +160,16 @@ export async function dispatchTaskNotices(
     if (!due.length) continue;
     const patch: Partial<Record<(typeof STAMP)[TaskNoticeKind], string>> & {
       notify_error?: string | null;
+      notify_failures?: number;
     } = {};
+    // Failing passes so far (0 before the Oct 12 migration, or on a task that never failed).
+    const failures =
+      Number((task as { notify_failures?: number | null }).notify_failures ?? 0) || 0;
+    const lastTry = failures + 1 >= TASK_NOTICE_MAX_TRIES;
     const errors: string[] = [];
     for (const n of due) {
-      patch[STAMP[n.kind]] = now.toISOString();
       if (n.silent) {
+        patch[STAMP[n.kind]] = now.toISOString();
         out.tasks_silent++;
         continue;
       }
@@ -150,6 +180,10 @@ export async function dispatchTaskNotices(
         admin,
       );
       errors.push(...r.errors);
+      // Nobody inside heard it: no stamp, so the next pass sends it again — until the last try.
+      if (r.inboxFailed && !lastTry) continue;
+      patch[STAMP[n.kind]] = now.toISOString();
+      if (r.inboxFailed) continue; // stamped to stop, not sent: not counted as a notice
       if (n.kind === "created") out.tasks_created++;
       else if (n.kind === "morning") out.tasks_morning++;
       else out.tasks_overdue++;
@@ -157,8 +191,20 @@ export async function dispatchTaskNotices(
     if (errors.length) {
       out.tasks_errors += errors.length;
       patch.notify_error = errors.join("; ").slice(0, 1000);
+      patch.notify_failures = failures + 1;
+    } else if (failures || task.notify_error) {
+      patch.notify_error = null;
+      patch.notify_failures = 0;
     }
-    const { error: upErr } = await admin.from("tasks").update(patch).eq("id", task.id);
+    let { error: upErr } = await admin
+      .from("tasks")
+      .update(patch as TaskPatch)
+      .eq("id", task.id);
+    if (upErr && patch.notify_failures !== undefined && isMissingColumn(upErr)) {
+      // Before 20261012180000 is applied: the stamps and notify_error alone, as before.
+      const { notify_failures: _skip, ...rest } = patch;
+      ({ error: upErr } = await admin.from("tasks").update(rest).eq("id", task.id));
+    }
     if (upErr) throw new Error(upErr.message);
   }
   return out;

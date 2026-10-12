@@ -179,8 +179,14 @@ export const saveBid = createServerFn({ method: "POST" })
         .single();
       if (error) throw new Error(error.message);
       // The bid drives its opportunity (opportunities.functions.ts syncOpportunityFromBid), after
-      // the bid write succeeded.
-      if (statusChanged) await syncOpportunityFromBid(context, bid.id);
+      // the bid write succeeded. Owner, Oct 12 (A): on a status change as before, and on EVERY
+      // save that leaves the bid submitted / won / lost while the row names its opportunity — the
+      // database function answers 'unchanged' when there is nothing to do, so a bid linked after
+      // it was saved as Won, or a sync that failed once, catches up on the next save. A draft
+      // moves nothing; a bid with no opportunity is left silent (no warning: a bid does not have
+      // to be linked to one).
+      if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id))
+        await syncOpportunityFromBid(context, bid.id);
       return bid;
     }
     const status = data.status ?? "draft";

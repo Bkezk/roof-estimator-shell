@@ -249,8 +249,11 @@ describe("1. saveBid (the server)", () => {
     expect(fn).toMatch(/dueDate: z\s*\.string\(\)\s*\.regex\(/);
     expect(fn).toContain("...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),");
     expect(fn.match(/bidDueDateProblem\(\{/g)).toHaveLength(2);
-    // The status sync to the opportunity is untouched.
-    expect(fn).toContain("if (statusChanged) await syncOpportunityFromBid(context, bid.id);");
+    // The status sync to the opportunity (owner, Oct 12, A: on a change, and on every save of a
+    // submitted / won / lost bid that names its opportunity) is untouched by the due-date rule.
+    expect(fn.replace(/\s+/g, " ")).toContain(
+      'if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id)) await syncOpportunityFromBid(context, bid.id);',
+    );
   });
 });
 
