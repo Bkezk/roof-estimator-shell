@@ -292,7 +292,8 @@ describe("a customer's Tasks list", () => {
     expect(fn).toContain(
       'sb .from("tasks") .select("*") .eq("account_id", data.id) .order("due_date", { ascending: true, nullsFirst: false }) .limit(200),',
     );
-    expect(fn).toContain("bids, tasks: tasks ?? [] };");
+    // Since Oct 12 the customer's opportunities ride along too.
+    expect(fn).toContain("opportunities, bids, tasks: tasks ?? [], };");
   });
   it("the account detail has a Tasks section after Tickets and Bids: rows open the task dialog, New task starts one on this company", () => {
     const page = src("src/components/customers-page.tsx");

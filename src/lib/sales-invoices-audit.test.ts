@@ -95,6 +95,8 @@ describe("auditLine (pure)", () => {
       "ticket",
       "ticket_time",
       "task",
+      "opportunity",
+      "bid",
     ]);
     expect([...AUDIT_ACTIONS]).toEqual([
       "create",

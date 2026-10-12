@@ -190,19 +190,21 @@ describe("deleteOpportunity closes its open follow-up; restore does not reopen i
     );
     expect(env.writes).toEqual([]);
   });
-  it("restore clears deleted_at; the closed follow-up stays closed and none is started", async () => {
+  it("restore clears deleted_at and syncs the follow-up again: an assigned, open one gets its timer back (owner item 7, Oct 12)", async () => {
     setup({ followups: [followup()] });
     await call(deleteOpportunity, { id: OPP });
-    await call(restoreOpportunity, { id: OPP }, MGR);
-    expect(oppRow()["deleted_at"]).toBeNull();
     expect(followups()).toHaveLength(1);
     expect(followups()[0]!["status"]).toBe("closed");
-    expect(notified).toEqual([]);
-    // The next status change syncs a fresh follow-up (a new row; the table's default makes it
-    // open — the stand-in does not apply column defaults).
-    await call(setOpportunityStatus, { id: OPP, status: "contacted" }, MGR);
+    await call(restoreOpportunity, { id: OPP }, MGR);
+    expect(oppRow()["deleted_at"]).toBeNull();
+    // A fresh row for the assignee (the table's default makes it open — the stand-in does not
+    // apply column defaults); the delete's closed row stays closed.
     expect(followups()).toHaveLength(2);
+    expect(followups()[0]!["status"]).toBe("closed");
     expect(followups()[1]).toMatchObject({ kind: "opportunity", item_id: OPP, assignee_id: BOB });
+    // Bob hears about it (the manager restored it, not Bob).
+    expect(notified).toHaveLength(1);
+    expect((notified[0] as unknown[])[0]).toEqual([BOB]);
   });
   it("restore refuses an opportunity that is not deleted", async () => {
     setup();

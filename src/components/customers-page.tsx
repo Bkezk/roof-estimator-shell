@@ -42,6 +42,7 @@ import {
   Ruler,
   Save,
   Sparkles,
+  Target,
   Trash2,
   Truck,
   Unlink,
@@ -52,7 +53,9 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { dispatchesTickets, seesEveryone } from "@/lib/access";
+import { dispatchesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
+import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { doneStamp, orderAccountTasks, type TaskRow } from "@/lib/tasks";
 import { TaskDialog } from "@/components/tasks/task-dialog";
@@ -473,6 +476,9 @@ function AccountDetailPane({ id }: { id: string }) {
       <ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />
       <SitesSection accountId={id} sites={d.sites} readOnly={deleted} />
       <TicketsSection jobs={d.jobs} />
+      {/* Owner, Oct 12: the customer's opportunities, for those who see the Opportunities list
+          (Customers / Estimate; the same people who read them). */}
+      {seesOpportunitiesList(profile) && <OpportunitiesSection opportunities={d.opportunities} />}
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} readOnly={deleted} />}
       <TasksSection
         accountId={id}
@@ -1559,6 +1565,75 @@ function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
             </Link>
           ))}
         </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The customer's opportunities (owner, Oct 12): live open ones first, then closed ones (Won /
+ * Lost / No response) folded under "Closed", deleted ones last in that fold. Each row — title,
+ * status, assignee, expected close, the linked bid's status — opens the opportunity.
+ */
+function OpportunitiesSection({
+  opportunities,
+}: {
+  opportunities: AccountDetail["opportunities"];
+}) {
+  const [showClosed, setShowClosed] = useState(false);
+  const isClosed = (o: AccountDetail["opportunities"][number]) =>
+    !!o.deleted_at || ["won", "lost", "no_response"].includes(o.status);
+  const live = opportunities.filter((o) => !isClosed(o));
+  const closed = opportunities.filter(isClosed);
+  const label = (s: string) => OPP_STATUS_LABELS[s as OppStatus] ?? s;
+  const row = (o: AccountDetail["opportunities"][number]) => (
+    <Link
+      key={o.id}
+      to="/opportunities"
+      search={{ id: o.id }}
+      className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm hover:bg-muted/60"
+      data-opportunity={o.id}
+    >
+      <span className="min-w-0 flex-1 truncate font-medium">{o.title}</span>
+      <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+        {o.deleted_at ? "Deleted" : label(o.status)}
+      </Badge>
+      {o.bid_id && (
+        <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
+          Bid: {BID_STATUS_LABELS[asBidStatus(o.bid_status)]}
+        </Badge>
+      )}
+      <span className="text-xs text-muted-foreground">
+        {o.assignee_name ?? "Unassigned"}
+        {o.expected_close ? ` · Expected close ${day(o.expected_close)}` : ""}
+      </span>
+    </Link>
+  );
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Opportunities">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <Target className="h-4 w-4" /> Opportunities
+        <span className="text-xs font-normal text-muted-foreground">{opportunities.length}</span>
+      </h2>
+      {opportunities.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No opportunities for this customer.</p>
+      ) : (
+        <>
+          {live.length > 0 && <div className="divide-y rounded-md border">{live.map(row)}</div>}
+          {closed.length > 0 && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground"
+                aria-expanded={showClosed}
+                onClick={() => setShowClosed((v) => !v)}
+              >
+                {showClosed ? "Hide" : "Show"} {closed.length} closed
+              </button>
+              {showClosed && <div className="divide-y rounded-md border">{closed.map(row)}</div>}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

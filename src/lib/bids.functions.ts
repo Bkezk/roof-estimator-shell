@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
-import { BID_STATUSES } from "@/lib/bid-status";
+import { asBidStatus, BID_STATUSES, bidStatusStamps } from "@/lib/bid-status";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
+import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -20,7 +21,26 @@ export const listBids = createServerFn({ method: "GET" })
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     if (error) throw error;
-    return data ?? [];
+    // The opportunity a bid was started from (bids.opportunity_id; owner, Oct 12: "From
+    // opportunity: <title>" on the row). Read under the opportunities' own RLS; one that cannot be
+    // read is left null.
+    const oppIds = [
+      ...new Set((data ?? []).map((b) => b.opportunity_id).filter((x): x is string => !!x)),
+    ];
+    const titles = new Map<string, string>();
+    if (oppIds.length) {
+      const { data: opps } = await context.supabase
+        .from("crm_opportunities")
+        .select("id, title")
+        .in("id", oppIds);
+      for (const o of opps ?? []) titles.set(o.id, o.title);
+    }
+    return (data ?? []).map((b) => ({
+      ...b,
+      opportunity: b.opportunity_id
+        ? { id: b.opportunity_id, title: titles.get(b.opportunity_id) ?? null }
+        : null,
+    }));
   });
 
 /** Soft-deleted bids are kept this long, then purged (lazily, whenever the bin is listed). */
@@ -119,31 +139,39 @@ export const saveBid = createServerFn({ method: "POST" })
         throw new Error(
           `Read only: ${other.holderName} is currently editing this bid — your changes were not saved.`,
         );
-      if (data.expectUpdatedAt) {
-        const { data: cur, error: cErr } = await context.supabase
-          .from("bids")
-          .select("updated_at, updated_by_name")
-          .eq("id", data.id)
-          .maybeSingle();
-        if (cErr) throw new Error(cErr.message);
-        if (cur && bidSaveIsStale(data.expectUpdatedAt, cur.updated_at))
-          throw new Error(BID_STALE_MESSAGE(cur.updated_by_name, cur.updated_at));
-      }
+      const { data: cur, error: cErr } = await context.supabase
+        .from("bids")
+        .select("updated_at, updated_by_name, status, submitted_at")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (cErr) throw new Error(cErr.message);
+      if (data.expectUpdatedAt && cur && bidSaveIsStale(data.expectUpdatedAt, cur.updated_at))
+        throw new Error(BID_STALE_MESSAGE(cur.updated_by_name, cur.updated_at));
+      // The status stamps (owner, Oct 12): status_changed_at on a change, submitted_at the first
+      // time it is submitted (never overwritten).
+      const statusChanged = !!data.status && !!cur && asBidStatus(cur.status) !== data.status;
       const { data: bid, error } = await context.supabase
         .from("bids")
-        .update(payload)
+        .update({ ...payload, ...(data.status && cur ? bidStatusStamps(cur, data.status) : {}) })
         .eq("id", data.id)
         .select()
         .single();
       if (error) throw new Error(error.message);
+      // The bid drives its opportunity (opportunities.functions.ts syncOpportunityFromBid), after
+      // the bid write succeeded.
+      if (statusChanged) await syncOpportunityFromBid(context, bid.id);
       return bid;
     }
+    const status = data.status ?? "draft";
     const { data: bid, error } = await context.supabase
       .from("bids")
-      .insert({ ...payload, status: data.status ?? "draft" })
+      .insert({ ...payload, status, ...bidStatusStamps(null, status) })
       .select()
       .single();
     if (error) throw new Error(error.message);
+    // A new bid is linked to its opportunity only after this (linkBid), so there is nothing to
+    // sync yet unless the row already names one.
+    if (status !== "draft" && bid.opportunity_id) await syncOpportunityFromBid(context, bid.id);
     return bid;
   });
 
@@ -196,7 +224,11 @@ export const importBids = createServerFn({ method: "POST" })
     return inserted ?? [];
   });
 
-/** Change a bid's status from the list (Bids page dropdown); stamps who and when like a save. */
+/**
+ * Change a bid's status from the list (Bids page dropdown); stamps who and when like a save, the
+ * status stamps (bidStatusStamps), and then drives the linked opportunity (owner, Oct 12:
+ * opportunities.functions.ts syncOpportunityFromBid — submitted → quoted, won → won, lost → lost).
+ */
 export const setBidStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) =>
@@ -209,11 +241,16 @@ export const setBidStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me } = await context.supabase
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", context.userId)
-      .maybeSingle();
+    const [{ data: me }, { data: cur, error: cErr }] = await Promise.all([
+      context.supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", context.userId)
+        .maybeSingle(),
+      context.supabase.from("bids").select("status, submitted_at").eq("id", data.id).maybeSingle(),
+    ]);
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Bid not found (it may have been deleted).");
     const { data: bid, error } = await context.supabase
       .from("bids")
       .update({
@@ -221,11 +258,13 @@ export const setBidStatus = createServerFn({ method: "POST" })
         lost_reason: data.status === "lost" ? (data.lostReason ?? null) : null,
         updated_at: new Date().toISOString(),
         updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
+        ...bidStatusStamps(cur, data.status),
       })
       .eq("id", data.id)
-      .select("id, status, updated_at, updated_by_name")
+      .select("id, status, updated_at, updated_by_name, submitted_at")
       .single();
     if (error) throw new Error(error.message);
+    if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);
     return bid;
   });
 

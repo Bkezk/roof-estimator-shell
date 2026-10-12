@@ -130,14 +130,15 @@ describe("20261009100000_tasks_tracking.sql", () => {
       "alter table public.tasks add column if not exists done_by uuid references public.profiles(id) on delete set null, add column if not exists done_by_name text;",
     );
   });
-  it("adds 'task' to the entity check, keeping every existing entity (= AUDIT_ENTITIES)", () => {
+  it("adds 'task' to the entity check, keeping every existing entity (= AUDIT_ENTITIES less what came after: 'opportunity' / 'bid', Oct 12)", () => {
     expect(flat).toContain(
       "alter table public.audit_log drop constraint if exists audit_log_entity_check;",
     );
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
-    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual([...AUDIT_ENTITIES]);
+    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
+      AUDIT_ENTITIES.filter((e) => e !== "opportunity" && e !== "bid"),
+    );
     expect(AUDIT_ENTITIES).toContain("task");
-    expect(AUDIT_ENTITIES.at(-1)).toBe("task");
   });
   it("audit_row() gets the tasks branch: entity 'task', the task's id, \"Task 'title'\"", () => {
     expect(auditRow).toContain(
@@ -174,11 +175,16 @@ describe("20261009100000_tasks_tracking.sql", () => {
 describe("reading and showing a task's History", () => {
   it("listAudit takes a task (its own rows), AuditFold has it", () => {
     const fns = read("src/lib/audit.functions.ts");
-    expect(fns).toContain('entity: z.enum(["invoice", "account", "vendor", "ticket", "task"])');
-    expect(fns).toContain('if (data.entity === "task") {');
-    expect(fns).toContain('.eq("entity", "task")');
-    expect(read("src/components/audit-history.tsx")).toContain(
-      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task";',
+    expect(fns).toContain(
+      'entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"])',
+    );
+    // Since Oct 12 the task shares its own-rows branch with the opportunity and the bid.
+    expect(fns).toContain(
+      'if (data.entity === "task" || data.entity === "opportunity" || data.entity === "bid") {',
+    );
+    expect(fns).toContain('.eq("entity", data.entity)');
+    expect(src("src/components/audit-history.tsx")).toContain(
+      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid";',
     );
   });
   it("the task dialog, editing a task, mounts the History fold (it hides itself from non-managers) and shows the stamp", () => {

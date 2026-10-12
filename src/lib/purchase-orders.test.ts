@@ -447,7 +447,13 @@ describe("migration 20261001100000_ticket_purchase_orders.sql", () => {
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
     expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
       AUDIT_ENTITIES.filter(
-        (e) => e !== "vendor" && e !== "ticket" && e !== "ticket_time" && e !== "task",
+        (e) =>
+          e !== "vendor" &&
+          e !== "ticket" &&
+          e !== "ticket_time" &&
+          e !== "task" &&
+          e !== "opportunity" &&
+          e !== "bid",
       ),
     );
   });

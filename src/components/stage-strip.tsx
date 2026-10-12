@@ -55,6 +55,12 @@ export function StageStrip({
             </div>
             <span className={`mt-1.5 leading-tight ${look.label}`}>{c.label}</span>
             <span className={`tabular-nums ${look.date}`}>{c.at ? shortDate(c.at) : " "}</span>
+            {/* Who set it, when the log says (opportunities; owner, Oct 12). */}
+            {c.by && (
+              <span className="truncate text-muted-foreground" data-by>
+                by {c.by}
+              </span>
+            )}
           </li>
         );
       })}

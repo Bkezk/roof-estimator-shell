@@ -5,7 +5,9 @@
  *
  * An invoice's history includes its lines' rows (entity 'invoice_line', entity_id = the
  * invoice). A customer's history includes the rows of its sites and contacts, deleted ones too.
- * A vendor's history is its own rows (entity 'vendor'); a task's too (entity 'task'; owner, Oct 9).
+ * A vendor's history is its own rows (entity 'vendor'); a task's too (entity 'task'; owner, Oct 9),
+ * and an opportunity's and a bid's (entity 'opportunity' / 'bid'; owner, Oct 12, item 12 — the
+ * folds on the opportunity page and in the estimator). Admins and managers only, as everywhere.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -21,7 +23,7 @@ export const listAudit = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z
       .object({
-        entity: z.enum(["invoice", "account", "vendor", "ticket", "task"]),
+        entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"]),
         entity_id: z.string().uuid(),
       })
       .parse(d),
@@ -72,12 +74,13 @@ export const listAudit = createServerFn({ method: "GET" })
       if (error) throw new Error(error.message);
       return (rows ?? []) as AuditRow[];
     }
-    if (data.entity === "task") {
-      // A task's own rows (its History fold in the task dialog; owner, Oct 9).
+    if (data.entity === "task" || data.entity === "opportunity" || data.entity === "bid") {
+      // Its own rows: a task (its History fold in the task dialog; owner, Oct 9), an opportunity
+      // (the fold on its page) or a bid (the fold in the estimator; owner, Oct 12).
       const { data: rows, error } = await sb
         .from("audit_log")
         .select(cols)
-        .eq("entity", "task")
+        .eq("entity", data.entity)
         .eq("entity_id", data.entity_id)
         .order("at", { ascending: false })
         .order("id", { ascending: false })

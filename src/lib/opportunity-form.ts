@@ -20,7 +20,6 @@
 import { BID_NOTES_MAX } from "@/lib/inspection";
 import type { EstimateSearch } from "@/lib/estimate-search";
 import type { ServiceSearch } from "@/lib/service-search";
-import { seesEveryone, type AccessLike } from "@/lib/access";
 
 type BidPrefill = Pick<
   EstimateSearch,
@@ -142,34 +141,14 @@ export const fromOpportunityLabel = (title: string) => `From opportunity: ${titl
 export const ticketLinkLabel = (n: number) => `Ticket #${n}`;
 
 /**
- * Won / Lost / No response end the follow-up reminders that management relies on, so they are
- * an admin's or a manager's (owner decision, audit Oct 2: a rep could end their own reminders by
- * setting No response or Lost). A rep moves Open → Contacted → Quoted. The twin of the database
- * trigger crm_opportunities_closing_rule (20261002140000_followup_guard.sql).
+ * Won / Lost / No response end the follow-up reminders. From Oct 2 to Oct 12 they were an
+ * admin's or a manager's (a rep could end their own reminders); owner decision, Oct 12: anyone
+ * who may edit the opportunity sets any status — people close opportunities to clear their
+ * board, and the status log (crm_opportunity_events) records who and when. The manager-only
+ * rule is gone from the form, the server (saveOpportunity / setOpportunityStatus) and the
+ * database (20261012100000 drops crm_opportunities_closing_rule).
  */
-export const OPP_MANAGER_STATUSES: readonly string[] = ["won", "lost", "no_response"];
-export const OPP_STATUS_MANAGER_ONLY =
-  "Only a manager can mark an opportunity Won, Lost or No response";
-
-/** May this person set this status? */
-export const canSetOppStatus = (p: AccessLike | null | undefined, status: string): boolean =>
-  !OPP_MANAGER_STATUSES.includes(status) || seesEveryone(p);
-
-/**
- * The problem with a status change, or null: setting Won / Lost / No response (from any other
- * status, or creating one at it) is a manager's. Keeping the current status is never refused.
- */
-export function oppStatusProblem(input: {
-  profile: AccessLike | null | undefined;
-  from: string | null | undefined;
-  to: string | null | undefined;
-}): string | null {
-  if (!input.to || input.to === input.from) return null;
-  return canSetOppStatus(input.profile, input.to) ? null : OPP_STATUS_MANAGER_ONLY;
-}
-
-/** The hint under the status select for someone who may not pick the closing statuses. */
-export const OPP_STATUS_REP_HINT = "Won, Lost and No response are set by a manager";
+export const OPP_CLOSING_STATUSES: readonly string[] = ["won", "lost", "no_response"];
 
 /**
  * The line beside "Create opportunity": creating an assigned opportunity starts the assignee's
@@ -181,7 +160,7 @@ export function createReminderHint(input: {
   assignee_id: string | null | undefined;
 }): string | null {
   if (!input.assignee_id) return null;
-  if (OPP_MANAGER_STATUSES.includes(input.status))
+  if (OPP_CLOSING_STATUSES.includes(input.status))
     return "Created at this status, it starts no follow-up reminders.";
   return "Creating it starts the assignee's follow-up reminders.";
 }

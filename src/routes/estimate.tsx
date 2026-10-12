@@ -28,7 +28,8 @@ import {
   getFastenerLookup,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
-import { linkBid } from "@/lib/opportunities.functions";
+import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
+import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
 import {
   buildEstimateInputs,
@@ -148,7 +149,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
-import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
+import {
+  BID_STATUSES,
+  STATUS_LABELS,
+  asBidStatus,
+  fromOpportunityLine,
+  type BidStatus,
+} from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-store";
 import { useBidLock } from "@/lib/use-bid-lock";
 import { LayerStack, TileGlyph } from "@/components/layer-stack";
@@ -985,6 +992,16 @@ function EstimatePage() {
     queryKey: ["bid", bidParam],
     queryFn: () => getBidFn({ data: { id: bidParam! } }),
     enabled: authed && !!bidParam,
+  });
+  // The opportunity this bid was started from (bids.opportunity_id; owner, Oct 12): "From
+  // opportunity: <title>" under the Status select, linking back. Read under the opportunity's own
+  // RLS (Estimate access reads them all).
+  const getOppFn = useServerFn(getOpportunity);
+  const fromOpportunityId = loadedBid?.opportunity_id ?? null;
+  const fromOpportunity = useQuery({
+    queryKey: ["opportunity", fromOpportunityId],
+    queryFn: () => getOppFn({ data: { id: fromOpportunityId! } }),
+    enabled: authed && !!fromOpportunityId,
   });
   // The saved bid could not be read (a timed-out or cancelled query while the database is
   // busy, an expired session…) or the id matches nothing this user may see. The form below is
@@ -6145,6 +6162,21 @@ function EstimatePage() {
                 Lost: {lostReason ?? "reason not known"}
               </p>
             )}
+            {fromOpportunity.data && (
+              <p
+                className="truncate text-[11px] text-muted-foreground"
+                data-line="from-opportunity"
+              >
+                <Link
+                  to="/opportunities"
+                  search={{ id: fromOpportunity.data.id }}
+                  className="hover:underline"
+                  title="Open the opportunity. Submitted / Won / Lost here move its status; its own status leaves this bid alone."
+                >
+                  {fromOpportunityLine(fromOpportunity.data.title)}
+                </Link>
+              </p>
+            )}
             {askLost && (
               <LostReasonDialog
                 open
@@ -6390,6 +6422,11 @@ function EstimatePage() {
           extraLines={result?.adhesiveLines}
           laborRate={laborRate}
         />
+        {/* Admins and managers: the bid's History (audit_log; owner, Oct 12), folded, at the
+            foot of the total panel. AuditHistory renders nothing for anyone else. */}
+        {bidId && (
+          <AuditHistory entity="bid" entityId={bidId} className="rounded-lg border px-4 py-3" />
+        )}
       </div>
 
       {/* Mobile: the live total stays in reach on every step (the panel itself sits at the

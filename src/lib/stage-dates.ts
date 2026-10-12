@@ -108,6 +108,8 @@ export interface StatusEventLike {
   kind: string;
   status?: string | null;
   at: string;
+  /** Who set it (the log's by_name); the strip says "by <name>" under the date (owner, Oct 12). */
+  by_name?: string | null;
 }
 
 /**
@@ -134,6 +136,30 @@ export interface StripCell {
   label: string;
   at: string | null;
   current: boolean;
+  /** Who set it, when the log says (opportunities; owner, Oct 12: any status is anyone's). */
+  by?: string | null;
+}
+
+/**
+ * Who LAST set each opportunity status (the 'created' row and every 'status' row carry by_name);
+ * a status never reached, or set by nobody known, is absent.
+ */
+export function statusActors(
+  events: readonly StatusEventLike[],
+): Partial<Record<OppStatus, string>> {
+  const latest: Partial<Record<OppStatus, string>> = {};
+  const out: Partial<Record<OppStatus, string>> = {};
+  for (const e of events) {
+    if ((e.kind !== "status" && e.kind !== "created") || !e.status) continue;
+    if (!(OPP_STATUSES as readonly string[]).includes(e.status)) continue;
+    const s = e.status as OppStatus;
+    if (later(latest[s], e.at) !== e.at && latest[s]) continue;
+    latest[s] = e.at;
+    const who = (e.by_name ?? "").trim();
+    if (who) out[s] = who;
+    else delete out[s];
+  }
+  return out;
 }
 
 /** The ticket's stage strip: every stage in board order (Open → Closed), the current one marked. */
@@ -163,11 +189,13 @@ export function oppStatusStrip(
   events: readonly StatusEventLike[],
 ): StripCell[] {
   const dates = statusDates(events);
+  const actors = statusActors(events);
   const cells: StripCell[] = OPP_STATUSES.filter((s) => !OPP_CLOSING.includes(s)).map((s) => ({
     key: s,
     label: OPP_STATUS_LABELS[s],
     at: dates[s] ?? null,
     current: s === current,
+    ...(actors[s] ? { by: actors[s] } : {}),
   }));
   let outcome: OppStatus | null = OPP_CLOSING.includes(current as OppStatus)
     ? (current as OppStatus)
@@ -187,6 +215,7 @@ export function oppStatusStrip(
     label: outcome ? OPP_STATUS_LABELS[outcome] : OUTCOME_LABEL,
     at: outcome ? (dates[outcome] ?? null) : null,
     current: !!outcome && outcome === current,
+    ...(outcome && actors[outcome] ? { by: actors[outcome] } : {}),
   });
   return cells;
 }

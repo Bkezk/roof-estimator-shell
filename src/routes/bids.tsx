@@ -29,7 +29,13 @@ import {
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
-import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
+import {
+  BID_STATUSES,
+  STATUS_LABELS,
+  asBidStatus,
+  fromOpportunityLine,
+  type BidStatus,
+} from "@/lib/bid-status";
 import {
   bidsInYear,
   FOLDER_GROUP_LABELS,
@@ -426,6 +432,20 @@ function BidsPage() {
               {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
               {importedFrom(bid.data) ? ` · Imported from ${importedFrom(bid.data)}` : ""}
             </p>
+            {/* The opportunity it was started from (bids.opportunity_id; owner, Oct 12). */}
+            {bid.opportunity?.title && (
+              <p className="text-xs text-muted-foreground" data-line="from-opportunity">
+                <Link
+                  to="/opportunities"
+                  search={{ id: bid.opportunity.id }}
+                  className="hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  {fromOpportunityLine(bid.opportunity.title)}
+                </Link>
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-6">

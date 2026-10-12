@@ -248,6 +248,35 @@ export interface LinkedBidRow {
   grand_total: number;
   updated_at: string;
 }
+/**
+ * One of the customer's opportunities for the Opportunities section (owner, Oct 12): title,
+ * status, who follows it up, when it is expected to close, and the linked bid's status.
+ */
+export interface AccountOpportunity {
+  id: string;
+  title: string;
+  status: string;
+  assignee_id: string | null;
+  assignee_name: string | null;
+  expected_close: string | null;
+  bid_id: string | null;
+  bid_status: string | null;
+  deleted_at: string | null;
+  updated_at: string;
+}
+
+/**
+ * The order the section shows them in: live open ones first (open / contacted / quoted, newest
+ * change first), then live closed ones (Won / Lost / No response), deleted ones last.
+ */
+export function orderAccountOpportunities<
+  T extends { status: string; deleted_at: string | null; updated_at: string },
+>(rows: readonly T[]): T[] {
+  const rank = (o: T) =>
+    o.deleted_at ? 2 : ["won", "lost", "no_response"].includes(o.status) ? 1 : 0;
+  return [...rows].sort((a, b) => rank(a) - rank(b) || b.updated_at.localeCompare(a.updated_at));
+}
+
 export interface AccountDetail {
   /** Deleted ones too (deleted_at set): an old link shows it with a banner, read-only. */
   account: AccountRow;
@@ -258,6 +287,12 @@ export interface AccountDetail {
   deleted_by: string | null;
   sites: SiteRow[];
   jobs: Database["public"]["Tables"]["service_jobs"]["Row"][];
+  /**
+   * The customer's opportunities (owner, Oct 12: an Opportunities section on the customer, like
+   * Tickets): live open first, closed next, deleted last (orderAccountOpportunities); what RLS
+   * lets the reader see (Customers / Estimate: all; anyone else: their own).
+   */
+  opportunities: AccountOpportunity[];
   /** Bids linked to the account — empty when the reader has no Estimate access. */
   bids: LinkedBidRow[];
   /**
@@ -274,31 +309,42 @@ export const getAccount = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<AccountDetail> => {
     const p = await readAccess(context);
     const sb = context.supabase;
-    const [{ data: account, error }, { data: sites }, { data: jobs }, { data: tasks }] =
-      await Promise.all([
-        sb.from("crm_accounts").select("*").eq("id", data.id).maybeSingle(),
-        sb
-          .from("crm_sites")
-          .select("*")
-          .eq("account_id", data.id)
-          .is("deleted_at", null)
-          .order("name"),
-        sb
-          .from("service_jobs")
-          .select("*")
-          .eq("account_id", data.id)
-          .is("deleted_at", null)
-          .order("updated_at", { ascending: false })
-          .limit(200),
-        // Every column (done_by / done_by_name arrive with 20261009100000; a named list would fail
-        // until it is applied). The section orders them (tasks.ts orderAccountTasks).
-        sb
-          .from("tasks")
-          .select("*")
-          .eq("account_id", data.id)
-          .order("due_date", { ascending: true, nullsFirst: false })
-          .limit(200),
-      ]);
+    const [
+      { data: account, error },
+      { data: sites },
+      { data: jobs },
+      { data: tasks },
+      { data: oppRows },
+    ] = await Promise.all([
+      sb.from("crm_accounts").select("*").eq("id", data.id).maybeSingle(),
+      sb
+        .from("crm_sites")
+        .select("*")
+        .eq("account_id", data.id)
+        .is("deleted_at", null)
+        .order("name"),
+      sb
+        .from("service_jobs")
+        .select("*")
+        .eq("account_id", data.id)
+        .is("deleted_at", null)
+        .order("updated_at", { ascending: false })
+        .limit(200),
+      // Every column (done_by / done_by_name arrive with 20261009100000; a named list would fail
+      // until it is applied). The section orders them (tasks.ts orderAccountTasks).
+      sb
+        .from("tasks")
+        .select("*")
+        .eq("account_id", data.id)
+        .order("due_date", { ascending: true, nullsFirst: false })
+        .limit(200),
+      sb
+        .from("crm_opportunities")
+        .select("id, title, status, assignee_id, expected_close, bid_id, deleted_at, updated_at")
+        .eq("account_id", data.id)
+        .order("updated_at", { ascending: false })
+        .limit(200),
+    ]);
     if (error) throw new Error(error.message);
     if (!account) throw new Error("Customer not found");
     let deleted_by: string | null = null;
@@ -325,8 +371,43 @@ export const getAccount = createServerFn({ method: "GET" })
         .limit(200);
       bids = (b ?? []) as LinkedBidRow[];
     }
-    return { account, deleted_by, sites: sites ?? [], jobs: jobs ?? [], bids, tasks: tasks ?? [] };
+    const opportunities = await accountOpportunities(sb, oppRows ?? []);
+    return {
+      account,
+      deleted_by,
+      sites: sites ?? [],
+      jobs: jobs ?? [],
+      opportunities,
+      bids,
+      tasks: tasks ?? [],
+    };
   });
+
+/** The customer's opportunities with the assignee's name and the linked bid's status, ordered. */
+async function accountOpportunities(
+  sb: SupabaseClient<Database>,
+  rows: readonly Omit<AccountOpportunity, "assignee_name" | "bid_status">[],
+): Promise<AccountOpportunity[]> {
+  if (!rows.length) return [];
+  const bidIds = [...new Set(rows.map((r) => r.bid_id).filter((x): x is string => !!x))];
+  const [{ data: people }, { data: bids }] = await Promise.all([
+    sb.rpc("crm_user_options"),
+    bidIds.length
+      ? sb.from("bids").select("id, status").in("id", bidIds)
+      : Promise.resolve({ data: [] as { id: string; status: string }[] }),
+  ]);
+  const names = new Map<string, string>();
+  for (const u of people ?? []) names.set(u.id, (u.full_name ?? "").trim() || u.email);
+  const bidStatus = new Map<string, string>();
+  for (const b of bids ?? []) bidStatus.set(b.id, b.status);
+  return orderAccountOpportunities(
+    rows.map((r) => ({
+      ...r,
+      assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
+      bid_status: r.bid_id ? (bidStatus.get(r.bid_id) ?? null) : null,
+    })),
+  );
+}
 
 /** Drop the keys a caller left out, so an update leaves those columns as they are. */
 const defined = <T extends Record<string, unknown>>(o: T) =>

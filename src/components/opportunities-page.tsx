@@ -61,15 +61,20 @@ import {
   assigneeProblem,
   autoSiteId,
   bidPrefillFromOpportunity,
-  canSetOppStatus,
   createReminderHint,
-  OPP_STATUS_REP_HINT,
   opportunityProblem,
   opportunitySiteProblem,
   ticketLinkLabel,
   ticketPrefillFromOpportunity,
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
+import {
+  asBidStatus,
+  BID_DRIVES_OPP_NOTE,
+  STATUS_BADGE_CLASSES as BID_STATUS_BADGE,
+  STATUS_LABELS as BID_STATUS_LABELS,
+} from "@/lib/bid-status";
+import { AuditHistory } from "@/components/audit-history";
 import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 // The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
 // so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
@@ -127,9 +132,7 @@ import { NumberField } from "@/components/ui/number-field";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -551,6 +554,12 @@ function OppListRow({
             {OPP_STATUS_LABELS[status]}
           </Badge>
           <OverdueBadge days={oppOverdueDays({ ...o, status }, today)} what="Expected to close" />
+          {/* The linked bid's status (owner, Oct 12: the bid drives the opportunity). */}
+          {o.bid_id && (
+            <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
+              Bid: {BID_STATUS_LABELS[asBidStatus(o.bid_status)]}
+            </Badge>
+          )}
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
           )}
@@ -855,10 +864,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   };
 
   // Owner, Oct 1: the status lives in the header only — a new opportunity's select sets the
-  // status it is created with (Open to start); a saved one's changes it at once. Won / Lost /
-  // No response are a manager's (lib/opportunity-form.ts canSetOppStatus; the server and the
-  // database refuse them too): a rep sees them disabled, with the hint.
-  const repLimited = OPP_STATUSES.some((s) => !canSetOppStatus(profile, s));
+  // status it is created with (Open to start); a saved one's changes it at once. Every status is
+  // anyone's who may edit the opportunity (owner, Oct 12; Won / Lost / No response were a
+  // manager's from Oct 2): the status history under the title says who set each one.
   const statusSelect = (
     <Select
       value={status}
@@ -867,31 +875,15 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         opp ? statusMut.mutate(v as OppStatus) : set("status", v as OppStatus)
       }
     >
-      <SelectTrigger
-        className="w-[150px]"
-        aria-label="Status"
-        title={repLimited ? OPP_STATUS_REP_HINT : undefined}
-      >
+      <SelectTrigger className="w-[150px]" aria-label="Status">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {OPP_STATUSES.map((s) => (
-          <SelectItem
-            key={s}
-            value={s}
-            disabled={s !== status && !canSetOppStatus(profile, s)}
-            data-manager-only={!canSetOppStatus(profile, s) || undefined}
-          >
+          <SelectItem key={s} value={s}>
             {OPP_STATUS_LABELS[s]}
           </SelectItem>
         ))}
-        {repLimited && (
-          <SelectGroup>
-            <SelectLabel className="text-xs font-normal text-muted-foreground">
-              {OPP_STATUS_REP_HINT}
-            </SelectLabel>
-          </SelectGroup>
-        )}
       </SelectContent>
     </Select>
   );
@@ -1127,13 +1119,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             {statusSelect}
             {opp &&
               !deleted &&
-              // Owner, Oct 1: at every status. A linked bid shows instead (opens it).
+              // Owner, Oct 1: at every status. A linked bid shows instead, as a small card
+              // (owner, Oct 12: its status, total, when submitted, and the one-way rule).
               (opp.bid_id ? (
-                <Button asChild variant="outline">
-                  <Link to="/estimate" search={{ bid: opp.bid_id }} title="Open the linked bid">
-                    <FileText className="mr-1 h-4 w-4" /> Bid: {opp.bid_name ?? "open it"}
-                  </Link>
-                </Button>
+                <BidCard opp={opp} />
               ) : (
                 <Button asChild variant="outline">
                   <Link
@@ -1261,6 +1250,13 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               )}
               <ContactLogList kind="opportunity" itemId={opp.id} />
             </section>
+            {/* Admins and managers: who changed what (audit_log; owner, Oct 12). AuditHistory
+                renders nothing for anyone else. */}
+            <AuditHistory
+              entity="opportunity"
+              entityId={opp.id}
+              className="rounded-lg border px-4 py-3"
+            />
           </aside>
         </div>
       ) : (
@@ -1297,6 +1293,48 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           </AlertDialogContent>
         </AlertDialog>
       )}
+    </div>
+  );
+}
+
+/**
+ * The linked bid (owner, Oct 12): its name (opens it in the estimator), status badge, grand total
+ * as last saved, "Submitted <date>" once it was, and the one-way rule — the bid's Won / Lost (and
+ * Submitted → Quoted) move this opportunity; the opportunity's own status leaves the bid alone.
+ */
+function BidCard({ opp }: { opp: OpportunityWithNames }) {
+  const st = asBidStatus(opp.bid_status);
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-1 rounded-md border px-3 py-2 text-sm"
+      data-card="bid"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          to="/estimate"
+          search={{ bid: opp.bid_id! }}
+          className="flex min-w-0 items-center gap-1 font-medium hover:underline"
+          title="Open the linked bid"
+        >
+          <FileText className="h-4 w-4 shrink-0" />
+          <span className="truncate">{opp.bid_name ?? "Bid"}</span>
+        </Link>
+        <span
+          className={`rounded px-1.5 py-0 text-[11px] font-medium ${BID_STATUS_BADGE[st]}`}
+          data-bid-status={st}
+        >
+          {BID_STATUS_LABELS[st]}
+        </span>
+        {opp.bid_grand_total != null && (
+          <span className="tabular-nums">{money(opp.bid_grand_total)}</span>
+        )}
+        {opp.bid_submitted_at && (
+          <span className="text-xs text-muted-foreground">
+            Submitted {when(opp.bid_submitted_at)}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{BID_DRIVES_OPP_NOTE}</p>
     </div>
   );
 }

@@ -31,13 +31,7 @@ import {
   setOpportunityStatus,
 } from "@/lib/opportunities.functions";
 import { listFollowups } from "@/lib/followups.functions";
-import {
-  bidPrefillFromOpportunity,
-  canSetOppStatus,
-  createReminderHint,
-  OPP_STATUS_MANAGER_ONLY,
-  oppStatusProblem,
-} from "@/lib/opportunity-form";
+import { bidPrefillFromOpportunity, createReminderHint } from "@/lib/opportunity-form";
 import { parseEstimateSearch } from "@/lib/estimate-search";
 import { canAccess, pageForPath, seesOpportunitiesList } from "@/lib/access";
 import { fakeSupabase } from "@/test/fake-supabase";
@@ -157,16 +151,9 @@ describe("item 3 — every user in the assignee box, and names on the rows", () 
   });
 });
 
-describe("item 6 — Won / Lost / No response are a manager's", () => {
-  it("a rep's setOpportunityStatus to Lost / No response / Won is refused; nothing written", async () => {
-    for (const status of ["lost", "no_response", "won"]) {
-      await expect(call(setOpportunityStatus, { id: OPP, status }, CUST)).rejects.toThrow(
-        OPP_STATUS_MANAGER_ONLY,
-      );
-    }
-    expect(env.writes).toEqual([]);
-    expect(oppRow()["status"]).toBe("open");
-  });
+describe("item 6 — Won / Lost / No response were a manager's (Oct 2) and are anyone's since Oct 12", () => {
+  // Owner, Oct 12: anyone who may edit the opportunity sets any status; the log records who.
+  // The fail-then-pass tests for that are in opportunity-status-anyone.test.ts.
   it("a rep moves Open → Contacted → Quoted", async () => {
     await call(setOpportunityStatus, { id: OPP, status: "contacted" }, CUST);
     await call(setOpportunityStatus, { id: OPP, status: "quoted" }, CUST);
@@ -176,35 +163,12 @@ describe("item 6 — Won / Lost / No response are a manager's", () => {
     await call(setOpportunityStatus, { id: OPP, status: "lost" }, MGR);
     expect(oppRow()["status"]).toBe("lost");
   });
-  it("a rep cannot create one at Won either", async () => {
-    await expect(
-      call(
-        saveOpportunity,
-        { title: "New", account_id: ACC, assignee_id: CUST, status: "won" },
-        CUST,
-      ),
-    ).rejects.toThrow(OPP_STATUS_MANAGER_ONLY);
-  });
-  it("the rule", () => {
-    expect(canSetOppStatus(cust, "quoted")).toBe(true);
-    expect(canSetOppStatus(cust, "no_response")).toBe(false);
-    expect(canSetOppStatus(mgr, "no_response")).toBe(true);
-    expect(canSetOppStatus({ role: "admin" }, "won")).toBe(true);
-    // Keeping the status it already has is never refused.
-    expect(oppStatusProblem({ profile: cust, from: "won", to: "won" })).toBeNull();
-  });
-  it("the status select shows them disabled with a hint for reps", () => {
-    const page = read("src/components/opportunities-page.tsx");
-    expect(page).toContain("disabled={s !== status && !canSetOppStatus(profile, s)}");
-    expect(page).toContain("{OPP_STATUS_REP_HINT}");
-    expect(page).toContain("title={repLimited ? OPP_STATUS_REP_HINT : undefined}");
-  });
-  it("the database says the same (crm_opportunities_closing_rule)", () => {
-    const mig = read("supabase/migrations/20261002140000_followup_guard.sql");
-    expect(mig).toMatch(
-      /if new\.status in \('won', 'lost', 'no_response'\)\s+and \(tg_op = 'INSERT' or new\.status is distinct from old\.status\)\s+and not \(public\.followup_is_system\(\) or public\.is_admin\(\) or public\.is_manager\(\)\)/,
-    );
-    expect(mig).toContain("before insert or update of status\n  on public.crm_opportunities");
+  it("and so does a rep now (the Oct 2 rule is gone from the form, the server and the database)", async () => {
+    await call(setOpportunityStatus, { id: OPP, status: "lost" }, CUST);
+    expect(oppRow()["status"]).toBe("lost");
+    const form = read("src/lib/opportunity-form.ts");
+    expect(form).not.toContain("export const canSetOppStatus");
+    expect(form).not.toContain("export function oppStatusProblem");
   });
 });
 
@@ -289,12 +253,10 @@ describe("item 13 — Start a bid links back", () => {
       linked: true,
     });
     expect(oppRow()["bid_id"]).toBe(BID);
-    // The page then shows "Bid: <name>".
+    // The page then shows the bid card (owner, Oct 12; it was a "Bid: <name>" button).
     const o = await call<Row>(getOpportunity, { id: OPP }, CUST);
     expect(o["bid_name"]).toBe("Gym reroof bid");
-    expect(read("src/components/opportunities-page.tsx")).toContain(
-      'Bid: {opp.bid_name ?? "open it"}',
-    );
+    expect(read("src/components/opportunities-page.tsx")).toContain("<BidCard opp={opp} />");
   });
   it("an opportunity already linked to another bid keeps it", async () => {
     setup({ opp: { bid_id: BID2 } });
@@ -314,7 +276,9 @@ describe("item 13 — Start a bid links back", () => {
   });
   it("/estimate links it right after the bid is first created (the smallest hook)", () => {
     const est = read("src/routes/estimate.tsx");
-    expect(est).toContain('import { linkBid } from "@/lib/opportunities.functions";');
+    expect(est).toContain(
+      'import { getOpportunity, linkBid } from "@/lib/opportunities.functions";',
+    );
     expect(est).toMatch(
       /if \(row && !bidId\) \{\s+setBidId\(row\.id\);\s+hydratedFor\.current = row\.id;\s+if \(search\.opportunity\) linkOpportunity\(search\.opportunity, row\.id\);/,
     );

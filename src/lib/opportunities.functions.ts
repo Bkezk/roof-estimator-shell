@@ -1,7 +1,10 @@
 /**
  * Opportunities — a potential new customer, or new work for one (design §11). Assigned to a
  * user with an expected close date; the follow-up timer (followups.server.ts) reminds them
- * until it is Won / Lost / No response.
+ * until it is Won / Lost / No response. Any status is set by whoever may edit the opportunity
+ * (owner, Oct 12; the closing ones were a manager's from Oct 2) — the status log says who. A
+ * linked bid drives the status one way (syncOpportunityFromBid): submitted → quoted, won → won,
+ * lost → lost; the opportunity's own status never changes the bid.
  *
  * A deleted opportunity (deleted_at set) stays readable by id — an old `/opportunities?id=…`
  * link shows it with a "Deleted on <date>" banner, read-only — but nothing changes it: saving,
@@ -21,16 +24,12 @@ import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canAccess, canClaim, seesEveryone } from
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
-import {
-  assigneeProblem,
-  OPP_CUSTOMER_REQUIRED,
-  opportunityProblem,
-  oppStatusProblem,
-} from "@/lib/opportunity-form";
+import { assigneeProblem, OPP_CUSTOMER_REQUIRED, opportunityProblem } from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
 import { addDays } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 import { localYmd as easternYmd } from "@/lib/tasks";
+import { oppStatusFromBid } from "@/lib/bid-status";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
 export const OPP_STATUSES = ["open", "contacted", "quoted", "won", "lost", "no_response"] as const;
@@ -53,6 +52,12 @@ export type OpportunityWithNames = OpportunityRow & {
   site_name: string | null;
   /** The linked bid's name (bid_id), when the caller may read it. */
   bid_name: string | null;
+  /** The linked bid's status (draft / submitted / won / lost), when the caller may read it. */
+  bid_status: string | null;
+  /** The linked bid's grand total as last saved. */
+  bid_grand_total: number | null;
+  /** When the linked bid was first submitted (bids.submitted_at), if it was. */
+  bid_submitted_at: string | null;
   /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
   followup_note?: string | null;
 };
@@ -122,9 +127,7 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
       siteIds.length
         ? sb.from("crm_sites").select("id, name").in("id", siteIds)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      bidIds.length
-        ? sb.from("bids").select("id, name").in("id", bidIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      bidIds.length ? linkedBids(sb, bidIds) : Promise.resolve({ data: [] as LinkedBid[] }),
     ],
   );
   const names = new Map<string, string>();
@@ -145,15 +148,48 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   for (const a of accounts ?? []) accs.set(a.id, a.name);
   const siteNames = new Map<string, string>();
   for (const x of sites ?? []) siteNames.set(x.id, x.name);
-  const bidNames = new Map<string, string>();
-  for (const b of bids ?? []) bidNames.set(b.id, b.name);
-  return rows.map((r) => ({
-    ...r,
-    assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
-    account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
-    site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,
-    bid_name: r.bid_id ? (bidNames.get(r.bid_id) ?? null) : null,
-  })) as OpportunityWithNames[];
+  const bidRows = new Map<string, LinkedBid>();
+  for (const b of bids ?? []) bidRows.set(b.id, b);
+  return rows.map((r) => {
+    const bid = r.bid_id ? bidRows.get(r.bid_id) : undefined;
+    return {
+      ...r,
+      assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
+      account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
+      site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,
+      bid_name: bid?.name ?? null,
+      bid_status: bid?.status ?? null,
+      bid_grand_total: bid ? Number(bid.grand_total ?? 0) : null,
+      bid_submitted_at: bid?.submitted_at ?? null,
+    };
+  }) as OpportunityWithNames[];
+}
+
+/** What the opportunity page and list show of the linked bid (the bid card, the status chip). */
+interface LinkedBid {
+  id: string;
+  name: string;
+  status: string | null;
+  grand_total: number | null;
+  submitted_at: string | null;
+}
+/**
+ * The linked bids: name, status, total and when first submitted (owner, Oct 12). Before
+ * 20261012100000 adds bids.submitted_at the named read fails (42703); then the columns that exist.
+ */
+async function linkedBids(sb: SupabaseClient<Database>, ids: string[]) {
+  const full = await sb
+    .from("bids")
+    .select("id, name, status, grand_total, submitted_at")
+    .in("id", ids);
+  if (!full.error) return { data: (full.data ?? []) as LinkedBid[] };
+  if (full.error.code !== "42703") throw new Error(full.error.message);
+  const { data, error } = await sb
+    .from("bids")
+    .select("id, name, status, grand_total")
+    .in("id", ids);
+  if (error) throw new Error(error.message);
+  return { data: (data ?? []).map((b) => ({ ...b, submitted_at: null })) as LinkedBid[] };
 }
 
 export const listOpportunities = createServerFn({ method: "GET" })
@@ -329,9 +365,8 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       });
       if (moveProblem) throw new Error(moveProblem);
     }
-    // Won / Lost / No response are a manager's (lib/opportunity-form.ts oppStatusProblem).
-    const statusProblem = oppStatusProblem({ profile: p, from: oldStatus, to: fields.status });
-    if (statusProblem) throw new Error(statusProblem);
+    // Any status is the editor's to set (owner, Oct 12; Won / Lost / No response were a
+    // manager's from Oct 2): the log says who.
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
       const { data: s } = await sb
@@ -444,6 +479,53 @@ async function syncOppFollowup(
   );
 }
 
+/**
+ * The bid drives its opportunity (owner, Oct 12), after a bid's status is written (bids.functions.ts
+ * saveBid / setBidStatus): the database function sync_opportunity_from_bid (20261012100000) finds
+ * the live opportunity linked to the bid (crm_opportunities.bid_id, else bids.opportunity_id),
+ * applies the mapping (lib/bid-status.ts oppStatusFromBid: submitted → quoted from open /
+ * contacted only; won → won; lost → lost) and writes the status under the flag the closing-rule
+ * trigger honours — so a non-manager marking a bid Won closes the opportunity, by design. The
+ * status log row comes from the database (crm_opportunities_log); the follow-up closes or
+ * reopens here as for a manual status change (syncOppFollowup). Nothing moves the other way:
+ * the opportunity's status never changes the bid. Best effort by the caller: the bid is saved
+ * either way; a failure here is thrown so the caller can say so.
+ */
+export async function syncOpportunityFromBid(
+  ctx: Ctx,
+  bidId: string,
+): Promise<{ action: string; opportunity_id?: string; from?: string; to?: string }> {
+  const { data, error } = await ctx.supabase.rpc("sync_opportunity_from_bid", { p_bid: bidId });
+  if (error) {
+    // Before 20261012100000 is applied there is no function: the bid is saved, the opportunity
+    // keeps its status (as before Oct 12).
+    if (error.code === "PGRST202" || /sync_opportunity_from_bid/.test(error.message))
+      return { action: "none" };
+    throw new Error(error.message);
+  }
+  const out = (data ?? { action: "none" }) as {
+    action: string;
+    opportunity_id?: string;
+    from?: string;
+    to?: string;
+  };
+  if (out.action !== "updated" || !out.opportunity_id) return out;
+  const { data: row, error: rErr } = await ctx.supabase
+    .from("crm_opportunities")
+    .select("*")
+    .eq("id", out.opportunity_id)
+    .maybeSingle();
+  if (rErr) throw new Error(rErr.message);
+  if (row) {
+    const p = await me(ctx);
+    await syncOppFollowup(row, out.from ?? null, ctx, nameOf(p));
+  }
+  return out;
+}
+
+/** The opportunity's new status for a bid status, or null (the pure twin, for the pages). */
+export { oppStatusFromBid };
+
 export const setOpportunityStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -459,9 +541,7 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
       .maybeSingle();
     if (curErr) throw new Error(curErr.message);
     const prevStatus = cur?.status ?? null;
-    // Won / Lost / No response are a manager's (lib/opportunity-form.ts oppStatusProblem).
-    const statusProblem = oppStatusProblem({ profile: p, from: prevStatus, to: data.status });
-    if (statusProblem) throw new Error(statusProblem);
+    // Any status is the editor's to set (owner, Oct 12): the log (crm_opportunity_events) says who.
     const { data: row, error } = await context.supabase
       .from("crm_opportunities")
       .update({ status: data.status, updated_by_name: nameOf(p) })
@@ -529,7 +609,17 @@ export const linkBid = createServerFn({ method: "POST" })
       .is("bid_id", null)
       .select("id");
     if (error) throw new Error(error.message);
-    return { linked: !!rows?.length };
+    const linked = !!rows?.length;
+    // The bid side knows its opportunity too (bids.opportunity_id; owner, Oct 12: "From
+    // opportunity: …" on the Bids page and in the estimator, and the bid → opportunity sync).
+    if (linked) {
+      const { error: bErr } = await admin
+        .from("bids")
+        .update({ opportunity_id: data.opportunityId })
+        .eq("id", data.bidId);
+      if (bErr) throw new Error(bErr.message);
+    }
+    return { linked };
   });
 
 /**
@@ -569,8 +659,10 @@ export const deleteOpportunity = createServerFn({ method: "POST" })
   });
 
 /**
- * Undo a delete: admins and managers only. Clears deleted_at; the follow-up closed by the delete
- * stays closed (the next save or status change syncs a fresh one).
+ * Undo a delete: admins and managers only. Clears deleted_at and syncs the follow-up again
+ * (owner item 7, Oct 12): an assigned, open opportunity gets its timer back ("started"; the
+ * assignee hears "Opportunity assigned to you" unless they are the restorer); a closed or
+ * unassigned one gets none. Before Oct 12 the follow-up stayed closed until the next change.
  */
 export const restoreOpportunity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -583,16 +675,21 @@ export const restoreOpportunity = createServerFn({ method: "POST" })
       .update({ deleted_at: null, updated_by_name: nameOf(p) })
       .eq("id", data.id)
       .not("deleted_at", "is", null)
-      .select("id");
+      .select("*");
     if (error) throw new Error(error.message);
-    if (!rows?.length) throw new Error("This opportunity is not deleted");
+    const row = rows?.[0];
+    if (!row) throw new Error("This opportunity is not deleted");
+    await syncOppFollowup(row, null, context, nameOf(p));
   });
 
 /**
  * Claim an unassigned opportunity for yourself (owner, Oct 8; the Work Overview unassigned
  * list and calendar). Anyone `canClaim`; the opportunity must be open and have no assignee. A
- * dropped day becomes its expected close; no day keeps whatever it had. The update is the
- * caller's own under crm_opportunities_write (Customers access).
+ * dropped day becomes its expected close under the manager date rule (dateMoveProblem, as
+ * saveOpportunity: once set, only an admin or a manager moves it; owner item 7, Oct 12 — it used
+ * to be overwritten silently); no day keeps whatever it had. The update is the caller's own under
+ * crm_opportunities_write (Customers access). The follow-up is synced as a save would: the
+ * claimer's timer starts (they are the actor, so no "assigned to you" notice goes to them).
  */
 export const claimOpportunity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -614,7 +711,7 @@ export const claimOpportunity = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("crm_opportunities")
-      .select("assignee_id, status, deleted_at")
+      .select("assignee_id, status, deleted_at, expected_close")
       .eq("id", data.id)
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
@@ -622,6 +719,14 @@ export const claimOpportunity = createServerFn({ method: "POST" })
     if (cur.assignee_id) throw new Error(CLAIM_TAKEN);
     if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))
       throw new Error("Only an open opportunity can be claimed");
+    if (data.date) {
+      const moveProblem = dateMoveProblem({
+        profile: p,
+        oldYmd: cur.expected_close,
+        newYmd: data.date,
+      });
+      if (moveProblem) throw new Error(moveProblem);
+    }
     const { data: row, error } = await sb
       .from("crm_opportunities")
       .update({
@@ -632,9 +737,10 @@ export const claimOpportunity = createServerFn({ method: "POST" })
       })
       .eq("id", data.id)
       .is("assignee_id", null)
-      .select("id, assignee_id, expected_close")
+      .select("*")
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error(CLAIM_TAKEN);
-    return row;
+    await syncOppFollowup(row, cur.status, context, nameOf(p));
+    return { id: row.id, assignee_id: row.assignee_id, expected_close: row.expected_close };
   });

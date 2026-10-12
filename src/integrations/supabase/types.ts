@@ -317,6 +317,8 @@ export type Database = {
           roof_id: string | null;
           site_id: string | null;
           status: string;
+          status_changed_at: string | null;
+          submitted_at: string | null;
           takeoff_id: string | null;
           updated_at: string;
           updated_by_name: string | null;
@@ -336,6 +338,8 @@ export type Database = {
           roof_id?: string | null;
           site_id?: string | null;
           status?: string;
+          status_changed_at?: string | null;
+          submitted_at?: string | null;
           takeoff_id?: string | null;
           updated_at?: string;
           updated_by_name?: string | null;
@@ -355,6 +359,8 @@ export type Database = {
           roof_id?: string | null;
           site_id?: string | null;
           status?: string;
+          status_changed_at?: string | null;
+          submitted_at?: string | null;
           takeoff_id?: string | null;
           updated_at?: string;
           updated_by_name?: string | null;
@@ -379,6 +385,13 @@ export type Database = {
             columns: ["account_id"];
             isOneToOne: false;
             referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bids_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_opportunities";
             referencedColumns: ["id"];
           },
           {
@@ -4367,6 +4380,15 @@ export type Database = {
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] | null };
         Returns: Json;
+      };
+      /** 20261012100000_bid_drives_opportunity.sql: the bid's status drives the opportunity. */
+      sync_opportunity_from_bid: {
+        Args: { p_bid: string };
+        Returns: Json;
+      };
+      opportunity_status_from_bid: {
+        Args: { p_bid_status: string; p_opp_status: string };
+        Returns: string | null;
       };
       technician_options: {
         Args: never;

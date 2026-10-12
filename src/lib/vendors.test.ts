@@ -297,7 +297,14 @@ describe("migration 20261001110000_vendors.sql", () => {
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
     // As of this migration: 'ticket' / 'ticket_time' came later (20261005130000_ticket_audit.sql).
     expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
-      AUDIT_ENTITIES.filter((e) => e !== "ticket" && e !== "ticket_time" && e !== "task"),
+      AUDIT_ENTITIES.filter(
+        (e) =>
+          e !== "ticket" &&
+          e !== "ticket_time" &&
+          e !== "task" &&
+          e !== "opportunity" &&
+          e !== "bid",
+      ),
     );
     expect(flat).toContain(
       "when 'vendors' then v_entity := 'vendor'; v_entity_id := (v_row ->> 'id')::uuid; v_label := 'Vendor ''' || coalesce(v_old ->> 'name', v_new ->> 'name', '') || '''';",
@@ -378,7 +385,7 @@ describe("audit: the vendor entity and its History", () => {
     expect(fn).toMatch(
       /if \(data\.entity === "vendor"\) \{[\s\S]*?\.eq\("entity", "vendor"\)\s*\.eq\("entity_id", data\.entity_id\)/,
     );
-    expect(read("src/components/audit-history.tsx")).toContain(
+    expect(read("src/components/audit-history.tsx").replace(/\s+/g, " ")).toContain(
       'export type AuditFold = "invoice" | "account" | "vendor"',
     );
   });
