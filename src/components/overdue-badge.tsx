@@ -5,6 +5,7 @@
  * lists' Overdue filter and the Customers page counts.
  */
 import { Badge } from "@/components/ui/badge";
+import { isOppHeld } from "@/lib/work-counts";
 
 export function OverdueBadge({ days, what }: { days: number | null; what: string }) {
   if (days === null) return null;
@@ -16,6 +17,31 @@ export function OverdueBadge({ days, what }: { days: number | null; what: string
       title={`${what} ${days} day${days === 1 ? "" : "s"} ago`}
     >
       Overdue {days}d
+    </Badge>
+  );
+}
+
+/**
+ * The quiet "On hold until …" tag (owner, Oct 13: a snoozed opportunity read Overdue): shown
+ * instead of the red tag while the item's follow-up is on hold on a later day (isOppHeld).
+ */
+export function HoldBadge({
+  holdUntil,
+  today,
+}: {
+  holdUntil: string | null | undefined;
+  today: string;
+}) {
+  if (!isOppHeld({ hold_until: holdUntil ?? null }, today)) return null;
+  const day = new Date(holdUntil!).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return (
+    <Badge
+      variant="outline"
+      className="px-1.5 py-0 text-[11px]"
+      data-tag="hold"
+      title="Follow-up on hold"
+    >
+      On hold until {day}
     </Badge>
   );
 }

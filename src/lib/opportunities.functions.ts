@@ -58,6 +58,12 @@ export type OpportunityWithNames = OpportunityRow & {
   bid_grand_total: number | null;
   /** When the linked bid was first submitted (bids.submitted_at), if it was. */
   bid_submitted_at: string | null;
+  /**
+   * The open follow-up's snoozed_until when it is on hold (owner, Oct 13): the list row, the
+   * header and the Customers strip read "on hold until …" instead of Overdue until that day
+   * (work-counts.ts isOppHeld). Null when there is no hold or the caller cannot read follow-ups.
+   */
+  hold_until: string | null;
   /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
   followup_note?: string | null;
 };
@@ -150,10 +156,28 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   for (const x of sites ?? []) siteNames.set(x.id, x.name);
   const bidRows = new Map<string, LinkedBid>();
   for (const b of bids ?? []) bidRows.set(b.id, b);
+  // The holds (owner, Oct 13): each opportunity's open follow-up with a snoozed_until. Best
+  // effort — a caller who cannot read follow-ups sees no hold, never an error.
+  const holds = new Map<string, string>();
+  if (rows.length) {
+    const { data: held } = await sb
+      .from("crm_followups")
+      .select("item_id, snoozed_until")
+      .eq("kind", "opportunity")
+      .eq("status", "open")
+      .not("snoozed_until", "is", null)
+      .in(
+        "item_id",
+        rows.map((r) => r.id),
+      )
+      .limit(1000);
+    for (const h of held ?? []) if (h.snoozed_until) holds.set(h.item_id, h.snoozed_until);
+  }
   return rows.map((r) => {
     const bid = r.bid_id ? bidRows.get(r.bid_id) : undefined;
     return {
       ...r,
+      hold_until: holds.get(r.id) ?? null,
       assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
       account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
       site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,

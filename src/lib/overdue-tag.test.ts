@@ -99,9 +99,8 @@ describe("where the tag shows", () => {
   });
 
   it("each opportunity row and the open opportunity's header, by the list's own day", () => {
-    expect(opps).toContain(
-      '<OverdueBadge days={oppOverdueDays({ ...o, status }, today)} what="Expected to close" />',
-    );
+    // The row passes its hold too (owner, Oct 13: a snoozed opportunity is not overdue).
+    expect(opps).toContain("days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}");
     expect(opps).toMatch(/<OppListRow[\s\S]*?today=\{today\}/);
     expect(count(opps, "oppOverdueDays(")).toBe(2);
     expect(opps).toMatch(/data-line="opened"[\s\S]{0,80}\{opened\}\s*<OverdueBadge/);

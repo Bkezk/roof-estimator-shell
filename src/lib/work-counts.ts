@@ -135,11 +135,43 @@ export const countsAsOverdueTicket = (
   held: ReadonlySet<string>,
 ): boolean => isOverdueTicket(j, todayYmd) && !held.has(j.id);
 
-/** An open opportunity past its expected close (the tile and the list's Overdue filter). */
+/**
+ * The opportunities whose follow-up is on hold on `today` (the twin of heldTicketIds; owner,
+ * Oct 13: "I put Corbin middle on snooze with a date … it still says overdue"): an open
+ * opportunity follow-up whose snoozed_until falls on a later day.
+ */
+export function heldOppIds(
+  followups: readonly HeldFollowupIn[],
+  todayYmd: string,
+  toYmd: (iso: string) => string = (iso) => easternYmd(new Date(iso)),
+): Set<string> {
+  const out = new Set<string>();
+  for (const f of followups)
+    if (f.kind === "opportunity" && isHeldOn(f, todayYmd, toYmd)) out.add(f.item_id);
+  return out;
+}
+
+/**
+ * Is the opportunity on hold on `today`? Its row carries `hold_until`, the open follow-up's
+ * snoozed_until (opportunities.functions.ts withNames); a hold on a later day means "come back
+ * then", so the row is not overdue, wherever it is shown, until that day.
+ */
+export const isOppHeld = (
+  o: { hold_until?: string | null },
+  todayYmd: string,
+  toYmd: (iso: string) => string = (iso) => easternYmd(new Date(iso)),
+): boolean => isHeldOn({ status: "open", snoozed_until: o.hold_until ?? null }, todayYmd, toYmd);
+
+/**
+ * An open opportunity past its expected close (the tile and the list's Overdue filter) — unless
+ * its follow-up is on hold (`held`): a snooze means "not overdue until that day" everywhere the
+ * red tag is shown, as Work Overview already files it under Waiting (owner, Oct 13).
+ */
 export const isOverdueOpp = (
   o: { status: string; expected_close: string | null },
   todayYmd: string,
-): boolean => isOpenOppStatus(o.status) && isOverdue(o.expected_close, todayYmd);
+  held = false,
+): boolean => !held && isOpenOppStatus(o.status) && isOverdue(o.expected_close, todayYmd);
 
 export interface WorkCounts {
   openTickets: number;
@@ -209,8 +241,9 @@ export function ticketOverdueDays(
 export function oppOverdueDays(
   o: { status: string; expected_close: string | null },
   todayYmd: string,
+  held = false,
 ): number | null {
-  return isOverdueOpp(o, todayYmd) ? daysBetween(o.expected_close!, todayYmd) : null;
+  return isOverdueOpp(o, todayYmd, held) ? daysBetween(o.expected_close!, todayYmd) : null;
 }
 
 /**

@@ -79,8 +79,14 @@ import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 // The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
 // so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
 import { localYmd } from "@/lib/my-work";
-import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN, oppOverdueDays } from "@/lib/work-counts";
-import { OverdueBadge } from "@/components/overdue-badge";
+import {
+  isOpenOppStatus,
+  isOppHeld,
+  isOverdueOpp,
+  OPP_ALL_OPEN,
+  oppOverdueDays,
+} from "@/lib/work-counts";
+import { HoldBadge, OverdueBadge } from "@/components/overdue-badge";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -298,7 +304,11 @@ function OppList({
     if (statusFilter === OPP_ALL_OPEN) {
       if (!isOpenOppStatus(asStatus(o.status))) return false;
     } else if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
-    if (overdueOnly && !isOverdueOpp({ ...o, status: asStatus(o.status) }, today)) return false;
+    if (
+      overdueOnly &&
+      !isOverdueOpp({ ...o, status: asStatus(o.status) }, today, isOppHeld(o, today))
+    )
+      return false;
     if (q) {
       const hay = [
         o.title,
@@ -553,7 +563,11 @@ function OppListRow({
           <Badge variant={STATUS_BADGE[status]} className="px-1.5 py-0 text-[11px]">
             {OPP_STATUS_LABELS[status]}
           </Badge>
-          <OverdueBadge days={oppOverdueDays({ ...o, status }, today)} what="Expected to close" />
+          <OverdueBadge
+            days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}
+            what="Expected to close"
+          />
+          <HoldBadge holdUntil={o.hold_until} today={today} />
           {/* The linked bid's status (owner, Oct 12: the bid drives the opportunity). */}
           {o.bid_id && (
             <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
@@ -1204,9 +1218,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               days={oppOverdueDays(
                 { status: asStatus(opp.status), expected_close: opp.expected_close },
                 localYmd(new Date()),
+                isOppHeld(opp, localYmd(new Date())),
               )}
               what="Expected to close"
             />
+            <HoldBadge holdUntil={opp.hold_until} today={localYmd(new Date())} />
           </p>
         )}
         {opp && (
@@ -1448,8 +1464,10 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
             : "No open follow-up for this opportunity."}
       </p>
     );
-  // Red only once the due DAY has passed, as Work Overview says it (not at 12:00 UTC on the due day).
+  // Red only once the due DAY has passed, as Work Overview says it (not at 12:00 UTC on the due day);
+  // never while on hold (owner, Oct 13).
   const overdue = isFollowupOverdue(f, localYmd(new Date()));
+  const held = isOppHeld({ hold_until: f.snoozed_until }, localYmd(new Date()));
   return (
     <div className={box}>
       <BellRing className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -1459,6 +1477,7 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
         <span className={overdue ? "text-destructive" : "text-muted-foreground"}>
           {" "}
           · due {whenDay(f.due_at)} · {f.reminders_sent} sent
+          {held ? ` · on hold until ${whenDay(f.snoozed_until)}` : ""}
         </span>
       </span>
       {canManage && (

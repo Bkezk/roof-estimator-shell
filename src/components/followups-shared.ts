@@ -45,6 +45,11 @@ export function useFollowupActions() {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["followups"] });
     void qc.invalidateQueries({ queryKey: ["my-work"] });
+    // The opportunity rows carry the hold (hold_until; owner, Oct 13): the list, the open
+    // opportunity and the Customers strip re-read so "Overdue" gives way to "On hold until …".
+    void qc.invalidateQueries({ queryKey: ["opportunities"] });
+    void qc.invalidateQueries({ queryKey: ["opportunity"] });
+    void qc.invalidateQueries({ queryKey: ["work-counts"] });
   };
   // A snooze is a hold with a date and a reason (owner, Oct 9; followup-controls.tsx SnoozeMenu).
   const snooze = useMutation({

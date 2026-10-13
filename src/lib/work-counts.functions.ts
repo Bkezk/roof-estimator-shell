@@ -19,6 +19,7 @@ import {
   OPEN_TICKET_STAGES,
   OVERDUE_TICKET_STAGES,
   countsAsOverdueTicket,
+  heldOppIds,
   heldTicketIds,
   parseTodayInput,
   viewerToday,
@@ -61,12 +62,19 @@ export const getWorkCounts = createServerFn({ method: "GET" })
       sb
         .from("crm_followups")
         .select("kind, item_id, status, snoozed_until")
-        .eq("kind", "ticket")
+        .in("kind", ["ticket", "opportunity"])
         .eq("status", "open")
         .not("snoozed_until", "is", null)
         .limit(LIMIT),
       opps(),
-      opps().lt("expected_close", today),
+      // The overdue candidates as rows, not a count: a held one (owner, Oct 13) is left out.
+      sb
+        .from("crm_opportunities")
+        .select("id")
+        .is("deleted_at", null)
+        .in("status", [...OPEN_OPP_STATUSES])
+        .lt("expected_close", today)
+        .limit(LIMIT),
     ]);
     if (openT.error) throw new Error(`Tickets in progress: ${openT.error.message}`);
     if (overdueT.error) throw new Error(`Overdue tickets: ${overdueT.error.message}`);
@@ -74,13 +82,15 @@ export const getWorkCounts = createServerFn({ method: "GET" })
     if (overdueO.error) throw new Error(`Overdue opportunities: ${overdueO.error.message}`);
     if (held.error)
       console.error(`Overdue tickets: follow-up holds not read — ${held.error.message}`);
-    const onHold = heldTicketIds(held.error ? [] : (held.data ?? []), today);
+    const heldRows = held.error ? [] : (held.data ?? []);
+    const onHold = heldTicketIds(heldRows, today);
+    const oppsOnHold = heldOppIds(heldRows, today);
     return {
       openTickets: openT.count ?? 0,
       overdueTickets: (overdueT.data ?? []).filter((j) => countsAsOverdueTicket(j, today, onHold))
         .length,
       openOpps: openO.count ?? 0,
-      overdueOpps: overdueO.count ?? 0,
+      overdueOpps: (overdueO.data ?? []).filter((o) => !oppsOnHold.has(o.id)).length,
       today,
     };
   });

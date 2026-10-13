@@ -157,10 +157,15 @@ export function followupStateText(
  * 12:00 UTC on the due day).
  */
 export const isFollowupOverdue = (
-  f: Pick<FollowupStateIn, "due_at" | "status">,
+  f: Pick<FollowupStateIn, "due_at" | "status" | "snoozed_until">,
   today: string,
   toYmd: (iso: string) => string = localYmd,
-): boolean => (!f.status || f.status === "open") && daysBetween(toYmd(f.due_at), today) > 0;
+): boolean =>
+  (!f.status || f.status === "open") &&
+  // On hold until a later day (owner, Oct 13: "on snooze with a date … still says overdue"):
+  // not red until that day comes, the way Work Overview files it under Waiting.
+  !(f.snoozed_until && toYmd(f.snoozed_until) > today) &&
+  daysBetween(toYmd(f.due_at), today) > 0;
 
 /** The parts as one line ("Overdue 3 days · Reminders every 3 days"). */
 export const followupStateLine = (parts: FollowupStatePart[]): string =>
