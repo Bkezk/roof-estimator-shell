@@ -17,7 +17,7 @@ describe("AccessoriesScreens defines no component inside its render", () => {
   it("no capitalised arrow component is declared inside the function", () => {
     // A `const Name = ({ … }: { … }) =>` inside the component is a component with a fresh
     // identity each render — exactly the bug.
-    expect(body).not.toMatch(/\n  const [A-Z]\w* = \(/);
+    expect(body).not.toMatch(/\n {2}const [A-Z]\w* = \(/);
     expect(body).not.toContain("<FastenerGrid");
     expect(body).not.toContain("<SubtypeColumn");
   });
