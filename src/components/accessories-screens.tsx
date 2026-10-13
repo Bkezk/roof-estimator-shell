@@ -6,7 +6,7 @@
  * white (read-only) values.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import {
   EDGE_FASTENER_GROUPS,
@@ -790,8 +790,15 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     );
   }
 
+  // The two grids below are plain render helpers, NOT components defined inside this render
+  // function (owner, Oct 13: "the first time you click tab after writing a number in
+  // accessories should go to the next form below it … except after the first time you enter a
+  // number"). A component created inside render gets a new identity on every re-render, so the
+  // commit of a typed number (Num's onBlur → onChange → this re-renders) unmounted the whole
+  // grid and the box Tab had just moved into with it, dropping focus. A helper returns plain
+  // elements inside this component's own tree, so the boxes keep their identity across commits.
   /** A labelled fastener grid bound to one slot; rows from a captured group list or keys. */
-  const FastenerGrid = ({
+  const fastenerGrid = ({
     slot,
     keys,
     title,
@@ -854,7 +861,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   );
 
   /** All catalog rows of the given subtypes, size-sorted, bound to a slot (deck screens). */
-  const SubtypeColumn = ({
+  const subtypeColumn = ({
     slot,
     subtypes,
     title,
@@ -1186,11 +1193,11 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               <span className="font-medium">Adj. Total Length: {r?.adjTotalLengthFt ?? 0} ft</span>
               <span className="font-medium">Material: {usd(r?.cost ?? 0)}</span>
             </div>
-            <FastenerGrid
-              slot="termBar"
-              keys={EDGE_FASTENER_GROUPS.termBar}
-              needed={r?.fastenersNeeded ?? 0}
-            />
+            {fastenerGrid({
+              slot: "termBar",
+              keys: EDGE_FASTENER_GROUPS.termBar,
+              needed: r?.fastenersNeeded ?? 0,
+            })}
           </div>
         );
       }
@@ -1324,11 +1331,11 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               <span className="font-medium">Adj. Total Length: {r?.totalLengthFt ?? 0} ft</span>
               <span className="font-medium">Material: {usd(r?.cost ?? 0)}</span>
             </div>
-            <FastenerGrid
-              slot={slot}
-              keys={EDGE_FASTENER_GROUPS[slot]}
-              needed={r?.fastenersNeeded ?? 0}
-            />
+            {fastenerGrid({
+              slot: slot,
+              keys: EDGE_FASTENER_GROUPS[slot],
+              needed: r?.fastenersNeeded ?? 0,
+            })}
           </div>
         );
       }
@@ -1430,11 +1437,11 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                 );
               })}
             </div>
-            <FastenerGrid
-              slot={group}
-              keys={EDGE_FASTENER_GROUPS[group]}
-              needed={gr?.fastenersNeeded ?? 0}
-            />
+            {fastenerGrid({
+              slot: group,
+              keys: EDGE_FASTENER_GROUPS[group],
+              needed: gr?.fastenersNeeded ?? 0,
+            })}
           </div>
         );
       }
@@ -1522,12 +1529,12 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               />
               <span className="font-medium">Adj. Total Length: {rs?.totalLengthFt ?? 0} ft</span>
             </div>
-            <FastenerGrid
-              slot="snapCover"
-              keys={EDGE_FASTENER_GROUPS.snapCover}
-              title="Compression or Snap Cover"
-              needed={result?.snapCover.fastenersNeeded ?? 0}
-            />
+            {fastenerGrid({
+              slot: "snapCover",
+              keys: EDGE_FASTENER_GROUPS.snapCover,
+              title: "Compression or Snap Cover",
+              needed: result?.snapCover.fastenersNeeded ?? 0,
+            })}
           </div>
         );
       }
@@ -1832,23 +1839,23 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               Fasteners Needed: {result?.parapetTabs.fastenersNeeded ?? 0}
             </p>
             <div className="flex flex-wrap gap-8">
-              <FastenerGrid
-                slot="parapet"
-                keys={EDGE_FASTENER_GROUPS.parapet.filter((k) => k !== PLATE_ROWS.steel)}
-                title="Parapet Wall-Tab Fasteners"
-              />
-              <SubtypeColumn
-                slot="parapet"
-                subtypes={["Bit-SDS", "Bit-Straight", "Bit-TE-CX"]}
-                title="Masonry Bits"
-              />
+              {fastenerGrid({
+                slot: "parapet",
+                keys: EDGE_FASTENER_GROUPS.parapet.filter((k) => k !== PLATE_ROWS.steel),
+                title: "Parapet Wall-Tab Fasteners",
+              })}
+              {subtypeColumn({
+                slot: "parapet",
+                subtypes: ["Bit-SDS", "Bit-Straight", "Bit-TE-CX"],
+                title: "Masonry Bits",
+              })}
               <div className="space-y-2">
                 <p
                   className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
                 >
                   Steel Plates Needed: {result?.parapetTabs.steelPlatesNeeded ?? 0}
                 </p>
-                <FastenerGrid slot="parapet" keys={[PLATE_ROWS.steel]} title="Steel Plates" />
+                {fastenerGrid({ slot: "parapet", keys: [PLATE_ROWS.steel], title: "Steel Plates" })}
               </div>
             </div>
           </div>
@@ -1950,10 +1957,12 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             </div>
             <div className="flex flex-wrap gap-6">
               {cols.map((c) => (
-                <SubtypeColumn key={c.title} slot={bucket} subtypes={c.subtypes} title={c.title} />
+                <Fragment key={c.title}>
+                  {subtypeColumn({ slot: bucket, subtypes: c.subtypes, title: c.title })}
+                </Fragment>
               ))}
-              <SubtypeColumn slot={bucket} subtypes={["DL-Plates"]} title="Plates" />
-              <SubtypeColumn slot={bucket} subtypes={["SD-Tips"]} title="Driver Tips" />
+              {subtypeColumn({ slot: bucket, subtypes: ["DL-Plates"], title: "Plates" })}
+              {subtypeColumn({ slot: bucket, subtypes: ["SD-Tips"], title: "Driver Tips" })}
             </div>
           </div>
         );
