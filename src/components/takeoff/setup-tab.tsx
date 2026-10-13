@@ -410,11 +410,12 @@ export function SetupTab(props: {
             />
           </Field>
           <Field label="Pull test (lbs)">
+            {/* The arrows move by 25 lbs (owner, Oct 13); any number can still be typed. */}
             <NumberField
               className="h-8"
               value={setup.pullTest ?? 0}
               onChange={(v) => set("pullTest", v)}
-              step="any"
+              step="25"
             />
           </Field>
           <Field label="Field lap (in)">

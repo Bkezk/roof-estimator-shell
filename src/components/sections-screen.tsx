@@ -832,8 +832,10 @@ export function SectionsScreen(p: SectionsScreenProps) {
 
           <div className="flex flex-wrap items-end gap-3">
             <Field label="Pull Test (lbs)">
+              {/* The arrows move by 25 lbs (owner, Oct 13); any number can still be typed. */}
               <Num
                 className="w-[100px]"
+                step="25"
                 value={pullDraft ?? s.pullTest ?? 0}
                 invalid={sys.rsId === 1 && (s.pullTest ?? 0) > 0 && s.pullTest! < 140}
                 onChange={setPullDraft}
