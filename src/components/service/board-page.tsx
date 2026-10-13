@@ -62,7 +62,7 @@ import {
 import { listTechnicians } from "@/lib/auth.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { arrivalLabel } from "@/lib/arrival-window";
+import { chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const asStage = (s: string): ServiceStage =>
@@ -664,17 +664,16 @@ function TicketChip(props: {
         ? `${shortDay(j.scheduled_date)} · no technician`
         : null
     : null;
-  const arrival = arrivalLabel(j.arrival_window);
+  // The card's lines (owner, Oct 13: "more details on the items shown on the calendar week"):
+  // the property, then Type · Urgent/Emergency · arrival window, then the description.
+  const place = chipPlace(j);
+  const facts = chipFacts(j);
+  const description = chipDescription(j);
   const title = [
-    `#${j.number} ${j.customer_name}`,
-    arrival,
-    j.site_name,
-    j.description,
+    ...chipTitleLines(j),
     STAGE_LABELS[stage],
     canDrag ? "Drag to schedule · click to open" : "Click to open",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].join("\n");
   return (
     <Link
       to="/service"
@@ -695,13 +694,17 @@ function TicketChip(props: {
           <CheckCheck className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Authorized" />
         )}
         <span className="font-semibold">#{j.number}</span> {j.customer_name}
-        {j.description ? <span className="opacity-80"> · {j.description}</span> : null}
       </span>
-      {arrival && <span className="mt-0.5 block truncate text-[11px] font-medium">{arrival}</span>}
+      {place && <span className="mt-0.5 block truncate text-[11px] opacity-80">{place}</span>}
+      {facts.length > 0 && (
+        <span className="mt-0.5 block truncate text-[11px] font-medium">{facts.join(" · ")}</span>
+      )}
+      {description && (
+        <span className="mt-0.5 line-clamp-2 text-[11px] opacity-80">{description}</span>
+      )}
       {props.detail && (
         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
           <span className="font-medium">{STAGE_LABELS[stage]}</span>
-          {j.site_name ? ` · ${j.site_name}` : ""}
           {` · ${partial ?? `opened ${openedOn(j.created_at)}`}`}
         </span>
       )}

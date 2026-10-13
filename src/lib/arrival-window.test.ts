@@ -70,8 +70,12 @@ describe("on the screens", () => {
   });
   it("the Tech Board card shows it", () => {
     const board = read("src/components/service/board-page.tsx");
-    expect(board).toContain("const arrival = arrivalLabel(j.arrival_window);");
-    expect(board).toContain("{arrival && <span");
+    // The window sits on the card's facts line with the type and rate (board-chip.ts, Oct 13).
+    expect(board).toContain("const facts = chipFacts(j);");
+    expect(board).toContain("{facts.length > 0 && (");
+    expect(read("src/lib/board-chip.ts")).toContain(
+      "const arrival = arrivalLabel(j.arrival_window);",
+    );
   });
   it("the technician's Today card shows it, Today included", () => {
     const today = read("src/components/service/today-page.tsx");
