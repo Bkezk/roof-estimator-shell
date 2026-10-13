@@ -59,8 +59,20 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
   it("calls the rpc and never updates profiles directly", async () => {
     const e = env();
     await e.call({ notify_email: false });
+    // Oct 13: the three notice-category switches ride along, null (unchanged) like p_leads.
     expect(e.rpcCalls).toEqual([
-      { fn: "set_my_notify_prefs", args: { p_email: false, p_push: null, p_leads: null } },
+      {
+        fn: "set_my_notify_prefs",
+        args: {
+          p_email: false,
+          p_push: null,
+          p_leads: null,
+          p_opportunities: null,
+          p_service: null,
+          p_bids: null,
+          p_storms: null,
+        },
+      },
     ]);
     expect(e.writes.filter((w) => w.table === "profiles")).toEqual([]);
     expect(e.tables["profiles"]![0]).toMatchObject({ notify_email: false, notify_push: true });
@@ -71,8 +83,24 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
     await e.call({ notify_push: false });
     await e.call({ notify_email: false, notify_push: true });
     expect(e.rpcCalls.map((c) => c.args)).toEqual([
-      { p_email: null, p_push: false, p_leads: null },
-      { p_email: false, p_push: true, p_leads: null },
+      {
+        p_email: null,
+        p_push: false,
+        p_leads: null,
+        p_opportunities: null,
+        p_service: null,
+        p_bids: null,
+        p_storms: null,
+      },
+      {
+        p_email: false,
+        p_push: true,
+        p_leads: null,
+        p_opportunities: null,
+        p_service: null,
+        p_bids: null,
+        p_storms: null,
+      },
     ]);
     expect(e.tables["profiles"]![0]).toMatchObject({ notify_email: false, notify_push: true });
   });
@@ -104,6 +132,10 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
       notify_email: false,
       notify_push: true,
       notify_leads: false,
+      notify_opportunities: true,
+      notify_service: true,
+      notify_bids: true,
+      notify_storms: false,
     });
   });
 });
@@ -149,10 +181,10 @@ describe("migration 20261002180000_notify_prefs.sql", () => {
     expect(sql).not.toMatch(/create function/);
   });
 
-  it("is typed (the three-argument form of 20261012160000_notify_leads.sql, which the app calls)", () => {
+  it("is typed (the seven-argument form of 20261013170000_notice_categories.sql, which the app calls)", () => {
     const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
-    expect(types).toContain(
-      "set_my_notify_prefs: {\n        Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null };\n        Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean }[];\n      };",
+    expect(types.replace(/\s+/g, " ")).toContain(
+      "set_my_notify_prefs: { Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null; p_opportunities: boolean | null; p_service: boolean | null; p_bids: boolean | null; p_storms: boolean | null; }; Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
     );
   });
 });

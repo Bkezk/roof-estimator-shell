@@ -7,7 +7,18 @@ import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-store";
-import { getNotifyPrefs, sendTestNotification, setNotifyPrefs } from "@/lib/followups.functions";
+import {
+  getNotifyPrefs,
+  sendTestNotification,
+  setNotifyPrefs,
+  type NotifyPrefs,
+} from "@/lib/followups.functions";
+import {
+  NOTICE_CATEGORIES,
+  NOTICE_CATEGORY_COLUMNS,
+  NOTICE_CATEGORY_HELP,
+  NOTICE_CATEGORY_LABELS,
+} from "@/lib/notice-categories";
 import {
   IOS_INSTALL_HINT,
   disablePushHere,
@@ -141,12 +152,9 @@ function AccountPage() {
 }
 
 const PREFS_KEY = ["notify-prefs"] as const;
-type Prefs = {
-  notify_email: boolean;
-  notify_push: boolean;
-  notify_leads: boolean;
-  devices: number;
-};
+type Prefs = NotifyPrefs & { devices: number };
+/** One or several switches at a time (the page saves the one that was flipped). */
+type PrefsPatch = Partial<NotifyPrefs>;
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -166,11 +174,7 @@ function NotificationsCard() {
   const prefs = useQuery({ queryKey: PREFS_KEY, queryFn: () => getFn(), enabled: !!session });
 
   const save = useMutation({
-    mutationFn: (patch: {
-      notify_email?: boolean;
-      notify_push?: boolean;
-      notify_leads?: boolean;
-    }) => setFn({ data: patch }),
+    mutationFn: (patch: PrefsPatch) => setFn({ data: patch }),
     onMutate: (patch) => {
       const before = qc.getQueryData<Prefs>(PREFS_KEY);
       if (before) qc.setQueryData<Prefs>(PREFS_KEY, { ...before, ...patch });
@@ -180,7 +184,12 @@ function NotificationsCard() {
       if (ctx?.before) qc.setQueryData(PREFS_KEY, ctx.before);
       toast.error(errText(e));
     },
-    onSettled: () => void qc.invalidateQueries({ queryKey: PREFS_KEY }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: PREFS_KEY });
+      // A notice category switched off (or on) changes what the bell shows and counts at once:
+      // the bell's list and its unread count both live under NOTIFICATIONS_QUERY_KEY.
+      void qc.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+    },
   });
 
   // Push on THIS device — only knowable in the browser, so it starts unknown (null).
@@ -295,21 +304,38 @@ function NotificationsCard() {
                 onCheckedChange={(v) => save.mutate({ notify_push: v })}
               />
             </div>
-            {/* Owner, Oct 12: lead notices (the bid-board stream) are opt-in, off by default;
-                saved through the same prefs function as the two switches above. */}
-            <div className="flex items-center justify-between gap-4">
+            {/* Owner, Oct 13: which notices reach this person at all — the bell, email and push
+                alike (notice-categories.ts). Leads (Oct 12) and storm alerts are opt-in, off by
+                default; opportunities, service and bids are on by default. Each saves through the same prefs function as the two
+                switches above, and the bell re-reads after a change. */}
+            <div className="space-y-4 border-t pt-4">
               <div>
-                <Label htmlFor="notify-leads">Lead notices</Label>
+                <p className="text-sm font-medium">Which notices you get</p>
                 <p className="text-xs text-muted-foreground">
-                  New leads from the bid boards. Off unless you work them.
+                  Turn off what you do not deal with. Tasks and mentions always come through.
                 </p>
               </div>
-              <Switch
-                id="notify-leads"
-                checked={p?.notify_leads ?? false}
-                disabled={!p}
-                onCheckedChange={(v) => save.mutate({ notify_leads: v })}
-              />
+              {NOTICE_CATEGORIES.map((category) => {
+                const column = NOTICE_CATEGORY_COLUMNS[category];
+                return (
+                  <div key={category} className="flex items-center justify-between gap-4">
+                    <div>
+                      <Label htmlFor={`notify-${category}`}>
+                        {NOTICE_CATEGORY_LABELS[category]}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {NOTICE_CATEGORY_HELP[category]}
+                      </p>
+                    </div>
+                    <Switch
+                      id={`notify-${category}`}
+                      checked={p?.[column] ?? false}
+                      disabled={!p}
+                      onCheckedChange={(v) => save.mutate({ [column]: v })}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

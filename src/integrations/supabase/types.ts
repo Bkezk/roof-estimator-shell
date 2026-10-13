@@ -2370,6 +2370,10 @@ export type Database = {
           notify_email: boolean;
           notify_push: boolean;
           notify_leads: boolean;
+          notify_opportunities: boolean;
+          notify_service: boolean;
+          notify_bids: boolean;
+          notify_storms: boolean;
           role: string;
           technician: boolean;
           theme: string;
@@ -2387,6 +2391,10 @@ export type Database = {
           notify_email?: boolean;
           notify_push?: boolean;
           notify_leads?: boolean;
+          notify_opportunities?: boolean;
+          notify_service?: boolean;
+          notify_bids?: boolean;
+          notify_storms?: boolean;
           role?: string;
           technician?: boolean;
           theme?: string;
@@ -2404,6 +2412,10 @@ export type Database = {
           notify_email?: boolean;
           notify_push?: boolean;
           notify_leads?: boolean;
+          notify_opportunities?: boolean;
+          notify_service?: boolean;
+          notify_bids?: boolean;
+          notify_storms?: boolean;
           role?: string;
           technician?: boolean;
           theme?: string;
@@ -4350,8 +4362,24 @@ export type Database = {
       set_my_theme: { Args: { p_theme: string }; Returns: undefined };
       set_my_work_layout: { Args: { p_layout: Json | null }; Returns: undefined };
       set_my_notify_prefs: {
-        Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null };
-        Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean }[];
+        Args: {
+          p_email: boolean | null;
+          p_push: boolean | null;
+          p_leads: boolean | null;
+          p_opportunities: boolean | null;
+          p_service: boolean | null;
+          p_bids: boolean | null;
+          p_storms: boolean | null;
+        };
+        Returns: {
+          notify_email: boolean;
+          notify_push: boolean;
+          notify_leads: boolean;
+          notify_opportunities: boolean;
+          notify_service: boolean;
+          notify_bids: boolean;
+          notify_storms: boolean;
+        }[];
       };
       building_county_counts_storm: {
         Args: never;
@@ -4422,6 +4450,11 @@ export type Database = {
           id: string;
           notify_email: boolean;
           notify_push: boolean;
+          notify_leads: boolean;
+          notify_opportunities: boolean;
+          notify_service: boolean;
+          notify_bids: boolean;
+          notify_storms: boolean;
         }[];
       };
       technician_bill_rates: {

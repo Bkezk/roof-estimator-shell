@@ -33,7 +33,9 @@ type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 async function me(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
-    .select("role, access, technician, full_name, email, notify_email, notify_push, notify_leads")
+    .select(
+      "role, access, technician, full_name, email, notify_email, notify_push, notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms",
+    )
     .eq("id", ctx.userId)
     .maybeSingle();
   if (!data) throw new Error("Profile not found");
@@ -332,40 +334,66 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
-/** Channels for the signed-in user. */
+/**
+ * The signed-in user's notification settings: the two channels, the five notice categories
+ * (notice-categories.ts; leads and storms opt-in, the other three on unless the row says false)
+ * and how many devices have push on.
+ */
+export interface NotifyPrefs {
+  notify_email: boolean;
+  notify_push: boolean;
+  notify_leads: boolean;
+  notify_opportunities: boolean;
+  notify_service: boolean;
+  notify_bids: boolean;
+  notify_storms: boolean;
+}
+export const NOTIFY_PREF_KEYS = [
+  "notify_email",
+  "notify_push",
+  "notify_leads",
+  "notify_opportunities",
+  "notify_service",
+  "notify_bids",
+  "notify_storms",
+] as const satisfies readonly (keyof NotifyPrefs)[];
+
+/** The flags as the row holds them (a missing or null value falls back per flag). */
+const prefsOf = (p: {
+  [K in keyof NotifyPrefs]?: boolean | null | undefined;
+}): NotifyPrefs => ({
+  notify_email: p.notify_email === true,
+  notify_push: p.notify_push === true,
+  // Owner, Oct 12: lead notices are opt-in — off unless the row says true.
+  notify_leads: p.notify_leads === true,
+  // Owner, Oct 13: the other three categories are on unless the row says false.
+  notify_opportunities: p.notify_opportunities !== false,
+  notify_service: p.notify_service !== false,
+  notify_bids: p.notify_bids !== false,
+  // Owner, Oct 13: storm alerts are opt-in too — off unless the row says true.
+  notify_storms: p.notify_storms === true,
+});
+
+/** Channels and notice categories for the signed-in user. */
 export const getNotifyPrefs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(
-    async ({
-      context,
-    }): Promise<{
-      notify_email: boolean;
-      notify_push: boolean;
-      notify_leads: boolean;
-      devices: number;
-    }> => {
-      const p = await me(context);
-      const { count } = await context.supabase
-        .from("push_subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", context.userId)
-        .is("failed_at", null);
-      return {
-        notify_email: p.notify_email,
-        notify_push: p.notify_push,
-        // Owner, Oct 12: lead notices are opt-in — off unless the row says true.
-        notify_leads: p.notify_leads === true,
-        devices: count ?? 0,
-      };
-    },
-  );
+  .handler(async ({ context }): Promise<NotifyPrefs & { devices: number }> => {
+    const p = await me(context);
+    const { count } = await context.supabase
+      .from("push_subscriptions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", context.userId)
+      .is("failed_at", null);
+    return { ...prefsOf(p), devices: count ?? 0 };
+  });
 
 const PREFS_NOT_SAVED = "Your notification settings were not saved. Please try again.";
 
 /**
- * Save the caller's channels through set_my_notify_prefs (their own row only, keyed on
- * auth.uid(); migration 20261002180000_notify_prefs.sql, the lead switch added by
- * 20261012160000_notify_leads.sql). Not a direct profiles update: only admins may update
+ * Save the caller's channels and notice categories through set_my_notify_prefs (their own row
+ * only, keyed on auth.uid(); migration 20261002180000_notify_prefs.sql, the lead switch added by
+ * 20261012160000_notify_leads.sql, the opportunity / service / bid / storm switches by
+ * 20261013170000_notice_categories.sql). Not a direct profiles update: only admins may update
  * profiles, so for anyone else that matched 0 rows and looked like success. The function returns
  * the row after the write; anything but the values asked for is an error.
  */
@@ -377,35 +405,29 @@ export const setNotifyPrefs = createServerFn({ method: "POST" })
         notify_email: z.boolean().optional(),
         notify_push: z.boolean().optional(),
         notify_leads: z.boolean().optional(),
+        notify_opportunities: z.boolean().optional(),
+        notify_service: z.boolean().optional(),
+        notify_bids: z.boolean().optional(),
+        notify_storms: z.boolean().optional(),
       })
       .parse(d),
   )
-  .handler(
-    async ({
-      data,
-      context,
-    }): Promise<{ notify_email: boolean; notify_push: boolean; notify_leads: boolean }> => {
-      const { data: rows, error } = await context.supabase.rpc("set_my_notify_prefs", {
-        p_email: data.notify_email ?? null,
-        p_push: data.notify_push ?? null,
-        p_leads: data.notify_leads ?? null,
-      });
-      if (error) throw new Error(PREFS_NOT_SAVED);
-      const saved = Array.isArray(rows) ? rows[0] : undefined;
-      if (
-        !saved ||
-        (data.notify_email !== undefined && saved.notify_email !== data.notify_email) ||
-        (data.notify_push !== undefined && saved.notify_push !== data.notify_push) ||
-        (data.notify_leads !== undefined && saved.notify_leads !== data.notify_leads)
-      )
-        throw new Error(PREFS_NOT_SAVED);
-      return {
-        notify_email: saved.notify_email,
-        notify_push: saved.notify_push,
-        notify_leads: saved.notify_leads === true,
-      };
-    },
-  );
+  .handler(async ({ data, context }): Promise<NotifyPrefs> => {
+    const { data: rows, error } = await context.supabase.rpc("set_my_notify_prefs", {
+      p_email: data.notify_email ?? null,
+      p_push: data.notify_push ?? null,
+      p_leads: data.notify_leads ?? null,
+      p_opportunities: data.notify_opportunities ?? null,
+      p_service: data.notify_service ?? null,
+      p_bids: data.notify_bids ?? null,
+      p_storms: data.notify_storms ?? null,
+    });
+    if (error) throw new Error(PREFS_NOT_SAVED);
+    const saved = Array.isArray(rows) ? rows[0] : undefined;
+    if (!saved || NOTIFY_PREF_KEYS.some((k) => data[k] !== undefined && saved[k] !== data[k]))
+      throw new Error(PREFS_NOT_SAVED);
+    return prefsOf(saved);
+  });
 
 /** The public VAPID key the browser needs to subscribe (generated on first call). */
 export const getPushPublicKey = createServerFn({ method: "GET" })

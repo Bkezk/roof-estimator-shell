@@ -1,7 +1,8 @@
 /**
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
  * the server functions under test (select / insert / update / delete with eq, neq, in, is, not
- * is, ilike, or(ilike… / not.is.null), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
+ * is / not in / not like, ilike, or(ilike… / like / not.like / is.null / not.is.null / in /
+ * not.in / eq), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
  * single; rpc technician_options, crm_user_options, the follow-up functions as missing, any
  * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
  * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
@@ -35,6 +36,52 @@ const likeToRegExp = (pattern: string) =>
       .join(".*")}$`,
     "is",
   );
+
+/** PostgREST's `in` list: `(a,b,"c d")` → the values. */
+const inListValues = (list: string): string[] => {
+  const inner = list.trim().replace(/^\(/, "").replace(/\)$/, "");
+  return [...inner.matchAll(/"((?:[^"\\]|\\.)*)"|([^,]+)/g)].map((m) =>
+    m[1] !== undefined ? m[1].replace(/\\"/g, '"') : m[2]!.trim(),
+  );
+};
+
+/** Split an or() expression at its top-level commas (an `in.(a,b)` list keeps its own). */
+const splitOr = (expr: string): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of expr) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur) parts.push(cur);
+  return parts.map((p) => p.trim());
+};
+
+/** One `column.op.value` of an or() expression as a predicate (the operators the app uses). */
+const orPart = (part: string): ((r: Row) => boolean) => {
+  const m = /^(\w+)\.(not\.)?(\w+)\.(.*)$/s.exec(part);
+  if (!m) throw new Error(`fake: or(${part})`);
+  const col = m[1]!;
+  const neg = m[2] !== undefined;
+  const op = m[3]!;
+  const value = m[4]!;
+  let p: (r: Row) => boolean;
+  if (op === "is" && value === "null") p = (r) => (r[col] ?? null) === null;
+  else if (op === "ilike" || op === "like") {
+    const re = likeToRegExp(value);
+    p = (r) => re.test(String(r[col] ?? ""));
+  } else if (op === "in") {
+    const vs = inListValues(value);
+    p = (r) => vs.includes(String(r[col]));
+  } else if (op === "eq") p = (r) => String(r[col]) === value;
+  else throw new Error(`fake: or(${part})`);
+  return neg ? (r) => !p(r) : p;
+};
 
 /** An rpc a test provides by name: its return value is the data (a throw becomes the error). */
 export type FakeRpc = (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown;
@@ -131,20 +178,22 @@ export function fakeSupabase(
         filter(`in ${c}=${vs.map(String).join(",")}`, (r) => vs.includes(r[c])),
       is: (c: string, v: unknown) => filter(`is ${c}=${String(v)}`, (r) => (r[c] ?? null) === v),
       not: (c: string, o: string, v: unknown) => {
-        if (o !== "is" || v !== null) throw new Error(`fake: not ${o} ${String(v)}`);
-        return filter(`not ${c} is null`, (r) => (r[c] ?? null) !== null);
+        if (o === "is" && v === null)
+          return filter(`not ${c} is null`, (r) => (r[c] ?? null) !== null);
+        if (o === "in" && typeof v === "string") {
+          const vs = inListValues(v);
+          return filter(`not ${c} in ${vs.join(",")}`, (r) => !vs.includes(String(r[c])));
+        }
+        if (o === "like" && typeof v === "string") {
+          const re = likeToRegExp(v);
+          return filter(`not ${c} like ${v}`, (r) => !re.test(String(r[c] ?? "")));
+        }
+        throw new Error(`fake: not ${o} ${String(v)}`);
       },
       ilike: (c: string, pattern: string) =>
         filter(`ilike ${c}=${pattern}`, (r) => likeToRegExp(pattern).test(String(r[c] ?? ""))),
       or: (expr: string) => {
-        const parts = expr.split(",").map((part): ((r: Row) => boolean) => {
-          const notNull = /^(\w+)\.not\.is\.null$/.exec(part);
-          if (notNull) return (r) => (r[notNull[1]!] ?? null) !== null;
-          const m = /^(\w+)\.ilike\.(.*)$/.exec(part);
-          if (!m) throw new Error(`fake: or(${part})`);
-          const re = likeToRegExp(m[2]!);
-          return (r) => re.test(String(r[m[1]!] ?? ""));
-        });
+        const parts = splitOr(expr).map(orPart);
         return filter(`or ${expr}`, (r) => parts.some((p) => p(r)));
       },
       gte: (c: string, v: string) => filter(`gte ${c}`, (r) => String(r[c] ?? "") >= v),

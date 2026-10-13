@@ -34,6 +34,12 @@ vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupa
 import type { Client } from "@/lib/notify.server";
 import { saveLeadRows } from "@/lib/leads.server";
 import { getNotifyPrefs, setNotifyPrefs } from "@/lib/followups.functions";
+import {
+  NOTICE_CATEGORIES,
+  NOTICE_CATEGORY_COLUMNS,
+  NOTICE_CATEGORY_HELP,
+  NOTICE_CATEGORY_LABELS,
+} from "@/lib/notice-categories";
 import { fakeSupabase, type FakeRpc } from "@/test/fake-supabase";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -123,8 +129,10 @@ describe(`migration ${MIGRATION}`, () => {
     expect(profiles.match(/notify_leads: boolean;/g)).toHaveLength(1);
     expect(profiles.match(/notify_leads\?: boolean;/g)).toHaveLength(2);
     expect(types).toContain("lead_notice_user_ids: { Args: never; Returns: string[] };");
-    expect(types).toContain(
-      "set_my_notify_prefs: {\n        Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null };\n        Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean }[];\n      };",
+    // Oct 13 (20261013170000_notice_categories.sql): the app calls the six-argument form, which
+    // still carries p_leads / notify_leads.
+    expect(types.replace(/\s+/g, " ")).toContain(
+      "set_my_notify_prefs: { Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null; p_opportunities: boolean | null; p_service: boolean | null; p_bids: boolean | null; p_storms: boolean | null; }; Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
     );
   });
 });
@@ -336,9 +344,24 @@ describe("the prefs functions carry notify_leads", () => {
       notify_email: true,
       notify_push: false,
       notify_leads: true,
+      notify_opportunities: true,
+      notify_service: true,
+      notify_bids: true,
+      notify_storms: false,
     });
     expect(e.rpcCalls).toEqual([
-      { fn: "set_my_notify_prefs", args: { p_email: null, p_push: null, p_leads: true } },
+      {
+        fn: "set_my_notify_prefs",
+        args: {
+          p_email: null,
+          p_push: null,
+          p_leads: true,
+          p_opportunities: null,
+          p_service: null,
+          p_bids: null,
+          p_storms: null,
+        },
+      },
     ]);
     expect(e.writes.filter((w) => w.table === "profiles")).toEqual([]);
     expect(e.tables["profiles"]![0]).toMatchObject({ notify_leads: true, notify_email: true });
@@ -370,6 +393,10 @@ describe("the prefs functions carry notify_leads", () => {
       notify_email: true,
       notify_push: true,
       notify_leads: true,
+      notify_opportunities: true,
+      notify_service: true,
+      notify_bids: true,
+      notify_storms: false,
       devices: 0,
     });
     const none = env({ notify_email: true, notify_push: true });
@@ -427,28 +454,29 @@ describe("the Account page", () => {
   });
 
   it("has the Lead notices switch under the email / push switches, off by default, saved the same way", () => {
+    // Oct 13 (notice-categories.ts, notify-categories.test.ts): the lead switch is the first of
+    // the four "Which notices you get" switches, its label and help from the pure module.
     const card = src.slice(src.indexOf("function NotificationsCard()"));
     const email = card.indexOf('id="notify-email"');
     const push = card.indexOf('id="notify-push"');
-    const leads = card.indexOf('id="notify-leads"');
+    const leads = card.indexOf("{NOTICE_CATEGORIES.map((category) => {");
     const device = card.indexOf('<p className="text-sm font-medium">This device</p>');
     expect(email).toBeGreaterThan(-1);
     expect(push).toBeGreaterThan(email);
     expect(leads).toBeGreaterThan(push);
     expect(device).toBeGreaterThan(leads);
-    expect(flat(card)).toContain(
-      '<Label htmlFor="notify-leads">Lead notices</Label> <p className="text-xs text-muted-foreground"> New leads from the bid boards. Off unless you work them. </p>',
+    expect(NOTICE_CATEGORIES[0]).toBe("leads");
+    expect(NOTICE_CATEGORY_LABELS.leads).toBe("Lead notices");
+    expect(NOTICE_CATEGORY_HELP.leads).toBe(
+      "New leads from the bid boards. Off unless you work them.",
     );
+    expect(NOTICE_CATEGORY_COLUMNS.leads).toBe("notify_leads");
     expect(flat(card)).toContain(
-      '<Switch id="notify-leads" checked={p?.notify_leads ?? false} disabled={!p} onCheckedChange={(v) => save.mutate({ notify_leads: v })} />',
+      "<Switch id={`notify-${category}`} checked={p?.[column] ?? false} disabled={!p} onCheckedChange={(v) => save.mutate({ [column]: v })} />",
     );
-    // One save path, one toast: the mutation the other two switches use, typed for the third.
+    // One save path, one toast: the mutation the other two switches use, typed for the four.
     expect(card.match(/save\.mutate\(/g)).toHaveLength(3);
-    expect(flat(src)).toContain(
-      "type Prefs = { notify_email: boolean; notify_push: boolean; notify_leads: boolean; devices: number; };",
-    );
-    expect(flat(card)).toContain(
-      "mutationFn: (patch: { notify_email?: boolean; notify_push?: boolean; notify_leads?: boolean; }) => setFn({ data: patch }),",
-    );
+    expect(src).toContain("type Prefs = NotifyPrefs & { devices: number };");
+    expect(card).toContain("mutationFn: (patch: PrefsPatch) => setFn({ data: patch }),");
   });
 });

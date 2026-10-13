@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
+import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
 import { generateVapidKeys, sendWebPush } from "@/lib/webpush";
 
 /**
@@ -175,15 +176,25 @@ export const emailText = (msg: Outgoing, link: string, signature: string) =>
  * Write one inbox row per recipient and deliver it by email and push according to each
  * user's channels. Never throws for a delivery failure: the row records the error and the
  * admin screen shows it. Returns how many rows were written.
+ *
+ * Owner, Oct 13: a recipient who turned the notice's category off (Account › Notifications ›
+ * Which notices you get; notice-categories.ts) is left out entirely — no inbox row, no email,
+ * no push — so people who do not deal with those things do not see them. A notice with no
+ * category (tasks, mentions, the test) reaches everyone asked. Lead notices are narrowed at the
+ * source as well (leads.server.ts, lead_notice_user_ids); notify_leads is honoured here too.
  */
 export async function notify(userIds: string[], msg: Outgoing, sb: Client): Promise<number> {
-  const ids = [...new Set(userIds.filter(Boolean))];
-  if (!ids.length) return 0;
+  const requested = [...new Set(userIds.filter(Boolean))];
+  if (!requested.length) return 0;
   const admin = await serverClient(sb);
-  // Recipients' channels: a SECURITY DEFINER read (profiles RLS hides other users' rows).
-  const { data: people, error } = await admin.rpc("notify_recipients", { ids });
+  // Recipients' channels and category switches: a SECURITY DEFINER read (profiles RLS hides
+  // other users' rows).
+  const { data: everyone, error } = await admin.rpc("notify_recipients", { ids: requested });
   if (error) throw new Error(error.message);
-  const inserts = (people ?? []).map((p) => ({
+  const category = noticeCategory(msg.kind, msg.url ?? null);
+  const people = (everyone ?? []).filter((p) => wantsNotice(p, category));
+  const ids = people.map((p) => p.id);
+  const inserts = people.map((p) => ({
     user_id: p.id,
     kind: msg.kind,
     title: msg.title,
@@ -216,11 +227,11 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
   // Email: only when it would arrive whole (emailConfigProblem; without RESEND_API_KEY sendEmail
   // records that, as before); the signature is read once.
   const emailProblem = emailConfigured() ? emailConfigProblem() : null;
-  const wantsEmail = (people ?? []).some((p) => p.notify_email);
+  const wantsEmail = people.some((p) => p.notify_email);
   if (wantsEmail && emailProblem) logOncePerPass(emailProblem);
   const signature = wantsEmail && !emailProblem ? await emailSignature(admin) : "";
   for (const row of rows ?? []) {
-    const p = (people ?? []).find((x) => x.id === row.user_id);
+    const p = people.find((x) => x.id === row.user_id);
     if (!p) continue;
     const patch: Database["public"]["Tables"]["notifications"]["Update"] = {};
     if (p.notify_email) {

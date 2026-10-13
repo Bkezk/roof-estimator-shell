@@ -16,6 +16,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  SHARED_KINDS,
+  noticeExclusions,
+  offCategories,
+  type NoticeCategory,
+} from "@/lib/notice-categories";
 
 export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
@@ -48,6 +54,42 @@ export type ListMyNotificationsArgs = z.infer<typeof listSchema>;
 type Db = SupabaseClient<Database>;
 
 /**
+ * The notice categories the caller turned off (Account › Notifications › Which notices you get;
+ * notice-categories.ts): their own profiles row, which RLS shows them. A row that cannot be read
+ * — the migration not applied yet — turns nothing off.
+ */
+async function myOffCategories(sb: Db, userId: string): Promise<NoticeCategory[]> {
+  const { data } = await sb
+    .from("profiles")
+    .select("notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms")
+    .eq("id", userId)
+    .maybeSingle();
+  return data ? offCategories(data) : [];
+}
+
+/** PostgREST's list form for `in`: the kinds are plain identifiers, nothing to quote. */
+const inList = (xs: readonly string[]) => `(${xs.join(",")})`;
+
+/**
+ * Leave out the rows of the caller's off categories, in SQL (the list is paged and the count a
+ * head request, so not in the server function): `kind not in (…)` for the kind-only kinds of
+ * those categories, and for each off category with a link prefix "kind not in (the shared kinds)
+ * or url is null or url not like 'prefix%'" — a shared-kind row (assigned, followup, reminder,
+ * untouched) is dropped only when its link opens there. Older rows from before the switch was
+ * turned off go with it, so the bell clears at once; turning it back on shows them again.
+ */
+function excludeOff<Q extends { not(c: string, op: string, v: string): Q; or(f: string): Q }>(
+  q: Q,
+  off: readonly NoticeCategory[],
+): Q {
+  const ex = noticeExclusions(off);
+  if (ex.kinds.length) q = q.not("kind", "in", inList(ex.kinds));
+  for (const prefix of ex.urlPrefixes)
+    q = q.or(`kind.not.in.${inList(SHARED_KINDS)},url.is.null,url.not.like.${prefix}%`);
+  return q;
+}
+
+/**
  * One page of the signed-in user's inbox, newest first (created_at desc, id desc). With
  * `before`, the rows that share its timestamp but have a smaller id come first, then everything
  * older: two reads merged, because PostgREST has no row-value comparison.
@@ -58,6 +100,7 @@ export const listMyNotifications = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<NotificationRow[]> => {
     const sb: Db = context.supabase;
     const limit = data.limit ?? NOTIFICATIONS_PAGE;
+    const off = await myOffCategories(sb, context.userId);
     const base = () => {
       let q = sb
         .from("notifications")
@@ -66,6 +109,7 @@ export const listMyNotifications = createServerFn({ method: "GET" })
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .limit(limit);
+      q = excludeOff(q, off);
       if (data.unreadOnly) q = q.is("read_at", null);
       if (Array.isArray(data.kind)) q = q.in("kind", data.kind);
       else if (data.kind) q = q.eq("kind", data.kind);
@@ -118,15 +162,23 @@ export const markAllNotificationsRead = createServerFn({ method: "POST" })
     return { marked: count ?? 0 };
   });
 
-/** The real unread count (the old bell counted within its latest 30 rows): a head request. */
+/**
+ * The real unread count (the old bell counted within its latest 30 rows): a head request, less
+ * the rows of the categories the caller turned off (the same exclusion as the list).
+ */
 export const unreadNotificationCount = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<number> => {
-    const { error, count } = await context.supabase
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", context.userId)
-      .is("read_at", null);
+    const sb: Db = context.supabase;
+    const off = await myOffCategories(sb, context.userId);
+    const { error, count } = await excludeOff(
+      sb
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", context.userId)
+        .is("read_at", null),
+      off,
+    );
     if (error) throw new Error(error.message);
     return count ?? 0;
   });
