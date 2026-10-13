@@ -6,7 +6,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { canBeMentioned } from "@/lib/dispatch-access";
-import { insertMention, mentionedIds, mentionQuery, suggestPeople } from "@/lib/mentions";
+import {
+  insertMention,
+  MENTION_LIST_MAX,
+  mentionedIds,
+  mentionQuery,
+  suggestPeople,
+} from "@/lib/mentions";
 
 const people = [
   { id: "bk", name: "Brandon Keck" },
@@ -28,10 +34,23 @@ describe("typing", () => {
     expect(mentionQuery("@Bra\nnext", 9)).toBeNull();
     expect(mentionQuery("@one two three four", 19)).toBeNull();
   });
-  it("suggests by first or last name, A–Z, at most 6", () => {
+  it("suggests by first or last name, A–Z, everyone on a bare '@' (owner, Oct 13: the old cap of 6 hid the seventh person)", () => {
     expect(suggestPeople(people, "ke").map((p) => p.id)).toEqual(["bk"]);
     expect(suggestPeople(people, "mar").map((p) => p.id)).toEqual(["m", "mb"]);
-    expect(suggestPeople(people, "")).toHaveLength(6);
+    // The live roster: seven people; a bare "@" must list all seven (Test office is last A–Z).
+    const seven = [...people, { id: "to", name: "Test office" }];
+    expect(seven.length).toBe(7);
+    expect(suggestPeople(seven, "")).toHaveLength(7);
+    expect(suggestPeople(seven, "").map((p) => p.name)).toContain("Test office");
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      id: `p${i}`,
+      name: `Person ${String(i).padStart(2, "0")}`,
+    }));
+    expect(suggestPeople(many, "")).toHaveLength(MENTION_LIST_MAX);
+    // The list scrolls instead of cutting off.
+    expect(readFileSync("src/components/service/ticket-field-sections.tsx", "utf8")).toContain(
+      'aria-label="People to mention"\n              className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto',
+    );
   });
   it("picking writes '@Full Name ' and moves the caret past it", () => {
     expect(insertMention("Still leaking @Bra", 14, 18, "Brandon Keck")).toEqual({
@@ -133,6 +152,29 @@ describe("the roster: anyone with Service or Customers access", () => {
     );
     expect(sql).toContain("order by coalesce(nullif(trim(p.full_name), ''), p.email);");
     expect(sql).toContain("revoke all on function public.mention_options() from public;");
+    expect(sql).toContain("revoke all on function public.mention_options() from anon;");
+    expect(sql).toContain("grant execute on function public.mention_options() to authenticated;");
+  });
+});
+
+describe("technicians can mention (owner, Oct 13)", () => {
+  it("migration 20261013180000: the caller rule admits is_technician(); who can be mentioned is unchanged", () => {
+    const path = "supabase/migrations/20261013180000_mention_options_technicians.sql";
+    const raw = existsSync(path) ? readFileSync(path, "utf8") : "";
+    expect(raw.startsWith("-- ")).toBe(true);
+    const sql = raw
+      .replace(/--[^\n]*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    expect(sql).toContain(
+      "create or replace function public.mention_options() returns table (id uuid, full_name text, email text) language sql stable security definer set search_path = public as $$",
+    );
+    expect(sql).toContain(
+      "where (public.has_access('service') or public.has_access('customers') or public.is_technician())",
+    );
+    expect(sql).toContain(
+      "and (p.role in ('admin', 'manager') or 'service' = any(p.access) or 'customers' = any(p.access))",
+    );
     expect(sql).toContain("revoke all on function public.mention_options() from anon;");
     expect(sql).toContain("grant execute on function public.mention_options() to authenticated;");
   });

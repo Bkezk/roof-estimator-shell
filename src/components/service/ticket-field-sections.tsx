@@ -638,7 +638,7 @@ function Timeline({ jobId }: { jobId: string }) {
             <ul
               role="listbox"
               aria-label="People to mention"
-              className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border bg-popover text-sm shadow-md"
+              className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-md border bg-popover text-sm shadow-md"
             >
               {suggestions.map((p) => (
                 <li key={p.id}>

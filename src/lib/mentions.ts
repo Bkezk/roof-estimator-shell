@@ -29,7 +29,15 @@ export function mentionQuery(text: string, caret: number): { at: number; query: 
   return { at, query };
 }
 
-/** People whose name starts with (or has a word starting with) the query, A–Z, at most 6. */
+/** The most names the list shows at once; it scrolls past that (the roster is small). */
+export const MENTION_LIST_MAX = 30;
+
+/**
+ * People whose name starts with (or has a word starting with) the query, A–Z. Every match is
+ * listed (owner, Oct 13: "tagging someone by clicking the @ symbol doesn't seem to work for all
+ * users" — the list stopped at six, so with seven people on the roster the last name A–Z,
+ * Test office, never appeared after a bare "@"); the box scrolls past MENTION_LIST_MAX.
+ */
 export function suggestPeople(people: Person[], query: string): Person[] {
   const q = query.trim().toLowerCase();
   return people
@@ -38,7 +46,7 @@ export function suggestPeople(people: Person[], query: string): Person[] {
       return !q || n.startsWith(q) || n.split(/\s+/).some((w) => w.startsWith(q));
     })
     .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, 6);
+    .slice(0, MENTION_LIST_MAX);
 }
 
 /** Replace the "@query" at `at` with "@Name " and say where the caret goes. */
