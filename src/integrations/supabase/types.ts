@@ -316,6 +316,11 @@ export type Database = {
           id: string;
           name: string;
           notified_due_at: string | null;
+          notified_overdue_at: string | null;
+          notify_error: string | null;
+          reminded_at: string | null;
+          reminder_note: string | null;
+          reminder_on: string | null;
           opportunity_id: string | null;
           roof_id: string | null;
           site_id: string | null;
@@ -340,6 +345,11 @@ export type Database = {
           id?: string;
           name: string;
           notified_due_at?: string | null;
+          notified_overdue_at?: string | null;
+          notify_error?: string | null;
+          reminded_at?: string | null;
+          reminder_note?: string | null;
+          reminder_on?: string | null;
           opportunity_id?: string | null;
           roof_id?: string | null;
           site_id?: string | null;
@@ -364,6 +374,11 @@ export type Database = {
           id?: string;
           name?: string;
           notified_due_at?: string | null;
+          notified_overdue_at?: string | null;
+          notify_error?: string | null;
+          reminded_at?: string | null;
+          reminder_note?: string | null;
+          reminder_on?: string | null;
           opportunity_id?: string | null;
           roof_id?: string | null;
           site_id?: string | null;
@@ -983,6 +998,8 @@ export type Database = {
           ticket_untouched_days: number;
           opportunity_untouched_days: number;
           unassigned_overdue_days: number;
+          bid_due_notice_days: number;
+          bid_overdue_every_days: number | null;
           escalate_to_admins: boolean;
           escalate_user_ids: string[];
           ticket_first_days: number;
@@ -1000,6 +1017,8 @@ export type Database = {
           ticket_untouched_days?: number;
           opportunity_untouched_days?: number;
           unassigned_overdue_days?: number;
+          bid_due_notice_days?: number;
+          bid_overdue_every_days?: number | null;
           escalate_to_admins?: boolean;
           escalate_user_ids?: string[];
           ticket_first_days?: number;
@@ -1017,6 +1036,8 @@ export type Database = {
           ticket_untouched_days?: number;
           opportunity_untouched_days?: number;
           unassigned_overdue_days?: number;
+          bid_due_notice_days?: number;
+          bid_overdue_every_days?: number | null;
           escalate_to_admins?: boolean;
           escalate_user_ids?: string[];
           ticket_first_days?: number;

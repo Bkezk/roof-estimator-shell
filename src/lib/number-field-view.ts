@@ -17,3 +17,15 @@ export function numberFieldView(p: {
     placeholder: p.placeholder ?? undefined,
   };
 }
+
+/**
+ * A "days, or blank = never" box (Admin › Reminders › Bids, "Then every N days while a draft is
+ * past due"; owner, Oct 13): what the typed text means. Blank (or nothing numeric) is null —
+ * never; otherwise the whole number typed (rounded). No 0 is made up for an empty box.
+ */
+export function blankOrNumber(raw: string): number | null {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}

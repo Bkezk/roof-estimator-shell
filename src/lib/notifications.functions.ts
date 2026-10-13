@@ -140,7 +140,7 @@ export const unreadBadge = (n: number): string => (n > 99 ? "99+" : String(n));
  * What a kind string is called (owner's list). Unknown kinds — "test", "note", whatever a later
  * module adds — are "Other". The kind strings are the ones the modules send to notify():
  * followups.server.ts, notify.server.ts, ticket-events.server.ts, tasks-notify.server.ts,
- * storms.server.ts, leads.server.ts, service-field.functions.ts.
+ * storms.server.ts, leads.server.ts, service-field.functions.ts, bids-notify.server.ts.
  */
 export const KIND_LABELS: Readonly<Record<string, string>> = {
   assigned: "Assigned",
@@ -154,8 +154,11 @@ export const KIND_LABELS: Readonly<Record<string, string>> = {
   task: "Task",
   task_today: "Task",
   task_overdue: "Task",
-  // "Bid due tomorrow" (bids-notify.server.ts; owner, Oct 12).
+  // "Bid due tomorrow" (bids-notify.server.ts; owner, Oct 12), the past-due repeat and the
+  // estimator's own "Remind me on" (owner, Oct 13; Admin › Reminders › Bids).
   bid_due: "Bid due",
+  bid_overdue: "Bid past due",
+  bid_reminder: "Bid reminder",
   storm: "Storm",
   lead: "Lead",
   bid: "Lead",
@@ -182,6 +185,8 @@ export const KIND_LABEL_ORDER: readonly string[] = [
   "Mention",
   "Task",
   "Bid due",
+  "Bid past due",
+  "Bid reminder",
   "Storm",
   "Lead",
   "Reassigned",

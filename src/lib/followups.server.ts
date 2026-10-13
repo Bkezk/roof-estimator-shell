@@ -18,6 +18,7 @@
  * rules run here with direct writes, as before.
  */
 import type { Database } from "@/integrations/supabase/types";
+import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 type Settings = {
   opportunity_close_days: number;
@@ -25,6 +26,9 @@ type Settings = {
   opportunity_every_days: number;
   ticket_first_days: number;
   ticket_every_days: number;
+  /** Admin › Reminders › Bids (owner, Oct 13; read by bids-notify.server.ts). */
+  bid_due_notice_days: number;
+  bid_overdue_every_days: number | null;
 };
 
 export async function crmSettings(admin: Client): Promise<Settings> {
@@ -37,6 +41,7 @@ export async function crmSettings(admin: Client): Promise<Settings> {
       opportunity_every_days: 7,
       ticket_first_days: 1,
       ticket_every_days: 3,
+      ...BID_REMINDER_DEFAULTS,
     }
   );
 }

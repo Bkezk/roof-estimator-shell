@@ -141,12 +141,17 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
 
   it("fires once for a draft due tomorrow — to its maker, through notify(), stamped — and not again", async () => {
     const client = world([bid()]);
+    // Oct 13: the counts carry the three rules' own numbers and a list of passes that threw.
     expect(await run(client)).toEqual({
       bids_checked: 1,
       bids_notified: 1,
       bids_silent: 0,
       bids_errors: 0,
       bids_skipped: 0,
+      bids_due: 1,
+      bids_overdue: 0,
+      bids_reminders: 0,
+      pass_errors: [],
     });
     expect(inbox()).toHaveLength(1);
     expect(inbox()[0]).toMatchObject({
@@ -179,6 +184,10 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
       bids_silent: 0,
       bids_errors: 0,
       bids_skipped: 0,
+      bids_due: 0,
+      bids_overdue: 0,
+      bids_reminders: 0,
+      pass_errors: [],
     });
     expect(inbox()).toEqual([]);
     for (const id of ["later", "sub", "won", "lost", "gone", "undated"])
@@ -323,23 +332,29 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("stamp had already moved"));
     log.mockRestore();
   });
-  it("reads with the admin client as the task notices do, and selects drafts due by tomorrow", () => {
+  it("reads with the admin client as the task notices do, and selects drafts due within the setting's days (Oct 13: was fixed at tomorrow)", () => {
     const src = read("src/lib/bids-notify.server.ts");
     expect(src).toContain("const admin = await serverClient(sb);");
     expect(src).toContain("const today = localYmd(now, TASK_TZ);");
     expect(src).toContain('.eq("status", "draft")');
     expect(src).toContain('.is("notified_due_at", null)');
-    expect(src).toContain('.lte("due_date", bidDayPlus(today, 1))');
+    expect(src).toContain("const daysBefore = settings.bid_due_notice_days;");
+    expect(src).toContain('.lte("due_date", bidDayPlus(today, daysBefore))');
+    expect(src).not.toContain("bidDayPlus(today, 1)");
+    expect(src).toContain("bidDueNoticeDue(b, today, daysBefore)");
     expect(src).toContain("await notify([b.created_by], msg, admin);");
-    // B2: the claim before the send, the put-back after a failure, both conditional.
+    // B2: the claim before the send, the put-back after a failure, both conditional — on the
+    // rule's own stamp column, where it still holds what this pass read (null, or the last stamp).
     const claim = src.indexOf("async function claimBidNotice");
     const unclaim = src.indexOf("async function unclaimBidNotice");
-    expect(src.slice(claim, unclaim)).toContain('.is("notified_due_at", null)');
-    expect(src.slice(unclaim)).toContain('.eq("notified_due_at", stamp)');
-    expect(src.indexOf("if (!(await claimBidNotice(admin, b.id, stamp)))")).toBeLessThan(
+    expect(src.slice(claim, unclaim)).toContain(
+      '(prev === null ? q.is(col, null) : q.eq(col, prev)).select("id")',
+    );
+    expect(src.slice(unclaim)).toContain(".eq(col, stamp)");
+    expect(src.indexOf("if (!(await claimBidNotice(admin, b.id, col, was, stamp)))")).toBeLessThan(
       src.indexOf("await notify([b.created_by], msg, admin);"),
     );
-    expect(src).toContain("await unclaimBidNotice(admin, b.id, stamp, errText(e));");
+    expect(src).toContain("await unclaimBidNotice(admin, b.id, col, was, stamp, errText(e));");
     expect(src).toContain("bids_skipped: number;");
   });
 });

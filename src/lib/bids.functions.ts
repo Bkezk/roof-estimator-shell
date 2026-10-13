@@ -3,7 +3,13 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
-import { asBidStatus, BID_STATUSES, bidDueDateProblem, bidStatusStamps } from "@/lib/bid-status";
+import {
+  asBidStatus,
+  BID_STATUSES,
+  bidDueDateProblem,
+  bidReminderColumns,
+  bidStatusStamps,
+} from "@/lib/bid-status";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
@@ -105,6 +111,20 @@ const saveBidSchema = z.object({
    * (bids-folders.ts normalizeFolder: blank → null = unfiled). Absent = leave as is.
    */
   folder: folderText.nullable().optional(),
+  /**
+   * The estimator's own reminder (bids.reminder_on / reminder_note; owner, Oct 13: "set up a
+   * custom reminder on there as well on setup"). Absent = leave as is; a day sets it (the note
+   * with it, trimmed, at most BID_REMINDER_NOTE_MAX); null clears the date AND the note
+   * (bid-status.ts bidReminderColumns). The pass (bids-notify.server.ts) sends "Bid reminder:
+   * <name>" with the note on that day, whatever the status, and stamps reminded_at; changing the
+   * date clears the stamp (the trigger), so the box can be set again.
+   */
+  reminderOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "The reminder day must be a day (YYYY-MM-DD)")
+    .nullable()
+    .optional(),
+  reminderNote: z.string().max(400).nullable().optional(),
   /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
   sessionKey: z.string().min(8).max(80).optional(),
   /**
@@ -154,6 +174,7 @@ export const saveBid = createServerFn({ method: "POST" })
       ...(data.siteId !== undefined ? { site_id: data.siteId } : {}),
       ...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),
       ...(data.folder !== undefined ? { folder: normalizeFolder(data.folder) } : {}),
+      ...bidReminderColumns(data.reminderOn, data.reminderNote),
     };
     if (data.id) {
       const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);

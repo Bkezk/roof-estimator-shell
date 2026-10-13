@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 import { easternYmd } from "@/lib/field-day";
 import {
@@ -492,6 +493,10 @@ const settingsSchema = z.object({
   opportunity_untouched_days: z.number().int().min(0).max(365),
   // Owner, Oct 7: nobody's work is flagged Overdue on Work Overview after this many days.
   unassigned_overdue_days: z.number().int().min(0).max(365),
+  // Owner, Oct 13 (Admin › Reminders › Bids): the "Bid due" notice N days before the due date
+  // (0 = on the due day), and the past-due repeat every N days — null = never.
+  bid_due_notice_days: z.number().int().min(0).max(BID_DUE_NOTICE_DAYS_MAX),
+  bid_overdue_every_days: z.number().int().min(1).max(BID_OVERDUE_EVERY_DAYS_MAX).nullable(),
   escalate_to_admins: z.boolean(),
   escalate_user_ids: z.array(z.string().uuid()).max(50),
 });
@@ -522,7 +527,10 @@ export interface ReminderRunResult {
   escalated: number;
   /** Task notices sent (created / due today / overdue; tasks-notify.server.ts). */
   taskNotices: number;
-  /** "Bid due tomorrow" notices sent (bids-notify.server.ts; owner, Oct 12). */
+  /**
+   * Bid notices sent (bids-notify.server.ts; owner, Oct 12 / 13): "Bid due", "Bid past due" and
+   * the estimator's own "Bid reminder" together.
+   */
   bidNotices: number;
   /** Sends that failed, reminders, task and bid notices together; each retries next pass. */
   failed: number;
@@ -663,8 +671,9 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
       console.error("Task notice dispatch failed", e);
       out.taskProblem = errText(e);
     }
-    // "Bid due tomorrow" (owner, Oct 12), the same client, right after the task notices, on its
-    // own: a task pass that threw does not stop it.
+    // "Bid due tomorrow" (owner, Oct 12) — and, Oct 13, the past-due repeat and the estimator's
+    // own "Remind me on" (the same module, each inside its own try/catch) — the same client,
+    // right after the task notices, on its own: a task pass that threw does not stop it.
     try {
       if (!hasServiceRole()) out.bidProblem = TASK_NOTICES_NEED_KEY;
       else {

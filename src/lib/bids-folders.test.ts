@@ -304,7 +304,7 @@ describe("the wiring", () => {
     expect(est).toContain('setBidFolder(loadedBid.folder ?? "")');
     expect(est).toContain("folder: normalizeFolder(bidFolder),");
     // A folder change is an unsaved change like a link change.
-    expect(est).toContain('|${normalizeFolder(bidFolder) ?? ""}`');
+    expect(est).toContain('|${normalizeFolder(bidFolder) ?? ""}|');
   });
   it("the server stores it: saveBid takes folder, setBidFolder / renameBidFolder / listBidFolders exist, listBids returns the row", () => {
     const fns = here("./bids.functions.ts");

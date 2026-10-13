@@ -157,12 +157,15 @@ import {
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import {
-  BID_STATUSES,
-  BID_NO_DUE_HINT,
-  STATUS_LABELS,
   asBidStatus,
+  BID_NO_DUE_HINT,
+  BID_REMINDER_NOTE_MAX,
+  BID_REMINDER_NOTE_PLACEHOLDER,
+  BID_STATUSES,
   bidDueDateProblem,
+  bidRemindedLine,
   fromOpportunityLine,
+  STATUS_LABELS,
   type BidStatus,
 } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-store";
@@ -656,6 +659,12 @@ function EstimatePage() {
   // The folder the bid is filed under (bids.folder, on the row; owner, Oct 13): a label the user
   // assigns on Setup › Bid Info — the customer's name is only suggested. "" = unfiled.
   const [bidFolder, setBidFolder] = useState("");
+  // The estimator's own reminder (bids.reminder_on / reminder_note, on the row; owner, Oct 13:
+  // "can we have users who set a bid set up a custom reminder on there as well on setup?"):
+  // "" = none. The note rides with the date; clearing the date clears it. Sent on that day to
+  // whoever started the bid, whatever its status (bids-notify.server.ts).
+  const [bidReminderOn, setBidReminderOn] = useState("");
+  const [bidReminderNote, setBidReminderNote] = useState("");
   // Set when a save was refused for want of a due date: the box is ringed until it is filled.
   const [dueDateMissing, setDueDateMissing] = useState(false);
   const dueDateRef = useRef<HTMLInputElement>(null);
@@ -1173,6 +1182,8 @@ function EstimatePage() {
     setLostReason(loadedBid.lost_reason ?? null);
     setBidDueDate(loadedBid.due_date ?? "");
     setBidFolder(loadedBid.folder ?? "");
+    setBidReminderOn(loadedBid.reminder_on ?? "");
+    setBidReminderNote(loadedBid.reminder_note ?? "");
     setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
@@ -1218,6 +1229,8 @@ function EstimatePage() {
       setBidStatus("draft");
       setLostReason(null);
       setBidDueDate("");
+      setBidReminderOn("");
+      setBidReminderNote("");
       // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.
       toast.success(`Combined ${sources.length} bids — review the steps in the notice, then save.`);
     } catch (e) {
@@ -1376,6 +1389,8 @@ function EstimatePage() {
       setBidStatus("draft");
       setLostReason(null);
       setBidDueDate("");
+      setBidReminderOn("");
+      setBidReminderNote("");
       if (takeoffRow.building_id) setLinkedBuildingId(takeoffRow.building_id);
       // Unsaved on purpose, like a combined bid: nothing exists until the estimator saves.
       toast.success(
@@ -1433,6 +1448,8 @@ function EstimatePage() {
       setBidStatus("draft");
       setLostReason(null);
       setBidDueDate("");
+      setBidReminderOn("");
+      setBidReminderNote("");
       // Unsaved on purpose, like a bid from a takeoff: nothing exists until the estimator saves.
       toast.success(
         `Bid started from PlanSwift: ${seed.sections.length} section${seed.sections.length === 1 ? "" : "s"}. Read the notice for what still needs placing, then save.`,
@@ -1761,9 +1778,9 @@ function EstimatePage() {
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
   // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
-  // The profile link and the folder live on the row, not in `saved`; they count as edits all the
-  // same.
-  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(bidFolder) ?? ""}`;
+  // The profile link, the folder and the reminder live on the row, not in `saved`; they count as
+  // edits all the same.
+  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(bidFolder) ?? ""}|${bidReminderOn}|${bidReminderOn ? bidReminderNote.trim() : ""}`;
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
@@ -2263,6 +2280,9 @@ function EstimatePage() {
           dueDate: bidDueDate || null,
           // So does the folder (owner, Oct 13; null = unfiled).
           folder: normalizeFolder(bidFolder),
+          // And the estimator's own reminder (owner, Oct 13): null clears the date and the note.
+          reminderOn: bidReminderOn || null,
+          reminderNote: bidReminderOn ? bidReminderNote.trim() || null : null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
           // Only a link changed in this session is sent (null unlinks); absent = left as is.
@@ -6310,6 +6330,50 @@ function EstimatePage() {
             )}
           </div>
           {exportMenu({ size: "sm", className: "h-9" })}
+        </div>
+        {/* Owner, Oct 13: "can we have users who set a bid set up a custom reminder on there as
+            well on setup?" — the row's reminder_on / reminder_note, under Bid due. On that day
+            whoever started the bid gets "Bid reminder: <name>" with the note, whatever the status
+            (bids-notify.server.ts); once it went, "Reminded <day>" shows here and a new day can be
+            picked (changing the date re-arms it). Clearing the date clears the note. */}
+        <div className="flex flex-wrap items-end gap-2" data-field="bid-reminder">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="bid-reminder-on" className="text-xs">
+              Remind me on
+            </Label>
+            <Input
+              id="bid-reminder-on"
+              type="date"
+              className="h-9 w-[9.5rem]"
+              value={bidReminderOn}
+              onChange={(e) => {
+                setBidReminderOn(e.target.value);
+                if (!e.target.value) setBidReminderNote("");
+              }}
+              disabled={readOnly}
+              title="A day to be reminded about this bid, whatever its status. Blank = no reminder."
+            />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label htmlFor="bid-reminder-note" className="text-xs">
+              About
+            </Label>
+            <Input
+              id="bid-reminder-note"
+              className="h-9"
+              value={bidReminderNote}
+              maxLength={BID_REMINDER_NOTE_MAX}
+              placeholder={BID_REMINDER_NOTE_PLACEHOLDER}
+              onChange={(e) => setBidReminderNote(e.target.value)}
+              disabled={readOnly || !bidReminderOn}
+              title="What the reminder is about — the notice's text."
+            />
+          </div>
+          {loadedBid?.reminded_at && (loadedBid.reminder_on ?? "") === bidReminderOn && (
+            <p className="w-full text-[11px] text-muted-foreground" data-line="bid-reminded">
+              {bidRemindedLine(loadedBid.reminded_at)} — pick a new day for another reminder.
+            </p>
+          )}
         </div>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">

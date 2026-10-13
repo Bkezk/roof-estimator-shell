@@ -40,10 +40,13 @@ import {
   setCrmSettings,
   type CrmSettingsInput,
 } from "@/lib/followups.functions";
+import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
+import { blankOrNumber } from "@/lib/number-field-view";
 import { listAssigneeOptions } from "@/lib/opportunities.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -69,11 +72,26 @@ const whenTime = (iso: string) =>
 type NumericKey = {
   [K in keyof CrmSettingsInput]-?: CrmSettingsInput[K] extends number ? K : never;
 }[keyof CrmSettingsInput];
+/**
+ * A number of days OR null = never (owner, Oct 13: the past-due repeat on bids). Its box starts
+ * blank when null; typing a number sets it; clearing the box saves null again — no 0 stands in.
+ */
+type NeverKey = {
+  [K in keyof CrmSettingsInput]-?: null extends CrmSettingsInput[K]
+    ? number extends CrmSettingsInput[K]
+      ? K
+      : never
+    : never;
+}[keyof CrmSettingsInput];
 type Field = {
-  key: NumericKey;
+  key: NumericKey | NeverKey;
   label: string;
   min: number;
-  group: "opportunity" | "ticket" | "untouched" | "unassigned";
+  /** Upper bound (365 when unsaid). */
+  max?: number;
+  /** A blank box means never (stored null); a number must still be within min..max. */
+  never?: boolean;
+  group: "opportunity" | "ticket" | "bids" | "untouched" | "unassigned";
 };
 const FIELDS: Field[] = [
   {
@@ -96,6 +114,23 @@ const FIELDS: Field[] = [
     group: "ticket",
   },
   { key: "ticket_every_days", label: "Then every N days", min: 1, group: "ticket" },
+  // Owner, Oct 13 ("Where are the bid reminders set? Is it in Reminders like opps and service,
+  // now that bids have due dates?"): bids-notify.server.ts reads these two.
+  {
+    key: "bid_due_notice_days",
+    label: "Notice N days before a bid is due",
+    min: 0,
+    max: BID_DUE_NOTICE_DAYS_MAX,
+    group: "bids",
+  },
+  {
+    key: "bid_overdue_every_days",
+    label: "Then every N days while a draft is past due (blank = never)",
+    min: 1,
+    max: BID_OVERDUE_EVERY_DAYS_MAX,
+    never: true,
+    group: "bids",
+  },
   {
     key: "ticket_untouched_days",
     label: "Ticket counts as untouched after N days with no contact",
@@ -124,6 +159,8 @@ const EMPTY: CrmSettingsInput = {
   ticket_untouched_days: 0,
   opportunity_untouched_days: 0,
   unassigned_overdue_days: 0,
+  bid_due_notice_days: 1,
+  bid_overdue_every_days: null,
   escalate_to_admins: false,
   escalate_user_ids: [],
 };
@@ -159,6 +196,9 @@ export function RemindersSettings() {
         ticket_untouched_days: s.ticket_untouched_days,
         opportunity_untouched_days: s.opportunity_untouched_days,
         unassigned_overdue_days: s.unassigned_overdue_days ?? 1,
+        // Before 20261013160000 is applied the row has neither: the day before, never past due.
+        bid_due_notice_days: s.bid_due_notice_days ?? 1,
+        bid_overdue_every_days: s.bid_overdue_every_days ?? null,
         escalate_to_admins: s.escalate_to_admins,
         escalate_user_ids: s.escalate_user_ids ?? [],
       });
@@ -177,7 +217,11 @@ export function RemindersSettings() {
       if (!all.some((u) => u.id === id)) all.push({ id, name: "Former user" });
     return all;
   }, [users.data, draft.escalate_user_ids]);
-  const invalid = FIELDS.filter((f) => !Number.isInteger(draft[f.key]) || draft[f.key] < f.min);
+  const invalid = FIELDS.filter((f) => {
+    const v = draft[f.key];
+    if (v === null) return !f.never; // blank: fine only where blank means never
+    return !Number.isInteger(v) || v < f.min || v > (f.max ?? 365);
+  });
 
   const save = useMutation({
     mutationFn: () => setFn({ data: draft }),
@@ -206,15 +250,26 @@ export function RemindersSettings() {
   // Owner, Oct 9 ("optimize and clarify this page a bit, its layout is unusual and spaced out"):
   // the numbers sit inside short sentences, one compact card, four sections side by side with
   // their help instead of a two-column grid of boxed sub-cards.
-  const field = (key: NumericKey) => {
+  const field = (key: Field["key"]) => {
     const f = FIELDS.find((x) => x.key === key)!;
+    const v = draft[key];
+    if (f.never)
+      return (
+        <DaysOrNever
+          key={key}
+          field={f}
+          value={v}
+          invalid={invalid.includes(f)}
+          onChange={(n) => setDraft((d) => ({ ...d, [key]: n }))}
+        />
+      );
     return (
       <Days
         key={key}
         field={f}
-        value={draft[key]}
+        value={v ?? 0}
         invalid={invalid.includes(f)}
-        onChange={(v) => setDraft((d) => ({ ...d, [key]: v }))}
+        onChange={(n) => setDraft((d) => ({ ...d, [key]: n }))}
       />
     );
   };
@@ -224,7 +279,7 @@ export function RemindersSettings() {
   const submit = () => {
     if (invalid.length) {
       toast.error(
-        `Check the numbers: ${invalid.map((f) => `“${f.label}” must be at least ${f.min}`).join("; ")}`,
+        `Check the numbers: ${invalid.map((f) => `“${f.label}” must be a whole number from ${f.min} to ${f.max ?? 365}`).join("; ")}`,
       );
       return;
     }
@@ -311,6 +366,27 @@ export function RemindersSettings() {
                 <Line label="First reminder">On the due date.</Line>
                 <Line label="After that">
                   Every {field("ticket_every_days")} days until the ticket is Done.
+                </Line>
+              </Section>
+
+              {/* Owner, Oct 13: "Where are the bid reminders set? Is it in Reminders like opps and
+                  service, now that bids have due dates?" — the "Bid due" notice's lead time (it
+                  was fixed at the day before) and a past-due repeat that is off until a number is
+                  typed (bids-notify.server.ts; rules in bid-status.ts). */}
+              <Section
+                title="Bids"
+                help="Sent to whoever started the bid. A submitted, won or lost bid is never reminded."
+              >
+                <Line label="Notice">
+                  {field("bid_due_notice_days")} days before a bid is due (0 = on the due day).
+                </Line>
+                <Line label="Past due">
+                  Then every {field("bid_overdue_every_days")} days while a draft is past due. Leave
+                  the box blank to never remind past due.
+                </Line>
+                <Line label="Custom reminder">
+                  Whoever sets up a bid can also pick a “Remind me on” day on its Setup; that one
+                  goes out on the day, whatever the bid’s status.
                 </Line>
               </Section>
 
@@ -629,6 +705,35 @@ function Line(props: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * A number of days OR blank = never (owner, Oct 13: "Then every N days while a draft is past
+ * due"). The box shows nothing while the setting is null — no 0 stands in for never — and
+ * clearing it saves null again (number-field-view.ts blankOrNumber).
+ */
+function DaysOrNever(props: {
+  field: Field;
+  value: number | null;
+  invalid: boolean;
+  onChange: (v: number | null) => void;
+}) {
+  return (
+    <span className="inline-block w-16">
+      <Input
+        type="number"
+        title={props.field.label}
+        data-field={props.field.key}
+        value={props.value ?? ""}
+        min={props.field.min}
+        max={props.field.max ?? 365}
+        step="1"
+        inputMode="numeric"
+        className={`h-8 text-center ${props.invalid ? "border-destructive" : ""}`}
+        onChange={(e) => props.onChange(blankOrNumber(e.target.value))}
+      />
+    </span>
+  );
+}
+
 /** A number of days, inline in its sentence; the full label is its accessible name. */
 function Days(props: {
   field: Field;
@@ -642,7 +747,7 @@ function Days(props: {
         title={props.field.label}
         value={props.value}
         min={0}
-        max={365}
+        max={props.field.max ?? 365}
         inputMode="numeric"
         invalid={props.invalid}
         className="h-8 text-center"
