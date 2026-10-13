@@ -393,7 +393,13 @@ describe("planCenterpointImport: companies", () => {
           property("5", "Shop", "Boyd Cat", { City: "Corbin" }),
           property("6", "Yard", "Boyd Cat", { City: "Nowhere" }),
         ],
-        [],
+        [
+          // Contacts carry their company's address: that tells the two apart (owner, Oct 13:
+          // "so are the boyd cat different locations?").
+          contact("21", "Silas Young", "Boyd Cat", { Address: "9 Hill Street", City: "Corbin" }),
+          contact("22", "Ryan Corbin", "Boyd Cat", { Address: "1 River Rd", City: "Louisville" }),
+          contact("23", "Nobody Known", "Boyd Cat", { Address: "", City: "" }),
+        ],
       ),
       lookups(),
     );
@@ -408,6 +414,17 @@ describe("planCenterpointImport: companies", () => {
     expect(plan.sitesToInsert.find((s) => s.row.name === "Shop")?.companyCpId).toBe("2");
     expect(plan.sitesToInsert.find((s) => s.row.name === "Yard")?.companyCpId).toBe("1");
     expect(plan.report.counts.properties.ambiguousCompany).toBe(1);
+    // Contacts: by the company address on the contact ("Street" = "St"), else flagged to the first.
+    const byName = (n: string) => plan.contactsToInsert.find((c) => c.row.name === n)?.companyCpId;
+    expect(byName("Silas Young")).toBe("2");
+    expect(byName("Ryan Corbin")).toBe("1");
+    expect(byName("Nobody Known")).toBe("1");
+    expect(plan.report.counts.contacts.ambiguousCompany).toBe(1);
+    expect(
+      plan.report.flags[
+        "contacts attached to the first of several same-name companies (check)"
+      ]?.map((f) => f.id),
+    ).toEqual(["23"]);
   });
   it("takes the account's contact info from the earliest contact that has any", () => {
     const plan = planCenterpointImport(

@@ -191,6 +191,9 @@ export interface ContactRow {
   id: string;
   name: string;
   company: string;
+  /** The company's address and city as CenterPoint copies them onto the contact: they tell two same-name companies apart (Boyd Cat Louisville / Corbin). */
+  address: string;
+  city: string;
   position: string;
   office: string;
   ext: string;
@@ -253,6 +256,8 @@ export function readContacts(rows: string[][]): ContactRow[] {
     id: col(r, "ID"),
     name: col(r, "Name"),
     company: col(r, "Company"),
+    address: col(r, "Address"),
+    city: col(r, "City"),
     position: col(r, "Position"),
     office: col(r, "Office"),
     ext: col(r, "Ext"),
@@ -659,6 +664,7 @@ export interface ImportReport {
       skippedNames: number;
       folded: number;
       noCompany: number;
+      ambiguousCompany: number;
     };
     clamps: number;
   };
@@ -798,6 +804,7 @@ export function planCenterpointImport(files: ImportFiles, lookups: ImportLookups
       skippedNames: 0,
       folded: 0,
       noCompany: 0,
+      ambiguousCompany: 0,
     },
     clamps: 0,
   };
@@ -870,14 +877,25 @@ export function planCenterpointImport(files: ImportFiles, lookups: ImportLookups
         );
       }
 
-  /** The kept company a property / contact belongs to, by company name (ci). */
+  /**
+   * The kept company a property / contact belongs to, by company name (ci). Several companies
+   * with that name (Boyd Cat Louisville and Corbin): the one whose address matches `address`
+   * (a contact carries its company's address), else the one in `city`, else the most recently
+   * active, flagged.
+   */
   const companyFor = (
     companyName: string,
     city: string | null,
+    address: string | null = null,
   ): { kept: Kept<CompanyRow> | null; ambiguous: boolean } => {
     const g = companiesByName.get(nameKey(companyName));
     if (!g || g.length === 0) return { kept: null, ambiguous: false };
     if (g.length === 1) return { kept: g[0] as Kept<CompanyRow>, ambiguous: false };
+    if (address && addressKey(address)) {
+      const sameAddress = g.filter((k) => addressKey(k.row.address) === addressKey(address));
+      if (sameAddress.length === 1)
+        return { kept: sameAddress[0] as Kept<CompanyRow>, ambiguous: false };
+    }
     if (city) {
       const sameCity = g.filter((k) => nameKey(k.row.city) === nameKey(city));
       if (sameCity.length === 1) return { kept: sameCity[0] as Kept<CompanyRow>, ambiguous: false };
@@ -975,7 +993,7 @@ export function planCenterpointImport(files: ImportFiles, lookups: ImportLookups
   for (const c of [...contacts].sort(byId)) {
     const placeholder = isPlaceholderName(c.name);
     if (placeholder) counts.contacts.skippedNames++;
-    const { kept } = companyFor(c.company, null);
+    const { kept, ambiguous } = companyFor(c.company, c.city, c.address);
     if (!kept) {
       counts.contacts.noCompany++;
       flag(
@@ -985,6 +1003,15 @@ export function planCenterpointImport(files: ImportFiles, lookups: ImportLookups
         `company "${c.company}"`,
       );
       continue;
+    }
+    if (ambiguous && !placeholder) {
+      counts.contacts.ambiguousCompany++;
+      flag(
+        "contacts attached to the first of several same-name companies (check)",
+        c.id,
+        c.name,
+        `company "${c.company}" → ${kept.row.id} (${kept.row.city})`,
+      );
     }
     const em = normalizeEmail(c.email);
     if (em.looksWrong) badEmails.push({ id: c.id, name: c.name, issue: `email "${c.email}"` });
@@ -1407,6 +1434,7 @@ export function formatImportReport(plan: ImportPlan): string {
   out.push(`  ${c.contacts.skippedNames} named N/A (skipped)`);
   out.push(`  ${c.contacts.folded} folded into a twin (same company, name and email or phone)`);
   out.push(`  ${c.contacts.noCompany} whose company is not in the Companies file (not imported)`);
+  out.push(`  ${c.contacts.ambiguousCompany} attached to the first of several same-name companies`);
   out.push("", `${plural(c.clamps, "text value")} shortened to the portal's limits.`);
   h("Account managers not found (set to none)");
   for (const m of r.unmatchedManagers)
