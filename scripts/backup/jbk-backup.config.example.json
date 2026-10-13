@@ -2,18 +2,9 @@
   "DestinationRoot": "X:\\JBK Portal Backups",
   "AppUrl": "https://PASTE-THE-PORTAL-ADDRESS-HERE",
   "BackupSecret": "PASTE-THE-SAME-PASSWORD-YOU-PUT-IN-LOVABLE-SECRETS",
-  "Buckets": [
-    "service",
-    "takeoffs"
-  ],
-  "KeyTables": [
-    "bids",
-    "service_jobs",
-    "crm_accounts",
-    "crm_sites",
-    "invoices",
-    "profiles"
-  ],
+  "RestoreSecret": "PASTE-A-DIFFERENT-PASSWORD-SET-AS-RESTORE_SECRET-IN-LOVABLE",
+  "Buckets": ["service", "takeoffs"],
+  "KeyTables": ["bids", "service_jobs", "crm_accounts", "crm_sites", "invoices", "profiles"],
   "SkipTables": [
     "address_points",
     "buildings",

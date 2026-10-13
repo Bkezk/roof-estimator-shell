@@ -250,6 +250,38 @@ export const setDefaultBillRate = createServerFn({ method: "POST" })
     };
   });
 
+const setPasswordSchema = z.object({
+  id: z.string().uuid(),
+  password: z.string().min(8, "Password must be at least 8 characters").max(200),
+});
+
+/**
+ * An admin sets a user's password (owner, Oct 13: there is no "Forgot password" on the sign-in
+ * page and the only password change is the user's own Account page, so a restored account — or
+ * anyone locked out — needs an admin to set one). Admin only, through the service-role admin
+ * client (auth.admin.updateUserById); the password is used for that one call and is never
+ * logged, audited or stored anywhere else. The user may change it on their Account page after.
+ */
+export const setUserPassword = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data) => setPasswordSchema.parse(data))
+  .handler(async ({ data, context }): Promise<{ id: string }> => {
+    await assertAdmin(context.supabase, context.userId);
+    const { data: target, error: readErr } = await context.supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!target) throw new Error("User not found");
+    const supabaseAdmin = await admin();
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
+      password: data.password,
+    });
+    if (error) throw new Error(error.message);
+    return { id: data.id };
+  });
+
 const deleteUserSchema = z.object({ id: z.string().uuid() });
 
 export const deleteUser = createServerFn({ method: "POST" })

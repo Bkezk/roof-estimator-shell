@@ -17,12 +17,12 @@ it makes is a read, and the portal logs every call (allowed or refused) with the
 
 What a backup folder holds (`X:\JBK Portal Backups\backup-2026-10-07\`):
 
-| What | Where |
-| --- | --- |
-| Every table of the portal — bids, tickets, customers, properties, contacts, opportunities, invoices, settings, the audit log, inventory, repairs, materials — as JSON, 1,000 rows a file | `db\<table>\page-0001.json …` |
-| The column types of every table | `db\schema.json` |
-| Ticket photos, signatures, receipts, invoice PDFs, takeoff plans — the files as uploaded | `storage\service\…`, `storage\takeoffs\…` |
-| When, how big, the row count of every table, how many files | `manifest.json` |
+| What                                                                                                                                                                                     | Where                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Every table of the portal — bids, tickets, customers, properties, contacts, opportunities, invoices, settings, the audit log, inventory, repairs, materials — as JSON, 1,000 rows a file | `db\<table>\page-0001.json …`             |
+| The column types of every table                                                                                                                                                          | `db\schema.json`                          |
+| Ticket photos, signatures, receipts, invoice PDFs, takeoff plans — the files as uploaded                                                                                                 | `storage\service\…`, `storage\takeoffs\…` |
+| When, how big, the row count of every table, how many files                                                                                                                              | `manifest.json`                           |
 
 In the root: `backup.log` (every run), `status.json` (the last run), `weekly\` (Sunday copies of
 the tables, the newest five), and `LAST-BACKUP-FAILED.txt` only while the last run has failed.
@@ -179,7 +179,157 @@ Task Scheduler on the server → Create Task (not "Basic"):
 
 ## Step 8 — Restoring
 
-A restore goes into a fresh portal database, never over the live one, and is a conversation with
-Claude or whoever is helping at the time: the JSON pages are loaded table by table through the
-same data API, then the storage files are uploaded back. Test it once a quarter by opening a
-`db\bids\page-0001.json` and a photo from the newest slot; if both open, the backup is readable.
+Owner, Oct 13: "go ahead and build it [a restore tool] … it needs to be as robust and safe, and
+get all info where it needs to go accurately." The restore is the sister script,
+`scripts/backup/jbk-restore.ps1`, next to the backup script. It puts a backup slot back through
+the portal's **restore door**, `<portal address>/api/restore`, which answers only to a second
+password, `RESTORE_SECRET`. It never holds the database's master key, only ever POSTs to that one
+address, reads the slot folder and writes nothing on the share but `restore.log`,
+`restore-report.txt` and `restore-report.json` inside that slot. It never deletes a row or a
+file, anywhere.
+
+### When to restore where
+
+| Situation                                                                                            | Where                                                                                         | Mode                                |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Rows were deleted or mangled by mistake today (a bad import, a wrong click); everything else is fine | **The live project.** Rows the live project lacks come back; every existing row is left alone | `skip` (the default)                |
+| A table's rows are wrong and last night's are right                                                  | The live project, naming the table: `-Tables bids`                                            | `replace`, with `-ReplaceConfirmed` |
+| The project is gone or unusable (Lovable project lost, database reset)                               | **A fresh Lovable project** made from this repository, after its migrations have run          | `skip`, with `-CreateUsers`         |
+| The quarterly test                                                                                   | A scratch Lovable project, deleted afterwards                                                 | `skip`, with `-CreateUsers -Yes`    |
+
+`skip` adds what is missing and touches nothing that exists. `replace` overwrites rows with the
+same primary key with the backup's values — rows the backup does not know still stay. Neither
+mode deletes.
+
+### Set the restore password (once)
+
+1. Make up a second password, at least 24 characters, **different from the backup password**
+   (one reads, the other writes; the script refuses a config where they are equal).
+2. Lovable → your project → Cloud → Secrets → Add secret: name `RESTORE_SECRET`, value the
+   password. Publish the portal.
+3. On the server, add it to `C:\JBK\backup\jbk-backup.config.json`:
+   `"RestoreSecret": "that password"`. The restore script reads the backup's config.
+
+Without the secret the door answers "Restores are off: RESTORE_SECRET is not set in Lovable
+Cloud › Secrets" and nothing can be written through it. You may leave it unset between restores
+and set it only when you need one; a wrong password is "Wrong restore password", logged by the
+portal with the caller's address.
+
+### Secrets are not in the backup
+
+The backup holds every table (the `app_secrets` table included — it carries only the push-signing
+key pair the app generated for itself, and restoring it keeps every phone's push subscription
+working) and every stored file. It does **not** hold the secrets in Lovable Cloud › Secrets,
+because they are not in the database: `RESEND_API_KEY` (email), `GOOGLE_MAPS_API_KEY`,
+`CRON_SECRET`, `BACKUP_SECRET`, `RESTORE_SECRET`, and the Supabase keys Lovable sets itself.
+Keep a private note — a password manager entry, never a file in the repository — of the secret
+**names** and where each value comes from (Resend dashboard, Google Cloud console, the ones you
+made up), never the values. A fresh project needs them set again before email, maps, the cron
+jobs or the backup work. Passwords are not in any backup either (see "User accounts" below).
+
+### The commands
+
+On the server, PowerShell in `C:\JBK\backup`. Every run needs `-Project`: the portal's label,
+"company name @ Supabase project ref". Run once with anything to see it printed:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+cd C:\JBK\backup
+.\jbk-restore.ps1 -Slot latest -Project x
+#  → Portal project: 'JBK Roofing @ abcdefghijkl' … STOP: you named 'x'
+```
+
+**1. Dry run** (the default — nothing is written; a report is filed in the slot folder):
+
+```powershell
+.\jbk-restore.ps1 -Slot latest -Project 'JBK Roofing @ abcdefghijkl'
+```
+
+**2. Read `restore-report.txt`** in the slot folder (also printed). It ends with `RESULT: dry run
+clean` or a list of what would fail. Fix those (see the columns below) or leave the tables out
+with `-Tables`, and run the dry run again until it is clean.
+
+**3. Apply:**
+
+```powershell
+.\jbk-restore.ps1 -Slot latest -Project 'JBK Roofing @ abcdefghijkl' -Apply
+```
+
+It asks you to type the label once more; add `-Yes` to skip that (a scripted test). Other
+switches: `-Slot backup-2026-10-12` (a named slot) or `-Slot 2026-10-11-db` (a Sunday copy under
+`weekly\`, tables only); `-Tables bids,invoices`; `-Only db` / `-Only storage` / `-SkipStorage`;
+`-Mode replace -ReplaceConfirmed`; `-CreateUsers` (below). The exit code is 0 only when nothing
+was refused; `restore.log` in the slot holds every line.
+
+### User accounts (a fresh project)
+
+User logins live in Lovable Cloud's auth tables, outside the backup; the backup's `profiles`
+table carries each person's email, name, role, access and technician tick. **Passwords are in no
+backup**, ever. The script matches backup profiles to live accounts **by email**: in the live
+project the ids are the same and nothing changes; in a fresh project the new accounts get new
+ids, and the script maps every user column (who created a ticket, who is assigned, who held a
+follow-up, who authorised, every `created_by`) from the old id to the new one as the rows go in.
+The dry run lists the accounts the project lacks.
+
+Nothing in the portal makes a first admin (there is no sign-up and only an admin can add users),
+so for a fresh project the restore does it:
+
+1. Make the Lovable project from the repository and let its migrations run (the restore door is
+   one of them: `20261013100000_restore_door.sql`).
+2. Set `RESTORE_SECRET` and the other secrets from your names note. Publish.
+3. Dry run: `.\jbk-restore.ps1 -Slot latest -Project '<label>' -CreateUsers`.
+4. Apply: `.\jbk-restore.ps1 -Slot latest -Project '<label>' -Apply -CreateUsers`. Because the
+   project has no admin yet, you are asked **which restored admin signs in first** (Enter takes
+   the first one; normally your own account, the one created when the portal was set up) and for
+   that one account's **initial password**, typed twice, sent over HTTPS once and never logged or
+   written anywhere. Every other account is created with no usable password.
+5. Sign in as that admin. Admin › Users & access → the key button on each row → **Set password**,
+   then tell each person theirs (in person or by phone, not by email).
+6. People sign in and may change their password on their Account page.
+
+If the project already has an admin (a restore into the live project, or you made one in
+Lovable first), the script says so, asks for no password, and you set the others' passwords from
+Admin › Users & access as above.
+
+### What the report says
+
+The dry run's table check, one row per table — `backup rows / live rows / already live / new`:
+
+- **backup rows** — in the slot (the manifest's count); **live rows** — in the project now.
+- **already live** — backup rows whose primary key already exists live. `skip` leaves them;
+  `replace` overwrites them. **new** — rows the restore would add.
+- `WOULD FAIL` — the live project has no such table, or it gained a NOT NULL column with no
+  default that the backup lacks (every row would be refused); add that default in a migration or
+  leave the table out. `plain insert (no primary key)` — such a table is inserted plainly, so a
+  second restore adds duplicates. `not restored (deny list)` — refused on purpose (none today).
+- `ignored (no longer live): …` — columns the backup has and the table lost; dropped quietly.
+  `take their default: …` — columns the table gained since; filled by the database.
+- `FK: …` — rows pointing at a parent row that is in neither the backup nor the live project;
+  those rows are refused and listed.
+- `Users: …` — accounts the project lacks (`-CreateUsers`), ids that will be mapped, whether the
+  project has an admin yet.
+- `Storage: …` — files in the slot, how many already exist live (kept as they are, a size
+  difference is noted), how many will be uploaded.
+
+After `-Apply`: `backup rows / live rows now / inserted / replaced / skipped / refused` per table,
+the refused rows with the database's reason, the sequences reset (ticket and invoice numbers
+carry on past the restored ones), the users created, and `RESULT`.
+
+### Changes to the app never need a change here
+
+Nothing in the restore names a table or a column: the portal reads its live schema each time
+(`restore_catalog()`), the tables go in parents-first from the live foreign keys, a column the
+backup has and the table lost is ignored, a column the table gained takes its default, and the
+restore functions run with the table's triggers off so no notice, audit row or follow-up is
+re-fired. Tests in the repository (`src/lib/restore-door.test.ts`) walk every migration and fail
+if a table ever becomes un-restorable or a user-id column appears the id map would not cover.
+
+### The quarterly test restore
+
+Once a quarter, restore the newest slot into a scratch Lovable project (Lovable → New project →
+from this repository; let the migrations run; set `RESTORE_SECRET` there) with
+`-Project '<the scratch label>' -Apply -CreateUsers -Yes`, open it, check a few tickets, bids,
+customers and photos against the live portal, then delete the scratch project. A backup that
+has never been restored is a hope, not a backup. Keep the dry-run report from the live project
+too (`-Slot latest -Project '<live label>'`, no `-Apply`): it should end `dry run clean` with
+every row `already live`.

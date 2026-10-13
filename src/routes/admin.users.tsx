@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, KeyRound, Trash2, UserPlus } from "lucide-react";
 
 import {
   listUsers,
@@ -11,6 +11,7 @@ import {
   updateUserAccess,
   deleteUser,
   setDefaultBillRate,
+  setUserPassword,
   type UserProfile,
 } from "@/lib/auth.functions";
 import { RateBox } from "@/components/service/rate-box";
@@ -45,6 +46,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/admin/users")({
   head: () => ({ meta: [{ title: "Users & access — JBK Portal" }] }),
@@ -131,6 +140,86 @@ function KindPicker(props: {
   );
 }
 
+/**
+ * "Set password" (owner, Oct 13): the sign-in page has no "Forgot password" and only the user's
+ * own Account page changes a password, so an admin sets one here — for a restored account
+ * (passwords are in no backup; docs/backup/windows-server-setup.md Step 8) or anyone locked out.
+ * Password + confirm, at least 8 characters; the person may change it on their Account page.
+ */
+function SetPasswordDialog(props: {
+  user: UserProfile | null;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (id: string, password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const name = props.user ? props.user.full_name || props.user.email : "";
+  const problem =
+    password.length < 8
+      ? "At least 8 characters"
+      : password !== confirm
+        ? "The two passwords differ"
+        : null;
+  const close = () => {
+    setPassword("");
+    setConfirm("");
+    props.onClose();
+  };
+  return (
+    <Dialog open={!!props.user} onOpenChange={(open) => (open ? undefined : close())}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Set password for {name}</DialogTitle>
+          <DialogDescription>
+            They sign in with this password straight away and can change it on their Account page.
+            Tell them in person or by phone, not by email.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (problem || !props.user) return;
+            props.onSubmit(props.user.id, password);
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="set-password">New password</Label>
+            <Input
+              id="set-password"
+              type="text"
+              autoComplete="off"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="set-password-confirm">Type it again</Label>
+            <Input
+              id="set-password-confirm"
+              type="text"
+              autoComplete="off"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </div>
+          {password && problem && <p className="text-xs text-muted-foreground">{problem}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close} disabled={props.pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!!problem || props.pending}>
+              {props.pending ? "Setting…" : "Set password"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UsersPage() {
   const queryClient = useQueryClient();
   const { profile: me, refreshProfile } = useAuth();
@@ -139,6 +228,8 @@ function UsersPage() {
   const updateAccessFn = useServerFn(updateUserAccess);
   const deleteUserFn = useServerFn(deleteUser);
   const rateFn = useServerFn(setDefaultBillRate);
+  const passwordFn = useServerFn(setUserPassword);
+  const [passwordFor, setPasswordFor] = useState<UserProfile | null>(null);
 
   const { data: users, isLoading } = useQuery({
     queryKey: ["users"],
@@ -200,6 +291,16 @@ function UsersPage() {
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message || "Could not set the bill rate"),
+  });
+
+  const passwordMut = useMutation({
+    mutationFn: (input: { id: string; password: string }) => passwordFn({ data: input }),
+    onSuccess: (_r, input) => {
+      const u = (users ?? []).find((x) => x.id === input.id);
+      toast.success(`Password set for ${u ? u.full_name || u.email : "the user"}`);
+      setPasswordFor(null);
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not set the password"),
   });
 
   const deleteMut = useMutation({
@@ -399,7 +500,17 @@ function UsersPage() {
                           <span className="text-xs text-muted-foreground">technicians only</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right whitespace-nowrap">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={`Set a password for ${u.full_name || u.email}`}
+                          aria-label={`Set password for ${u.full_name || u.email}`}
+                          disabled={passwordMut.isPending}
+                          onClick={() => setPasswordFor(u)}
+                        >
+                          <KeyRound className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -421,6 +532,12 @@ function UsersPage() {
           )}
         </CardContent>
       </Card>
+      <SetPasswordDialog
+        user={passwordFor}
+        pending={passwordMut.isPending}
+        onClose={() => setPasswordFor(null)}
+        onSubmit={(id, password) => passwordMut.mutate({ id, password })}
+      />
     </div>
   );
 }

@@ -21,8 +21,9 @@
  * server console with the caller's address, so a leaked password shows up in Lovable's logs.
  */
 
+import { NAME_RE } from "@/lib/backup-tables";
+
 export const BACKUP_PAGE = 1000;
-const NAME_RE = /^[a-z][a-z0-9_]{0,62}$/;
 
 export interface BackupEnv {
   /** BACKUP_SECRET — the password the script sends. */
@@ -58,14 +59,22 @@ export async function authorizeBackup(request: Request, secret?: string): Promis
       { status: 500 },
     );
   }
+  if (await bearerMatches(request, secret)) return null;
+  return new Response("Unauthorized", { status: 401 });
+}
+
+/**
+ * Does the request's `Authorization: Bearer <token>` hold `secret`? Constant-time on SHA-256
+ * digests (the way cron-auth.ts checks), so a wrong password of any length takes the same time.
+ * Shared with the restore door (restore-door.server.ts).
+ */
+export async function bearerMatches(request: Request, secret: string): Promise<boolean> {
   const match = /^Bearer ([^\s,]+)$/.exec(request.headers.get("authorization") ?? "");
   const token = match?.[1];
-  if (token) {
-    const { createHash, timingSafeEqual } = await import("node:crypto");
-    const digest = (v: string) => createHash("sha256").update(v, "utf8").digest();
-    if (timingSafeEqual(digest(token), digest(secret))) return null;
-  }
-  return new Response("Unauthorized", { status: 401 });
+  if (!token) return false;
+  const { createHash, timingSafeEqual } = await import("node:crypto");
+  const digest = (v: string) => createHash("sha256").update(v, "utf8").digest();
+  return timingSafeEqual(digest(token), digest(secret));
 }
 
 type Defs = Record<string, { properties?: Record<string, unknown> }>;
