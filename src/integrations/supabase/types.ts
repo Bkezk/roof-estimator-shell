@@ -415,6 +415,7 @@ export type Database = {
           address1: string | null;
           address2: string | null;
           billing_instructions: string | null;
+          centerpoint_alias_ids: string[];
           centerpoint_company_id: string | null;
           city: string | null;
           contact_name: string | null;
@@ -447,6 +448,7 @@ export type Database = {
           address1?: string | null;
           address2?: string | null;
           billing_instructions?: string | null;
+          centerpoint_alias_ids?: string[];
           centerpoint_company_id?: string | null;
           city?: string | null;
           contact_name?: string | null;
@@ -479,6 +481,7 @@ export type Database = {
           address1?: string | null;
           address2?: string | null;
           billing_instructions?: string | null;
+          centerpoint_alias_ids?: string[];
           centerpoint_company_id?: string | null;
           city?: string | null;
           contact_name?: string | null;
@@ -897,6 +900,7 @@ export type Database = {
           account_id: string;
           address1: string | null;
           address2: string | null;
+          centerpoint_alias_ids: string[];
           centerpoint_property_id: string | null;
           city: string | null;
           county_code_id: string | null;
@@ -914,6 +918,7 @@ export type Database = {
           account_id: string;
           address1?: string | null;
           address2?: string | null;
+          centerpoint_alias_ids?: string[];
           centerpoint_property_id?: string | null;
           city?: string | null;
           county_code_id?: string | null;
@@ -931,6 +936,7 @@ export type Database = {
           account_id?: string;
           address1?: string | null;
           address2?: string | null;
+          centerpoint_alias_ids?: string[];
           centerpoint_property_id?: string | null;
           city?: string | null;
           county_code_id?: string | null;

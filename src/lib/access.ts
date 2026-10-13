@@ -303,7 +303,11 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/my-work")) return null;
   // "/" only redirects to Work Overview.
   if (pathname === "/") return null;
-  if (pathname.startsWith("/admin/users") || pathname.startsWith("/admin/reminders"))
+  if (
+    pathname.startsWith("/admin/users") ||
+    pathname.startsWith("/admin/reminders") ||
+    pathname.startsWith("/admin/centerpoint-import")
+  )
     return "admin";
   // Setup (service rates, inspection checklist, vehicles) is ticket money: a manager's too
   // (owner, Oct 1); /admin/service-rates is its old address and redirects there.

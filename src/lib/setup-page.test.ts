@@ -110,7 +110,8 @@ describe("the sidebar", () => {
       nav.indexOf("const adminGroupItems"),
       nav.indexOf("// Admin pages with"),
     );
-    expect(adminItems.match(/title: "/g)).toHaveLength(2);
+    // Users & access, Reminders and (Oct 13) Import from CenterPoint.
+    expect(adminItems.match(/title: "/g)).toHaveLength(3);
   });
 });
 

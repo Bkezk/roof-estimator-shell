@@ -21,6 +21,7 @@ import {
   Contact,
   Target,
   BellRing,
+  Upload,
   CalendarCheck,
   CalendarDays,
   ListTodo,
@@ -133,6 +134,13 @@ const prospectItems = [
 const adminGroupItems = [
   { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
+  // Owner, Oct 13: the one-time CenterPoint Book of Business import (customers, properties, contacts).
+  {
+    title: "Import from CenterPoint",
+    url: "/admin/centerpoint-import",
+    icon: Upload,
+    adminOnly: true,
+  },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's

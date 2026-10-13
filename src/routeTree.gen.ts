@@ -25,6 +25,7 @@ import { Route as ProspectRouteImport } from './routes/prospect'
 import { Route as ServiceRouteImport } from './routes/service'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
+import { Route as AdminCenterpointImportRouteImport } from './routes/admin.centerpoint-import'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
@@ -122,6 +123,11 @@ const SetupRoute = SetupRouteImport.update({
 const TakeoffRoute = TakeoffRouteImport.update({
   id: '/takeoff',
   path: '/takeoff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCenterpointImportRoute = AdminCenterpointImportRouteImport.update({
+  id: '/admin/centerpoint-import',
+  path: '/admin/centerpoint-import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminDuroLastRoute = AdminDuroLastRouteImport.update({
@@ -232,6 +238,7 @@ export interface FileRoutesByFullPath {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -268,6 +275,7 @@ export interface FileRoutesByTo {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -305,6 +313,7 @@ export interface FileRoutesById {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -343,6 +352,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/admin/centerpoint-import'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -379,6 +389,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/admin/centerpoint-import'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -415,6 +426,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/admin/centerpoint-import'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -452,6 +464,7 @@ export interface RootRouteChildren {
   ServiceRoute: typeof ServiceRouteWithChildren
   SetupRoute: typeof SetupRoute
   TakeoffRoute: typeof TakeoffRoute
+  AdminCenterpointImportRoute: typeof AdminCenterpointImportRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
@@ -581,6 +594,13 @@ declare module '@tanstack/react-router' {
       path: '/takeoff'
       fullPath: '/takeoff'
       preLoaderRoute: typeof TakeoffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/centerpoint-import': {
+      id: '/admin/centerpoint-import'
+      path: '/admin/centerpoint-import'
+      fullPath: '/admin/centerpoint-import'
+      preLoaderRoute: typeof AdminCenterpointImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/duro-last': {
@@ -744,6 +764,7 @@ const rootRouteChildren: RootRouteChildren = {
   ServiceRoute: ServiceRouteWithChildren,
   SetupRoute: SetupRoute,
   TakeoffRoute: TakeoffRoute,
+  AdminCenterpointImportRoute: AdminCenterpointImportRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,

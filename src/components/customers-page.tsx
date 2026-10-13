@@ -261,6 +261,24 @@ export function CustomersPage({
   );
 }
 
+/**
+ * "No contact info" (owner, Oct 13): a live customer with no email, cell phone or office phone —
+ * the ones the CenterPoint import brought over without any (crm_accounts_contact_required lets
+ * source 'import' through) — in the list row and the customer header, muted, so the office
+ * fills one in.
+ */
+function NoContactInfoBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="px-1.5 py-0 text-[11px] font-normal text-muted-foreground"
+      data-badge="no-contact-info"
+    >
+      No contact info
+    </Badge>
+  );
+}
+
 function AccountList({ activeId }: { activeId?: string | undefined }) {
   const { session } = useAuth();
   const listFn = useServerFn(listAccounts);
@@ -353,6 +371,9 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
                 <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
                   {a.kind === "individual" ? "Individual" : "Company"}
                 </Badge>
+                {/* Owner, Oct 13: a customer imported from CenterPoint may have no email or
+                    phone; the badge asks the office to fill one in (NoContactInfoBadge). */}
+                {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
               </div>
               <p className="mt-0.5 pl-6 text-xs text-muted-foreground">
                 {[
@@ -655,6 +676,7 @@ function AccountSummary(props: {
             <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
               {a.kind === "individual" ? "Individual" : "Company"}
             </Badge>
+            {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
           </h2>
           <p className="text-xs text-muted-foreground">
             Updated {shortDate(a.updated_at)}

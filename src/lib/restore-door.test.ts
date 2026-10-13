@@ -863,11 +863,15 @@ describe("the migration 20261013100000_restore_door.sql", () => {
     expect(names).toEqual([...RESTORE_DENY].sort());
     if (!RESTORE_DENY.length) expect(expr).toContain("array[]::text[]");
   });
-  it("is the newest migration, so it runs after every table it restores exists", () => {
+  it("runs after every table it restores exists (no later migration creates a table)", () => {
     const files = readdirSync(MIG_DIR)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    expect(files.at(-1)).toBe(MIGRATION);
+    expect(files).toContain(MIGRATION);
+    // Later migrations (the Oct 13 CenterPoint import adds columns and indexes) may follow, but
+    // none may create a table the door would not know to restore.
+    for (const f of files.slice(files.indexOf(MIGRATION) + 1))
+      expect(readFileSync(`${MIG_DIR}/${f}`, "utf8"), f).not.toMatch(/create\s+table/i);
   });
 });
 
