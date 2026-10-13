@@ -34,9 +34,12 @@ import {
   Ban,
   ChevronRight,
   CircleDollarSign,
+  Copy,
   Download,
   Eye,
   FileCheck2,
+  Link2,
+  Link2Off,
   Loader2,
   Plus,
   RefreshCw,
@@ -69,7 +72,14 @@ import { InvoicePhotos } from "@/components/service/invoice-photos";
 import { PdfPages } from "@/components/service/pdf-pages";
 import { propertyLines, showChoice, showFlags, type ShowChoice } from "@/lib/invoice-pdf-rows";
 import {
+  canShareInvoice,
+  shareUrl,
+  shareViewsText,
+  type InvoiceShareState,
+} from "@/lib/invoice-share";
+import {
   createAnotherInvoice,
+  createInvoiceShareLink,
   finalizeInvoice,
   getInvoice,
   getServiceRates,
@@ -77,6 +87,7 @@ import {
   markInvoicePaid,
   rebuildInvoiceLines,
   renderInvoice,
+  revokeInvoiceShareLink,
   saveInvoice,
   sendInvoice,
   voidInvoice,
@@ -1760,6 +1771,8 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           )}
           Download PDF
         </Button>
+        {/* The share link (owner, Oct 13, as CenterPoint): final / sent / paid only. */}
+        {canShareInvoice(status) && <ShareLinkControl ctx={ctx} data={data} />}
         {status !== "void" && (
           <Button variant="outline" onClick={() => setDialog("send")}>
             <Send className="mr-2 h-4 w-4" /> {inv.sent_at ? "Send again" : "Send"}
@@ -1833,6 +1846,140 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               }}
             >
               {voidMut.isPending ? "Voiding…" : "Void"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ---- The share link (owner, Oct 13) ----------------------------------------------------------
+
+/**
+ * "On CenterPoint you can create a shareable link for the invoice": one compact row in the
+ * actions (it wraps on a phone). No link yet → Create share link. With a link → the URL in a
+ * read-only box, Copy, whether it was viewed, and Turn off link (confirmed). The URL is built
+ * from this browser's origin (shareUrl), so it works wherever the app is opened from. Rendered
+ * only where canShareInvoice (the caller hides it on a draft and a void).
+ */
+function ShareLinkControl({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
+  const inv = data.invoice;
+  const createFn = useServerFn(createInvoiceShareLink);
+  const revokeFn = useServerFn(revokeInvoiceShareLink);
+  const [confirmOff, setConfirmOff] = useState(false);
+  // The server answers with the share state alone; the page's invoice takes it over.
+  const apply = (r: InvoiceShareState) =>
+    ctx.applied({
+      ...data,
+      invoice: {
+        ...inv,
+        share_token: r.token,
+        share_created_at: r.share_created_at,
+        share_views: r.share_views,
+        share_last_viewed_at: r.share_last_viewed_at,
+      },
+    });
+  const create = useMutation({
+    mutationFn: () => createFn({ data: { id: inv.id } }),
+    onSuccess: (r) => {
+      apply(r);
+      toast.success("Share link created");
+    },
+    onError: (e) => toast.error(`Could not create the share link: ${errText(e)}`),
+  });
+  const revoke = useMutation({
+    mutationFn: () => revokeFn({ data: { id: inv.id } }),
+    onSuccess: (r) => {
+      setConfirmOff(false);
+      apply(r);
+      toast.success("Share link turned off");
+    },
+    onError: (e) => toast.error(`Could not turn off the share link: ${errText(e)}`),
+  });
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const url = inv.share_token ? shareUrl(origin, inv.share_token) : null;
+  const copy = (link: string) => {
+    if (!navigator.clipboard?.writeText) {
+      toast.error("Could not copy; select the link and copy it");
+      return;
+    }
+    navigator.clipboard
+      .writeText(link)
+      .then(() => toast.success("Link copied"))
+      .catch(() => toast.error("Could not copy; select the link and copy it"));
+  };
+
+  if (!url)
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        disabled={create.isPending}
+        onClick={() => create.mutate()}
+        title="A link the customer opens to view or download this invoice, no login needed"
+      >
+        {create.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Link2 className="mr-2 h-4 w-4" />
+        )}
+        Create share link
+      </Button>
+    );
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+        <Link2 className="h-4 w-4" /> Share link
+      </span>
+      <Input
+        readOnly
+        value={url}
+        aria-label="Share link"
+        className="h-9 w-full font-mono text-xs sm:w-72"
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      <Button type="button" variant="outline" size="sm" onClick={() => copy(url)}>
+        <Copy className="mr-1 h-4 w-4" /> Copy
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        {shareViewsText(inv.share_views, inv.share_last_viewed_at)}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-destructive hover:text-destructive"
+        disabled={revoke.isPending}
+        onClick={() => setConfirmOff(true)}
+      >
+        <Link2Off className="mr-1 h-4 w-4" /> Turn off link
+      </Button>
+      <AlertDialog
+        open={confirmOff}
+        onOpenChange={(o) => {
+          if (!o && !revoke.isPending) setConfirmOff(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turn off the share link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Anyone who has the link gets "This invoice link is no longer active" from now on,
+              including the link in any email already sent. You can create a new link later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revoke.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={revoke.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                revoke.mutate();
+              }}
+            >
+              {revoke.isPending ? "Turning off…" : "Turn off link"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2040,6 +2187,12 @@ function SendDialog(props: {
             <p className="text-xs text-muted-foreground">
               The invoice number, property, total and payment terms are added below it.
             </p>
+            {/* Owner, Oct 13: a draft is finalised on send, so every send carries the link. */}
+            {(props.inv.status === "draft" || canShareInvoice(props.inv.status)) && (
+              <p className="text-xs text-muted-foreground">
+                The email includes a link to view the invoice online.
+              </p>
+            )}
           </div>
         </div>
         <DialogFooter className="gap-2">

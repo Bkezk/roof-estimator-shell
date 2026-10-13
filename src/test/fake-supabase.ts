@@ -6,7 +6,9 @@
  * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
  * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
  * `rpcCalls`. `opts.maxRows` caps every select the way Supabase's PostgREST does (1,000 rows
- * per request whatever .limit() asks). Not imported by the app.
+ * per request whatever .limit() asks). `opts.objects` is a storage bucket (path → bytes) for
+ * `db.storage.from(…).download / upload`; what is uploaded lands in it (`uploads` lists the
+ * calls). Not imported by the app.
  */
 type Row = Record<string, unknown>;
 export interface FakeWrite {
@@ -44,9 +46,32 @@ export type FakeRpcAnswer = (
 
 export function fakeSupabase(
   tables: Record<string, Row[]>,
-  opts: { maxRows?: number; rpcs?: Record<string, FakeRpc>; rpc?: FakeRpcAnswer } = {},
+  opts: {
+    maxRows?: number;
+    rpcs?: Record<string, FakeRpc>;
+    rpc?: FakeRpcAnswer;
+    objects?: Record<string, Uint8Array>;
+  } = {},
 ) {
   const writes: FakeWrite[] = [];
+  const objects = opts.objects ?? {};
+  const uploads: Array<{ bucket: string; path: string; upsert: boolean }> = [];
+  const storage = {
+    from: (bucket: string) => ({
+      upload: async (path: string, bytes: Uint8Array, o?: { upsert?: boolean }) => {
+        uploads.push({ bucket, path, upsert: !!o?.upsert });
+        if (objects[path] && !o?.upsert)
+          return { data: null, error: { message: "The resource already exists" } };
+        objects[path] = bytes;
+        return { data: { path }, error: null };
+      },
+      download: async (path: string) => {
+        const o = objects[path];
+        if (!o) return { data: null, error: { message: "Object not found" } };
+        return { data: { arrayBuffer: async () => o.slice().buffer }, error: null };
+      },
+    }),
+  };
   let seq = 0;
   const from = (table: string) => {
     const rows = () => (tables[table] ??= []);
@@ -200,7 +225,7 @@ export function fakeSupabase(
       };
     return { data: null, error: { message: `fake: unexpected rpc ${fn}` } };
   };
-  return { db: { from, rpc } as never, writes, tables, rpcCalls };
+  return { db: { from, rpc, storage } as never, writes, tables, rpcCalls, objects, uploads };
 }
 
 /** createServerFn reduced to "validate, then call the handler" (use inside vi.mock). */

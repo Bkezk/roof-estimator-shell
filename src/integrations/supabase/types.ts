@@ -1526,6 +1526,10 @@ export type Database = {
           sent_at: string | null;
           sent_by_name: string | null;
           sent_to: Json | null;
+          share_created_at: string | null;
+          share_last_viewed_at: string | null;
+          share_token: string | null;
+          share_views: number;
           service_job_id: string;
           status: string;
           subtotal: number;
@@ -1562,6 +1566,10 @@ export type Database = {
           sent_at?: string | null;
           sent_by_name?: string | null;
           sent_to?: Json | null;
+          share_created_at?: string | null;
+          share_last_viewed_at?: string | null;
+          share_token?: string | null;
+          share_views?: number;
           service_job_id: string;
           status?: string;
           subtotal?: number;
@@ -1598,6 +1606,10 @@ export type Database = {
           sent_at?: string | null;
           sent_by_name?: string | null;
           sent_to?: Json | null;
+          share_created_at?: string | null;
+          share_last_viewed_at?: string | null;
+          share_token?: string | null;
+          share_views?: number;
           service_job_id?: string;
           status?: string;
           subtotal?: number;
@@ -4311,6 +4323,7 @@ export type Database = {
         Args: { p_job: string; p_stage: string; p_invoice?: string | null };
         Returns: undefined;
       };
+      invoice_share_viewed: { Args: { p_token: string }; Returns: undefined };
       stamp_dispatch: { Args: never; Returns: undefined };
       set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };
       set_my_theme: { Args: { p_theme: string }; Returns: undefined };

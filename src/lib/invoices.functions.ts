@@ -33,6 +33,16 @@ import {
 } from "@/lib/invoice-rebuild";
 import { stampSent } from "@/lib/invoice-sent";
 import { mergeSendTo } from "@/lib/invoice-send-to";
+import {
+  canShareInvoice,
+  SHARE_TOKEN_BYTES,
+  shareBase,
+  shareLinkLine,
+  shareProblem,
+  shareStateOf,
+  shareUrl,
+  type InvoiceShareState,
+} from "@/lib/invoice-share";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -218,9 +228,13 @@ const pdfPath = (inv: InvoiceRow) => `invoices/${invoiceFileStem(inv)}-${inv.id.
  * draft is drawn fresh (it is a preview). A final, sent, paid or void invoice is the PDF stored
  * when it was finalised (pdf_path in the "service" bucket), never drawn again — unless that file
  * is missing: then it is drawn once from the invoice as it stands, stored (never over an
- * existing file) and a warning logged.
+ * existing file) and a warning logged. Exported for the public share-link route
+ * (src/routes/i.$token.ts), which serves the same bytes with the admin client.
  */
-async function invoicePdf(sb: SupabaseClient<Database>, b: InvoiceBundle): Promise<Uint8Array> {
+export async function invoicePdf(
+  sb: SupabaseClient<Database>,
+  b: InvoiceBundle,
+): Promise<Uint8Array> {
   const { renderInvoicePdf } = await import("@/lib/invoices.server");
   if (b.invoice.status === "draft") return renderInvoicePdf(sb, b);
   const stored = b.invoice.pdf_path;
@@ -778,6 +792,91 @@ export const renderInvoice = createServerFn({ method: "POST" })
     };
   });
 
+// ---- The share link (owner, Oct 13) ----------------------------------------------------------
+
+/** A fresh share token: 32 random bytes as base64url (43 characters; isShareToken). */
+async function newShareToken(): Promise<string> {
+  const { randomBytes } = await import("node:crypto");
+  return randomBytes(SHARE_TOKEN_BYTES).toString("base64url");
+}
+
+/** The invoice row, or a plain "not found". */
+async function invoiceRow(sb: SupabaseClient<Database>, id: string): Promise<InvoiceRow> {
+  const { data, error } = await sb.from("invoices").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Invoice not found");
+  return data;
+}
+
+/**
+ * The invoice with a share token: the one it has, else a new one stored now (share_token,
+ * share_created_at). Written only where the row still has none, so two tabs making the link at
+ * once end up with the same token (the loser re-reads). Refuses a draft or a void invoice
+ * (shareProblem). The database logs the change (audit_row: "share token — → …").
+ */
+async function ensureShareToken(
+  sb: SupabaseClient<Database>,
+  inv: InvoiceRow,
+  byName: string,
+): Promise<InvoiceRow> {
+  const problem = shareProblem(inv.status);
+  if (problem) throw new Error(problem);
+  if (inv.share_token) return inv;
+  const { data, error } = await sb
+    .from("invoices")
+    .update({
+      share_token: await newShareToken(),
+      share_created_at: new Date().toISOString(),
+      updated_by_name: byName,
+    })
+    .eq("id", inv.id)
+    .is("share_token", null)
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) return data;
+  // Made meanwhile by someone else: theirs is the link.
+  const again = await invoiceRow(sb, inv.id);
+  if (!again.share_token) throw new Error("The share link was not saved");
+  return again;
+}
+
+/**
+ * Make the invoice's share link (or return the one it has): the token and its view counts. The
+ * screen builds the URL from its own origin (shareUrl), so APP_URL is not needed for this. Office
+ * only; a draft or a void invoice is refused with a plain message.
+ */
+export const createInvoiceShareLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<InvoiceShareState> => {
+    const p = await office(context);
+    const inv = await invoiceRow(context.supabase, data.id);
+    return shareStateOf(await ensureShareToken(context.supabase, inv, nameOf(p)));
+  });
+
+/**
+ * Turn the share link off: the token (and when it was made) cleared, so the link answers "no
+ * longer active" from now on; the view counts stay. A new link can be made later. Office only.
+ */
+export const revokeInvoiceShareLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<InvoiceShareState> => {
+    const p = await office(context);
+    const sb = context.supabase;
+    const inv = await invoiceRow(sb, data.id);
+    if (!inv.share_token) return shareStateOf(inv);
+    const { data: updated, error } = await sb
+      .from("invoices")
+      .update({ share_token: null, share_created_at: null, updated_by_name: nameOf(p) })
+      .eq("id", inv.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return shareStateOf(updated);
+  });
+
 /** Freeze the invoice: status final, PDF stored, the ticket Invoiced (finalizeDraft). */
 export const finalizeInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -791,7 +890,15 @@ export const finalizeInvoice = createServerFn({ method: "POST" })
     return withLines(sb, updated);
   });
 
-/** Email the (final) invoice PDF to the billing contacts; finalises a draft first. */
+/**
+ * Email the (final) invoice PDF to the billing contacts; finalises a draft first.
+ *
+ * The email carries the share link too (owner, Oct 13: customers should have the link): the
+ * invoice's token, made here when it has none yet (every invoice that can be sent can be shared,
+ * canShareInvoice). The link needs the app's public address, APP_URL (as the reminder emails do,
+ * notify.server.ts appUrl): when APP_URL is not set the line is left out altogether — never a
+ * broken link — and the token still exists, so the office can copy the link from the invoice.
+ */
 export const sendInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -814,11 +921,21 @@ export const sendInvoice = createServerFn({ method: "POST" })
       b = await loadBundle(sb, data.id);
     }
     if (b.invoice.status === "void") throw new Error("This invoice is void");
+    // The share link goes with the email (made now when the invoice has none); the line is
+    // left out when APP_URL is not set (see the doc comment above).
+    let shareLine = "";
+    if (canShareInvoice(b.invoice.status)) {
+      const shared = await ensureShareToken(sb, b.invoice, nameOf(p));
+      b = { ...b, invoice: shared };
+      const base = shareBase(process.env["APP_URL"]);
+      if (base && shared.share_token)
+        shareLine = `\n\n${shareLinkLine(shareUrl(base, shared.share_token))}`;
+    }
     // The PDF stored at finalising is the one attached (invoicePdf), not a fresh drawing.
     const pdf = await invoicePdf(sb, b);
     const label = invoiceLabel(b.invoice);
     const subject = b.settings.email_subject.replace("{number}", label);
-    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}`;
+    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}${shareLine}`;
     const r = await emailInvoice({
       to: data.to,
       subject,
