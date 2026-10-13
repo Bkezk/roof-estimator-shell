@@ -27,7 +27,14 @@ import {
   getMetalsCatalog,
   getFastenerLookup,
 } from "@/lib/engine.functions";
-import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
+import {
+  getBid,
+  listBidFolders,
+  saveBid,
+  getWarrantyData,
+  getMarkupPresets,
+} from "@/lib/bids.functions";
+import { FOLDER_MAX, normalizeFolder, suggestFolder, UNFILED } from "@/lib/bids-folders";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
@@ -410,6 +417,13 @@ function EstimatePage() {
     queryFn: () => listEstimatorsFn(),
     enabled: authed,
   });
+  // The folders in use, for the Setup › Bid Info "Folder" picker (owner, Oct 13).
+  const listBidFoldersFn = useServerFn(listBidFolders);
+  const { data: bidFolderNames } = useQuery({
+    queryKey: ["bid-folders"],
+    queryFn: () => listBidFoldersFn(),
+    enabled: authed,
+  });
 
   const { data: liveAdmin, isLoading } = useQuery({
     queryKey: ["engine-admin"],
@@ -639,6 +653,9 @@ function EstimatePage() {
   // required on the first save, changeable any time after, cleared only on a won / lost bid
   // (bid-status.ts bidDueDateProblem). "" = none.
   const [bidDueDate, setBidDueDate] = useState("");
+  // The folder the bid is filed under (bids.folder, on the row; owner, Oct 13): a label the user
+  // assigns on Setup › Bid Info — the customer's name is only suggested. "" = unfiled.
+  const [bidFolder, setBidFolder] = useState("");
   // Set when a save was refused for want of a due date: the box is ringed until it is filled.
   const [dueDateMissing, setDueDateMissing] = useState(false);
   const dueDateRef = useRef<HTMLInputElement>(null);
@@ -1155,6 +1172,7 @@ function EstimatePage() {
     setBidStatus(asBidStatus(loadedBid.status));
     setLostReason(loadedBid.lost_reason ?? null);
     setBidDueDate(loadedBid.due_date ?? "");
+    setBidFolder(loadedBid.folder ?? "");
     setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
@@ -1743,8 +1761,9 @@ function EstimatePage() {
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
   // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
-  // The profile link lives on the row, not in `saved`; it counts as an edit all the same.
-  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}`;
+  // The profile link and the folder live on the row, not in `saved`; they count as edits all the
+  // same.
+  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(bidFolder) ?? ""}`;
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
@@ -2242,6 +2261,8 @@ function EstimatePage() {
           lostReason: bidStatus === "lost" ? lostReason : null,
           // The due date rides on the row (null = none; the server refuses a new bid without one).
           dueDate: bidDueDate || null,
+          // So does the folder (owner, Oct 13; null = unfiled).
+          folder: normalizeFolder(bidFolder),
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
           // Only a link changed in this session is sent (null unlinks); absent = left as is.
@@ -2251,6 +2272,7 @@ function EstimatePage() {
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
+      qc.invalidateQueries({ queryKey: ["bid-folders"] });
       // Draft bids sit on Work Overview by due date (owner, Oct 12).
       qc.invalidateQueries({ queryKey: ["my-work"] });
       toast.success("Bid saved");
@@ -2844,6 +2866,28 @@ function EstimatePage() {
                           }
                           onChange={setBuildingType}
                         />
+                      </Field>
+                      {/* Owner, Oct 13 (Bid Advantage saved bids "in a file, so Bell County
+                          Schools could be saved under a folder"): the folder this bid is filed
+                          under on the Bids page's By folder view — a label you assign; the
+                          customer's name is only suggested. Type a new one or pick one in use;
+                          blank = Unfiled. */}
+                      <Field label="Folder">
+                        <Input
+                          id="bid-folder"
+                          list="bid-folder-options"
+                          value={bidFolder}
+                          maxLength={FOLDER_MAX}
+                          placeholder={suggestFolder(customer.name) ?? UNFILED}
+                          disabled={readOnly}
+                          onChange={(e) => setBidFolder(e.target.value)}
+                          title="Where this bid is filed on the Bids page (By folder). Blank = Unfiled."
+                        />
+                        <datalist id="bid-folder-options">
+                          {(bidFolderNames ?? []).map((f) => (
+                            <option key={f} value={f} />
+                          ))}
+                        </datalist>
                       </Field>
                     </div>
                   </LegacyGroup>

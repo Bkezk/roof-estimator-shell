@@ -310,6 +310,7 @@ export type Database = {
           data: Json;
           deleted_at: string | null;
           due_date: string | null;
+          folder: string | null;
           grand_total: number;
           lost_reason: string | null;
           id: string;
@@ -333,6 +334,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           due_date?: string | null;
+          folder?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
           id?: string;
@@ -356,6 +358,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           due_date?: string | null;
+          folder?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
           id?: string;

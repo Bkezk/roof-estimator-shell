@@ -9,9 +9,11 @@ import {
   FileSpreadsheet,
   FileUp,
   Folder,
+  FolderInput,
   FolderOpen,
   Layers,
   List,
+  Pencil,
   PlusCircle,
   RotateCcw,
   Trash2,
@@ -23,6 +25,8 @@ import {
   deleteBid,
   duplicateBid,
   listBids,
+  renameBidFolder,
+  setBidFolder,
   setBidStatus,
   listDeletedBids,
   purgeBid,
@@ -39,12 +43,20 @@ import {
 import { localYmd } from "@/lib/my-work";
 import { bidOverdueDays } from "@/lib/work-counts";
 import {
+  bidsInFolder,
   bidsInYear,
   FOLDER_GROUP_LABELS,
   FOLDER_GROUPS,
+  folderCards,
+  folderKey,
+  folderOptions,
   foldersFor,
+  normalizeFolder,
   readBidsView,
   readFolderGroup,
+  suggestFolder,
+  UNFILED,
+  UNFILED_KEY,
   writeBidsView,
   writeFolderGroup,
   yearFolders,
@@ -63,6 +75,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -246,14 +266,24 @@ function BidsPage() {
   const [combineSel, setCombineSel] = useState<string[]>([]);
   // Collapsed status groups (default: none, i.e. every group expanded).
   const [collapsed, setCollapsed] = useState<BidStatus[]>(readCollapsed);
-  // List or year folders (owner, Oct 7), remembered like the ticket's layout toggle.
+  // List, year folders (owner, Oct 7) or the assigned folders (owner, Oct 13), remembered like
+  // the ticket's layout toggle.
   const storage = typeof window === "undefined" ? null : window.localStorage;
   const [view, setViewState] = useState<BidsView>(() => readBidsView(storage));
   const [folderYear, setFolderYear] = useState<number | null>(null);
   const [folderGroup, setFolderGroupState] = useState<FolderGroup>(() => readFolderGroup(storage));
+  // The assigned folder that is open (its folderKey; UNFILED_KEY = the unfiled bids), or none.
+  const [folderOpen, setFolderOpen] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameText, setRenameText] = useState("");
+  // "Move to folder…" (one row, or the ticked bids): which bids, and the name being typed.
+  const [moveFor, setMoveFor] = useState<{ ids: string[]; label: string } | null>(null);
+  const [moveText, setMoveText] = useState("");
   const setView = (v: BidsView) => {
     setViewState(v);
     setFolderYear(null);
+    setFolderOpen(null);
+    setRenaming(false);
     writeBidsView(storage, v);
   };
   const setFolderGroup = (g: FolderGroup) => {
@@ -286,6 +316,35 @@ function BidsPage() {
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not change status"),
+  });
+  // Folders (owner, Oct 13): file one or several bids; rename a folder for every bid in it.
+  const setFolderFn = useServerFn(setBidFolder);
+  const moveFolder = useMutation({
+    mutationFn: (v: { ids: string[]; folder: string | null }) => setFolderFn({ data: v }),
+    onSuccess: (r, v) => {
+      toast.success(
+        r.folder
+          ? `Moved ${r.count} bid${r.count === 1 ? "" : "s"} to "${r.folder}"`
+          : `${r.count} bid${r.count === 1 ? "" : "s"} now unfiled`,
+      );
+      if (v.ids.length > 1) setCombineSel([]);
+      setMoveFor(null);
+      refresh();
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Could not move to the folder"),
+  });
+  const renameFolderFn = useServerFn(renameBidFolder);
+  const rename = useMutation({
+    mutationFn: (v: { from: string; to: string }) => renameFolderFn({ data: v }),
+    onSuccess: (r) => {
+      toast.success(`Renamed to "${r.folder}" (${r.count} bid${r.count === 1 ? "" : "s"})`);
+      setRenaming(false);
+      setFolderOpen(folderKey(r.folder));
+      refresh();
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Could not rename the folder"),
   });
   // Duplicate (owner, Oct 6): a new draft copy, opened in the estimator to be renamed.
   const duplicateFn = useServerFn(duplicateBid);
@@ -368,7 +427,12 @@ function BidsPage() {
   const maxPrice = priceMax.trim() === "" ? null : Number(priceMax);
   const filtered = bids.filter((b) => {
     if (statusFilter !== "all" && asBidStatus(b.status) !== statusFilter) return false;
-    if (q && !b.name.toLowerCase().includes(q) && !customerOf(b).toLowerCase().includes(q))
+    if (
+      q &&
+      !b.name.toLowerCase().includes(q) &&
+      !customerOf(b).toLowerCase().includes(q) &&
+      !(b.folder ?? "").toLowerCase().includes(q)
+    )
       return false;
     if (estimatorFilter !== "all") {
       const est = estimatorOf(b);
@@ -383,15 +447,41 @@ function BidsPage() {
     if (maxPrice !== null && Number.isFinite(maxPrice) && total > maxPrice) return false;
     return true;
   });
-  // Grouped Draft → Submitted → Won → Lost, in the list's order inside each group;
-  // filters above apply first, and a group with nothing in it is left out.
+  // The assigned folders (owner, Oct 13): the cards, the one that is open, and its bids. Search
+  // and the filters above apply inside a folder too.
+  const cards = folderCards(filtered);
+  const openCard = folderOpen === null ? null : (cards.find((c) => c.key === folderOpen) ?? null);
+  const openName =
+    openCard?.name ??
+    (folderOpen === UNFILED_KEY
+      ? UNFILED
+      : (normalizeFolder(bids.find((b) => folderKey(b.folder) === folderOpen)?.folder) ??
+        folderOpen ??
+        ""));
+  const scopeRows =
+    view === "byFolder" && folderOpen !== null ? bidsInFolder(filtered, folderOpen) : filtered;
+  // Grouped Draft → Submitted → Won → Lost, in the list's order inside each group; filters above
+  // (and the open folder) apply first, and a group with nothing in it is left out.
   const groups = BID_STATUSES.map((status) => ({
     status,
     rows: sortBids(
-      filtered.filter((b) => asBidStatus(b.status) === status),
+      scopeRows.filter((b) => asBidStatus(b.status) === status),
       sortBy,
     ),
   })).filter((g) => g.rows.length > 0);
+  const folderNames = folderOptions(bids);
+  /** Open "Move to folder…" for these bids; a lone unfiled bid starts at its customer's name. */
+  const openMove = (ids: string[]) => {
+    const rows = bids.filter((b) => ids.includes(b.id));
+    const one = rows.length === 1 ? rows[0] : undefined;
+    const shared = new Set(rows.map((b) => folderKey(b.folder)));
+    const current = shared.size === 1 ? normalizeFolder(rows[0]?.folder) : null;
+    setMoveText(current ?? (one ? (suggestFolder(customerOf(one)) ?? "") : ""));
+    setMoveFor({
+      ids,
+      label: one ? one.name : `${rows.length} bid${rows.length === 1 ? "" : "s"}`,
+    });
+  };
   const anyFilter =
     statusFilter !== "all" ||
     q !== "" ||
@@ -454,6 +544,7 @@ function BidsPage() {
                 timeStyle: "short",
               })}
               {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
+              {bid.folder ? ` · Folder: ${bid.folder}` : ""}
               {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
               {importedFrom(bid.data) ? ` · Imported from ${importedFrom(bid.data)}` : ""}
             </p>
@@ -528,6 +619,20 @@ function BidsPage() {
           <Button
             variant="ghost"
             size="sm"
+            title={bid.folder ? `Move to folder… (now in "${bid.folder}")` : "Move to folder…"}
+            disabled={moveFolder.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              openMove([bid.id]);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <FolderInput className="h-4 w-4" />
+            <span className="sr-only">Move to folder…</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             title="Duplicate this bid (a new draft copy)"
             disabled={duplicate.isPending}
             onClick={(e) => {
@@ -558,6 +663,45 @@ function BidsPage() {
     );
   };
 
+  /** The status groups (Draft → Submitted → Won → Lost): the list, and the inside of a folder. */
+  const statusGroups = (
+    <div className="grid gap-8">
+      {groups.map(({ status, rows }) => {
+        const open = !collapsed.includes(status);
+        const Chevron = open ? ChevronDown : ChevronRight;
+        return (
+          <section key={status} aria-label={`${STATUS_LABELS[status]} bids`}>
+            {/* Group header with a grey rule beneath it; empty groups are not shown.
+              Clicking it collapses/expands the group (remembered in localStorage). */}
+            <h2 className={`border-b border-border pb-1.5 ${open ? "mb-3" : ""}`}>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={open}
+                aria-controls={`bids-group-${status}`}
+                title={open ? "Collapse this group" : "Expand this group"}
+                onClick={() => toggleGroup(status)}
+              >
+                <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-sm font-semibold uppercase tracking-wide">
+                  {STATUS_LABELS[status]}
+                </span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {rows.length} bid{rows.length === 1 ? "" : "s"}
+                </span>
+              </button>
+            </h2>
+            {open && (
+              <div id={`bids-group-${status}`} className="grid gap-3">
+                {rows.map(renderBid)}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -580,6 +724,15 @@ function BidsPage() {
               >
                 <Layers className="mr-2 h-5 w-5" />
                 Combine {combineSel.length} bid{combineSel.length === 1 ? "" : "s"}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                title="File the ticked bids under one folder"
+                onClick={() => openMove(combineSel)}
+              >
+                <FolderInput className="mr-2 h-5 w-5" />
+                Move {combineSel.length} to folder…
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setCombineSel([])}>
                 Clear selection
@@ -745,27 +898,31 @@ function BidsPage() {
               />
             </div>
           </fieldset>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
             View
-            <Button
-              type="button"
-              variant="outline"
-              className="bg-background"
-              aria-pressed={view === "folders"}
-              title={view === "folders" ? "Show the list" : "Show folders by year"}
-              onClick={() => setView(view === "folders" ? "list" : "folders")}
-            >
-              {view === "folders" ? (
-                <>
-                  <FolderOpen className="mr-1 h-4 w-4" /> Folders
-                </>
-              ) : (
-                <>
-                  <List className="mr-1 h-4 w-4" /> List
-                </>
-              )}
-            </Button>
-          </label>
+            {/* List / Years (owner, Oct 7) / By folder (owner, Oct 13). */}
+            <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="View">
+              {(
+                [
+                  ["list", "List", List, "Show the list"],
+                  ["folders", "Years", Folder, "Show folders by year"],
+                  ["byFolder", "By folder", FolderOpen, "Show the folders you assigned"],
+                ] as const
+              ).map(([v, label, Icon, title], i) => (
+                <Button
+                  key={v}
+                  type="button"
+                  variant={view === v ? "default" : "outline"}
+                  className={`${view === v ? "" : "bg-background"} ${i === 0 ? "rounded-r-none" : i === 2 ? "rounded-l-none" : "rounded-none border-x-0"}`}
+                  aria-pressed={view === v}
+                  title={title}
+                  onClick={() => setView(v)}
+                >
+                  <Icon className="mr-1 h-4 w-4" /> {label}
+                </Button>
+              ))}
+            </div>
+          </div>
           {anyFilter && (
             <Button variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
               Clear filters
@@ -790,6 +947,121 @@ function BidsPage() {
           <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
             Clear filters
           </Button>
+        </div>
+      ) : view === "byFolder" && folderOpen === null ? (
+        /* The assigned folders (owner, Oct 13): one card per folder, Unfiled last; a click opens it. */
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Bids by folder">
+          {cards.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className="flex items-center gap-3 rounded-lg border p-4 text-left transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setFolderOpen(f.key)}
+              title={`Open ${f.name}`}
+              data-folder={f.key === UNFILED_KEY ? "unfiled" : f.key}
+            >
+              <Folder
+                className={`h-8 w-8 shrink-0 ${f.key === UNFILED_KEY ? "text-muted-foreground/50" : "text-muted-foreground"}`}
+                aria-hidden
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-lg font-semibold">{f.name}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {f.count} bid{f.count === 1 ? "" : "s"} · {money(f.total)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : view === "byFolder" && folderOpen !== null ? (
+        /* Inside a folder: its name (Rename for a real folder), then the usual status groups. */
+        <div className="grid gap-6">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setFolderOpen(null);
+                setRenaming(false);
+              }}
+            >
+              <Folder className="h-4 w-4" aria-hidden /> All folders
+            </button>
+            <span className="text-muted-foreground">›</span>
+            {renaming ? (
+              <form
+                className="inline-flex items-center gap-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const to = normalizeFolder(renameText);
+                  if (!to) {
+                    toast.error("Give the folder a name.");
+                    return;
+                  }
+                  if (folderKey(to) === folderOpen && to === openName) {
+                    setRenaming(false);
+                    return;
+                  }
+                  rename.mutate({ from: openName, to });
+                }}
+              >
+                <Input
+                  autoFocus
+                  aria-label="Folder name"
+                  className="h-8 w-[16rem] bg-background"
+                  value={renameText}
+                  maxLength={80}
+                  onChange={(e) => setRenameText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setRenaming(false);
+                  }}
+                />
+                <Button type="submit" size="sm" className="h-8" disabled={rename.isPending}>
+                  {rename.isPending ? "Renaming…" : "Save"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8"
+                  onClick={() => setRenaming(false)}
+                >
+                  Cancel
+                </Button>
+              </form>
+            ) : (
+              <>
+                <h2 className="inline-flex items-center gap-1 font-semibold">
+                  <FolderOpen className="h-4 w-4" aria-hidden /> {openName}
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {scopeRows.length} bid{scopeRows.length === 1 ? "" : "s"}
+                </span>
+                {folderOpen !== UNFILED_KEY && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    title="Rename this folder for every bid in it"
+                    onClick={() => {
+                      setRenameText(openName);
+                      setRenaming(true);
+                    }}
+                  >
+                    <Pencil className="mr-1 h-3.5 w-3.5" /> Rename
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+          {groups.length === 0 ? (
+            <p className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+              No bids in this folder match these filters.
+            </p>
+          ) : (
+            statusGroups
+          )}
         </div>
       ) : view === "folders" && folderYear === null ? (
         /* Year folders (owner, Oct 7): one per year with bids; a click opens it. */
@@ -849,6 +1121,7 @@ function BidsPage() {
             estimator: estimatorOf(b),
             systems: roofSystemsOf(b),
             status: STATUS_LABELS[asBidStatus(b.status)],
+            folder: b.folder,
           })).map((g) => (
             <section key={g.label} aria-label={`${g.label} bids`}>
               <h2 className="mb-3 flex items-center gap-2 border-b border-border pb-1.5">
@@ -863,41 +1136,7 @@ function BidsPage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-8">
-          {groups.map(({ status, rows }) => {
-            const open = !collapsed.includes(status);
-            const Chevron = open ? ChevronDown : ChevronRight;
-            return (
-              <section key={status} aria-label={`${STATUS_LABELS[status]} bids`}>
-                {/* Group header with a grey rule beneath it; empty groups are not shown.
-                  Clicking it collapses/expands the group (remembered in localStorage). */}
-                <h2 className={`border-b border-border pb-1.5 ${open ? "mb-3" : ""}`}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-expanded={open}
-                    aria-controls={`bids-group-${status}`}
-                    title={open ? "Collapse this group" : "Expand this group"}
-                    onClick={() => toggleGroup(status)}
-                  >
-                    <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="text-sm font-semibold uppercase tracking-wide">
-                      {STATUS_LABELS[status]}
-                    </span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {rows.length} bid{rows.length === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                </h2>
-                {open && (
-                  <div id={`bids-group-${status}`} className="grid gap-3">
-                    {rows.map(renderBid)}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
+        statusGroups
       )}
 
       {/* Recently deleted (soft-deleted bids inside the retention window) */}
@@ -962,6 +1201,76 @@ function BidsPage() {
           </div>
         )}
       </div>
+
+      {/* Move to folder… (owner, Oct 13): type a folder or pick one in use; blank = Unfiled. */}
+      <Dialog
+        open={moveFor !== null}
+        onOpenChange={(open) => {
+          if (!open && !moveFolder.isPending) setMoveFor(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (moveFor)
+                moveFolder.mutate({ ids: moveFor.ids, folder: normalizeFolder(moveText) });
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Move to folder</DialogTitle>
+              <DialogDescription>
+                File “{moveFor?.label}” under a folder: type a new name or pick one in use. Leave it
+                blank (or choose Unfiled) to take it out of its folder.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1">
+              <label htmlFor="bid-move-folder" className="text-xs text-muted-foreground">
+                Folder
+              </label>
+              <Input
+                id="bid-move-folder"
+                autoFocus
+                list="bid-folder-options"
+                placeholder={UNFILED}
+                maxLength={80}
+                value={moveText}
+                onChange={(e) => setMoveText(e.target.value)}
+              />
+              <datalist id="bid-folder-options">
+                {folderNames.map((f) => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={moveFolder.isPending}
+                onClick={() => setMoveFor(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={moveFolder.isPending}
+                title="Take the bid out of its folder"
+                onClick={() => {
+                  if (moveFor) moveFolder.mutate({ ids: moveFor.ids, folder: null });
+                }}
+              >
+                {UNFILED}
+              </Button>
+              <Button type="submit" disabled={moveFolder.isPending}>
+                {moveFolder.isPending ? "Moving…" : "Move"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {lostFor && (
         <LostReasonDialog

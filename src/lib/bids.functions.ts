@@ -5,6 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Json } from "@/integrations/supabase/types";
 import { asBidStatus, BID_STATUSES, bidDueDateProblem, bidStatusStamps } from "@/lib/bid-status";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
+import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
 
@@ -69,6 +70,9 @@ export const listDeletedBids = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+/** A folder name as typed; normalizeFolder trims, collapses and cuts it to FOLDER_MAX. */
+const folderText = z.string().max(400);
+
 const saveBidSchema = z.object({
   // Prospecting link (nullable spine column); absent = leave as is.
   buildingId: z.string().uuid().nullable().optional(),
@@ -96,6 +100,11 @@ const saveBidSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "The bid due date must be a day (YYYY-MM-DD)")
     .nullable()
     .optional(),
+  /**
+   * The folder the bid is filed under (bids.folder; owner, Oct 13), normalized here
+   * (bids-folders.ts normalizeFolder: blank → null = unfiled). Absent = leave as is.
+   */
+  folder: folderText.nullable().optional(),
   /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
   sessionKey: z.string().min(8).max(80).optional(),
   /**
@@ -144,6 +153,7 @@ export const saveBid = createServerFn({ method: "POST" })
       ...(data.accountId !== undefined ? { account_id: data.accountId } : {}),
       ...(data.siteId !== undefined ? { site_id: data.siteId } : {}),
       ...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),
+      ...(data.folder !== undefined ? { folder: normalizeFolder(data.folder) } : {}),
     };
     if (data.id) {
       const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);
@@ -253,6 +263,78 @@ export const importBids = createServerFn({ method: "POST" })
       .select("id, name");
     if (error) throw new Error(error.message);
     return inserted ?? [];
+  });
+
+/**
+ * File one or several live bids under a folder from the Bids page ("Move to folder…" on a row,
+ * "Move N to folder…" on a selection; owner, Oct 13). The name is normalized (blank / "Unfiled"
+ * → null = unfiled). Only the folder changes: "Last saved … by" is left alone, so the list keeps
+ * its order and an estimator tab with the bid open is not told its copy is stale. RLS
+ * (`bids_authenticated_all`) is the access rule, as for saveBid. Returns how many rows changed.
+ */
+export const setBidFolder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(200),
+        folder: folderText.nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const folder = normalizeFolder(data.folder);
+    const { error, count } = await context.supabase
+      .from("bids")
+      .update({ folder }, { count: "exact" })
+      .in("id", data.ids)
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+    return { count: count ?? 0, folder };
+  });
+
+/**
+ * Rename a folder (owner, Oct 13): every live bid whose folder matches `from` — case-insensitive
+ * (bids-folders.ts folderKey), so both spellings of one folder move together — is filed under
+ * `to`. Returns how many bids moved and the name as stored.
+ */
+export const renameBidFolder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ from: folderText.min(1), to: folderText.min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const to = normalizeFolder(data.to);
+    if (!to) throw new Error("Give the folder a name.");
+    const fromKey = folderKey(data.from);
+    if (!fromKey) throw new Error("Unfiled is not a folder and cannot be renamed.");
+    const { data: rows, error } = await context.supabase
+      .from("bids")
+      .select("id, folder")
+      .not("folder", "is", null)
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+    const ids = (rows ?? []).filter((r) => folderKey(r.folder) === fromKey).map((r) => r.id);
+    if (ids.length === 0) return { count: 0, folder: to };
+    const { error: uErr, count } = await context.supabase
+      .from("bids")
+      .update({ folder: to }, { count: "exact" })
+      .in("id", ids);
+    if (uErr) throw new Error(uErr.message);
+    return { count: count ?? ids.length, folder: to };
+  });
+
+/** The folder names in use (live bids), A–Z, for the estimator's Folder picker. */
+export const listBidFolders = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<string[]> => {
+    const { data, error } = await context.supabase
+      .from("bids")
+      .select("folder")
+      .not("folder", "is", null)
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+    return folderOptions(
+      (data ?? []).map((r) => ({ folder: r.folder, created_at: "", grand_total: null })),
+    );
   });
 
 /**
