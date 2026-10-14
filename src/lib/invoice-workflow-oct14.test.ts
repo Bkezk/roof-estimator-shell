@@ -511,3 +511,20 @@ describe("4. purchase orders in the editor (invoice-editor.tsx)", () => {
     expect(totals).toContain('{poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}');
   });
 });
+
+describe("the wording the owner tripped on (Oct 14: 'cost 0.091? … what does mark up purchase orders do?')", () => {
+  const ed = readFileSync("src/components/service/invoice-editor.tsx", "utf8");
+  it("the switch's help says purchase orders, not the ticket's material lines", () => {
+    expect(ed).toContain(
+      "On: a purchase order on this invoice bills at what it cost plus the markup above.",
+    );
+    expect(ed).toContain("Off: at what it cost. A price typed by hand stays either way.");
+    expect(ed).not.toContain("material lines are priced again");
+  });
+  it("a per-piece material's Cost cell says what the number is per", () => {
+    expect(ed).toContain('per {l.unit.trim() || "ea"}');
+    expect(ed.indexOf('per {l.unit.trim() || "ea"}')).toBeGreaterThan(
+      ed.indexOf("<CellLabel>Cost</CellLabel>"),
+    );
+  });
+});

@@ -1067,8 +1067,8 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               </Label>
             </div>
             <p className="text-xs text-muted-foreground">
-              For this invoice: the ticket&apos;s material lines are priced again; a price typed by
-              hand stays. Off, the purchase-order lines bill at cost.
+              On: a purchase order on this invoice bills at what it cost plus the markup above. Off:
+              at what it cost. A price typed by hand stays either way.
             </p>
           </div>
         </div>
@@ -1220,6 +1220,13 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                       label={`Line ${i + 1} cost`}
                       onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
                     />
+                    {/* Owner, Oct 14 ("it says cost 0.091, I'm confused"): a material from the
+                        ledger is costed per piece — the box price over the pieces in it. */}
+                    {rateIsComputed(l) && (
+                      <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
+                        per {l.unit.trim() || "ea"}
+                      </span>
+                    )}
                   </div>
                 )}
                 <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
