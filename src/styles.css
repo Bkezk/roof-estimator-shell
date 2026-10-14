@@ -62,9 +62,17 @@
   --color-image-plate: var(--image-plate);
 }
 
+/*
+ * Light theme (owner, Oct 14: "some people in the office are having issues with everything
+ * being white"): the page is an off-white blue-grey, cards, forms and pop-ups stay white, so
+ * every panel stands off the page; borders a step darker so edges read; muted fills a step
+ * darker than the page so a table header or a hover still shows on a white card. The
+ * bordered-box rule under @layer base paints every "rounded… border" box white too (most of
+ * the app's panels are plain bordered divs, not <Card>).
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
+  --background: oklch(0.968 0.006 247.9);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.129 0.042 264.695);
@@ -72,16 +80,16 @@
   --popover-foreground: oklch(0.129 0.042 264.695);
   --primary: oklch(0.208 0.042 265.755);
   --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
+  --secondary: oklch(0.945 0.009 247.9);
   --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
+  --muted: oklch(0.945 0.009 247.9);
   --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
+  --accent: oklch(0.945 0.009 247.9);
   --accent-foreground: oklch(0.208 0.042 265.755);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
+  --border: oklch(0.895 0.014 255.5);
+  --input: oklch(0.895 0.014 255.5);
   --ring: oklch(0.704 0.04 256.788);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -149,6 +157,17 @@
 @layer base {
   * {
     border-color: var(--color-border);
+  }
+
+  /*
+   * Off-white page, white cards (owner, Oct 14): a bordered, rounded box is a panel, so it is
+   * painted the card colour. :where() keeps the rule at zero specificity and @layer base sits
+   * under the utilities layer, so any box with its own fill (bg-muted/40, a stage colour, an
+   * input's bg-transparent) keeps it; only boxes with no fill of their own turn white. In dark
+   * mode the same boxes take the dark card tone, a step lighter than the page.
+   */
+  :where(.rounded.border, .rounded-md.border, .rounded-lg.border, .rounded-xl.border) {
+    background-color: var(--color-card);
   }
 
   /*
