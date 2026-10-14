@@ -206,7 +206,7 @@ function InvoiceList({
         </Button>
       </div>
 
-      <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+      <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <Chip
             active={toInvoice}

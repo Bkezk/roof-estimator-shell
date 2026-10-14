@@ -380,7 +380,7 @@ function OppList({
       ) : (
         <>
           {opps.length > 0 && (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+            <div className="space-y-3 rounded-lg border p-3">
               <label className="flex flex-col gap-1 text-xs text-muted-foreground">
                 Search
                 <Input
@@ -1379,7 +1379,7 @@ function OppCustomerBlock(props: {
   onPickSite: (siteId: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+    <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
         <Link
           to="/customers"

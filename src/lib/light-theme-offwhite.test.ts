@@ -46,15 +46,37 @@ describe("the light tokens", () => {
   });
 });
 
+describe("page-level panels are white, not a muted box on a muted page", () => {
+  it("the filter bars and page sections carry no muted fill of their own (owner, Oct 14: 'why are the … forms not white?')", () => {
+    for (const [f, cls] of [
+      ["src/routes/bids.tsx", "flex flex-wrap items-end gap-3 rounded-lg border p-3"],
+      ["src/components/takeoff-page.tsx", "flex flex-wrap items-end gap-3 rounded-lg border p-3"],
+      ["src/components/service-page.tsx", "space-y-3 rounded-lg border p-3"],
+      ["src/components/opportunities-page.tsx", "space-y-3 rounded-lg border p-3"],
+      ["src/components/service/invoices-page.tsx", "space-y-3 rounded-lg border p-3"],
+      ["src/components/inventory-page.tsx", "justify-between gap-2 rounded-md border px-3 py-2"],
+      ["src/components/leads-page.tsx", "space-y-2 rounded-lg border p-3 text-sm"],
+    ] as const) {
+      const src = readFileSync(f, "utf8");
+      expect(src, f).toContain(cls);
+      expect(src, f).not.toContain("rounded-lg border bg-muted/30 p-3");
+    }
+  });
+});
+
 describe("bordered boxes are painted the card colour", () => {
   it("one zero-specificity rule under @layer base, so a box's own fill still wins", () => {
     const base = css.slice(css.indexOf("@layer base {"));
+    // :is(), not :where(): two-class specificity beats preflight's transparent <button> in the
+    // same layer (the bid folder cards are buttons — owner, Oct 14: "why are the folders … not
+    // white?"); the utilities layer still wins over it.
     expect(base).toContain(
-      ":where(.rounded.border, .rounded-md.border, .rounded-lg.border, .rounded-xl.border) {",
+      ":is(.rounded.border, .rounded-md.border, .rounded-lg.border, .rounded-xl.border) {",
     );
+    expect(base).not.toContain(":where(.rounded.border");
     expect(base).toContain("background-color: var(--color-card);");
     // Inside the base layer (before its closing brace), not an unlayered rule.
-    const rule = base.indexOf(":where(.rounded.border");
+    const rule = base.indexOf(":is(.rounded.border");
     expect(rule).toBeGreaterThan(0);
     expect(base.slice(0, rule)).not.toMatch(/\n\}\n/);
   });

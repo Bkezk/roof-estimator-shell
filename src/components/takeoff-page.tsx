@@ -245,7 +245,7 @@ function TakeoffList() {
       ) : (
         <>
           {takeoffs.length > 0 && (
-            <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+            <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
               <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground">
                 Takeoff or customer name
                 <Input

@@ -352,7 +352,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       )}
 
       {aboutOpen && (
-        <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+        <div className="space-y-2 rounded-lg border p-3 text-sm">
           {settings?.last_fetch_note ? (
             <p>
               <span className="font-medium">Last check</span>

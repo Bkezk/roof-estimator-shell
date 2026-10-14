@@ -588,7 +588,7 @@ function ServiceList({ filters }: { filters: ListFilters }) {
       ) : (
         <>
           {jobs.length > 0 && (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+            <div className="space-y-3 rounded-lg border p-3">
               <div className="flex flex-wrap items-end gap-3">
                 <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground">
                   Search
@@ -2552,7 +2552,7 @@ function CustomerBlock(props: {
   const site = props.siteId ? detail.data?.sites.find((s) => s.id === props.siteId) : undefined;
   const name = a?.name ?? props.hit?.account_name ?? "";
   return (
-    <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+    <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
         <Link
           to="/customers"

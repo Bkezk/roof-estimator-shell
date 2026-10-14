@@ -161,12 +161,14 @@
 
   /*
    * Off-white page, white cards (owner, Oct 14): a bordered, rounded box is a panel, so it is
-   * painted the card colour. :where() keeps the rule at zero specificity and @layer base sits
-   * under the utilities layer, so any box with its own fill (bg-muted/40, a stage colour, an
-   * input's bg-transparent) keeps it; only boxes with no fill of their own turn white. In dark
-   * mode the same boxes take the dark card tone, a step lighter than the page.
+   * painted the card colour. @layer base sits under the utilities layer, so any box with its own
+   * fill (bg-muted/40, a stage colour, an input's bg-transparent) keeps it; only boxes with no
+   * fill of their own turn white. :is() keeps the two-class specificity so the rule also beats
+   * the preflight reset in this same layer that makes a <button> transparent (owner, Oct 14:
+   * "why are the folders … not white?" — the bid folder cards are buttons). In dark mode the
+   * same boxes take the dark card tone, a step lighter than the page.
    */
-  :where(.rounded.border, .rounded-md.border, .rounded-lg.border, .rounded-xl.border) {
+  :is(.rounded.border, .rounded-md.border, .rounded-lg.border, .rounded-xl.border) {
     background-color: var(--color-card);
   }
 

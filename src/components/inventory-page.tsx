@@ -797,7 +797,7 @@ function ProductPicker(props: {
 
   if (chosen) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2">
         <div>
           <p className="font-medium">{productLabel(chosen)}</p>
           <p className="text-xs text-muted-foreground">
@@ -988,7 +988,7 @@ function LocationPicker(props: {
   const chosen = list.find((l) => l.id === props.value);
   if (chosen) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2">
         <p className="flex items-center gap-2 font-medium">
           {chosen.kind === "vehicle" ? (
             <Truck className="h-4 w-4" />
