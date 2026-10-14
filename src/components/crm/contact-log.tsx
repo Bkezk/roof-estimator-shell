@@ -37,6 +37,7 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { HOLD_REASON_MAX, holdDateBounds, holdDateProblem } from "@/lib/followup-holds";
 import { shortDay } from "@/lib/followup-rules";
+import { toldSuffix } from "@/lib/mentions";
 import { localYmd } from "@/lib/my-work";
 import {
   CONTACT_METHOD_LABELS,
@@ -54,7 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const whenShort = (iso: string) =>
@@ -150,11 +151,12 @@ export function LogContactButtons({
       });
     },
     onSuccess: (row, method) => {
-      toast.success(
-        row.hold
-          ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
-          : `Logged: ${CONTACT_METHOD_LABELS[method]}`,
-      );
+      const logged = row.hold
+        ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
+        : `Logged: ${CONTACT_METHOD_LABELS[method]}`;
+      toast.success(`${logged}${toldSuffix(row.mentioned)}`);
+      // The contact is on record; say loudly when the people named in it were not told.
+      if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
       setNote("");
       setTryAgain("");
       setPicked(null);
@@ -199,14 +201,14 @@ export function LogContactButtons({
       </div>
       {picked && (
         <div className="space-y-1.5">
-          <Textarea
+          <MentionTextarea
             rows={2}
             value={note}
             maxLength={2000}
             autoFocus
-            placeholder={NOTE_HINTS[picked] ?? "What was said or learned"}
+            placeholder={`${NOTE_HINTS[picked] ?? "What was said or learned"} — ${MENTION_HINT}`}
             aria-label={`Note for ${CONTACT_METHOD_LABELS[picked]}`}
-            onChange={(e) => setNote(e.target.value)}
+            onValueChange={setNote}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -272,7 +274,8 @@ export function LogContactButtons({
               <X className="mr-1 h-3.5 w-3.5" /> Cancel
             </Button>
             <span className="text-xs text-muted-foreground">
-              What was said or learned helps the next person. Ctrl+Enter saves.
+              What was said or learned helps the next person. Type @ to tell someone. Ctrl+Enter
+              saves.
             </span>
           </div>
         </div>

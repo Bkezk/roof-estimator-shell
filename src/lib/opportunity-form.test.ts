@@ -174,7 +174,8 @@ describe("the opportunity page (owner, Oct 1)", () => {
 
   it("Description and Notes grow as typed (two rows to start)", () => {
     expect(editor).toMatch(/<AutoTextarea\s+id="opp-description"\s+rows=\{2\}/);
-    expect(editor).toMatch(/<AutoTextarea\s+id="opp-notes"\s+rows=\{2\}/);
+    // Notes is the @mention box since Oct 14 (mention-textarea.tsx); `grow` makes it auto-grow.
+    expect(editor).toMatch(/<MentionTextarea\s+grow\s+id="opp-notes"\s+rows=\{2\}/);
     expect(page).not.toMatch(/<Textarea\b/);
   });
 

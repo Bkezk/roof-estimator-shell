@@ -79,6 +79,7 @@ import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 // The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
 // so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
 import { localYmd } from "@/lib/my-work";
+import { toldSuffix } from "@/lib/mentions";
 import {
   isOpenOppStatus,
   isOppHeld,
@@ -143,6 +144,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
+import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -822,13 +824,16 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       if (opp) {
         setSavedKey(draftKey(draft));
         // A moved date clears a running snooze (followups.server.ts): say so.
-        toast.success(
-          row.followup_note ? `Opportunity saved — ${row.followup_note}` : "Opportunity saved",
-        );
+        const saved = row.followup_note
+          ? `Opportunity saved — ${row.followup_note}`
+          : "Opportunity saved";
+        toast.success(`${saved}${toldSuffix(row.mentioned ?? 0)}`);
       } else {
-        toast.success("Opportunity created");
+        toast.success(`Opportunity created${toldSuffix(row.mentioned ?? 0)}`);
         void navigate({ to: "/opportunities", search: { id: row.id }, replace: true });
       }
+      // The opportunity is saved; say loudly when the people named in Notes were not told.
+      if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
     },
     onError: (e) => toast.error(`Could not save the opportunity: ${errText(e)}`),
   });
@@ -1078,12 +1083,14 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
 
         <div className="space-y-1">
           <Label htmlFor="opp-notes">Notes</Label>
-          <AutoTextarea
+          <MentionTextarea
+            grow
             id="opp-notes"
             rows={2}
             value={draft.notes}
             maxLength={10000}
-            onChange={(e) => set("notes", e.target.value)}
+            placeholder={`Anything the next person should know — ${MENTION_HINT}`}
+            onValueChange={(v) => set("notes", v)}
           />
         </div>
 

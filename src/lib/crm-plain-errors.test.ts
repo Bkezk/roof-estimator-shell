@@ -98,7 +98,8 @@ describe("every validator in crm.functions.ts and vendors.functions.ts goes thro
 });
 
 describe("the inputs carry a maxLength", () => {
-  const inputs = (src: string) => src.match(/<(Input|Textarea)\b[\s\S]*?\/>/g) ?? [];
+  const inputs = (src: string) =>
+    src.match(/<(Input|Textarea|MentionTextarea)\b[\s\S]*?\/>/g) ?? [];
   const page = readFileSync("src/components/customers-page.tsx", "utf8");
   const slice = (from: string, to: string) => page.slice(page.indexOf(from), page.indexOf(to));
   it("the account form, the contact form and the site form", () => {

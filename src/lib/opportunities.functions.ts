@@ -26,6 +26,7 @@ import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 import { assigneeProblem, OPP_CUSTOMER_REQUIRED, opportunityProblem } from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
+import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { addDays } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 import { localYmd as easternYmd } from "@/lib/tasks";
@@ -66,6 +67,10 @@ export type OpportunityWithNames = OpportunityRow & {
   hold_until: string | null;
   /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
   followup_note?: string | null;
+  /** After a save: how many people the Notes' @mentions told (owner, Oct 14). */
+  mentioned?: number;
+  /** After a save: why the people named in Notes were not told; null when they were. */
+  mention_error?: string | null;
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
@@ -373,15 +378,17 @@ export const saveOpportunity = createServerFn({ method: "POST" })
     // The stored expected close: once set, only an admin or a manager moves it (owner, Oct 1).
     let oldClose: string | null = null;
     let oldStatus: string | null = null;
+    let oldNotes: string | null = null;
     if (id) {
       const { data: cur, error: cErr } = await sb
         .from("crm_opportunities")
-        .select("expected_close, status")
+        .select("expected_close, status, notes")
         .eq("id", id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
       oldClose = cur?.expected_close ?? null;
       oldStatus = cur?.status ?? null;
+      oldNotes = cur?.notes ?? null;
       const moveProblem = dateMoveProblem({
         profile: p,
         oldYmd: oldClose,
@@ -454,10 +461,24 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       row = r;
     }
     const synced = await syncOppFollowup(row, oldStatus, context, nameOf(p));
+    // @mentions in Notes (owner, Oct 14): the names newly written since the stored text are told;
+    // a re-save does not tell anyone twice. sendMentions never throws.
+    let mentions: MentionOutcome = NO_MENTIONS;
+    if (row.notes?.includes("@")) {
+      const { sendMentions } = await import("@/lib/mention-notify");
+      mentions = await sendMentions(context, {
+        text: row.notes,
+        previous: oldNotes,
+        writer: nameOf(p),
+        where: `opportunity "${row.title}"`,
+        url: `/opportunities?id=${row.id}`,
+      });
+    }
     const [r] = await withNames(sb, [row]);
     return {
       ...(r as OpportunityWithNames),
       followup_note: synced === "snooze_cleared" ? SNOOZE_CLEARED_NOTE : null,
+      ...mentions,
     };
   });
 

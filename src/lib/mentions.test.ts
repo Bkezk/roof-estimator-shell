@@ -48,8 +48,8 @@ describe("typing", () => {
     }));
     expect(suggestPeople(many, "")).toHaveLength(MENTION_LIST_MAX);
     // The list scrolls instead of cutting off.
-    expect(readFileSync("src/components/service/ticket-field-sections.tsx", "utf8")).toContain(
-      'aria-label="People to mention"\n              className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto',
+    expect(readFileSync("src/components/mention-textarea.tsx", "utf8")).toContain(
+      'aria-label="People to mention"\n          className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto',
     );
   });
   it("picking writes '@Full Name ' and moves the caret past it", () => {
@@ -97,11 +97,14 @@ describe("saving the note", () => {
 });
 
 describe("the note box", () => {
+  // Since Oct 14 the picker is the shared MentionTextarea (mention-everywhere.test.ts).
   const src = readFileSync("src/components/service/ticket-field-sections.tsx", "utf8");
+  const box = readFileSync("src/components/mention-textarea.tsx", "utf8");
   it("suggests people on @ and says who was told", () => {
-    expect(src).toContain('aria-label="People to mention"');
-    expect(src).toContain("type @ to tell someone");
-    expect(src).toContain("Note added — told");
+    expect(box).toContain('aria-label="People to mention"');
+    expect(box).toContain("type @ to tell someone");
+    expect(src).toContain("<MentionTextarea");
+    expect(src).toContain("toast.success(`Note added${toldSuffix(r.mentioned)}`);");
   });
 });
 
@@ -119,7 +122,7 @@ describe("the roster: anyone with Service or Customers access", () => {
     expect(canBeMentioned(null)).toBe(false);
   });
   it("the picker and the server read the same roster (mention_options), not the dispatch one", () => {
-    const box = readFileSync("src/components/service/ticket-field-sections.tsx", "utf8");
+    const box = readFileSync("src/components/mention-textarea.tsx", "utf8");
     expect(box).toContain("const peopleFn = useServerFn(listMentionPeople);");
     expect(box).toContain('queryKey: ["mention-options"]');
     expect(box).not.toContain("const peopleFn = useServerFn(listTechnicians);");

@@ -236,7 +236,7 @@ describe("item 8 — moving the date clears a running snooze, and says so", () =
     );
     expect(row["followup_note"]).toBe("snooze cleared: the reminders follow the new date");
     const page = read("src/components/opportunities-page.tsx");
-    expect(page).toContain("row.followup_note ? `Opportunity saved — ${row.followup_note}`");
+    expect(page).toContain("? `Opportunity saved — ${row.followup_note}`");
   });
   it("no snooze running: no note", async () => {
     setup({ followups: [followup()] });

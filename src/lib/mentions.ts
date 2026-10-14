@@ -90,3 +90,35 @@ export function mentionedIds(text: string, people: Person[]): string[] {
   }
   return hits.sort((a, b) => a.index - b.index).map((h) => h.id);
 }
+
+/**
+ * Who a re-saved field newly mentions (owner, Oct 14: @ on opportunity and customer Notes, not
+ * only ticket notes). A Notes box is saved whole, so the names already in the stored text were
+ * told when they were written; only names not in `previous` are told now. A new record has no
+ * previous text, so everyone named is told.
+ */
+export function newMentionIds(text: string, previous: string | null | undefined, people: Person[]) {
+  const before = previous ? new Set(mentionedIds(previous, people)) : null;
+  return mentionedIds(text, people).filter((id) => !before?.has(id));
+}
+
+/** What the toast adds after a save that told people: " — told 2 people", "" for none. */
+export function toldSuffix(n: number): string {
+  return n > 0 ? ` — told ${n} ${n === 1 ? "person" : "people"}` : "";
+}
+
+/** A notice body is the text itself, cut short when a Notes box runs long. */
+export const MENTION_BODY_MAX = 1000;
+export function mentionBody(text: string): string {
+  const t = text.trim();
+  return t.length > MENTION_BODY_MAX ? `${t.slice(0, MENTION_BODY_MAX - 1).trimEnd()}…` : t;
+}
+
+/** What a save reports about the @mentions in its text (lib/mention-notify.ts fills it in). */
+export interface MentionOutcome {
+  /** How many people were told. */
+  mentioned: number;
+  /** Why they were not, when the text named someone and sending failed; null otherwise. */
+  mention_error: string | null;
+}
+export const NO_MENTIONS: MentionOutcome = { mentioned: 0, mention_error: null };

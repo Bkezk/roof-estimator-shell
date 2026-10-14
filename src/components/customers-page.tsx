@@ -58,6 +58,7 @@ import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-statu
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { doneStamp, orderAccountTasks, type TaskRow } from "@/lib/tasks";
+import { toldSuffix } from "@/lib/mentions";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import {
   deleteAccount,
@@ -131,6 +132,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -788,8 +790,10 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
           account_manager_id: f.account_manager_id || null,
         },
       }),
-    onSuccess: (row) => {
-      toast.success("Customer saved");
+    onSuccess: ({ mentioned, mention_error, ...row }) => {
+      toast.success(`Customer saved${toldSuffix(mentioned)}`);
+      // The customer is saved; say loudly when the people named in Notes were not told.
+      if (mention_error) toast.error(mention_error, { duration: 12_000 });
       qc.setQueryData<AccountDetail>(["account", row.id], (old) =>
         old ? { ...old, account: row } : old,
       );
@@ -933,12 +937,13 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
         {field("external_id", "Sage / CenterPoint customer #")}
         <div className="space-y-1">
           <Label htmlFor="acct-notes">Notes</Label>
-          <Textarea
+          <MentionTextarea
             id="acct-notes"
             rows={2}
             maxLength={CRM_MAX.notes}
             value={f.notes}
-            onChange={(e) => set("notes", e.target.value)}
+            placeholder={`Anything the next person should know — ${MENTION_HINT}`}
+            onValueChange={(v) => set("notes", v)}
           />
         </div>
       </div>

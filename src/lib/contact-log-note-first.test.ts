@@ -22,7 +22,10 @@ describe("LogContactButtons: tap opens the note, Save logs", () => {
   it("the note opens for the picked method, focused, with a hint for that method", () => {
     expect(buttons).toContain("{picked && (");
     expect(buttons).toContain("autoFocus");
-    expect(buttons).toContain('placeholder={NOTE_HINTS[picked] ?? "What was said or learned"}');
+    // The method's hint, then the @ hint (owner, Oct 14: mentions in the contact log too).
+    expect(buttons).toContain(
+      'placeholder={`${NOTE_HINTS[picked] ?? "What was said or learned"} — ${MENTION_HINT}`}',
+    );
     expect(src).toContain("const NOTE_HINTS: Partial<Record<ContactMethod, string>> = {");
     for (const m of ["called", "texted", "emailed", "visited"])
       expect(src).toContain(`  ${m}: "e.g. `);

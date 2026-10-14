@@ -39,6 +39,7 @@ import {
   type AccountInput,
   type QuickAccountInput,
 } from "@/lib/crm-account";
+import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { namesLookAlike } from "@/lib/name-match";
 import {
   SEARCH_LIMIT,
@@ -422,29 +423,54 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
 export const saveAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => parseInput(accountSchema, d))
-  .handler(async ({ data, context }): Promise<AccountRow> => {
+  .handler(async ({ data, context }): Promise<AccountRow & MentionOutcome> => {
     const p = await writeAccess(context);
     const sb = context.supabase;
     const { id, source, ...fields } = data;
     const patch = { ...defined(fields), updated_by_name: nameOf(p) };
+    let row: AccountRow;
+    // The stored Notes, read only when the new ones name someone (owner, Oct 14: @mentions on a
+    // customer's Notes): the names already there were told when they were written.
+    let oldNotes: string | null = null;
     if (id) {
       await assertLiveAccount(sb, id);
-      const { data: row, error } = await sb
+      if (fields.notes?.includes("@")) {
+        const { data: cur } = await sb
+          .from("crm_accounts")
+          .select("notes")
+          .eq("id", id)
+          .maybeSingle();
+        oldNotes = cur?.notes ?? null;
+      }
+      const { data: r, error } = await sb
         .from("crm_accounts")
         .update(patch)
         .eq("id", id)
         .select("*")
         .single();
       if (error) throw new Error(error.message);
-      return row;
+      row = r;
+    } else {
+      const { data: r, error } = await sb
+        .from("crm_accounts")
+        .insert({ ...patch, source: source ?? "manual", created_by: context.userId })
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      row = r;
     }
-    const { data: row, error } = await sb
-      .from("crm_accounts")
-      .insert({ ...patch, source: source ?? "manual", created_by: context.userId })
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
-    return row;
+    let mentions: MentionOutcome = NO_MENTIONS;
+    if (fields.notes?.includes("@")) {
+      const { sendMentions } = await import("@/lib/mention-notify");
+      mentions = await sendMentions(context, {
+        text: fields.notes,
+        previous: oldNotes,
+        writer: nameOf(p) ?? "Someone",
+        where: `customer ${row.name}`,
+        url: `/customers?id=${row.id}`,
+      });
+    }
+    return { ...row, ...mentions };
   });
 
 /**

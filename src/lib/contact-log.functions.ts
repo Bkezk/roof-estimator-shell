@@ -30,6 +30,7 @@ import {
   holdDateProblem,
 } from "@/lib/followup-holds";
 import { canManageFollowup } from "@/lib/followup-rules";
+import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 
 export type ContactLogRow = Database["public"]["Tables"]["crm_contact_log"]["Row"];
 export type UntouchedRow = Database["public"]["Functions"]["crm_untouched"]["Returns"][number];
@@ -109,10 +110,42 @@ const logSchema = z.object({
 });
 export type LogContactInput = z.input<typeof logSchema>;
 
-/** The logged row, and the hold the same save set (null when no date was given). */
-export type LogContactResult = ContactLogRow & {
-  hold: { until: string; hold_count: number } | null;
-};
+/**
+ * The logged row, the hold the same save set (null when no date was given), and the @mentions
+ * in the note: how many people were told, or why they were not (owner, Oct 14).
+ */
+export type LogContactResult = ContactLogRow &
+  MentionOutcome & {
+    hold: { until: string; hold_count: number } | null;
+  };
+
+/** Where a contact log note's @mention happened, for the notice: "Ticket #6016 Bell County" or 'opportunity "Courthouse roof"'. */
+async function contactPlace(
+  sb: Ctx["supabase"],
+  kind: ContactKind,
+  itemId: string,
+): Promise<{ where: string; url: string }> {
+  if (kind === "ticket") {
+    const { data } = await sb
+      .from("service_jobs")
+      .select("number, customer_name")
+      .eq("id", itemId)
+      .maybeSingle();
+    return {
+      where: data ? `Ticket #${data.number} ${data.customer_name}` : "a ticket",
+      url: `/service?id=${itemId}`,
+    };
+  }
+  const { data } = await sb
+    .from("crm_opportunities")
+    .select("title")
+    .eq("id", itemId)
+    .maybeSingle();
+  return {
+    where: data ? `opportunity "${data.title}"` : "an opportunity",
+    url: `/opportunities?id=${itemId}`,
+  };
+}
 
 export const logContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -167,6 +200,19 @@ export const logContact = createServerFn({ method: "POST" })
         throw new Error("You cannot log a contact on this item (no access to it)");
       throw new Error(error.message);
     }
+    // @mentions in the note (owner, Oct 14): told before the hold is set, so a hold problem never
+    // loses them. sendMentions never throws; its outcome rides back on the row.
+    let mentions: MentionOutcome = NO_MENTIONS;
+    if (data.note?.includes("@")) {
+      const { sendMentions } = await import("@/lib/mention-notify");
+      const place = await contactPlace(context.supabase, data.kind, data.item_id);
+      mentions = await sendMentions(context, {
+        text: data.note,
+        writer: by_name ?? "Someone",
+        where: place.where,
+        url: place.url,
+      });
+    }
     if (data.try_again_on && followup && data.note) {
       const { holdFollowup } = await import("@/lib/followups.functions");
       try {
@@ -180,7 +226,7 @@ export const logContact = createServerFn({ method: "POST" })
           today,
           actor: { id: context.userId, name: by_name },
         });
-        return { ...row, hold };
+        return { ...row, ...mentions, hold };
       } catch (e) {
         // The contact is on record; say plainly that the hold is not.
         const msg = e instanceof Error ? e.message : String(e);
@@ -193,7 +239,7 @@ export const logContact = createServerFn({ method: "POST" })
       const { clearFollowupHold } = await import("@/lib/followups.functions");
       await clearFollowupHold(context.supabase, followup.id);
     }
-    return { ...row, hold: null };
+    return { ...row, ...mentions, hold: null };
   });
 
 export const listContactLog = createServerFn({ method: "GET" })
