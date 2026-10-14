@@ -248,11 +248,15 @@ describe("Calendar: whole width, one screen, the day's items beside it, five ite
     const cal = page.slice(page.indexOf("function CalendarView"), page.indexOf("export function"));
     // The whole thing (month buttons, grid, the day's items) is one viewport tall on xl and up,
     // the weeks dividing the grid's height; nothing to scroll to. Below xl it flows as before.
+    // Owner, Oct 14: never under 36rem, and a week never under 5.5rem, so a short window or a
+    // higher browser zoom (RoAnna's login) cannot squash the days to a number and one line.
     expect(cal).toContain(
-      '<div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[30rem] xl:flex-row">',
+      '<div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[36rem] xl:flex-row">',
     );
+    expect(cal).not.toContain("xl:min-h-[30rem]");
     expect(cal).not.toContain("lg:h-[calc(100vh-14rem)]");
-    expect(cal).toContain("grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto");
+    expect(cal).toContain("grid min-h-0 flex-1 auto-rows-[minmax(5.5rem,1fr)] overflow-y-auto");
+    expect(cal).not.toContain("auto-rows-[1fr]");
     expect(cal).toContain("min-h-24");
     expect(cal).toContain("xl:min-h-0");
     expect(cal).not.toContain("lg:min-h-36");

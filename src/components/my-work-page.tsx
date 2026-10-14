@@ -666,7 +666,11 @@ function CalendarView({
     // day's items share one screen — the grid is sized to the viewport (the 15rem is the shell
     // header, the page title and toolbar, this row of month buttons and the paddings), the weeks
     // divide that height, and the day's items sit beside the grid on xl and up, scrolling inside.
-    <div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[30rem] xl:flex-row">
+    // Owner, Oct 14 (RoAnna's login: "the calendar view became really compressed"): on a short
+    // window or at a higher browser zoom the viewport share left the weeks a few lines tall. The
+    // block is never under 36rem (the page scrolls instead) and a week never under 5.5rem (the
+    // grid scrolls instead), so a day always shows its number and three lines.
+    <div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[36rem] xl:flex-row">
       {/* Owner, Oct 8: "the unassigned list on the left of the calendar so people can drag and
         drop it onto their own calendar". Dragging a row onto a day takes it and dates it there. */}
       {claim && unassignedPane && (
@@ -745,7 +749,7 @@ function CalendarView({
               </div>
             ))}
           </div>
-          <div className="grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto">
+          <div className="grid min-h-0 flex-1 auto-rows-[minmax(5.5rem,1fr)] overflow-y-auto">
             {weeks.map((week) => (
               <div key={week[0]} className="grid grid-cols-7 border-b last:border-b-0">
                 {week.map((d) => {
