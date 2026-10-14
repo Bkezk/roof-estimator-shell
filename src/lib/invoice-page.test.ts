@@ -58,19 +58,21 @@ describe("the full-width invoice page", () => {
     expect(ed).toMatch(/to="\/service"\s+search=\{\{ id: job\.id \}\}/);
     expect(ed).toContain("Ticket #{job.number}");
     expect(ed).toMatch(/to="\/service\/invoices"\s+search=\{\{ id: x\.id \}\}/);
-    // The actions, drafts and finals.
+    // The actions, drafts and finals. (owner, Oct 14: the draft saves itself — no Save; one
+    // primary Finalise with "Send it now?" after it — no "Finalise & send"; Preview is a pane,
+    // not "Preview PDF"; Rebuild and Delete sit in the "…" menu; invoice-workflow-oct14.test.ts)
     for (const a of [
-      "Save",
       "Rebuild from ticket",
-      "Preview PDF",
+      "Preview",
       "Finalise",
-      "Finalise &amp; send",
       "Delete draft",
       "Download PDF",
       "Mark paid",
       "Void",
     ])
       expect(ed, a).toMatch(new RegExp(`[>}]\\s*${a}\\s*<`));
+    for (const gone of ["Save", "Preview PDF", "Finalise &amp; send"])
+      expect(ed, gone).not.toMatch(new RegExp(`[>}]\\s*${gone}\\s*<`));
   });
   it("the Invoices page renders it when ?id= is set, behind seesInvoices", () => {
     const page = read("src/components/service/invoices-page.tsx");
@@ -151,8 +153,10 @@ describe("a new line's quantity and rate start blank", () => {
     expect(ed).toContain(
       "if (l.qty === null || l.rate === null) return `Line ${i + 1} needs a quantity and a rate`;",
     );
-    // Save and Preview stop on it with that message (Finalise / Send already did).
-    expect(ed).toMatch(/const save = \(\) => \{\s*if \(!complete\(false, false\)\) return;/);
-    expect(ed).toMatch(/const preview = \(\) => \{\s*if \(!complete\(false, false\)\) return;/);
+    // (owner, Oct 14: the draft saves itself; while a line is incomplete the autosave is not
+    // pushed and the hint by the actions carries that message; Finalise still stops on it.)
+    expect(ed).toContain('if (typeof p === "string") return; // Incomplete: shown by the actions');
+    expect(ed).toContain("{problem} — not saved yet");
+    expect(ed).toMatch(/const tryFinal = \(\) => \{\s*if \(!complete\(true, true\)\) \{/);
   });
 });

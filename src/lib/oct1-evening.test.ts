@@ -8,13 +8,16 @@ import { describe, expect, it } from "vitest";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
-describe("Invoice: Preview PDF shows the PDF in the page", () => {
+describe("Invoice: Preview shows the PDF in the page", () => {
   const src = read("src/components/service/invoice-editor.tsx");
   // Oct 8: the pages are drawn with pdf.js (Chrome blocked its own viewer in the iframe).
-  it("renders into a dialog, pages drawn with pdf.js, Download and a plain new-tab link", () => {
-    expect(src).toContain("function PdfPreviewDialog(");
-    expect(src).toContain("setPdfView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });");
-    expect(src).toContain("<PdfPreviewDialog view={pdfView} onClose={() => setPdfView(null)} />");
+  // (owner, Oct 14: the dialog became a collapsible pane under the lines, PreviewPane; same
+  // blob-URL handling, Download and new-tab link; invoice-workflow-oct14.test.ts)
+  it("renders into a pane in the page, pages drawn with pdf.js, Download and a plain new-tab link", () => {
+    expect(src).toContain("function PreviewPane(");
+    expect(src).not.toContain("function PdfPreviewDialog(");
+    expect(src).toContain("setView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });");
+    expect(src).toContain("<PreviewPane invoiceId={inv.id} version={inv.updated_at} />");
     expect(src).toContain("const u = URL.createObjectURL(view.blob);");
     expect(src).toContain("return () => URL.revokeObjectURL(u);");
     expect(src).toContain("<PdfPages blob={view.blob} title={view.fileName} />");

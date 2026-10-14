@@ -444,7 +444,11 @@ async function createInvoiceFor(
   ]);
   const { buildLinesFromJob, loadSettings, totals } = await import("@/lib/invoices.server");
   const vendor = billToVendorId ? await billableVendor(sb, billToVendorId) : null;
-  const [lines, settings] = await Promise.all([buildLinesFromJob(sb, job.id), loadSettings(sb)]);
+  // A new draft marks its PO lines up (invoices.po_markup defaults true; owner, Oct 14).
+  const [lines, settings] = await Promise.all([
+    buildLinesFromJob(sb, job.id, { poMarkup: true }),
+    loadSettings(sb),
+  ]);
   // The customer's tax exemption is the customer's: an invoice to a vendor takes the standard
   // rate (the draft's Tax % can still be changed).
   const taxRate = !vendor && account?.tax_exempt ? 0 : Number(settings.tax_rate);
@@ -539,6 +543,8 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
     const built = await buildLinesFromJob(sb, inv.service_job_id, {
       markup: inv.material_markup == null ? null : Number(inv.material_markup),
+      // The PO lines follow this draft's Mark up switch (owner, Oct 14).
+      poMarkup: inv.po_markup !== false,
     });
     const { data: oldLines, error: oErr } = await sb
       .from("invoice_lines")
@@ -639,6 +645,12 @@ const saveSchema = z.object({
   /** This invoice's material markup (0.75 = 75 %; owner, Oct 6). */
   material_markup: z.number().min(0).max(10).optional(),
   /**
+   * Mark up the PO lines (owner, Oct 14): true = cost plus material_markup, false = at cost.
+   * The editor re-prices the lines itself and sends them; the switch is stored so Rebuild from
+   * ticket prices them the same way.
+   */
+  po_markup: z.boolean().optional(),
+  /**
    * The Send To printed on this invoice only (owner, Oct 8): its name and address lines, laid
    * over the invoice's own copy (mergeSendTo). Instructions and the Sage id are never sent.
    */
@@ -728,6 +740,7 @@ export const saveInvoice = createServerFn({ method: "POST" })
       ...t,
       tax_rate: taxRate,
       ...(data.material_markup === undefined ? {} : { material_markup: data.material_markup }),
+      ...(data.po_markup === undefined ? {} : { po_markup: data.po_markup }),
       updated_by_name: nameOf(p),
     };
     if (data.invoice_date) patch.invoice_date = data.invoice_date;

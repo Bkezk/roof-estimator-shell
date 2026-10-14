@@ -6,15 +6,24 @@
  * The page: a header linking back to the ticket ("← Ticket #6012 · <customer>"), the invoice
  * label, its status and the ticket's other invoices as chips (6012, 6012.2, …) with "Another
  * invoice"; then the draft editor (header fields across the top, the line table, totals / cost /
- * margin in a summary box on the right, the actions along the bottom) or the final invoice
- * (facts, lines, totals; Download, Send, Mark paid, Void); the History fold under it. On a phone
- * everything stacks to one column and each line becomes a small card.
+ * margin in a summary box on the right, the actions along the bottom, the PDF preview pane under
+ * them) or the final invoice (facts, lines, totals; Download, Send, Mark paid, Void); the History
+ * fold under it. On a phone everything stacks to one column and each line becomes a small card.
  *
- * A draft is made from the ticket's time and materials (getOrCreateInvoice, §4 rules), edited
- * here and then finalised, or finalised and emailed, or deleted; a final invoice is read-only and
- * can be downloaded, sent again, marked paid or voided (docs/service-module-design.md §5.4).
- * Numbering is invoice-numbering.ts ("<ticket>", "<ticket>.2", …; a deleted or voided invoice
- * frees its number).
+ * A draft is made from the ticket's time, materials and approved purchase orders
+ * (getOrCreateInvoice, §4 rules; invoice-po-lines.ts), edited here and then finalised, or
+ * deleted; a final invoice is read-only and can be downloaded, sent, marked paid or voided
+ * (docs/service-module-design.md §5.4). Numbering is invoice-numbering.ts ("<ticket>",
+ * "<ticket>.2", …; a deleted or voided invoice frees its number).
+ *
+ * Owner, Oct 14: the draft SAVES ITSELF (useAutosave, ~900 ms after the last change; no Save
+ * button) — only when every line has a description, quantity and rate, else a hint by the
+ * actions says what is missing and nothing is saved. A ticket material's rate (ledger or PO)
+ * follows the markup and is shown as text with its rule ("cost + 75%") and a pencil to override
+ * it; a red outline appears only after Finalise was tried on an incomplete line. The actions
+ * are Finalise (then "Send it now?"), Preview (a collapsible pane, remembered) and a "…" menu
+ * with Rebuild from ticket and Delete draft. "Mark up purchase orders" (invoices.po_markup)
+ * prices the PO lines at cost + markup or at cost.
  *
  * Bill to (owner, Oct 1: "Sometimes invoices go to vendors"): a draft is billed to the ticket's
  * customer account or to a billable vendor (BillToChoice, bill-to-picker.tsx); saving takes the
@@ -41,9 +50,10 @@ import {
   Link2,
   Link2Off,
   Loader2,
+  MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
-  Save,
   Send,
   Trash2,
   X,
@@ -54,10 +64,13 @@ import { managesTickets } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
+import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
+import { applyPoMarkup } from "@/lib/invoice-po-lines";
 import {
   computeTotals,
   poCostForInvoice,
+  splitPosByLines,
   storedTotals,
   type InvoiceTotals,
 } from "@/lib/invoice-totals";
@@ -67,7 +80,8 @@ import { sendToEdited, sendToOf, type SendTo } from "@/lib/invoice-send-to";
 import { useVendors } from "@/components/crm/use-vendors";
 import { BillToChoice, VendorBilledBadge } from "@/components/service/bill-to-picker";
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
-import { fieldKeys } from "@/components/service/field-utils";
+import { SavedIndicator } from "@/components/service/field-shared";
+import { fieldKeys, useAutosave } from "@/components/service/field-utils";
 import { InvoicePhotos } from "@/components/service/invoice-photos";
 import { PdfPages } from "@/components/service/pdf-pages";
 import { propertyLines, showChoice, showFlags, type ShowChoice } from "@/lib/invoice-pdf-rows";
@@ -135,6 +149,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -152,6 +172,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 /** An invoice made before 20261006150000_invoice_markup.sql had the markup of the day: 75 %. */
@@ -198,6 +219,8 @@ interface Ctx {
   /** After a failed step that saved first: show what the server now holds. */
   refresh: () => void;
   onVoided: (voidedId: string) => void;
+  /** A draft was just finalised (owner, Oct 14): the page asks "Send it now?". */
+  askSend: (invoiceId: string) => void;
 }
 
 // ---- The page -------------------------------------------------------------------------------
@@ -245,6 +268,9 @@ export function InvoiceEditorPage({ id }: { id: string }) {
   const openInvoice = (invoiceId: string, replace = false) =>
     void navigate({ to: "/service/invoices", search: { id: invoiceId }, replace });
 
+  // After Finalise (owner, Oct 14): "Send it now?" on the now-final invoice; Send opens its
+  // Send dialog.
+  const [sendNow, setSendNow] = useState<{ id: string; step: "ask" | "open" } | null>(null);
   const another = useMutation({
     mutationFn: (jid: string) => anotherFn({ data: { job_id: jid } }),
     onSuccess: (r, jid) => {
@@ -302,6 +328,7 @@ export function InvoiceEditorPage({ id }: { id: string }) {
       if (stageChanged) refreshTicket(job.id);
     },
     refresh: () => void qc.invalidateQueries({ queryKey: invoicePageKey(id) }),
+    askSend: (invoiceId) => setSendNow({ id: invoiceId, step: "ask" }),
     onVoided: (voidedId) => {
       qc.removeQueries({ queryKey: invoiceKey(job.id) });
       refreshTicket(job.id);
@@ -407,11 +434,41 @@ export function InvoiceEditorPage({ id }: { id: string }) {
       </div>
 
       {status === "draft" ? (
-        // Remount on every server change so the edit state starts from what was saved.
-        <DraftInvoice key={`${inv.id}:${inv.updated_at}`} ctx={ctx} data={data} />
+        // One mount per draft: it saves itself as it is edited (owner, Oct 14), so a remount on
+        // every server change would drop the box being typed in; Rebuild resets its state itself.
+        <DraftInvoice key={inv.id} ctx={ctx} data={data} />
       ) : (
-        <FinalInvoice key={inv.id} ctx={ctx} data={data} />
+        <FinalInvoice
+          key={inv.id}
+          ctx={ctx}
+          data={data}
+          openSend={sendNow?.id === inv.id && sendNow.step === "open"}
+          onSendClosed={() => setSendNow(null)}
+        />
       )}
+      {/* Owner, Oct 14: after Finalise, offer to send straight away. */}
+      <AlertDialog
+        open={status !== "draft" && sendNow?.id === inv.id && sendNow.step === "ask"}
+        onOpenChange={(o) => {
+          if (!o) setSendNow(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send it now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Invoice #{invoiceLabel(inv)} is final and its PDF is stored. Email it now, or later
+              with Send below.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not now</AlertDialogCancel>
+            <AlertDialogAction onClick={() => setSendNow({ id: inv.id, step: "open" })}>
+              <Send className="mr-2 h-4 w-4" /> Send
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Which of the ticket's photos (with their marks) print on this invoice (owner, Oct 1). */}
       <InvoicePhotos invoiceId={inv.id} ticketNumber={job.number} editable={status === "draft"} />
       <AuditHistory entity="invoice" entityId={data.invoice.id} />
@@ -461,6 +518,8 @@ interface HeadDraft {
    * invoice"); starts at Setup › Material pricing's.
    */
   markup_pct: number;
+  /** Mark up purchase orders (owner, Oct 14): the PO lines at cost + markup, or at cost. */
+  po_markup: boolean;
   /** Bill to: a vendor's id, or null for the customer account. */
   bill_to_vendor_id: string | null;
   /** The Send To printed on this invoice only (owner, Oct 8). */
@@ -493,6 +552,7 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
   payment_terms: inv.payment_terms ?? "",
   tax_pct: toPct(inv.tax_rate),
   markup_pct: toPct(inv.material_markup ?? DEFAULT_MARKUP),
+  po_markup: inv.po_markup !== false,
   bill_to_vendor_id: inv.bill_to_vendor_id ?? null,
   send_to: sendToOf(inv.bill_to as Record<string, unknown> | null),
 });
@@ -568,14 +628,13 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const deleteFn = useServerFn(voidInvoice);
   const saveFn = useServerFn(saveInvoice);
   const rebuildFn = useServerFn(rebuildInvoiceLines);
-  const renderFn = useServerFn(renderInvoice);
   const finalizeFn = useServerFn(finalizeInvoice);
-  const sendFn = useServerFn(sendInvoice);
 
   const [head, setHead] = useState<HeadDraft>(() => headFrom(inv));
   const [lines, setLines] = useState<LineDraft[]>(() => data.lines.map(lineFrom));
   const savedKey = useMemo(() => editKey(headFrom(inv), data.lines.map(lineFrom)), [inv, data]);
-  const dirty = editKey(head, lines) !== savedKey;
+  const liveKey = editKey(head, lines);
+  const dirty = liveKey !== savedKey;
   const setH = <K extends keyof HeadDraft>(k: K, v: HeadDraft[K]) =>
     setHead((h) => ({ ...h, [k]: v }));
   const setLine = (key: string, patch: Partial<LineDraft>) =>
@@ -599,34 +658,43 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         return next;
       }),
     );
+  // A re-priced line's new rate is the base for a later hand edit (rescaleCost's `orig`).
+  const rebased = (before: LineDraft[], after: LineDraft[]) =>
+    after.map((l, i) =>
+      l === before[i] || l.rate === null
+        ? l
+        : { ...l, orig: { rate: l.rate, cost_rate: l.cost_rate } },
+    );
   // The markup changed: the ticket's material lines that follow the markup are re-priced (a
-  // price typed by hand, rate_overridden, stays); their new rate is the base for a later hand
-  // edit.
+  // price typed by hand, rate_overridden, stays), and so are the purchase-order lines while
+  // Mark up purchase orders is on (owner, Oct 14).
   const setMarkup = (pct: number) => {
     const before = fromPct(head.markup_pct);
+    const after = fromPct(pct);
     setH("markup_pct", pct);
     setLines((ls) =>
-      applyMarkup(ls, before, fromPct(pct)).map((l, i) =>
-        l === ls[i] || l.rate === null
-          ? l
-          : { ...l, orig: { rate: l.rate, cost_rate: l.cost_rate } },
-      ),
+      rebased(ls, applyPoMarkup(applyMarkup(ls, before, after), after, head.po_markup)),
     );
   };
+  // Mark up purchase orders flipped (owner, Oct 14): the PO lines not typed by hand move between
+  // cost and cost × (1 + markup) at once, like a markup change does.
+  const setPoMarkup = (on: boolean) => {
+    setH("po_markup", on);
+    setLines((ls) => rebased(ls, applyPoMarkup(ls, fromPct(head.markup_pct), on)));
+  };
   const [newKey, setNewKey] = useState<string | null>(null);
+  // Lines whose computed rate the office chose to override (the pencil; owner, Oct 14).
+  const [rateEdit, setRateEdit] = useState<ReadonlySet<string>>(() => new Set());
 
-  const [busy, setBusy] = useState<
-    null | "save" | "rebuild" | "preview" | "final" | "send" | "delete"
-  >(null);
+  const [busy, setBusy] = useState<null | "rebuild" | "final" | "delete">(null);
   const [confirm, setConfirm] = useState<null | "rebuild" | "final" | "delete">(null);
-  const [sendOpen, setSendOpen] = useState(false);
 
   const account = useAccount(job.account_id);
   // Still the day the draft was made (the database's UTC day or the local one): not chosen.
   const dateUntouched = (ymd: string) =>
     ymd === toYmd(new Date(inv.created_at)) || ymd === inv.created_at.slice(0, 10);
   const taxExempt = !!account?.tax_exempt;
-  const po = useApprovedPoCost(job.id, inv.id);
+  const po = useApprovedPoCost(job.id, inv.id, lines);
   const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
   // Bill to changed here and not saved yet: show whom it will be billed to.
   const vendors = useVendors();
@@ -638,12 +706,25 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         ? pickedVendor && vendorBillTo(pickedVendor)
         : accountBillTo(account, job.customer_name);
 
-  /** The save payload, or an error message when a line is incomplete. */
-  const payload = (forFinal: boolean): InvoiceSaveInput | string => {
-    for (const [i, l] of lines.entries()) {
+  /** What stops the lines being saved ("Line 2 needs a quantity and a rate"), or null. */
+  const lineProblem = (ls: readonly LineDraft[]): string | null => {
+    for (const [i, l] of ls.entries()) {
       if (!l.description.trim()) return `Line ${i + 1} needs a description`;
       if (l.qty === null || l.rate === null) return `Line ${i + 1} needs a quantity and a rate`;
     }
+    return null;
+  };
+  const problem = lineProblem(lines);
+  // New lines saved by the autosave get their row ids here (the React key stays, so the box
+  // being typed in keeps focus); the next save then updates them instead of adding them again.
+  const savedIds = useRef(new Map<string, number>());
+  const idOf = (key: string): number | undefined =>
+    key.startsWith("l") ? Number(key.slice(1)) : savedIds.current.get(key);
+
+  /** The save payload, or an error message when a line is incomplete. */
+  const payload = (forFinal: boolean): InvoiceSaveInput | string => {
+    const p = lineProblem(lines);
+    if (p) return p;
     // §4: the invoice date is the day it is finalised — unless the office changed it.
     const untouched = dateUntouched(head.invoice_date);
     const invoice_date =
@@ -659,29 +740,83 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       payment_terms: head.payment_terms.trim() || null,
       tax_rate: fromPct(head.tax_pct),
       material_markup: fromPct(head.markup_pct),
+      po_markup: head.po_markup,
       bill_to_vendor_id: head.bill_to_vendor_id,
       // Sent only when edited, and not while Bill To is being switched (a new copy is taken).
       ...(!billPreview && sendToEdited(inv.bill_to as Record<string, unknown>, head.send_to)
         ? { send_to: head.send_to }
         : {}),
-      lines: lines.map((l) => ({
-        // A saved line's id (its key is "l<id>"); new lines have none. The audit log uses it.
-        ...(l.key.startsWith("l") ? { id: Number(l.key.slice(1)) } : {}),
-        kind: l.kind,
-        description: l.description.trim(),
-        qty: l.qty ?? 0,
-        unit: l.unit.trim() || "ea",
-        rate: l.rate ?? 0,
-        cost_rate: l.cost_rate,
-        on_date: l.on_date,
-        taxable: l.taxable,
-        source: l.source,
-        rate_overridden: l.rate_overridden,
-        show_on_invoice: l.show_on_invoice,
-        hide_price: l.hide_price,
-      })),
+      lines: lines.map((l) => {
+        // A saved line's id (its key is "l<id>", or the autosave recorded it); new lines have
+        // none. The audit log uses it.
+        const id = idOf(l.key);
+        return {
+          ...(id === undefined ? {} : { id }),
+          kind: l.kind,
+          description: l.description.trim(),
+          qty: l.qty ?? 0,
+          unit: l.unit.trim() || "ea",
+          rate: l.rate ?? 0,
+          cost_rate: l.cost_rate,
+          on_date: l.on_date,
+          taxable: l.taxable,
+          source: l.source,
+          rate_overridden: l.rate_overridden,
+          show_on_invoice: l.show_on_invoice,
+          hide_price: l.hide_price,
+        };
+      }),
     };
   };
+
+  // Autosave (owner, Oct 14: no Save button). A complete payload is saved ~900 ms after the
+  // last change; while a line is incomplete nothing is saved and the hint by the actions says
+  // so. Each saved answer goes to the page's cache (ctx.applied), so savedKey follows; the
+  // last pushed key keeps the answer from being pushed again (no feedback loop).
+  type Pushed = { p: InvoiceSaveInput; newKeys: (string | null)[]; billSwitched: boolean };
+  const autosave = useAutosave<Pushed>(
+    async (v) => {
+      const r = await saveFn({ data: v.p });
+      // The lines come back in the order sent (sort = position): a new line's row id.
+      v.newKeys.forEach((k, i) => {
+        const saved = r.lines[i];
+        if (k && saved) savedIds.current.set(k, saved.id);
+      });
+      // Bill To switched: the server took a new Send To copy from whoever it is billed to now;
+      // the boxes show that copy (not the previous party's lines).
+      if (v.billSwitched)
+        setHead((h) =>
+          h.bill_to_vendor_id === (r.invoice.bill_to_vendor_id ?? null)
+            ? { ...h, send_to: sendToOf(r.invoice.bill_to as Record<string, unknown> | null) }
+            : h,
+        );
+      ctx.applied(r);
+    },
+    { what: `Invoice #${no}`, delay: 900, signal: false },
+  );
+  const lastPushed = useRef(savedKey);
+  const latest = useRef({ payload, lines, billPreview });
+  latest.current = { payload, lines, billPreview };
+  const push = autosave.push;
+  useEffect(() => {
+    if (liveKey === savedKey || liveKey === lastPushed.current) return;
+    const p = latest.current.payload(false);
+    if (typeof p === "string") return; // Incomplete: shown by the actions, not saved yet.
+    lastPushed.current = liveKey;
+    push({
+      p,
+      newKeys: latest.current.lines.map((l) => (idOf(l.key) === undefined ? l.key : null)),
+      billSwitched: latest.current.billPreview !== null,
+    });
+  }, [liveKey, savedKey, push]);
+
+  // Red outlines only after a Finalise was tried on an incomplete line (owner, Oct 14: never on
+  // an untouched line); gone as soon as the lines are complete.
+  const [showProblems, setShowProblems] = useState(false);
+  useEffect(() => {
+    if (showProblems && problem === null) setShowProblems(false);
+  }, [showProblems, problem]);
+
   /** Save when there is anything to save; returns the saved invoice (or null when unchanged). */
   const saveIfNeeded = async (forFinal: boolean): Promise<InvoiceWithLines | null> => {
     const p = payload(forFinal);
@@ -720,68 +855,44 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     }
   };
 
-  const save = () => {
-    if (!complete(false, false)) return;
-    void run("save", "Could not save the invoice", async () => {
-      const r = await saveIfNeeded(false);
-      if (r) ctx.applied(r);
-      toast.success(`Invoice #${no} saved`);
-    });
+  /** The server's draft replaces what is on the screen (after Rebuild from ticket). */
+  const takeServer = (r: InvoiceWithLines) => {
+    setHead(headFrom(r.invoice));
+    setLines(r.lines.map(lineFrom));
+    setRateEdit(new Set());
+    lastPushed.current = editKey(headFrom(r.invoice), r.lines.map(lineFrom));
+    ctx.applied(r);
   };
   const rebuild = () =>
     run("rebuild", "Could not rebuild the invoice", async () => {
+      // What is still waiting goes first, or it would land on top of the rebuilt lines.
+      await autosave.flush();
       const r = await rebuildFn({ data: { id: inv.id } });
       setConfirm(null);
-      ctx.applied(r);
+      takeServer(r);
       toast.success(
         `Rebuilt from the ticket: ${r.lines.length} line${r.lines.length === 1 ? "" : "s"}`,
       );
     });
-  // Owner (Oct 1): the preview opens in the page, not a new tab — a blob: page in a new tab
-  // was "blocked by Chrome" (ERR_BLOCKED_BY_CLIENT, an extension) on the owner's machine.
-  const [pdfView, setPdfView] = useState<PdfView | null>(null);
-  const preview = () => {
-    if (!complete(false, false)) return;
-    void run(
-      "preview",
-      "Could not make the PDF",
-      async () => {
-        const saved = await saveIfNeeded(false);
-        const pdf = await renderFn({ data: { id: inv.id } });
-        setPdfView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });
-        if (saved) ctx.applied(saved);
-      },
-      dirty,
-    );
-  };
   const finalise = () =>
     run(
       "final",
       "Could not finalise the invoice",
       async () => {
+        await autosave.flush();
         await saveIfNeeded(true);
         const r = await finalizeFn({ data: { id: inv.id } });
         setConfirm(null);
         ctx.applied(r, true);
         toast.success(`Invoice #${invoiceLabel(r.invoice)} is final; the ticket is Invoiced`);
-      },
-      true,
-    );
-  const send = (to: string[], message: string) =>
-    run(
-      "send",
-      "Could not send the invoice",
-      async () => {
-        await saveIfNeeded(true);
-        const r = await sendFn({ data: { id: inv.id, to, ...(message ? { message } : {}) } });
-        setSendOpen(false);
-        ctx.applied(r, true);
-        toast.success(`Invoice #${invoiceLabel(r.invoice)} sent to ${to.join(", ")}`);
+        // Owner, Oct 14: "Send it now?" follows, on the final invoice (the page asks).
+        ctx.askSend(r.invoice.id);
       },
       true,
     );
   const removeDraft = () =>
     run("delete", "Could not delete the draft", async () => {
+      autosave.cancel(); // Nothing waiting may be saved onto a deleted draft.
       await deleteFn({ data: { id: inv.id } });
       setConfirm(null);
       toast.success(`Draft invoice #${no} deleted; its number is free for the next invoice`);
@@ -813,10 +924,30 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     setNewKey(key);
   };
   const tryFinal = () => {
-    if (complete(true, true)) setConfirm("final");
+    if (!complete(true, true)) {
+      setShowProblems(true);
+      return;
+    }
+    setConfirm("final");
   };
-  const trySend = () => {
-    if (complete(true, true)) setSendOpen(true);
+
+  // The PDF preview is a pane under the lines (owner, Oct 14), open or closed as last left.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PREVIEW_OPEN_KEY) === "1") setPreviewOpen(true);
+    } catch {
+      /* storage blocked: stays closed */
+    }
+  }, []);
+  const togglePreview = () => {
+    const o = !previewOpen;
+    setPreviewOpen(o);
+    try {
+      localStorage.setItem(PREVIEW_OPEN_KEY, o ? "1" : "0");
+    } catch {
+      /* storage blocked: not remembered */
+    }
   };
 
   return (
@@ -923,9 +1054,21 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               inputMode="decimal"
               onChange={setMarkup}
             />
+            {/* Owner, Oct 14: the markup applied to the purchase-order lines, or not. */}
+            <div className="flex items-center gap-2 pt-1">
+              <Switch
+                id="inv-po-markup"
+                checked={head.po_markup}
+                onCheckedChange={setPoMarkup}
+                aria-label="Mark up purchase orders"
+              />
+              <Label htmlFor="inv-po-markup" className="text-xs font-normal">
+                Mark up purchase orders
+              </Label>
+            </div>
             <p className="text-xs text-muted-foreground">
               For this invoice: the ticket&apos;s material lines are priced again; a price typed by
-              hand stays.
+              hand stays. Off, the purchase-order lines bill at cost.
             </p>
           </div>
         </div>
@@ -1005,7 +1148,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                     maxLength={300}
                     autoFocus={l.key === newKey}
                     aria-label={`Line ${i + 1} description`}
-                    className={l.description.trim() ? "" : "border-destructive"}
+                    className={showProblems && !l.description.trim() ? "border-destructive" : ""}
                     onChange={(e) => setLine(l.key, { description: e.target.value })}
                   />
                   {l.on_date && (
@@ -1020,7 +1163,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                     value={l.qty}
                     step="0.25"
                     label={`Line ${i + 1} quantity`}
-                    invalid={l.qty === null}
+                    invalid={showProblems && l.qty === null}
                     onChange={(v) => setLine(l.key, { qty: v })}
                   />
                 </div>
@@ -1035,14 +1178,38 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 </div>
                 <div>
                   <CellLabel>Rate</CellLabel>
-                  <OptionalNumber
-                    value={l.rate}
-                    min={-1_000_000}
-                    step="0.01"
-                    label={`Line ${i + 1} rate`}
-                    invalid={l.rate === null}
-                    onChange={(v) => setLine(l.key, { rate: v })}
-                  />
+                  {/* A ticket material's rate follows the markup (owner, Oct 14): shown with
+                      its rule and a pencil; the box comes back to type a price of your own. */}
+                  {rateIsComputed(l) && !rateEdit.has(l.key) ? (
+                    <div className="flex h-9 items-center justify-end gap-1">
+                      <span className="text-right leading-tight">
+                        <span className="block text-sm tabular-nums">{rateText(l.rate)}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {computedRateHint(l, head.markup_pct, head.po_markup)}
+                        </span>
+                      </span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 text-muted-foreground"
+                        aria-label={`Override the rate for line ${i + 1}`}
+                        title="Type a rate of your own"
+                        onClick={() => setRateEdit((s) => new Set(s).add(l.key))}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <OptionalNumber
+                      value={l.rate}
+                      min={-1_000_000}
+                      step="0.01"
+                      label={`Line ${i + 1} rate`}
+                      invalid={showProblems && l.rate === null}
+                      onChange={(v) => setLine(l.key, { rate: v })}
+                    />
+                  )}
                 </div>
                 {internal && (
                   <div>
@@ -1116,56 +1283,70 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           </Button>
         </section>
         <div className="xl:sticky xl:top-4">
-          <Totals t={t} taxPct={head.tax_pct} poError={po.error} poCountedOn={po.countedOn} />
+          <Totals
+            t={t}
+            taxPct={head.tax_pct}
+            poError={po.error}
+            poCountedOn={po.countedOn}
+            poOnInvoice={po.onInvoice}
+          />
         </div>
       </div>
 
-      {/* Actions along the bottom */}
+      {/* Actions along the bottom (owner, Oct 14): Finalise, the preview, the rest in a menu;
+          the draft saves itself. */}
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button type="button" disabled={!!busy || !dirty} onClick={save}>
-          {busy === "save" ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          Save
+        <Button type="button" disabled={!!busy} onClick={tryFinal}>
+          <FileCheck2 className="mr-2 h-4 w-4" /> Finalise
         </Button>
         <Button
           type="button"
           variant="outline"
           disabled={!!busy}
-          onClick={() => setConfirm("rebuild")}
-          title="Throw away these lines and build them again from the ticket's time and materials"
+          aria-expanded={previewOpen}
+          aria-controls="invoice-preview"
+          onClick={togglePreview}
         >
-          <RefreshCw className="mr-2 h-4 w-4" /> Rebuild from ticket
+          <Eye className="mr-2 h-4 w-4" /> Preview
         </Button>
-        <Button type="button" variant="outline" disabled={!!busy} onClick={preview}>
-          {busy === "preview" ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Eye className="mr-2 h-4 w-4" />
-          )}
-          Preview PDF
-        </Button>
-        <Button type="button" variant="outline" disabled={!!busy} onClick={tryFinal}>
-          <FileCheck2 className="mr-2 h-4 w-4" /> Finalise
-        </Button>
-        <Button type="button" disabled={!!busy} onClick={trySend}>
-          <Send className="mr-2 h-4 w-4" /> Finalise &amp; send
-        </Button>
-        {dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-        <Button
-          type="button"
-          variant="ghost"
-          className="ml-auto text-destructive hover:text-destructive"
-          disabled={!!busy}
-          onClick={() => setConfirm("delete")}
-        >
-          <Trash2 className="mr-2 h-4 w-4" /> Delete draft
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              disabled={!!busy}
+              aria-label="More actions"
+              title="More"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem
+              title="Throw away these lines and build them again from the ticket's time and materials"
+              onSelect={() => setConfirm("rebuild")}
+            >
+              <RefreshCw className="h-4 w-4" /> Rebuild from ticket
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => setConfirm("delete")}
+            >
+              <Trash2 className="h-4 w-4" /> Delete draft
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <SavedIndicator state={autosave.state} />
+        {problem && (
+          <span className="text-xs text-muted-foreground" aria-live="polite">
+            {problem} — not saved yet
+          </span>
+        )}
       </div>
 
-      <PdfPreviewDialog view={pdfView} onClose={() => setPdfView(null)} />
+      {previewOpen && <PreviewPane invoiceId={inv.id} version={inv.updated_at} />}
+
       <AlertDialog
         open={confirm !== null}
         onOpenChange={(o) => {
@@ -1183,7 +1364,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "rebuild"
-                ? "The lines are built again from the ticket's time entries and materials at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
+                ? "The lines are built again from the ticket's time entries, materials and approved purchase orders at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
                 : confirm === "delete"
                   ? deleteDraftNote(job.number, no)
                   : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}
@@ -1209,19 +1390,6 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {sendOpen && (
-        <SendDialog
-          title={`Finalise & send invoice #${no}`}
-          note="The invoice is finalised (the ticket moves to Invoiced) and the PDF emailed."
-          inv={inv}
-          accountId={job.account_id}
-          vendorId={head.bill_to_vendor_id}
-          busy={busy === "send"}
-          onClose={() => setSendOpen(false)}
-          onSend={(to, message) => void send(to, message)}
-        />
-      )}
     </div>
   );
 }
@@ -1361,13 +1529,52 @@ function SendToBox(props: { label: string; value: string; onChange: (v: string) 
 
 type PdfView = { blob: Blob; fileName: string };
 
+/** Whether the preview pane was left open (owner, Oct 14), per browser. */
+const PREVIEW_OPEN_KEY = "jbk-portal:invoice-preview";
+
 /**
- * The PDF in the page (owner, Oct 1: a new tab was blocked by a browser extension): its pages
- * drawn with pdf.js (PdfPages; Oct 8, Chrome blocked its own viewer in an <iframe> inside the
- * Lovable preview), a blob URL that lives as long as the dialog, with Download and a plain link for
- * a tab of its own. Nothing is uploaded or stored; the PDF is the server's render.
+ * The PDF in the page, in a pane under the lines (owner, Oct 14; Oct 1: a new tab was blocked by
+ * a browser extension): its pages drawn with pdf.js (PdfPages; Oct 8, Chrome blocked its own
+ * viewer in an <iframe> inside the Lovable preview), a blob URL that lives as long as the
+ * render, with Download and a plain link for a tab of its own. It is the server's render of the
+ * SAVED draft: drawn when the pane opens and again, a moment after each autosave lands
+ * (`version` is the invoice's updated_at), with "Updating…" meanwhile. Nothing is uploaded or
+ * stored.
  */
-function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: () => void }) {
+function PreviewPane({ invoiceId, version }: { invoiceId: string; version: string }) {
+  const renderFn = useServerFn(renderInvoice);
+  const render = useRef(renderFn);
+  render.current = renderFn;
+  const [view, setView] = useState<PdfView | null>(null);
+  const hasView = useRef(false);
+  const [state, setState] = useState<"updating" | "ready" | { error: string }>("updating");
+  useEffect(() => {
+    let cancelled = false;
+    setState("updating");
+    // The first draw at once; after a save, a short wait so several saves in a row make one.
+    const timer = setTimeout(
+      () => {
+        render
+          .current({ data: { id: invoiceId } })
+          .then((pdf) => {
+            if (cancelled) return;
+            setView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });
+            hasView.current = true;
+            setState("ready");
+          })
+          .catch((e: unknown) => {
+            if (cancelled) return;
+            setState({ error: errText(e) });
+            toast.error(`Could not make the PDF preview: ${errText(e)}`);
+          });
+      },
+      hasView.current ? 1500 : 0,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [invoiceId, version]);
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!view) {
@@ -1379,20 +1586,26 @@ function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: ()
     return () => URL.revokeObjectURL(u);
   }, [view]);
   return (
-    <Dialog open={!!view} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[92vh] max-w-[min(96vw,1100px)] flex-col gap-3 p-4">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>{view?.fileName ?? "Invoice PDF"}</DialogTitle>
-          <DialogDescription>
-            What the customer receives. Download it, or open it in a tab of its own.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
-          {/* Drawn with pdf.js: Chrome blocks its own PDF viewer in a sandboxed frame (the
-              Lovable preview; owner, Oct 8). */}
-          {view && <PdfPages blob={view.blob} title={view.fileName} />}
-        </div>
-        <DialogFooter className="shrink-0 gap-2 sm:justify-between">
+    <section
+      id="invoice-preview"
+      aria-label="PDF preview"
+      className="space-y-2 rounded-lg border p-3"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium">{view?.fileName ?? "Invoice PDF"}</span>
+        <span className="text-xs text-muted-foreground">What the customer receives.</span>
+        {state === "updating" && (
+          <span
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            aria-live="polite"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating…
+          </span>
+        )}
+        {typeof state === "object" && (
+          <span className="text-xs text-destructive">Could not make the PDF: {state.error}</span>
+        )}
+        <div className="ml-auto flex items-center gap-3">
           {url && (
             <a
               href={url}
@@ -1403,21 +1616,35 @@ function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: ()
               Open in a new tab
             </a>
           )}
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => view && downloadBlob(view.blob, view.fileName)}
-            >
-              <Download className="mr-2 h-4 w-4" /> Download
-            </Button>
-            <Button type="button" onClick={onClose}>
-              Close
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!view}
+            onClick={() => view && downloadBlob(view.blob, view.fileName)}
+          >
+            <Download className="mr-2 h-4 w-4" /> Download
+          </Button>
+        </div>
+      </div>
+      <div className="h-[70vh] min-h-[320px] overflow-hidden rounded-md border bg-muted/30">
+        {/* Drawn with pdf.js: Chrome blocks its own PDF viewer in a sandboxed frame (the
+            Lovable preview; owner, Oct 8). */}
+        {view ? (
+          <PdfPages blob={view.blob} title={view.fileName} />
+        ) : (
+          <p className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+            {typeof state === "object" ? (
+              "No preview."
+            ) : (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Making the PDF…
+              </>
+            )}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1425,15 +1652,18 @@ const INTERNAL_OPEN_KEY = "invoiceInternalOpen";
 
 /**
  * This invoice's share of the ticket's approved purchase-order total (purchase-orders.ts): an
- * internal cost, read for admins and managers only (the Internal fold is theirs). Never an
- * invoice line or on the PDF. Each approved PO counts on one invoice of the ticket, its earliest
- * live one (invoice-totals.ts poCostForInvoice); the others carry $0 and name it (`countedOn`).
- * The ticket's invoices come from the same cache as the ticket's invoice block and this page.
+ * internal cost, read for admins and managers only (the Internal fold is theirs). Each approved
+ * PO counts on one invoice of the ticket, its earliest live one (invoice-totals.ts
+ * poCostForInvoice); the others carry $0 and name it (`countedOn`). A PO that is a line on this
+ * invoice ("po:<id>"; owner, Oct 14) is left out here — its cost is in the lines already — and
+ * counted in `onInvoice`. The ticket's invoices come from the same cache as the ticket's invoice
+ * block and this page.
  */
 function useApprovedPoCost(
   jobId: string,
   invoiceId: string,
-): { cost: number; countedOn: string | null; error: unknown } {
+  lines: readonly { source: string | null }[],
+): { cost: number; countedOn: string | null; onInvoice: number; error: unknown } {
   const { session, profile } = useAuth();
   const listFn = useServerFn(listPurchaseOrders);
   const invoicesFn = useServerFn(listTicketInvoices);
@@ -1450,9 +1680,11 @@ function useApprovedPoCost(
   });
   // Until both are read nothing is added: never the whole total on every invoice "for now".
   if (!q.data || !invoices.data)
-    return { cost: 0, countedOn: null, error: q.error ?? invoices.error };
+    return { cost: 0, countedOn: null, onInvoice: 0, error: q.error ?? invoices.error };
+  const { onInvoice, offInvoice } = splitPosByLines(q.data.pos, lines);
   return {
-    ...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(q.data.pos)),
+    ...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice)),
+    onInvoice: onInvoice.filter((p) => p.approved).length,
     error: null,
   };
 }
@@ -1462,6 +1694,7 @@ function Totals({
   taxPct,
   poError,
   poCountedOn,
+  poOnInvoice,
 }: {
   t: InvoiceTotals;
   taxPct: number;
@@ -1469,6 +1702,8 @@ function Totals({
   poError?: unknown;
   /** The ticket's approved POs are counted on that other invoice ("6000"); $0 here. */
   poCountedOn?: string | null;
+  /** How many approved POs are lines on this invoice (their cost is in the lines; Oct 14). */
+  poOnInvoice?: number;
 }) {
   const { profile } = useAuth();
   // Cost and margin are internal (owner, Oct 1: the invoice goes out to a customer): folded,
@@ -1528,6 +1763,7 @@ function Totals({
                 <dt>
                   Purchase orders (approved)
                   {poCountedOn ? ` — counted on #${poCountedOn}` : ""}
+                  {poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}
                 </dt>
                 <dd className="tabular-nums">
                   {poError ? (
@@ -1561,7 +1797,18 @@ function Totals({
 
 // ---- Final / sent / paid / void -------------------------------------------------------------
 
-function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
+function FinalInvoice({
+  ctx,
+  data,
+  openSend = false,
+  onSendClosed,
+}: {
+  ctx: Ctx;
+  data: InvoiceWithLines;
+  /** "Send it now?" answered Send after a finalise (owner, Oct 14): the Send dialog is open. */
+  openSend?: boolean;
+  onSendClosed?: () => void;
+}) {
   const { job } = ctx;
   const inv = data.invoice;
   const status: InvoiceStatus = asInvoiceStatus(inv.status);
@@ -1573,8 +1820,13 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const voidFn = useServerFn(voidInvoice);
   const account = useAccount(job.account_id);
   const [dialog, setDialog] = useState<null | "send" | "paid" | "void">(null);
+  const shownDialog = dialog ?? (openSend && status !== "void" ? "send" : null);
+  const closeDialog = () => {
+    setDialog(null);
+    onSendClosed?.();
+  };
 
-  const po = useApprovedPoCost(job.id, inv.id);
+  const po = useApprovedPoCost(job.id, inv.id, data.lines);
   const t = computeTotals(
     data.lines.map((l) => ({
       kind: l.kind,
@@ -1599,7 +1851,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     mutationFn: (v: { to: string[]; message: string }) =>
       sendFn({ data: { id: inv.id, to: v.to, ...(v.message ? { message: v.message } : {}) } }),
     onSuccess: (r, v) => {
-      setDialog(null);
+      closeDialog();
       ctx.applied(r);
       toast.success(`Invoice #${invoiceLabel(r.invoice)} sent to ${v.to.join(", ")}`);
     },
@@ -1759,6 +2011,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           taxPct={toPct(inv.tax_rate)}
           poError={po.error}
           poCountedOn={po.countedOn}
+          poOnInvoice={po.onInvoice}
         />
       </div>
 
@@ -1799,19 +2052,19 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         )}
       </div>
 
-      {dialog === "send" && (
+      {shownDialog === "send" && (
         <SendDialog
           title={`Send invoice #${invoiceLabel(inv)}`}
-          note="The final PDF is emailed again."
+          note={inv.sent_at ? "The final PDF is emailed again." : "The final PDF is emailed."}
           inv={inv}
           accountId={job.account_id}
           vendorId={inv.bill_to_vendor_id}
           busy={send.isPending}
-          onClose={() => setDialog(null)}
+          onClose={closeDialog}
           onSend={(to, message) => send.mutate({ to, message })}
         />
       )}
-      {dialog === "paid" && (
+      {shownDialog === "paid" && (
         <PaidDialog
           inv={inv}
           busy={paid.isPending}
@@ -1820,7 +2073,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         />
       )}
       <AlertDialog
-        open={dialog === "void"}
+        open={shownDialog === "void"}
         onOpenChange={(o) => {
           if (!o && !voidMut.isPending) setDialog(null);
         }}

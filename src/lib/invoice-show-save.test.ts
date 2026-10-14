@@ -43,10 +43,12 @@ describe("saveInvoice and the preview", () => {
   });
   it("the preview draws the pages with pdf.js, not Chrome's viewer in an iframe", () => {
     const ed = read("src/components/service/invoice-editor.tsx");
+    // (owner, Oct 14: the preview is a pane under the lines, PreviewPane, not a dialog.)
     const dialog = ed.slice(
-      ed.indexOf("function PdfPreviewDialog("),
+      ed.indexOf("function PreviewPane("),
       ed.indexOf("const INTERNAL_OPEN_KEY"),
     );
+    expect(dialog.length).toBeGreaterThan(500);
     expect(dialog).not.toContain("<iframe");
     expect(dialog).toContain("<PdfPages blob={view.blob} title={view.fileName} />");
     const pages = read("src/components/service/pdf-pages.tsx");

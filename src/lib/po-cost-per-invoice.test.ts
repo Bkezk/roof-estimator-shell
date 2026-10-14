@@ -85,25 +85,30 @@ describe("the editor counts the POs once (invoice-editor.tsx)", () => {
     expect(ed).toMatch(/import \{[^}]*\bpoCostForInvoice\b[^}]*\} from "@\/lib\/invoice-totals";/);
     expect(hook).toContain("queryKey: ticketInvoicesKey(jobId),");
     expect(hook).toContain("invoicesFn({ data: { job_id: jobId } })");
+    // (owner, Oct 14: a PO that is a line on this invoice is left out — its cost is in the
+    // lines; splitPosByLines in invoice-totals.ts, invoice-workflow-oct14.test.ts)
+    expect(hook).toContain("splitPosByLines(q.data.pos, lines)");
     expect(hook).toContain(
-      "poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(q.data.pos))",
+      "poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice))",
     );
+    expect(hook).not.toContain("approvedPoTotal(q.data.pos)");
     // Until both lists are in, nothing is added (never the whole total "for now").
     expect(hook).toContain("if (!q.data || !invoices.data)");
     expect(hook).not.toContain("approvedPoTotal(q.data?.pos ?? [])");
   });
   it("the draft and the final invoice both pass their own id", () => {
     const calls = ed.match(/useApprovedPoCost\([^)]*\)/g) ?? [];
+    // (owner, Oct 14: the hook also takes the lines, to leave out the POs that are lines.)
     expect(calls.filter((c) => !c.includes("jobId: string"))).toEqual([
-      "useApprovedPoCost(job.id, inv.id)",
-      "useApprovedPoCost(job.id, inv.id)",
+      "useApprovedPoCost(job.id, inv.id, lines)",
+      "useApprovedPoCost(job.id, inv.id, data.lines)",
     ]);
     expect(ed).not.toContain("useApprovedPoCost(job.id)");
     expect(ed).toMatch(
-      /<Totals\s+t=\{t\}\s+taxPct=\{head\.tax_pct\}\s+poError=\{po\.error\}\s+poCountedOn=\{po\.countedOn\}\s+\/>/,
+      /<Totals\s+t=\{t\}\s+taxPct=\{head\.tax_pct\}\s+poError=\{po\.error\}\s+poCountedOn=\{po\.countedOn\}\s+poOnInvoice=\{po\.onInvoice\}\s+\/>/,
     );
     expect(ed).toMatch(
-      /<Totals\s+t=\{stored\}\s+taxPct=\{toPct\(inv\.tax_rate\)\}\s+poError=\{po\.error\}\s+poCountedOn=\{po\.countedOn\}\s+\/>/,
+      /<Totals\s+t=\{stored\}\s+taxPct=\{toPct\(inv\.tax_rate\)\}\s+poError=\{po\.error\}\s+poCountedOn=\{po\.countedOn\}\s+poOnInvoice=\{po\.onInvoice\}\s+\/>/,
     );
   });
   it('the Internal fold says "— counted on #6000" on the other invoices', () => {

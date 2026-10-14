@@ -43,19 +43,26 @@ export const fieldKeys = {
  */
 export function useAutosave<T>(
   save: (value: T) => Promise<void>,
-  opts: { what: string; delay?: number },
+  opts: {
+    what: string;
+    delay?: number;
+    /** false: no "Check your signal" (the office's desktop, e.g. the invoice draft; Oct 14). */
+    signal?: boolean;
+  },
 ) {
   const [state, setState] = useState<AutosaveState>("idle");
   const saveRef = useRef(save);
   saveRef.current = save;
   const what = useRef(opts.what);
   what.current = opts.what;
+  // "Check your signal" is for the field; the office's desktop (the invoice draft) leaves it off.
+  const [tail] = useState(opts.signal === false ? "" : ". Check your signal");
   const [saver] = useState(() =>
     createAutosave<T>({
       delay: opts.delay ?? 700,
       save: (v) => saveRef.current(v),
       onState: setState,
-      onError: (e) => loudError(`${what.current} did not save. Check your signal`, e),
+      onError: (e) => loudError(`${what.current} did not save${tail}`, e),
     }),
   );
   // Leaving the screen: save what is still waiting.

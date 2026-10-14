@@ -31,6 +31,7 @@ import {
   unitText,
   type CatalogData,
 } from "@/lib/invoice-materials";
+import { poLineFor } from "@/lib/invoice-po-lines";
 import {
   chosenPhotoIds,
   invoicePhotoCaption,
@@ -152,13 +153,15 @@ export async function cellPiece(
 }
 
 /**
- * Build the lines a ticket's time entries and materials produce today. `markup` is the invoice's
- * own material markup (owner, Oct 6: per invoice); without it, Setup › Material pricing's.
+ * Build the lines a ticket's time entries, materials and approved purchase orders produce today.
+ * `markup` is the invoice's own material markup (owner, Oct 6: per invoice); without it, Setup ›
+ * Material pricing's. `poMarkup` (owner, Oct 14; invoices.po_markup) prices the PO lines at
+ * cost plus that markup (true, the default) or at cost (false).
  */
 export async function buildLinesFromJob(
   sb: Client,
   jobId: string,
-  opts: { markup?: number | null } = {},
+  opts: { markup?: number | null; poMarkup?: boolean | null } = {},
 ): Promise<LineInsert[]> {
   const { data: job, error } = await sb
     .from("service_jobs")
@@ -175,6 +178,7 @@ export async function buildLinesFromJob(
     { data: techs },
     { data: crew, error: crewErr },
     { data: profileRates, error: rateErr },
+    { data: pos, error: poErr },
   ] = await Promise.all([
     loadRates(sb, job.labor_rate_kind),
     loadSettings(sb),
@@ -198,9 +202,18 @@ export async function buildLinesFromJob(
       .eq("service_job_id", jobId)
       .order("sort"),
     sb.rpc("technician_bill_rates"),
+    // The ticket's APPROVED purchase orders become lines too (owner, Oct 14).
+    sb
+      .from("service_job_purchase_orders")
+      .select("id, po_number, title, price, po_date, vendor_id, vendor_text")
+      .eq("service_job_id", jobId)
+      .eq("approved", true)
+      .order("po_date")
+      .order("created_at"),
   ]);
   if (crewErr) throw new Error(crewErr.message);
   if (rateErr) throw new Error(`Technicians' bill rates: ${rateErr.message}`);
+  if (poErr) throw new Error(`The ticket's purchase orders: ${poErr.message}`);
   const techName = new Map<string, string>();
   for (const t of techs ?? []) techName.set(t.id, (t.full_name ?? "").trim() || t.email);
   const profileRate = new Map<string, number>();
@@ -282,6 +295,37 @@ export async function buildLinesFromJob(
       taxable: true,
     });
   }
+  // Approved purchase orders (owner, Oct 14: "the mark up … toggled to applied to the PO or
+  // not"): one material line each at the PO's price plus the markup, or at the price when the
+  // invoice's switch is off. The supplier is named as typed on the PO, else by its linked vendor.
+  const approved = pos ?? [];
+  const vendorIds = [
+    ...new Set(
+      approved.filter((p) => !p.vendor_text && p.vendor_id).map((p) => p.vendor_id as string),
+    ),
+  ];
+  const vendorName = new Map<string, string>();
+  if (vendorIds.length) {
+    const { data: vs, error: vErr } = await sb
+      .from("vendors")
+      .select("id, name")
+      .in("id", vendorIds);
+    if (vErr) throw new Error(`The purchase orders' vendors: ${vErr.message}`);
+    for (const v of vs ?? []) vendorName.set(v.id, v.name);
+  }
+  for (const p of approved)
+    lines.push(
+      poLineFor(
+        {
+          ...p,
+          vendor_name:
+            p.vendor_text ?? (p.vendor_id ? (vendorName.get(p.vendor_id) ?? null) : null),
+        },
+        markup,
+        opts.poMarkup !== false,
+        sort++,
+      ),
+    );
   return lines;
 }
 

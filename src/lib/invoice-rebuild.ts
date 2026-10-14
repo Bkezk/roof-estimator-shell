@@ -8,7 +8,9 @@
  *     ticket's lines;
  *   - a rebuilt line whose old line had its price changed by hand (`rate_overridden`) keeps that
  *     price and its cost per unit (the editor rescales the cost with a typed rate, so Cost and
- *     Margin stay true; owner, Oct 6), totals worked out again for the new quantity.
+ *     Margin stay true; owner, Oct 6), totals worked out again for the new quantity. A purchase
+ *     order's line ("po:<id>"; owner, Oct 14) is kept and rebuilt by the same rule as a ledger
+ *     material's ("cell:…"): the rule keys on `source`, whatever its prefix.
  * Everything else takes today's rates. Pure, so it is tested without a server.
  *
  * `savedLineRow` is the row saveInvoice writes for one line the editor sent, here so the flag

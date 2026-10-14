@@ -534,7 +534,9 @@ describe("the invoice editor's Bill to (invoice-editor.tsx)", () => {
       /\} else if \(vendorId\) \{\s*setPicked\(\[\]\);\s*setExtra\(isEmail\(vendorEmail\) \? vendorEmail : ""\);/,
     );
     expect(send).toContain("if (vendorId && !vendorsQ.data && !vendorsQ.error) return;");
-    expect(ed).toContain("vendorId={head.bill_to_vendor_id}");
+    // (owner, Oct 14: a draft is no longer sent from the editor — Finalise, then "Send it now?"
+    // opens the final invoice's Send, which passes the saved bill_to_vendor_id.)
+    expect(ed).not.toContain("vendorId={head.bill_to_vendor_id}");
     expect(ed).toContain("vendorId={inv.bill_to_vendor_id}");
   });
 });

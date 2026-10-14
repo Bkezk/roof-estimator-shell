@@ -245,12 +245,14 @@ describe("the invoice's Internal fold: approved POs are cost, never the customer
   const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
   it("the editor uses the pure helper with this invoice's share of the approved PO total", () => {
     expect(ed).not.toMatch(/\nfunction computeTotals\(/);
+    // (owner, Oct 14: splitPosByLines joins the import — a PO that is a line is left out.)
     expect(ed).toMatch(
-      /import \{\s*computeTotals,\s*poCostForInvoice,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
+      /import \{\s*computeTotals,\s*poCostForInvoice,\s*splitPosByLines,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
     );
-    // Each approved PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts).
+    // Each approved PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts); one
+    // that is a line on the invoice is left out (owner, Oct 14; invoice-workflow-oct14.test.ts).
     expect(ed).toContain(
-      "...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(q.data.pos)),",
+      "...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice)),",
     );
     expect(ed).toContain("const enabled = !!session && managesTickets(profile);");
     expect(ed).toContain("computeTotals(lines, fromPct(head.tax_pct), po.cost)");

@@ -5,14 +5,21 @@
  *
  * Purchase orders (owner, Oct 1; purchase-orders.ts): the ticket's APPROVED PO total is its own
  * internal line, "Purchase orders (approved)", and part of Cost (so Margin and Margin / hour
- * move by it). It is never an invoice line, never on the customer's invoice or PDF, and never in
- * the stored invoices.cost_total (that stays the lines' cost; the PO cost is read live from the
- * ticket). Each approved PO counts toward exactly one invoice of the ticket, its earliest live
- * one (poCostForInvoice); the ticket's other invoices add $0 and say where it is counted.
+ * move by it). It is never in the stored invoices.cost_total (that stays the lines' cost; the
+ * PO cost is read live from the ticket). Each approved PO counts toward exactly one invoice of
+ * the ticket, its earliest live one (poCostForInvoice); the ticket's other invoices add $0 and
+ * say where it is counted.
  *
- * Pure: no database, no browser (unit tested in purchase-orders.test.ts and
- * po-cost-per-invoice.test.ts).
+ * Since Oct 14 (owner) a draft built from the ticket carries its approved POs as lines too
+ * (invoice-po-lines.ts, source "po:<id>", cost = the PO's price). A PO that is a line on the
+ * invoice is already in the lines' cost, so the internal row leaves it out (splitPosByLines);
+ * the row shows only the approved POs not on the invoice (e.g. approved after the draft was
+ * built) and notes how many are on it.
+ *
+ * Pure: no database, no browser (unit tested in purchase-orders.test.ts,
+ * po-cost-per-invoice.test.ts and invoice-workflow-oct14.test.ts).
  */
+import { poIdOfLine } from "@/lib/invoice-po-lines";
 
 /** Cents-rounded, like the server (invoices.server.ts r2). */
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -74,6 +81,27 @@ export function computeTotals(
     hours,
     perHour: hours > 0 ? margin / hours : null,
   };
+}
+
+/**
+ * The ticket's purchase orders split by this invoice's lines (owner, Oct 14): `onInvoice` are
+ * the POs that have a "po:<id>" line here — their cost is in the lines already, so the Internal
+ * row must not add them again; `offInvoice` are the rest (approved after the draft was built,
+ * or their line removed by hand), whose approved total still goes through poCostForInvoice.
+ */
+export function splitPosByLines<T extends { id: string }>(
+  pos: readonly T[],
+  lines: readonly { source?: string | null }[],
+): { onInvoice: T[]; offInvoice: T[] } {
+  const onLines = new Set<string>();
+  for (const l of lines) {
+    const id = poIdOfLine(l);
+    if (id) onLines.add(id);
+  }
+  const onInvoice: T[] = [];
+  const offInvoice: T[] = [];
+  for (const p of pos) (onLines.has(p.id) ? onInvoice : offInvoice).push(p);
+  return { onInvoice, offInvoice };
 }
 
 /**
