@@ -129,3 +129,11 @@ describe("forms and dropdowns are white (owner, Oct 14: 'can all the forms and d
     expect(L(light["--card"]!)).toBeGreaterThanOrEqual(99.5);
   });
 });
+
+describe("the search box in the header is white (owner, Oct 14)", () => {
+  it("global-search's button carries the card colour, not the page colour", () => {
+    const src = readFileSync("src/components/global-search.tsx", "utf8");
+    expect(src).toContain("rounded-md border border-input bg-card px-3 text-sm");
+    expect(src).not.toContain("border-input bg-background px-3");
+  });
+});
