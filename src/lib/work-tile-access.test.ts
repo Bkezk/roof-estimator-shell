@@ -4,7 +4,6 @@
  * Service) to My Work. A tile links only when the user may open its page; otherwise it shows
  * the number without a link, titled "Needs Service access".
  */
-import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { pageForPath } from "@/lib/access";
@@ -57,12 +56,4 @@ describe("tileBlockedTitle", () => {
   });
 });
 
-describe("the strip (work-counts-strip.tsx)", () => {
-  const src = readFileSync("src/components/work-counts-strip.tsx", "utf8");
-  it("renders a Link only when the tile is not blocked; otherwise a titled div", () => {
-    expect(src).toContain("const blocked = tileBlockedTitle(profile, t.kind);");
-    expect(src).toMatch(/if \(blocked\)\s*return \(\s*<div\s+key=\{t\.kind\}\s+title=\{blocked\}/);
-    expect(src.indexOf("if (blocked)")).toBeLessThan(src.indexOf("<Link"));
-    expect(src).toContain("const { session, profile } = useAuth();");
-  });
-});
+// The strip itself (work-counts-strip.tsx) left the Customers page on Oct 14 (owner).

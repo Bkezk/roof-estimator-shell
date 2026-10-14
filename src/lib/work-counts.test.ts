@@ -93,23 +93,4 @@ describe("tileHref", () => {
   });
 });
 
-describe("Customers page counts strip (source scan)", () => {
-  const page = readFileSync("src/components/customers-page.tsx", "utf8");
-  const strip = readFileSync("src/components/work-counts-strip.tsx", "utf8");
-  it("the Customers page renders the strip under its header", () => {
-    expect(page).toMatch(/import \{ WorkCountsStrip \} from "@\/components\/work-counts-strip";/);
-    const header = page.indexOf("New customer");
-    const at = page.indexOf("<WorkCountsStrip />");
-    expect(header).toBeGreaterThan(0);
-    expect(at).toBeGreaterThan(header);
-    // Above the list / account panes.
-    expect(at).toBeLessThan(page.indexOf("<AccountList"));
-  });
-  it("the strip renders one link per tile, to tileHref, from getWorkCounts", () => {
-    expect(strip).toMatch(/WORK_TILES\.map\(/);
-    expect(strip).toMatch(/<Link[\s\S]*?\{\.\.\.tileHref\(t\.kind\)\}/);
-    expect(strip).toMatch(/useServerFn\(getWorkCounts\)/);
-    expect(strip).toMatch(/refetchInterval: 60_000/);
-    expect(strip).toMatch(/refetchOnWindowFocus: true/);
-  });
-});
+// The Customers page counts strip left on Oct 14 (owner): the tiles above are the lib only.

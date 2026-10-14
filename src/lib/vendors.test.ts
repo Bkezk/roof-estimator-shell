@@ -585,7 +585,7 @@ describe("the Vendors tab on the Customers page", () => {
   const tab = read("src/components/crm/vendors-section.tsx");
   it("?tab=vendors on /customers; no new sidebar entry", () => {
     expect(route).toContain('if (s["tab"] === "vendors") out.tab = "vendors";');
-    expect(route).toContain("return <CustomersPage id={id} tab={tab} />;");
+    expect(route).toContain("return <CustomersPage tab={tab} />;");
     expect(page).toContain('{ tab: "vendors", title: "Vendors", icon: Truck },');
     expect(page).toMatch(
       /if \(tab === "vendors"\)[\s\S]*?<CustomersTabs tab=\{tab\} \/>\s*<VendorsSection \/>/,

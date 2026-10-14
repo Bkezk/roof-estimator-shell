@@ -36,6 +36,7 @@ import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiRestoreRouteImport } from './routes/api.restore'
+import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as ITokenRouteImport } from './routes/i.$token'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
@@ -181,6 +182,11 @@ const ApiRestoreRoute = ApiRestoreRouteImport.update({
   path: '/api/restore',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CustomersIdRoute = CustomersIdRouteImport.update({
+  id: '/customers_/$id',
+  path: '/customers/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ITokenRoute = ITokenRouteImport.update({
   id: '/i/$token',
   path: '/i/$token',
@@ -255,6 +261,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
+  '/customers/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -293,6 +300,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
+  '/customers/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -332,6 +340,7 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
+  '/customers_/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -372,6 +381,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/api/backup'
     | '/api/restore'
+    | '/customers/$id'
     | '/i/$token'
     | '/prospect/leads'
     | '/service/board'
@@ -410,6 +420,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/api/backup'
     | '/api/restore'
+    | '/customers/$id'
     | '/i/$token'
     | '/prospect/leads'
     | '/service/board'
@@ -448,6 +459,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/api/backup'
     | '/api/restore'
+    | '/customers_/$id'
     | '/i/$token'
     | '/prospect_/leads'
     | '/service/board'
@@ -487,6 +499,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   ApiBackupRoute: typeof ApiBackupRoute
   ApiRestoreRoute: typeof ApiRestoreRoute
+  CustomersIdRoute: typeof CustomersIdRoute
   ITokenRoute: typeof ITokenRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
@@ -686,6 +699,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRestoreRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/customers_/$id': {
+      id: '/customers_/$id'
+      path: '/customers/$id'
+      fullPath: '/customers/$id'
+      preLoaderRoute: typeof CustomersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/i/$token': {
       id: '/i/$token'
       path: '/i/$token'
@@ -795,6 +815,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   ApiBackupRoute: ApiBackupRoute,
   ApiRestoreRoute: ApiRestoreRoute,
+  CustomersIdRoute: CustomersIdRoute,
   ITokenRoute: ITokenRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,

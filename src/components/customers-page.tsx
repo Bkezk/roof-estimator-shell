@@ -3,9 +3,12 @@
  * company / group or an individual) with zero or more sites; service tickets and bids link to
  * it. A new customer is saved without sites; they are added on the account (Sites › Add site).
  * Each account has an account manager (the list filters by it), a physical and a mailing
- * address, and at least one of email / cell phone / office phone (owner, Sep 30). Left: the searchable list; right (`?id=<uuid>`): the account's fields, its sites, its
- * tickets and (with Estimate access) its bids. On a phone the two panes stack: the list, or
- * the open customer with a way back.
+ * address, and at least one of email / cell phone / office phone (owner, Sep 30). The list is
+ * one full-width card per customer (owner, Oct 14: "each customer take up the length of the
+ * screen and have relevant info shown on each card") — name, address, contact, account manager,
+ * properties, tickets in progress; a click opens the customer's own page, /customers/<uuid>
+ * (CustomerPage): the account's fields, its sites, its tickets and (with Estimate access) its
+ * bids, with "All customers" back to the list. The old `?id=` address redirects there.
  *
  * The account and its sites open read-only; Edit switches a block to its form, Cancel puts it
  * back (owner, Sep 27). A new customer is offered the saved bids that look like it
@@ -75,6 +78,7 @@ import {
   siteAddressLine,
   suggestBidsForAccount,
   type AccountDetail,
+  type AccountListRow,
   type AccountRow,
   type ContactWithSites,
   type LinkedBidRow,
@@ -106,7 +110,6 @@ import {
 } from "@/components/crm/account-fields";
 import { useCrmUsers } from "@/lib/use-crm-users";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
-import { WorkCountsStrip } from "@/components/work-counts-strip";
 import { VendorsSection } from "@/components/crm/vendors-section";
 import {
   AlertDialog,
@@ -186,13 +189,7 @@ function CustomersTabs({ tab }: { tab?: CustomersTab | undefined }) {
   );
 }
 
-export function CustomersPage({
-  id,
-  tab,
-}: {
-  id?: string | undefined;
-  tab?: CustomersTab | undefined;
-}) {
+export function CustomersPage({ tab }: { tab?: CustomersTab | undefined }) {
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   // A customer just added, offered the saved bids that look like it.
@@ -230,23 +227,9 @@ export function CustomersPage({
 
       <CustomersTabs tab={tab} />
 
-      {/* Open / overdue tickets and opportunities, each a link to that list (owner, Oct 1). */}
-      <WorkCountsStrip />
-
-      <div className="grid gap-6 md:grid-cols-[minmax(260px,340px)_1fr]">
-        <div className={id ? "hidden md:block" : ""}>
-          <AccountList activeId={id} />
-        </div>
-        <div className={id ? "" : "hidden md:block"}>
-          {id ? (
-            <AccountDetailPane key={id} id={id} />
-          ) : (
-            <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              Pick a customer on the left, or add a new one.
-            </div>
-          )}
-        </div>
-      </div>
+      {/* The counts strip (tickets in progress, overdue tickets, open / overdue opportunities)
+          left this page on Oct 14 (owner): the list is the page. */}
+      <AccountList />
 
       <QuickAddCustomerDialog
         open={adding}
@@ -254,7 +237,7 @@ export function CustomersPage({
         onOpenChange={setAdding}
         onCreated={(hit) => {
           setAdding(false);
-          void navigate({ to: "/customers", search: { id: hit.account_id } });
+          void navigate({ to: "/customers/$id", params: { id: hit.account_id } });
           setOfferFor({ id: hit.account_id, name: hit.account_name });
         }}
       />
@@ -281,7 +264,109 @@ function NoContactInfoBadge() {
   );
 }
 
-function AccountList({ activeId }: { activeId?: string | undefined }) {
+/**
+ * One customer in the list (owner, Oct 14): a full-width card — name and kind, the street
+ * address, the contact and how to reach them, the account manager, the properties and the
+ * tickets in progress — that opens the customer's own page.
+ */
+function AccountCard({ a, managerName }: { a: AccountListRow; managerName: string | undefined }) {
+  const address = [a.address1, [a.city, a.state].filter(Boolean).join(", "), a.zip]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Link
+      to="/customers/$id"
+      params={{ id: a.id }}
+      className="block rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+      data-customer-card={a.id}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {a.kind === "individual" ? (
+              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 truncate text-base font-semibold">{a.name}</span>
+            <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
+              {a.kind === "individual" ? "Individual" : "Company"}
+            </Badge>
+            {/* Owner, Oct 13: a customer imported from CenterPoint may have no email or phone;
+                the badge asks the office to fill one in (NoContactInfoBadge). */}
+            {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
+            {a.external_id && (
+              <span className="text-xs text-muted-foreground">#{a.external_id}</span>
+            )}
+          </div>
+          {address && (
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden /> {address}
+            </p>
+          )}
+          {(a.contact_name || a.mobile || a.phone || a.email) && (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+              {a.contact_name && <span className="text-foreground">{a.contact_name}</span>}
+              {(a.mobile || a.phone) && (
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {a.mobile || a.phone}
+                  {a.mobile && a.phone ? ` · ${a.phone}` : ""}
+                </span>
+              )}
+              {a.email && (
+                <span className="flex items-center gap-1">
+                  <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden /> {a.email}
+                </span>
+              )}
+            </p>
+          )}
+        </div>
+        <dl className="grid shrink-0 grid-cols-3 gap-x-6 text-sm sm:text-right">
+          <div>
+            <dt className="text-xs text-muted-foreground">Account manager</dt>
+            <dd>{managerName ?? "Unassigned"}</dd>
+          </div>
+          <div>
+            {/* "Property" since Oct 6 (owner, Oct 7: the list still said "2 sites"). */}
+            <dt className="text-xs text-muted-foreground">Properties</dt>
+            <dd>{a.site_count}</dd>
+          </div>
+          <div>
+            {/* Open, Scheduled, Done or Authorized — not yet invoiced or closed (owner, Oct 12,
+                item 6: the "Tickets in progress" set). */}
+            <dt className="text-xs text-muted-foreground">Tickets in progress</dt>
+            <dd className={a.open_jobs ? "font-medium" : ""}>{a.open_jobs}</dd>
+          </div>
+        </dl>
+      </div>
+    </Link>
+  );
+}
+
+/**
+ * A customer's own page, /customers/<uuid> (owner, Oct 14): the detail pane full width under
+ * the title, with "All customers" back to the list.
+ */
+export function CustomerPage({ id }: { id: string }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+          <Contact className="h-6 w-6" /> Customer
+        </h1>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/customers">
+            <ArrowLeft className="mr-1 h-4 w-4" /> All customers
+          </Link>
+        </Button>
+      </div>
+      <AccountDetailPane id={id} />
+    </div>
+  );
+}
+
+function AccountList() {
   const { session } = useAuth();
   const listFn = useServerFn(listAccounts);
   const list = useQuery({
@@ -353,46 +438,9 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
               : ` for ${userName.get(manager) ?? "that account manager"}.`}
         </p>
       ) : (
-        <div className="divide-y rounded-lg border">
+        <div className="space-y-2" data-list="customers">
           {rows.map((a) => (
-            <Link
-              key={a.id}
-              to="/customers"
-              search={{ id: a.id }}
-              className={`block px-3 py-2 transition-colors hover:bg-muted/60 ${
-                a.id === activeId ? "bg-muted" : ""
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {a.kind === "individual" ? (
-                  <User className="h-4 w-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <span className="min-w-0 flex-1 truncate font-medium">{a.name}</span>
-                <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
-                  {a.kind === "individual" ? "Individual" : "Company"}
-                </Badge>
-                {/* Owner, Oct 13: a customer imported from CenterPoint may have no email or
-                    phone; the badge asks the office to fill one in (NoContactInfoBadge). */}
-                {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
-              </div>
-              <p className="mt-0.5 pl-6 text-xs text-muted-foreground">
-                {[
-                  a.city,
-                  a.account_manager_id ? (userName.get(a.account_manager_id) ?? null) : null,
-                  // "Property" since Oct 6 (owner, Oct 7: the list still said "2 sites").
-                  `${a.site_count} propert${a.site_count === 1 ? "y" : "ies"}`,
-                  // Open, Scheduled, Done or Authorized — not yet invoiced or closed (owner, Oct
-                  // 12, item 6: the same set as the "Tickets in progress" tile above).
-                  a.open_jobs
-                    ? `${a.open_jobs} ticket${a.open_jobs === 1 ? "" : "s"} in progress`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </Link>
+            <AccountCard key={a.id} a={a} managerName={userName.get(a.account_manager_id ?? "")} />
           ))}
         </div>
       )}
@@ -441,18 +489,9 @@ function AccountDetailPane({ id }: { id: string }) {
     onError: (e) => toast.error(`Could not restore the customer: ${errText(e)}`),
   });
 
-  const back = (
-    <Button asChild variant="ghost" size="sm" className="-ml-2 md:hidden">
-      <Link to="/customers">
-        <ArrowLeft className="mr-1 h-4 w-4" /> All customers
-      </Link>
-    </Button>
-  );
-
   if (detail.error)
     return (
       <div className="space-y-3">
-        {back}
         <p className="text-sm text-destructive">
           Could not open the customer: {errText(detail.error)}
         </p>
@@ -470,7 +509,6 @@ function AccountDetailPane({ id }: { id: string }) {
   const canRestore = seesEveryone(profile);
   return (
     <div className="space-y-6">
-      {back}
       {d.account.deleted_at && (
         <div
           role="status"

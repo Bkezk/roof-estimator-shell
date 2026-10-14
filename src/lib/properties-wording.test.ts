@@ -30,7 +30,8 @@ describe("a crm_sites row is a Property", () => {
   });
   it("the customer list and the customer picker count properties, not sites (owner, Oct 7)", () => {
     const list = read("src/components/customers-page.tsx");
-    expect(list).toContain('`${a.site_count} propert${a.site_count === 1 ? "y" : "ies"}`');
+    // Oct 14: the card's Properties count.
+    expect(list).toContain('<dt className="text-xs text-muted-foreground">Properties</dt>');
     expect(list).not.toContain('site${a.site_count === 1 ? "" : "s"}');
     const picker = read("src/components/crm/account-picker.tsx");
     expect(picker).toContain("` · ${h.site_count} properties`");

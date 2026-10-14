@@ -66,7 +66,8 @@ describe("the open set", () => {
       /import \{[^}]*OPEN_TICKET_STAGES[^}]*\} from "@\/lib\/crm-account"/,
     );
     const page = read("src/components/customers-page.tsx");
-    expect(page).toContain("} in progress`");
+    // The card's label (Oct 14: one full-width card per customer).
+    expect(page).toContain("Tickets in progress");
     expect(page).not.toContain("open ticket${");
   });
 });

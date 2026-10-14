@@ -1,5 +1,6 @@
 /**
- * Whether a counts-strip tile (components/work-counts-strip.tsx) may be a link (audit, Oct 2):
+ * Whether a counts tile may be a link (audit, Oct 2; the Customers page's strip that drew these
+ * left on Oct 14 — canOpenPath is the gate's rule as a pure helper, still used by tests):
  * the ticket tiles link to /service, which needs Service; a Customers-only user who clicked one
  * was bounced by the gate to Work Overview. A tile links only when the user may open its page — the
  * gate's own rule (components/auth-gate.tsx), from `pageForPath` — and otherwise shows its number

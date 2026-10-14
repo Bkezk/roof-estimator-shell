@@ -167,16 +167,7 @@ describe("item 7 — at 23:30 in Chicago all four say the same day", () => {
   });
 });
 
-describe("item 7 — the Customers counts strip sends the viewer's day too", () => {
-  it("the strip calls getWorkCounts with localYmd(new Date()) and keys the query by it", () => {
-    const src = readFileSync("src/components/work-counts-strip.tsx", "utf8");
-    expect(src).toContain('import { localYmd } from "@/lib/my-work";');
-    expect(src).toContain("const today = localYmd(new Date());");
-    expect(src).toContain("queryFn: () => countsFn({ data: { today } }),");
-    expect(src).toContain("queryKey: [...WORK_COUNTS_KEY, today],");
-    expect(src).not.toContain("queryFn: () => countsFn(),");
-  });
-});
+// Item 7's strip check went with the strip (Oct 14): getWorkCounts still takes the viewer's day.
 
 describe("item 9 — the strip reads its own item's follow-up", () => {
   it("found past the first 1,000 open follow-ups", async () => {
