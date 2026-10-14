@@ -53,7 +53,7 @@ import { weekLabel } from "@/lib/board-week";
 import { assignedStage, shiftDays, sortUnassigned } from "@/lib/service-schedule";
 import {
   assignServiceJob,
-  listServiceJobs,
+  listBoardJobs,
   SERVICE_STAGES,
   STAGE_LABELS,
   type ServiceJobWithTech,
@@ -117,13 +117,19 @@ function Board({ week }: { week?: string | undefined }) {
   const dispatch = dispatchesTickets(profile);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const listFn = useServerFn(listServiceJobs);
+  const listFn = useServerFn(listBoardJobs);
   const techFn = useServerFn(listTechnicians);
   const assignFn = useServerFn(assignServiceJob);
 
+  const today = toYmd(new Date());
+  const monday = mondayOf(week ? fromYmd(week) : new Date());
+  const days = Array.from({ length: 7 }, (_, i) => toYmd(addDays(monday, i)));
+  // The week's own read (listBoardJobs: every assigned ticket in the week at any stage, plus the
+  // Unassigned rail), under "service-jobs" so every ticket change refreshes it too.
+  const boardKey = ["service-jobs", "board", days[0]!, days[6]!] as const;
   const jobsQ = useQuery({
-    queryKey: ["service-jobs"],
-    queryFn: () => listFn(),
+    queryKey: boardKey,
+    queryFn: () => listFn({ data: { from: days[0]!, to: days[6]! } }),
     enabled: !!session,
   });
   const techsQ = useQuery({
@@ -133,9 +139,6 @@ function Board({ week }: { week?: string | undefined }) {
     staleTime: 5 * 60_000,
   });
 
-  const today = toYmd(new Date());
-  const monday = mondayOf(week ? fromYmd(week) : new Date());
-  const days = Array.from({ length: 7 }, (_, i) => toYmd(addDays(monday, i)));
   const goWeek = (d: Date | null) => {
     void navigate({
       to: "/service/board",
@@ -156,9 +159,9 @@ function Board({ week }: { week?: string | undefined }) {
         data: { id: a.job.id, technician_id: a.technician_id, scheduled_date: a.scheduled_date },
       }),
     onMutate: async (a) => {
-      await qc.cancelQueries({ queryKey: ["service-jobs"] });
-      const prev = qc.getQueryData<ServiceJobWithTech[]>(["service-jobs"]);
-      qc.setQueryData<ServiceJobWithTech[]>(["service-jobs"], (old) =>
+      await qc.cancelQueries({ queryKey: boardKey });
+      const prev = qc.getQueryData<ServiceJobWithTech[]>(boardKey);
+      qc.setQueryData<ServiceJobWithTech[]>(boardKey, (old) =>
         (old ?? []).map((j) =>
           j.id === a.job.id
             ? {
@@ -174,11 +177,11 @@ function Board({ week }: { week?: string | undefined }) {
       return { prev };
     },
     onError: (e, a, ctx) => {
-      if (ctx?.prev) qc.setQueryData(["service-jobs"], ctx.prev);
+      if (ctx?.prev) qc.setQueryData(boardKey, ctx.prev);
       toast.error(`Could not move ticket #${a.job.number}: ${errText(e)}`, { duration: 10_000 });
     },
     onSuccess: (row) => {
-      qc.setQueryData<ServiceJobWithTech[]>(["service-jobs"], (old) =>
+      qc.setQueryData<ServiceJobWithTech[]>(boardKey, (old) =>
         (old ?? []).map((j) => (j.id === row.id ? row : j)),
       );
     },

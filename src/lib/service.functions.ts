@@ -156,6 +156,59 @@ export const listServiceJobs = createServerFn({ method: "GET" })
   });
 
 /**
+ * The Tech Board's tickets for one Monday–Sunday week (owner, Oct 14: "once assigned a day and
+ * tech it should really stay on the board regardless of step or time"). listServiceJobs stops at
+ * the 1,000 most recently updated tickets, so a ticket assigned to a day in the viewed week could
+ * fall off the board once a thousand others had been touched since — after the CenterPoint ticket
+ * import, most weeks. This reads exactly what the board draws, with no cap that matters:
+ *   - every ticket with a technician and a date inside the week, at any stage (Open through
+ *     Closed: the chip stays in its cell and takes the stage's colour as the work progresses);
+ *   - every Open / Scheduled ticket with no technician or no date (the Unassigned rail).
+ * Each read is capped only as a guard (a week holds far fewer than 1,000 cells' worth).
+ */
+export const BOARD_WEEK_LIMIT = 1000;
+export const listBoardJobs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ServiceJobWithTech[]> => {
+    await serviceAccess(context);
+    const sb = context.supabase;
+    const [week, rail] = await Promise.all([
+      sb
+        .from("service_jobs")
+        .select("*")
+        .is("deleted_at", null)
+        .not("technician_id", "is", null)
+        .gte("scheduled_date", data.from)
+        .lte("scheduled_date", data.to)
+        .order("number", { ascending: true })
+        .limit(BOARD_WEEK_LIMIT),
+      sb
+        .from("service_jobs")
+        .select("*")
+        .is("deleted_at", null)
+        .in("stage", ["open", "scheduled"])
+        .or("technician_id.is.null,scheduled_date.is.null")
+        .order("created_at", { ascending: true })
+        .limit(BOARD_WEEK_LIMIT),
+    ]);
+    if (week.error) throw new Error(week.error.message);
+    if (rail.error) throw new Error(rail.error.message);
+    const seen = new Set<string>();
+    const rows = [...(week.data ?? []), ...(rail.data ?? [])].filter((r) =>
+      seen.has(r.id) ? false : (seen.add(r.id), true),
+    );
+    return withPlaces(sb, await withTechNames(sb, rows));
+  });
+
+/**
  * "Awaiting invoice": the tickets at Authorized (owner, Oct 5: the owner reviews a Done ticket,
  * then the manager invoices it; finalising moves it to Invoiced). The count is
  * the database's own (`count: "exact"`, `head: true`), not the length of a loaded list — the
