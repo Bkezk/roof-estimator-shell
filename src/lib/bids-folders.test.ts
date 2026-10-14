@@ -25,6 +25,7 @@ import {
   readBidsView,
   readFolderGroup,
   suggestFolder,
+  toggleAllSelected,
   UNFILED,
   UNFILED_KEY,
   writeBidsView,
@@ -332,5 +333,28 @@ describe("the wiring", () => {
       "create index if not exists bids_folder_idx on public.bids (lower(folder)) where folder is not null and deleted_at is null;",
     );
     expect(sql).not.toMatch(/not null default/);
+  });
+});
+
+// ---- Select all shown (owner, Oct 14) -----------------------------------------------------------
+
+describe("toggleAllSelected: tick every bid in view, or untick them when they all are", () => {
+  it("ticks the shown bids, keeping ticks on bids filtered out of view", () => {
+    expect(toggleAllSelected([], ["a", "b"])).toEqual(["a", "b"]);
+    expect(toggleAllSelected(["z", "a"], ["a", "b"])).toEqual(["z", "a", "b"]);
+  });
+  it("when every shown bid is ticked, unticks just those", () => {
+    expect(toggleAllSelected(["z", "a", "b"], ["a", "b"])).toEqual(["z"]);
+    expect(toggleAllSelected([], [])).toEqual([]);
+  });
+  it("the page: the tick box says folders too, and a Select all shown button feeds Move N to folder…", () => {
+    const page = here("../routes/bids.tsx");
+    expect(page).toContain('title="Tick to move to a folder or combine with other bids"');
+    expect(page).toContain(
+      '{allShownTicked ? "Untick all" : `Select all ${scopeRows.length} shown`}',
+    );
+    expect(page).toContain("scopeRows.map((b) => b.id)");
+    expect(page).toContain("scopeRows.every((b) => combineSel.includes(b.id))");
+    expect(page).not.toContain('title="Tick to combine with other bids"');
   });
 });

@@ -256,3 +256,15 @@ export function foldersFor<T extends FolderBid>(
   });
   return out.map(({ label, rows }) => ({ label, rows }));
 }
+
+/**
+ * "Select all shown" on the Project Bids page (owner, Oct 14: tick the boxes next to the bid
+ * names and move them to a folder all at once). Ticks every bid in view; when every one of them
+ * is already ticked, unticks them — other ticked bids (filtered out of view) are left as they are.
+ */
+export function toggleAllSelected(selected: string[], shownIds: string[]): string[] {
+  const shown = new Set(shownIds);
+  const allTicked = shownIds.length > 0 && shownIds.every((id) => selected.includes(id));
+  if (allTicked) return selected.filter((id) => !shown.has(id));
+  return [...selected, ...shownIds.filter((id) => !selected.includes(id))];
+}

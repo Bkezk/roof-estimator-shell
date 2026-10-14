@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  CheckSquare,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -55,6 +56,7 @@ import {
   readBidsView,
   readFolderGroup,
   suggestFolder,
+  toggleAllSelected,
   UNFILED,
   UNFILED_KEY,
   writeBidsView,
@@ -460,6 +462,7 @@ function BidsPage() {
         ""));
   const scopeRows =
     view === "byFolder" && folderOpen !== null ? bidsInFolder(filtered, folderOpen) : filtered;
+  const allShownTicked = scopeRows.length > 0 && scopeRows.every((b) => combineSel.includes(b.id));
   // Grouped Draft → Submitted → Won → Lost, in the list's order inside each group; filters above
   // (and the open folder) apply first, and a group with nothing in it is left out.
   const groups = BID_STATUSES.map((status) => ({
@@ -527,8 +530,8 @@ function BidsPage() {
           <input
             type="checkbox"
             className="h-4 w-4 shrink-0 cursor-pointer"
-            aria-label={`Select ${bid.name} to combine`}
-            title="Tick to combine with other bids"
+            aria-label={`Select ${bid.name}`}
+            title="Tick to move to a folder or combine with other bids"
             checked={combineSel.includes(bid.id)}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
@@ -707,6 +710,29 @@ function BidsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Project Bids</h1>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Owner, Oct 14: tick the bids in view in one go, then "Move N to folder…". */}
+          {scopeRows.length > 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title={
+                allShownTicked
+                  ? "Untick the bids shown"
+                  : "Tick every bid shown, then move them to a folder or combine them"
+              }
+              onClick={() =>
+                setCombineSel((prev) =>
+                  toggleAllSelected(
+                    prev,
+                    scopeRows.map((b) => b.id),
+                  ),
+                )
+              }
+            >
+              <CheckSquare className="mr-1.5 h-4 w-4" />
+              {allShownTicked ? "Untick all" : `Select all ${scopeRows.length} shown`}
+            </Button>
+          )}
           {combineSel.length > 0 && (
             <>
               <Button
