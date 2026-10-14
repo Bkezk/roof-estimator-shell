@@ -102,3 +102,30 @@ describe("bordered boxes are painted the card colour", () => {
     expect(base.slice(0, rule)).not.toMatch(/\n\}\n/);
   });
 });
+
+describe("forms and dropdowns are white (owner, Oct 14: 'can all the forms and dropdowns be white?')", () => {
+  const ui = (f: string) => readFileSync(`src/components/ui/${f}`, "utf8");
+  it("inputs, text areas, select boxes, outline buttons and toggles carry the card colour, not transparent", () => {
+    expect(ui("input.tsx")).toContain("border border-input bg-card px-3 py-1");
+    expect(ui("textarea.tsx")).toContain("border border-input bg-card px-3 py-2");
+    expect(ui("select.tsx")).toContain("border border-input bg-card px-3 py-2");
+    expect(ui("button.tsx")).toContain("border border-input bg-card shadow-sm");
+    expect(ui("toggle.tsx")).toContain("border border-input bg-card shadow-sm");
+    for (const f of ["input.tsx", "textarea.tsx", "select.tsx"])
+      expect(ui(f)).not.toMatch(/border-input bg-transparent/);
+  });
+  it("dropdown lists and pop-ups are the popover colour (white); dialogs, sheets and drawers the card colour", () => {
+    expect(ui("select.tsx")).toContain("rounded-md border bg-popover text-popover-foreground");
+    expect(ui("dropdown-menu.tsx")).toContain(
+      "rounded-md border bg-popover p-1 text-popover-foreground",
+    );
+    expect(ui("popover.tsx")).toContain("rounded-md border bg-popover p-4 text-popover-foreground");
+    for (const f of ["dialog.tsx", "alert-dialog.tsx", "sheet.tsx", "drawer.tsx"]) {
+      expect(ui(f), f).toContain("bg-card");
+      expect(ui(f), f).not.toContain("bg-background");
+    }
+    const light = block(":root");
+    expect(L(light["--popover"]!)).toBeGreaterThanOrEqual(99.5);
+    expect(L(light["--card"]!)).toBeGreaterThanOrEqual(99.5);
+  });
+});
