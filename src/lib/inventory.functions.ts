@@ -54,6 +54,22 @@ export const MOVEMENT_REASONS = [
   "vehicle_used",
 ] as const;
 export type MovementReason = (typeof MOVEMENT_REASONS)[number];
+/**
+ * What a ledger entry says it was (owner, Oct 14: "what does released from bid mean here?" — a
+ * tech's take-back on a ticket read "Released from bid"). `consumed` and `released` name a bid
+ * or a ticket, so the label says which: "Used on ticket" / "Put back from ticket" for a ticket,
+ * "Used on bid" / "Released from bid" for a bid. Everything else is REASON_LABELS.
+ */
+export function movementLabel(r: {
+  reason: string;
+  service_job_id?: string | null;
+  bid_id?: string | null;
+}): string {
+  if (r.reason === "consumed") return r.service_job_id ? "Used on ticket" : "Used on bid";
+  if (r.reason === "released")
+    return r.service_job_id ? "Put back from ticket" : "Released from bid";
+  return REASON_LABELS[r.reason as MovementReason] ?? r.reason;
+}
 export const REASON_LABELS: Record<MovementReason, string> = {
   leftover: "Put in inventory",
   adjustment: "Count adjustment",

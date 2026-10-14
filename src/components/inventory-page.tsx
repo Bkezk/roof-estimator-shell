@@ -84,7 +84,7 @@ import {
   listStock,
   MOVEMENTS_PAGE,
   myServiceDefaults,
-  REASON_LABELS,
+  movementLabel,
   SHOP_LOCATION_ID,
   transferStock,
   undoMovement,
@@ -92,7 +92,6 @@ import {
   stockUnitFor,
   type InventoryLocation,
   type JobOption,
-  type MovementReason,
   type MovementRow,
   type StockRow,
 } from "@/lib/inventory.functions";
@@ -1523,7 +1522,7 @@ function LedgerTable(props: {
       (r.bid_name ?? "").toLowerCase().includes(f) ||
       (r.service_job_name ?? "").toLowerCase().includes(f) ||
       (r.created_by_name ?? "").toLowerCase().includes(f) ||
-      REASON_LABELS[r.reason as MovementReason]?.toLowerCase().includes(f),
+      movementLabel(r).toLowerCase().includes(f),
   );
   return (
     <div className="space-y-3">
@@ -1600,7 +1599,7 @@ function LedgerTable(props: {
                     {r.qty > 0 ? "+" : ""}
                     {describeStock(r.qty, r.unit, props.pieceFor(r))}
                   </TableCell>
-                  <TableCell className="text-xs">{REASON_LABELS[r.reason]}</TableCell>
+                  <TableCell className="text-xs">{movementLabel(r)}</TableCell>
                   <TableCell className="text-xs">
                     {r.service_job_name || r.service_job_id ? (
                       <>
@@ -1953,7 +1952,7 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
                       logged with none in inventory
                     </span>
                   )}
-                  {REASON_LABELS[c.reason as MovementReason] ?? c.reason}
+                  {movementLabel(c)}
                   {c.note ? ` — ${c.note}` : ""}
                 </TableCell>
               </TableRow>

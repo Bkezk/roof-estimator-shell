@@ -5,7 +5,7 @@
  *
  * Why a count goes below zero: material on a service ticket may be logged although the app shows
  * none of it at the chosen place (inventory.functions.ts addMovement, `short_ok`); the entry's
- * note then starts with "Short: the app had N <unit> on <place>; count needs fixing". Stock on
+ * note then starts with "Short: inventory had N <unit> on <place>; count needs fixing". Stock on
  * hand per cell per location is the plain sum of inventory_movements.qty, so the ledger itself
  * says where a negative came from: walk one cell's entries at one location in time order and the
  * entry that pushed the running sum below zero — and every taking entry after it — is the list of

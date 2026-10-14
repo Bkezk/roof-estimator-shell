@@ -4,7 +4,9 @@
  * in order and capped, "Short:" detection, a cell fixed inside the week, the empty report — the
  * Monday–Sunday week helpers, and the Set count payload (reconcileAdjustment).
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { movementLabel } from "@/lib/inventory.functions";
 
 import {
   buildReconciliation,
@@ -367,5 +369,33 @@ describe("reconcileAdjustment — what Set count records", () => {
     expect(reconcileAdjustment({ ...cell, on_hand: 4 }, 4)).toBeNull();
     expect(reconcileAdjustment(cell, Number.NaN)).toBeNull();
     expect(reconcileAdjustment(cell, -1)).toBeNull();
+  });
+});
+
+describe("the note says inventory, never the app (owner, Oct 14)", () => {
+  it("no code or comment writes 'the app had'; the one stored entry is rewritten by migration", () => {
+    for (const f of ["src/lib/inventory.functions.ts", "src/lib/inventory-reconcile.ts"])
+      expect(readFileSync(f, "utf8")).not.toContain("the app had");
+    const m = readFileSync("supabase/migrations/20261014090000_short_note_wording.sql", "utf8");
+    expect(m).toContain("replace(note, 'Short: the app had ', 'Short: inventory had ')");
+  });
+});
+
+describe("movementLabel says bid or ticket (owner, Oct 14: 'what does released from bid mean here?')", () => {
+  it("a ticket's take-back is 'Put back from ticket'; a bid's is 'Released from bid'", () => {
+    expect(movementLabel({ reason: "released", service_job_id: "t1" })).toBe(
+      "Put back from ticket",
+    );
+    expect(movementLabel({ reason: "released", bid_id: "b1" })).toBe("Released from bid");
+    expect(movementLabel({ reason: "consumed", service_job_id: "t1" })).toBe("Used on ticket");
+    expect(movementLabel({ reason: "consumed", bid_id: "b1" })).toBe("Used on bid");
+    expect(movementLabel({ reason: "leftover" })).toBe("Put in inventory");
+    expect(movementLabel({ reason: "zzz" })).toBe("zzz");
+  });
+  it("the ledger and the Reconcile tab render it, never the bare reason table", () => {
+    const page = readFileSync("src/components/inventory-page.tsx", "utf8");
+    expect(page).toContain("{movementLabel(r)}");
+    expect(page).toContain("{movementLabel(c)}");
+    expect(page).not.toContain("REASON_LABELS[");
   });
 });
