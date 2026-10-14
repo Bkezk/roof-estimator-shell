@@ -87,6 +87,7 @@ describe("arranging the columns", () => {
     const l: WorkLayout = {
       order: ["invoice", "unassigned", "overdue", "week", "later", "authorize", "waiting"],
       hidden: ["waiting", "authorize"],
+      hiddenKinds: [],
     };
     const { shown, hidden } = applyWorkLayout(all, l);
     expect(shown.map((g) => g.bucket)).toEqual([

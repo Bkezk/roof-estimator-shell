@@ -9,14 +9,47 @@
  * follows them to another device. Pure rules only; the page (components/my-work-page.tsx) owns
  * the drag and drop and the X.
  */
-import { BUCKET_LABELS, LIST_BUCKETS, type WorkBucket } from "@/lib/my-work";
+import {
+  BUCKET_LABELS,
+  KIND_LABELS,
+  LIST_BUCKETS,
+  type WorkBucket,
+  type WorkKind,
+} from "@/lib/my-work";
 
 export interface WorkLayout {
   /** Every List column, in the order shown (hidden ones keep their place for when they return). */
   order: WorkBucket[];
   /** Columns the user closed with the X. */
   hidden: WorkBucket[];
+  /**
+   * Kinds of work the user unticked under Show (owner, Oct 14: "an option to check which things
+   * you want to see, like if you don't want to see bids on there or tickets … so you can be
+   * focused on your scope of work"). Left out of the List and the Calendar alike.
+   */
+  hiddenKinds: WorkKind[];
 }
+
+/** The kinds the Show menu offers, in the same-day order. */
+export const WORK_KINDS: readonly WorkKind[] = [
+  "ticket",
+  "inspection",
+  "task",
+  "followup",
+  "opportunity",
+  "bid",
+];
+/** The Show menu's wording for each kind. */
+export const KIND_PLURALS: Record<WorkKind, string> = {
+  ticket: "Tickets",
+  inspection: "Inspections",
+  task: "Tasks",
+  followup: "Follow-ups",
+  opportunity: "Opportunities",
+  bid: "Bids",
+};
+const isKind = (v: unknown): v is WorkKind =>
+  typeof v === "string" && (WORK_KINDS as readonly string[]).includes(v);
 
 /** The owner's default order (Oct 7): LIST_BUCKETS. */
 export const DEFAULT_WORK_LAYOUT_ORDER: readonly WorkBucket[] = LIST_BUCKETS;
@@ -24,6 +57,7 @@ export const DEFAULT_WORK_LAYOUT_ORDER: readonly WorkBucket[] = LIST_BUCKETS;
 export const defaultWorkLayout = (): WorkLayout => ({
   order: [...DEFAULT_WORK_LAYOUT_ORDER],
   hidden: [],
+  hiddenKinds: [],
 });
 
 const isBucket = (v: unknown): v is WorkBucket =>
@@ -40,7 +74,7 @@ const isBucket = (v: unknown): v is WorkBucket =>
  * column that no longer exists (Oct 12: the No date group) is an unknown name, dropped.
  */
 export function normalizeWorkLayout(raw: unknown): WorkLayout {
-  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown };
+  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hiddenKinds?: unknown };
   const order: WorkBucket[] = [];
   for (const v of Array.isArray(r.order) ? r.order : [])
     if (isBucket(v) && !order.includes(v)) order.push(v);
@@ -62,11 +96,41 @@ export function normalizeWorkLayout(raw: unknown): WorkLayout {
   const hidden: WorkBucket[] = [];
   for (const v of Array.isArray(r.hidden) ? r.hidden : [])
     if (isBucket(v) && !hidden.includes(v)) hidden.push(v);
-  return { order, hidden };
+  // Hidden kinds: unknown names dropped; every kind hidden would be a blank page, so that is
+  // read as none hidden (the menu never lets the last tick go either).
+  let hiddenKinds: WorkKind[] = [];
+  for (const v of Array.isArray(r.hiddenKinds) ? r.hiddenKinds : [])
+    if (isKind(v) && !hiddenKinds.includes(v)) hiddenKinds.push(v);
+  if (hiddenKinds.length >= WORK_KINDS.length) hiddenKinds = [];
+  return { order, hidden, hiddenKinds };
 }
 
 export const isDefaultWorkLayout = (l: WorkLayout): boolean =>
-  l.hidden.length === 0 && l.order.join(",") === DEFAULT_WORK_LAYOUT_ORDER.join(",");
+  l.hidden.length === 0 &&
+  l.hiddenKinds.length === 0 &&
+  l.order.join(",") === DEFAULT_WORK_LAYOUT_ORDER.join(",");
+
+/** Tick or untick a kind under Show. The last kind showing cannot be unticked. */
+export function toggleKind(layout: WorkLayout, kind: WorkKind): WorkLayout {
+  if (layout.hiddenKinds.includes(kind))
+    return { ...layout, hiddenKinds: layout.hiddenKinds.filter((k) => k !== kind) };
+  if (layout.hiddenKinds.length >= WORK_KINDS.length - 1) return layout;
+  return { ...layout, hiddenKinds: [...layout.hiddenKinds, kind] };
+}
+
+/** The items of the kinds still ticked (every item when nothing is unticked). */
+export function applyKinds<T extends { kind: WorkKind }>(items: T[], layout: WorkLayout): T[] {
+  if (!layout.hiddenKinds.length) return items;
+  return items.filter((i) => !layout.hiddenKinds.includes(i.kind));
+}
+
+/** "Show: all", or "Show: 4 of 6" when some kinds are unticked. */
+export const kindsSummary = (layout: WorkLayout): string =>
+  layout.hiddenKinds.length
+    ? `${WORK_KINDS.length - layout.hiddenKinds.length} of ${WORK_KINDS.length}`
+    : "all";
+
+export const kindLabel = (k: WorkKind): string => KIND_LABELS[k];
 
 /**
  * The List's groups under a layout: `shown` in the user's order without the hidden ones (a

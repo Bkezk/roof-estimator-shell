@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import {
   CalendarDays,
   CheckCircle2,
+  Eye,
   ChevronLeft,
   ChevronRight,
   GripVertical,
@@ -75,15 +76,20 @@ import {
 } from "@/lib/my-work";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
+  applyKinds,
   applyWorkLayout,
   defaultWorkLayout,
   hideBucket,
   isDefaultWorkLayout,
+  KIND_PLURALS,
+  kindsSummary,
   moveBucket,
   readStoredWorkLayout,
   showBucket,
-  writeStoredWorkLayout,
+  toggleKind,
   type WorkLayout,
+  WORK_KINDS,
+  writeStoredWorkLayout,
 } from "@/lib/work-layout";
 import { getMyWorkLayout, setMyWorkLayout } from "@/lib/work-layout.functions";
 import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
@@ -92,6 +98,14 @@ import { OwnerView } from "@/components/owner-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import {
   Select,
@@ -998,6 +1012,8 @@ export function MyWorkPage(props: {
       }
     : null;
   const hasFollowups = items.some((i) => i.followup?.status === "open");
+  // Show (owner, Oct 14): the kinds the user unticked are left out of the List and the Calendar.
+  const visibleItems = useMemo(() => applyKinds(items, layout), [items, layout]);
   const canPick = !!q.data?.canPick;
   const scope = q.data?.scope;
   const mineOnly = scope !== "all" && scope?.length === 1 && scope[0] === profile?.id;
@@ -1064,6 +1080,43 @@ export function MyWorkPage(props: {
             </Button>
           )}
         </div>
+        {view !== "owner" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label="Which kinds of work to show"
+                title="Tick the kinds of work you want on this page"
+              >
+                <Eye className="h-4 w-4" /> Show: {kindsSummary(layout)}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>Show on this page</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {WORK_KINDS.map((k) => {
+                const on = !layout.hiddenKinds.includes(k);
+                const last = on && layout.hiddenKinds.length >= WORK_KINDS.length - 1;
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={k}
+                    checked={on}
+                    disabled={last}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={() => onLayout(toggleKind(layout, k))}
+                  >
+                    {KIND_PLURALS[k]}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                Remembered for you on every device. One kind always stays on.
+              </p>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {canPick && view !== "owner" && (
           <Select value={props.who} onValueChange={props.onWho}>
             <SelectTrigger className="h-9 w-[220px]" aria-label="Show">
@@ -1114,7 +1167,7 @@ export function MyWorkPage(props: {
         </div>
       ) : view === "calendar" ? (
         <CalendarView
-          items={items}
+          items={visibleItems}
           today={today}
           showWho={showWho}
           manage={manage}
@@ -1124,7 +1177,7 @@ export function MyWorkPage(props: {
       ) : (
         // Nothing at all shows every heading as an "Empty:" chip (Oct 12), no columns.
         <ListView
-          items={items}
+          items={visibleItems}
           today={today}
           showWho={showWho}
           manage={manage}
