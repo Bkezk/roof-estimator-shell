@@ -2639,7 +2639,7 @@ function CustomerBlock(props: {
           onChange={props.onLocation}
         />
         {site?.technician_instructions && (
-          <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
+          <p className="whitespace-pre-line rounded border bg-card px-2 py-1 text-xs">
             <span className="font-medium">Technician instructions: </span>
             {site.technician_instructions}
           </p>

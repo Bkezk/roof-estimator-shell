@@ -400,7 +400,7 @@ export function CatalogEditor({
                               />
                               {priceCols.length > 1 && (
                                 <select
-                                  className="h-7 rounded-md border bg-background px-1 text-xs"
+                                  className="h-7 rounded-md border bg-card px-1 text-xs"
                                   value={entry.col}
                                   onChange={(e) => setItemEntry({ ...entry, col: e.target.value })}
                                   title="Price column (colour) this item number prices"

@@ -672,10 +672,7 @@ function EdgePanel(props: {
           ))}
         </tbody>
       </table>
-      <p
-        className="rounded border bg-background px-2 py-1.5 text-sm font-medium"
-        aria-live="polite"
-      >
+      <p className="rounded border bg-card px-2 py-1.5 text-sm font-medium" aria-live="polite">
         {sum.text}
       </p>
       <div className="flex gap-2">

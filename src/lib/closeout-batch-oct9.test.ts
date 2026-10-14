@@ -472,7 +472,7 @@ describe("tap targets (owner, Oct 9)", () => {
     expect(shared).toContain("flex h-9 w-9 items-center justify-center rounded-full bg-black/60");
     expect(shared).not.toContain("flex h-7 w-7 items-center");
     expect(materials).toMatch(
-      /className="h-10 rounded-md border bg-background px-2 text-base"\s*aria-label="Take material from"/,
+      /className="h-10 rounded-md border bg-card px-2 text-base"\s*aria-label="Take material from"/,
     );
   });
 });

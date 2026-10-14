@@ -1013,7 +1013,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           </Card>
         )}
 
-        <div className="min-h-0 overflow-hidden rounded-lg border bg-background">
+        <div className="min-h-0 overflow-hidden rounded-lg border bg-card">
           <TakeoffViewer
             source={source}
             loadError={loadError}

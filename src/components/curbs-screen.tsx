@@ -465,7 +465,7 @@ export function CurbsScreen(p: CurbsScreenProps) {
 
           {/* ── Right: the legacy picCurb (readout + drawing) and lvSummary ── */}
           <div className="space-y-2">
-            <div className="flex items-center gap-3 rounded-md border bg-background p-3">
+            <div className="flex items-center gap-3 rounded-md border bg-card p-3">
               <div
                 className="space-y-1 text-sm font-bold text-red-600 dark:text-red-400"
                 style={{ fontFamily: "Arial, sans-serif" }}

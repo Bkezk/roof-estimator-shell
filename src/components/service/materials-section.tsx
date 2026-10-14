@@ -841,7 +841,7 @@ export function MaterialsSection({
                   <label className="flex items-center gap-2 text-sm">
                     <span className="font-medium">From</span>
                     <select
-                      className="h-10 rounded-md border bg-background px-2 text-base"
+                      className="h-10 rounded-md border bg-card px-2 text-base"
                       aria-label="Take material from"
                       value={fromLoc}
                       onChange={(e) => {

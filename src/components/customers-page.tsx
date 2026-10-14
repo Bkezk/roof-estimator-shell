@@ -1916,7 +1916,7 @@ function BidsSection({
             <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
             Bids that look like this customer
           </p>
-          <div className="divide-y rounded-md border bg-background">
+          <div className="divide-y rounded-md border bg-card">
             {suggested.data.map((b) => (
               <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
                 <Link
@@ -2003,7 +2003,7 @@ function BidsSection({
           ) : !unlinked.data?.length ? (
             <p className="text-sm text-muted-foreground">No unlinked bids match.</p>
           ) : (
-            <div className="divide-y rounded-md border bg-background">
+            <div className="divide-y rounded-md border bg-card">
               {unlinked.data.map((b) => (
                 <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{b.name}</span>

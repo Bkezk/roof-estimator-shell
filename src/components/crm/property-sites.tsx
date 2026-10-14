@@ -34,7 +34,7 @@ export function PropertySites({ propertyId }: { propertyId: string }) {
       {sites.map((s) => (
         <span
           key={s.id}
-          className="rounded-full border bg-background px-2 py-0.5"
+          className="rounded-full border bg-card px-2 py-0.5"
           title={s.notes ?? undefined}
         >
           {s.name}

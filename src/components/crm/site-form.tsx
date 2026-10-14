@@ -328,7 +328,7 @@ export function SiteForm(props: {
       </div>
 
       {/* Sites inside the property (owner, Oct 6): a ticket picks one under its property. */}
-      <fieldset className="space-y-2 rounded-md border bg-background p-2" aria-label="Sites">
+      <fieldset className="space-y-2 rounded-md border bg-card p-2" aria-label="Sites">
         <legend className="flex items-center gap-1 px-1 text-sm font-medium">
           <Building2 className="h-4 w-4" /> Sites
         </legend>
@@ -396,7 +396,7 @@ export function SiteForm(props: {
       </fieldset>
 
       {/* Roof warranties (service study M5): their badge shows on the tickets while in force. */}
-      <fieldset className="space-y-2 rounded-md border bg-background p-2" aria-label="Warranties">
+      <fieldset className="space-y-2 rounded-md border bg-card p-2" aria-label="Warranties">
         <legend className="flex items-center gap-1 px-1 text-sm font-medium">
           <ShieldCheck className="h-4 w-4" /> Warranties
         </legend>

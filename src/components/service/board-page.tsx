@@ -607,7 +607,7 @@ function BoardRow(props: {
                 to="/service"
                 search={{ new: 1, tech: r.id, date: d }}
                 // Always visible (owner, Oct 9); it used to appear on hover only on a desktop.
-                className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-card text-muted-foreground shadow-sm hover:text-foreground"
                 title={`New ticket for ${r.name} on ${shortDay(d)}`}
                 aria-label={`New ticket for ${r.name} on ${shortDay(d)}`}
                 draggable={false}

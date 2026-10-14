@@ -1401,7 +1401,7 @@ export function TakeoffViewer(props: ViewerProps) {
         )}
 
         {stamp && stampSource && (
-          <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow">
+          <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-md border bg-card/95 px-3 py-2 text-xs shadow">
             <span className="font-medium">
               Click to stamp a copy of {stampSource.attrs.name} · right-click or Esc to stop
             </span>
@@ -1422,7 +1422,7 @@ export function TakeoffViewer(props: ViewerProps) {
           </div>
         )}
         {(props.loadError || renderError) && (
-          <div className="absolute inset-x-6 top-6 rounded-md border border-destructive/40 bg-background p-3 text-sm text-destructive shadow">
+          <div className="absolute inset-x-6 top-6 rounded-md border border-destructive/40 bg-card p-3 text-sm text-destructive shadow">
             Could not show this plan: {props.loadError ?? renderError}
           </div>
         )}

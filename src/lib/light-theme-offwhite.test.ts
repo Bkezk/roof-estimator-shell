@@ -64,6 +64,27 @@ describe("page-level panels are white, not a muted box on a muted page", () => {
   });
 });
 
+describe("inner panels say card, not background (owner, Oct 14: 'did you do the same for customers, service etc?')", () => {
+  it("a bordered panel inside a card that used the page colour to mean white now uses the card colour", () => {
+    for (const f of [
+      "src/components/customers-page.tsx",
+      "src/components/crm/site-form.tsx",
+      "src/components/crm/property-sites.tsx",
+      "src/components/service-page.tsx",
+      "src/components/service/purchase-orders-section.tsx",
+      "src/components/service/materials-section.tsx",
+      "src/components/takeoff/editor.tsx",
+      "src/components/takeoff/viewer.tsx",
+    ]) {
+      const src = readFileSync(f, "utf8");
+      expect(src, f).not.toMatch(/border bg-background\b/);
+    }
+    expect(readFileSync("src/components/customers-page.tsx", "utf8")).toContain(
+      '<div className="divide-y rounded-md border bg-card">',
+    );
+  });
+});
+
 describe("bordered boxes are painted the card colour", () => {
   it("one zero-specificity rule under @layer base, so a box's own fill still wins", () => {
     const base = css.slice(css.indexOf("@layer base {"));

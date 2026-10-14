@@ -580,7 +580,7 @@ function PoForm({
         </div>
       </div>
       {approver && (
-        <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+        <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm">
           <span className="font-medium">Approved?</span>
           <Switch checked={approved} disabled={busy} onCheckedChange={setApproved} />
         </label>
