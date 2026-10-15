@@ -50,7 +50,7 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets } from "@/lib/access";
 import { weekLabel } from "@/lib/board-week";
-import { assignedStage, shiftDays, sortUnassigned } from "@/lib/service-schedule";
+import { assignedStage, boardDay, shiftDays, sortUnassigned } from "@/lib/service-schedule";
 import {
   assignServiceJob,
   listBoardJobs,
@@ -195,11 +195,12 @@ function Board({ week }: { week?: string | undefined }) {
 
   const jobs = useMemo(() => jobsQ.data ?? [], [jobsQ.data]);
   const techs = useMemo(() => techsQ.data ?? [], [techsQ.data]);
-  const inWeek = (j: ServiceJobWithTech) =>
-    !!j.technician_id &&
-    !!j.scheduled_date &&
-    j.scheduled_date >= days[0]! &&
-    j.scheduled_date <= days[6]!;
+  // A finished ticket sits on the day it was completed, not its scheduled date (owner, Oct 15;
+  // service-schedule.ts boardDay).
+  const inWeek = (j: ServiceJobWithTech) => {
+    const day = boardDay(j);
+    return !!j.technician_id && !!day && day >= days[0]! && day <= days[6]!;
+  };
 
   // Rows: the technicians, then (folded) anyone else holding a ticket this week — an office
   // user, or a former technician no longer on the roster.
@@ -228,7 +229,7 @@ function Board({ week }: { week?: string | undefined }) {
 
   const cellJobs = (techId: string, ymd: string) =>
     jobs
-      .filter((j) => j.technician_id === techId && j.scheduled_date === ymd)
+      .filter((j) => j.technician_id === techId && boardDay(j) === ymd)
       .sort((a, b) => a.number - b.number);
 
   const q = search.trim().toLowerCase();

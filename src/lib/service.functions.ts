@@ -15,6 +15,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { shiftYmd } from "@/lib/tech-clock";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
@@ -180,7 +181,10 @@ export const listBoardJobs = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<ServiceJobWithTech[]> => {
     await serviceAccess(context);
     const sb = context.supabase;
-    const [week, rail] = await Promise.all([
+    // A finished ticket is filed by its completed day (boardDay), which may fall in this week
+    // while its scheduled date does not (owner, Oct 15): read those too, a day wide each side
+    // so the viewer's calendar day never falls outside the UTC bounds.
+    const [week, finished, rail] = await Promise.all([
       sb
         .from("service_jobs")
         .select("*")
@@ -194,16 +198,27 @@ export const listBoardJobs = createServerFn({ method: "GET" })
         .from("service_jobs")
         .select("*")
         .is("deleted_at", null)
+        .not("technician_id", "is", null)
+        .in("stage", ["done", "authorized", "invoiced", "closed"])
+        .gte("completed_at", `${shiftYmd(data.from, -1)}T00:00:00Z`)
+        .lte("completed_at", `${shiftYmd(data.to, 1)}T23:59:59Z`)
+        .order("number", { ascending: true })
+        .limit(BOARD_WEEK_LIMIT),
+      sb
+        .from("service_jobs")
+        .select("*")
+        .is("deleted_at", null)
         .in("stage", ["open", "scheduled"])
         .or("technician_id.is.null,scheduled_date.is.null")
         .order("created_at", { ascending: true })
         .limit(BOARD_WEEK_LIMIT),
     ]);
     if (week.error) throw new Error(week.error.message);
+    if (finished.error) throw new Error(finished.error.message);
     if (rail.error) throw new Error(rail.error.message);
     const seen = new Set<string>();
-    const rows = [...(week.data ?? []), ...(rail.data ?? [])].filter((r) =>
-      seen.has(r.id) ? false : (seen.add(r.id), true),
+    const rows = [...(week.data ?? []), ...(finished.data ?? []), ...(rail.data ?? [])].filter(
+      (r) => (seen.has(r.id) ? false : (seen.add(r.id), true)),
     );
     return withPlaces(sb, await withTechNames(sb, rows));
   });

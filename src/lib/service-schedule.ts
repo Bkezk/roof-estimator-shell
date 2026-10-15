@@ -147,3 +147,24 @@ export function sortUnassigned<T extends RailJob>(jobs: readonly T[]): T[] {
     return a.created_at.localeCompare(b.created_at);
   });
 }
+
+/** The stages after the work is done: the board files these by the day they were completed. */
+export const FINISHED_STAGES: readonly string[] = ["done", "authorized", "invoiced", "closed"];
+
+/**
+ * The day a ticket sits on the Tech Board (owner, Oct 15: "if the due date is 10/22 but they
+ * completed it on 10/15, have it show up on 10/15 instead of the due date so we can move it
+ * forward easier"): a finished ticket with a close-out stamp goes on the day it was completed
+ * (the viewer's calendar day); anything else on its scheduled date. Null when it has neither.
+ */
+export function boardDay(j: {
+  stage: string;
+  scheduled_date: string | null;
+  completed_at: string | null;
+}): string | null {
+  if (FINISHED_STAGES.includes(j.stage) && j.completed_at) {
+    const d = new Date(j.completed_at);
+    if (!Number.isNaN(d.getTime())) return toYmd(d);
+  }
+  return j.scheduled_date;
+}

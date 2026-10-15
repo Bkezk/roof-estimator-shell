@@ -94,10 +94,9 @@ describe("the board draws from listBoardJobs, keyed by its week", () => {
     expect(board).toContain("await qc.cancelQueries({ queryKey: boardKey });");
     expect(board).toContain("if (ctx?.prev) qc.setQueryData(boardKey, ctx.prev);");
     expect(board).not.toContain('qc.setQueryData<ServiceJobWithTech[]>(["service-jobs"]');
-    // A cell shows every ticket on that tech and day, whatever its stage.
-    expect(board).toContain(
-      ".filter((j) => j.technician_id === techId && j.scheduled_date === ymd)",
-    );
+    // A cell shows every ticket on that tech and day, whatever its stage — the day being
+    // boardDay (Oct 15: a finished ticket on the day it was completed).
+    expect(board).toContain(".filter((j) => j.technician_id === techId && boardDay(j) === ymd)");
   });
   it("the server read: assigned in the week at any stage, the rail Open / Scheduled only", () => {
     const fns = readFileSync("src/lib/service.functions.ts", "utf8");
@@ -111,5 +110,48 @@ describe("the board draws from listBoardJobs, keyed by its week", () => {
     expect(body).toContain('.in("stage", ["open", "scheduled"])');
     expect(body).toContain('.or("technician_id.is.null,scheduled_date.is.null")');
     expect(body).not.toContain('.eq("stage"');
+  });
+});
+
+describe("a finished ticket sits on the day it was completed (owner, Oct 15)", () => {
+  it("boardDay: completed and finished → the completed day; otherwise the scheduled date", async () => {
+    const { boardDay } = await import("@/lib/service-schedule");
+    // 2026-10-15 14:00 UTC is Oct 15 in every US zone; the viewer's calendar day is used.
+    const completed = new Date("2026-10-15T14:00:00Z");
+    const local = `${completed.getFullYear()}-${String(completed.getMonth() + 1).padStart(2, "0")}-${String(completed.getDate()).padStart(2, "0")}`;
+    for (const stage of ["done", "authorized", "invoiced", "closed"])
+      expect(
+        boardDay({ stage, scheduled_date: "2026-10-22", completed_at: "2026-10-15T14:00:00Z" }),
+      ).toBe(local);
+    expect(boardDay({ stage: "scheduled", scheduled_date: "2026-10-22", completed_at: null })).toBe(
+      "2026-10-22",
+    );
+    // Scheduled with a stale stamp (an undone close-out): the scheduled date.
+    expect(
+      boardDay({
+        stage: "scheduled",
+        scheduled_date: "2026-10-22",
+        completed_at: "2026-10-15T14:00:00Z",
+      }),
+    ).toBe("2026-10-22");
+    expect(boardDay({ stage: "done", scheduled_date: null, completed_at: null })).toBeNull();
+    expect(boardDay({ stage: "done", scheduled_date: "2026-10-22", completed_at: "bad" })).toBe(
+      "2026-10-22",
+    );
+  });
+  it("the board places and counts by boardDay; the week read also loads tickets completed in the week", () => {
+    const board = readFileSync("src/components/service/board-page.tsx", "utf8");
+    expect(board).toContain(".filter((j) => j.technician_id === techId && boardDay(j) === ymd)");
+    expect(board).toContain("const day = boardDay(j);");
+    expect(board).not.toContain("j.scheduled_date === ymd)");
+    const fns = readFileSync("src/lib/service.functions.ts", "utf8");
+    const body = fns.slice(
+      fns.indexOf("export const listBoardJobs"),
+      fns.indexOf("export interface AwaitingInvoice"),
+    );
+    expect(body).toContain('.in("stage", ["done", "authorized", "invoiced", "closed"])');
+    expect(body).toContain('.gte("completed_at", `${shiftYmd(data.from, -1)}T00:00:00Z`)');
+    expect(body).toContain('.lte("completed_at", `${shiftYmd(data.to, 1)}T23:59:59Z`)');
+    expect(body).toContain("...(finished.data ?? [])");
   });
 });
