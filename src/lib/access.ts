@@ -340,8 +340,13 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
  * Where a signed-in user lands: Work Overview, for everyone (owner, Sep 30) — every signed-in user may
  * open it (it replaced "a technician lands on Service, others on their first page").
  */
-export function homeFor(_p?: AccessLike | null): string {
-  return "/my-work";
+/**
+ * Where a sign-in lands: Work Overview — except a technician-only user (owner, Oct 15: "they
+ * should really only see My tickets and Inventory, not Service and Work Overview"), who lands
+ * on My tickets. The sidebar hides Work Overview and Service for them the same way.
+ */
+export function homeFor(p?: AccessLike | null): string {
+  return isFieldOnly(p) ? "/service/today" : "/my-work";
 }
 
 export const normalizeAccess = (v: unknown): Page[] =>

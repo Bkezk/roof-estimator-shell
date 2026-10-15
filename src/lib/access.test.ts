@@ -50,13 +50,14 @@ describe("per-page access", () => {
     expect(pageForPath("/account")).toBeNull();
   });
 
-  it("lands every signed-in user on My Work (owner, Sep 30)", () => {
+  it("lands every signed-in user on My Work (owner, Sep 30) — a technician-only user on My tickets (owner, Oct 15)", () => {
     expect(homeFor(admin)).toBe("/my-work");
     expect(homeFor(estimator)).toBe("/my-work");
     expect(homeFor(field)).toBe("/my-work");
     expect(homeFor(pricingOnly)).toBe("/my-work");
     expect(homeFor({ role: "user", access: [] })).toBe("/my-work");
-    expect(homeFor({ role: "user", access: ["service"], technician: true })).toBe("/my-work");
+    // Technician-only (Service / Inventory access only, ticked Technician): My tickets.
+    expect(homeFor({ role: "user", access: ["service"], technician: true })).toBe("/service/today");
     expect(homeFor({ role: "manager", access: [] })).toBe("/my-work");
     expect(homeFor(null)).toBe("/my-work");
     // Every signed-in user may open My Work (and "/" only redirects there).

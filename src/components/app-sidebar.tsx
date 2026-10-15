@@ -100,6 +100,7 @@ const customerItems: ServiceItem[] = [
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   // Owner, Oct 9: the menu opens on the Tech Board; the Tickets tab is a click away. The item
   // stays lit on every /service page but My tickets.
+  // Not for a technician-only user (owner, Oct 15: My tickets and Inventory are their menu).
   {
     title: "Service",
     url: "/service/board",
@@ -107,6 +108,7 @@ const customerItems: ServiceItem[] = [
     page: "service",
     lit: "/service",
     except: ["/service/today"],
+    office: true,
   },
   // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from Work Overview.
   {
@@ -400,9 +402,10 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {/* Work Overview (owner, Sep 30): every signed-in user's landing page — their own tickets,
-            tasks and follow-ups in one list and calendar. */}
-        {profile && (
+        {/* Work Overview (owner, Sep 30): the landing page — their own tickets, tasks and
+            follow-ups in one list and calendar. Not for a technician-only user (owner, Oct 15):
+            My tickets is their page, and the Service board is the office's. */}
+        {profile && !isTech && (
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>

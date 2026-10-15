@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 
 import { MyWorkPage } from "@/components/my-work-page";
+import { homeFor, isFieldOnly } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { parseBucketPreset, resolveWho, whoParam, type BucketPreset } from "@/lib/my-work";
 
@@ -33,6 +34,9 @@ function MyWorkRoute() {
   const { view, who, bucket } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { profile } = useAuth();
+  // A technician-only user's page is My tickets (owner, Oct 15; homeFor): the sidebar has no
+  // Work Overview for them, and an old link or the sign-in redirect lands there instead.
+  if (isFieldOnly(profile)) return <Navigate to={homeFor(profile)} replace />;
   const curView = view ?? "list";
   // No ?who: Everyone for admins and managers, Mine for anyone else (defaultWho).
   const curWho = resolveWho(who, profile);
