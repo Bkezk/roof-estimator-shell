@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canClaim } from "@/lib/access";
+import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canClaim, seesEveryone } from "@/lib/access";
 import {
   addedAttendees,
   attendeeList,
@@ -336,6 +336,113 @@ export const claimTask = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error(CLAIM_TAKEN);
     return row;
+  });
+
+/**
+ * One task, for opening it in place (owner, Oct 15: a Work Overview task row opens the
+ * TaskDialog instead of leaving for the map). Whoever may see it (canSeeTask — the same rule as
+ * editing it); an open task nobody is on is readable under RLS by the office, but not theirs to
+ * open here — the row's Claim takes it first.
+ */
+export const getTask = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<TaskRow> => {
+    const profile = await me(context);
+    const { data: row, error } = await context.supabase
+      .from("tasks")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Task not found — it was deleted");
+    if (!canSeeTask(profile, row))
+      throw new Error("Only the people on this task, or a manager, can open it — Claim it first");
+    return row;
+  });
+
+/**
+ * Move a task to another day (owner, Oct 15: drag it onto a calendar day on Work Overview),
+ * keeping its time of day (or all day). Whoever may edit the task — the creator, the assignee,
+ * an attendee, an admin or a manager (loadVisible, as saveTask); RLS tasks_write says the same.
+ */
+export const moveTaskDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<TaskRow> => {
+    const profile = await me(context);
+    const cur = await loadVisible(context, data.id, profile);
+    const at = taskDueAt(cur);
+    const allDay = isAllDay(cur);
+    const moved = { date: data.date, time: at && !allDay ? localHm(at) : null, all_day: allDay };
+    const { data: row, error } = await context.supabase
+      .from("tasks")
+      .update({ due_date: moved.date, due_at: dueAtFor(moved) })
+      .eq("id", data.id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+/**
+ * Put someone on a task nobody is on (owner, Oct 15: "Assign to…" on a Work Overview Unassigned
+ * row). An admin's or a manager's (`seesEveryone` — who sees every task; claimTask is the
+ * self-service twin for anyone `canClaim`). The task must be open with no assignee:
+ * `.is("assignee", null)` means two people cannot both hand it out. The assignee joins the
+ * attendees and gets the "New task" notice, as a save that adds them would (best effort).
+ */
+export const assignTask = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), assignee: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<SaveTaskResult> => {
+    const p = await me(context);
+    if (!seesEveryone(p)) throw new Error("Only an admin or a manager assigns a task to someone");
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("tasks")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Task not found");
+    if (cur.assignee) throw new Error(CLAIM_TAKEN);
+    if (cur.status !== "open") throw new Error("Only an open task can be assigned");
+    const roster = await users(context);
+    const who = roster.find((u) => u.id === data.assignee);
+    if (!who) throw new Error("The assignee is not a user of the app");
+    const { data: row, error } = await sb
+      .from("tasks")
+      .update({
+        assignee: data.assignee,
+        assignee_name: userLabel(who) || null,
+        attendees: attendeeList(data.assignee, cur.attendees ?? []),
+      })
+      .eq("id", data.id)
+      .is("assignee", null)
+      .select()
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(CLAIM_TAKEN);
+    const added = addedAttendees(cur, row);
+    const to = { users: added.users.filter((u) => u !== context.userId), emails: added.emails };
+    if (!to.users.length) return { task: row, notified: 0, notifyErrors: [] };
+    try {
+      const { sendTaskNotice } = await import("@/lib/tasks-notify.server");
+      const r = await sendTaskNotice(row, "created", to, sb);
+      return { task: row, notified: r.users + r.emails, notifyErrors: r.errors };
+    } catch (e) {
+      return { task: row, notified: 0, notifyErrors: [e instanceof Error ? e.message : String(e)] };
+    }
   });
 
 export const deleteTask = createServerFn({ method: "POST" })

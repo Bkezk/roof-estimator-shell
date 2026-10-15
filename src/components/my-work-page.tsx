@@ -33,6 +33,7 @@ import {
   List,
   ListTodo,
   Loader2,
+  MapPin,
   Plus,
   RotateCcw,
   Users,
@@ -40,7 +41,13 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { canClaim, isAdmin, seesEveryone } from "@/lib/access";
+import {
+  canClaim,
+  dispatchesTickets,
+  isAdmin,
+  seesEveryone,
+  seesOpportunitiesList,
+} from "@/lib/access";
 import { backFromHold } from "@/lib/followup-holds";
 import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
@@ -76,6 +83,12 @@ import {
   type WorkItem,
   type WorkKind,
 } from "@/lib/my-work";
+import {
+  NEW_OPPORTUNITY_HREF,
+  newTicketHref,
+  taskMapHref,
+  taskOpensInPlace,
+} from "@/lib/my-work-actions";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
   applyKinds,
@@ -115,6 +128,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TaskDialog } from "@/components/tasks/task-dialog";
+import { useWorkActions, type WorkActions } from "@/components/my-work-actions";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -127,6 +142,17 @@ import {
 } from "@/components/ui/select";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * A real link's click: the browser keeps its modifier-clicks (a new tab, a window); the page's
+ * router takes a plain one.
+ */
+const followLink =
+  (navigate: ReturnType<typeof useNavigate>, href: string) => (e: React.MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    void navigate({ href });
+  };
 
 const KIND_CLASS: Record<WorkKind, string> = {
   ticket:
@@ -242,6 +268,7 @@ function WorkRow({
   today,
   manage,
   claim = null,
+  actions = null,
 }: {
   item: WorkItem;
   showWho: boolean;
@@ -249,71 +276,122 @@ function WorkRow({
   manage: ManageFollowup | null;
   /** Owner, Oct 8: people ticked Technician who see the unassigned list take it for themselves. */
   claim?: ClaimWork | null;
+  /** Owner, Oct 15: a task opens in place, its Done tick, "Assign to…" on an unassigned row. */
+  actions?: WorkActions | null;
 }) {
   const navigate = useNavigate();
   const f = item.followup && item.followup.status === "open" ? item.followup : null;
+  // Owner, Oct 15: every task row opens the task in place (the TaskDialog) — its link led to the
+  // Prospecting map, a bare one for a task without a building. The map is the "Open on map" link
+  // below, for a task with a building (taskMapHref). Every other kind stays a real link.
+  const act = actions && taskOpensInPlace(item) ? actions : null;
+  const busy = !!actions?.busy(item);
+  const mapHref = act ? taskMapHref(item) : null;
+  const tick = !!act && act.canEditTask(item);
+  const assignNode = item.unassigned && actions ? actions.assign(item) : null;
+  const showClaim = !!item.unassigned && !!claim;
+  const body = (
+    <>
+      <div className="flex items-start gap-2">
+        <Badge variant="outline" className={`shrink-0 ${KIND_CLASS[item.kind]}`}>
+          {KIND_LABELS[item.kind]}
+        </Badge>
+        <span className="min-w-0 flex-1 break-words font-medium leading-snug">{item.title}</span>
+      </div>
+      {item.where && (
+        <div className="mt-1 break-words text-sm text-muted-foreground">{item.where}</div>
+      )}
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        <span>{item.date ? dayLabel(item.date) : "No date"}</span>
+        <span>{item.status}</span>
+        {/* Whose it is, always (owner, Oct 9: "why doesnt this show who its assigned to on
+            the card?"); the Everyone view also names an item whose person is unknown. */}
+        {item.unassigned ? (
+          <span className="font-medium text-destructive">Unassigned</span>
+        ) : (
+          (showWho || item.assigneeName) && <span>{item.assigneeName ?? "(unknown)"}</span>
+        )}
+        {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
+            (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
+        {item.flag && <span className="font-medium text-destructive">Overdue</span>}
+        {/* An Authorized ticket (owner, Oct 12): how long it has waited for its invoice — the
+            Invoices queue's number. Opening the ticket shows "Make the invoice". A Done ticket
+            under Needs authorization (Oct 12: managers authorize too): since its close-out. */}
+        {(item.toInvoice || item.needsAuth) && (
+          <WaitingSince since={item.waitingSince ?? null} today={today} />
+        )}
+      </div>
+      {f && <FollowupState f={f} today={today} />}
+    </>
+  );
   return (
     <div
       className={`rounded-lg border bg-card transition-colors hover:bg-muted/50 ${
         item.done ? "opacity-70" : ""
       }`}
     >
-      <a
-        href={item.href}
-        className="block p-3"
-        onClick={(e) => {
-          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-          e.preventDefault();
-          void navigate({ href: item.href });
-        }}
-      >
-        <div className="flex items-start gap-2">
-          <Badge variant="outline" className={`shrink-0 ${KIND_CLASS[item.kind]}`}>
-            {KIND_LABELS[item.kind]}
-          </Badge>
-          <span className="min-w-0 flex-1 break-words font-medium leading-snug">{item.title}</span>
-        </div>
-        {item.where && (
-          <div className="mt-1 break-words text-sm text-muted-foreground">{item.where}</div>
-        )}
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          <span>{item.date ? dayLabel(item.date) : "No date"}</span>
-          <span>{item.status}</span>
-          {/* Whose it is, always (owner, Oct 9: "why doesnt this show who its assigned to on
-            the card?"); the Everyone view also names an item whose person is unknown. */}
-          {item.unassigned ? (
-            <span className="font-medium text-destructive">Unassigned</span>
-          ) : (
-            (showWho || item.assigneeName) && <span>{item.assigneeName ?? "(unknown)"}</span>
-          )}
-          {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
-            (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
-          {item.flag && <span className="font-medium text-destructive">Overdue</span>}
-          {/* An Authorized ticket (owner, Oct 12): how long it has waited for its invoice — the
-            Invoices queue's number. Opening the ticket shows "Make the invoice". A Done ticket
-            under Needs authorization (Oct 12: managers authorize too): since its close-out. */}
-          {(item.toInvoice || item.needsAuth) && (
-            <WaitingSince since={item.waitingSince ?? null} today={today} />
-          )}
-        </div>
-        {f && <FollowupState f={f} today={today} />}
-      </a>
+      {act ? (
+        <button
+          type="button"
+          className="block w-full p-3 text-left"
+          title="Open the task"
+          disabled={busy}
+          onClick={() => act.openTask(item)}
+        >
+          {body}
+        </button>
+      ) : (
+        <a href={item.href} className="block p-3" onClick={followLink(navigate, item.href)}>
+          {body}
+        </a>
+      )}
       {f && manage && (
         <div className="flex flex-wrap items-center justify-end gap-1 border-t px-3 py-2">
           {manage(f)}
         </div>
       )}
-      {item.unassigned && claim && (
-        <div className="flex items-center justify-end border-t px-3 py-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            title="Take it for yourself; it keeps its date"
-            onClick={() => claim(item, null)}
-          >
-            Claim
-          </Button>
+      {(tick || mapHref || assignNode || showClaim) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            {/* The Done tick (owner, Oct 15): no confirm; the toast's Undo reopens it. */}
+            {act && tick && (
+              <label className="flex items-center gap-2" data-tick="task">
+                <Checkbox
+                  checked={busy}
+                  disabled={busy}
+                  aria-label={`Mark ${item.title} done`}
+                  onCheckedChange={(v) => {
+                    if (v === true) act.markDone(item);
+                  }}
+                />
+                Done
+              </label>
+            )}
+            {mapHref && (
+              <a
+                href={mapHref}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={followLink(navigate, mapHref)}
+              >
+                <MapPin className="h-3.5 w-3.5" aria-hidden="true" /> Open on map
+              </a>
+            )}
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {assignNode}
+            {showClaim && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                title="Take it for yourself; it keeps its date"
+                disabled={busy}
+                onClick={() => claim(item, null)}
+              >
+                Claim
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -373,9 +451,12 @@ function ListView({
   layout,
   onLayout,
   claim = null,
+  actions = null,
 }: {
   items: WorkItem[];
   claim?: ClaimWork | null;
+  /** Owner, Oct 15: open a task in place, Done tick, "Assign to…" (components/my-work-actions). */
+  actions?: WorkActions | null;
   today: string;
   /** The caller reviews Done tickets: the Needs authorization tab shows, empty or not (M9). */
   authorize?: boolean;
@@ -450,6 +531,7 @@ function ListView({
           today={today}
           manage={manage}
           claim={claim}
+          actions={actions}
         />
       ))
     );
@@ -667,6 +749,9 @@ function CalendarView({
   unassignedPane = false,
   month: urlMonth,
   onMonth,
+  actions = null,
+  day,
+  onDay,
 }: {
   items: WorkItem[];
   today: string;
@@ -678,6 +763,15 @@ function CalendarView({
   /** The month shown (?month=YYYY-MM; owner, Oct 15), null for this month, and how to change it. */
   month: string | null;
   onMonth: (month: string) => void;
+  /**
+   * Owner, Oct 15: an assigned ticket or task dragged onto another day is rescheduled
+   * (actions.movable / actions.move; nobody's work is still claimed by its drop), and the rows'
+   * Done tick / open in place / "Assign to…".
+   */
+  actions?: WorkActions | null;
+  /** The selected day (the page's, so New ticket / New task can carry it). */
+  day: string;
+  onDay: (day: string) => void;
 }) {
   const unassigned = useMemo(() => items.filter((i) => i.unassigned), [items]);
   const dragKey = "text/x-work-key";
@@ -685,7 +779,21 @@ function CalendarView({
   const month = urlMonth ?? today.slice(0, 7);
   const setMonth = (next: string | ((m: string) => string)) =>
     onMonth(typeof next === "function" ? next(month) : next);
-  const [day, setDay] = useState(today);
+  // A drop takes any row the page knows: nobody's work is claimed for that day (owner, Oct 8),
+  // an assigned ticket or task is moved to it (owner, Oct 15; lib/my-work-actions.ts dropPlan).
+  const dropTargets = !!claim || !!actions;
+  const dropOn = (key: string, d: string) => {
+    const it = items.find((i) => i.key === key);
+    if (!it) return false;
+    if (it.unassigned) {
+      if (claim) claim(it, d);
+    } else actions?.move(it, d);
+    return true;
+  };
+  const startDrag = (e: React.DragEvent, it: WorkItem) => {
+    e.dataTransfer.setData(dragKey, it.key);
+    e.dataTransfer.effectAllowed = "move";
+  };
   const byDay = useMemo(() => itemsByDay(items), [items]);
   const weeks = useMemo(() => monthGrid(month), [month]);
   const dayItems = useMemo(() => [...(byDay.get(day) ?? [])].sort(compareWork), [byDay, day]);
@@ -721,12 +829,16 @@ function CalendarView({
                   key={it.key}
                   draggable
                   className="cursor-grab active:cursor-grabbing"
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(dragKey, it.key);
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
+                  onDragStart={(e) => startDrag(e, it)}
                 >
-                  <WorkRow item={it} showWho={false} today={today} manage={null} claim={claim} />
+                  <WorkRow
+                    item={it}
+                    showWho={false}
+                    today={today}
+                    manage={null}
+                    claim={claim}
+                    actions={actions}
+                  />
                 </div>
               ))
             )}
@@ -751,7 +863,7 @@ function CalendarView({
                 size="sm"
                 onClick={() => {
                   setMonth(today.slice(0, 7));
-                  setDay(today);
+                  onDay(today);
                 }}
               >
                 Today
@@ -791,22 +903,18 @@ function CalendarView({
                     <button
                       key={d}
                       type="button"
-                      onClick={() => setDay(d)}
+                      onClick={() => onDay(d)}
                       onDragOver={
-                        claim
+                        dropTargets
                           ? (e) => {
                               if (e.dataTransfer.types.includes(dragKey)) e.preventDefault();
                             }
                           : undefined
                       }
                       onDrop={
-                        claim
+                        dropTargets
                           ? (e) => {
-                              const key = e.dataTransfer.getData(dragKey);
-                              const it = unassigned.find((u) => u.key === key);
-                              if (!it) return;
-                              e.preventDefault();
-                              claim(it, d);
+                              if (dropOn(e.dataTransfer.getData(dragKey), d)) e.preventDefault();
                             }
                           : undefined
                       }
@@ -838,12 +946,18 @@ function CalendarView({
                           </span>
                           <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
                             {shown.map((i) => (
+                              // Owner, Oct 15: an assigned ticket or task is dragged to another
+                              // day from its cell (whoever may move it: actions.movable).
                               <span
                                 key={i.key}
                                 title={showWho ? `${i.title} — ${i.assigneeName ?? ""}` : i.title}
+                                draggable={!!actions?.movable(i)}
+                                onDragStart={
+                                  actions?.movable(i) ? (e) => startDrag(e, i) : undefined
+                                }
                                 className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
                                   i.done ? "opacity-60" : ""
-                                }`}
+                                } ${actions?.movable(i) ? "cursor-grab active:cursor-grabbing" : ""}`}
                               >
                                 <span className="min-w-0 flex-1 truncate">{i.title}</span>
                                 {showWho && (
@@ -881,16 +995,36 @@ function CalendarView({
             <p className="text-sm text-muted-foreground">Nothing on this day.</p>
           ) : (
             <div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-1">
-              {dayItems.map((it) => (
-                <WorkRow
-                  key={it.key}
-                  item={it}
-                  showWho={showWho}
-                  today={today}
-                  manage={manage}
-                  claim={claim}
-                />
-              ))}
+              {dayItems.map((it) =>
+                // The day's rows drag too (owner, Oct 15), like the Unassigned aside's.
+                actions?.movable(it) ? (
+                  <div
+                    key={it.key}
+                    draggable
+                    className="cursor-grab active:cursor-grabbing"
+                    onDragStart={(e) => startDrag(e, it)}
+                  >
+                    <WorkRow
+                      item={it}
+                      showWho={showWho}
+                      today={today}
+                      manage={manage}
+                      claim={claim}
+                      actions={actions}
+                    />
+                  </div>
+                ) : (
+                  <WorkRow
+                    key={it.key}
+                    item={it}
+                    showWho={showWho}
+                    today={today}
+                    manage={manage}
+                    claim={claim}
+                    actions={actions}
+                  />
+                ),
+              )}
             </div>
           )}
           {undated > 0 && (
@@ -983,6 +1117,17 @@ export function MyWorkPage(props: {
     () => (q.data ? flagUnassigned(mergeWork(q.data), today, q.data.unassignedOverdueDays) : []),
     [q.data, today],
   );
+
+  // Owner, Oct 15: a task row opens in place, its Done tick, a ticket or a task dragged to
+  // another calendar day, "Assign to…" on an unassigned row (components/my-work-actions.tsx; the
+  // rules in lib/my-work-actions.ts). The Calendar's selected day is the page's, so New ticket
+  // and New task carry it.
+  const navigate = useNavigate();
+  const { actions, editTask, closeTask } = useWorkActions(profile);
+  const [calDay, setCalDay] = useState(today);
+  const newDay = view === "calendar" ? calDay : null;
+  const showNewTicket = dispatchesTickets(profile);
+  const showNewOpportunity = seesOpportunitiesList(profile);
 
   // The profile's copy of the layout rides on the list (listMyWork; Oct 15 — one request on
   // landing, not two). It seeds the saved-layout cache, which is applied as before (below), but
@@ -1104,9 +1249,36 @@ export function MyWorkPage(props: {
         <Button size="sm" onClick={() => setNewTask(true)}>
           <Plus className="h-4 w-4" /> New task
         </Button>
+        {/* Owner, Oct 15: New ticket for whoever dispatches (dispatchesTickets), New opportunity
+          for whoever works the Opportunities list (seesOpportunitiesList); from the Calendar the
+          ticket and the task take the selected day. Real links, so a modifier-click opens a tab. */}
+        {showNewTicket && (
+          <Button size="sm" variant="outline" asChild>
+            <a href={newTicketHref(newDay)} onClick={followLink(navigate, newTicketHref(newDay))}>
+              <Plus className="h-4 w-4" /> New ticket
+            </a>
+          </Button>
+        )}
+        {showNewOpportunity && (
+          <Button size="sm" variant="outline" asChild>
+            <a href={NEW_OPPORTUNITY_HREF} onClick={followLink(navigate, NEW_OPPORTUNITY_HREF)}>
+              <Plus className="h-4 w-4" /> New opportunity
+            </a>
+          </Button>
+        )}
         <TaskDialog
           open={newTask}
           onOpenChange={setNewTask}
+          defaults={newDay ? { date: newDay } : undefined}
+          onSaved={() => void qc.invalidateQueries({ queryKey: ["my-work"] })}
+        />
+        {/* A task row opened in place (owner, Oct 15): the same dialog, on that task. */}
+        <TaskDialog
+          open={!!editTask}
+          task={editTask ?? undefined}
+          onOpenChange={(o) => {
+            if (!o) closeTask();
+          }}
           onSaved={() => void qc.invalidateQueries({ queryKey: ["my-work"] })}
         />
         <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="View">
@@ -1238,6 +1410,9 @@ export function MyWorkPage(props: {
           manage={manage}
           claim={claim}
           unassignedPane={!!q.data?.unassigned}
+          actions={actions}
+          day={calDay}
+          onDay={setCalDay}
         />
       ) : (
         // Nothing at all shows every heading as an "Empty:" chip (Oct 12), no columns.
@@ -1254,6 +1429,7 @@ export function MyWorkPage(props: {
           layout={layout}
           onLayout={onLayout}
           claim={claim}
+          actions={actions}
         />
       )}
 

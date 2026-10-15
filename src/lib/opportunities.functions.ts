@@ -795,3 +795,49 @@ export const claimOpportunity = createServerFn({ method: "POST" })
     await syncOppFollowup(row, cur.status, context, nameOf(p));
     return { id: row.id, assignee_id: row.assignee_id, expected_close: row.expected_close };
   });
+
+/**
+ * Put someone on an opportunity nobody is on (owner, Oct 15: "Assign to…" on a Work Overview
+ * Unassigned row). An admin's or a manager's (`seesEveryone`; claimOpportunity is the
+ * self-service twin for anyone `canClaim`). The opportunity must be live, open and have no
+ * assignee — `.is("assignee_id", null)` means two people cannot both hand it out. Its date is
+ * untouched. The follow-up is synced as a save would: the assignee's timer starts and they get
+ * the "assigned to you" notice (the manager is the actor).
+ */
+export const assignOpportunity = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), assignee_id: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const p = await me(context);
+    if (!seesEveryone(p))
+      throw new Error("Only an admin or a manager assigns an opportunity to someone");
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("crm_opportunities")
+      .select("assignee_id, status, deleted_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Opportunity not found");
+    if (cur.deleted_at) throw new Error(OPP_DELETED);
+    if (cur.assignee_id) throw new Error(CLAIM_TAKEN);
+    if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))
+      throw new Error("Only an open opportunity can be assigned");
+    const { data: row, error } = await sb
+      .from("crm_opportunities")
+      .update({
+        assignee_id: data.assignee_id,
+        assigned_at: new Date().toISOString(),
+        updated_by_name: nameOf(p),
+      })
+      .eq("id", data.id)
+      .is("assignee_id", null)
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(CLAIM_TAKEN);
+    await syncOppFollowup(row, cur.status, context, nameOf(p));
+    return { id: row.id, assignee_id: row.assignee_id, expected_close: row.expected_close };
+  });

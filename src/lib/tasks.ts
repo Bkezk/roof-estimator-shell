@@ -438,6 +438,43 @@ export function taskToInput(t: TaskRow, tz: string = TASK_TZ): TaskInput {
   };
 }
 
+/** A new task's blank form: open, all day, assigned to (and attended by) the person making it. */
+export function blankTaskInput(me: string | null): TaskInput {
+  return {
+    title: "",
+    details: null,
+    account_id: null,
+    account_name: null,
+    site_id: null,
+    site_name: null,
+    building_id: null,
+    date: null,
+    time: null,
+    all_day: true,
+    assignee: me,
+    attendees: me ? [me] : [],
+    external_emails: [],
+    status: "open",
+  };
+}
+
+/**
+ * The dialog's form when it opens: an existing task exactly as stored (its date is never touched
+ * — a task with no date stays undated); a new task from the blank form plus any prefill (a
+ * building from the map, a day on the Work Overview calendar), and — owner, Oct 15 — dated
+ * `today` when no day was given. The date box is still the user's to clear before saving.
+ */
+export function openTaskInput(
+  task: TaskRow | null | undefined,
+  defaults: Partial<TaskInput> | null | undefined,
+  me: string | null,
+  today: string,
+): TaskInput {
+  if (task) return taskToInput(task);
+  const input = { ...blankTaskInput(me), ...(defaults ?? {}) };
+  return { ...input, date: input.date ?? today };
+}
+
 /** Who a save newly adds: users and outside emails not on the task before. */
 export function addedAttendees(
   before: { attendees: readonly string[]; external_emails: readonly string[] } | null,

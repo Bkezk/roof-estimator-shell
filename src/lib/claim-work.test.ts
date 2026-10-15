@@ -155,9 +155,13 @@ describe("where it is used", () => {
       '<aside className="flex min-h-0 flex-col gap-2 xl:w-64 xl:shrink-0" aria-label="Unassigned">',
     );
     expect(page).toContain("e.dataTransfer.setData(dragKey, it.key);");
+    // Since Oct 15 a drop takes any row the page knows (an assigned ticket or task is moved to
+    // the day; lib/my-work-actions.ts dropPlan); nobody's work is still claimed, with the day.
+    expect(page).toContain("const it = items.find((i) => i.key === key); if (!it) return false;");
     expect(page).toContain(
-      "const it = unassigned.find((u) => u.key === key); if (!it) return; e.preventDefault(); claim(it, d);",
+      "if (it.unassigned) { if (claim) claim(it, d); } else actions?.move(it, d);",
     );
+    expect(page).toContain("if (dropOn(e.dataTransfer.getData(dragKey), d)) e.preventDefault();");
     // The row's Claim keeps the date; the drop sets it; only people who canClaim get either.
     expect(page).toContain("onClick={() => claim(item, null)}");
     expect(page).toContain("const claim: ClaimWork | null = canClaim(profile)");

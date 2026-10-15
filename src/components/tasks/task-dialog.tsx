@@ -12,12 +12,14 @@ import { toast } from "sonner";
 import { Loader2, Trash2, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { localYmd } from "@/lib/my-work";
 import {
+  blankTaskInput,
   cleanEmails,
   doneStamp,
   isValidEmail,
+  openTaskInput,
   taskInputSchema,
-  taskToInput,
   type TaskInput,
   type TaskRow,
 } from "@/lib/tasks";
@@ -66,25 +68,6 @@ import { Textarea } from "@/components/ui/textarea";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function blankInput(me: string | null): TaskInput {
-  return {
-    title: "",
-    details: null,
-    account_id: null,
-    account_name: null,
-    site_id: null,
-    site_name: null,
-    building_id: null,
-    date: null,
-    time: null,
-    all_day: true,
-    assignee: me,
-    attendees: me ? [me] : [],
-    external_emails: [],
-    status: "open",
-  };
-}
-
 const siteLabel = (s: { name: string; address1?: string | null; city?: string | null }) =>
   [s.name, s.address1, s.city].filter((x) => x && x.trim()).join(", ");
 
@@ -99,16 +82,18 @@ export function TaskDialog(props: {
 }) {
   const { profile } = useAuth();
   const me = profile?.id ?? null;
-  const [f, setF] = useState<TaskInput>(() => blankInput(me));
+  const [f, setF] = useState<TaskInput>(() => blankTaskInput(me));
   const [emailText, setEmailText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (patch: Partial<TaskInput>) => setF((cur) => ({ ...cur, ...patch }));
 
-  // Reset each time the dialog opens (or opens on another task).
+  // Reset each time the dialog opens (or opens on another task). A new task is dated today
+  // unless a day was given (owner, Oct 15; lib/tasks.ts openTaskInput); an existing task keeps
+  // its own date, dated or not.
   const taskId = props.task?.id;
   useEffect(() => {
     if (!props.open) return;
-    setF(props.task ? taskToInput(props.task) : { ...blankInput(me), ...(props.defaults ?? {}) });
+    setF(openTaskInput(props.task, props.defaults, me, localYmd(new Date())));
     setEmailText("");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open / another task
   }, [props.open, taskId]);
