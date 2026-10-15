@@ -3480,6 +3480,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      service_tech_clock: {
+        Row: {
+          created_at: string;
+          helper_count: number;
+          kind: string;
+          service_job_id: string;
+          started_at: string;
+          technician_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          helper_count?: number;
+          kind: string;
+          service_job_id: string;
+          started_at?: string;
+          technician_id: string;
+        };
+        Update: {
+          created_at?: string;
+          helper_count?: number;
+          kind?: string;
+          service_job_id?: string;
+          started_at?: string;
+          technician_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_tech_clock_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_tech_clock_technician_id_fkey";
+            columns: ["technician_id"];
+            isOneToOne: true;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       service_time_entries: {
         Row: {
           created_at: string;

@@ -863,15 +863,27 @@ describe("the migration 20261013100000_restore_door.sql", () => {
     expect(names).toEqual([...RESTORE_DENY].sort());
     if (!RESTORE_DENY.length) expect(expr).toContain("array[]::text[]");
   });
-  it("runs after every table it restores exists (no later migration creates a table)", () => {
+  it("a table created after it is one the door restores (walked, named plainly, not denied)", () => {
     const files = readdirSync(MIG_DIR)
       .filter((f) => f.endsWith(".sql"))
       .sort();
     expect(files).toContain(MIGRATION);
-    // Later migrations (the Oct 13 CenterPoint import adds columns and indexes) may follow, but
-    // none may create a table the door would not know to restore.
-    for (const f of files.slice(files.indexOf(MIGRATION) + 1))
-      expect(readFileSync(`${MIG_DIR}/${f}`, "utf8"), f).not.toMatch(/create\s+table/i);
+    // The door reads the live catalog per table (restore_rows(p_table, …)), so a table a later
+    // migration creates (Oct 15: service_tech_clock) is restored like any other — as long as the
+    // migration walk below finds it, its name is plain, and it is not on the deny list. The old
+    // rule here forbade any later "create table"; this one checks what actually matters.
+    const { tables } = walkMigrations();
+    for (const f of files.slice(files.indexOf(MIGRATION) + 1)) {
+      const sql = readFileSync(`${MIG_DIR}/${f}`, "utf8");
+      for (const m of sql.matchAll(
+        /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?([a-z_0-9]+)/gi,
+      )) {
+        const t = m[1]!;
+        expect(tables.has(t), `${f}: ${t} not found by the migration walk`).toBe(true);
+        expect(NAME_RE.test(t), `${f}: ${t} is not a plain name`).toBe(true);
+        expect(RESTORE_DENY, `${f}: ${t} is on the deny list`).not.toContain(t);
+      }
+    }
   });
 });
 
