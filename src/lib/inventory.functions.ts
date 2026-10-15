@@ -40,6 +40,7 @@ import {
   unitWord,
 } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
+import { readAllMovements } from "@/lib/inventory-reconcile.functions";
 import { readCrew } from "@/lib/service-crew.server";
 
 export const MOVEMENT_REASONS = [
@@ -185,8 +186,11 @@ export interface MovementRow {
   label: string | null;
 }
 
-/** A stock row's category: its catalog screen's, or a service material's own group. */
-async function categories(sb: SupabaseClient<Database>) {
+/**
+ * A stock row's category: its catalog screen's, or a service material's own group. The Export
+ * dialog's reports (inventory-export.functions.ts) name categories the same way.
+ */
+export async function categories(sb: SupabaseClient<Database>) {
   const [{ data, error }, materials] = await Promise.all([
     sb.from("pricing_catalog").select("id, category").eq("branch", "duro_last"),
     loadServiceMaterialLinks(sb),
@@ -205,75 +209,79 @@ async function categories(sb: SupabaseClient<Database>) {
 /** Stock on hand per catalog cell (only cells that have ever moved). */
 export const listStock = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<StockRow[]> => {
-    const sb = context.supabase;
-    const [{ data, error }, cats, { data: nums }, materials] = await Promise.all([
-      sb
-        .from("inventory_movements")
-        .select("location_id, screen_id, row_label, price_col, qty, unit, created_at, item_no")
-        .order("created_at"),
-      categories(sb),
-      sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
-      loadServiceMaterialLinks(sb),
-    ]);
-    if (error) throw new Error(error.message);
-    const byMaterial = materialsByCell(materials);
-    const byCell = new Map<string, StockRow>();
-    for (const m of data ?? []) {
-      const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
-      let row = byCell.get(key);
-      if (!row) {
-        row = {
-          location_id: m.location_id,
-          screen_id: m.screen_id,
-          category: cats(m.screen_id, m.row_label),
-          row_label: m.row_label,
-          price_col: m.price_col,
-          unit: m.unit,
-          on_hand: 0,
-          last_at: null,
-          item_nos: [],
-          piece: null,
-          label: serviceLabel(byMaterial, m),
-        };
-        byCell.set(key, row);
+  .handler(({ context }): Promise<StockRow[]> => readStock(context.supabase));
+
+/**
+ * listStock's work as a plain function, so the Export dialog's "Stock on hand" report
+ * (inventory-export.functions.ts) sums the same ledger the same way instead of carrying a copy.
+ * The ledger is read whole, by page (readAllMovements): PostgREST answers at most 1,000 rows per
+ * request, and a cell's count is wrong when any of its entries is left out.
+ */
+export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[]> {
+  const [data, cats, { data: nums, error }, materials] = await Promise.all([
+    readAllMovements(sb),
+    categories(sb),
+    sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
+    loadServiceMaterialLinks(sb),
+  ]);
+  if (error) throw new Error(error.message);
+  const byMaterial = materialsByCell(materials);
+  const byCell = new Map<string, StockRow>();
+  for (const m of data) {
+    const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
+    let row = byCell.get(key);
+    if (!row) {
+      row = {
+        location_id: m.location_id,
+        screen_id: m.screen_id,
+        category: cats(m.screen_id, m.row_label),
+        row_label: m.row_label,
+        price_col: m.price_col,
+        unit: m.unit,
+        on_hand: 0,
+        last_at: null,
+        item_nos: [],
+        piece: null,
+        label: serviceLabel(byMaterial, m),
+      };
+      byCell.set(key, row);
+    }
+    row.on_hand += Number(m.qty);
+    row.unit = m.unit;
+    row.last_at = m.created_at;
+  }
+  const numsByCell = new Map<string, string[]>();
+  for (const n of nums ?? []) {
+    const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
+    const list = numsByCell.get(k) ?? [];
+    if (!list.includes(n.item_no)) list.push(n.item_no);
+    numsByCell.set(k, list);
+  }
+  for (const row of byCell.values())
+    row.item_nos =
+      numsByCell.get(`${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`) ?? [];
+  // Piece definitions per distinct cell (a handful of catalog reads, like myTruckStock).
+  const pieceCache = new Map<string, PieceDef | null>();
+  for (const row of byCell.values()) {
+    const k = `${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`;
+    if (!pieceCache.has(k)) {
+      try {
+        pieceCache.set(k, (await cellUnit(sb, row)).piece);
+      } catch {
+        pieceCache.set(k, null);
       }
-      row.on_hand += Number(m.qty);
-      row.unit = m.unit;
-      row.last_at = m.created_at;
     }
-    const numsByCell = new Map<string, string[]>();
-    for (const n of nums ?? []) {
-      const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
-      const list = numsByCell.get(k) ?? [];
-      if (!list.includes(n.item_no)) list.push(n.item_no);
-      numsByCell.set(k, list);
-    }
-    for (const row of byCell.values())
-      row.item_nos =
-        numsByCell.get(`${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`) ?? [];
-    // Piece definitions per distinct cell (a handful of catalog reads, like myTruckStock).
-    const pieceCache = new Map<string, PieceDef | null>();
-    for (const row of byCell.values()) {
-      const k = `${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`;
-      if (!pieceCache.has(k)) {
-        try {
-          pieceCache.set(k, (await cellUnit(sb, row)).piece);
-        } catch {
-          pieceCache.set(k, null);
-        }
-      }
-      row.piece = pieceCache.get(k) ?? null;
-    }
-    return [...byCell.values()]
-      .map((r) => ({ ...r, on_hand: Math.round(r.on_hand * 1000) / 1000 }))
-      .sort(
-        (a, b) =>
-          a.location_id.localeCompare(b.location_id) ||
-          a.category.localeCompare(b.category) ||
-          a.row_label.localeCompare(b.row_label),
-      );
-  });
+    row.piece = pieceCache.get(k) ?? null;
+  }
+  return [...byCell.values()]
+    .map((r) => ({ ...r, on_hand: Math.round(r.on_hand * 1000) / 1000 }))
+    .sort(
+      (a, b) =>
+        a.location_id.localeCompare(b.location_id) ||
+        a.category.localeCompare(b.category) ||
+        a.row_label.localeCompare(b.row_label),
+    );
+}
 
 /** One page of the ledger (PostgREST answers at most 1,000 rows per request). */
 export const MOVEMENTS_PAGE = 1000;

@@ -122,27 +122,34 @@ const ymdOf = (d: Date): string =>
     month: "2-digit",
     day: "2-digit",
   }).format(d);
-/** Midnight of a calendar day in the office's time zone, as an instant (DST-safe). */
-function easternMidnight(ymd: string): Date {
+const wallClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: FIELD_DAY_TZ,
+  hourCycle: "h23",
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+});
+/** The office's UTC offset (ms, negative for New York) at an instant. */
+function officeOffsetAt(t: number): number {
+  const parts = wallClock.formatToParts(new Date(t));
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute")) - t;
+}
+/**
+ * Midnight of a calendar day in the office's time zone, as an instant (DST-safe). The Export
+ * dialog's From..To window (inventory-export.ts exportWindow) is built from it too. The offset
+ * is read AT the midnight wanted (two passes settle it), not at noon of that day: on the day the
+ * clocks change (a Sunday, 2 am) midnight is still on the old offset while noon is on the new one,
+ * and an export ending on Oct 31 would otherwise take in the first hour of Nov 1.
+ */
+export function easternMidnight(ymd: string): Date {
   const m = YMD.exec(ymd);
   if (!m) throw new Error(`Not a day: ${ymd}`);
-  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  // Noon UTC is inside the same Eastern day; the offset there is the day's offset at midnight
-  // too (New York changes clocks at 2 am, never at midnight).
-  const noon = Date.UTC(y, mo - 1, d, 12);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: FIELD_DAY_TZ,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  }).formatToParts(new Date(noon));
-  const n = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  const local = Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"));
-  const offset = local - noon;
-  return new Date(Date.UTC(y, mo - 1, d) - offset);
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const guess = wall - officeOffsetAt(wall);
+  return new Date(wall - officeOffsetAt(guess));
 }
 /** The Monday (YYYY-MM-DD, office time) of the week a day or instant falls in. */
 export function weekStartOf(dayOrNow: string | Date): string {

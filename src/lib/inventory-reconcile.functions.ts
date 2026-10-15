@@ -26,6 +26,7 @@ import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 /**
  * The whole ledger, oldest first: a cell's first-below-zero may be older than any week, and
  * PostgREST answers at most 1,000 rows per request whatever .limit() asks, so read by page.
+ * listStock (inventory.functions.ts readStock) and the Export dialog's reports read it too.
  */
 const PAGE = 1000;
 export async function readAllMovements(sb: SupabaseClient<Database>): Promise<ReconcileMovement[]> {
@@ -34,7 +35,7 @@ export async function readAllMovements(sb: SupabaseClient<Database>): Promise<Re
     const { data, error } = await sb
       .from("inventory_movements")
       .select(
-        "id, location_id, screen_id, row_label, price_col, qty, unit, reason, service_job_id, service_job_name, note, created_by_name, created_at",
+        "id, location_id, screen_id, row_label, price_col, qty, unit, reason, service_job_id, service_job_name, bid_id, bid_name, note, created_by_name, created_at",
       )
       .order("created_at")
       .order("id")

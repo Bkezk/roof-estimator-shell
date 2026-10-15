@@ -41,6 +41,7 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  FileDown,
   History,
   Package,
   Scale,
@@ -105,6 +106,7 @@ import {
   plural,
   type PieceDef,
 } from "@/lib/stock-units";
+import { InventoryExportDialog } from "@/components/inventory-export-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -229,6 +231,9 @@ export function InventoryPage(props: {
   // whatever the URL says, and never sees the tab row.
   const canSeeAll = seesEveryone(profile);
   const tab: InventoryTab = canSeeAll ? (props.tab ?? "stock") : "stock";
+  // Export (owner, Oct 15): three CSV reports, admins and managers only — the same gate as the
+  // tab row, where its button sits (inventory-export-dialog.tsx).
+  const [exporting, setExporting] = useState(false);
   const qc = useQueryClient();
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
@@ -443,8 +448,17 @@ export function InventoryPage(props: {
               {t.title}
             </Link>
           ))}
+          <Button
+            variant="outline"
+            size="sm"
+            className="mb-1 ml-auto self-center"
+            onClick={() => setExporting(true)}
+          >
+            <FileDown className="mr-1 h-4 w-4" /> Export
+          </Button>
         </nav>
       )}
+      {canSeeAll && exporting && <InventoryExportDialog onClose={() => setExporting(false)} />}
 
       {tab === "stock" && (
         <Card>
