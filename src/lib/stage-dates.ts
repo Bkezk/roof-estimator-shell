@@ -198,6 +198,20 @@ export function ticketStageStrip(
 ): StripCell[] {
   const dates = stageDates(events);
   const actors = stageActors(events);
+  // Every ticket starts at Open (owner, Oct 15: "if you set a scheduled date when opening a
+  // ticket the Open dot never gets coloured in because it's scheduled from origin"). The
+  // trigger logs the stage a ticket is created at — Scheduled, when the form carried a date —
+  // so Open had no row: it takes the creation row's moment and name.
+  if (!dates.open) {
+    const first = [...events]
+      .filter((e) => e.kind === "stage" && !!e.stage)
+      .sort((a, b) => a.at.localeCompare(b.at))[0];
+    if (first) {
+      dates.open = first.at;
+      const who = (first.by_name ?? "").trim();
+      if (who) actors.open = who;
+    }
+  }
   return SERVICE_STAGES.map((s) => ({
     key: s,
     label: STAGE_LABELS[s],

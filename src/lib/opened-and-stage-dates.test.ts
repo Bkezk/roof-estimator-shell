@@ -507,3 +507,24 @@ describe("the opportunity page: 'Opened … by …' and the status strip", () =>
     );
   });
 });
+
+describe("ticketStageStrip: Open is where every ticket starts (owner, Oct 15)", () => {
+  it("a ticket created Scheduled (a date on the form) shows Open reached at the creation row", () => {
+    const cells = ticketStageStrip("scheduled", [
+      { kind: "stage", stage: "scheduled", at: "2026-10-14T15:33:00Z", by_name: "RoAnna Sims" },
+    ]);
+    const open = cells.find((c) => c.key === "open")!;
+    expect(open.at).toBe("2026-10-14T15:33:00Z");
+    expect(open.by).toBe("RoAnna Sims");
+    expect(cells.find((c) => c.key === "scheduled")!.at).toBe("2026-10-14T15:33:00Z");
+  });
+  it("a ticket that logged Open keeps its own Open row; nothing logged, nothing shown", () => {
+    const cells = ticketStageStrip("open", [
+      { kind: "stage", stage: "open", at: "2026-10-01T12:00:00Z", by_name: "Ann" },
+      { kind: "stage", stage: "scheduled", at: "2026-10-02T12:00:00Z", by_name: "Bob" },
+    ]);
+    expect(cells.find((c) => c.key === "open")!.at).toBe("2026-10-01T12:00:00Z");
+    expect(cells.find((c) => c.key === "open")!.by).toBe("Ann");
+    expect(ticketStageStrip("open", []).find((c) => c.key === "open")!.at).toBeNull();
+  });
+});
