@@ -113,7 +113,8 @@ export function TaskDialog(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open / another task
   }, [props.open, taskId]);
 
-  const usersQ = useTaskUsers();
+  // The roster is read once the dialog opens, not while it sits closed on a page (Oct 15).
+  const usersQ = useTaskUsers(props.open);
   const roster: TaskUser[] = usersQ.data ?? [];
   const nameOf = (id: string) => userLabel(roster.find((u) => u.id === id)) || "(unknown user)";
 

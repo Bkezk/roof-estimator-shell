@@ -63,6 +63,12 @@ export function shortDay(ymd: string): string {
   return `${WEEKDAYS[wd]}, ${MONTHS[m - 1]} ${d}`;
 }
 
+/** "Oct 13" for a YYYY-MM-DD calendar day. */
+export function monthDay(ymd: string): string {
+  const [, m, d] = ymdParts(ymd);
+  return `${MONTHS[m - 1]} ${d}`;
+}
+
 /** "Oct 3, 2026" for a YYYY-MM-DD calendar day. */
 export function longDay(ymd: string): string {
   const [y, m, d] = ymdParts(ymd);
@@ -105,6 +111,8 @@ export interface FollowupStateIn {
   hold_reason?: string | null;
   held_by_name?: string | null;
   hold_count?: number | null;
+  /** When the last reminder went out (ISO; notify.server.ts stamps it). */
+  last_reminded_at?: string | null;
 }
 
 export interface FollowupStatePart {
@@ -117,7 +125,8 @@ export interface FollowupStatePart {
  * A follow-up's state against `today` (YYYY-MM-DD, the viewer's day): Due today / Due <day> or
  * Overdue N days; then, while a hold is running, "On hold until <day>", its reason and "held by
  * <name>" (owner, Oct 9 — it was "Snoozed until <day>"); "held N times" once it has been held
- * more than once; then Reminders every N days. A closed follow-up says so and nothing else.
+ * more than once; then Reminders every N days and, once one has gone out, "last reminded Oct 13"
+ * (owner, Oct 15: the reminder history on the row). A closed follow-up says so and nothing else.
  */
 export function followupStateText(
   f: FollowupStateIn,
@@ -147,6 +156,8 @@ export function followupStateText(
   const every = f.every_days ?? 0;
   if (every > 0)
     parts.push({ text: `Reminders every ${every} day${every === 1 ? "" : "s"}`, tone: "normal" });
+  if (f.last_reminded_at)
+    parts.push({ text: `last reminded ${monthDay(toYmd(f.last_reminded_at))}`, tone: "normal" });
   return parts;
 }
 

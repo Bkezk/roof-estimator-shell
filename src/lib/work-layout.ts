@@ -28,7 +28,23 @@ export interface WorkLayout {
    * focused on your scope of work"). Left out of the List and the Calendar alike.
    */
   hiddenKinds: WorkKind[];
+  /**
+   * The view the user was last on (owner, Oct 15: remember it per user) — absent for the List,
+   * the default. Applied when the URL has no ?view (`landingSearch`); never a column
+   * customisation (`isDefaultWorkLayout` ignores it, so Reset layout does not appear for it).
+   */
+  view?: WorkViewName;
+  /**
+   * Whose work the user last asked for, in the ?who= form (`whoParam`): "mine", a profile id, or
+   * absent for the caller's default (Everyone for admins and managers). Applied when the URL has
+   * no ?who. A person who no longer exists is harmless: the list shows nobody.
+   */
+  who?: string;
 }
+
+/** The three views; the page's effectiveView downgrades "owner" for anyone but an admin. */
+export type WorkViewName = "list" | "calendar" | "owner";
+const isView = (v: unknown): v is WorkViewName => v === "list" || v === "calendar" || v === "owner";
 
 /** The kinds the Show menu offers, in the same-day order. */
 export const WORK_KINDS: readonly WorkKind[] = [
@@ -74,7 +90,13 @@ const isBucket = (v: unknown): v is WorkBucket =>
  * column that no longer exists (Oct 12: the No date group) is an unknown name, dropped.
  */
 export function normalizeWorkLayout(raw: unknown): WorkLayout {
-  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hiddenKinds?: unknown };
+  const r = (raw ?? {}) as {
+    order?: unknown;
+    hidden?: unknown;
+    hiddenKinds?: unknown;
+    view?: unknown;
+    who?: unknown;
+  };
   const order: WorkBucket[] = [];
   for (const v of Array.isArray(r.order) ? r.order : [])
     if (isBucket(v) && !order.includes(v)) order.push(v);
@@ -102,13 +124,85 @@ export function normalizeWorkLayout(raw: unknown): WorkLayout {
   for (const v of Array.isArray(r.hiddenKinds) ? r.hiddenKinds : [])
     if (isKind(v) && !hiddenKinds.includes(v)) hiddenKinds.push(v);
   if (hiddenKinds.length >= WORK_KINDS.length) hiddenKinds = [];
-  return { order, hidden, hiddenKinds };
+  // The remembered view and person (Oct 15): "list" is the default and is not kept; a person is
+  // any short string (the ?who= form), checked by the server when it is used, not here.
+  const who =
+    typeof r.who === "string" && r.who.length > 0 && r.who.length <= 64 ? r.who : undefined;
+  return withRemembered({ order, hidden, hiddenKinds }, isView(r.view) ? r.view : undefined, who);
 }
 
+/**
+ * The default columns and kinds — the layout the List's Reset button restores and the bar's
+ * "customized" test. The remembered view and person are NOT a customisation (owner, Oct 15: no
+ * Reset button for having been on the Calendar); `isEmptyWorkLayout` is the "nothing to keep"
+ * test the saves use.
+ */
 export const isDefaultWorkLayout = (l: WorkLayout): boolean =>
   l.hidden.length === 0 &&
   l.hiddenKinds.length === 0 &&
   l.order.join(",") === DEFAULT_WORK_LAYOUT_ORDER.join(",");
+
+/** Nothing to remember at all: default columns and kinds, no view, no person (saved as null). */
+export const isEmptyWorkLayout = (l: WorkLayout): boolean =>
+  isDefaultWorkLayout(l) && !l.view && !l.who;
+
+/** `l`'s columns and kinds with this view (none for the List) and this person (none = default). */
+const withRemembered = (
+  l: Pick<WorkLayout, "order" | "hidden" | "hiddenKinds">,
+  view: WorkViewName | undefined,
+  who: string | undefined,
+): WorkLayout => ({
+  order: l.order,
+  hidden: l.hidden,
+  hiddenKinds: l.hiddenKinds,
+  ...(view && view !== "list" ? { view } : {}),
+  ...(who ? { who } : {}),
+});
+
+/** Remember the view the user picked (the same layout back when nothing changes). */
+export const rememberView = (layout: WorkLayout, view: WorkViewName): WorkLayout =>
+  (layout.view ?? "list") === view ? layout : withRemembered(layout, view, layout.who);
+
+/** Remember whose work the user picked, in the ?who= form (undefined / "" = their default). */
+export const rememberWho = (layout: WorkLayout, who: string | undefined): WorkLayout =>
+  (layout.who ?? "") === (who ?? "")
+    ? layout
+    : withRemembered(layout, layout.view, who || undefined);
+
+/**
+ * A column or kind change (`next`, from the List or the Show menu — Reset layout included) with
+ * the view and person `cur` remembers: those callers never mean to forget where the user was.
+ */
+export const keepRemembered = (next: WorkLayout, cur: WorkLayout): WorkLayout =>
+  withRemembered(next, cur.view, cur.who);
+
+/**
+ * What Work Overview opens on: the URL's ?view / ?who when given, else the remembered ones, else
+ * the defaults (the List; `who` null = the caller's default, resolveWho). The sidebar's link and
+ * the sign-in landing carry no search, so they open where the user was (owner, Oct 15). The view
+ * still goes through effectiveView (a remembered "owner" for a non-admin becomes the List).
+ */
+export function landingSearch(
+  saved: Pick<WorkLayout, "view" | "who"> | null | undefined,
+  url: { view?: string | null; who?: string | null },
+): { view: WorkViewName; who: string | null } {
+  const view = isView(url.view) ? url.view : (saved?.view ?? "list");
+  const who = url.who || saved?.who || null;
+  return { view, who };
+}
+
+/**
+ * The profile's copy now rides on the list (listMyWork, Oct 15). It seeds the saved-layout cache
+ * only when the cache is empty or this old: a local change writes the cache (the save's
+ * onMutate), and a list fetched before that save committed must not put the old layout back.
+ * The list refreshes every five minutes, so a change made on another device shows within one.
+ */
+export const LAYOUT_SEED_STALE_MS = 4 * 60_000;
+export const shouldSeedWorkLayout = (
+  cached: { data?: unknown; dataUpdatedAt: number } | undefined,
+  now: number,
+): boolean =>
+  !cached || cached.data === undefined || now - cached.dataUpdatedAt >= LAYOUT_SEED_STALE_MS;
 
 /** Tick or untick a kind under Show. The last kind showing cannot be unticked. */
 export function toggleKind(layout: WorkLayout, kind: WorkKind): WorkLayout {
@@ -208,14 +302,14 @@ export function readStoredWorkLayout(
   }
 }
 
-/** Cache the layout for this user in this browser (the default clears the cache). */
+/** Cache the layout for this user in this browser (nothing to remember clears the cache). */
 export function writeStoredWorkLayout(
   storage: StorageLike | null,
   userId: string,
   layout: WorkLayout,
 ): void {
   try {
-    if (isDefaultWorkLayout(layout)) storage?.removeItem(keyFor(userId));
+    if (isEmptyWorkLayout(layout)) storage?.removeItem(keyFor(userId));
     else storage?.setItem(keyFor(userId), JSON.stringify(layout));
   } catch {
     // A private window or a full store: the page still lays out from memory.

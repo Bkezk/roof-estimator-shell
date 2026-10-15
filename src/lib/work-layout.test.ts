@@ -161,7 +161,8 @@ describe("the layout follows the user", () => {
     const fn = read("./work-layout.functions.ts");
     expect(fn).toContain('.select("work_layout")');
     expect(fn).toContain('rpc("set_my_work_layout"');
-    expect(fn).toContain("isDefaultWorkLayout(layout) ? null : toJson(layout)");
+    // Oct 15: null only when there is nothing at all to keep (a remembered view counts).
+    expect(fn).toContain("isEmptyWorkLayout(layout) ? null : toJson(layout)");
     const sql = read("../../supabase/migrations/20261007110000_work_layout.sql");
     expect(sql).toContain("add column if not exists work_layout jsonb");
     expect(sql).toContain("security definer");

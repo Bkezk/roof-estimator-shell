@@ -30,6 +30,7 @@ import {
   type UnassignedRows,
 } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
+import { normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
 
 export interface WorkPerson {
   id: string;
@@ -87,9 +88,21 @@ export interface MyWorkResult {
    * every draft for Everyone. A submitted / won / lost bid is never sent.
    */
   bids: BidIn[];
+  /**
+   * The caller's saved Work Overview layout (owner, Oct 15: read with the list, so landing makes
+   * one request instead of two); null when none is saved or the column is not there yet
+   * (20261007110000_work_layout.sql) — the page keeps the browser's copy.
+   */
+  layout: WorkLayout | null;
+  /**
+   * Did any list hit `LIMIT` (owner, Oct 15)? Each kind is capped at 1,000 rows per request, so
+   * Everyone may be missing some; the page says so and suggests narrowing to one person.
+   */
+  truncated: boolean;
 }
 
-const LIMIT = 1000;
+/** Each list's cap (nine lists); `truncated` says whether any reached it. */
+export const LIMIT = 1000;
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
 
@@ -249,6 +262,14 @@ export const listMyWork = createServerFn({ method: "GET" })
     if (bq && scope !== "all") bq = bq.in("created_by", scope);
     const bRows = bq ?? Promise.resolve({ data: [] as BidRow[], error: null });
 
+    // The saved layout, with the lists (Oct 15; its own read, so a database without the column
+    // — 20261007110000_work_layout.sql not applied — still answers the list, with no layout).
+    const layoutRow = sb
+      .from("profiles")
+      .select("work_layout")
+      .eq("id", context.userId)
+      .maybeSingle();
+
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
     const [
       tickets,
@@ -262,6 +283,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       toInvoice,
       toAuthorize,
       bids,
+      layoutRes,
     ] = await Promise.all([
       tq,
       kq,
@@ -274,7 +296,24 @@ export const listMyWork = createServerFn({ method: "GET" })
       iTickets,
       aTickets,
       bRows,
+      layoutRow,
     ]);
+    const layout =
+      layoutRes.error || !layoutRes.data?.work_layout
+        ? null
+        : normalizeWorkLayout(layoutRes.data.work_layout);
+    const atCap = (r: { data: unknown[] | null }) => (r.data?.length ?? 0) >= LIMIT;
+    const truncated = [
+      tickets,
+      tasks,
+      followups,
+      unTickets,
+      unOpps,
+      unTasks,
+      toInvoice,
+      toAuthorize,
+      bids,
+    ].some(atCap);
     if (toInvoice.error) throw new Error(`Tickets to invoice: ${toInvoice.error.message}`);
     if (toAuthorize.error) throw new Error(`Tickets to authorize: ${toAuthorize.error.message}`);
     if (bids.error) throw new Error(`Bids: ${bids.error.message}`);
@@ -369,6 +408,8 @@ export const listMyWork = createServerFn({ method: "GET" })
         hold_reason: f.hold_reason ?? null,
         held_by_name: f.held_by_name ?? null,
         hold_count: f.hold_count ?? 0,
+        // When its last reminder went out (owner, Oct 15: shown on the row).
+        last_reminded_at: f.last_reminded_at ?? null,
         account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
         opportunity_status: f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,
       })),
@@ -403,6 +444,8 @@ export const listMyWork = createServerFn({ method: "GET" })
         account_name: b.account_id ? (accountName.get(b.account_id) ?? null) : null,
         created_by: b.created_by,
       })),
+      layout,
+      truncated,
     };
   });
 

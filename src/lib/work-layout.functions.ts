@@ -13,10 +13,20 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
-import { isDefaultWorkLayout, normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
+import { isEmptyWorkLayout, normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
 
-/** The layout as the jsonb column holds it: {"order": [...], "hidden": [...]}. */
-const toJson = (l: WorkLayout): Json => ({ order: [...l.order], hidden: [...l.hidden] });
+/**
+ * The layout as the jsonb column holds it: {"order": [...], "hidden": [...], "hiddenKinds":
+ * [...]} plus, when remembered, "view" and "who" (owner, Oct 15). Oct 15 fix: hiddenKinds was
+ * left out here and in the schema, so the Show menu's "remembered on every device" was false.
+ */
+const toJson = (l: WorkLayout): Json => ({
+  order: [...l.order],
+  hidden: [...l.hidden],
+  hiddenKinds: [...l.hiddenKinds],
+  ...(l.view ? { view: l.view } : {}),
+  ...(l.who ? { who: l.who } : {}),
+});
 
 /** The caller's saved layout, or null when there is none (the default applies). */
 export const getMyWorkLayout = createServerFn({ method: "GET" })
@@ -31,9 +41,13 @@ export const getMyWorkLayout = createServerFn({ method: "GET" })
     return { layout: normalizeWorkLayout(data.work_layout) };
   });
 
+const names = z.array(z.string().max(32)).max(20);
 const layoutSchema = z.object({
-  order: z.array(z.string().max(32)).max(20),
-  hidden: z.array(z.string().max(32)).max(20),
+  order: names,
+  hidden: names,
+  hiddenKinds: names.optional(),
+  view: z.enum(["list", "calendar", "owner"]).optional(),
+  who: z.string().max(64).optional(),
 });
 
 /** Save the caller's layout (their own row only: set_my_work_layout keys on auth.uid()). */
@@ -43,7 +57,7 @@ export const setMyWorkLayout = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ saved: boolean; error?: string }> => {
     const layout = normalizeWorkLayout(data);
     const { error } = await context.supabase.rpc("set_my_work_layout", {
-      p_layout: isDefaultWorkLayout(layout) ? null : toJson(layout),
+      p_layout: isEmptyWorkLayout(layout) ? null : toJson(layout),
     });
     return error ? { saved: false, error: error.message } : { saved: true };
   });

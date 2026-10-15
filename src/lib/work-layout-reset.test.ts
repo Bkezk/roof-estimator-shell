@@ -13,7 +13,8 @@ const src = readFileSync("src/components/my-work-page.tsx", "utf8");
 describe("Work Overview layout: a save keeps the saved-layout cache in step", () => {
   it("the save mutation writes the cache in onMutate, null for the default", () => {
     expect(src).toMatch(
-      /onMutate: \(l\) => \{\s*qc\.setQueryData<\{ layout: WorkLayout \| null \}>\(\["work-layout", userId\], \{\s*layout: isDefaultWorkLayout\(l\) \? null : l,\s*\}\);/,
+      // Oct 15: isEmptyWorkLayout — a remembered view or person is kept too (work-layout.ts).
+      /onMutate: \(l\) => \{\s*qc\.setQueryData<\{ layout: WorkLayout \| null \}>\(\["work-layout", userId\], \{\s*layout: isEmptyWorkLayout\(l\) \? null : l,\s*\}\);/,
     );
   });
   it("the old one-line mutation is gone", () => {

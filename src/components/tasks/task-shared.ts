@@ -11,10 +11,19 @@ import { listAssignableUsers } from "@/lib/tasks.functions";
 /** Every task query starts with this key; a save invalidates them all. */
 export const TASKS_KEY = ["tasks"] as const;
 
-/** The user roster for the assignee and attendee pickers and for names in lists. */
-export function useTaskUsers() {
+/**
+ * The user roster for the assignee and attendee pickers and for names in lists. `enabled` false
+ * holds the read (the task dialog while it is closed — it is mounted on Work Overview from the
+ * first paint; owner, Oct 15).
+ */
+export function useTaskUsers(enabled = true) {
   const fn = useServerFn(listAssignableUsers);
-  return useQuery({ queryKey: ["task-users"], queryFn: () => fn(), staleTime: 5 * 60_000 });
+  return useQuery({
+    queryKey: ["task-users"],
+    queryFn: () => fn(),
+    staleTime: 5 * 60_000,
+    enabled,
+  });
 }
 
 /** Refresh every list a task shows up in (the calendar, the list, a building's tasks). */

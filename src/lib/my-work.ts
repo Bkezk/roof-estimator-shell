@@ -189,6 +189,8 @@ export interface FollowupIn {
   hold_reason?: string | null;
   held_by_name?: string | null;
   hold_count?: number | null;
+  /** When its last reminder went out (owner, Oct 15: "last reminded Oct 13" on the row). */
+  last_reminded_at?: string | null;
 }
 
 /** The open follow-up behind a row: its state line, and Snooze / Close for managers. */
@@ -202,6 +204,8 @@ export interface WorkFollowup {
   hold_reason: string | null;
   held_by_name: string | null;
   hold_count: number;
+  /** When its last reminder went out (ISO), or null when none has (Oct 15). */
+  last_reminded_at: string | null;
 }
 
 const workFollowup = (f: FollowupIn): WorkFollowup => ({
@@ -214,6 +218,7 @@ const workFollowup = (f: FollowupIn): WorkFollowup => ({
   hold_reason: f.hold_reason ?? null,
   held_by_name: f.held_by_name ?? null,
   hold_count: f.hold_count ?? 0,
+  last_reminded_at: f.last_reminded_at ?? null,
 });
 
 /** An open opportunity nobody is assigned to (the Unassigned group; owner, Oct 7). */
@@ -930,6 +935,14 @@ export function splitEmptyGroups<T extends { bucket: WorkBucket; items: unknown[
 
 /** A List preset from the URL (?bucket=today|overdue — the Owner view's links). */
 export type BucketPreset = "today" | "overdue";
+
+/**
+ * ?month=YYYY-MM: the Calendar's month (owner, Oct 15: remembered while switching List and
+ * Calendar and through the browser's back button — in the URL, not on the profile, where last
+ * week's month would be wrong). Anything else is no month (the current one).
+ */
+export const parseMonthParam = (v: unknown): string | undefined =>
+  typeof v === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? v : undefined;
 
 export const parseBucketPreset = (v: unknown): BucketPreset | undefined =>
   v === "today" || v === "overdue" ? v : undefined;

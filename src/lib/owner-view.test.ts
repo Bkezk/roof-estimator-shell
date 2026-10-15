@@ -433,7 +433,8 @@ describe("Source: admin-only on the client and the server", () => {
     // The only Owner button and the only <OwnerView /> are behind the admin checks.
     expect(page.match(/> Owner/g)?.length).toBe(1);
     expect(page).toMatch(/view === "owner" && ownerToggle \? \(\s*<OwnerView \/>/);
-    expect(page).toContain("const view = effectiveView(props.view, profile);");
+    // Oct 15: the URL's ?view, else the remembered one (landingSearch), still through effectiveView.
+    expect(page).toContain("const view = effectiveView(landing.view, profile);");
   });
   it("listOwnerView checks the role from the caller's own profile and refuses non-admins", () => {
     const src = read("src/lib/owner-view.functions.ts");

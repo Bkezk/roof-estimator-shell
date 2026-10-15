@@ -58,6 +58,8 @@ import {
   localYmd,
   mergeWork,
   monthGrid,
+  resolveWho,
+  whoParam,
   compareWork,
   defaultBucket,
   presetBucket,
@@ -81,10 +83,16 @@ import {
   defaultWorkLayout,
   hideBucket,
   isDefaultWorkLayout,
+  isEmptyWorkLayout,
+  keepRemembered,
   KIND_PLURALS,
   kindsSummary,
+  landingSearch,
   moveBucket,
   readStoredWorkLayout,
+  rememberView,
+  rememberWho,
+  shouldSeedWorkLayout,
   showBucket,
   toggleKind,
   type WorkLayout,
@@ -657,6 +665,8 @@ function CalendarView({
   manage,
   claim = null,
   unassignedPane = false,
+  month: urlMonth,
+  onMonth,
 }: {
   items: WorkItem[];
   today: string;
@@ -665,10 +675,16 @@ function CalendarView({
   /** Owner, Oct 8: the unassigned list beside the calendar; a drop on a day claims it for that day. */
   claim?: ClaimWork | null;
   unassignedPane?: boolean;
+  /** The month shown (?month=YYYY-MM; owner, Oct 15), null for this month, and how to change it. */
+  month: string | null;
+  onMonth: (month: string) => void;
 }) {
   const unassigned = useMemo(() => items.filter((i) => i.unassigned), [items]);
   const dragKey = "text/x-work-key";
-  const [month, setMonth] = useState(() => today.slice(0, 7));
+  // The month lives in the URL (the route), so List ↔ Calendar and Back keep it (Oct 15).
+  const month = urlMonth ?? today.slice(0, 7);
+  const setMonth = (next: string | ((m: string) => string)) =>
+    onMonth(typeof next === "function" ? next(month) : next);
   const [day, setDay] = useState(today);
   const byDay = useMemo(() => itemsByDay(items), [items]);
   const weeks = useMemo(() => monthGrid(month), [month]);
@@ -889,25 +905,49 @@ function CalendarView({
 }
 
 export function MyWorkPage(props: {
-  view: MyWorkView;
-  who: string;
+  /** The URL's ?view, ?who and ?month as they are — null when absent (the remembered ones apply). */
+  view: MyWorkView | null;
+  who: string | null;
+  month: string | null;
   bucket: BucketPreset | null;
   onView: (v: MyWorkView) => void;
   onWho: (who: string) => void;
+  onMonth: (month: string | null) => void;
   onBucket: (b: BucketPreset | null) => void;
 }) {
   const { session, profile } = useAuth();
   const qc = useQueryClient();
   const [newTask, setNewTask] = useState(false);
+  // The user's layout (owner, Oct 7): the browser's copy first, then the profile's copy once the
+  // list brings it (it wins; below); every change goes to both. Since Oct 15 it also remembers
+  // the view and whose work (lib/work-layout.ts): the URL's ?view / ?who win, and when the URL is
+  // silent — the sidebar's link, the sign-in landing — the remembered ones apply (landingSearch).
+  const userId = profile?.id ?? session?.user.id ?? "";
+  const storage = typeof window === "undefined" ? null : window.localStorage;
+  const [layout, setLayout] = useState<WorkLayout>(
+    () => (userId && readStoredWorkLayout(storage, userId)) || defaultWorkLayout(),
+  );
+  useEffect(() => {
+    if (!userId) return;
+    const stored = readStoredWorkLayout(storage, userId);
+    if (stored) setLayout(stored);
+  }, [storage, userId]);
+  const landing = landingSearch(layout, { view: props.view, who: props.who });
   // ?view=owner is honoured for admins only; anyone else gets the list.
-  const view = effectiveView(props.view, profile);
+  const view = effectiveView(landing.view, profile);
+  // No ?who: the remembered person, else Everyone for admins and managers, Mine for anyone else.
+  const who = resolveWho(landing.who, profile);
   // The Owner toggle: admins only (the server's listOwnerView refuses anyone else too).
   const ownerToggle = isAdmin(profile);
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
-    queryKey: ["my-work", props.who],
-    queryFn: () => listFn({ data: { who: props.who } }),
+    queryKey: ["my-work", who],
+    queryFn: () => listFn({ data: { who } }),
     enabled: !!session && view !== "owner",
+    // Owner, Oct 15: "do every 5 minutes just so we're not constantly refreshing" — the list
+    // refreshes itself while the page sits open, not while the tab is in the background.
+    refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
 
   // Errors toast the server's message (and stay on the page until the next try).
@@ -944,24 +984,27 @@ export function MyWorkPage(props: {
     [q.data, today],
   );
 
-  // The user's column layout (owner, Oct 7): the browser's copy first, then the profile's copy
-  // once it arrives (it wins); every change goes to both.
-  const userId = profile?.id ?? session?.user.id ?? "";
-  const storage = typeof window === "undefined" ? null : window.localStorage;
-  const [layout, setLayout] = useState<WorkLayout>(() => defaultWorkLayout());
-  useEffect(() => {
-    if (!userId) return;
-    const stored = readStoredWorkLayout(storage, userId);
-    if (stored) setLayout(stored);
-  }, [storage, userId]);
+  // The profile's copy of the layout rides on the list (listMyWork; Oct 15 — one request on
+  // landing, not two). It seeds the saved-layout cache, which is applied as before (below), but
+  // not within LAYOUT_SEED_STALE_MS of a local change (shouldSeedWorkLayout: a list fetched
+  // before that save committed must not put the old layout back); the 5-minute refresh brings
+  // another device's change. getMyWorkLayout stays as the cache's query, never fetched by itself.
   const layoutFn = useServerFn(getMyWorkLayout);
   const saveLayoutFn = useServerFn(setMyWorkLayout);
   const savedLayout = useQuery({
     queryKey: ["work-layout", userId],
     queryFn: () => layoutFn(),
-    enabled: !!session && !!userId,
+    enabled: false,
     staleTime: 5 * 60_000,
   });
+  const listLayout = q.data?.layout;
+  useEffect(() => {
+    if (listLayout === undefined || !userId) return;
+    if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), Date.now()))
+      qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
+        layout: listLayout,
+      });
+  }, [listLayout, qc, userId]);
   useEffect(() => {
     const l = savedLayout.data?.layout;
     if (l && userId) {
@@ -976,14 +1019,28 @@ export function MyWorkPage(props: {
     mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
     onMutate: (l) => {
       qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
-        layout: isDefaultWorkLayout(l) ? null : l,
+        layout: isEmptyWorkLayout(l) ? null : l,
       });
     },
   });
-  const onLayout = (l: WorkLayout) => {
+  const commitLayout = (l: WorkLayout) => {
     setLayout(l);
     if (userId) writeStoredWorkLayout(storage, userId, l);
     saveLayout.mutate(l);
+  };
+  // Columns and kinds, from the List and the Show menu: the remembered view and person ride
+  // along (Reset layout resets the columns, not where the user was).
+  const onLayout = (l: WorkLayout) => commitLayout(keepRemembered(l, layout));
+  // The view and the person (owner, Oct 15: remembered per user): saved, then put in the URL.
+  const changeView = (v: MyWorkView) => {
+    const next = rememberView(layout, v);
+    if (next !== layout) commitLayout(next);
+    props.onView(v);
+  };
+  const changeWho = (w: string) => {
+    const next = rememberWho(layout, whoParam(w, profile));
+    if (next !== layout) commitLayout(next);
+    props.onWho(w);
   };
 
   // Follow-ups are management's (owner, Oct 1): Snooze / Close only under seesEveryone (admin or
@@ -1020,11 +1077,11 @@ export function MyWorkPage(props: {
   const showWho = !!scope && !mineOnly;
   const people = q.data?.people ?? [];
   const whoName =
-    props.who === "all"
+    who === "all"
       ? "Everyone"
-      : props.who === "mine"
+      : who === "mine"
         ? null
-        : (people.find((p) => p.id === props.who)?.name ?? null);
+        : (people.find((p) => p.id === who)?.name ?? null);
 
   return (
     // Owner (Oct 1): every view uses the whole width ("a lot of unused whitespace"; "a bigger
@@ -1057,7 +1114,7 @@ export function MyWorkPage(props: {
             size="sm"
             variant={view === "list" ? "default" : "ghost"}
             aria-pressed={view === "list"}
-            onClick={() => props.onView("list")}
+            onClick={() => changeView("list")}
           >
             <List className="h-4 w-4" /> List
           </Button>
@@ -1065,7 +1122,7 @@ export function MyWorkPage(props: {
             size="sm"
             variant={view === "calendar" ? "default" : "ghost"}
             aria-pressed={view === "calendar"}
-            onClick={() => props.onView("calendar")}
+            onClick={() => changeView("calendar")}
           >
             <CalendarDays className="h-4 w-4" /> Calendar
           </Button>
@@ -1074,7 +1131,7 @@ export function MyWorkPage(props: {
               size="sm"
               variant={view === "owner" ? "default" : "ghost"}
               aria-pressed={view === "owner"}
-              onClick={() => props.onView("owner")}
+              onClick={() => changeView("owner")}
             >
               <Users className="h-4 w-4" /> Owner
             </Button>
@@ -1118,7 +1175,7 @@ export function MyWorkPage(props: {
           </DropdownMenu>
         )}
         {canPick && view !== "owner" && (
-          <Select value={props.who} onValueChange={props.onWho}>
+          <Select value={who} onValueChange={changeWho}>
             <SelectTrigger className="h-9 w-[220px]" aria-label="Show">
               <span className="mr-1 text-muted-foreground">Show:</span>
               <SelectValue />
@@ -1153,6 +1210,12 @@ export function MyWorkPage(props: {
       {!canManage && hasFollowups && !errMsg && view !== "owner" && (
         <p className="text-xs text-muted-foreground">Follow-ups are managed by your manager.</p>
       )}
+      {/* Owner, Oct 15: each kind is capped at 1,000 rows (listMyWork LIMIT); say so when hit. */}
+      {view === "list" && !errMsg && q.data?.truncated && (
+        <p className="text-xs text-muted-foreground" data-row="truncated">
+          Showing the first 1,000 of each kind. Narrow to one person to see everything.
+        </p>
+      )}
 
       {view === "owner" && ownerToggle ? (
         <OwnerView />
@@ -1169,6 +1232,8 @@ export function MyWorkPage(props: {
         <CalendarView
           items={visibleItems}
           today={today}
+          month={props.month}
+          onMonth={(m) => props.onMonth(m === today.slice(0, 7) ? null : m)}
           showWho={showWho}
           manage={manage}
           claim={claim}

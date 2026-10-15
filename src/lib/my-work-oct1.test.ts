@@ -73,7 +73,10 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
   });
   it("the picker shows the resolved value (Everyone selected by default)", () => {
     const page = read("src/components/my-work-page.tsx");
-    expect(page).toContain("<Select value={props.who} onValueChange={props.onWho}>");
+    // Oct 15: `who` is the URL's, else the remembered one (landingSearch), resolved on the page;
+    // changeWho remembers the pick and then puts it in the URL (props.onWho).
+    expect(page).toContain("<Select value={who} onValueChange={changeWho}>");
+    expect(page).toContain("const who = resolveWho(landing.who, profile);");
     expect(page).toContain('<SelectItem value="all">Everyone</SelectItem>');
   });
 });
