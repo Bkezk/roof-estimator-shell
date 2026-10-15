@@ -738,7 +738,9 @@ export const restoreOpportunity = createServerFn({ method: "POST" })
  * list and calendar). Anyone `canClaim`; the opportunity must be open and have no assignee. A
  * dropped day becomes its expected close under the manager date rule (dateMoveProblem, as
  * saveOpportunity: once set, only an admin or a manager moves it; owner item 7, Oct 12 — it used
- * to be overwritten silently); no day keeps whatever it had. The update is the caller's own under
+ * to be overwritten silently). Owner, Oct 15: someone who may not move it still claims it — the
+ * day is ignored, the stored date stays, and the result says so (`dateKept`) for the page's
+ * toast. No day keeps whatever it had. The update is the caller's own under
  * crm_opportunities_write (Customers access). The follow-up is synced as a save would: the
  * claimer's timer starts (they are the actor, so no "assigned to you" notice goes to them).
  */
@@ -770,21 +772,22 @@ export const claimOpportunity = createServerFn({ method: "POST" })
     if (cur.assignee_id) throw new Error(CLAIM_TAKEN);
     if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))
       throw new Error("Only an open opportunity can be claimed");
-    if (data.date) {
-      const moveProblem = dateMoveProblem({
-        profile: p,
-        oldYmd: cur.expected_close,
-        newYmd: data.date,
-      });
-      if (moveProblem) throw new Error(moveProblem);
-    }
+    // The dropped day under the manager date rule (dateMoveProblem, as saveOpportunity). Owner,
+    // Oct 15: someone who may not move a stored expected close still gets the opportunity — the
+    // claim goes through WITHOUT the day (`dateKept`), and the page's toast says the date stayed.
+    // Until then the drop failed outright ("Only a manager can move the date") and the person
+    // was left with nothing.
+    const dateKept =
+      !!data.date &&
+      !!dateMoveProblem({ profile: p, oldYmd: cur.expected_close, newYmd: data.date });
+    const newDate = data.date && !dateKept ? data.date : null;
     const { data: row, error } = await sb
       .from("crm_opportunities")
       .update({
         assignee_id: context.userId,
         assigned_at: new Date().toISOString(),
         updated_by_name: nameOf(p),
-        ...(data.date ? { expected_close: data.date } : {}),
+        ...(newDate ? { expected_close: newDate } : {}),
       })
       .eq("id", data.id)
       .is("assignee_id", null)
@@ -793,7 +796,13 @@ export const claimOpportunity = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error(CLAIM_TAKEN);
     await syncOppFollowup(row, cur.status, context, nameOf(p));
-    return { id: row.id, assignee_id: row.assignee_id, expected_close: row.expected_close };
+    return {
+      id: row.id,
+      assignee_id: row.assignee_id,
+      expected_close: row.expected_close,
+      /** True when the dropped day was ignored: the caller may not move a stored expected close. */
+      dateKept,
+    };
   });
 
 /**

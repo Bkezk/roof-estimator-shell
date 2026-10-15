@@ -551,7 +551,12 @@ describe("B. claimOpportunity starts the follow-up and keeps the date rule (owne
   it("claiming starts the claimer's timer; no 'assigned to you' notice to themselves", async () => {
     setup({ opp: { assignee_id: null } });
     const r = await call<Row>(claimOpportunity, { id: OPP }, CLAIMER);
-    expect(r).toEqual({ id: OPP, assignee_id: CLAIMER, expected_close: "2026-10-20" });
+    expect(r).toEqual({
+      id: OPP,
+      assignee_id: CLAIMER,
+      expected_close: "2026-10-20",
+      dateKept: false,
+    });
     expect(oppRow()["assignee_id"]).toBe(CLAIMER);
     expect(followups()).toHaveLength(1);
     expect(followups()[0]).toMatchObject({
@@ -562,14 +567,34 @@ describe("B. claimOpportunity starts the follow-up and keeps the date rule (owne
     });
     expect(notified).toEqual([]);
   });
-  it("a dropped day on an opportunity that already has a date: the manager rule (as saveOpportunity); nothing written", async () => {
+  it("Oct 15: a dropped day on an opportunity that already has a date — someone who may not move it still claims it, the date stays, and the result says so", async () => {
     setup({ opp: { assignee_id: null } });
-    await expect(call(claimOpportunity, { id: OPP, date: "2026-10-25" }, CLAIMER)).rejects.toThrow(
-      DATE_MOVE_MANAGER_ONLY,
-    );
-    expect(env.writes).toEqual([]);
+    // Until Oct 15 this threw DATE_MOVE_MANAGER_ONLY and the claimer got nothing.
+    const r = await call<Row>(claimOpportunity, { id: OPP, date: "2026-10-25" }, CLAIMER);
+    expect(r).toEqual({
+      id: OPP,
+      assignee_id: CLAIMER,
+      expected_close: "2026-10-20",
+      dateKept: true,
+    });
+    expect(oppRow()["assignee_id"]).toBe(CLAIMER);
     expect(oppRow()["expected_close"]).toBe("2026-10-20");
-    expect(oppRow()["assignee_id"]).toBeNull();
+    const update = env.writes.find((w) => w.table === "crm_opportunities" && w.op === "update");
+    expect(update?.payload).not.toHaveProperty("expected_close");
+    // The timer runs from the kept date.
+    expect(followups()[0]).toMatchObject({ assignee_id: CLAIMER });
+    expect(followups()[0]!["due_at"]).toMatch(/^2026-10-20T/);
+    // The rule itself is unchanged: the same drop by a manager moves the date (below).
+    expect(DATE_MOVE_MANAGER_ONLY).toBe("Only a manager can move the date");
+  });
+  it("Oct 15: a day the caller MAY set reports dateKept: false", async () => {
+    setup({ opp: { assignee_id: null, expected_close: null } });
+    const r = await call<Row>(claimOpportunity, { id: OPP, date: "2026-10-25" }, CLAIMER);
+    expect(r).toMatchObject({ expected_close: "2026-10-25", dateKept: false });
+    setup({ opp: { assignee_id: null } });
+    expect(await call<Row>(claimOpportunity, { id: OPP }, CLAIMER)).toMatchObject({
+      dateKept: false,
+    });
   });
   it("a manager (ticked Technician) may drop it on a day; no date keeps the date", async () => {
     setup({ opp: { assignee_id: null } });

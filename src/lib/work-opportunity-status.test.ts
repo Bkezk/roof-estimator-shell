@@ -13,7 +13,13 @@ vi.mock("@tanstack/react-start", async () => ({
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
-import { followupItem, mergeWork, opportunityItem, type FollowupIn } from "@/lib/my-work";
+import {
+  AUTHORIZE_FOLLOWUP_STATUS,
+  followupItem,
+  mergeWork,
+  opportunityItem,
+  type FollowupIn,
+} from "@/lib/my-work";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
 import { fakeSupabase } from "@/test/fake-supabase";
 
@@ -50,13 +56,14 @@ describe("the pure rule: an opportunity row's status", () => {
     expect(followupItem(followup({ opportunity_status: null })).status).toBe("Open");
     expect(followupItem(followup({ opportunity_status: "won" })).status).toBe("won");
   });
-  it("a ticket's or the office's follow-up row is still Open, whatever is sent", () => {
+  it("a ticket's follow-up row is still Open, whatever is sent; the office's Authorize row says Done — to authorize (Oct 15)", () => {
     expect(followupItem(followup({ kind: "ticket", opportunity_status: "quoted" })).status).toBe(
       "Open",
     );
     expect(followupItem(followup({ kind: "invoice", opportunity_status: "quoted" })).status).toBe(
-      "Open",
+      AUTHORIZE_FOLLOWUP_STATUS,
     );
+    expect(AUTHORIZE_FOLLOWUP_STATUS).toBe("Done — to authorize");
   });
 });
 
@@ -200,8 +207,8 @@ describe("listMyWork, through the fake client", () => {
     expect(fn).toContain('sb.from("crm_opportunities").select("id, status").in("id", oppIds)');
     expect(fn).toContain('f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,');
     const lib = readFileSync("src/lib/my-work.ts", "utf8");
-    expect(lib).toContain(
-      'status: f.kind === "opportunity" ? oppStatusLabel(f.opportunity_status) : "Open",',
+    expect(lib).toMatch(
+      /status:\s*f\.kind === "opportunity"\s*\? oppStatusLabel\(f\.opportunity_status\)\s*: f\.kind === "invoice"\s*\? AUTHORIZE_FOLLOWUP_STATUS\s*: "Open",/,
     );
   });
 });

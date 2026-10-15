@@ -684,6 +684,11 @@ export const assignServiceJob = createServerFn({ method: "POST" })
           .string()
           .regex(/^\d{4}-\d{2}-\d{2}$/)
           .nullable(),
+        // Work Overview's "Assign to…" on an Unassigned row (Oct 15): the ticket must still
+        // have nobody on it, or the call fails with CLAIM_TAKEN — two dispatchers handing out
+        // the same ticket cannot both succeed. A plain reassignment (the Board, the ticket page)
+        // leaves it out and overwrites as before.
+        expect_unassigned: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -700,6 +705,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Ticket not found");
+    if (data.expect_unassigned && cur.technician_id) throw new Error(CLAIM_TAKEN);
     // A drop onto another day moves the date: the office's or a manager's (owner, Oct 1 / Oct 9;
     // logged below). A drop that only changes the technician on the same day needs no more than
     // dispatching.
@@ -711,7 +717,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     });
     if (moveProblem) throw new Error(moveProblem);
     const stage = assignedStage(cur.stage, data.technician_id, data.scheduled_date);
-    const { data: row, error } = await sb
+    let uq = sb
       .from("service_jobs")
       .update({
         technician_id: data.technician_id,
@@ -719,10 +725,12 @@ export const assignServiceJob = createServerFn({ method: "POST" })
         stage,
         updated_by_name: nameOf(p),
       })
-      .eq("id", data.id)
-      .select("*")
-      .single();
+      .eq("id", data.id);
+    // The guard against the race (Oct 15): the row must still be nobody's at the write.
+    if (data.expect_unassigned) uq = uq.is("technician_id", null);
+    const { data: row, error } = await uq.select("*").maybeSingle();
     if (error) throw new Error(error.message);
+    if (!row) throw new Error(data.expect_unassigned ? CLAIM_TAKEN : "Ticket not found");
     await logTicketDateMove(sb, row.id, cur.scheduled_date, row.scheduled_date, {
       id: context.userId,
       name: nameOf(p),

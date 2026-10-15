@@ -10,8 +10,9 @@
  *    (landingSearch); the URL wins when it speaks. Neither counts as a column customisation
  *    (isDefaultWorkLayout: no Reset button, no chips), but both are kept (isEmptyWorkLayout).
  * 3. The profile's copy rides on listMyWork and seeds the cache only when the cache is empty or
- *    older than LAYOUT_SEED_STALE_MS (shouldSeedWorkLayout), so a list fetched before a save
- *    committed cannot put the old layout back.
+ *    the list is newer than the cache (shouldSeedWorkLayout; Oct 15, after the 4-minute window
+ *    let a stale cached list through), so a list fetched before a save committed cannot put the
+ *    old layout back.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -23,7 +24,6 @@ vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupa
 
 import { effectiveView } from "@/lib/owner-view";
 import {
-  LAYOUT_SEED_STALE_MS,
   defaultWorkLayout,
   hideBucket,
   isDefaultWorkLayout,
@@ -214,22 +214,27 @@ describe("landingSearch: the URL when it speaks, else what is remembered, else t
 
 describe("shouldSeedWorkLayout: the list's copy of the layout and the cache", () => {
   const now = 1_000_000_000;
-  it("an empty cache is seeded", () => {
+  it("an empty cache is seeded, whatever the list's age", () => {
     expect(shouldSeedWorkLayout(undefined, now)).toBe(true);
     expect(shouldSeedWorkLayout({ dataUpdatedAt: 0 }, now)).toBe(true);
     expect(shouldSeedWorkLayout({ data: undefined, dataUpdatedAt: now }, now)).toBe(true);
+    expect(shouldSeedWorkLayout(undefined, 0)).toBe(true);
   });
-  it("a cache written within the window (a local save) is left alone; an old one is refreshed", () => {
+  it("Oct 15: a list older than the cache (a local save) never seeds, however long ago the save was", () => {
     const data = { layout: null };
+    // The bug: a list React Query still held from before the save (gcTime 5 min) was handed to a
+    // remount 4–5 minutes later, and the 4-minute window let it overwrite the Reset.
+    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now - 1)).toBe(false);
+    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now - 4 * 60_000)).toBe(false);
+    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now - 10 * 60_000)).toBe(false);
     expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now)).toBe(false);
-    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now - LAYOUT_SEED_STALE_MS + 1 }, now)).toBe(
-      false,
-    );
-    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now - LAYOUT_SEED_STALE_MS }, now)).toBe(
-      true,
-    );
-    // Shorter than the list's 5-minute refresh, so every refresh may bring another device's change.
-    expect(LAYOUT_SEED_STALE_MS).toBeLessThan(5 * 60_000);
+  });
+  it("a list fetched after the cache was written seeds it (another device's change arrives)", () => {
+    const data = { layout: null };
+    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now + 1)).toBe(true);
+    expect(shouldSeedWorkLayout({ data, dataUpdatedAt: now }, now + 5 * 60_000)).toBe(true);
+    // No wall-clock window is left.
+    expect(readFileSync("src/lib/work-layout.ts", "utf8")).not.toContain("LAYOUT_SEED_STALE_MS");
   });
 });
 
@@ -270,9 +275,12 @@ describe("the page and the route", () => {
     expect(page).toMatch(
       /queryKey: \["work-layout", userId\],\s*queryFn: \(\) => layoutFn\(\),\s*enabled: false,/,
     );
+    // The list's own stamp, not the clock (Oct 15).
+    expect(page).toContain("const listUpdatedAt = q.dataUpdatedAt;");
     expect(page).toContain(
-      'if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), Date.now()))',
+      'if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), listUpdatedAt))',
     );
+    expect(page).not.toContain("Date.now()))");
     expect(page).not.toContain("enabled: !!session && !!userId,");
   });
   it("the route hands the page the URL's values as they are, and keeps ?month across views", () => {

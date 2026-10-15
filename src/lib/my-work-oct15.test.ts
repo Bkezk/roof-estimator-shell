@@ -213,11 +213,13 @@ describe("the page", () => {
       "const usersQ = useTaskUsers();",
     );
   });
-  it("10d — the List says so when a list hit the cap", () => {
-    expect(page).toContain('{view === "list" && !errMsg && q.data?.truncated && (');
-    expect(page).toContain(
-      "Showing the first 1,000 of each kind. Narrow to one person to see everything.",
-    );
+  it("10d — the List and the Calendar say so when a list hit the cap; 'narrow to one person' only on Everyone", () => {
+    // Oct 15 (later): the Calendar shows the same capped rows, so it says so too; the advice to
+    // narrow is for Everyone only (a person's list is already one person).
+    expect(page).toContain('{view !== "owner" && !errMsg && q.data?.truncated && (');
+    expect(page).not.toContain('{view === "list" && !errMsg && q.data?.truncated && (');
+    expect(page).toContain("Showing the first 1,000 of each kind.");
+    expect(page).toContain('{who === "all" ? " Narrow to one person to see everything." : ""}');
   });
   it("the Show menu's promise holds now: hiddenKinds are saved to the profile", () => {
     expect(page).toContain("Remembered for you on every device. One kind always stays on.");

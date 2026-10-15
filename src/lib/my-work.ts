@@ -128,6 +128,33 @@ export const resolveWho = (who: string | null | undefined, profile: RoleLike): W
 export const whoParam = (who: string, profile: RoleLike): string | undefined =>
   !who || who === defaultWho(profile) ? undefined : who;
 
+/**
+ * The `who` the page can show (Oct 15): "mine", "all" or a person on the roster. A remembered or
+ * linked person who is no longer there (deleted, or never one of the roster) rendered a blank
+ * Select and "Someone else: …"; once the roster has loaded (`loaded`), such a `who` falls back to
+ * the caller's default. Before it loads, `who` stands (nothing to check it against).
+ */
+export function effectiveWho(
+  who: string,
+  people: readonly { id: string }[],
+  profile: RoleLike,
+  loaded: boolean,
+): WorkWho {
+  if (!loaded || who === "mine" || who === "all") return who;
+  return people.some((p) => p.id === who) ? who : defaultWho(profile);
+}
+
+/** The three views; `effectiveView` (owner-view.ts) still downgrades "owner" for a non-admin. */
+export type WorkViewParam = "list" | "calendar" | "owner";
+
+/**
+ * ?view= from the URL, "list" included (Oct 15): an explicit List — the Owner view's number links
+ * — must beat the remembered view (work-layout.ts landingSearch), so the route keeps it rather
+ * than dropping it as the default. Anything else is no view (the remembered one applies).
+ */
+export const parseViewParam = (v: unknown): WorkViewParam | undefined =>
+  v === "list" || v === "calendar" || v === "owner" ? v : undefined;
+
 // ---- rows in -------------------------------------------------------------------------------
 
 export interface TicketIn {
@@ -487,6 +514,12 @@ export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkIte
   };
 }
 
+/**
+ * What an "Authorize ticket #…" follow-up row (kind "invoice") reads as its status (Oct 15): the
+ * ticket is Done on the technician's side and waits for the office — "Open" was misleading.
+ */
+export const AUTHORIZE_FOLLOWUP_STATUS = "Done — to authorize";
+
 export function followupItem(
   f: FollowupIn,
   names: Record<string, string> = {},
@@ -502,8 +535,15 @@ export function followupItem(
     where: joinWhere(f.account_name),
     date: toYmd(f.due_at),
     // An opportunity's row reads its real status (Open / Contacted / Quoted — the Opportunities
-    // page's labels, as the Unassigned rows do; owner, Oct 12); a follow-up itself is "Open".
-    status: f.kind === "opportunity" ? oppStatusLabel(f.opportunity_status) : "Open",
+    // page's labels, as the Unassigned rows do; owner, Oct 12); a follow-up itself is "Open" —
+    // except the office's "Authorize ticket #…" timer (kind "invoice"), whose ticket is Done
+    // and waits to be authorized: "Open" read as if the ticket were still open (Oct 15).
+    status:
+      f.kind === "opportunity"
+        ? oppStatusLabel(f.opportunity_status)
+        : f.kind === "invoice"
+          ? AUTHORIZE_FOLLOWUP_STATUS
+          : "Open",
     done: false,
     // Only an in-app path (the follow-up's own link); anything else stays on Work Overview.
     href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/my-work",
@@ -731,8 +771,9 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
  * column title and every empty-column chip shows it (the page's BucketHelp tooltip).
  */
 export const BUCKET_HELP: Record<WorkBucket, string> = {
+  // Oct 15: tasks too (they have sat here since Oct 9).
   unassigned:
-    "Tickets and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+    "Tickets, tasks and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
   overdue:
     "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
   today: "Due today.",
@@ -1002,6 +1043,30 @@ export function itemsByDay(items: WorkItem[]): Map<string, WorkItem[]> {
     m.set(it.date, list);
   }
   return m;
+}
+
+/**
+ * Is a past calendar day red (Oct 15)? Only when something on it is truly overdue — in the Overdue
+ * group (`listBucketOf`): an Open / Scheduled ticket, a task, a follow-up, an opportunity or a
+ * draft bid past its day. The other dated work on a past day still APPEARS in the cell (it is
+ * dated, and the day's list shows it) but never colours it: a Done ticket waiting to be
+ * authorized (needsAuth; its day is the day it was done), an Authorized ticket waiting for its
+ * invoice (toInvoice) and a follow-up on hold (Waiting). Nobody's work on a past day IS red
+ * (owner, Oct 15: unowned and late is the worst case; its row carries the Overdue flag too).
+ * Before this the cell read `d < today && some(!done)`, so a month of finished work was a month
+ * of red days.
+ */
+export function dayIsOverdue(
+  list: readonly BucketIn[],
+  day: string,
+  today: string,
+  toYmd: (iso: string) => string = localYmd,
+): boolean {
+  if (!(day < today)) return false;
+  return list.some((i) => {
+    const b = listBucketOf(i, today, toYmd);
+    return b === "overdue" || (b === "unassigned" && !i.done);
+  });
 }
 
 /** A calendar day shows at most this many items, then "+N more" (owner, Oct 1). */

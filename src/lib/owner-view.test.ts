@@ -364,16 +364,24 @@ describe("digestLine, totals, sort, links", () => {
     ]);
     expect(sorted.map((r) => r.name)).toEqual(["Bo", "Ab", "Cy", "Al"]);
   });
-  it("numbers link into My Work for that person with the List preset", () => {
+  it("numbers link into My Work's LIST for that person with the preset (Oct 15: view explicit)", () => {
+    // An admin on the Owner view has "owner" remembered; without view=list the link reopened it.
     expect(myWorkHref("id1", "today")).toEqual({
       to: "/my-work",
-      search: { who: "id1", bucket: "today" },
+      search: { view: "list", who: "id1", bucket: "today" },
     });
     expect(myWorkHref("id1", "overdue")).toEqual({
       to: "/my-work",
-      search: { who: "id1", bucket: "overdue" },
+      search: { view: "list", who: "id1", bucket: "overdue" },
     });
-    expect(myWorkHref("all", "done")).toEqual({ to: "/my-work", search: { who: "all" } });
+    expect(myWorkHref("all", "overdue").search).toEqual({
+      view: "list",
+      who: "all",
+      bucket: "overdue",
+    });
+    // Done this week is not a link any more (no Done group to land on): no "done" cell.
+    const cells: Parameters<typeof myWorkHref>[1][] = ["today", "overdue"];
+    expect(cells).not.toContain("done");
   });
 });
 
@@ -414,9 +422,9 @@ describe("My Work List: ?bucket=today|overdue preset", () => {
     expect(presetGroups(groups, "today").map((g) => g.items[0]?.title)).toEqual(["Now"]);
     expect(presetGroups(groups, null)).toEqual(groups);
   });
-  it("the route keeps ?view=owner and ?bucket for the page to decide", () => {
+  it("the route keeps ?view (list included since Oct 15) and ?bucket for the page to decide", () => {
     const route = read("src/routes/my-work.tsx");
-    expect(route).toMatch(/view === "calendar" \|\| view === "owner"/);
+    expect(route).toContain('const view = parseViewParam(s["view"]);');
     expect(route).toContain('parseBucketPreset(s["bucket"])');
   });
 });

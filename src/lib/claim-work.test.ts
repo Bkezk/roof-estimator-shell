@@ -123,7 +123,9 @@ describe("the claim server functions", () => {
     expect(body).toContain("if (!canClaim(p)) throw new Error(CLAIM_NEEDS_TICK);");
     expect(body).toContain("if (cur.assignee_id) throw new Error(CLAIM_TAKEN);");
     expect(body).toContain("if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))");
-    expect(body).toContain("...(data.date ? { expected_close: data.date } : {}),");
+    // Oct 15: the day is written only when the caller may move the date (else dateKept).
+    expect(body).toContain("...(newDate ? { expected_close: newDate } : {}),");
+    expect(body).toContain("const newDate = data.date && !dateKept ? data.date : null;");
     expect(body).toContain('.is("assignee_id", null)');
   });
 });
@@ -165,8 +167,10 @@ describe("where it is used", () => {
     // The row's Claim keeps the date; the drop sets it; only people who canClaim get either.
     expect(page).toContain("onClick={() => claim(item, null)}");
     expect(page).toContain("const claim: ClaimWork | null = canClaim(profile)");
+    expect(page).toContain('if (v.item.kind === "opportunity") {');
+    // Oct 15: the opportunity's answer says whether the dropped day was kept (the toast wording).
     expect(page).toContain(
-      'if (v.item.kind === "opportunity") await claimOppFn({ data: { id, date: v.date } });',
+      "const r = await claimOppFn({ data: { id, date: v.date } }); return r.dateKept ? (r.expected_close ?? null) : null;",
     );
     expect(page).toContain("unassignedPane={!!q.data?.unassigned}");
   });

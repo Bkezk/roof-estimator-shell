@@ -26,6 +26,7 @@ import {
   canMoveWork,
   dropPlan,
   monthDay,
+  taskOpensInPlace,
   workId,
   type AssignKind,
   type AssignPlan,
@@ -48,6 +49,8 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** What a row (and the calendar) can do; every callback already knows the viewer. */
 export interface WorkActions {
+  /** Does this row open in place (taskOpensInPlace)? A task — unless nobody's and not the viewer's to take or assign. */
+  opensInPlace: (item: WorkItem) => boolean;
   /** Open a task row in place (the TaskDialog). */
   openTask: (item: WorkItem) => void;
   /** May the viewer tick this task Done (canEditWorkTask)? */
@@ -121,9 +124,16 @@ export function useWorkActions(profile: UserProfile | null): {
   const assignOppFn = useServerFn(assignOpportunity);
   const assign = useMutation({
     mutationFn: async (v: AssignPlan & { name: string }) => {
+      // expect_unassigned (Oct 15): the ticket must still be nobody's at the write, or the
+      // server answers "Someone already has it" — two dispatchers cannot both hand it out.
       if (v.kind === "ticket")
         await assignTicketFn({
-          data: { id: v.id, technician_id: v.technicianId, scheduled_date: v.date },
+          data: {
+            id: v.id,
+            technician_id: v.technicianId,
+            scheduled_date: v.date,
+            expect_unassigned: true,
+          },
         });
       else if (v.kind === "task") await assignTaskFn({ data: { id: v.id, assignee: v.assignee } });
       else await assignOppFn({ data: { id: v.id, assignee_id: v.assignee } });
@@ -177,6 +187,7 @@ export function useWorkActions(profile: UserProfile | null): {
   );
 
   const actions: WorkActions = {
+    opensInPlace: (item) => taskOpensInPlace(item, profile),
     openTask: (item) => open.mutate(workId(item)),
     canEditTask: (item) => canEditWorkTask(item, profile),
     markDone: (item) => status.mutate({ id: workId(item), status: "done" }),

@@ -135,8 +135,9 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
   });
   it("the texts, as the owner wrote them", () => {
     expect(BUCKET_HELP).toEqual({
+      // Oct 15: tasks named too (they have sat in the group since Oct 9).
       unassigned:
-        "Tickets and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+        "Tickets, tasks and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
       overdue:
         "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
       today: "Due today.",

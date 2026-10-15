@@ -5,10 +5,12 @@
  * only under `visibleToOwner(profile)`, and `listOwnerView` refuses anyone else on the server.
  * Definitions are in src/lib/owner-view.ts.
  *
- * Each number links into Work Overview for that person (`who`) with the List preset (`bucket`);
- * opportunity numbers link to the Opportunities list's open / overdue filter for that person
- * (`oppsHref`: `assignee=<id>`; the totals row: everyone). Refreshes when the
- * window regains focus, every 60 s and on mount, like the counts strip.
+ * Due today and Overdue link into Work Overview's List for that person (`who`) with the preset
+ * (`bucket`) and an explicit `view=list` (Oct 15: the remembered Owner view must not win);
+ * Done this week expands the person's row (the List has no Done group to land on); opportunity
+ * numbers link to the Opportunities list's open / overdue filter for that person (`oppsHref`:
+ * `assignee=<id>`; the totals row: everyone). Refreshes when the window regains focus, every 60 s
+ * and on mount, like the counts strip.
  *
  * Rows start collapsed; clicking a person's row (or its chevron) expands it in place (owner,
  * Oct 1: "a bit more detail per person"): their Today / Overdue / Done this week items — exactly
@@ -36,6 +38,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
 import { localYmd, ymdParts } from "@/lib/my-work";
+import { taskMapHref } from "@/lib/my-work-actions";
 import { getOwnerPersonDetail, listOwnerView } from "@/lib/owner-view.functions";
 import {
   DETAIL_KIND_LABELS,
@@ -263,9 +266,18 @@ export function OwnerView() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Link {...myWorkHref(r.id, "done")} className={linkCls}>
+                          {/* Nowhere to link (the List has no Done group; Oct 15): the number
+                              opens this person's row, whose "Done this week" card lists them. */}
+                          <button
+                            type="button"
+                            className={linkCls}
+                            aria-expanded={isOpen}
+                            aria-controls={detailId}
+                            title={`${isOpen ? "Hide" : "Show"} what ${r.name} got done this week`}
+                            onClick={() => toggle(r.id)}
+                          >
                             {r.doneThisWeek}
-                          </Link>
+                          </button>
                         </TableCell>
                         <TableCell className="text-right">
                           <Link {...oppsHref(r.id)} className={linkCls}>
@@ -307,10 +319,9 @@ export function OwnerView() {
                       {totals.overdue}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Link {...myWorkHref("all", "done")} className={linkCls}>
-                      {totals.doneThisWeek}
-                    </Link>
+                  {/* No row to expand for the total: a plain number (Oct 15). */}
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {totals.doneThisWeek}
                   </TableCell>
                   <TableCell className="text-right">
                     <Link {...oppsHref("all")} className={linkCls}>
@@ -485,8 +496,17 @@ interface DetailLine {
   title: string;
   where: string | null;
   when: string;
-  href: string;
+  /** Where the title links; null for a task without a building (plain text — Oct 15). */
+  href: string | null;
 }
+
+/**
+ * A line's link (Oct 15): a task's goes to its building on the Prospecting map and nowhere for a
+ * task without one (lib/my-work-actions.ts taskMapHref — the bare map was a dead link; the Owner
+ * view has no task dialog to open instead); every other kind keeps its link.
+ */
+const lineHref = (i: { kind: DetailKind; href: string }): string | null =>
+  i.kind === "task" ? taskMapHref(i) : i.href;
 
 function DetailGroup({
   title,
@@ -520,7 +540,11 @@ function DetailGroup({
               </Badge>
               <span className="min-w-0">
                 <span className="block truncate leading-snug" title={l.title}>
-                  <ItemLink href={l.href}>{l.title}</ItemLink>
+                  {l.href ? (
+                    <ItemLink href={l.href}>{l.title}</ItemLink>
+                  ) : (
+                    <span className="font-medium">{l.title}</span>
+                  )}
                 </span>
                 {l.where && (
                   <span className="block truncate text-xs text-muted-foreground" title={l.where}>
@@ -576,12 +600,12 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
       <DetailGroup
         title="Today"
         empty="Nothing due today"
-        lines={d.today.map((i) => ({ ...i, when: dated(i.date) }))}
+        lines={d.today.map((i) => ({ ...i, when: dated(i.date), href: lineHref(i) }))}
       />
       <DetailGroup
         title="Overdue"
         empty="Nothing overdue"
-        lines={d.overdue.map((i) => ({ ...i, when: dated(i.date) }))}
+        lines={d.overdue.map((i) => ({ ...i, when: dated(i.date), href: lineHref(i) }))}
       />
       <DetailGroup
         title="Done this week"
@@ -592,7 +616,7 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
           title: i.title,
           where: i.customer,
           when: activityWhen(i.when, now),
-          href: i.href,
+          href: lineHref(i),
         }))}
       />
       <section className="min-h-48 min-w-0 overflow-hidden rounded-md border">

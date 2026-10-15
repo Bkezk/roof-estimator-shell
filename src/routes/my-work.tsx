@@ -6,9 +6,11 @@ import { useAuth } from "@/lib/auth-store";
 import {
   parseBucketPreset,
   parseMonthParam,
+  parseViewParam,
   resolveWho,
   whoParam,
   type BucketPreset,
+  type WorkViewParam,
 } from "@/lib/my-work";
 
 export const Route = createFileRoute("/my-work")({
@@ -25,13 +27,15 @@ export const Route = createFileRoute("/my-work")({
   // Owner, Oct 15: without ?view / ?who the page opens on the view and the person the user last
   // picked (remembered on their profile with the layout; lib/work-layout.ts landingSearch), so
   // the page gets the URL's values as they are — absent when absent — and resolves them itself.
+  // An explicit ?view=list is kept too (Oct 15): the Owner view's number links say so, and the
+  // remembered "owner" must not win over it (landingSearch treats any URL view as final).
   validateSearch: (s: Record<string, unknown>): MyWorkSearch => {
-    const view = s["view"];
+    const view = parseViewParam(s["view"]);
     const who = s["who"];
     const bucket = parseBucketPreset(s["bucket"]);
     const month = parseMonthParam(s["month"]);
     return {
-      ...(view === "calendar" || view === "owner" ? { view } : {}),
+      ...(view ? { view } : {}),
       ...(typeof who === "string" && who ? { who: who.slice(0, 64) } : {}),
       ...(bucket ? { bucket } : {}),
       ...(month ? { month } : {}),
@@ -41,7 +45,7 @@ export const Route = createFileRoute("/my-work")({
 });
 
 type MyWorkSearch = {
-  view?: "calendar" | "owner";
+  view?: WorkViewParam;
   who?: string;
   bucket?: BucketPreset;
   month?: string;
@@ -60,9 +64,12 @@ function MyWorkRoute() {
   const curView = view ?? "list";
   // No ?who: Everyone for admins and managers, Mine for anyone else (defaultWho).
   const curWho = resolveWho(who, profile);
-  /** The search without default keys (the list, the caller's default `who`, no preset). */
+  /**
+   * The search without default keys (the list, the caller's default `who`, no preset) — the
+   * page's own navigations may drop "list"; only an incoming link needs it explicit.
+   */
   const searchOf = (
-    v: "list" | "calendar" | "owner",
+    v: WorkViewParam,
     w: string,
     b?: BucketPreset | null,
     m?: string | null,

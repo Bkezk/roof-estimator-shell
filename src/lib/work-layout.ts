@@ -193,16 +193,21 @@ export function landingSearch(
 
 /**
  * The profile's copy now rides on the list (listMyWork, Oct 15). It seeds the saved-layout cache
- * only when the cache is empty or this old: a local change writes the cache (the save's
- * onMutate), and a list fetched before that save committed must not put the old layout back.
+ * only when the cache is empty or the list is NEWER than the cache: a local change writes the
+ * cache (the save's onMutate, stamped then), and a list fetched before that — one still in
+ * React Query's cache when the page remounts, up to its 5-minute gcTime — must not put the old
+ * layout back over a Reset or a hidden column. (Until Oct 15 the rule was a 4-minute wall-clock
+ * window on the cache, which let exactly that stale list through once the window had passed.)
  * The list refreshes every five minutes, so a change made on another device shows within one.
  */
-export const LAYOUT_SEED_STALE_MS = 4 * 60_000;
 export const shouldSeedWorkLayout = (
   cached: { data?: unknown; dataUpdatedAt: number } | undefined,
-  now: number,
+  listUpdatedAt: number,
 ): boolean =>
-  !cached || cached.data === undefined || now - cached.dataUpdatedAt >= LAYOUT_SEED_STALE_MS;
+  !cached ||
+  cached.data === undefined ||
+  !cached.dataUpdatedAt ||
+  listUpdatedAt > cached.dataUpdatedAt;
 
 /** Tick or untick a kind under Show. The last kind showing cannot be unticked. */
 export function toggleKind(layout: WorkLayout, kind: WorkKind): WorkLayout {

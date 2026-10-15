@@ -12,6 +12,7 @@ import { dispatchesTickets, seesEveryone } from "./access";
 import type { WorkItem } from "./my-work";
 import {
   NEW_OPPORTUNITY_HREF,
+  UNASSIGNED_TASK_HINT,
   assignKind,
   assignPlan,
   canEditWorkTask,
@@ -77,13 +78,47 @@ describe("the rules' premises (access.ts)", () => {
 
 describe("a task row opens in place (bug 2, then owner: every task)", () => {
   it("every task, with or without a building; nothing else", () => {
-    expect(taskOpensInPlace(task())).toBe(true);
-    expect(taskOpensInPlace(task({ href: "/prospect?building=b1" }))).toBe(true);
-    expect(taskOpensInPlace(item({ kind: "ticket" }))).toBe(false);
-    expect(taskOpensInPlace(item({ kind: "inspection" }))).toBe(false);
-    expect(taskOpensInPlace(item({ kind: "followup" }))).toBe(false);
-    expect(taskOpensInPlace(item({ kind: "opportunity" }))).toBe(false);
-    expect(taskOpensInPlace(item({ kind: "bid" }))).toBe(false);
+    expect(taskOpensInPlace(task(), office)).toBe(true);
+    expect(taskOpensInPlace(task({ href: "/prospect?building=b1" }), office)).toBe(true);
+    expect(taskOpensInPlace(item({ kind: "ticket" }), admin)).toBe(false);
+    expect(taskOpensInPlace(item({ kind: "inspection" }), admin)).toBe(false);
+    expect(taskOpensInPlace(item({ kind: "followup" }), admin)).toBe(false);
+    expect(taskOpensInPlace(item({ kind: "opportunity" }), admin)).toBe(false);
+    expect(taskOpensInPlace(item({ kind: "bid" }), admin)).toBe(false);
+  });
+  it("Oct 15: nobody's task does not open for a viewer who can neither Claim nor assign it", () => {
+    const un = task({ unassigned: true, assigneeId: null, assigneeName: null });
+    // Admins and managers assign it; a ticked office person claims it: the row opens.
+    expect(taskOpensInPlace(un, admin)).toBe(true);
+    expect(taskOpensInPlace(un, manager)).toBe(true);
+    expect(taskOpensInPlace(un, { ...office, technician: true })).toBe(true);
+    // The office or sales without the tick: getTask would refuse ("Claim it first") — no button.
+    expect(taskOpensInPlace(un, office)).toBe(false);
+    expect(taskOpensInPlace(un, customersOnly)).toBe(false);
+    expect(taskOpensInPlace(un, { ...customersOnly, access: ["estimate", "invoices"] })).toBe(
+      false,
+    );
+    expect(taskOpensInPlace(un, null)).toBe(false);
+    // An assigned task opens for its assignee, as before.
+    expect(taskOpensInPlace(task({ assigneeId: ME }), office)).toBe(true);
+    expect(taskOpensInPlace(task({ assigneeId: BOB }), office)).toBe(true);
+    expect(UNASSIGNED_TASK_HINT).toBe("Claim it, or ask a manager to assign it");
+  });
+  it("the page: such a row is plain text with the hint, keeps its flags and Open on map", () => {
+    const page = read("src/components/my-work-page.tsx");
+    const row = page.slice(
+      page.indexOf("function WorkRow("),
+      page.indexOf("function WaitingSince"),
+    );
+    expect(row).toContain("const act = actions && actions.opensInPlace(item) ? actions : null;");
+    expect(row).toContain('const inert = !!actions && item.kind === "task" && !act;');
+    expect(row).toContain("const mapHref = act || inert ? taskMapHref(item) : null;");
+    expect(row).toContain(') : inert ? (\n        <div className="p-3" data-row="inert-task">');
+    expect(row).toContain("{UNASSIGNED_TASK_HINT}");
+    // The same body (title, badge, Unassigned / Overdue flags) as every other row.
+    expect(row.match(/\{body\}/g)).toHaveLength(3);
+    const hook = read("src/components/my-work-actions.tsx");
+    expect(hook).toContain("opensInPlace: (item) => taskOpensInPlace(item, profile),");
   });
   it("the map stays one click away for a task with a building, not for one without", () => {
     expect(taskMapHref(task({ href: "/prospect?building=b1" }))).toBe("/prospect?building=b1");
@@ -100,7 +135,7 @@ describe("a task row opens in place (bug 2, then owner: every task)", () => {
       page.indexOf("function WorkRow("),
       page.indexOf("function WaitingSince"),
     );
-    expect(row).toContain("const act = actions && taskOpensInPlace(item) ? actions : null;");
+    expect(row).toContain("const act = actions && actions.opensInPlace(item) ? actions : null;");
     expect(row).toContain("onClick={() => act.openTask(item)}");
     expect(row).toContain(
       '<button\n          type="button"\n          className="block w-full p-3 text-left"',
@@ -113,7 +148,7 @@ describe("a task row opens in place (bug 2, then owner: every task)", () => {
       "if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;",
     );
     // "Open on map" for a task with a building.
-    expect(row).toContain("const mapHref = act ? taskMapHref(item) : null;");
+    expect(row).toContain("const mapHref = act || inert ? taskMapHref(item) : null;");
     expect(row).toContain("Open on map");
     // The edit dialog is the TaskDialog on the fetched row; the hook fetches the whole task.
     expect(page).toContain("task={editTask ?? undefined}");

@@ -118,7 +118,7 @@ describe("unassigned tasks on Work Overview", () => {
   it("the page's Claim (row button or calendar drop) knows a task", () => {
     const page = src("src/components/my-work-page.tsx");
     expect(page).toContain(
-      'else if (v.item.kind === "task") await claimTaskFn({ data: { id, date: v.date } });',
+      'if (v.item.kind === "task") await claimTaskFn({ data: { id, date: v.date } });',
     );
     expect(page).toContain('import { claimTask } from "@/lib/tasks.functions";');
   });

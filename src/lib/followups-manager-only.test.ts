@@ -59,7 +59,9 @@ describe("2. My Work shows the follow-up state; controls only under seesEveryone
     expect(snoozeAt).toBeGreaterThan(manageStart);
     expect(snoozeAt).toBeLessThan(manageEnd);
     expect(page.indexOf("<SnoozeMenu", manageEnd)).toBe(-1);
-    expect(page).toMatch(/\{canManage && \(\s*<CloseFollowupDialog/);
+    // Oct 15: no Close on Work Overview (owner: "it may cause more issues than not"); the
+    // Opportunities page keeps its own (below).
+    expect(page).not.toContain("CloseFollowupDialog");
   });
   it("plain users get one muted line instead", () => {
     expect(page).toMatch(

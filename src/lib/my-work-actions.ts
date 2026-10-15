@@ -5,7 +5,8 @@
  *   - A task row opens the task in place, in the TaskDialog (`taskOpensInPlace`): its old link
  *     led to the Prospecting map (a bare map for a task without a building — a dead link), so the
  *     map is a small "Open on map" link instead, only for a task that has a building
- *     (`taskMapHref`). Every other kind keeps its link.
+ *     (`taskMapHref`). Every other kind keeps its link. An unassigned task for someone who can
+ *     neither Claim nor assign it does not open (getTask would refuse): plain text with a hint.
  *   - A Done tick on a task row (`canEditWorkTask`): for whoever may change the task — the
  *     server's rule (setTaskStatus / saveTask: canSeeTask — the creator, the assignee, an
  *     attendee, or an admin / manager). The page knows a row's assignee, not its creator or
@@ -21,7 +22,7 @@
  *   - The toolbar's New ticket / New opportunity links (`newTicketHref`, NEW_OPPORTUNITY_HREF):
  *     from the Calendar the ticket carries the selected day.
  */
-import { dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
+import { canClaim, dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
 import { ymdParts, type WorkItem, type WorkKind } from "@/lib/my-work";
 
 /** The signed-in person as the rules read them: role, access, technician, and their id. */
@@ -37,9 +38,24 @@ const isTicketKind = (k: WorkKind) => k === "ticket" || k === "inspection";
 
 /**
  * Does the row open in place (the TaskDialog) rather than follow its link? Every task (owner,
- * Oct 15: "every task row opens the task in place"); the map is `taskMapHref`.
+ * Oct 15: "every task row opens the task in place"); the map is `taskMapHref`. One exception
+ * (Oct 15, later): a task nobody is on, for a viewer who can neither Claim it (`canClaim`) nor
+ * assign it (`seesEveryone`) — an office or sales user without the Technician tick. getTask
+ * refuses them ("Claim it first"), so the button was a dead end: the row is plain text with a
+ * hint instead (`UNASSIGNED_TASK_HINT`). Every other task — an admin's, a manager's, a ticked
+ * office person's, or an assigned task for its assignee — opens as before.
  */
-export const taskOpensInPlace = (item: Pick<WorkItem, "kind">): boolean => item.kind === "task";
+export function taskOpensInPlace(
+  item: Pick<WorkItem, "kind" | "unassigned">,
+  viewer?: Viewer,
+): boolean {
+  if (item.kind !== "task") return false;
+  if (!item.unassigned) return true;
+  return canClaim(viewer) || seesEveryone(viewer);
+}
+
+/** The muted line under an unassigned task row that does not open (`taskOpensInPlace`). */
+export const UNASSIGNED_TASK_HINT = "Claim it, or ask a manager to assign it";
 
 /** A task's "Open on map" link: its building on the Prospecting map; null without a building. */
 export const taskMapHref = (item: Pick<WorkItem, "kind" | "href">): string | null =>

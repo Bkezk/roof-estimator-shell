@@ -454,21 +454,23 @@ export function ownerTotals(rows: OwnerRow[]): OwnerSums {
 
 // ---- links ---------------------------------------------------------------------------------
 
-export type OwnerCell = "today" | "overdue" | "done";
+export type OwnerCell = "today" | "overdue";
 
 /**
- * Where a number links: Work Overview for that person (`who` = their id, or "all" for the totals row)
- * with the matching List bucket preset — Due today → bucket=today, Overdue → bucket=overdue,
- * Done this week → their list (Work Overview has no history filter).
+ * Where a number links: Work Overview's LIST for that person (`who` = their id, or "all" for the
+ * totals row) with the matching bucket preset — Due today → bucket=today, Overdue →
+ * bucket=overdue. `view: "list"` is explicit (Oct 15): the page remembers the view the person
+ * was last on, and an admin reading the Owner view has "owner" remembered, so a view-less link
+ * reopened the Owner view (work-layout.ts landingSearch: an explicit URL view is final). The
+ * person is only peeking at a list, so the landing does not change the remembered view. Done
+ * this week has nowhere to land (the List has no Done group): its number expands the person's
+ * row instead (components/owner-view.tsx), so it is not a cell here.
  */
 export function myWorkHref(
   who: string,
   cell: OwnerCell,
-): { to: "/my-work"; search: { who: string; bucket?: "today" | "overdue" } } {
-  return {
-    to: "/my-work",
-    search: { who, ...(cell === "done" ? {} : { bucket: cell }) },
-  };
+): { to: "/my-work"; search: { view: "list"; who: string; bucket: OwnerCell } } {
+  return { to: "/my-work", search: { view: "list", who, bucket: cell } };
 }
 
 /**

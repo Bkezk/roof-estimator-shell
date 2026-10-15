@@ -11,9 +11,10 @@
  * is folded in here (owner, Oct 1): a ticket, opportunity or follow-up row shows its follow-up
  * state (Due / Overdue N days / On hold until … · reason · held by … / Reminders every N days)
  * and, once a hold has ended and nothing was logged since, a "Back from hold" badge with the
- * reason (owner, Oct 9). Snooze (a hold with a date and a reason) and Close are for admins and
- * managers only (seesEveryone; the server and the database refuse anyone else);
- * everyone else sees the state with one line saying their manager manages follow-ups. The rules
+ * reason (owner, Oct 9). Snooze (a hold with a date and a reason) is for admins and managers
+ * only (seesEveryone; the server and the database refuse anyone else) — no Close on this page
+ * since Oct 15 (owner: "it may cause more issues than not"; the Opportunities page keeps its
+ * own); everyone else sees the state with one line saying their manager manages follow-ups. The rules
  * (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts, the follow-up
  * state in src/lib/followup-rules.ts.
  */
@@ -24,7 +25,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   CalendarDays,
-  CheckCircle2,
   Eye,
   ChevronLeft,
   ChevronRight,
@@ -58,6 +58,8 @@ import {
   KIND_LABELS,
   addMonths,
   cellItems,
+  dayIsOverdue,
+  effectiveWho,
   flagUnassigned,
   initials,
   itemsByDay,
@@ -85,9 +87,10 @@ import {
 } from "@/lib/my-work";
 import {
   NEW_OPPORTUNITY_HREF,
+  UNASSIGNED_TASK_HINT,
+  monthDay,
   newTicketHref,
   taskMapHref,
-  taskOpensInPlace,
 } from "@/lib/my-work-actions";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
@@ -112,8 +115,8 @@ import {
   WORK_KINDS,
   writeStoredWorkLayout,
 } from "@/lib/work-layout";
-import { getMyWorkLayout, setMyWorkLayout } from "@/lib/work-layout.functions";
-import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
+import { LAYOUT_SAVE_FAILED, getMyWorkLayout, setMyWorkLayout } from "@/lib/work-layout.functions";
+import { SnoozeMenu } from "@/components/followup-controls";
 import { useFollowupActions } from "@/components/followups-shared";
 import { OwnerView } from "@/components/owner-view";
 import { Badge } from "@/components/ui/badge";
@@ -216,7 +219,7 @@ const monthLabel = (month: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 };
 
-/** Snooze / Close for one row's follow-up: admins and managers only (null for everyone else). */
+/** Snooze for one row's follow-up: admins and managers only (null for everyone else). */
 type ManageFollowup = (f: WorkFollowup) => React.ReactNode;
 
 /**
@@ -257,7 +260,7 @@ function FollowupState({ f, today }: { f: WorkFollowup; today: string }) {
 
 /**
  * One item: type badge, title, customer / property, date, status (and whose, when not mine), the
- * follow-up state, and — for admins and managers — Snooze / Close under the link.
+ * follow-up state, and — for admins and managers — Snooze under the link.
  */
 /** How an unassigned item is taken: the row's Claim button (no date) or a drop on a calendar day. */
 type ClaimWork = (item: WorkItem, date: string | null) => void;
@@ -283,10 +286,13 @@ function WorkRow({
   const f = item.followup && item.followup.status === "open" ? item.followup : null;
   // Owner, Oct 15: every task row opens the task in place (the TaskDialog) — its link led to the
   // Prospecting map, a bare one for a task without a building. The map is the "Open on map" link
-  // below, for a task with a building (taskMapHref). Every other kind stays a real link.
-  const act = actions && taskOpensInPlace(item) ? actions : null;
+  // below, for a task with a building (taskMapHref). Every other kind stays a real link. One
+  // task row opens nowhere (lib/my-work-actions.ts taskOpensInPlace): nobody's task for a viewer
+  // who can neither Claim nor assign it — getTask would refuse — is plain text with a hint.
+  const act = actions && actions.opensInPlace(item) ? actions : null;
+  const inert = !!actions && item.kind === "task" && !act;
   const busy = !!actions?.busy(item);
-  const mapHref = act ? taskMapHref(item) : null;
+  const mapHref = act || inert ? taskMapHref(item) : null;
   const tick = !!act && act.canEditTask(item);
   const assignNode = item.unassigned && actions ? actions.assign(item) : null;
   const showClaim = !!item.unassigned && !!claim;
@@ -340,6 +346,11 @@ function WorkRow({
         >
           {body}
         </button>
+      ) : inert ? (
+        <div className="p-3" data-row="inert-task">
+          {body}
+          <p className="mt-1 text-xs text-muted-foreground">{UNASSIGNED_TASK_HINT}</p>
+        </div>
       ) : (
         <a href={item.href} className="block p-3" onClick={followLink(navigate, item.href)}>
           {body}
@@ -898,7 +909,10 @@ function CalendarView({
                   const list = byDay.get(d) ?? [];
                   const { shown, more } = cellItems(list);
                   const inMonth = d.slice(0, 7) === month;
-                  const overdue = d < today && list.some((i) => !i.done);
+                  // Red only for truly overdue work (my-work.ts dayIsOverdue, Oct 15): a Done
+                  // ticket waiting to be authorized, one waiting for its invoice or a held
+                  // follow-up still shows in the cell, but never colours the day.
+                  const overdue = dayIsOverdue(list, d, today);
                   return (
                     <button
                       key={d}
@@ -1095,22 +1109,41 @@ export function MyWorkPage(props: {
   const claimOppFn = useServerFn(claimOpportunity);
   const claimTaskFn = useServerFn(claimTask);
   const claimMut = useMutation({
-    mutationFn: async (v: { item: WorkItem; date: string | null }) => {
+    /** Resolves to the expected close an opportunity KEPT when the caller may not move it. */
+    mutationFn: async (v: { item: WorkItem; date: string | null }): Promise<string | null> => {
       const id = v.item.key.slice(v.item.key.indexOf(":") + 1);
-      if (v.item.kind === "opportunity") await claimOppFn({ data: { id, date: v.date } });
+      if (v.item.kind === "opportunity") {
+        // Owner, Oct 15: a non-manager's drop on a day still claims an opportunity that has an
+        // expected close — the date stays, and the server says so (dateKept).
+        const r = await claimOppFn({ data: { id, date: v.date } });
+        return r.dateKept ? (r.expected_close ?? null) : null;
+      }
       // A task nobody is on (owner, Oct 9: tasks behave like services here).
-      else if (v.item.kind === "task") await claimTaskFn({ data: { id, date: v.date } });
+      if (v.item.kind === "task") await claimTaskFn({ data: { id, date: v.date } });
       else await claimTicketFn({ data: { id, date: v.date } });
+      return null;
     },
-    onSuccess: (_r, v) => {
-      toast.success(v.date ? `Yours, on ${dayLabel(v.date)}` : "Yours — it is on your list now");
+    onSuccess: (kept, v) => {
+      toast.success(
+        kept
+          ? `Yours — its expected close stays ${monthDay(kept)}`
+          : v.date
+            ? `Yours, on ${dayLabel(v.date)}`
+            : "Yours — it is on your list now",
+      );
       void qc.invalidateQueries({ queryKey: ["my-work"] });
     },
-    onError: (e: Error) => toast.error(e.message || "Could not claim it"),
+    // "Someone already has it": the row is stale, so the list is refetched (Oct 15).
+    onError: (e: Error) => {
+      toast.error(e.message || "Could not claim it");
+      void qc.invalidateQueries({ queryKey: ["my-work"] });
+    },
   });
   const claim: ClaimWork | null = canClaim(profile)
     ? (item, date) => claimMut.mutate({ item, date })
     : null;
+  /** The row being claimed: its buttons disable while the claim is in flight (Oct 15). */
+  const claimingKey = claimMut.isPending ? (claimMut.variables?.item.key ?? null) : null;
 
   const today = localYmd(new Date());
   const items = useMemo(
@@ -1123,7 +1156,12 @@ export function MyWorkPage(props: {
   // rules in lib/my-work-actions.ts). The Calendar's selected day is the page's, so New ticket
   // and New task carry it.
   const navigate = useNavigate();
-  const { actions, editTask, closeTask } = useWorkActions(profile);
+  const { actions: rowActions, editTask, closeTask } = useWorkActions(profile);
+  // A row's busy set includes the claim in flight on it (Oct 15: Claim could be clicked twice).
+  const actions: WorkActions = {
+    ...rowActions,
+    busy: (item) => rowActions.busy(item) || item.key === claimingKey,
+  };
   const [calDay, setCalDay] = useState(today);
   const newDay = view === "calendar" ? calDay : null;
   const showNewTicket = dispatchesTickets(profile);
@@ -1131,9 +1169,10 @@ export function MyWorkPage(props: {
 
   // The profile's copy of the layout rides on the list (listMyWork; Oct 15 — one request on
   // landing, not two). It seeds the saved-layout cache, which is applied as before (below), but
-  // not within LAYOUT_SEED_STALE_MS of a local change (shouldSeedWorkLayout: a list fetched
-  // before that save committed must not put the old layout back); the 5-minute refresh brings
-  // another device's change. getMyWorkLayout stays as the cache's query, never fetched by itself.
+  // only when the list is newer than the cache (shouldSeedWorkLayout: a list fetched before a
+  // local save — one React Query still held when the page remounted — must not put the old
+  // layout back); the 5-minute refresh brings another device's change. getMyWorkLayout stays as
+  // the cache's query, never fetched by itself.
   const layoutFn = useServerFn(getMyWorkLayout);
   const saveLayoutFn = useServerFn(setMyWorkLayout);
   const savedLayout = useQuery({
@@ -1143,23 +1182,27 @@ export function MyWorkPage(props: {
     staleTime: 5 * 60_000,
   });
   const listLayout = q.data?.layout;
+  const listUpdatedAt = q.dataUpdatedAt;
   useEffect(() => {
     if (listLayout === undefined || !userId) return;
-    if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), Date.now()))
+    if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), listUpdatedAt))
       qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
         layout: listLayout,
       });
-  }, [listLayout, qc, userId]);
+  }, [listLayout, listUpdatedAt, qc, userId]);
+  // The profile's copy wins: a layout applies as it is; null (the server's default — another
+  // device's Reset, Oct 15) applies the default and drops this browser's copy. Before this null
+  // was ignored, so a Reset made elsewhere never arrived here.
   useEffect(() => {
-    const l = savedLayout.data?.layout;
-    if (l && userId) {
-      setLayout(l);
-      writeStoredWorkLayout(storage, userId, l);
-    }
+    if (!savedLayout.data || !userId) return;
+    const l = savedLayout.data.layout ?? defaultWorkLayout();
+    setLayout(l);
+    writeStoredWorkLayout(storage, userId, l);
   }, [savedLayout.data, storage, userId]);
   // The saved-layout cache follows every save (owner, Oct 9: "i restored the layout on the work
   // overview but it doesnt remember i restored it when i navigate away and then back" — the
-  // stale cached copy was re-applied on the next mount and written back over the reset).
+  // stale cached copy was re-applied on the next mount and written back over the reset). A save
+  // the profile refused says so (Oct 15; setMyWorkLayout throws): the browser's copy stands.
   const saveLayout = useMutation({
     mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
     onMutate: (l) => {
@@ -1167,6 +1210,7 @@ export function MyWorkPage(props: {
         layout: isEmptyWorkLayout(l) ? null : l,
       });
     },
+    onError: () => toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 }),
   });
   const commitLayout = (l: WorkLayout) => {
     setLayout(l);
@@ -1188,16 +1232,16 @@ export function MyWorkPage(props: {
     props.onWho(w);
   };
 
-  // Follow-ups are management's (owner, Oct 1): Snooze / Close only under seesEveryone (admin or
-  // manager); the server (canManageFollowup) and the database trigger refuse anyone else.
+  // Follow-ups are management's (owner, Oct 1): Snooze only under seesEveryone (admin or
+  // manager); the server (canManageFollowup) and the database trigger refuse anyone else. No
+  // Close here since Oct 15 (owner: "i think it may cause more issues than not") — a follow-up
+  // closes with its item (the ticket authorized, the opportunity won or lost); the Opportunities
+  // page keeps its own Close.
   const canManage = seesEveryone(profile);
-  const { snooze, close } = useFollowupActions();
-  const [closing, setClosing] = useState<WorkFollowup | null>(null);
+  const { snooze } = useFollowupActions();
   const manage: ManageFollowup | null = canManage
     ? (f) => {
-        const busy =
-          (snooze.isPending && snooze.variables?.id === f.id) ||
-          (close.isPending && close.variables?.id === f.id);
+        const busy = snooze.isPending && snooze.variables?.id === f.id;
         return (
           <>
             {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -1206,9 +1250,6 @@ export function MyWorkPage(props: {
               today={today}
               onSnooze={(hold) => snooze.mutate({ id: f.id, ...hold })}
             />
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => setClosing(f)}>
-              <CheckCircle2 className="mr-1 h-4 w-4" /> Close
-            </Button>
           </>
         );
       }
@@ -1221,6 +1262,15 @@ export function MyWorkPage(props: {
   const mineOnly = scope !== "all" && scope?.length === 1 && scope[0] === profile?.id;
   const showWho = !!scope && !mineOnly;
   const people = q.data?.people ?? [];
+  // A remembered or linked person who is not on the roster any more (Oct 15: a blank Select and
+  // "Someone else: …"): once the roster is here, fall back to the caller's default and forget
+  // them, once (changeWho clears the remembered who and the URL).
+  const shownWho = effectiveWho(who, people, profile, !!q.data);
+  useEffect(() => {
+    if (shownWho !== who) changeWho(shownWho);
+    // changeWho is re-made every render; the fallback depends on `who` and the roster only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownWho, who]);
   const whoName =
     who === "all"
       ? "Everyone"
@@ -1240,8 +1290,8 @@ export function MyWorkPage(props: {
           {view === "owner"
             ? "Everyone: what is due today, what is overdue, what got done this week."
             : mineOnly || !scope
-              ? "Your tickets, tasks and follow-ups, by date."
-              : `${whoName ?? "Someone else"}: tickets, tasks and follow-ups, by date.`}
+              ? "Your tickets, tasks, follow-ups, opportunities and bids, by date."
+              : `${whoName ?? "Someone else"}: tickets, tasks, follow-ups, opportunities and bids, by date.`}
         </p>
       </div>
 
@@ -1382,10 +1432,13 @@ export function MyWorkPage(props: {
       {!canManage && hasFollowups && !errMsg && view !== "owner" && (
         <p className="text-xs text-muted-foreground">Follow-ups are managed by your manager.</p>
       )}
-      {/* Owner, Oct 15: each kind is capped at 1,000 rows (listMyWork LIMIT); say so when hit. */}
-      {view === "list" && !errMsg && q.data?.truncated && (
+      {/* Owner, Oct 15: each kind is capped at 1,000 rows (listMyWork LIMIT); say so when hit —
+          on the Calendar too (it shows the same rows), and "narrow to one person" only when the
+          page is on Everyone (one person's list is already as narrow as it gets). */}
+      {view !== "owner" && !errMsg && q.data?.truncated && (
         <p className="text-xs text-muted-foreground" data-row="truncated">
-          Showing the first 1,000 of each kind. Narrow to one person to see everything.
+          Showing the first 1,000 of each kind.
+          {who === "all" ? " Narrow to one person to see everything." : ""}
         </p>
       )}
 
@@ -1430,21 +1483,6 @@ export function MyWorkPage(props: {
           onLayout={onLayout}
           claim={claim}
           actions={actions}
-        />
-      )}
-
-      {canManage && (
-        <CloseFollowupDialog
-          target={closing}
-          pending={close.isPending}
-          onCancel={() => setClosing(null)}
-          onConfirm={(reason) => {
-            if (!closing) return;
-            close.mutate(
-              { id: closing.id, ...(reason ? { reason } : {}) },
-              { onSuccess: () => setClosing(null) },
-            );
-          }}
         />
       )}
     </div>

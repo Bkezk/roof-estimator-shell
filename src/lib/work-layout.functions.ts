@@ -5,8 +5,8 @@
  * wins) and written on every change.
  *
  * Both ends tolerate a database without migration 20261007110000_work_layout.sql: the read
- * answers "no saved layout" and the write reports `saved: false`, so dragging keeps working from
- * the browser's copy.
+ * answers "no saved layout" and the write throws (the page toasts LAYOUT_SAVE_FAILED), so
+ * dragging keeps working from the browser's copy and the person knows it went no further.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -50,7 +50,15 @@ const layoutSchema = z.object({
   who: z.string().max(64).optional(),
 });
 
-/** Save the caller's layout (their own row only: set_my_work_layout keys on auth.uid()). */
+/** The toast when the profile would not take the layout (the browser's copy still stands). */
+export const LAYOUT_SAVE_FAILED = "Could not save your layout — kept on this device only";
+
+/**
+ * Save the caller's layout (their own row only: set_my_work_layout keys on auth.uid()). A failure
+ * THROWS (Oct 15): until then it answered `{ saved: false }` and the page never looked, so a
+ * layout that only lived in this browser was announced as "remembered on every device". The
+ * success shape stays `{ saved: true }` for callers that read it.
+ */
 export const setMyWorkLayout = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => layoutSchema.parse(d))
@@ -59,5 +67,6 @@ export const setMyWorkLayout = createServerFn({ method: "POST" })
     const { error } = await context.supabase.rpc("set_my_work_layout", {
       p_layout: isEmptyWorkLayout(layout) ? null : toJson(layout),
     });
-    return error ? { saved: false, error: error.message } : { saved: true };
+    if (error) throw new Error(`${LAYOUT_SAVE_FAILED}: ${error.message}`);
+    return { saved: true };
   });

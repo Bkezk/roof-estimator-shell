@@ -90,10 +90,12 @@ export interface MyWorkResult {
   bids: BidIn[];
   /**
    * The caller's saved Work Overview layout (owner, Oct 15: read with the list, so landing makes
-   * one request instead of two); null when none is saved or the column is not there yet
-   * (20261007110000_work_layout.sql) — the page keeps the browser's copy.
+   * one request instead of two); null when none is saved (the default: the page applies it and
+   * drops the browser's copy — another device's Reset). Undefined when the read failed (the
+   * column is not there yet: 20261007110000_work_layout.sql) — then the page seeds nothing and
+   * keeps the browser's copy, rather than reading the failure as "no layout".
    */
-  layout: WorkLayout | null;
+  layout: WorkLayout | null | undefined;
   /**
    * Did any list hit `LIMIT` (owner, Oct 15)? Each kind is capped at 1,000 rows per request, so
    * Everyone may be missing some; the page says so and suggests narrowing to one person.
@@ -298,10 +300,11 @@ export const listMyWork = createServerFn({ method: "GET" })
       bRows,
       layoutRow,
     ]);
-    const layout =
-      layoutRes.error || !layoutRes.data?.work_layout
-        ? null
-        : normalizeWorkLayout(layoutRes.data.work_layout);
+    const layout = layoutRes.error
+      ? undefined
+      : layoutRes.data?.work_layout
+        ? normalizeWorkLayout(layoutRes.data.work_layout)
+        : null;
     const atCap = (r: { data: unknown[] | null }) => (r.data?.length ?? 0) >= LIMIT;
     const truncated = [
       tickets,
