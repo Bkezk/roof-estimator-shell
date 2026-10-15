@@ -81,7 +81,7 @@ function useTick(everyMs: number): number {
   return now;
 }
 
-type ClockAction = "en_route" | "on_site" | "leave";
+type ClockAction = "en_route" | "on_site" | "leave" | "undo";
 
 /**
  * A clock press on a ticket: setFieldStatus with the phone's day (field-day.ts), then the day,
@@ -249,17 +249,40 @@ function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: 
       );
     void navigate({ to: "/service", search: { id: clock.service_job_id, closeout: 1 } });
   };
+  const onSite = clock.kind === "labor";
+  const since = new Date(clock.started_at).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
   return (
+    // Owner, Oct 15: the one control for the running clock, nothing like a ticket card — a
+    // coloured panel (amber on the road, green on site) with the state, the elapsed time, what
+    // to do next, and the buttons; the ticket's own card below only says "use the clock above".
     <section
-      className="space-y-3 rounded-xl border-2 border-primary/50 bg-primary/5 p-4"
+      className={`space-y-3 rounded-xl border-2 p-4 ${
+        onSite
+          ? "border-emerald-400 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/40"
+          : "border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"
+      }`}
       aria-label="My clock"
       data-line="clock-banner"
+      data-clock={clock.kind}
     >
+      <p className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <span>Your clock</span>
+        <span
+          className={`rounded-full px-2 py-0.5 normal-case ${
+            onSite ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"
+          }`}
+        >
+          {onSite ? "On site" : "Travelling"} · since {since}
+        </span>
+      </p>
       <p className="flex items-center gap-2 text-base font-semibold">
-        {clock.kind === "labor" ? (
-          <MapPinCheck className="h-5 w-5 shrink-0 text-primary" />
+        {onSite ? (
+          <MapPinCheck className="h-5 w-5 shrink-0" />
         ) : (
-          <Truck className="h-5 w-5 shrink-0 text-primary" />
+          <Truck className="h-5 w-5 shrink-0" />
         )}
         <Link
           to="/service"
@@ -273,8 +296,13 @@ function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: 
           )}
         </Link>
       </p>
+      <p className="text-sm text-muted-foreground" data-line="clock-next">
+        {onSite
+          ? "Leaving for now? Leave site stops the clock and keeps the ticket open to come back to. Finished? Complete opens the close-out."
+          : "When you arrive, tap On site — the travel time is logged and the labor clock starts."}
+      </p>
       <div className="flex gap-2">
-        {clock.kind === "travel" ? (
+        {!onSite ? (
           <Button
             type="button"
             className="h-14 flex-1 text-lg font-semibold"
@@ -293,29 +321,45 @@ function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: 
             <Button
               type="button"
               variant="outline"
-              className="h-14 flex-1 text-lg font-semibold"
+              className="h-14 flex-1 flex-col gap-0 text-base font-semibold"
               disabled={press.isPending}
               onClick={() => press.mutate("leave")}
             >
-              {press.isPending ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              ) : (
-                <LogOut className="mr-2 h-5 w-5" />
-              )}
-              Leave site
+              <span className="flex items-center">
+                {press.isPending ? (
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                ) : (
+                  <LogOut className="mr-2 h-5 w-5" />
+                )}
+                Leave site
+              </span>
+              <span className="text-xs font-normal text-muted-foreground">not done yet</span>
             </Button>
             <Button
               type="button"
-              className="h-14 flex-1 text-lg font-semibold"
+              className="h-14 flex-1 flex-col gap-0 text-base font-semibold"
               disabled={press.isPending}
               onClick={openCloseout}
             >
-              <CheckCircle2 className="mr-2 h-5 w-5" />
-              Complete
+              <span className="flex items-center">
+                <CheckCircle2 className="mr-2 h-5 w-5" />
+                Complete
+              </span>
+              <span className="text-xs font-normal opacity-80">finish the ticket</span>
             </Button>
           </>
         )}
       </div>
+      {!onSite && (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          disabled={press.isPending}
+          onClick={() => press.mutate("undo")}
+        >
+          Started travel by mistake? Cancel it (nothing is logged)
+        </button>
+      )}
     </section>
   );
 }
@@ -491,8 +535,9 @@ function JobCard({
       {crewOpen && <CrewBox job={j} />}
 
       {/* The clock's buttons (owner, Oct 15; the Oct 8 one-button card is superseded): Start
-          travel / On site while no clock runs here, On site while travelling here, Leave site /
-          Complete while on site here. A clock on another ticket moves here on a press. */}
+          travel / On site while the clock is not on this ticket (a clock on another ticket moves
+          here on a press). While it is, the banner at the top is the one control and the card
+          only says so (cardActions returns none). */}
       {clock && clock.service_job_id === j.id && (
         <p
           className="flex items-center gap-2 text-sm font-medium text-primary"
@@ -505,6 +550,7 @@ function JobCard({
             hour: "numeric",
             minute: "2-digit",
           })}
+          <span className="font-normal text-muted-foreground">— use the clock at the top</span>
         </p>
       )}
       <div className="flex gap-2" data-line="clock-buttons">
@@ -531,44 +577,10 @@ function JobCard({
             On site
           </Button>
         )}
-        {actions.includes("leave") && (
-          <Button
-            type="button"
-            variant="outline"
-            className="h-14 flex-1 text-lg font-semibold"
-            disabled={busy}
-            onClick={() => press_.mutate("leave")}
-          >
-            {spin(LogOut)}
-            Leave site
-          </Button>
-        )}
-        {actions.includes("complete") && (
-          <Button
-            type="button"
-            className="h-14 flex-1 text-lg font-semibold"
-            disabled={busy}
-            onClick={press}
-          >
-            <CheckCircle2 className="mr-2 h-5 w-5" />
-            Complete
-          </Button>
-        )}
       </div>
       {/* Open ticket: the close-out, which saves itself; the tech can leave it and come back
-          (photos before, then after) until Complete. Primary until the clock is on site here,
-          where Complete above takes over. */}
-      <Button
-        type="button"
-        size="lg"
-        variant={actions.includes("complete") ? "outline" : "default"}
-        className={
-          actions.includes("complete")
-            ? "h-12 w-full text-base font-semibold"
-            : "h-16 w-full text-xl font-semibold"
-        }
-        onClick={press}
-      >
+          (photos before, then after) until Complete (the banner's, while the clock is here). */}
+      <Button type="button" size="lg" className="h-16 w-full text-xl font-semibold" onClick={press}>
         <ClipboardList className="mr-2 h-6 w-6" />
         Open ticket
       </Button>

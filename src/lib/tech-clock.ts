@@ -209,10 +209,13 @@ export function closedLine(
 }
 
 /** What a ticket card offers (today-page.tsx), from the technician's clock. */
-export type CardAction = "travel" | "on_site" | "leave" | "complete";
+export type CardAction = "travel" | "on_site";
 export function cardActions(open: Clock | null, jobId: string): CardAction[] {
   if (!open || open.service_job_id !== jobId) return ["travel", "on_site"];
-  return open.kind === "travel" ? ["on_site"] : ["leave", "complete"];
+  // The clock is on this ticket: the banner at the top is its one control (owner, Oct 15:
+  // "there's two On site buttons … it may seem like they haven't done anything with the ticket
+  // if it's essentially a copy of it"). The card says so and keeps Open ticket.
+  return [];
 }
 
 /** Shift a YYYY-MM-DD by whole days (the clock ran over midnight). */
@@ -274,13 +277,16 @@ export function entryTimes(
  */
 export function pressLine(
   before: (Clock & { number: number | string; customer_name: string | null }) | null,
-  action: "en_route" | "on_site" | "leave",
+  action: "en_route" | "on_site" | "leave" | "undo",
   ticket: { id: string; number: number | string; customer_name: string | null },
   now: string | Date,
 ): string {
   const tag = ticketTag(ticket);
   const here = !!before && before.service_job_id === ticket.id;
   const stopped = before ? closedLine(before, now, before) : null;
+  // Cancel (the banner's "started by mistake"): the clock is dropped, nothing logged.
+  if (action === "undo")
+    return here ? `Cancelled — nothing logged at ${tag}` : `No clock was running at ${tag}`;
   if (action === "leave") return here && stopped ? stopped : `No clock was running at ${tag}`;
   if (action === "en_route") {
     if (here && before.kind === "travel") return `Already travelling to ${tag}`;

@@ -241,9 +241,9 @@ describe("cardActions: what a ticket card offers (today-page.tsx)", () => {
     expect(cardActions(laborA, B)).toEqual(["travel", "on_site"]);
     expect(cardActions(travelA, B)).toEqual(["travel", "on_site"]);
   });
-  it("travelling here: On site; on site here: Leave site and Complete", () => {
-    expect(cardActions(travelA, A)).toEqual(["on_site"]);
-    expect(cardActions(laborA, A)).toEqual(["leave", "complete"]);
+  it("the clock on this ticket: no buttons on the card — the banner is the one control (owner, Oct 15: 'two On site buttons')", () => {
+    expect(cardActions(travelA, A)).toEqual([]);
+    expect(cardActions(laborA, A)).toEqual([]);
   });
 });
 
@@ -291,5 +291,26 @@ describe("the time editor's helpers", () => {
     expect(entryTimes("15/10/2026", "08:00", "09:00")).toBeNull();
     // The hours follow the times.
     expect(durationHours(t!.started_at, t!.ended_at)).toBe(1.75);
+  });
+});
+
+describe("pressLine: cancel (owner, Oct 15: the banner's 'started by mistake')", () => {
+  it("says nothing was logged", () => {
+    const travelA = {
+      technician_id: "t",
+      service_job_id: "A",
+      kind: "travel" as const,
+      started_at: "2026-10-15T14:00:00Z",
+      helper_count: 0,
+      number: 6029,
+      customer_name: "5K, Inc",
+    };
+    const a = { id: "A", number: 6029, customer_name: "5K, Inc" };
+    expect(pressLine(travelA, "undo", a, "2026-10-15T14:05:00Z")).toBe(
+      "Cancelled — nothing logged at #6029 5K, Inc",
+    );
+    expect(pressLine(null, "undo", a, "2026-10-15T14:05:00Z")).toBe(
+      "No clock was running at #6029 5K, Inc",
+    );
   });
 });

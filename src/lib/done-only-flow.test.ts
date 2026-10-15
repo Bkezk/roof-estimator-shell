@@ -26,11 +26,13 @@ describe("Today: Open ticket, and the clock's buttons (owner, Oct 15)", () => {
     );
     expect(today).toContain("Open ticket");
     expect(today).not.toMatch(/>\s*Done\s*</);
-    // Owner, Oct 15: Start travel / On site / Leave site / Complete are the clock (tech-clock.ts
-    // cardActions), pressed through setFieldStatus; no undo button on the card.
+    // Owner, Oct 15: Start travel / On site are the clock (tech-clock.ts cardActions), pressed
+    // through setFieldStatus; the card has no undo button. The banner at the top (the running
+    // clock's one control) has a small "started travel by mistake? Cancel" — undo, nothing logged.
     expect(today).toContain("const actions = cardActions(clock, j.id);");
     expect(today).toContain("setFieldStatus");
-    expect(today).not.toContain('mutate("undo")');
+    expect(today).not.toContain('press_.mutate("undo")');
+    expect(today).toContain('onClick={() => press.mutate("undo")}');
     expect(today).not.toContain("nextStep(");
   });
   it("the crew question moved to the close-out; an answered card still shows Change", () => {

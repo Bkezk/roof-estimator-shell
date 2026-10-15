@@ -527,13 +527,25 @@ describe("My tickets (today-page.tsx): the clock's banner and buttons", () => {
     expect(today).toMatch(/useTick\(30_000\)/);
     expect(today).toContain("const actions = cardActions(clock, j.id);");
   });
-  it("the cards' buttons: Start travel, On site, Leave site, Complete — and Open ticket stays", () => {
+  it("the cards' buttons: Start travel and On site; Leave site and Complete live on the banner; Open ticket stays", () => {
     for (const label of ["Start travel", "On site", "Leave site", "Complete", "Open ticket"])
       expect(today).toContain(label);
     expect(today).toContain('press_.mutate("en_route")');
     expect(today).toContain('press_.mutate("on_site")');
-    expect(today).toContain('press_.mutate("leave")');
-    expect(today).toContain('actions.includes("complete") && (');
+    expect(today).toContain('press.mutate("leave")');
+    // Owner, Oct 15 ("two On site buttons"): the card never repeats the banner's buttons.
+    expect(today).not.toContain('press_.mutate("leave")');
+    expect(today).not.toContain('actions.includes("complete")');
+  });
+  it("the banner is the one control (owner, Oct 15): coloured by state, says what to do next, Leave site vs Complete explained, a mistaken travel cancelled; the card points at it", () => {
+    expect(today).toContain("data-clock={clock.kind}");
+    expect(today).toContain('data-line="clock-next"');
+    expect(today).toContain("When you arrive, tap On site");
+    expect(today).toContain("Leave site stops the clock and keeps the ticket open");
+    expect(today).toContain(">not done yet</span>");
+    expect(today).toContain(">finish the ticket</span>");
+    expect(today).toContain('onClick={() => press.mutate("undo")}');
+    expect(today).toContain("— use the clock at the top");
   });
   it("a press sends the phone's day, re-reads the day, the clock and the time, and toasts pressLine; failures are loud", () => {
     expect(today).toContain("await statusFn({ data: { id: ticket.id, to, day: localYmd() } });");
