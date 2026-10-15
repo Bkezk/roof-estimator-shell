@@ -1,7 +1,8 @@
 /**
  * Components shared by the technician's phone flow (closeout) and the office ticket page
- * (docs/service-module-design.md §5.3): photo thumbnails, the time-entry editor and the ticket
- * page's section box (optionally collapsible, its open state remembered per section).
+ * (docs/service-module-design.md §5.3): photo thumbnails, the time-entry editor (typed hours, or
+ * the clock's entries edited as start / end times — owner, Oct 15) and the ticket page's section
+ * box (optionally collapsible, its open state remembered per section).
  */
 import { sectionTone } from "@/components/service/section-tones";
 import { useMemo, useState } from "react";
@@ -16,6 +17,7 @@ import {
   Loader2,
   PenLine,
   Plus,
+  Timer,
   Trash2,
   X,
   type LucideIcon,
@@ -30,13 +32,16 @@ import { useAuth } from "@/lib/auth-store";
 import { listJobCrew } from "@/lib/service.functions";
 import { billedCrewLine } from "@/lib/service-crew";
 import {
+  TIME_END_BEFORE_START,
   deleteTimeEntry,
   estimateTravel,
   listTimeEntries,
   saveTimeEntry,
   type JobPhotoRow,
+  type TimeEntryInput,
   type TimeEntryRow,
 } from "@/lib/service-field.functions";
+import { durationHours, entryTimes, localHm } from "@/lib/tech-clock";
 import type { TravelEstimate } from "@/lib/travel-estimate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -349,8 +354,11 @@ export function PhotoThumb({
 }
 
 // ---------------------------------------------------------------------------------------------
-// Time entries: travel and labor to the quarter hour, typed here (owner, Oct 8: no En route /
-// On site buttons any more; older entries those made still show their clock times).
+// Time entries: travel and labor to the quarter hour. The clock's entries (owner, Oct 15,
+// CenterPoint-style; tech-clock.ts) carry their real start and end and are edited as two times
+// on their day — the hours follow the times (the server recomputes them, quarterHours); typed
+// entries keep the hours box and stay the fallback for time not on the clock. (The Oct 8 "no En
+// route / On site buttons" note is superseded: the buttons are back as the clock, Oct 15.)
 
 const KIND_LABEL: Record<string, string> = { travel: "Travel", labor: "Labor" };
 const quarter = (h: number) => Math.round(h * 4) / 4;
@@ -361,21 +369,43 @@ interface TimeVals {
   hours: number;
   helper_count: number;
   on_date: string;
+  /** The clock's (or an edited) start and end as local HH:MM on `on_date`; "" when typed hours. */
+  start: string;
+  end: string;
 }
 const valsOf = (e: TimeEntryRow): TimeVals => ({
   kind: e.kind === "travel" ? "travel" : "labor",
   hours: Number(e.hours),
   helper_count: e.helper_count,
   on_date: e.on_date,
+  start: e.started_at && e.ended_at ? localHm(e.started_at) : "",
+  end: e.started_at && e.ended_at ? localHm(e.ended_at) : "",
 });
 const sameVals = (a: TimeVals, b: TimeVals) =>
   a.kind === b.kind &&
   a.hours === b.hours &&
   a.helper_count === b.helper_count &&
-  a.on_date === b.on_date;
+  a.on_date === b.on_date &&
+  a.start === b.start &&
+  a.end === b.end;
+/** An entry edited as times (both set). */
+const timed = (v: TimeVals) => !!v.start && !!v.end;
+
+/** A small tag on an entry the clock wrote (source 'clock'). */
+function ClockTag() {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 rounded bg-muted px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+      title="Written by the clock; edit the times to correct it"
+      data-tag="clock"
+    >
+      <Timer className="h-3 w-3" aria-hidden /> clock
+    </span>
+  );
+}
 
 /**
- * The ticket's time entries as an editable list (kind, hours, helpers, date) with add and
+ * The ticket's time entries as an editable list (kind, hours or start / end, date) with add and
  * delete. Read-only when `editable` is false: then only the totals and the lines show.
  *
  * `suggestTravel` (the close-out only; owner, Oct 9): while the ticket has no Travel line, the
@@ -497,8 +527,9 @@ export function TimeEntries({
           <ul className="divide-y rounded-md border text-sm">
             {rows.map((r) => (
               <li key={r.id} className="flex flex-wrap justify-between gap-2 px-3 py-1.5">
-                <span>
+                <span className="inline-flex items-center gap-1.5">
                   {KIND_LABEL[r.kind] ?? r.kind} · {fmtHours(r.hours)}
+                  {r.source === "clock" && <ClockTag />}
                 </span>
                 <span className="text-muted-foreground">
                   {shortDay(r.on_date)}
@@ -515,6 +546,44 @@ export function TimeEntries({
   );
 }
 
+/** The time of day box (a clock entry's Start / End), 24-hour on the wire, the phone's own look. */
+function TimeBox({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  disabled: boolean;
+  onCommit: (hm: string) => void;
+}) {
+  // The box keeps its own text while being edited; a blank or half-typed time is not committed.
+  const [text, setText] = useState(value);
+  const [was, setWas] = useState(value);
+  if (was !== value) {
+    setWas(value);
+    setText(value);
+  }
+  return (
+    <label className="space-y-1 text-xs text-muted-foreground">
+      {label}
+      <Input
+        type="time"
+        value={text}
+        disabled={disabled}
+        className="h-11 text-base text-foreground sm:h-9 sm:text-sm"
+        data-time={label.toLowerCase()}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          if (/^\d{2}:\d{2}/.test(text) && text !== value) onCommit(text);
+          else setText(value);
+        }}
+      />
+    </label>
+  );
+}
+
 function TimeFields({
   vals,
   onChange,
@@ -527,8 +596,20 @@ function TimeFields({
   onCommit?: ((v: TimeVals) => void) | undefined;
   disabled: boolean;
 }) {
+  const withTimes = timed(vals);
+  // The hours follow the times (tech-clock.ts entryTimes rolls an end past midnight over).
+  const hoursFromTimes = (v: TimeVals) => {
+    const t = entryTimes(v.on_date, v.start, v.end);
+    return t ? { ...v, hours: durationHours(t.started_at, t.ended_at) } : v;
+  };
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[110px_90px_1fr]">
+    <div
+      className={
+        withTimes
+          ? "grid grid-cols-2 gap-2 sm:grid-cols-[110px_96px_96px_72px_1fr]"
+          : "grid grid-cols-2 gap-2 sm:grid-cols-[110px_90px_1fr]"
+      }
+    >
       <label className="space-y-1 text-xs text-muted-foreground">
         Kind
         <Select
@@ -549,23 +630,60 @@ function TimeFields({
           </SelectContent>
         </Select>
       </label>
-      <label className="space-y-1 text-xs text-muted-foreground">
-        Hours
-        <NumberField
-          value={vals.hours}
-          step="0.25"
-          max={24}
-          inputMode="decimal"
-          disabled={disabled}
-          className="h-11 text-base text-foreground sm:h-9 sm:text-sm"
-          onChange={(h) => onChange({ ...vals, hours: h })}
-          onBlur={() => {
-            const v = { ...vals, hours: quarter(vals.hours) };
-            onChange(v);
-            onCommit?.(v);
-          }}
-        />
-      </label>
+      {withTimes ? (
+        <>
+          <TimeBox
+            label="Start"
+            value={vals.start}
+            disabled={disabled}
+            onCommit={(hm) => {
+              const v = hoursFromTimes({ ...vals, start: hm });
+              onChange(v);
+              onCommit?.(v);
+            }}
+          />
+          <TimeBox
+            label="End"
+            value={vals.end}
+            disabled={disabled}
+            onCommit={(hm) => {
+              const v = hoursFromTimes({ ...vals, end: hm });
+              onChange(v);
+              onCommit?.(v);
+            }}
+          />
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Hours
+            {/* Read-only: the hours follow the times (the server recomputes them). */}
+            <Input
+              readOnly
+              tabIndex={-1}
+              value={fmtHours(vals.hours)}
+              className="h-11 bg-muted/40 text-base text-foreground sm:h-9 sm:text-sm"
+              title="The hours follow the start and end"
+              data-hours="from-times"
+            />
+          </label>
+        </>
+      ) : (
+        <label className="space-y-1 text-xs text-muted-foreground">
+          Hours
+          <NumberField
+            value={vals.hours}
+            step="0.25"
+            max={24}
+            inputMode="decimal"
+            disabled={disabled}
+            className="h-11 text-base text-foreground sm:h-9 sm:text-sm"
+            onChange={(h) => onChange({ ...vals, hours: h })}
+            onBlur={() => {
+              const v = { ...vals, hours: quarter(vals.hours) };
+              onChange(v);
+              onCommit?.(v);
+            }}
+          />
+        </label>
+      )}
       {/* No Helpers box (owner, Oct 5): the named crew is who is billed (billedCrewLine). */}
       <label className="space-y-1 text-xs text-muted-foreground">
         Date
@@ -586,17 +704,29 @@ function TimeFields({
   );
 }
 
+/** What saveTimeEntry gets for `v`: the times (the hours follow) or the typed hours. */
+function timePayload(v: TimeVals): Omit<TimeEntryInput, "service_job_id" | "id"> {
+  const base = { kind: v.kind, helper_count: v.helper_count, on_date: v.on_date };
+  if (timed(v)) {
+    const t = entryTimes(v.on_date, v.start, v.end);
+    if (t) return { ...base, started_at: t.started_at, ended_at: t.ended_at };
+  }
+  return { ...base, hours: quarter(v.hours) };
+}
+
 function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveTimeEntry);
   const deleteFn = useServerFn(deleteTimeEntry);
   const [vals, setVals] = useState<TimeVals>(() => valsOf(entry));
   const save = useMutation({
-    mutationFn: (v: TimeVals) => saveFn({ data: { id: entry.id, service_job_id: jobId, ...v } }),
+    mutationFn: (v: TimeVals) =>
+      saveFn({ data: { id: entry.id, service_job_id: jobId, ...timePayload(v) } }),
     onSuccess: (row) => {
       qc.setQueryData<TimeEntryRow[]>(fieldKeys.time(jobId), (old) =>
         old?.map((r) => (r.id === row.id ? row : r)),
       );
+      setVals(valsOf(row));
     },
     onError: (e) => {
       setVals(valsOf(entry));
@@ -615,7 +745,13 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
   });
   const commit = (v: TimeVals) => {
     if (sameVals(v, valsOf(entry))) return;
-    if (v.hours <= 0) {
+    if (timed(v)) {
+      if (!entryTimes(v.on_date, v.start, v.end)) {
+        loudError(TIME_END_BEFORE_START, new Error("the end is the same as the start"));
+        setVals(valsOf(entry));
+        return;
+      }
+    } else if (v.hours <= 0) {
       loudError("Hours must be more than 0", new Error("delete the line instead"));
       setVals(valsOf(entry));
       return;
@@ -648,9 +784,14 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
-      {(save.isPending || (entry.started_at && entry.ended_at)) && (
-        <p className="text-[11px] text-muted-foreground">
-          {save.isPending ? "Saving…" : `${clock(entry.started_at)} to ${clock(entry.ended_at)}`}
+      {(save.isPending || entry.source === "clock" || (entry.started_at && entry.ended_at)) && (
+        <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          {entry.source === "clock" && <ClockTag />}
+          {save.isPending
+            ? "Saving…"
+            : entry.started_at && entry.ended_at
+              ? `${clock(entry.started_at)} to ${clock(entry.ended_at)}`
+              : null}
         </p>
       )}
     </div>
@@ -684,14 +825,15 @@ function NewTimeRow({
     hours: initial?.hours ?? 0,
     helper_count: defaultHelpers,
     on_date: localYmd(),
+    start: "",
+    end: "",
   }));
   const save = useMutation({
     mutationFn: () =>
       saveFn({
         data: {
           service_job_id: jobId,
-          ...vals,
-          hours: quarter(vals.hours),
+          ...timePayload(vals),
           ...(note ? { note } : {}),
         },
       }),

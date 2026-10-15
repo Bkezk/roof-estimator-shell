@@ -1,60 +1,152 @@
 /**
  * My tickets — the technician's day on the phone (docs/service-module-design.md §5.3): the
- * signed-in person's open tickets, today's first, each with ONE big button, Open ticket, which
- * opens the close-out (owner, Oct 8: "we dont need the en route then on site buttons … it should
- * just be done then present that workflow"). The close-out saves as it is filled out and can be
- * left and come back to any time (photos before, then after) — closeout.tsx; its Complete stamps
- * the labor entries the tech logged and sets the ticket Done. Everyone sees their own tickets
- * only, the office included (owner, Oct 9: "it should probably be called my tickets"); the URL
- * stays /service/today.
+ * signed-in person's open tickets, today's first, each with the clock's buttons and Open ticket.
+ *
+ * The clock (owner, Oct 15, CenterPoint-style: "the technicians clock into travel, then clock
+ * into the job; while they're out, if they're going to another job they clock into travel for
+ * that job, then into the job once they get there, then they can edit time later"): one running
+ * clock per technician (tech-clock.ts; myClock / setFieldStatus in service-field.functions.ts).
+ * A banner at the top says where it is ("Travelling to #6014 Bell County · 12 m", ticking every
+ * 30 s) with the next buttons. Each card offers what comes next: no clock on it → Start travel
+ * and On site (arriving without having pressed travel is fine); travelling to it → On site; on
+ * site → Leave site and Complete. A clock running on ANOTHER ticket moves: pressing Start travel
+ * or On site here closes it there (the toast says "Left #6012 · 0.75 h labor logged") — one
+ * clock per technician. Every close writes a time entry with the real start and end (source
+ * 'clock') that the Time section lets the technician edit. The Oct 8 "one button" screen
+ * (owner: "we dont need the en route then on site buttons") is superseded by this: the buttons
+ * are back as the clock, Oct 15.
+ *
+ * Open ticket (and Complete) open the close-out (closeout.tsx), which saves as it is filled out
+ * and can be left and come back to any time (photos before, then after); its Complete clocks the
+ * technician out of this ticket and sets it Done. Everyone sees their own tickets only, the
+ * office included (owner, Oct 9: "it should probably be called my tickets"); the URL stays
+ * /service/today.
  *
  * The crew question ("Who is on this job with you?", crew-box.tsx) is the close-out's first
  * section; a card whose crew is already answered names it and "Change" reopens it.
  */
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  Clock,
+  ClipboardList,
   Loader2,
+  LogOut,
   MapPin,
+  MapPinCheck,
   Phone,
   RefreshCw,
+  Truck,
   Users,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { myDay, type TodayJob } from "@/lib/service-field.functions";
+import {
+  myClock,
+  myDay,
+  setFieldStatus,
+  type MyClock,
+  type TodayJob,
+} from "@/lib/service-field.functions";
 import type { ServiceJobWithTech } from "@/lib/service.functions";
 import { seedJobFromToday } from "@/lib/job-cache";
+import { cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
 import { WarrantyBadgeList } from "@/components/crm/site-warranties";
-import { clock, errText, fieldKeys, localYmd, shortDay } from "@/components/service/field-utils";
+import {
+  errText,
+  fieldKeys,
+  localYmd,
+  loudError,
+  shortDay,
+} from "@/components/service/field-utils";
 
 const mapsUrl = (q: string) => `https://maps.google.com/?q=${encodeURIComponent(q)}`;
+
+/** The clock's ticking "now": every 30 s, so the banner's minutes move. */
+function useTick(everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(t);
+  }, [everyMs]);
+  return now;
+}
+
+type ClockAction = "en_route" | "on_site" | "leave";
+
+/**
+ * A clock press on a ticket: setFieldStatus with the phone's day (field-day.ts), then the day,
+ * the clock and the ticket's time (and the ticket the clock left) are re-read. The toast says
+ * what started and what stopped (tech-clock.ts pressLine); a failure is loud.
+ */
+function useClockPress(ticket: { id: string; number: number; customer_name: string }) {
+  const qc = useQueryClient();
+  const statusFn = useServerFn(setFieldStatus);
+  return useMutation({
+    mutationFn: async (to: ClockAction) => {
+      const before = qc.getQueryData<MyClock | null>(fieldKeys.clock) ?? null;
+      await statusFn({ data: { id: ticket.id, to, day: localYmd() } });
+      return { before, at: new Date() };
+    },
+    onSuccess: ({ before, at }, to) => {
+      toast.success(pressLine(before, to, ticket, at));
+      const keys: readonly (readonly string[])[] = [
+        fieldKeys.today,
+        fieldKeys.clock,
+        fieldKeys.time(ticket.id),
+        fieldKeys.job(ticket.id),
+        fieldKeys.events(ticket.id),
+        ...(before && before.service_job_id !== ticket.id
+          ? [
+              fieldKeys.time(before.service_job_id),
+              fieldKeys.job(before.service_job_id),
+              fieldKeys.events(before.service_job_id),
+            ]
+          : []),
+        ["service-jobs"],
+      ];
+      for (const k of keys) void qc.invalidateQueries({ queryKey: k });
+    },
+    onError: (e) => loudError("The clock did not move", e),
+  });
+}
 
 export function TodayPage() {
   const { session } = useAuth();
   const dayFn = useServerFn(myDay);
+  const clockFn = useServerFn(myClock);
   const q = useQuery({
     queryKey: fieldKeys.today,
     queryFn: () => dayFn(),
     enabled: !!session,
     refetchInterval: 5 * 60_000,
   });
+  // My clock (owner, Oct 15): fresh every minute; a press re-reads it at once.
+  const clockQ = useQuery({
+    queryKey: fieldKeys.clock,
+    queryFn: () => clockFn(),
+    enabled: !!session,
+    refetchInterval: 60_000,
+  });
+  const clock = clockQ.data ?? null;
+  const now = useTick(30_000);
   const today = localYmd();
   const jobs = q.data ?? [];
   // Today (and anything overdue or already started) first, then the coming days, then undated.
-  const now = jobs.filter(
+  const now_ = jobs.filter(
     (j) => !!j.field_status || (!!j.scheduled_date && j.scheduled_date <= today),
   );
-  const later = jobs.filter((j) => !now.includes(j) && !!j.scheduled_date);
-  const undated = jobs.filter((j) => !now.includes(j) && !j.scheduled_date);
+  const later = jobs.filter((j) => !now_.includes(j) && !!j.scheduled_date);
+  const undated = jobs.filter((j) => !now_.includes(j) && !j.scheduled_date);
   const title = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "short",
@@ -78,11 +170,22 @@ export function TodayPage() {
           aria-label="Refresh"
           title="Refresh"
           disabled={q.isFetching}
-          onClick={() => void q.refetch()}
+          onClick={() => {
+            void q.refetch();
+            void clockQ.refetch();
+          }}
         >
           <RefreshCw className={`h-5 w-5 ${q.isFetching ? "animate-spin" : ""}`} />
         </Button>
       </div>
+
+      {clockQ.error && (
+        <p className="flex items-center gap-2 rounded-md border border-destructive px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> Could not read your clock:{" "}
+          {errText(clockQ.error)}
+        </p>
+      )}
+      {clock && <ClockBanner clock={clock} now={now} jobs={jobs} />}
 
       {q.error ? (
         <div className="space-y-2 rounded-lg border border-destructive p-4 text-destructive">
@@ -105,12 +208,115 @@ export function TodayPage() {
         </div>
       ) : (
         <>
-          <Group title="Today" jobs={now} today={today} empty="Nothing scheduled for today." />
-          {later.length > 0 && <Group title="Coming up" jobs={later} today={today} />}
-          {undated.length > 0 && <Group title="No date yet" jobs={undated} today={today} />}
+          <Group
+            title="Today"
+            jobs={now_}
+            today={today}
+            clock={clock}
+            empty="Nothing scheduled for today."
+          />
+          {later.length > 0 && <Group title="Coming up" jobs={later} today={today} clock={clock} />}
+          {undated.length > 0 && (
+            <Group title="No date yet" jobs={undated} today={today} clock={clock} />
+          )}
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The running clock, at the top: "On site at #6014 Bell County · 1 h 20 m" and the next buttons
+ * (travelling → On site; on site → Leave site, Complete). Complete opens the close-out, whose
+ * Complete clocks out.
+ */
+function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: TodayJob[] }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { profile } = useAuth();
+  const ticket = {
+    id: clock.service_job_id,
+    number: clock.number,
+    customer_name: clock.customer_name,
+  };
+  const press = useClockPress(ticket);
+  const openCloseout = () => {
+    const j = jobs.find((x) => x.id === clock.service_job_id);
+    if (j)
+      qc.setQueryData<ServiceJobWithTech>(
+        fieldKeys.job(j.id),
+        (old) => old ?? seedJobFromToday(j, profile),
+      );
+    void navigate({ to: "/service", search: { id: clock.service_job_id, closeout: 1 } });
+  };
+  return (
+    <section
+      className="space-y-3 rounded-xl border-2 border-primary/50 bg-primary/5 p-4"
+      aria-label="My clock"
+      data-line="clock-banner"
+    >
+      <p className="flex items-center gap-2 text-base font-semibold">
+        {clock.kind === "labor" ? (
+          <MapPinCheck className="h-5 w-5 shrink-0 text-primary" />
+        ) : (
+          <Truck className="h-5 w-5 shrink-0 text-primary" />
+        )}
+        <Link
+          to="/service"
+          search={{ id: clock.service_job_id }}
+          className="underline-offset-2 hover:underline"
+        >
+          {runningLabel(
+            clock,
+            new Date(Math.max(now, new Date(clock.started_at).getTime())),
+            clock,
+          )}
+        </Link>
+      </p>
+      <div className="flex gap-2">
+        {clock.kind === "travel" ? (
+          <Button
+            type="button"
+            className="h-14 flex-1 text-lg font-semibold"
+            disabled={press.isPending}
+            onClick={() => press.mutate("on_site")}
+          >
+            {press.isPending ? (
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            ) : (
+              <MapPinCheck className="mr-2 h-5 w-5" />
+            )}
+            On site
+          </Button>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-14 flex-1 text-lg font-semibold"
+              disabled={press.isPending}
+              onClick={() => press.mutate("leave")}
+            >
+              {press.isPending ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <LogOut className="mr-2 h-5 w-5" />
+              )}
+              Leave site
+            </Button>
+            <Button
+              type="button"
+              className="h-14 flex-1 text-lg font-semibold"
+              disabled={press.isPending}
+              onClick={openCloseout}
+            >
+              <CheckCircle2 className="mr-2 h-5 w-5" />
+              Complete
+            </Button>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -118,11 +324,13 @@ function Group({
   title,
   jobs,
   today,
+  clock,
   empty,
 }: {
   title: string;
   jobs: TodayJob[];
   today: string;
+  clock: MyClock | null;
   empty?: string | undefined;
 }) {
   return (
@@ -134,13 +342,21 @@ function Group({
       {jobs.length === 0 && empty ? (
         <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
-        jobs.map((j) => <JobCard key={j.id} job={j} today={today} />)
+        jobs.map((j) => <JobCard key={j.id} job={j} today={today} clock={clock} />)
       )}
     </section>
   );
 }
 
-function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
+function JobCard({
+  job: j,
+  today,
+  clock,
+}: {
+  job: TodayJob;
+  today: string;
+  clock: MyClock | null;
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { profile } = useAuth();
@@ -153,6 +369,9 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
   // The crew question is the close-out's first section (owner, Oct 8); here, an answered card
   // names the crew and "Change" reopens the box.
   const [crewOpen, setCrewOpen] = useState(false);
+  // The clock's buttons for this card (tech-clock.ts cardActions; owner, Oct 15).
+  const actions = cardActions(clock, j.id);
+  const press_ = useClockPress(j);
 
   const press = () => {
     // Owner, Oct 9 (S13): this row IS the ticket row — plant it as the close-out's job so the
@@ -163,6 +382,9 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
     );
     void navigate({ to: "/service", search: { id: j.id, closeout: 1 } });
   };
+  const busy = press_.isPending;
+  const spin = (Icon: typeof Truck) =>
+    busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Icon className="mr-2 h-5 w-5" />;
 
   return (
     <article className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
@@ -268,10 +490,86 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
 
       {crewOpen && <CrewBox job={j} />}
 
-      {/* Owner, Oct 8: one button, "Open ticket", which opens the close-out; it saves itself,
-        and the tech can leave it and come back (photos before, then after) until Complete. */}
-      <Button size="lg" className="h-16 w-full text-xl font-semibold" onClick={press}>
-        <CheckCircle2 className="mr-2 h-6 w-6" />
+      {/* The clock's buttons (owner, Oct 15; the Oct 8 one-button card is superseded): Start
+          travel / On site while no clock runs here, On site while travelling here, Leave site /
+          Complete while on site here. A clock on another ticket moves here on a press. */}
+      {clock && clock.service_job_id === j.id && (
+        <p
+          className="flex items-center gap-2 text-sm font-medium text-primary"
+          data-line="card-clock"
+        >
+          <Clock className="h-4 w-4 shrink-0" />
+          {clock.kind === "labor" ? "You are on site here" : "You are travelling here"}
+          {" · since "}
+          {new Date(clock.started_at).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </p>
+      )}
+      <div className="flex gap-2" data-line="clock-buttons">
+        {actions.includes("travel") && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-14 flex-1 text-lg font-semibold"
+            disabled={busy}
+            onClick={() => press_.mutate("en_route")}
+          >
+            {spin(Truck)}
+            Start travel
+          </Button>
+        )}
+        {actions.includes("on_site") && (
+          <Button
+            type="button"
+            className="h-14 flex-1 text-lg font-semibold"
+            disabled={busy}
+            onClick={() => press_.mutate("on_site")}
+          >
+            {spin(MapPinCheck)}
+            On site
+          </Button>
+        )}
+        {actions.includes("leave") && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-14 flex-1 text-lg font-semibold"
+            disabled={busy}
+            onClick={() => press_.mutate("leave")}
+          >
+            {spin(LogOut)}
+            Leave site
+          </Button>
+        )}
+        {actions.includes("complete") && (
+          <Button
+            type="button"
+            className="h-14 flex-1 text-lg font-semibold"
+            disabled={busy}
+            onClick={press}
+          >
+            <CheckCircle2 className="mr-2 h-5 w-5" />
+            Complete
+          </Button>
+        )}
+      </div>
+      {/* Open ticket: the close-out, which saves itself; the tech can leave it and come back
+          (photos before, then after) until Complete. Primary until the clock is on site here,
+          where Complete above takes over. */}
+      <Button
+        type="button"
+        size="lg"
+        variant={actions.includes("complete") ? "outline" : "default"}
+        className={
+          actions.includes("complete")
+            ? "h-12 w-full text-base font-semibold"
+            : "h-16 w-full text-xl font-semibold"
+        }
+        onClick={press}
+      >
+        <ClipboardList className="mr-2 h-6 w-6" />
         Open ticket
       </Button>
     </article>

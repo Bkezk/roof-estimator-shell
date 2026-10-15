@@ -244,7 +244,8 @@ describe("the compact strip", () => {
     // Not sticky; still first in the form.
     expect(strip).not.toContain("sticky");
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
+      // (Owner, Oct 15: the clock's line sits above the strip while the clock runs on this ticket.)
+      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
     );
   });
 });

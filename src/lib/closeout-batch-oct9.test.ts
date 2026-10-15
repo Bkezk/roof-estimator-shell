@@ -328,8 +328,9 @@ describe("B7 the Time copy after the Oct 8 button removal", () => {
       expect(s).not.toContain("by hand");
       expect(s).not.toContain('source === "buttons"');
     }
-    expect(shared).toMatch(
-      /\{save\.isPending \? "Saving…" : `\$\{clock\(entry\.started_at\)\} to \$\{clock\(entry\.ended_at\)\}`\}/,
+    // Owner, Oct 15: the line also wears the clock tag, and shows the times only when there are two.
+    expect(shared.replace(/\s+/g, " ")).toContain(
+      '{save.isPending ? "Saving…" : entry.started_at && entry.ended_at ? `${clock(entry.started_at)} to ${clock(entry.ended_at)}` : null}',
     );
   });
   it("who the time is billed for comes before the first line, saying one line covers everyone", () => {

@@ -40,6 +40,7 @@ import { toldSuffix } from "@/lib/mentions";
 import { historyDay, historyDayText, historySnippet, SITE_HISTORY_LIMIT } from "@/lib/site-history";
 import {
   addJobNote,
+  clockOnJob,
   listJobEvents,
   listJobPhotos,
   listJobRepairs,
@@ -47,6 +48,7 @@ import {
   listTimeEntries,
   type JobEventRow,
 } from "@/lib/service-field.functions";
+import { elapsedLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -200,6 +202,41 @@ export function TicketFieldSections({
           Admins and managers only (AuditHistory renders nothing for anyone else). */}
       <AuditHistory entity="ticket" entityId={job.id} className="rounded-lg border px-4 py-3" />
     </>
+  );
+}
+
+/**
+ * The clock running on this ticket (owner, Oct 15; clockOnJob — the office reads every clock):
+ * "Trace Floyd is on site here · 1 h 20 m (since 9:05 AM)". One line in the ticket header, or
+ * nothing. A read that fails says so in small print; it never blocks the page.
+ */
+export function JobClockLine({ jobId }: { jobId: string }) {
+  const { session } = useAuth();
+  const fn = useServerFn(clockOnJob);
+  const q = useQuery({
+    queryKey: fieldKeys.jobClock(jobId),
+    queryFn: () => fn({ data: { id: jobId } }),
+    enabled: !!session,
+    refetchInterval: 60_000,
+  });
+  if (q.error)
+    return (
+      <p className="text-xs text-destructive" data-line="job-clock">
+        Could not read the clock on this ticket: {errText(q.error)}
+      </p>
+    );
+  const c = q.data;
+  if (!c) return null;
+  const since = new Date(c.started_at).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return (
+    <p className="flex items-center gap-1.5 text-sm font-medium" data-line="job-clock">
+      <Clock className="h-4 w-4 shrink-0 text-primary" />
+      {c.technician_name} is {c.kind === "labor" ? "on site here" : "travelling here"} ·{" "}
+      {elapsedLabel(c.started_at, new Date())} (since {since})
+    </p>
   );
 }
 
@@ -477,6 +514,10 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
 }
 
 const FIELD_LABEL: Record<string, string> = { en_route: "En route", on_site: "On site" };
+const FIELD_NOTE: Record<string, string> = {
+  "left site": "Left the site",
+  "stopped travelling": "Stopped travelling",
+};
 /** A logged contact (crm_contact_log → timeline, meta.method). */
 const CONTACT_TEXT: Record<string, string> = {
   called: "Called the customer",
@@ -496,6 +537,8 @@ function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
       };
     case "field":
       if (e.note === "undo") return { icon: Truck, text: "Undid the last step" };
+      // The clock's leaving rows (owner, Oct 15): "left site", "stopped travelling".
+      if (e.note && !e.field_status) return { icon: Truck, text: FIELD_NOTE[e.note] ?? e.note };
       return {
         icon: Truck,
         text: FIELD_LABEL[e.field_status ?? ""] ?? `Field: ${e.field_status ?? "changed"}`,

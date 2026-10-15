@@ -152,6 +152,7 @@ import { PurchaseOrdersSection } from "@/components/service/purchase-orders-sect
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   ContactSelect,
+  JobClockLine,
   TicketFieldSections,
   TicketRepairs,
 } from "@/components/service/ticket-field-sections";
@@ -2395,6 +2396,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </p>
         )}
         {job && <FromInspectionNote job={job} />}
+        {/* The clock on this ticket (owner, Oct 15): who is travelling here / on site, since when. */}
+        {job && <JobClockLine jobId={job.id} />}
         {!job && seed?.note && (
           <p
             className={

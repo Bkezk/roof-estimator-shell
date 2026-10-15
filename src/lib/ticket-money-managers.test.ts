@@ -107,7 +107,14 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
     ],
     // myDay lists the caller's own tickets for everyone since Oct 9 (my-tickets-page.test.ts),
     // so only the own-ticket editing check remains here.
-    "src/lib/service-field.functions.ts": ["if (!isOffice(p) && job.technician_id !== ctx.userId)"],
+    // clockJob (owner, Oct 15): the crew clocks their own; the office presses for the lead.
+    // The clock leaving another ticket (Oct 15): its field status is cleared by its lead or the
+    // office — a visibility / own-ticket rule, not money.
+    "src/lib/service-field.functions.ts": [
+      "if (!isOffice(p) && job.technician_id !== ctx.userId)",
+      'if (!onCrew && !isOffice(p)) throw new Error("This ticket is assigned to someone else");',
+      "if (other && (other.technician_id === tech || isOffice(p))) {",
+    ],
     "src/lib/service-aerial.functions.ts": [
       "if (!isOffice(p) && job.technician_id !== context.userId)",
     ],

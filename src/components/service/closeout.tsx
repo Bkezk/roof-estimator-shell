@@ -21,12 +21,17 @@
  * the file is kept on the repair for "Retry upload" (owner, Oct 9) until it lands or is discarded.
  *
  * Reached from My tickets' and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
- * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
- * takes the Before photos, leaves, comes back for the After photos and Complete. Time is typed
- * in the Time section (Complete points out a ticket with none); with no Travel line yet the
- * section opens prefilled with the office → site estimate (field-shared.tsx TimeEntries,
- * suggestTravel; owner, Oct 9). Step 6 can be skipped ("Skip — nothing to add", a phone mark
- * like "Nothing used"; owner, Oct 9: the notes are "kind of redundant") and is not a Complete gap.
+ * This IS the workflow (owner, Oct 8): a tech opens it, takes the Before photos, leaves, comes
+ * back for the After photos and Complete. The clock (owner, Oct 15, CenterPoint-style; the Oct 8
+ * "no En route / On site buttons" is superseded — the buttons are back as the clock on My
+ * tickets, tech-clock.ts): while the technician's clock runs on this ticket a line near the top
+ * says so ("On site at #6014 Bell County · 1 h 20 m") with Leave site, and Complete clocks them
+ * out (the server writes the labor entry from the clock, setFieldStatus "done"). Time not on the
+ * clock is typed in the Time section (Complete points out a ticket with none); with no Travel
+ * line yet the section opens prefilled with the office → site estimate (field-shared.tsx
+ * TimeEntries, suggestTravel; owner, Oct 9). Step 6 can be skipped ("Skip — nothing to add", a
+ * phone mark like "Nothing used"; owner, Oct 9: the notes are "kind of redundant") and is not a
+ * Complete gap.
  *
  * Owner, Oct 9 (from the phone): "ill have everything i need in there and it wont go to the next
  * step … instead of auto swapping to the next step it should have a go to next step button at
@@ -70,7 +75,9 @@ import {
   Hammer,
   Loader2,
   Lock,
+  LogOut,
   MapPin,
+  MapPinCheck,
   Minus,
   Package,
   PenLine,
@@ -108,6 +115,7 @@ import {
   listJobPhotos,
   listJobRepairs,
   listRepairTemplates,
+  myClock,
   photoObjectPath,
   recentRepairsForJob,
   registerJobPhoto,
@@ -185,6 +193,7 @@ import {
   type StepStatus,
 } from "@/lib/closeout-steps";
 import { officeStageMessage } from "@/lib/office-stage-message";
+import { closedLine, runningLabel } from "@/lib/tech-clock";
 import {
   clock,
   errText,
@@ -615,6 +624,40 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
   const timeFn = useServerFn(listTimeEntries);
+  const clockFn = useServerFn(myClock);
+  // My clock (owner, Oct 15): the line near the top while it runs on THIS ticket, and what
+  // Complete closes. Fresh every minute, like My tickets.
+  const clockQ = useQuery({
+    queryKey: fieldKeys.clock,
+    queryFn: () => clockFn(),
+    enabled: !!session,
+    refetchInterval: 60_000,
+  });
+  const clockHere = clockQ.data && clockQ.data.service_job_id === job.id ? clockQ.data : null;
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setTick(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const leave = useMutation({
+    mutationFn: async () => {
+      const before = clockHere;
+      await statusFn({ data: { id: job.id, to: "leave", day: localYmd() } });
+      return before;
+    },
+    onSuccess: (before) => {
+      toast.success(before ? closedLine(before, new Date(), before) : "Left the site");
+      for (const k of [
+        fieldKeys.clock,
+        fieldKeys.today,
+        fieldKeys.time(job.id),
+        fieldKeys.job(job.id),
+        fieldKeys.events(job.id),
+      ])
+        void qc.invalidateQueries({ queryKey: k });
+    },
+    onError: (e) => loudError("The clock did not stop", e),
+  });
 
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
   const [draft, setDraft] = useState<TextDraft>(() => stored ?? fromJob(job));
@@ -691,6 +734,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       clearInspectionDraft(job.id);
       for (const k of [
         fieldKeys.today,
+        fieldKeys.clock,
         fieldKeys.job(job.id),
         fieldKeys.events(job.id),
         fieldKeys.time(job.id),
@@ -716,6 +760,16 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
   const busy = complete.isPending;
   const finished = FINISHED.includes(job.stage);
+  // The labor Complete adds itself (closeout-check.ts, closeout-steps.ts): a labor clock running
+  // on this ticket, or — no clock, still "on site" from the buttons of before Oct 8 — the On site
+  // stamp. Never a stamp left by a clock already closed (Leave site wrote that labor).
+  const onSiteAt = clockHere
+    ? clockHere.kind === "labor"
+      ? clockHere.started_at
+      : null
+    : job.field_status === "on_site"
+      ? job.on_site_at
+      : null;
   // Owner, Oct 12 (item 7): "Complete anyway" is a manager's (managesTickets, the server's rule
   // in setFieldStatus); a technician sees the list with Complete disabled until it is whole.
   const manager = managesTickets(profile);
@@ -758,8 +812,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       finished,
       service_type: job.service_type,
       signature_path: job.signature_path,
-      // Labor from an On site stamp (older tickets) is added by Complete itself.
-      on_site_at: job.on_site_at,
+      // Labor from the clock on this ticket (or an older ticket's On site stamp) is added by
+      // Complete itself (onSiteAt above).
+      on_site_at: onSiteAt,
       ...reads,
       // An inspection (owner, Oct 12): its checklist, answered and saved, stands where the
       // repairs do; no photo or signature is a gap.
@@ -826,7 +881,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     photos: photosQ.data ?? [],
     materialsTouched: (materialsQ.data ?? []).length > 0 || nothingUsed,
     timeHours: (timeQ.data ?? []).reduce((sum, r) => sum + Number(r.hours), 0),
-    onSiteAt: job.on_site_at,
+    onSiteAt,
     // The draft, not the saved row: a save that failed on the roof must not lock the signature.
     closingNotes: draft.closing_notes,
     notesSkipped,
@@ -916,6 +971,37 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
   return (
     <div className="space-y-5">
+      {/* The clock on this ticket (owner, Oct 15): where it stands and Leave site; Complete
+          below clocks out too. */}
+      {clockHere && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-primary/50 bg-primary/5 px-4 py-3"
+          data-line="closeout-clock"
+        >
+          <p className="flex items-center gap-2 font-semibold">
+            <MapPinCheck className="h-5 w-5 shrink-0 text-primary" />
+            {runningLabel(
+              clockHere,
+              new Date(Math.max(tick, new Date(clockHere.started_at).getTime())),
+              clockHere,
+            )}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11"
+            disabled={leave.isPending || busy}
+            onClick={() => leave.mutate()}
+          >
+            {leave.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="mr-2 h-4 w-4" />
+            )}
+            Leave site
+          </Button>
+        </div>
+      )}
       <StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
@@ -1079,10 +1165,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             }
           >
             <Section title="Time">
-              {job.on_site_at && !finished && (
-                <p className="text-sm text-muted-foreground">
-                  Labor from On site ({clock(job.on_site_at)}) until now is added when you press
-                  Complete.
+              {onSiteAt && !finished && (
+                <p className="text-sm text-muted-foreground" data-line="labor-from-clock">
+                  {clockHere
+                    ? `Your clock here (on site since ${clock(onSiteAt)}) is logged as labor when you press Complete — or Leave site at the top.`
+                    : `Labor from On site (${clock(onSiteAt)}) until now is added when you press Complete.`}
                 </p>
               )}
               <TimeEntries

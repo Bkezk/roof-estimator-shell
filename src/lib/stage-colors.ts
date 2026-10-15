@@ -67,9 +67,12 @@ export function ticketToneKey(j: {
   stage: ServiceStage;
   field_status?: string | null | undefined;
 }): StageToneKey {
-  // Owner, Oct 8: the En route / On site steps are gone ("why does it say scheduled on site and
-  // scheduled en route on the tags"); a ticket's badge is its stage. Older tickets still carry
-  // a field_status stamp; it no longer colours or labels anything.
+  // Owner, Oct 15: the clock brought En route / On site back (tech-clock.ts), so a Scheduled
+  // card is coloured by where the technician is again. (Oct 8 had turned this off with the
+  // buttons: "why does it say scheduled on site and scheduled en route on the tags" — the LABEL
+  // stays the stage's, only the colour moves.) Any other stage is its own colour.
+  if (j.stage === "scheduled" && (j.field_status === "en_route" || j.field_status === "on_site"))
+    return j.field_status;
   return j.stage;
 }
 

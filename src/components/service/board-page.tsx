@@ -420,7 +420,16 @@ function Board({ week }: { week?: string | undefined }) {
               <span className="text-xs font-normal text-muted-foreground">{unassignedTotal}</span>
             </h2>
             <StageLegend
-              stages={["open", "scheduled", "done", "authorized", "invoiced", "closed"]}
+              stages={[
+                "open",
+                "scheduled",
+                "en_route",
+                "on_site",
+                "done",
+                "authorized",
+                "invoiced",
+                "closed",
+              ]}
             />
             <Input
               type="search"

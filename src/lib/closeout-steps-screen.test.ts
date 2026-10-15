@@ -23,7 +23,8 @@ describe("the step strip", () => {
     expect(src).toContain("function StepStrip({");
     // The SHOWN open step (owner, Oct 9, later: the step the tech is inside stays open).
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
+      // (Owner, Oct 15: the clock's line sits above the strip while the clock runs on this ticket.)
+      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
     );
     const strip = src.slice(
       src.indexOf("function StepStrip({"),
@@ -52,7 +53,8 @@ describe("the step strip", () => {
     expect(form).toContain(
       "timeHours: (timeQ.data ?? []).reduce((sum, r) => sum + Number(r.hours), 0),",
     );
-    expect(form).toContain("onSiteAt: job.on_site_at,");
+    // Owner, Oct 15: the labor clock on this ticket, or an older ticket's On site stamp (onSiteAt).
+    expect(form).toContain("onSiteAt,\n");
     expect(form).toContain("closingNotes: draft.closing_notes,");
     expect(form).toContain("signaturePath: job.signature_path,");
     expect(form).toContain("const open = firstOpenStep(stepState);");

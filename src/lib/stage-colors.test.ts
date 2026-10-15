@@ -20,10 +20,13 @@ describe("stage colours in CenterPoint's families", () => {
   });
   it("a Scheduled card changes colour as the tech goes en route, then on site", () => {
     expect(ticketToneKey({ stage: "scheduled", field_status: null })).toBe("scheduled");
-    // Owner, Oct 8: the field steps are gone; a stamp an older ticket carries changes nothing.
-    expect(ticketToneKey({ stage: "scheduled", field_status: "en_route" })).toBe("scheduled");
-    expect(ticketToneKey({ stage: "scheduled", field_status: "on_site" })).toBe("scheduled");
+    // Owner, Oct 15: the clock brought En route / On site back (tech-clock.ts), so a Scheduled
+    // card is coloured by where the technician is again (Oct 8 had turned this off with the
+    // buttons); the label stays the stage's. Any other stage keeps its own colour.
+    expect(ticketToneKey({ stage: "scheduled", field_status: "en_route" })).toBe("en_route");
+    expect(ticketToneKey({ stage: "scheduled", field_status: "on_site" })).toBe("on_site");
     expect(ticketToneKey({ stage: "done", field_status: "on_site" })).toBe("done");
+    expect(ticketToneKey({ stage: "open", field_status: "en_route" })).toBe("open");
     expect(STAGE_TONES.en_route.chip).toContain("bg-amber-100");
     expect(STAGE_TONES.on_site.chip).toContain("bg-violet-100");
   });
@@ -47,8 +50,9 @@ describe("used on the board, the ticket list and the stage strip", () => {
       '<Check className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Done" />',
     );
     expect(board).toMatch(
-      // Every stage's colour in the key (owner, Oct 6: Invoiced was missing).
-      /stages=\{\[\s*"open",\s*"scheduled",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
+      // Every stage's colour in the key (owner, Oct 6: Invoiced was missing), and the clock's two
+      // (owner, Oct 15: En route / On site colour a Scheduled card again).
+      /stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
   });
   it("the ticket list's stage badge and the ticket's stage strip", () => {

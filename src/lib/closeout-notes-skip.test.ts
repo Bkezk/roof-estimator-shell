@@ -101,7 +101,10 @@ describe("the closing notes are not a Complete gap any more", () => {
   });
   it("the screen no longer hands the draft's notes to the check", () => {
     expect(form).not.toContain("closing_notes: latest.current.closing_notes");
-    expect(form).toMatch(/signature_path: job\.signature_path,\s*\/\/ Labor from an On site stamp/);
+    // (Owner, Oct 15: the stamp's labor is the clock's — "Labor from the clock on this ticket".)
+    expect(form).toMatch(
+      /signature_path: job\.signature_path,\s*\/\/ Labor from the clock on this ticket/,
+    );
   });
 });
 
