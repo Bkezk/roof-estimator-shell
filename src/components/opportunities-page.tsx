@@ -31,7 +31,6 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   BellRing,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   FilePlus2,
@@ -112,7 +111,7 @@ import { StageStrip } from "@/components/stage-strip";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
 import { SiteSelect } from "@/components/crm/site-select";
-import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
+import { SnoozeMenu } from "@/components/followup-controls";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
 import {
   ContactLogList,
@@ -1442,15 +1441,14 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
   const canManage = canManageFollowup(profile);
   // This one item's open follow-up, read by item (audit, Oct 2: searching the first 1,000 rows
   // of listFollowups said "No open follow-up" past them). Under the ["followups", …] key, so
-  // Snooze / Close / a save refresh it.
+  // Snooze / a save refresh it.
   const oneFn = useServerFn(followupForItem);
   const followups = useQuery({
     queryKey: [...followupsKey(false), "item", "opportunity", opp.id],
     queryFn: () => oneFn({ data: { kind: "opportunity", item_id: opp.id } }),
     enabled: !!session,
   });
-  const { snooze, close } = useFollowupActions();
-  const [closing, setClosing] = useState(false);
+  const { snooze } = useFollowupActions();
   const f = followups.data ?? null;
 
   const box = "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm";
@@ -1493,32 +1491,13 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
           {held ? ` · on hold until ${whenDay(f.snoozed_until)}` : ""}
         </span>
       </span>
+      {/* Snooze only (owner, Oct 15: Close "may cause more issues than not" — a closed timer
+          left the opportunity open with nobody reminded; the status change closes it instead). */}
       {canManage && (
-        <>
-          <SnoozeMenu
-            disabled={snooze.isPending || close.isPending}
-            onSnooze={(hold) => snooze.mutate({ id: f.id, ...hold })}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={snooze.isPending || close.isPending}
-            onClick={() => setClosing(true)}
-          >
-            <CheckCircle2 className="mr-1 h-4 w-4" /> Close
-          </Button>
-          <CloseFollowupDialog
-            target={closing ? { id: f.id, title: f.title } : null}
-            pending={close.isPending}
-            onCancel={() => setClosing(false)}
-            onConfirm={(reason) =>
-              close.mutate(
-                { id: f.id, ...(reason ? { reason } : {}) },
-                { onSuccess: () => setClosing(false) },
-              )
-            }
-          />
-        </>
+        <SnoozeMenu
+          disabled={snooze.isPending}
+          onSnooze={(hold) => snooze.mutate({ id: f.id, ...hold })}
+        />
       )}
     </div>
   );

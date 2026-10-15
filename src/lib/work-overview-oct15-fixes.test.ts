@@ -519,9 +519,12 @@ describe("Work Overview follow-up rows: Snooze, no Close (owner, Oct 15)", () =>
     expect(page).not.toContain("CloseFollowupDialog");
     expect(page).not.toContain("CheckCircle2");
     expect(page).toContain('import { SnoozeMenu } from "@/components/followup-controls";');
-    // The Opportunities page still closes follow-ups, so the shared mutation stays.
-    expect(read("src/components/opportunities-page.tsx")).toContain("<CloseFollowupDialog");
-    expect(read("src/components/followups-shared.ts")).toContain("return { snooze, close };");
+    // Owner, later Oct 15: "take it off the opportunity page too" — the dialog and the shared
+    // close mutation are gone with it; the server rule (closeFollowup) stays for the record.
+    expect(read("src/components/opportunities-page.tsx")).not.toContain("CloseFollowupDialog");
+    expect(read("src/components/followup-controls.tsx")).not.toContain("CloseFollowupDialog");
+    expect(read("src/components/followups-shared.ts")).toContain("return { snooze };");
+    expect(read("src/components/followups-shared.ts")).not.toContain("closeFollowup");
   });
 });
 

@@ -30,11 +30,11 @@ describe("1. The Follow-ups page is folded into My Work", () => {
     expect(route).not.toMatch(/component:/);
     expect(route).not.toContain("followups-page");
   });
-  it("the page is gone; the snooze menu and close dialog live in followup-controls", () => {
+  it("the page is gone; the snooze menu lives in followup-controls (no close dialog since Oct 15)", () => {
     expect(existsSync("src/components/followups-page.tsx")).toBe(false);
     const controls = read("src/components/followup-controls.tsx");
     expect(controls).toMatch(/export function SnoozeMenu/);
-    expect(controls).toMatch(/export function CloseFollowupDialog/);
+    expect(controls).not.toMatch(/CloseFollowupDialog/);
     for (const page of ["opportunities-page", "my-work-page"]) {
       const src = read(`src/components/${page}.tsx`);
       expect(src, page).not.toContain("@/components/followups-page");
@@ -68,10 +68,12 @@ describe("2. My Work shows the follow-up state; controls only under seesEveryone
       /\{!canManage && hasFollowups[^}]*\(\s*<p className="text-xs text-muted-foreground">Follow-ups are managed by your manager\.<\/p>/,
     );
   });
-  it("the opportunity strip shows Snooze / Close only to a manager too", () => {
+  it("the opportunity strip shows Snooze only to a manager too (Close went on Oct 15)", () => {
     const opp = read("src/components/opportunities-page.tsx");
     expect(opp).toMatch(/const canManage = canManageFollowup\(profile\);/);
-    expect(opp).toMatch(/\{canManage && \(\s*<>\s*<SnoozeMenu/);
+    expect(opp).toMatch(/\{canManage && \(\s*<SnoozeMenu/);
+    expect(opp).not.toContain("CloseFollowupDialog");
+    expect(opp).not.toMatch(/> Close\s*</);
   });
 });
 
