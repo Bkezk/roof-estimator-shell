@@ -24,12 +24,14 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Loader2,
   Mail,
   MapPin,
   MessageSquare,
+  MessageSquarePlus,
   Phone,
   X,
 } from "lucide-react";
@@ -40,6 +42,7 @@ import { shortDay } from "@/lib/followup-rules";
 import { toldSuffix } from "@/lib/mentions";
 import { localYmd } from "@/lib/my-work";
 import {
+  COMMENT_METHOD,
   CONTACT_METHOD_LABELS,
   contactMethodLabel,
   daysSince,
@@ -47,6 +50,7 @@ import {
   listContactLog,
   listUntouched,
   logContact,
+  SERVICE_DONE_METHOD,
   type ContactKind,
   type ContactMethod,
   type UntouchedRow,
@@ -115,13 +119,16 @@ export function LogContactButtons({
   itemId: string;
   /** Icon-only buttons (labels in the tooltip). */
   compact?: boolean | undefined;
-  onLogged?: ((method: ContactMethod) => void) | undefined;
+  onLogged?: ((method: ContactMethod | typeof COMMENT_METHOD) => void) | undefined;
 }) {
   const qc = useQueryClient();
   const logFn = useServerFn(logContact);
   // Owner (Oct 1): a tap on Called / Texted / Emailed / Visited opens the note first, to
   // encourage one; "Save" (or Ctrl/⌘+Enter) logs the contact, with the note when there is one.
-  const [picked, setPicked] = useState<ContactMethod | null>(null);
+  // Owner, Oct 14: the box is the timeline — Comment writes a plain note on it (a comment is
+  // not a contact: nothing is stamped or moved; @mentions tell people).
+  const [picked, setPicked] = useState<ContactMethod | typeof COMMENT_METHOD | null>(null);
+  const isComment = picked === COMMENT_METHOD;
   const [note, setNote] = useState("");
   // Owner, Oct 9: "They asked to try again on" — optional; with it, the note is the hold's reason.
   const [tryAgain, setTryAgain] = useState("");
@@ -138,7 +145,7 @@ export function LogContactButtons({
   const holdReady = !tryAgain || (!dateProblem && !noteProblem);
 
   const log = useMutation({
-    mutationFn: (method: ContactMethod) => {
+    mutationFn: (method: ContactMethod | typeof COMMENT_METHOD) => {
       const n = note.trim();
       return logFn({
         data: {
@@ -151,9 +158,12 @@ export function LogContactButtons({
       });
     },
     onSuccess: (row, method) => {
-      const logged = row.hold
-        ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
-        : `Logged: ${CONTACT_METHOD_LABELS[method]}`;
+      const logged =
+        method === COMMENT_METHOD
+          ? "Comment added"
+          : row.hold
+            ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
+            : `Logged: ${CONTACT_METHOD_LABELS[method]}`;
       toast.success(`${logged}${toldSuffix(row.mentioned)}`);
       // The contact is on record; say loudly when the people named in it were not told.
       if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
@@ -163,11 +173,17 @@ export function LogContactButtons({
       for (const queryKey of REFRESH_KEYS) void qc.invalidateQueries({ queryKey });
       onLogged?.(method);
     },
-    onError: (e) => toast.error(`Could not log the contact: ${errText(e)}`, { duration: 12_000 }),
+    onError: (e) =>
+      toast.error(`Could not ${isComment ? "add the comment" : "log the contact"}: ${errText(e)}`, {
+        duration: 12_000,
+      }),
   });
   const save = () => {
-    if (picked && !log.isPending && holdReady) log.mutate(picked);
+    if (!picked || log.isPending || !holdReady) return;
+    if (isComment && !note.trim()) return;
+    log.mutate(picked);
   };
+  const pickedLabel = picked ? (isComment ? "Comment" : CONTACT_METHOD_LABELS[picked]) : "";
 
   return (
     <div className="space-y-2">
@@ -198,6 +214,20 @@ export function LogContactButtons({
             </Button>
           );
         })}
+        <Button
+          type="button"
+          size="sm"
+          variant={isComment ? "default" : "outline"}
+          className={compact ? "h-8 w-8 p-0" : "h-8"}
+          disabled={log.isPending}
+          aria-pressed={isComment}
+          title="Comment: write a note on the timeline (type @ to tell someone)"
+          aria-label={isComment ? "Comment (picked)" : "Comment"}
+          onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}
+        >
+          <MessageSquarePlus className={`h-4 w-4${compact ? "" : " mr-1"}`} />
+          {!compact && "Comment"}
+        </Button>
       </div>
       {picked && (
         <div className="space-y-1.5">
@@ -206,8 +236,12 @@ export function LogContactButtons({
             value={note}
             maxLength={2000}
             autoFocus
-            placeholder={`${NOTE_HINTS[picked] ?? "What was said or learned"} — ${MENTION_HINT}`}
-            aria-label={`Note for ${CONTACT_METHOD_LABELS[picked]}`}
+            placeholder={
+              isComment
+                ? `Add a comment — ${MENTION_HINT}`
+                : `${NOTE_HINTS[picked] ?? "What was said or learned"} — ${MENTION_HINT}`
+            }
+            aria-label={isComment ? "Comment" : `Note for ${CONTACT_METHOD_LABELS[picked]}`}
             onValueChange={setNote}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -216,35 +250,37 @@ export function LogContactButtons({
               }
             }}
           />
-          <div className="space-y-1" data-field="try-again-on">
-            <Label htmlFor={`contact-try-again-${kind}`} className="text-xs">
-              They asked to try again on
-            </Label>
-            <Input
-              id={`contact-try-again-${kind}`}
-              type="date"
-              className="h-8 w-48"
-              value={tryAgain}
-              min={bounds.min}
-              max={bounds.max}
-              onChange={(e) => setTryAgain(e.target.value)}
-            />
-            <p
-              className={`text-xs ${dateProblem || noteProblem ? "text-destructive" : "text-muted-foreground"}`}
-            >
-              {dateProblem ??
-                noteProblem ??
-                (tryAgain
-                  ? `The follow-up waits until ${shortDay(tryAgain)}; this note is the reason.`
-                  : "Optional. With a date, the follow-up is on hold until then and this note is the reason.")}
-            </p>
-          </div>
+          {!isComment && (
+            <div className="space-y-1" data-field="try-again-on">
+              <Label htmlFor={`contact-try-again-${kind}`} className="text-xs">
+                They asked to try again on
+              </Label>
+              <Input
+                id={`contact-try-again-${kind}`}
+                type="date"
+                className="h-8 w-48"
+                value={tryAgain}
+                min={bounds.min}
+                max={bounds.max}
+                onChange={(e) => setTryAgain(e.target.value)}
+              />
+              <p
+                className={`text-xs ${dateProblem || noteProblem ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {dateProblem ??
+                  noteProblem ??
+                  (tryAgain
+                    ? `The follow-up waits until ${shortDay(tryAgain)}; this note is the reason.`
+                    : "Optional. With a date, the follow-up is on hold until then and this note is the reason.")}
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               size="sm"
               className="h-8"
-              disabled={log.isPending || !holdReady}
+              disabled={log.isPending || !holdReady || (isComment && !note.trim())}
               onClick={save}
             >
               {log.isPending ? (
@@ -252,12 +288,14 @@ export function LogContactButtons({
               ) : (
                 <Check className="mr-1 h-4 w-4" />
               )}
-              Save {CONTACT_METHOD_LABELS[picked]}
-              {tryAgain
-                ? ` and hold until ${shortDay(tryAgain)}`
-                : note.trim()
-                  ? ""
-                  : " without a note"}
+              Save {pickedLabel}
+              {isComment
+                ? ""
+                : tryAgain
+                  ? ` and hold until ${shortDay(tryAgain)}`
+                  : note.trim()
+                    ? ""
+                    : " without a note"}
             </Button>
             <Button
               type="button"
@@ -303,21 +341,30 @@ export function ContactLogList({ kind, itemId }: { kind: ContactKind; itemId: st
       </p>
     );
   if (q.data.length === 0)
-    return <p className="text-xs text-muted-foreground">No contact logged yet</p>;
-  // The server returns newest first.
+    return <p className="text-xs text-muted-foreground">Nothing on the timeline yet</p>;
+  // The server returns newest first. A "Service done" row (owner, Oct 14) stands out.
   return (
-    <ul className="space-y-1 text-xs">
-      {q.data.map((r) => (
-        <li key={r.id}>
-          <span className="font-medium">{contactMethodLabel(r.method)}</span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {whenShort(r.at)}
-            {r.by_name ? ` · ${r.by_name}` : ""}
-          </span>
-          {r.note ? <span className="whitespace-pre-line"> — {r.note}</span> : null}
-        </li>
-      ))}
+    <ul className="space-y-1 text-xs" data-list="timeline">
+      {q.data.map((r) => {
+        const done = r.method === SERVICE_DONE_METHOD;
+        return (
+          <li
+            key={r.id}
+            className={done ? "rounded-sm bg-emerald-50 px-1.5 py-1 dark:bg-emerald-950/40" : ""}
+          >
+            <span className="inline-flex items-center gap-1 font-medium">
+              {done && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />}
+              {contactMethodLabel(r.method)}
+            </span>
+            <span className="text-muted-foreground">
+              {" "}
+              · {whenShort(r.at)}
+              {r.by_name ? ` · ${r.by_name}` : ""}
+            </span>
+            {r.note ? <span className="whitespace-pre-line"> — {r.note}</span> : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -348,7 +395,7 @@ export function LatestContact({ kind, itemId }: { kind: ContactKind; itemId: str
     );
   // The server returns newest first.
   const [last] = q.data;
-  if (!last) return <p className="text-xs text-muted-foreground">No contact logged yet</p>;
+  if (!last) return <p className="text-xs text-muted-foreground">Nothing on the timeline yet</p>;
   const Chevron = showAll ? ChevronDown : ChevronRight;
   return (
     <div className="space-y-1">

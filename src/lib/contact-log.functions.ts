@@ -50,15 +50,26 @@ export const CONTACT_METHOD_LABELS: Record<ContactMethod, string> = {
  * Contacted (crm_contact_log_apply skips it). Not one of the one-tap buttons.
  */
 export const LOG_NOTE_METHOD = "note";
-/** The label a logged row shows: the contact method, or "Note" for a plain note. */
+/**
+ * The timeline (owner, Oct 14): a comment someone wrote (the Comment button; @mentions tell
+ * people), and "Service done", written by the close-out with a brief summary. Neither is a
+ * contact: the database trigger stamps nothing and moves nothing for them, as for a note.
+ */
+export const COMMENT_METHOD = "comment";
+export const SERVICE_DONE_METHOD = "service";
+/** The label a logged row shows: the contact method, "Note", "Comment" or "Service done". */
 export const contactMethodLabel = (method: string): string =>
   method === LOG_NOTE_METHOD
     ? "Note"
-    : CONTACT_METHOD_LABELS[
-        (CONTACT_METHODS as readonly string[]).includes(method)
-          ? (method as ContactMethod)
-          : "other"
-      ];
+    : method === COMMENT_METHOD
+      ? "Comment"
+      : method === SERVICE_DONE_METHOD
+        ? "Service done"
+        : CONTACT_METHOD_LABELS[
+            (CONTACT_METHODS as readonly string[]).includes(method)
+              ? (method as ContactMethod)
+              : "other"
+          ];
 export const CONTACT_KINDS = ["ticket", "opportunity"] as const;
 export type ContactKind = (typeof CONTACT_KINDS)[number];
 
@@ -95,7 +106,8 @@ export function isPastLimit(
 const logSchema = z.object({
   kind: z.enum(CONTACT_KINDS),
   item_id: z.string().uuid(),
-  method: z.enum(CONTACT_METHODS),
+  /** A contact method, or "comment" (owner, Oct 14): a comment needs its text (checked below). */
+  method: z.enum([...CONTACT_METHODS, COMMENT_METHOD]),
   note: z
     .string()
     .trim()
@@ -109,6 +121,7 @@ const logSchema = z.object({
     .optional(),
 });
 export type LogContactInput = z.input<typeof logSchema>;
+export const COMMENT_NEEDS_TEXT = "Write the comment first.";
 
 /**
  * The logged row, the hold the same save set (null when no date was given), and the @mentions
@@ -156,6 +169,7 @@ export const logContact = createServerFn({ method: "POST" })
       const { assertLiveOpportunity } = await import("@/lib/opportunities.functions");
       await assertLiveOpportunity(context.supabase, data.item_id);
     }
+    if (data.method === COMMENT_METHOD && !data.note) throw new Error(COMMENT_NEEDS_TEXT);
     const p = await myProfile(context);
     const by_name = p.name;
     const today = easternYmd();

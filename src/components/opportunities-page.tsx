@@ -37,6 +37,7 @@ import {
   FilePlus2,
   FileText,
   Loader2,
+  History,
   Phone,
   Plus,
   RotateCcw,
@@ -1259,9 +1260,14 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             {/* Owner, Sep 28: log each call / text / email / visit. The first one moves an Open
                 opportunity to Contacted (server side); the buttons refetch this opportunity so
                 the status select shows it. */}
-            <section className="space-y-2 rounded-md border px-3 py-2 text-sm" aria-label="Contact">
+            {/* Owner, Oct 14: the box is the timeline — contacts, comments, and "Service done"
+                from the tickets started here. */}
+            <section
+              className="space-y-2 rounded-md border px-3 py-2 text-sm"
+              aria-label="Timeline"
+            >
               <p className="flex items-center gap-1.5 font-medium">
-                <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Contact
+                <History className="h-3.5 w-3.5 text-muted-foreground" /> Timeline
               </p>
               {/* Not on a deleted opportunity: a contact would move it Open → Contacted. */}
               {!deleted && (

@@ -874,7 +874,9 @@ describe("the markup", () => {
       'type="date" className="h-8 w-48" value={tryAgain} min={bounds.min} max={bounds.max}',
     );
     expect(src).toContain("...(tryAgain ? { try_again_on: tryAgain } : {}),");
-    expect(src).toContain("if (picked && !log.isPending && holdReady) log.mutate(picked);");
+    // Oct 14 (owner): the save guard, with a comment's own check beside it.
+    expect(src).toContain("if (!picked || log.isPending || !holdReady) return;");
+    expect(src).toContain("log.mutate(picked);");
     expect(src).toContain(
       "`Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`",
     );

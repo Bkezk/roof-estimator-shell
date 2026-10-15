@@ -71,6 +71,7 @@ import {
   Lock,
   MapPin,
   Package,
+  History,
   Phone,
   Plus,
   Receipt,
@@ -158,7 +159,7 @@ import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-ex
 import { AerialSection } from "@/components/service/aerial-markup";
 import { InspectionSection } from "@/components/service/inspection-section";
 import {
-  LatestContact,
+  ContactLogList,
   LogContactButtons,
   NeedsActionStrip,
   UntouchedBadge,
@@ -1926,12 +1927,13 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const customerContact = job && (
     // Owner, Sep 28: log each call / text / email / visit so the office sees the
     // customer has been reached (and the ticket leaves the untouched list).
-    <section className="space-y-2 rounded-lg border p-3 text-sm" aria-label="Customer contact">
+    // Owner, Oct 14: the box is the timeline — contacts, comments and "Service done".
+    <section className="space-y-2 rounded-lg border p-3 text-sm" aria-label="Timeline">
       <p className="flex items-center gap-1.5 font-medium">
-        <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Customer contact
+        <History className="h-3.5 w-3.5 text-muted-foreground" /> Timeline
       </p>
       <LogContactButtons kind="ticket" itemId={job.id} />
-      <LatestContact kind="ticket" itemId={job.id} />
+      <ContactLogList kind="ticket" itemId={job.id} />
     </section>
   );
   // Description, then PO # and Job #.

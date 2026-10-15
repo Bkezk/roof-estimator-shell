@@ -20,6 +20,7 @@ import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import { REPAIR_TAG_VALUES } from "@/lib/repair-tags";
 import type { ServiceJobRow } from "@/lib/service.functions";
+import { SERVICE_DONE_METHOD } from "@/lib/contact-log.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
 import { easternYmd, resolveFieldDay } from "@/lib/field-day";
@@ -402,6 +403,17 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // Owner, Oct 14: the timeline (the contact log) says when service was completed, with a
+    // brief summary — on the ticket, and on the opportunity the ticket was started from. Once,
+    // at the first close-out (a ticket already stamped is not logged again). The close-out is
+    // done by now: a problem here is logged loudly, never a reason to fail it.
+    if (data.to === "done" && !job.completed_at && row.completed_at) {
+      try {
+        await logServiceDone(sb, row, who, context.userId);
+      } catch (e) {
+        console.error(`Ticket #${row.number}: the Service done timeline row was not written`, e);
+      }
+    }
     if (row.stage !== job.stage) {
       const { afterTicketStage } = await import("@/lib/ticket-events.server");
       await afterTicketStage(row, job.stage, { id: context.userId, name: who }, context.supabase);
@@ -425,6 +437,45 @@ export const setFieldStatus = createServerFn({ method: "POST" })
     }
     return row;
   });
+
+/** The "Service done" timeline rows (service-done-summary.ts): the ticket's, and the opportunity's. */
+async function logServiceDone(
+  sb: SupabaseClient<Database>,
+  job: ServiceJobRow,
+  by: string | null,
+  userId: string,
+) {
+  const { serviceDoneSummary, serviceDoneForOpportunity } =
+    await import("@/lib/service-done-summary");
+  const [repairs, time] = await Promise.all([
+    sb.from("service_job_repairs").select("name, sort").eq("service_job_id", job.id).order("sort"),
+    sb.from("service_time_entries").select("hours").eq("service_job_id", job.id),
+  ]);
+  if (repairs.error) throw new Error(repairs.error.message);
+  if (time.error) throw new Error(time.error.message);
+  const summary = serviceDoneSummary({
+    by,
+    closingNotes: job.closing_notes,
+    repairNames: (repairs.data ?? []).map((r) => r.name ?? ""),
+    hours: (time.data ?? []).reduce((s, t) => s + Number(t.hours ?? 0), 0),
+  });
+  const base = { method: SERVICE_DONE_METHOD, by_user: userId, by_name: by };
+  const rows = [
+    { ...base, kind: "ticket", item_id: job.id, note: summary },
+    ...(job.from_opportunity_id
+      ? [
+          {
+            ...base,
+            kind: "opportunity",
+            item_id: job.from_opportunity_id,
+            note: serviceDoneForOpportunity(job.number, job.customer_name, summary),
+          },
+        ]
+      : []),
+  ];
+  const { error } = await sb.from("crm_contact_log").insert(rows);
+  if (error) throw new Error(error.message);
+}
 
 export const listTimeEntries = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

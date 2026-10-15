@@ -566,7 +566,7 @@ function Timeline({ jobId }: { jobId: string }) {
   );
   return (
     <Box
-      title="Timeline"
+      title="Activity log"
       icon={History}
       collapsible
       defaultOpen={false}
