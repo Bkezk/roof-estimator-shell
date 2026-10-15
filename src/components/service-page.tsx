@@ -2608,9 +2608,22 @@ function CustomerBlock(props: {
         );
       })()}
       <div className="space-y-1">
-        <label htmlFor="ticket-site" className="text-xs font-medium">
-          Property
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="ticket-site" className="text-xs font-medium">
+            Property
+          </label>
+          {/* Oct 15: the property's own page (its tickets, sites, warranties). */}
+          {props.siteId && (
+            <Link
+              to="/properties/$id"
+              params={{ id: props.siteId }}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              title="Open this property"
+            >
+              Open property
+            </Link>
+          )}
+        </div>
         <SiteSelect
           id="ticket-site"
           accountId={accountId}

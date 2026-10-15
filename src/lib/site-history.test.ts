@@ -75,7 +75,8 @@ describe("Sites are called Properties (owner, Oct 6)", () => {
   it("in the interface; the data keeps its names", () => {
     const read = (p: string) => readFileSync(p, "utf8");
     const customers = read("src/components/customers-page.tsx");
-    expect(customers).toContain('<MapPin className="h-4 w-4" /> Properties');
+    // Since Oct 15 the heading is the section's fold header (components/section-fold.tsx).
+    expect(customers.replace(/\s+/g, " ")).toContain('icon={MapPin} title="Properties"');
     expect(customers).not.toMatch(/>\s*Sites\s*</);
     expect(read("src/components/crm/site-select.tsx")).toContain('"Pick the property…"');
     expect(read("src/components/service-page.tsx")).toMatch(

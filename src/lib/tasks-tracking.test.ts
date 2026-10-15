@@ -174,17 +174,18 @@ describe("20261009100000_tasks_tracking.sql", () => {
 
 describe("reading and showing a task's History", () => {
   it("listAudit takes a task (its own rows), AuditFold has it", () => {
-    const fns = read("src/lib/audit.functions.ts");
+    const fns = src("src/lib/audit.functions.ts");
     expect(fns).toContain(
-      'entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"])',
+      'entity: z.enum([ "invoice", "account", "vendor", "ticket", "task", "opportunity", "bid", "site", ]),',
     );
-    // Since Oct 12 the task shares its own-rows branch with the opportunity and the bid.
+    // Since Oct 12 the task shares its own-rows branch with the opportunity and the bid (and,
+    // since Oct 15, the property).
     expect(fns).toContain(
-      'if (data.entity === "task" || data.entity === "opportunity" || data.entity === "bid") {',
+      'if ( data.entity === "task" || data.entity === "opportunity" || data.entity === "bid" || data.entity === "site" ) {',
     );
     expect(fns).toContain('.eq("entity", data.entity)');
     expect(src("src/components/audit-history.tsx")).toContain(
-      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid";',
+      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid" | "site";',
     );
   });
   it("the task dialog, editing a task, mounts the History fold (it hides itself from non-managers) and shows the stamp", () => {

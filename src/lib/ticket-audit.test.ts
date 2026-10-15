@@ -70,9 +70,9 @@ describe("the migration", () => {
 
 describe("reading it", () => {
   it("listAudit takes a ticket: its own rows and its time entries' rows", () => {
-    const fns = read("src/lib/audit.functions.ts");
+    const fns = read("src/lib/audit.functions.ts").replace(/\s+/g, " ");
     expect(fns).toContain(
-      'entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"])',
+      'entity: z.enum([ "invoice", "account", "vendor", "ticket", "task", "opportunity", "bid", "site", ]),',
     );
     expect(fns).toContain('.in("entity", ["ticket", "ticket_time"])');
   });

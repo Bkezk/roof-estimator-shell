@@ -38,6 +38,7 @@ import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiRestoreRouteImport } from './routes/api.restore'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as ITokenRouteImport } from './routes/i.$token'
+import { Route as PropertiesIdRouteImport } from './routes/properties_.$id'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
@@ -192,6 +193,11 @@ const ITokenRoute = ITokenRouteImport.update({
   path: '/i/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PropertiesIdRoute = PropertiesIdRouteImport.update({
+  id: '/properties_/$id',
+  path: '/properties/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProspectLeadsRoute = ProspectLeadsRouteImport.update({
   id: '/prospect_/leads',
   path: '/prospect/leads',
@@ -263,6 +269,7 @@ export interface FileRoutesByFullPath {
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
+  '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -302,6 +309,7 @@ export interface FileRoutesByTo {
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
+  '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -342,6 +350,7 @@ export interface FileRoutesById {
   '/api/restore': typeof ApiRestoreRoute
   '/customers_/$id': typeof CustomersIdRoute
   '/i/$token': typeof ITokenRoute
+  '/properties_/$id': typeof PropertiesIdRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -383,6 +392,7 @@ export interface FileRouteTypes {
     | '/api/restore'
     | '/customers/$id'
     | '/i/$token'
+    | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
@@ -422,6 +432,7 @@ export interface FileRouteTypes {
     | '/api/restore'
     | '/customers/$id'
     | '/i/$token'
+    | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
@@ -461,6 +472,7 @@ export interface FileRouteTypes {
     | '/api/restore'
     | '/customers_/$id'
     | '/i/$token'
+    | '/properties_/$id'
     | '/prospect_/leads'
     | '/service/board'
     | '/service/invoices'
@@ -501,6 +513,7 @@ export interface RootRouteChildren {
   ApiRestoreRoute: typeof ApiRestoreRoute
   CustomersIdRoute: typeof CustomersIdRoute
   ITokenRoute: typeof ITokenRoute
+  PropertiesIdRoute: typeof PropertiesIdRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
   ApiCronLeadsImportRoute: typeof ApiCronLeadsImportRoute
@@ -713,6 +726,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ITokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/properties_/$id': {
+      id: '/properties_/$id'
+      path: '/properties/$id'
+      fullPath: '/properties/$id'
+      preLoaderRoute: typeof PropertiesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/prospect_/leads': {
       id: '/prospect_/leads'
       path: '/prospect/leads'
@@ -817,6 +837,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRestoreRoute: ApiRestoreRoute,
   CustomersIdRoute: CustomersIdRoute,
   ITokenRoute: ITokenRoute,
+  PropertiesIdRoute: PropertiesIdRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,
   ApiCronLeadsImportRoute: ApiCronLeadsImportRoute,

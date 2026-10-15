@@ -310,9 +310,12 @@ describe("a customer's Tasks list", () => {
     expect(page).toContain(
       '<span className="text-xs text-muted-foreground">{stamp ?? "Open"}</span>',
     );
-    expect(page).toContain("defaults={{ account_id: accountId, account_name: accountName }}");
+    // Since Oct 15 the same section serves the property's page: New task starts on it.
     expect(page).toContain(
-      'onSaved={() => void qc.invalidateQueries({ queryKey: ["account", accountId] })}',
+      "defaults={{ account_id: accountId, account_name: accountName, site_id: site?.id ?? null, site_name: site?.name ?? null, }}",
+    );
+    expect(page).toContain(
+      'onSaved={() => { void qc.invalidateQueries({ queryKey: ["account", accountId] });',
     );
     // A deleted customer is read-only: no New task.
     expect(page).toContain(

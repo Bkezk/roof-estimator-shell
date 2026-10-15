@@ -7,7 +7,8 @@
  * invoice). A customer's history includes the rows of its sites and contacts, deleted ones too.
  * A vendor's history is its own rows (entity 'vendor'); a task's too (entity 'task'; owner, Oct 9),
  * and an opportunity's and a bid's (entity 'opportunity' / 'bid'; owner, Oct 12, item 12 — the
- * folds on the opportunity page and in the estimator). Admins and managers only, as everywhere.
+ * folds on the opportunity page and in the estimator), and a property's (entity 'site', its own
+ * page since Oct 15). Admins and managers only, as everywhere.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -23,7 +24,16 @@ export const listAudit = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z
       .object({
-        entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"]),
+        entity: z.enum([
+          "invoice",
+          "account",
+          "vendor",
+          "ticket",
+          "task",
+          "opportunity",
+          "bid",
+          "site",
+        ]),
         entity_id: z.string().uuid(),
       })
       .parse(d),
@@ -74,9 +84,16 @@ export const listAudit = createServerFn({ method: "GET" })
       if (error) throw new Error(error.message);
       return (rows ?? []) as AuditRow[];
     }
-    if (data.entity === "task" || data.entity === "opportunity" || data.entity === "bid") {
+    if (
+      data.entity === "task" ||
+      data.entity === "opportunity" ||
+      data.entity === "bid" ||
+      data.entity === "site"
+    ) {
       // Its own rows: a task (its History fold in the task dialog; owner, Oct 9), an opportunity
-      // (the fold on its page) or a bid (the fold in the estimator; owner, Oct 12).
+      // (the fold on its page), a bid (the fold in the estimator; owner, Oct 12) or a property
+      // (the fold on its page, Oct 15; its inner sites and warranties are logged as entity
+      // 'site' under it too — migration 20261006201000).
       const { data: rows, error } = await sb
         .from("audit_log")
         .select(cols)

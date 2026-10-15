@@ -305,7 +305,9 @@ describe("the Customers page on a deleted customer (source)", () => {
     expect(page).toContain("const deleted = !!d.account.deleted_at;");
     expect(page).toMatch(/<AccountBlock\s+account=\{d\.account\}\s+readOnly=\{deleted\}/);
     expect(page).toContain("<ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />");
-    expect(page).toContain("<SitesSection accountId={id} sites={d.sites} readOnly={deleted} />");
+    expect(page).toContain(
+      "<SitesSection accountId={id} sites={d.sites} jobs={d.jobs} readOnly={deleted} />",
+    );
     expect(page).toContain("<BidsSection accountId={id} bids={d.bids} readOnly={deleted} />");
   });
   it("hides Edit / Delete / New ticket and never opens the form when read-only", () => {

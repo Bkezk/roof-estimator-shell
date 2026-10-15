@@ -23,6 +23,12 @@
  * "Deleted on <date> by <who>" banner, and everything read-only — no New ticket, Edit, Delete,
  * site, contact or bid-link actions (the server refuses them too). Admins and managers get
  * Restore (restoreAccount), which brings back the sites and contacts deleted with it.
+ *
+ * Every section of the customer's page folds under its header (owner, Oct 15: "lets make these
+ * collapsible so if there's 100 tickets it won't take up the whole page"): Properties open, the
+ * rest open while short and folded past ten rows, each fold remembered per user
+ * (lib/customer-folds.ts, components/section-fold.tsx). A property's name opens its own page,
+ * /properties/<uuid> (property-page.tsx), with its tickets, sites and warranties.
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,6 +66,10 @@ import { dispatchesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/ac
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
+import { FoldHeader } from "@/components/section-fold";
+import { useSectionFold } from "@/lib/use-section-fold";
+import { TicketRows } from "@/components/crm/ticket-rows";
+import { countBy } from "@/lib/paging";
 import { doneStamp, orderAccountTasks, type TaskRow } from "@/lib/tasks";
 import { toldSuffix } from "@/lib/mentions";
 import { TaskDialog } from "@/components/tasks/task-dialog";
@@ -539,7 +549,7 @@ function AccountDetailPane({ id }: { id: string }) {
         onDelete={() => setConfirmDelete(true)}
       />
       <ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />
-      <SitesSection accountId={id} sites={d.sites} readOnly={deleted} />
+      <SitesSection accountId={id} sites={d.sites} jobs={d.jobs} readOnly={deleted} />
       <TicketsSection jobs={d.jobs} />
       {/* Owner, Oct 12: the customer's opportunities, for those who see the Opportunities list
           (Customers / Estimate; the same people who read them). */}
@@ -1076,31 +1086,40 @@ function ContactsSection({
     return names.length ? names.join(", ") : "A deleted property";
   };
   const rows = contacts.data ?? [];
+  const fold = useSectionFold("customer", "contacts", contacts.data ? rows.length : null);
 
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Contacts">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <Users className="h-4 w-4" /> Contacts
-          {contacts.data && (
-            <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
-          )}
-        </h2>
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={Users}
+        title="Contacts"
+        count={contacts.data ? rows.length : null}
+      >
         {!readOnly && editing !== "new" && (
-          <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditing("new");
+              if (!fold.open) fold.toggle();
+            }}
+          >
             <Plus className="mr-1 h-4 w-4" /> Add contact
           </Button>
         )}
-      </div>
-      {contacts.error ? (
+      </FoldHeader>
+      {fold.open && contacts.error ? (
         <p className="text-sm text-destructive">
           Could not load the contacts: {errText(contacts.error)}
         </p>
-      ) : contacts.isLoading ? (
+      ) : fold.open && contacts.isLoading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading contacts…
         </p>
       ) : (
+        fold.open &&
         rows.length === 0 &&
         editing !== "new" && (
           <p className="text-sm text-muted-foreground">
@@ -1109,7 +1128,7 @@ function ContactsSection({
           </p>
         )
       )}
-      <div className="space-y-2">
+      <div className="space-y-2" hidden={!fold.open}>
         {rows.map((c) =>
           !readOnly && editing === c.id ? (
             <ContactForm
@@ -1428,14 +1447,19 @@ function ContactForm(props: {
 function SitesSection({
   accountId,
   sites,
+  jobs,
   readOnly,
 }: {
   accountId: string;
   sites: SiteRow[];
+  /** The customer's tickets: each property card counts its own (by site_id). */
+  jobs: AccountDetail["jobs"];
   /** A deleted customer: the sites are listed, no Add / New ticket / Edit / Delete. */
   readOnly: boolean;
 }) {
   const { can, profile } = useAuth();
+  const fold = useSectionFold("customer", "properties", sites.length);
+  const ticketCounts = countBy(jobs, (j) => j.site_id);
   // Only a manager creates tickets (owner, Oct 1).
   const canNewTicket = can("service") && dispatchesTickets(profile) && !readOnly;
   const qc = useQueryClient();
@@ -1461,24 +1485,33 @@ function SitesSection({
 
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Properties">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <MapPin className="h-4 w-4" /> Properties
-          <span className="text-xs font-normal text-muted-foreground">{sites.length}</span>
-        </h2>
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={MapPin}
+        title="Properties"
+        count={sites.length}
+      >
         {!readOnly && editing !== "new" && (
-          <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditing("new");
+              if (!fold.open) fold.toggle();
+            }}
+          >
             {/* "Property" since Oct 6 (owner, Oct 6): the inner Sites are the site form's. */}
             <Plus className="mr-1 h-4 w-4" /> Add property
           </Button>
         )}
-      </div>
-      {sites.length === 0 && editing !== "new" && (
+      </FoldHeader>
+      {fold.open && sites.length === 0 && editing !== "new" && (
         <p className="text-sm text-muted-foreground">
           No properties yet. A property is a building or address the work happens at.
         </p>
       )}
-      <div className="space-y-2">
+      <div className="space-y-2" hidden={!fold.open}>
         {sites.map((s) =>
           !readOnly && editing === s.id ? (
             <SiteForm
@@ -1496,7 +1529,20 @@ function SitesSection({
               className="flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-medium">{s.name}</p>
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  {/* Oct 15: the property's own page — its details, tickets, sites. */}
+                  <Link
+                    to="/properties/$id"
+                    params={{ id: s.id }}
+                    className="font-medium underline-offset-2 hover:underline"
+                    title="Open this property"
+                  >
+                    {s.name}
+                  </Link>
+                  <span className="text-xs text-muted-foreground" data-site-tickets={s.id}>
+                    {ticketCounts.get(s.id) ?? 0} ticket{ticketCounts.get(s.id) === 1 ? "" : "s"}
+                  </span>
+                </p>
                 <p className="text-sm text-muted-foreground">
                   {siteAddressLine(s) || "No address on file"}
                 </p>
@@ -1603,37 +1649,20 @@ function SitesSection({
 }
 
 function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
+  const fold = useSectionFold("customer", "tickets", jobs.length);
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Tickets">
-      <h2 className="flex items-center gap-2 font-semibold">
-        <Wrench className="h-4 w-4" /> Tickets
-        <span className="text-xs font-normal text-muted-foreground">{jobs.length}</span>
-      </h2>
-      {jobs.length === 0 ? (
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={Wrench}
+        title="Tickets"
+        count={jobs.length}
+      />
+      {!fold.open ? null : jobs.length === 0 ? (
         <p className="text-sm text-muted-foreground">No service tickets for this customer.</p>
       ) : (
-        <div className="divide-y rounded-md border">
-          {jobs.map((j) => (
-            <Link
-              key={j.id}
-              to="/service"
-              search={{ id: j.id }}
-              className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm hover:bg-muted/60"
-            >
-              <span className="font-medium">#{j.number}</span>
-              <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
-                {stageLabel(j.stage)}
-              </Badge>
-              <span className="min-w-0 flex-1 truncate">
-                {j.site_name ? `${j.site_name} · ` : ""}
-                {j.description || "No description"}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {j.scheduled_date ? day(j.scheduled_date) : `Updated ${shortDate(j.updated_at)}`}
-              </span>
-            </Link>
-          ))}
-        </div>
+        <TicketRows jobs={jobs} />
       )}
     </section>
   );
@@ -1644,12 +1673,18 @@ function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
  * Lost / No response) folded under "Closed", deleted ones last in that fold. Each row — title,
  * status, assignee, expected close, the linked bid's status — opens the opportunity.
  */
-function OpportunitiesSection({
+export function OpportunitiesSection({
   opportunities,
+  page = "customer",
+  emptyText = "No opportunities for this customer.",
 }: {
   opportunities: AccountDetail["opportunities"];
+  /** Whose folds to remember: the customer's page (default) or the property's. */
+  page?: "customer" | "property";
+  emptyText?: string;
 }) {
   const [showClosed, setShowClosed] = useState(false);
+  const fold = useSectionFold(page, "opportunities", opportunities.length);
   const isClosed = (o: AccountDetail["opportunities"][number]) =>
     !!o.deleted_at || ["won", "lost", "no_response"].includes(o.status);
   const live = opportunities.filter((o) => !isClosed(o));
@@ -1680,12 +1715,15 @@ function OpportunitiesSection({
   );
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Opportunities">
-      <h2 className="flex items-center gap-2 font-semibold">
-        <Target className="h-4 w-4" /> Opportunities
-        <span className="text-xs font-normal text-muted-foreground">{opportunities.length}</span>
-      </h2>
-      {opportunities.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No opportunities for this customer.</p>
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={Target}
+        title="Opportunities"
+        count={opportunities.length}
+      />
+      {!fold.open ? null : opportunities.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
       ) : (
         <>
           {live.length > 0 && <div className="divide-y rounded-md border">{live.map(row)}</div>}
@@ -1713,35 +1751,43 @@ function OpportunitiesSection({
  * behavior as services"): open ones first by due day, then done ones with their stamp ("Done
  * Oct 9, 2:15 PM by …"). A row opens the task dialog; New task starts one on this company.
  */
-function TasksSection({
+export function TasksSection({
   accountId,
   accountName,
+  site,
   tasks,
   readOnly,
 }: {
   accountId: string;
   accountName: string;
+  /** On a property's page: New task starts on this property, and the folds are the page's. */
+  site?: { id: string; name: string } | undefined;
   tasks: TaskRow[];
   readOnly: boolean;
 }) {
   const qc = useQueryClient();
   const [dialog, setDialog] = useState<{ task?: TaskRow } | null>(null);
   const rows = orderAccountTasks(tasks);
+  const fold = useSectionFold(site ? "property" : "customer", "tasks", rows.length);
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Tasks">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <ListTodo className="h-4 w-4" /> Tasks
-          <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
-        </h2>
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={ListTodo}
+        title="Tasks"
+        count={rows.length}
+      >
         {!readOnly && (
           <Button size="sm" variant="outline" onClick={() => setDialog({})}>
             <Plus className="mr-1 h-4 w-4" /> New task
           </Button>
         )}
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No tasks for this customer.</p>
+      </FoldHeader>
+      {!fold.open ? null : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No tasks for this {site ? "property" : "customer"}.
+        </p>
       ) : (
         <div className="divide-y rounded-md border">
           {rows.map((t) => {
@@ -1781,8 +1827,16 @@ function TasksSection({
           if (!o) setDialog(null);
         }}
         task={dialog?.task}
-        defaults={{ account_id: accountId, account_name: accountName }}
-        onSaved={() => void qc.invalidateQueries({ queryKey: ["account", accountId] })}
+        defaults={{
+          account_id: accountId,
+          account_name: accountName,
+          site_id: site?.id ?? null,
+          site_name: site?.name ?? null,
+        }}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ["account", accountId] });
+          if (site) void qc.invalidateQueries({ queryKey: ["property", site.id] });
+        }}
       />
     </section>
   );
@@ -1798,15 +1852,17 @@ function TakeoffsSection({ accountId }: { accountId: string }) {
     enabled: !!session,
   });
   const rows = list.data ?? [];
+  const fold = useSectionFold("customer", "takeoffs", list.data ? rows.length : null);
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Takeoffs">
-      <h2 className="flex items-center gap-2 font-semibold">
-        <Ruler className="h-4 w-4" /> Takeoffs
-        {list.data && (
-          <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
-        )}
-      </h2>
-      {list.error ? (
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={Ruler}
+        title="Takeoffs"
+        count={list.data ? rows.length : null}
+      />
+      {!fold.open ? null : list.error ? (
         <p className="text-sm text-destructive">
           Could not load the takeoffs: {errText(list.error)}
         </p>
@@ -1894,134 +1950,155 @@ function BidsSection({
     onError: (e) => toast.error(`Could not change the bid link: ${errText(e)}`),
   });
 
+  const fold = useSectionFold("customer", "bids", bids.length);
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Bids">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <Link2 className="h-4 w-4" /> Bids
-          <span className="text-xs font-normal text-muted-foreground">{bids.length}</span>
-        </h2>
+      <FoldHeader
+        open={fold.open}
+        onToggle={fold.toggle}
+        icon={Link2}
+        title="Bids"
+        count={bids.length}
+      >
         {!readOnly && !linking && (
-          <Button size="sm" variant="outline" onClick={() => setLinking(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setLinking(true);
+              if (!fold.open) fold.toggle();
+            }}
+          >
             <Plus className="mr-1 h-4 w-4" /> Link a bid
           </Button>
         )}
-      </div>
-      {!readOnly && !!suggested.data?.length && (
-        <div
-          className="space-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-800 dark:bg-amber-950/40"
-          aria-label="Bids that look like this customer"
-        >
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            Bids that look like this customer
-          </p>
-          <div className="divide-y rounded-md border bg-card">
-            {suggested.data.map((b) => (
-              <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-                <Link
-                  to="/estimate"
-                  search={{ bid: b.id }}
-                  className="min-w-0 flex-1 truncate text-sm font-medium underline-offset-2 hover:underline"
-                  title="Open this bid"
-                >
-                  {b.name}
-                </Link>
-                <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
-                  {b.status}
-                </Badge>
-                <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={link.isPending}
-                  onClick={() => link.mutate({ bid: b, accountId })}
-                >
-                  <Link2 className="mr-1 h-4 w-4" /> Link
-                </Button>
+      </FoldHeader>
+      {fold.open && (
+        <>
+          {!readOnly && !!suggested.data?.length && (
+            <div
+              className="space-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-800 dark:bg-amber-950/40"
+              aria-label="Bids that look like this customer"
+            >
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                Bids that look like this customer
+              </p>
+              <div className="divide-y rounded-md border bg-card">
+                {suggested.data.map((b) => (
+                  <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                    <Link
+                      to="/estimate"
+                      search={{ bid: b.id }}
+                      className="min-w-0 flex-1 truncate text-sm font-medium underline-offset-2 hover:underline"
+                      title="Open this bid"
+                    >
+                      {b.name}
+                    </Link>
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
+                      {b.status}
+                    </Badge>
+                    <span className="text-sm tabular-nums">
+                      {money(Number(b.grand_total) || 0)}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={link.isPending}
+                      onClick={() => link.mutate({ bid: b, accountId })}
+                    >
+                      <Link2 className="mr-1 h-4 w-4" /> Link
+                    </Button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {bids.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No bids linked to this customer.</p>
-      ) : (
-        <div className="divide-y rounded-md border">
-          {bids.map((b) => (
-            <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-              <Link
-                to="/estimate"
-                search={{ bid: b.id }}
-                className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
-                title="Open this bid"
-              >
-                {b.name}
-              </Link>
-              <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
-                {b.status}
-              </Badge>
-              <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
-              <span className="text-xs text-muted-foreground">{shortDate(b.updated_at)}</span>
-              {!readOnly && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="Unlink this bid from the customer"
-                  aria-label={`Unlink ${b.name}`}
-                  disabled={link.isPending}
-                  onClick={() => link.mutate({ bid: b, accountId: null })}
-                >
-                  <Unlink className="h-4 w-4" />
-                </Button>
-              )}
             </div>
-          ))}
-        </div>
-      )}
-      {!readOnly && linking && (
-        <div className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-3">
-          <div className="flex items-center gap-2">
-            <Input
-              type="search"
-              autoFocus
-              placeholder="Search saved bids not linked to a customer…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              className="bg-background"
-            />
-            <Button size="sm" variant="ghost" onClick={() => setLinking(false)}>
-              Done
-            </Button>
-          </div>
-          {unlinked.error ? (
-            <p className="text-sm text-destructive">Search failed: {errText(unlinked.error)}</p>
-          ) : unlinked.isLoading ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Searching…
-            </p>
-          ) : !unlinked.data?.length ? (
-            <p className="text-sm text-muted-foreground">No unlinked bids match.</p>
+          )}
+          {bids.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No bids linked to this customer.</p>
           ) : (
-            <div className="divide-y rounded-md border bg-card">
-              {unlinked.data.map((b) => (
+            <div className="divide-y rounded-md border">
+              {bids.map((b) => (
                 <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{b.name}</span>
-                  <span className="text-xs capitalize text-muted-foreground">{b.status}</span>
-                  <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={link.isPending}
-                    onClick={() => link.mutate({ bid: b, accountId })}
+                  <Link
+                    to="/estimate"
+                    search={{ bid: b.id }}
+                    className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
+                    title="Open this bid"
                   >
-                    Link
-                  </Button>
+                    {b.name}
+                  </Link>
+                  <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
+                    {b.status}
+                  </Badge>
+                  <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
+                  <span className="text-xs text-muted-foreground">{shortDate(b.updated_at)}</span>
+                  {!readOnly && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Unlink this bid from the customer"
+                      aria-label={`Unlink ${b.name}`}
+                      disabled={link.isPending}
+                      onClick={() => link.mutate({ bid: b, accountId: null })}
+                    >
+                      <Unlink className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
           )}
-        </div>
+          {!readOnly && linking && (
+            <div className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-3">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="search"
+                  autoFocus
+                  placeholder="Search saved bids not linked to a customer…"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  className="bg-background"
+                />
+                <Button size="sm" variant="ghost" onClick={() => setLinking(false)}>
+                  Done
+                </Button>
+              </div>
+              {unlinked.error ? (
+                <p className="text-sm text-destructive">Search failed: {errText(unlinked.error)}</p>
+              ) : unlinked.isLoading ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+                </p>
+              ) : !unlinked.data?.length ? (
+                <p className="text-sm text-muted-foreground">No unlinked bids match.</p>
+              ) : (
+                <div className="divide-y rounded-md border bg-card">
+                  {unlinked.data.map((b) => (
+                    <div
+                      key={b.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{b.name}</span>
+                      <span className="text-xs capitalize text-muted-foreground">{b.status}</span>
+                      <span className="text-sm tabular-nums">
+                        {money(Number(b.grand_total) || 0)}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={link.isPending}
+                        onClick={() => link.mutate({ bid: b, accountId })}
+                      >
+                        Link
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

@@ -410,6 +410,134 @@ async function accountOpportunities(
   );
 }
 
+/**
+ * A property's own page (owner, Oct 15: "click a property to open its own page where you can see
+ * its details, how many tickets were there, its sites, etc."): the crm_sites row, its customer,
+ * and what links to it by site_id — the tickets (every stage, newest first, with a count by
+ * stage), the opportunities, the bids (Estimate access only, as on the customer) and the tasks
+ * RLS lets the reader see. Takeoffs link by customer and building only, so none here.
+ */
+export interface PropertyDetail {
+  /** Deleted too (deleted_at set): an old link shows it with a banner, read-only. */
+  site: SiteRow;
+  /** Its customer; deleted_at set when the customer is gone (the page is read-only then too). */
+  account: { id: string; name: string; deleted_at: string | null };
+  /** Live tickets at this property, newest change first (the latest PROPERTY_JOBS_MAX). */
+  jobs: Database["public"]["Tables"]["service_jobs"]["Row"][];
+  /** How many of `jobs` are at each stage ("open" → 2); a stage with none is left out. */
+  job_counts: Record<string, number>;
+  opportunities: AccountOpportunity[];
+  /** Bids linked to the property — empty when the reader has no Estimate access. */
+  bids: LinkedBidRow[];
+  tasks: Database["public"]["Tables"]["tasks"]["Row"][];
+}
+
+/** The most tickets a property's page lists. */
+export const PROPERTY_JOBS_MAX = 500;
+
+/**
+ * The Tickets header's summary on a property, "12 tickets · 2 open · 1 scheduled · 9 closed":
+ * the total, then each stage with any, in stage order. "No tickets" for none.
+ */
+export function stageCountsLine(counts: Readonly<Record<string, number>>): string {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total === 0) return "No tickets";
+  const parts = [`${total} ticket${total === 1 ? "" : "s"}`];
+  for (const s of SERVICE_STAGE_ORDER) {
+    const n = counts[s] ?? 0;
+    if (n > 0) parts.push(`${n} ${STAGE_WORDS[s] ?? s}`);
+  }
+  // A stage the list does not know (an old row): after the known ones.
+  for (const [s, n] of Object.entries(counts))
+    if (n > 0 && !(SERVICE_STAGE_ORDER as readonly string[]).includes(s)) parts.push(`${n} ${s}`);
+  return parts.join(" · ");
+}
+// service.functions.ts's SERVICE_STAGES / STAGE_LABELS, lower-cased for the line; repeated here so
+// this CRM module does not import the Service module (MODULES.md).
+const SERVICE_STAGE_ORDER = [
+  "open",
+  "scheduled",
+  "done",
+  "authorized",
+  "invoiced",
+  "closed",
+] as const;
+const STAGE_WORDS: Record<string, string> = {
+  open: "open",
+  scheduled: "scheduled",
+  done: "done",
+  authorized: "authorized",
+  invoiced: "invoiced",
+  closed: "closed",
+};
+
+export const getProperty = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
+  .handler(async ({ data, context }): Promise<PropertyDetail> => {
+    const p = await readAccess(context);
+    const sb = context.supabase;
+    const { data: site, error } = await sb
+      .from("crm_sites")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!site) throw new Error("Property not found");
+    const [{ data: account, error: aErr }, { data: jobs }, { data: tasks }, { data: oppRows }] =
+      await Promise.all([
+        sb
+          .from("crm_accounts")
+          .select("id, name, deleted_at")
+          .eq("id", site.account_id)
+          .maybeSingle(),
+        sb
+          .from("service_jobs")
+          .select("*")
+          .eq("site_id", data.id)
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false })
+          .limit(PROPERTY_JOBS_MAX),
+        sb
+          .from("tasks")
+          .select("*")
+          .eq("site_id", data.id)
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(200),
+        sb
+          .from("crm_opportunities")
+          .select("id, title, status, assignee_id, expected_close, bid_id, deleted_at, updated_at")
+          .eq("site_id", data.id)
+          .order("updated_at", { ascending: false })
+          .limit(200),
+      ]);
+    if (aErr) throw new Error(aErr.message);
+    if (!account) throw new Error("Customer not found");
+    let bids: LinkedBidRow[] = [];
+    if (canAccess(p, "estimate")) {
+      const { data: b } = await sb
+        .from("bids")
+        .select("id, name, status, grand_total, updated_at")
+        .eq("site_id", data.id)
+        .is("deleted_at", null)
+        .order("updated_at", { ascending: false })
+        .limit(200);
+      bids = (b ?? []) as LinkedBidRow[];
+    }
+    const opportunities = await accountOpportunities(sb, oppRows ?? []);
+    const job_counts: Record<string, number> = {};
+    for (const [stage, n] of countBy(jobs ?? [], (j) => j.stage)) job_counts[stage] = n;
+    return {
+      site,
+      account,
+      jobs: jobs ?? [],
+      job_counts,
+      opportunities,
+      bids,
+      tasks: tasks ?? [],
+    };
+  });
+
 /** Drop the keys a caller left out, so an update leaves those columns as they are. */
 const defined = <T extends Record<string, unknown>>(o: T) =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as {

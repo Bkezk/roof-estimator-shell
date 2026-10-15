@@ -19,10 +19,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 /**
  * What has a History fold: an invoice, a customer (account), a vendor, a ticket, a task (owner,
- * Oct 9), an opportunity or a bid (owner, Oct 12).
+ * Oct 9), an opportunity or a bid (owner, Oct 12), a property (site; its own page, Oct 15).
  */
 export type AuditFold =
-  "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid";
+  "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid" | "site";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

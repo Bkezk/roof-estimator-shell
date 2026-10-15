@@ -381,7 +381,7 @@ describe("audit: the vendor entity and its History", () => {
   });
   it("listAudit reads a vendor's own rows; the fold takes 'vendor'", () => {
     const fn = serverFn(read("src/lib/audit.functions.ts"), "listAudit");
-    expect(fn).toContain('entity: z.enum(["invoice", "account", "vendor"');
+    expect(fn.replace(/\s+/g, " ")).toContain('entity: z.enum([ "invoice", "account", "vendor"');
     expect(fn).toMatch(
       /if \(data\.entity === "vendor"\) \{[\s\S]*?\.eq\("entity", "vendor"\)\s*\.eq\("entity_id", data\.entity_id\)/,
     );

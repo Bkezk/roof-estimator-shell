@@ -321,6 +321,8 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/service/invoices")) return "invoices";
   if (pathname.startsWith("/service")) return "service";
   if (pathname.startsWith("/customers")) return "customers";
+  // A property's own page (Oct 15) is the Customers page's, like the customer it belongs to.
+  if (pathname.startsWith("/properties")) return "customers";
   // Opportunities: every signed-in user (audit, Oct 2: a rep without Customers access was
   // bounced from their own opportunity's Work Overview link). What they see is the server's: RLS
   // gives Customers / Estimate users every opportunity and anyone else only their own

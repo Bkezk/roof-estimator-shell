@@ -204,11 +204,11 @@ describe("reading it (listAudit)", () => {
     );
   });
   it("the validator and the fold type know both", () => {
-    expect(read("src/lib/audit.functions.ts")).toContain(
-      'entity: z.enum(["invoice", "account", "vendor", "ticket", "task", "opportunity", "bid"])',
+    expect(src("src/lib/audit.functions.ts")).toContain(
+      'entity: z.enum([ "invoice", "account", "vendor", "ticket", "task", "opportunity", "bid", "site", ]),',
     );
     expect(src("src/components/audit-history.tsx")).toContain(
-      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid";',
+      'export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task" | "opportunity" | "bid" | "site";',
     );
   });
 });
