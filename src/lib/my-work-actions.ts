@@ -20,10 +20,16 @@
  *   - "Assign to…" on an Unassigned row (`assignPlan`): a ticket to a technician for whoever
  *     dispatches; a task or an opportunity to a user for an admin or a manager (`seesEveryone`,
  *     the server's rule in assignTask / assignOpportunity).
+ *   - The Calendar's Unassigned pane (owner, Oct 20) for whoever may act on nobody's work, not
+ *     only claimers (`showUnassignedPane`, `paneHint`): a viewer who cannot Claim but may assign
+ *     a row drags it onto a day and a small dialog assigns it for that day (`dropAssigns`;
+ *     `assignPlan` with the day). Until then the pane showed only for `canClaim` viewers, so an
+ *     admin, a manager or an unticked office dispatcher could dispatch from the List alone.
  *   - The toolbar's New ticket / New opportunity links (`newTicketHref`, NEW_OPPORTUNITY_HREF):
  *     from the Calendar the ticket carries the selected day.
  */
-import { dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
+import { canClaim, dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
+import { dateMoveProblem } from "@/lib/followup-rules";
 import { ymdParts, type WorkItem, type WorkKind } from "@/lib/my-work";
 
 /** The signed-in person as the rules read them: role, access, technician, and their id. */
@@ -141,20 +147,90 @@ export function assignKind(item: ActionIn, viewer: Viewer): AssignKind | null {
   return null;
 }
 
-/** What "Assign to…" sends: a ticket keeps its day (assignServiceJob needs one). */
+/**
+ * What "Assign to…" sends: a ticket keeps its day (assignServiceJob needs one) unless a day is
+ * given; a task or an opportunity carries `date` only when a day is given (Oct 20: a drop on a
+ * calendar day). An opportunity's `dateKept`: the day was NOT sent because the viewer may not
+ * move a stored expected close (followup-rules dateMoveProblem, the rule claimOpportunity
+ * applies) — the toast says the date stayed.
+ */
 export type AssignPlan =
   | { kind: "ticket"; id: string; technicianId: string; date: string | null }
-  | { kind: "task"; id: string; assignee: string }
-  | { kind: "opportunity"; id: string; assignee: string };
+  | { kind: "task"; id: string; assignee: string; date?: string }
+  | { kind: "opportunity"; id: string; assignee: string; date?: string; dateKept?: true };
 
-/** The assignment picking `userId` on an Unassigned row makes; null when not allowed. */
-export function assignPlan(item: ActionIn, userId: string, viewer: Viewer): AssignPlan | null {
+/**
+ * The assignment picking `userId` on an Unassigned row makes; null when not allowed. `day`
+ * (Oct 20: the row dropped on a calendar day) overrides the item's own date: a ticket is
+ * scheduled for it, a task is due on it, an opportunity's expected close becomes it where the
+ * viewer may move that date (else `dateKept`).
+ */
+export function assignPlan(
+  item: ActionIn,
+  userId: string,
+  viewer: Viewer,
+  day?: string | null,
+): AssignPlan | null {
   const kind = assignKind(item, viewer);
   if (!kind || !userId) return null;
+  const onDay = day && YMD.test(day) ? day : null;
   const id = workId(item);
-  if (kind === "ticket") return { kind, id, technicianId: userId, date: item.date };
-  return { kind, id, assignee: userId };
+  if (kind === "ticket") return { kind, id, technicianId: userId, date: onDay ?? item.date };
+  if (!onDay) return { kind, id, assignee: userId };
+  if (kind === "task") return { kind, id, assignee: userId, date: onDay };
+  const kept = !!dateMoveProblem({
+    profile: viewer,
+    oldYmd: item.date,
+    newYmd: onDay,
+    kind: "opportunity",
+  });
+  return kept
+    ? { kind, id, assignee: userId, dateKept: true }
+    : { kind, id, assignee: userId, date: onDay };
 }
+
+/**
+ * The "Assigned to …" toast (Oct 20): with the day it was dropped on, or — an opportunity whose
+ * expected close the viewer may not move — the date that stayed.
+ */
+export function assignedToast(name: string, day: string | null, kept: string | null): string {
+  if (kept) return `Assigned to ${name} — its expected close stays ${monthDay(kept)}`;
+  return day ? `Assigned to ${name} for ${monthDay(day)}` : `Assigned to ${name}`;
+}
+
+/**
+ * Does the Calendar show the Unassigned pane (owner, Oct 20)? For whoever may act on nobody's
+ * work: a claimer (`canClaim`) always — their Oct 8 pane, "Nothing waiting." included — and
+ * otherwise whoever may assign at least one of the unassigned rows listed (`assignKind`: an
+ * admin or a manager any of them, an unticked office dispatcher a ticket). A viewer who can do
+ * neither (sales, a technician-only user, the office with only nobody's tasks in the list) has
+ * no pane: the List's Unassigned column is where they read it.
+ */
+export function showUnassignedPane(items: readonly ActionIn[], viewer: Viewer): boolean {
+  if (!viewer) return false;
+  if (canClaim(viewer)) return true;
+  return items.some((i) => !!i.unassigned && assignKind(i, viewer) !== null);
+}
+
+export const PANE_HINT_CLAIM =
+  "Drag one onto a day to take it and put it there, or Claim to take it as is.";
+export const PANE_HINT_ASSIGN = "Drag one onto a day to assign it for that day, or use Assign to.";
+
+/** The pane's helper line: a claimer's drop claims, anyone else's drop assigns (`dropAssigns`). */
+export const paneHint = (viewer: Viewer): string =>
+  canClaim(viewer) ? PANE_HINT_CLAIM : PANE_HINT_ASSIGN;
+
+/**
+ * Does dropping this Unassigned row on a day open the assign dialog (Oct 20)? For a viewer who
+ * cannot Claim (a claimer's drop claims it for that day, as since Oct 8) but may assign that
+ * kind. A viewer who can do neither does not drag the row at all.
+ */
+export const dropAssigns = (item: ActionIn, viewer: Viewer): boolean =>
+  !canClaim(viewer) && assignKind(item, viewer) !== null;
+
+/** May the viewer drag this Unassigned row from the pane: a claimer, or an assigner of its kind. */
+export const dragsFromPane = (item: ActionIn, viewer: Viewer): boolean =>
+  canClaim(viewer) || assignKind(item, viewer) !== null;
 
 /** The toolbar's New ticket: a blank ticket, dated on the Calendar's selected day when given. */
 export const newTicketHref = (day?: string | null): string =>

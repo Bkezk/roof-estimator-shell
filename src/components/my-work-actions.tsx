@@ -9,6 +9,12 @@
  *     technician unchanged / moveTaskDate); the toast says when the ticket's hold ended with it.
  *   - assign: the "Assign to…" select on an Unassigned row (assignServiceJob / assignTask /
  *     assignOpportunity); its roster loads the first time a select of that kind opens.
+ *   - assignOn / assignDialog (owner, Oct 20): an Unassigned row dropped on a calendar day by
+ *     someone who may assign it but not Claim it (lib/my-work-actions.ts dropAssigns) opens a
+ *     small dialog — "Assign <title> for <Mon, Oct 22>", the same person select, Assign — and the
+ *     pick runs the same assign mutation with that day (assignPlan's day override: the ticket is
+ *     scheduled for it, the task is due on it, the opportunity's expected close becomes it where
+ *     the viewer may move that date, else the toast says it stayed). Cancel writes nothing.
  *
  * Every change invalidates ["my-work"] and toasts; an error toasts the server's message and
  * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it).
@@ -19,13 +25,17 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { listTechnicians, type UserProfile } from "@/lib/auth.functions";
+import { shortDay } from "@/lib/followup-rules";
 import type { WorkItem } from "@/lib/my-work";
 import {
   assignKind,
   assignPlan,
+  assignedToast,
   canEditWorkTask,
   canMoveWork,
+  dropAssigns,
   dropPlan,
+  monthDay,
   movedToast,
   taskOpensInPlace,
   workId,
@@ -45,6 +55,15 @@ import {
   userLabel,
 } from "@/lib/tasks.functions";
 import { AssignSelect, type AssignOption as Option } from "@/components/work-assign-select";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -62,6 +81,13 @@ export interface WorkActions {
   markingDone: (item: WorkItem) => boolean;
   /** The "Assign to…" select for an Unassigned row; null when the viewer may not assign it. */
   assign: (item: WorkItem) => ReactNode;
+  /**
+   * Does a drop of this Unassigned row on a calendar day open the assign dialog (Oct 20: the
+   * viewer may assign it but not Claim it — dropAssigns)? The pane drags the row when so.
+   */
+  dropAssigns: (item: WorkItem) => boolean;
+  /** The drop itself: open the dialog for that day (nothing when the viewer may not assign it). */
+  assignOn: (item: WorkItem, day: string) => void;
   /** May the viewer drag this row onto another calendar day? */
   movable: (item: WorkItem) => boolean;
   /** A drop on another day: reschedule (nothing on the same day or without permission). */
@@ -75,6 +101,8 @@ export function useWorkActions(profile: UserProfile | null): {
   /** The task open in place, for the page's edit TaskDialog. */
   editTask: TaskRow | null;
   closeTask: () => void;
+  /** The assign-for-a-day dialog (Oct 20), for the page to render once. */
+  assignDialog: ReactNode;
 } {
   const qc = useQueryClient();
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["my-work"] });
@@ -130,14 +158,17 @@ export function useWorkActions(profile: UserProfile | null): {
     },
   });
 
-  // "Assign to…" on an Unassigned row.
+  // "Assign to…" on an Unassigned row, or the dialog's Assign (Oct 20: with the dropped day).
   const assignTaskFn = useServerFn(assignTask);
   const assignOppFn = useServerFn(assignOpportunity);
   const assign = useMutation({
-    mutationFn: async (v: AssignPlan & { name: string }) => {
+    /** Resolves to the expected close an opportunity KEPT when the viewer may not move it. */
+    mutationFn: async (
+      v: AssignPlan & { name: string; day: string | null },
+    ): Promise<string | null> => {
       // expect_unassigned (Oct 15): the ticket must still be nobody's at the write, or the
       // server answers "Someone already has it" — two dispatchers cannot both hand it out.
-      if (v.kind === "ticket")
+      if (v.kind === "ticket") {
         await assignTicketFn({
           data: {
             id: v.id,
@@ -146,11 +177,19 @@ export function useWorkActions(profile: UserProfile | null): {
             expect_unassigned: true,
           },
         });
-      else if (v.kind === "task") await assignTaskFn({ data: { id: v.id, assignee: v.assignee } });
-      else await assignOppFn({ data: { id: v.id, assignee_id: v.assignee } });
+        return null;
+      }
+      if (v.kind === "task") {
+        await assignTaskFn({ data: { id: v.id, assignee: v.assignee, date: v.date ?? null } });
+        return null;
+      }
+      const r = await assignOppFn({
+        data: { id: v.id, assignee_id: v.assignee, date: v.date ?? null },
+      });
+      return r.dateKept || v.dateKept ? (r.expected_close ?? null) : null;
     },
-    onSuccess: (_r, v) => {
-      toast.success(`Assigned to ${v.name}`);
+    onSuccess: (kept, v) => {
+      toast.success(assignedToast(v.name, v.day, kept));
       invalidate();
     },
     // "Someone already has it" or any other refusal: the row is stale, so the list is refetched
@@ -193,6 +232,71 @@ export function useWorkActions(profile: UserProfile | null): {
   });
   const rosters = { ticket: techs, task: users, opportunity: oppUsers } as const;
 
+  // The assign-for-a-day dialog (Oct 20): the row dropped on a day, and the person picked so far.
+  const [drop, setDrop] = useState<{ item: WorkItem; day: string } | null>(null);
+  const [picked, setPicked] = useState("");
+  const dropKind = drop ? assignKind(drop.item, profile) : null;
+  const dropPlanned = drop && dropKind ? assignPlan(drop.item, picked, profile, drop.day) : null;
+  const closeDrop = () => {
+    setDrop(null);
+    setPicked("");
+  };
+  const assignDialog = (
+    <Dialog
+      open={!!drop && !!dropKind}
+      onOpenChange={(o) => {
+        if (!o) closeDrop();
+      }}
+    >
+      {drop && dropKind && (
+        <DialogContent className="sm:max-w-md" data-dialog="assign-day">
+          <DialogHeader>
+            <DialogTitle>
+              Assign {drop.item.title} for {shortDay(drop.day)}
+            </DialogTitle>
+            <DialogDescription>
+              {dropKind === "ticket"
+                ? "They get the ticket, scheduled for that day."
+                : dropKind === "task"
+                  ? "They get the task, due that day."
+                  : dropPlanned?.kind === "opportunity" && dropPlanned.dateKept && drop.item.date
+                    ? `They get the opportunity; its expected close stays ${monthDay(drop.item.date)} — only a manager moves it.`
+                    : "They get the opportunity, with that day as its expected close."}
+            </DialogDescription>
+          </DialogHeader>
+          <AssignSelect
+            label={`Assign ${drop.item.title} to`}
+            roster={rosters[dropKind].data ?? []}
+            loading={rosters[dropKind].isLoading}
+            error={rosters[dropKind].error ? errText(rosters[dropKind].error) : null}
+            disabled={assign.isPending}
+            value={picked}
+            onOpen={() => want(dropKind)}
+            onPick={setPicked}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDrop}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!dropPlanned || assign.isPending}
+              onClick={() => {
+                if (!dropPlanned) return;
+                const name =
+                  (rosters[dropKind].data ?? []).find((o) => o.id === picked)?.name ?? "them";
+                assign.mutate({ ...dropPlanned, name, day: drop.day });
+                closeDrop();
+              }}
+            >
+              Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+
   const pendingIds = new Set<string>(
     [
       open.isPending ? open.variables : null,
@@ -227,10 +331,16 @@ export function useWorkActions(profile: UserProfile | null): {
             const plan = assignPlan(item, id, profile);
             if (!plan) return;
             const name = (q.data ?? []).find((o) => o.id === id)?.name ?? "them";
-            assign.mutate({ ...plan, name });
+            assign.mutate({ ...plan, name, day: null });
           }}
         />
       );
+    },
+    dropAssigns: (item) => dropAssigns(item, profile),
+    assignOn: (item, day) => {
+      if (!assignKind(item, profile)) return;
+      setPicked("");
+      setDrop({ item, day });
     },
     movable: (item) => canMoveWork(item, profile),
     move: (item, day) => {
@@ -240,5 +350,5 @@ export function useWorkActions(profile: UserProfile | null): {
     busy: (item) => pendingIds.has(workId(item)),
   };
 
-  return { actions, editTask, closeTask: () => setEditTask(null) };
+  return { actions, editTask, closeTask: () => setEditTask(null), assignDialog };
 }

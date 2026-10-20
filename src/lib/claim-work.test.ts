@@ -152,7 +152,12 @@ describe("where it is used", () => {
   });
   it("Work Overview: the unassigned pane left of the calendar, rows draggable, a day accepts the drop with its date", () => {
     const page = src("src/components/my-work-page.tsx");
-    expect(page).toContain("{claim && unassignedPane && (");
+    // Oct 20: the pane is for whoever may act on nobody's work (showUnassignedPane), a claimer
+    // still among them (calendar-unassigned-pane.test.ts); it was `claim && unassignedPane`.
+    expect(page).toContain(
+      "const showPane = unassignedPane && showUnassignedPane(unassigned, viewer);",
+    );
+    expect(page).toContain("{showPane && (");
     expect(page).toContain(
       '<aside className="flex min-h-0 flex-col gap-2 xl:w-64 xl:shrink-0" aria-label="Unassigned">',
     );
@@ -160,8 +165,9 @@ describe("where it is used", () => {
     // Since Oct 15 a drop takes any row the page knows (an assigned ticket or task is moved to
     // the day; lib/my-work-actions.ts dropPlan); nobody's work is still claimed, with the day.
     expect(page).toContain("const it = items.find((i) => i.key === key); if (!it) return false;");
+    // A claimer's drop still claims; since Oct 20 an assigner's drop opens the assign dialog.
     expect(page).toContain(
-      "if (it.unassigned) { if (claim) claim(it, d); } else actions?.move(it, d);",
+      "if (it.unassigned) { if (claim) claim(it, d); else actions?.assignOn(it, d); } else actions?.move(it, d);",
     );
     expect(page).toContain("if (dropOn(e.dataTransfer.getData(dragKey), d)) e.preventDefault();");
     // The row's Claim keeps the date; the drop sets it; only people who canClaim get either.

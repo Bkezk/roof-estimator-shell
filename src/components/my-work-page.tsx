@@ -89,8 +89,11 @@ import {
   NEW_OPPORTUNITY_HREF,
   monthDay,
   newTicketHref,
+  paneHint,
+  showUnassignedPane,
   taskMapHref,
   unassignedTaskHint,
+  type Viewer,
 } from "@/lib/my-work-actions";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
@@ -763,6 +766,7 @@ function CalendarView({
   manage,
   claim = null,
   unassignedPane = false,
+  viewer = null,
   month: urlMonth,
   onMonth,
   actions = null,
@@ -775,7 +779,13 @@ function CalendarView({
   manage: ManageFollowup | null;
   /** Owner, Oct 8: the unassigned list beside the calendar; a drop on a day claims it for that day. */
   claim?: ClaimWork | null;
+  /** The server lists nobody's work to this viewer (the office). */
   unassignedPane?: boolean;
+  /**
+   * The signed-in person (Oct 20): the pane shows for whoever may act on nobody's work
+   * (lib/my-work-actions.ts showUnassignedPane), not only claimers, with the hint for their case.
+   */
+  viewer?: Viewer;
   /** The month shown (?month=YYYY-MM; owner, Oct 15), null for this month, and how to change it. */
   month: string | null;
   onMonth: (month: string) => void;
@@ -795,17 +805,24 @@ function CalendarView({
   const month = urlMonth ?? today.slice(0, 7);
   const setMonth = (next: string | ((m: string) => string)) =>
     onMonth(typeof next === "function" ? next(month) : next);
-  // A drop takes any row the page knows: nobody's work is claimed for that day (owner, Oct 8),
-  // an assigned ticket or task is moved to it (owner, Oct 15; lib/my-work-actions.ts dropPlan).
+  // A drop takes any row the page knows: nobody's work is claimed for that day (owner, Oct 8) —
+  // or, for a viewer who may assign it but not Claim it (Oct 20), the assign-for-that-day dialog
+  // opens (actions.assignOn) — and an assigned ticket or task is moved to it (owner, Oct 15;
+  // lib/my-work-actions.ts dropPlan).
   const dropTargets = !!claim || !!actions;
   const dropOn = (key: string, d: string) => {
     const it = items.find((i) => i.key === key);
     if (!it) return false;
     if (it.unassigned) {
       if (claim) claim(it, d);
+      else actions?.assignOn(it, d);
     } else actions?.move(it, d);
     return true;
   };
+  // The pane (Oct 20): for whoever may act on nobody's work — a claimer, or an assigner with
+  // something to assign — not only claimers (an admin, a manager or an unticked office
+  // dispatcher could dispatch from the List alone).
+  const showPane = unassignedPane && showUnassignedPane(unassigned, viewer);
   const startDrag = (e: React.DragEvent, it: WorkItem) => {
     e.dataTransfer.setData(dragKey, it.key);
     e.dataTransfer.effectAllowed = "move";
@@ -826,37 +843,41 @@ function CalendarView({
     // grid scrolls instead), so a day always shows its number and three lines.
     <div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[36rem] xl:flex-row">
       {/* Owner, Oct 8: "the unassigned list on the left of the calendar so people can drag and
-        drop it onto their own calendar". Dragging a row onto a day takes it and dates it there. */}
-      {claim && unassignedPane && (
+        drop it onto their own calendar". Dragging a row onto a day takes it and dates it there.
+        Oct 20: also for whoever may assign (not Claim) a row — their drag assigns it for that
+        day through the dialog, their rows carry "Assign to…" as on the List, and a row they may
+        do neither with does not drag. */}
+      {showPane && (
         <aside className="flex min-h-0 flex-col gap-2 xl:w-64 xl:shrink-0" aria-label="Unassigned">
           <h2 className="flex h-10 shrink-0 items-center text-sm font-semibold">
             Unassigned{" "}
             <span className="ml-1 font-normal text-muted-foreground">({unassigned.length})</span>
           </h2>
-          <p className="shrink-0 text-xs text-muted-foreground">
-            Drag one onto a day to take it and put it there, or Claim to take it as is.
-          </p>
+          <p className="shrink-0 text-xs text-muted-foreground">{paneHint(viewer)}</p>
           <div className="min-h-0 flex-1 space-y-2 xl:overflow-y-auto xl:pr-1">
             {unassigned.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nothing waiting.</p>
             ) : (
-              unassigned.map((it) => (
-                <div
-                  key={it.key}
-                  draggable
-                  className="cursor-grab active:cursor-grabbing"
-                  onDragStart={(e) => startDrag(e, it)}
-                >
-                  <WorkRow
-                    item={it}
-                    showWho={false}
-                    today={today}
-                    manage={null}
-                    claim={claim}
-                    actions={actions}
-                  />
-                </div>
-              ))
+              unassigned.map((it) => {
+                const drags = !!claim || !!actions?.dropAssigns(it);
+                return (
+                  <div
+                    key={it.key}
+                    draggable={drags}
+                    className={drags ? "cursor-grab active:cursor-grabbing" : undefined}
+                    onDragStart={drags ? (e) => startDrag(e, it) : undefined}
+                  >
+                    <WorkRow
+                      item={it}
+                      showWho={false}
+                      today={today}
+                      manage={null}
+                      claim={claim}
+                      actions={actions}
+                    />
+                  </div>
+                );
+              })
             )}
           </div>
         </aside>
@@ -1166,7 +1187,7 @@ export function MyWorkPage(props: {
   // rules in lib/my-work-actions.ts). The Calendar's selected day is the page's, so New ticket
   // and New task carry it.
   const navigate = useNavigate();
-  const { actions: rowActions, editTask, closeTask } = useWorkActions(profile);
+  const { actions: rowActions, editTask, closeTask, assignDialog } = useWorkActions(profile);
   // A row's busy set includes the claim in flight on it (Oct 15: Claim could be clicked twice).
   const actions: WorkActions = {
     ...rowActions,
@@ -1359,6 +1380,9 @@ export function MyWorkPage(props: {
           }}
           onSaved={() => void qc.invalidateQueries({ queryKey: ["my-work"] })}
         />
+        {/* An Unassigned row dropped on a calendar day by someone who assigns rather than claims
+          (Oct 20): "Assign <title> for <day>" (components/my-work-actions.tsx). */}
+        {assignDialog}
         <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="View">
           <Button
             size="sm"
@@ -1491,6 +1515,7 @@ export function MyWorkPage(props: {
           manage={manage}
           claim={claim}
           unassignedPane={!!q.data?.unassigned}
+          viewer={profile}
           actions={actions}
           day={calDay}
           onDay={setCalDay}

@@ -815,13 +815,27 @@ export const claimOpportunity = createServerFn({ method: "POST" })
  * Unassigned row). An admin's or a manager's (`seesEveryone`; claimOpportunity is the
  * self-service twin for anyone `canClaim`). The opportunity must be live, open and have no
  * assignee — `.is("assignee_id", null)` means two people cannot both hand it out. Its date is
- * untouched. The follow-up is synced as a save would: the assignee's timer starts and they get
- * the "assigned to you" notice (the manager is the actor).
+ * untouched unless a `date` is sent (Oct 20: the row dropped on a calendar day by someone who
+ * assigns rather than claims): then the day becomes its expected close under the manager date
+ * rule, exactly as claimOpportunity — a caller who may not move a stored date still assigns it,
+ * the day is ignored and the result says so (`dateKept`). The follow-up is synced as a save
+ * would: the assignee's timer starts and they get the "assigned to you" notice (the manager is
+ * the actor).
  */
 export const assignOpportunity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ id: z.string().uuid(), assignee_id: z.string().uuid() }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        assignee_id: z.string().uuid(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const p = await me(context);
@@ -830,7 +844,7 @@ export const assignOpportunity = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("crm_opportunities")
-      .select("assignee_id, status, deleted_at")
+      .select("assignee_id, status, deleted_at, expected_close")
       .eq("id", data.id)
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
@@ -839,12 +853,18 @@ export const assignOpportunity = createServerFn({ method: "POST" })
     if (cur.assignee_id) throw new Error(CLAIM_TAKEN);
     if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))
       throw new Error("Only an open opportunity can be assigned");
+    // The dropped day under the manager date rule (dateMoveProblem), as claimOpportunity.
+    const dateKept =
+      !!data.date &&
+      !!dateMoveProblem({ profile: p, oldYmd: cur.expected_close, newYmd: data.date });
+    const newDate = data.date && !dateKept ? data.date : null;
     const { data: row, error } = await sb
       .from("crm_opportunities")
       .update({
         assignee_id: data.assignee_id,
         assigned_at: new Date().toISOString(),
         updated_by_name: nameOf(p),
+        ...(newDate ? { expected_close: newDate } : {}),
       })
       .eq("id", data.id)
       .is("assignee_id", null)
@@ -853,5 +873,11 @@ export const assignOpportunity = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error(CLAIM_TAKEN);
     await syncOppFollowup(row, cur.status, context, nameOf(p));
-    return { id: row.id, assignee_id: row.assignee_id, expected_close: row.expected_close };
+    return {
+      id: row.id,
+      assignee_id: row.assignee_id,
+      expected_close: row.expected_close,
+      /** True when the sent day was ignored: the caller may not move a stored expected close. */
+      dateKept,
+    };
   });

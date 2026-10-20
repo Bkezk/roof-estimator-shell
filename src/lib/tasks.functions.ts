@@ -397,12 +397,24 @@ export const moveTaskDate = createServerFn({ method: "POST" })
  * row). An admin's or a manager's (`seesEveryone` — who sees every task; claimTask is the
  * self-service twin for anyone `canClaim`). The task must be open with no assignee:
  * `.is("assignee", null)` means two people cannot both hand it out. The assignee joins the
- * attendees and gets the "New task" notice, as a save that adds them would (best effort).
+ * attendees and gets the "New task" notice, as a save that adds them would (best effort). A
+ * `date` (Oct 20: the row dropped on a calendar day by someone who assigns rather than claims)
+ * moves it to that day keeping its time of day, as claimTask / moveTaskDate do.
  */
 export const assignTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ id: z.string().uuid(), assignee: z.string().uuid() }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        assignee: z.string().uuid(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<SaveTaskResult> => {
     const p = await me(context);
@@ -420,12 +432,18 @@ export const assignTask = createServerFn({ method: "POST" })
     const roster = await users(context);
     const who = roster.find((u) => u.id === data.assignee);
     if (!who) throw new Error("The assignee is not a user of the app");
+    const at = taskDueAt(cur);
+    const allDay = isAllDay(cur);
+    const moved = data.date
+      ? { date: data.date, time: at && !allDay ? localHm(at) : null, all_day: allDay }
+      : null;
     const { data: row, error } = await sb
       .from("tasks")
       .update({
         assignee: data.assignee,
         assignee_name: userLabel(who) || null,
         attendees: attendeeList(data.assignee, cur.attendees ?? []),
+        ...(moved ? { due_date: moved.date, due_at: dueAtFor(moved) } : {}),
       })
       .eq("id", data.id)
       .is("assignee", null)

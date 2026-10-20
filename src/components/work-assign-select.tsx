@@ -2,7 +2,8 @@
  * The compact person select on a Work Overview Unassigned row (owner, Oct 15: "Assign to…"
  * beside Claim): a placeholder that never holds a value — a pick assigns at once and the row
  * leaves the group — with the roster loading the first time it opens (components/my-work-actions
- * .tsx useWorkActions owns the rosters and the server calls).
+ * .tsx useWorkActions owns the rosters and the server calls). With a `value` (Oct 20: the
+ * assign-for-a-day dialog) it holds the pick until the dialog's Assign sends it.
  */
 import {
   Select,
@@ -25,9 +26,12 @@ export function AssignSelect({
   disabled,
   onOpen,
   onPick,
+  value = "",
 }: {
   label: string;
   roster: AssignOption[];
+  /** The held pick (the dialog); the row's select leaves it out and never holds one. */
+  value?: string;
   loading: boolean;
   error: string | null;
   disabled: boolean;
@@ -37,7 +41,7 @@ export function AssignSelect({
 }) {
   return (
     <Select
-      value=""
+      value={value}
       disabled={disabled}
       onOpenChange={(o) => {
         if (o) onOpen();
