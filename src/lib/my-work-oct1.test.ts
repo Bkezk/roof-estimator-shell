@@ -61,7 +61,8 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
   it("the route resolves ?who through the signed-in profile and keeps an explicit mine", () => {
     const route = read("src/routes/my-work.tsx");
     expect(route).toContain('import { useAuth } from "@/lib/auth-store";');
-    expect(route).toContain("const { profile } = useAuth();");
+    // Oct 20 (audit 4 d): the route also asks for a missing profile once (refreshProfile).
+    expect(route).toContain("const { profile, session, refreshProfile } = useAuth();");
     expect(route).toContain("const curWho = resolveWho(who, profile);");
     // The search rule moved to lib/my-work.ts nextWorkSearch (Oct 20); the route hands it the profile.
     expect(route).toContain(

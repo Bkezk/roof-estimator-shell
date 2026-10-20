@@ -26,6 +26,7 @@ import {
   localHm,
   noticeRecipients,
   seesAllTasks,
+  TASK_CHANGED,
   taskDueAt,
   taskInputSchema,
   type TaskRow,
@@ -196,13 +197,18 @@ export const saveTask = createServerFn({ method: "POST" })
     };
     let row: TaskRow;
     if (before) {
-      const { data: saved, error } = await sb
-        .from("tasks")
-        .update(fields)
-        .eq("id", before.id)
-        .select()
-        .single();
+      // Optimistic concurrency (Oct 20): the dialog says which row it loaded (expect_updated_at);
+      // a row changed since — someone ticked it Done, moved it — is not written over. Checked
+      // before the write, and again by the write itself (the .eq on updated_at: a change that
+      // lands between the read and the update matches nothing). Callers that never loaded the
+      // row send no expectation and are not checked.
+      const expected = data.expect_updated_at;
+      if (expected && before.updated_at !== expected) throw new Error(TASK_CHANGED);
+      let upd = sb.from("tasks").update(fields).eq("id", before.id);
+      if (expected) upd = upd.eq("updated_at", expected);
+      const { data: saved, error } = await upd.select().maybeSingle();
       if (error) throw new Error(error.message);
+      if (!saved) throw new Error(TASK_CHANGED);
       row = saved;
     } else {
       const { data: saved, error } = await sb

@@ -111,10 +111,14 @@ describe("1. committedPathname: the page the Outlet renders, from the same commi
     // The decisions themselves are unchanged: bare login, spinner while signed out or blocked,
     // the shell otherwise; the signed-in visitor to /login goes home.
     expect(gate).toContain("if (isLogin) return <>{children}</>;");
-    expect(gate).toContain("if (loading || !session) return <Waiting />;");
+    // Oct 20, audit 4 (b): the shell renders through a profile load; `loading` only holds the
+    // /login redirect (work-overview-oct20-audit4.test.ts).
+    expect(gate).toContain("if (!session) return <Waiting />;");
     expect(gate).toContain("if (blocked) return <Waiting />;");
     expect(gate).toContain("return <AuthedShell>{children}</AuthedShell>;");
-    expect(gate).toMatch(/\} else if \(session && isLogin\) \{\s*navigate\(\{ to: home \}\);/);
+    expect(gate).toMatch(
+      /\} else if \(session && isLogin\) \{\s*if \(decision === "home"\) \{\s*navigate\(\{ to: home \}\);/,
+    );
   });
   it("one TooltipProvider at the root wraps the gate and every page; the shell's nests inside", () => {
     expect(root).toContain('import { TooltipProvider } from "@/components/ui/tooltip";');
@@ -313,14 +317,16 @@ describe("b. the browser's copy carries an `unsaved` flag that outlives the page
     expect(page).toMatch(
       /const \[localWins, setLocalWins\] = useState\(\s*\(\) => !!userId && !!readStoredWork\(storage, userId\)\?\.unsaved,\s*\);/,
     );
+    // Oct 20, audit 4 (e): each handler writes the latest committed layout, and only for a save
+    // of that layout (applySaveResult; work-overview-oct20-audit4.test.ts).
     expect(page).toMatch(
-      /onSuccess: \(_r, l\) => \{\s*setLocalWins\(false\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l\);\s*\},/,
+      /onSuccess: \(_r, l\) => \{\s*const r = applySaveResult\(latestLayoutRef\.current, l, true\);\s*if \(!r\) return;\s*setLocalWins\(false\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, r\.layout\);\s*\},/,
     );
     expect(page).toMatch(
-      /onError: \(_e, l\) => \{\s*setLocalWins\(true\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l, true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
+      /onError: \(_e, l\) => \{\s*const r = applySaveResult\(latestLayoutRef\.current, l, false\);\s*if \(!r\) return;\s*setLocalWins\(true\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, r\.layout, true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
     );
     expect(page).toMatch(
-      /const retriedUnsaved = useRef\(false\);\s*const \{ mutate: retrySave \} = saveLayout;\s*useEffect\(\(\) => \{\s*if \(!userId \|\| retriedUnsaved\.current\) return;\s*const stored = readStoredWork\(storage, userId\);\s*if \(!stored\?\.unsaved\) return;\s*retriedUnsaved\.current = true;\s*setLocalWins\(true\);\s*retrySave\(stored\.layout\);\s*\}, \[retrySave, storage, userId\]\);/,
+      /const retriedUnsaved = useRef\(false\);\s*const \{ mutate: retrySave \} = saveLayout;\s*useEffect\(\(\) => \{\s*if \(!userId \|\| retriedUnsaved\.current\) return;\s*const stored = readStoredWork\(storage, userId\);\s*if \(!stored\?\.unsaved\) return;\s*retriedUnsaved\.current = true;\s*setLocalWins\(true\);\s*latestLayoutRef\.current = stored\.layout;\s*retrySave\(stored\.layout\);\s*\}, \[retrySave, storage, userId\]\);/,
     );
     // The retry sits before the seed effect reads localWins — and the seed still honours it.
     expect(page.indexOf("const { mutate: retrySave } = saveLayout;")).toBeLessThan(
@@ -347,10 +353,15 @@ describe("c. the login page no longer navigates; the gate's home redirect waits 
   });
   it("the gate still sends a signed-in visitor of /login home (homeFor: My tickets for a technician-only user)", () => {
     expect(gate).toContain("const home = homeFor(profile);");
-    expect(gate).toMatch(/\} else if \(session && isLogin\) \{\s*navigate\(\{ to: home \}\);/);
-    // The provider holds `loading` through a sign-in's profile load, so `home` is the person's.
-    expect(auth).toContain(
-      'if (event === "SIGNED_IN" && next && !profileRef.current) setLoading(true);',
+    // Oct 20, audit 4 (d): with the profile (landingDecision "home"); without it the gate asks
+    // again first (work-overview-oct20-audit4.test.ts).
+    expect(gate).toMatch(
+      /\} else if \(session && isLogin\) \{\s*if \(decision === "home"\) \{\s*navigate\(\{ to: home \}\);/,
+    );
+    // The provider holds `loading` through a sign-in's profile load, so `home` is the person's
+    // (audit 4 (b): only a real sign-in — shouldHoldForProfile — and bounded).
+    expect(auth).toMatch(
+      /if \(shouldHoldForProfile\(had, next, event\)\) \{\s*setLoading\(true\);/,
     );
     expect(gate).toMatch(/useEffect\(\(\) => \{\s*if \(loading\) return;/);
   });

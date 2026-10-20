@@ -435,10 +435,13 @@ describe("4. Work Overview — the item (pure)", () => {
     expect([...by.keys()]).toEqual(["2026-10-15"]);
   });
   it("the column help names draft bids where it lists what sits in a group", () => {
+    // Oct 20 (audit 4): every kind bucketOf puts there, by its day; today's items sit in This week.
     expect(BUCKET_HELP.overdue).toBe(
-      "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
+      "Tickets, tasks, follow-ups, opportunities and draft bids past their day. The assignee is reminded on the Reminders schedule.",
     );
-    expect(BUCKET_HELP.week).toBe("Tickets, tasks, follow-ups and draft bids due later this week.");
+    expect(BUCKET_HELP.week).toBe(
+      "Due today or later this week: tickets, tasks, follow-ups, opportunities and draft bids.",
+    );
     expect(BUCKET_HELP.later).toBe(
       "Due after this week, or with no date yet (a bid without a due date too).",
     );

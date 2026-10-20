@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
+import { PROFILE_HOLD_MS, shouldHoldForProfile } from "@/lib/auth-flow";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 import { canAccess } from "@/lib/access";
 import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-store";
@@ -17,6 +18,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   // The profile as the auth listener sees it (its closure is from the first render).
   const profileRef = useRef<UserProfile | null>(null);
+  // The session the listener last saw (Oct 20): a SIGNED_IN with none before is a real sign-in.
+  const sessionRef = useRef<Session | null>(null);
 
   async function loadProfile(current: Session | null) {
     if (!current) {
@@ -52,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
+      sessionRef.current = data.session;
       setSession(data.session);
       await loadProfile(data.session);
       if (active) setLoading(false);
@@ -59,13 +63,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, next) => {
       if (!active) return;
-      // A sign-in with no profile yet (Oct 20): `loading` holds the gate's redirect off /login
-      // until the profile is here, so the landing page is the person's own (homeFor: a
-      // technician-only user's is My tickets, not Work Overview). A token refresh on an open
-      // page has its profile and never flips it.
-      if (event === "SIGNED_IN" && next && !profileRef.current) setLoading(true);
+      const had = sessionRef.current;
+      sessionRef.current = next;
+      // A session that ended outside signOut (Oct 20): another tab's sign-out, a refresh that
+      // failed — nothing of this person stays cached for the next one.
+      if (event === "SIGNED_OUT" || (!next && had)) queryClient.clear();
+      // A real sign-in (Oct 20, shouldHoldForProfile: no session before, one now): `loading`
+      // holds the gate's redirect off /login until the profile is here, so the landing page is
+      // the person's own (homeFor: a technician-only user's is My tickets, not Work Overview).
+      // auth-js emits SIGNED_IN on every tab wake too; with a session already here that is no
+      // sign-in, and holding on it (as "no profile yet" did) remounted the page under the
+      // spinner on every wake while the profile was null. A token refresh never holds.
+      let guard: ReturnType<typeof setTimeout> | null = null;
+      if (shouldHoldForProfile(had, next, event)) {
+        setLoading(true);
+        // Bounded like the mount guard: a profile read that never settles lets the gate go on.
+        guard = setTimeout(() => {
+          if (active) setLoading(false);
+        }, PROFILE_HOLD_MS);
+      }
       setSession(next);
       await loadProfile(next);
+      if (guard) clearTimeout(guard);
       setLoading(false);
     });
 
@@ -74,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onUnauthorized = () => {
       if (!active) return;
       void supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      sessionRef.current = null;
       setSession(null);
       profileRef.current = null;
       setProfile(null);

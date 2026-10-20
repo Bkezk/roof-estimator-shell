@@ -19,12 +19,16 @@ import {
   doneStamp,
   isValidEmail,
   openTaskInput,
+  TASK_CHANGED,
   taskInputSchema,
+  taskSavePayload,
+  taskToInput,
   type TaskInput,
   type TaskRow,
 } from "@/lib/tasks";
 import {
   deleteTask,
+  getTask,
   listTaskSites,
   saveTask,
   userLabel,
@@ -85,6 +89,11 @@ export function TaskDialog(props: {
   const [f, setF] = useState<TaskInput>(() => blankTaskInput(me));
   const [emailText, setEmailText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Oct 20 (a lost update): the Done box's status goes to the server only when the person
+  // touched it, so an edit never reopens a task someone else ticked Done meanwhile
+  // (taskSavePayload); `live` is the row as last reloaded here, after TASK_CHANGED.
+  const [statusTouched, setStatusTouched] = useState(false);
+  const [live, setLive] = useState<TaskRow | null>(null);
   const set = (patch: Partial<TaskInput>) => setF((cur) => ({ ...cur, ...patch }));
 
   // Reset each time the dialog opens (or opens on another task). A new task is dated today
@@ -95,8 +104,12 @@ export function TaskDialog(props: {
     if (!props.open) return;
     setF(openTaskInput(props.task, props.defaults, me, localYmd(new Date())));
     setEmailText("");
+    setStatusTouched(false);
+    setLive(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open / another task
   }, [props.open, taskId]);
+  // The row the save is checked against: the one reloaded after a refusal, else the one opened.
+  const task = live ?? props.task;
 
   // The roster is read once the dialog opens, not while it sits closed on a page (Oct 15).
   const usersQ = useTaskUsers(props.open);
@@ -111,6 +124,19 @@ export function TaskDialog(props: {
   });
 
   const invalidate = useInvalidateTasks();
+  // After "This task changed since you opened it": the fresh row replaces the form (the dialog
+  // stays open; the person sees what changed and saves again if they still want to).
+  const getTaskFn = useServerFn(getTask);
+  const reload = useMutation({
+    mutationFn: (id: string) => getTaskFn({ data: { id } }),
+    onSuccess: (row) => {
+      setLive(row);
+      setF(taskToInput(row));
+      setStatusTouched(false);
+      invalidate();
+    },
+    onError: (e) => toast.error(errText(e)),
+  });
   const saveFn = useServerFn(saveTask);
   const save = useMutation({
     mutationFn: (input: TaskInput) => saveFn({ data: input }),
@@ -128,7 +154,10 @@ export function TaskDialog(props: {
       props.onSaved?.();
       props.onOpenChange(false);
     },
-    onError: (e) => toast.error(errText(e)),
+    onError: (e) => {
+      toast.error(errText(e));
+      if (errText(e) === TASK_CHANGED && task) reload.mutate(task.id);
+    },
   });
   const deleteFn = useServerFn(deleteTask);
   const remove = useMutation({
@@ -178,10 +207,10 @@ export function TaskDialog(props: {
       toast.error("Pick a time, or turn on All day");
       return;
     }
-    save.mutate(parsed.data);
+    save.mutate(taskSavePayload(parsed.data, task, statusTouched));
   };
 
-  const busy = save.isPending || remove.isPending;
+  const busy = save.isPending || remove.isPending || reload.isPending;
   const others = roster.filter((u) => !f.attendees.includes(u.id));
   const accountValue = f.account_id
     ? { account_id: f.account_id, site_id: null, label: f.account_name ?? "" }
@@ -443,7 +472,10 @@ export function TaskDialog(props: {
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={f.status === "done"}
-                onCheckedChange={(v) => set({ status: v === true ? "done" : "open" })}
+                onCheckedChange={(v) => {
+                  setStatusTouched(true);
+                  set({ status: v === true ? "done" : "open" });
+                }}
               />
               Done
               {/* Who marked it done and when (owner, Oct 9), as the row was saved. */}

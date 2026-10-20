@@ -138,10 +138,11 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
       // Oct 15: tasks named too (they have sat in the group since Oct 9).
       unassigned:
         "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+      // Oct 20 (audit 4): every kind bucketOf puts there; today's items sit in This week.
       overdue:
-        "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
+        "Tickets, tasks, follow-ups, opportunities and draft bids past their day. The assignee is reminded on the Reminders schedule.",
       today: "Due today.",
-      week: "Tickets, tasks, follow-ups and draft bids due later this week.",
+      week: "Due today or later this week: tickets, tasks, follow-ups, opportunities and draft bids.",
       // Oct 12: draft bids by due date join the groups (bid-due-date.test.ts).
       later: "Due after this week, or with no date yet (a bid without a due date too).",
       waiting:

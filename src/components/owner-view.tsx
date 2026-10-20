@@ -318,6 +318,20 @@ export function OwnerView() {
                     <Link {...myWorkHref("all", "overdue")} className={linkCls}>
                       {totals.overdue}
                     </Link>
+                    {/* Oct 20: the total counts the overdue opportunities too (never List rows),
+                        so it says so like each person's row does. */}
+                    {totals.overdueOpps > 0 && (
+                      <div className="text-xs">
+                        <Link
+                          {...oppsHref("all", true)}
+                          className="underline-offset-4 hover:underline"
+                          title="Opportunities past expected close with no open follow-up (not on Work Overview)"
+                        >
+                          incl. {totals.overdueOpps} opportunit
+                          {totals.overdueOpps === 1 ? "y" : "ies"}
+                        </Link>
+                      </div>
+                    )}
                   </TableCell>
                   {/* No row to expand for the total: a plain number (Oct 15). */}
                   <TableCell className="text-right font-semibold tabular-nums">

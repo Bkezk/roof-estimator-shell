@@ -521,7 +521,8 @@ describe("8. AuthGate reads the rendered location, not the pending one", () => {
     expect(gate).not.toContain("select: (s) => s.location.pathname,");
     // The gate still renders the login screen bare and everyone else inside the shell.
     expect(gate).toContain("if (isLogin) return <>{children}</>;");
-    expect(gate).toContain("if (loading || !session) return <Waiting />;");
+    // Oct 20, audit 4 (b): with a session the shell renders through a profile load.
+    expect(gate).toContain("if (!session) return <Waiting />;");
     expect(gate).toContain("return <AuthedShell>{children}</AuthedShell>;");
   });
   it("BucketHelp keeps relying on the shell's TooltipProvider (no provider of its own needed)", () => {
@@ -574,12 +575,14 @@ describe("b. a failed save: the browser's copy wins until a later save succeeds"
     expect(page).toMatch(
       /const \[localWins, setLocalWins\] = useState\(\s*\(\) => !!userId && !!readStoredWork\(storage, userId\)\?\.unsaved,\s*\);/,
     );
+    // Oct 20, audit 4 (e): the handlers write the latest committed layout, for a save of it only
+    // (applySaveResult; work-overview-oct20-audit4.test.ts).
     expect(page).toMatch(
-      /onSuccess: \(_r, l\) => \{\s*setLocalWins\(false\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l\);\s*\},\s*onError: \(_e, l\) => \{\s*setLocalWins\(true\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l, true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
+      /onSuccess: \(_r, l\) => \{\s*const r = applySaveResult\(latestLayoutRef\.current, l, true\);\s*if \(!r\) return;\s*setLocalWins\(false\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, r\.layout\);\s*\},\s*onError: \(_e, l\) => \{\s*const r = applySaveResult\(latestLayoutRef\.current, l, false\);\s*if \(!r\) return;\s*setLocalWins\(true\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, r\.layout, true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
     );
     // commitLayout saves on every change (the retry), after the browser's copy is written.
     expect(page).toMatch(
-      /const commitLayout = \(l: WorkLayout\) => \{\s*setLayout\(l\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l\);\s*saveLayout\.mutate\(l\);/,
+      /const commitLayout = \(l: WorkLayout\) => \{\s*setLayout\(l\);\s*latestLayoutRef\.current = l;\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l\);\s*saveLayout\.mutate\(l\);/,
     );
     // The wording stays.
     expect(read("src/lib/work-layout.functions.ts")).toContain(

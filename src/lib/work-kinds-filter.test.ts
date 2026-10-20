@@ -76,12 +76,14 @@ describe("the page", () => {
     expect(page).toContain("{KIND_PLURALS[k]}");
   });
   it("both views draw the ticked kinds only", () => {
-    expect(page).toContain(
-      "const visibleItems = useMemo(() => applyKinds(items, layout), [items, layout]);",
+    // Oct 20 (audit 4): through kindsForLanding — an Owner-view link's landing shows every kind
+    // (work-overview-oct20-audit4.test.ts); otherwise the same layout.
+    expect(page).toMatch(
+      /const visibleItems = useMemo\(\s*\(\) => applyKinds\(items, landingKinds\.layout\),\s*\[items, landingKinds\.layout\],\s*\);/,
     );
-    expect(page).toContain("<CalendarView\n          items={visibleItems}");
-    expect(page).toContain("<ListView\n          items={visibleItems}");
-    expect(page).not.toContain("<CalendarView\n          items={items}");
-    expect(page).not.toContain("<ListView\n          items={items}");
+    expect(page).toMatch(/<CalendarView\s+items=\{visibleItems\}/);
+    expect(page).toMatch(/<ListView\s+items=\{visibleItems\}/);
+    expect(page).not.toMatch(/<CalendarView\s+items=\{items\}/);
+    expect(page).not.toMatch(/<ListView\s+items=\{items\}/);
   });
 });

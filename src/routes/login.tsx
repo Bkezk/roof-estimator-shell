@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { SIGN_IN_STALL_MS } from "@/lib/auth-flow";
 import { useAuth } from "@/lib/auth-store";
+import { StalledNotice } from "@/components/stalled-sign-in";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +28,18 @@ function LoginPage() {
   // has loaded. This page used to navigate to /bids on its own as well (Oct 20): two competing
   // navigations, the wrong one for a technician. Until the gate moves, the button stays busy.
   const leaving = !!session;
+  // Oct 20: a profile read that never settles left the button "Signing in…" for good (the gate
+  // renders this page bare, before its Waiting and its notice): after the same wait as the
+  // gate's (SIGN_IN_STALL_MS), the same way out — Reload / Sign in again.
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    if (!leaving) {
+      setStalled(false);
+      return;
+    }
+    const t = setTimeout(() => setStalled(true), SIGN_IN_STALL_MS);
+    return () => clearTimeout(t);
+  }, [leaving]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +100,11 @@ function LoginPage() {
             {submitting || leaving ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+        {leaving && stalled && (
+          <div className="mt-4 flex flex-col items-center gap-3 text-center" data-row="stalled">
+            <StalledNotice />
+          </div>
+        )}
         <p className="mt-6 text-center text-xs text-muted-foreground">
           Accounts are created by an administrator.
         </p>

@@ -818,10 +818,12 @@ export const BUCKET_HELP: Record<WorkBucket, string> = {
   // ticked Technician can Claim (canClaim); everyone else puts someone on it with Assign to.
   unassigned:
     "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+  // Oct 20: every kind bucketOf puts here (tasks and follow-ups were missing), by its day.
   overdue:
-    "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
+    "Tickets, tasks, follow-ups, opportunities and draft bids past their day. The assignee is reminded on the Reminders schedule.",
   today: "Due today.",
-  week: "Tickets, tasks, follow-ups and draft bids due later this week.",
+  // Oct 20: today's items sit here too (Today is folded into This week), opportunities as well.
+  week: "Due today or later this week: tickets, tasks, follow-ups, opportunities and draft bids.",
   // Owner, Oct 12: no "No date" group — an undated item (from before dates were required) sits here.
   later: "Due after this week, or with no date yet (a bid without a due date too).",
   waiting:
@@ -1068,6 +1070,20 @@ export function activeTab(
 ): WorkBucket {
   if (picked && columns.some((c) => c.bucket === picked)) return picked;
   return defaultBucket(columns, preset);
+}
+
+/**
+ * The phone's pick when the preset changes (Oct 20): a NEW preset — an Owner-view link while
+ * already on the page — wins over an earlier pick, so the pick is dropped; the preset going away
+ * is the person's own tap (`pick` clears it through the URL), so their pick stands. Until now any
+ * change reset the pick, the tap included, and the tab fell to the first non-empty column.
+ */
+export function nextPicked(
+  prevPreset: BucketPreset | null,
+  preset: BucketPreset | null,
+  picked: WorkBucket | null,
+): WorkBucket | null {
+  return preset !== null && preset !== prevPreset ? null : picked;
 }
 
 // ---- calendar ------------------------------------------------------------------------------

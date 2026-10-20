@@ -395,8 +395,17 @@ export const taskInputSchema = z.object({
     .max(50)
     .default([]),
   status: z.enum(["open", "done"]).optional(),
+  /**
+   * The row's updated_at as the dialog loaded it (Oct 20): saveTask refuses to write over a row
+   * someone changed since (TASK_CHANGED). Absent on a new task, and on the callers that never
+   * loaded the row — then nothing is checked.
+   */
+  expect_updated_at: z.string().optional(),
 });
 export type TaskInput = z.infer<typeof taskInputSchema>;
+
+/** saveTask's refusal when the row changed under the dialog; the dialog reloads the task on it. */
+export const TASK_CHANGED = "This task changed since you opened it — reopen it";
 
 /** due_at for a date + time (or all day) in the office zone; null without a date. */
 export function dueAtFor(
@@ -435,6 +444,28 @@ export function taskToInput(t: TaskRow, tz: string = TASK_TZ): TaskInput {
     attendees: t.attendees ?? [],
     external_emails: t.external_emails ?? [],
     status: t.status === "done" ? "done" : "open",
+  };
+}
+
+/**
+ * What the dialog sends for a save (Oct 20 — a lost update: editing a task reopened one somebody
+ * else had just ticked Done, because the form always sent the status it loaded, and saveTask
+ * wrote it over the live row). Editing an existing task: `status` goes only when the person
+ * touched the Done box (`statusTouched`), so saveTask keeps the live status otherwise; and the
+ * row's `updated_at` rides along as `expect_updated_at`, so a save over a row that changed since
+ * is refused (TASK_CHANGED) instead of applied. A new task is sent as it is.
+ */
+export function taskSavePayload(
+  input: TaskInput,
+  task: Pick<TaskRow, "updated_at"> | null | undefined,
+  statusTouched: boolean,
+): TaskInput {
+  if (!task) return input;
+  const { status, ...rest } = input;
+  return {
+    ...rest,
+    ...(statusTouched && status ? { status } : {}),
+    expect_updated_at: task.updated_at,
   };
 }
 

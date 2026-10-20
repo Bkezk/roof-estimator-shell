@@ -68,6 +68,7 @@ import {
   localYmd,
   mergeWork,
   monthGrid,
+  nextPicked,
   resolveWho,
   whoParam,
   compareWork,
@@ -99,6 +100,7 @@ import {
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
   applyKinds,
+  applySaveResult,
   applyWorkLayout,
   defaultWorkLayout,
   hideBucket,
@@ -106,6 +108,7 @@ import {
   isEmptyWorkLayout,
   keepRemembered,
   KIND_PLURALS,
+  kindsForLanding,
   kindsSummary,
   landingSearch,
   moveBucket,
@@ -522,11 +525,13 @@ function ListView({
   // of every bucket there is (a sales person has no Needs authorization or Authorized column).
   const present = useMemo(() => groups.map((g) => g.bucket), [groups]);
   const [picked, setPicked] = useState<WorkBucket | null>(null);
-  // A new preset (an Owner-view link while already here) wins over an earlier pick.
+  // A new preset (an Owner-view link while already here) wins over an earlier pick; the preset
+  // going away is the person's own tap (Oct 20, nextPicked: `pick` clears it through the URL,
+  // and the reset here then lost the tab they had just tapped), so their pick stands.
   const [prevPreset, setPrevPreset] = useState(preset);
   if (prevPreset !== preset) {
     setPrevPreset(preset);
-    setPicked(null);
+    setPicked(nextPicked(prevPreset, preset, picked));
   }
   // The phone's tab: the pick while its column is still there, else the default (Oct 20 —
   // activeTab: a pick whose group emptied and folded away left no tab selected).
@@ -1242,6 +1247,16 @@ export function MyWorkPage(props: {
   const [localWins, setLocalWins] = useState(
     () => !!userId && !!readStoredWork(storage, userId)?.unsaved,
   );
+  // The flag as the effects below see it (the "profile's copy wins" effect keeps it when it
+  // writes the browser's copy — Oct 20: it wrote the copy plain during a retry's flight).
+  const localWinsRef = useRef(localWins);
+  useEffect(() => {
+    localWinsRef.current = localWins;
+  }, [localWins]);
+  // The layout last committed (Oct 20): a save that settles for any other layout is ignored —
+  // two overlapping saves could resurrect the older one when each wrote its own layout on
+  // settling (applySaveResult).
+  const latestLayoutRef = useRef<WorkLayout | null>(null);
   const saveLayout = useMutation({
     mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
     onMutate: (l) => {
@@ -1250,12 +1265,16 @@ export function MyWorkPage(props: {
       });
     },
     onSuccess: (_r, l) => {
+      const r = applySaveResult(latestLayoutRef.current, l, true);
+      if (!r) return;
       setLocalWins(false);
-      if (userId) writeStoredWorkLayout(storage, userId, l);
+      if (userId) writeStoredWorkLayout(storage, userId, r.layout);
     },
     onError: (_e, l) => {
+      const r = applySaveResult(latestLayoutRef.current, l, false);
+      if (!r) return;
       setLocalWins(true);
-      if (userId) writeStoredWorkLayout(storage, userId, l, true);
+      if (userId) writeStoredWorkLayout(storage, userId, r.layout, true);
       toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 });
     },
   });
@@ -1270,6 +1289,7 @@ export function MyWorkPage(props: {
     if (!stored?.unsaved) return;
     retriedUnsaved.current = true;
     setLocalWins(true);
+    latestLayoutRef.current = stored.layout;
     retrySave(stored.layout);
   }, [retrySave, storage, userId]);
   useEffect(() => {
@@ -1291,7 +1311,7 @@ export function MyWorkPage(props: {
     if (!savedLayout.data || !userId) return;
     const l = savedLayout.data.layout ?? defaultWorkLayout();
     setLayout(l);
-    writeStoredWorkLayout(storage, userId, l);
+    writeStoredWorkLayout(storage, userId, l, localWinsRef.current);
   }, [savedLayout.data, storage, userId]);
   // The saved-layout cache follows every save (saveLayout's onMutate, above; owner, Oct 9: "i
   // restored the layout on the work overview but it doesnt remember i restored it when i
@@ -1300,6 +1320,7 @@ export function MyWorkPage(props: {
   // throws): the browser's copy stands, and stands against the next list too (localWins).
   const commitLayout = (l: WorkLayout) => {
     setLayout(l);
+    latestLayoutRef.current = l;
     if (userId) writeStoredWorkLayout(storage, userId, l);
     saveLayout.mutate(l);
   };
@@ -1349,7 +1370,13 @@ export function MyWorkPage(props: {
     : null;
   const hasFollowups = items.some((i) => i.followup?.status === "open");
   // Show (owner, Oct 14): the kinds the user unticked are left out of the List and the Calendar.
-  const visibleItems = useMemo(() => applyKinds(items, layout), [items, layout]);
+  // Oct 20: an Owner-view link's number counted every kind — for that landing (?bucket=) the
+  // unticked kinds show too, and a line says so (kindsForLanding); Show itself is untouched.
+  const landingKinds = useMemo(() => kindsForLanding(layout, props.bucket), [layout, props.bucket]);
+  const visibleItems = useMemo(
+    () => applyKinds(items, landingKinds.layout),
+    [items, landingKinds.layout],
+  );
   const canPick = !!q.data?.canPick;
   const scope = q.data?.scope;
   const mineOnly = scope !== "all" && scope?.length === 1 && scope[0] === profile?.id;
@@ -1538,50 +1565,72 @@ export function MyWorkPage(props: {
           {who === "all" ? " Narrow to one person to see everything." : ""}
         </p>
       )}
+      {view === "list" && q.data && landingKinds.note && (
+        <p className="text-xs text-muted-foreground" data-row="landing-kinds">
+          {landingKinds.note}
+        </p>
+      )}
 
       {view === "owner" && ownerToggle ? (
         <OwnerView />
       ) : q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : errMsg ? (
+      ) : errMsg && !q.data ? (
         <div className="space-y-2">
           <p className="text-sm text-destructive">Could not load your work: {errMsg}</p>
           <Button size="sm" variant="outline" onClick={() => void q.refetch()}>
             Try again
           </Button>
         </div>
-      ) : view === "calendar" ? (
-        <CalendarView
-          items={visibleItems}
-          today={today}
-          month={props.month}
-          onMonth={(m) => props.onMonth(m === today.slice(0, 7) ? null : m)}
-          showWho={showWho}
-          manage={manage}
-          claim={claim}
-          unassignedPane={!!q.data?.unassigned}
-          viewer={profile}
-          actions={actions}
-          day={calDay}
-          onDay={setCalDay}
-        />
       ) : (
-        // Nothing at all shows every heading as an "Empty:" chip (Oct 12), no columns.
-        <ListView
-          items={visibleItems}
-          today={today}
-          showWho={showWho}
-          manage={manage}
-          preset={props.bucket}
-          onClearPreset={() => props.onBucket(null)}
-          authorize={!!q.data?.authorizer}
-          invoice={!!q.data?.invoicer}
-          unassigned={!!q.data?.unassigned}
-          layout={layout}
-          onLayout={onLayout}
-          claim={claim}
-          actions={actions}
-        />
+        <>
+          {/* Oct 20: a refetch that failed keeps the list it had; one line says so. */}
+          {errMsg && (
+            <p className="text-xs text-destructive" data-row="refresh-failed">
+              Could not refresh: {errMsg} ·{" "}
+              <button
+                type="button"
+                className="underline underline-offset-4"
+                onClick={() => void q.refetch()}
+              >
+                Try again
+              </button>
+            </p>
+          )}
+          {view === "calendar" ? (
+            <CalendarView
+              items={visibleItems}
+              today={today}
+              month={props.month}
+              onMonth={(m) => props.onMonth(m === today.slice(0, 7) ? null : m)}
+              showWho={showWho}
+              manage={manage}
+              claim={claim}
+              unassignedPane={!!q.data?.unassigned}
+              viewer={profile}
+              actions={actions}
+              day={calDay}
+              onDay={setCalDay}
+            />
+          ) : (
+            // Nothing at all shows every heading as an "Empty:" chip (Oct 12), no columns.
+            <ListView
+              items={visibleItems}
+              today={today}
+              showWho={showWho}
+              manage={manage}
+              preset={props.bucket}
+              onClearPreset={() => props.onBucket(null)}
+              authorize={!!q.data?.authorizer}
+              invoice={!!q.data?.invoicer}
+              unassigned={!!q.data?.unassigned}
+              layout={layout}
+              onLayout={onLayout}
+              claim={claim}
+              actions={actions}
+            />
+          )}
+        </>
       )}
     </div>
   );

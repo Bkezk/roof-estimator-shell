@@ -1,4 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
 import { MyWorkPage } from "@/components/my-work-page";
 import { homeFor, isFieldOnly } from "@/lib/access";
@@ -56,7 +57,16 @@ type MyWorkSearch = {
 function MyWorkRoute() {
   const { view, who, bucket, month } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { profile } = useAuth();
+  const { profile, session, refreshProfile } = useAuth();
+  // Oct 20: landed here signed in but without a profile (homeFor(null) after the profile read
+  // failed — a technician-only user's page is My tickets, which needs the profile to say so):
+  // ask for it once more.
+  const refreshed = useRef(false);
+  useEffect(() => {
+    if (!session || profile || refreshed.current) return;
+    refreshed.current = true;
+    void refreshProfile();
+  }, [profile, refreshProfile, session]);
   // A technician-only user's page is My tickets (owner, Oct 15; homeFor): the sidebar has no
   // Work Overview for them, and an old link or the sign-in redirect lands there instead.
   if (isFieldOnly(profile)) return <Navigate to={homeFor(profile)} replace />;

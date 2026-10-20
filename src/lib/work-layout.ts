@@ -245,6 +245,41 @@ export const kindsSummary = (layout: WorkLayout): string =>
 export const kindLabel = (k: WorkKind): string => KIND_LABELS[k];
 
 /**
+ * The kinds to apply when the page landed from an Owner-view link (Oct 20): the link's number
+ * counted every kind, so for that landing (a ?bucket= preset in the URL) the unticked kinds are
+ * shown too — `layout` with no hidden kinds, and a muted `note` saying so, with what Show is set
+ * to (kindsSummary). Without a preset, or with nothing unticked, the layout comes back as it is
+ * and the note is null. The person's Show setting itself is untouched.
+ */
+export function kindsForLanding(
+  layout: WorkLayout,
+  preset: string | null | undefined,
+): { layout: WorkLayout; note: string | null } {
+  if (!preset || !layout.hiddenKinds.length) return { layout, note: null };
+  return {
+    layout: { ...layout, hiddenKinds: [] },
+    note: `Showing every kind for this link (Show is ${kindsSummary(layout)}).`,
+  };
+}
+
+/**
+ * What a settled layout save writes (Oct 20 — two overlapping saves could resurrect the older
+ * one: each wrote its own layout on settling, so a late failure of an older save re-flagged and
+ * re-stored it over a newer one). `latest` is the layout last committed (the page's
+ * latestLayoutRef); a result for any other layout is ignored (null). Otherwise the latest layout
+ * is what the browser keeps, flagged unsaved when the save failed. Before any commit (`latest`
+ * null — the retry of a stored copy on mount) the settled layout is the latest.
+ */
+export function applySaveResult(
+  latest: WorkLayout | null,
+  settled: WorkLayout,
+  ok: boolean,
+): { layout: WorkLayout; unsaved: boolean } | null {
+  if (latest && settled !== latest) return null;
+  return { layout: latest ?? settled, unsaved: !ok };
+}
+
+/**
  * The List's groups under a layout: `shown` in the user's order without the hidden ones (a
  * `keep` bucket — the ?bucket= preset's — stays shown even when hidden), `hidden` the closed
  * ones that exist, in order, for the restore chips.
