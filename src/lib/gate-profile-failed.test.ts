@@ -71,11 +71,11 @@ describe("the wiring", () => {
   it("the provider exposes profileFailed: set on a throw and on no row after the retry, cleared by a load that succeeds, a sign-out and a lost session", () => {
     const auth = read("src/lib/auth-context.tsx");
     expect(auth).toContain("const [profileFailed, setProfileFailed] = useState(false);");
+    // Oct 21 (the sixth audit): the outcome goes through nextProfileState, which keeps a profile
+    // already held when a RE-read fails (src/lib/profile-reload-keeps-held.test.ts); with none
+    // held a throw or no row is still null + failed.
     expect(auth).toMatch(
-      /profileRef\.current = p;\s*setProfile\(p\);[\s\S]*?setProfileFailed\(!p\);/,
-    );
-    expect(auth).toMatch(
-      /\} catch \{\s*profileRef\.current = null;\s*setProfile\(null\);\s*setProfileFailed\(true\);\s*\}/,
+      /result = \{ ok: true, profile: p \};\s*\} catch \{\s*result = \{ ok: false \};\s*\}\s*const next = nextProfileState\(held, result\);\s*profileRef\.current = next\.profile;\s*setProfile\(next\.profile\);\s*setProfileFailed\(next\.failed\);/,
     );
     expect(auth).toMatch(
       /if \(!current\) \{\s*profileRef\.current = null;\s*setProfile\(null\);\s*setProfileFailed\(false\);/,

@@ -2,8 +2,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { toast } from "sonner";
+
 import { supabase } from "@/integrations/supabase/client";
-import { PROFILE_HOLD_MS, shouldHoldForProfile } from "@/lib/auth-flow";
+import {
+  nextProfileState,
+  PROFILE_HOLD_MS,
+  PROFILE_REFRESH_FAILED_TOAST,
+  profileRefreshWarnDue,
+  shouldHoldForProfile,
+  type ProfileLoadResult,
+} from "@/lib/auth-flow";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 import { canAccess } from "@/lib/access";
 import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-store";
@@ -23,6 +32,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileRef = useRef<UserProfile | null>(null);
   // The session the listener last saw (Oct 20): a SIGNED_IN with none before is a real sign-in.
   const sessionRef = useRef<Session | null>(null);
+  // When the "could not refresh your profile" toast was last shown (Oct 21): at most one per
+  // PROFILE_REFRESH_WARN_EVERY_MS, however often a tab wakes.
+  const warnedAtRef = useRef<number | null>(null);
 
   async function loadProfile(current: Session | null) {
     if (!current) {
@@ -31,6 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileFailed(false);
       return;
     }
+    // Oct 21 (the sixth audit): a profile already held this session survives a failed RE-read
+    // (TOKEN_REFRESHED, a tab-wake SIGNED_IN, refreshProfile) — nulling it and setting
+    // profileFailed made the gate send the person home from the page they were on. Only a load
+    // with no profile to begin with fails (lib/auth-flow.ts nextProfileState); a session that
+    // ends still clears everything above.
+    const held = profileRef.current;
+    let result: ProfileLoadResult<UserProfile>;
     try {
       let p = await getMyProfile();
       if (!p) {
@@ -39,14 +58,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await new Promise((r) => setTimeout(r, 1200));
         p = await getMyProfile();
       }
-      profileRef.current = p;
-      setProfile(p);
       // No row after the retry is a failed load too: the gate must not fail open on it.
-      setProfileFailed(!p);
+      result = { ok: true, profile: p };
     } catch {
-      profileRef.current = null;
-      setProfile(null);
-      setProfileFailed(true);
+      result = { ok: false };
+    }
+    const next = nextProfileState(held, result);
+    profileRef.current = next.profile;
+    setProfile(next.profile);
+    setProfileFailed(next.failed);
+    if (next.kept) {
+      console.warn("Profile re-read failed; keeping the profile already held this session");
+      const now = Date.now();
+      if (profileRefreshWarnDue(warnedAtRef.current, now)) {
+        warnedAtRef.current = now;
+        toast.warning(PROFILE_REFRESH_FAILED_TOAST);
+      }
     }
   }
 

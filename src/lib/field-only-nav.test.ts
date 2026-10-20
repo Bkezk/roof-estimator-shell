@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { homeFor, isFieldOnly } from "@/lib/access";
+import { homeFor, isFieldOnly, pageForPath } from "@/lib/access";
 
 const techOnly = { role: "user", access: ["service", "inventory"], technician: true };
 const officeTech = { role: "user", access: ["service", "customers"], technician: true };
@@ -20,6 +20,10 @@ describe("homeFor", () => {
     expect(homeFor(officeTech)).toBe("/my-work");
     expect(homeFor(manager)).toBe("/my-work");
     expect(homeFor(null)).toBe("/my-work");
+  });
+  it("My tickets is every signed-in user's route (Oct 21), like Work Overview — the landing page never blocks", () => {
+    expect(pageForPath(homeFor(techOnly))).toBeNull();
+    expect(pageForPath(homeFor(null))).toBeNull();
   });
 });
 

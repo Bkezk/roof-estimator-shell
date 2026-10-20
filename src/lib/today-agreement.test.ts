@@ -189,7 +189,11 @@ describe("item 9 — the strip reads its own item's follow-up", () => {
     });
     const env = fakeSupabase({
       crm_followups: rows,
-      profiles: [{ id: REP, full_name: "Rae Rep", email: "r@x" }],
+      profiles: [
+        // Oct 21: listFollowups reads the caller's profile to scope the list (an admin: unscoped).
+        { id: ADMIN, role: "admin", access: [], full_name: "Ann", email: "a@x" },
+        { id: REP, full_name: "Rae Rep", email: "r@x" },
+      ],
     });
     // What the strip used to search: the first 1,000.
     const all = await call<Row[]>(listFollowups, {}, env.db);

@@ -74,8 +74,16 @@ export function AccountPicker(props: {
   onBlur?: () => void;
   /** "Add as a new customer" asks for the whole physical address too (an opportunity). */
   requireAddress?: boolean;
+  /**
+   * Offer "Add … as a new customer" (default on). The ticket page turns it off for a
+   * technician-only user (Oct 21): the office adds customers (crm-account.ts
+   * OFFICE_ADDS_CUSTOMERS; the server refuses them too), and a customer they created was
+   * unreadable to their own token, so the ticket's save failed "Customer not found".
+   */
+  allowAdd?: boolean;
 }) {
   const free = !!props.allowFreeText;
+  const allowAdd = props.allowAdd !== false;
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   // null = not typing: the input shows the picked value's label.
@@ -101,8 +109,9 @@ export function AccountPicker(props: {
     staleTime: 30_000,
   });
   const hits = search.data ?? [];
-  const addLabel = free ? "" : typed.trim();
-  // Rows: the hits, then (when something is typed) the "add as new customer" row.
+  const addLabel = free || !allowAdd ? "" : typed.trim();
+  // Rows: the hits, then (when something is typed, and adding is allowed) the "add as new
+  // customer" row.
   const rowCount = hits.length + (addLabel ? 1 : 0);
 
   // Free text: no row is highlighted until the arrow keys pick one, so Enter never links by itself.
@@ -219,9 +228,9 @@ export function AccountPicker(props: {
             <p className="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">
               Pick one to link this bid to the customer&apos;s profile.
             </p>
-          ) : hits.length === 0 && !addLabel ? (
+          ) : hits.length === 0 && !typed.trim() ? (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">
-              No customers yet. Type a name to add one.
+              {allowAdd ? "No customers yet. Type a name to add one." : "Type a customer's name."}
             </p>
           ) : hits.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">No match.</p>

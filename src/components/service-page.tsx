@@ -86,7 +86,14 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { canClaim, dispatchesTickets, isOffice, managesTickets, seesInvoices } from "@/lib/access";
+import {
+  canClaim,
+  dispatchesTickets,
+  isFieldOnly,
+  isOffice,
+  managesTickets,
+  seesInvoices,
+} from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
@@ -1852,7 +1859,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // The form's sections. The office lays them out in two columns from md up (owner, Oct 1, "the
   // tighter layout"); a technician keeps the one column.
   // The customer: the search box until one is picked, then one block with the name (× to
-  // change), the site and the site contact.
+  // change), the site and the site contact. Not for a technician-only user (Oct 21, the sixth
+  // audit): they work the tickets assigned to them and the office owns the customer — no × to
+  // change the customer, and the search box offers no "Add … as a new customer" (a customer they
+  // created was unreadable to their own token, so the save failed "Customer not found"; the
+  // server refuses them too, crm.functions.ts quickCreateAccount).
+  const ownsCustomer = !isFieldOnly(profile);
   const customerField = (
     <div className="space-y-1">
       <Label htmlFor={draft.customer ? undefined : "ticket-customer"}>Customer</Label>
@@ -1864,6 +1876,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           contactId={draft.contact_id}
           siteMessage={siteMessage}
           disabled={ro}
+          allowChange={ownsCustomer}
           locationId={draft.location_id}
           locationName={job?.location_name ?? null}
           onLocation={(v) => set("location_id", v)}
@@ -1894,6 +1907,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             value={null}
             autoFocus={!job || changingCustomer}
             disabled={ro}
+            allowAdd={ownsCustomer}
             placeholder="Search a customer (e.g. bell county)…"
             onChange={(hit) =>
               setDraft((d) => ({
@@ -2541,6 +2555,8 @@ function CustomerBlock(props: {
   locationName: string | null;
   onLocation: (id: string) => void;
   disabled: boolean;
+  /** Show the × that changes the customer (not for a technician-only user, Oct 21). */
+  allowChange: boolean;
   onChangeCustomer: () => void;
   onPickSite: (site: { id: string; name: string }, accountName: string) => void;
   onContact: (id: string) => void;
@@ -2571,7 +2587,7 @@ function CustomerBlock(props: {
           {detail.isLoading && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
-          {!props.disabled && (
+          {!props.disabled && props.allowChange && (
             <Button
               type="button"
               size="icon"

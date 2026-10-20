@@ -317,6 +317,12 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";
   if (pathname.startsWith("/takeoff")) return "takeoff";
+  // My tickets (Oct 21, the sixth audit): every signed-in user's, like Work Overview — the
+  // server lists the caller's own tickets whoever they are (myDay), and it is a technician-only
+  // user's landing page, which must not block on a failed first profile load (the gate blocked
+  // it as Service and sent them to Work Overview, which is not theirs). The sidebar still lists
+  // it for the Technician tick only.
+  if (pathname.startsWith("/service/today")) return null;
   // The Invoices tab under Service is the Invoices page's (seesInvoices gates the screen too).
   if (pathname.startsWith("/service/invoices")) return "invoices";
   if (pathname.startsWith("/service")) return "service";

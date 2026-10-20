@@ -27,6 +27,7 @@ import { canAccess, isFieldOnly, seesEveryone } from "@/lib/access";
 import {
   ACCOUNT_ALREADY_DELETED,
   ACCOUNT_DELETED,
+  OFFICE_ADDS_CUSTOMERS,
   OPEN_OPPORTUNITY_STATUSES,
   OPEN_TICKET_STAGES,
   CRM_MAX,
@@ -664,13 +665,17 @@ export const saveSite = createServerFn({ method: "POST" })
 /**
  * The one-step "new customer" from the Customers page or a ticket's / bid's customer search: the
  * account only, no site (owner, Sep 30: sites are added under the account afterwards). Needs an
- * email, a cell phone or an office phone.
+ * email, a cell phone or an office phone. Not a technician-only user's (Oct 21, the sixth
+ * audit, OFFICE_ADDS_CUSTOMERS): the office owns the customer book — and a row they created was
+ * unreadable to their own token under 20261020122000's fence (no ticket links it yet), so the
+ * ticket's save failed "Customer not found" over an orphan customer. Refused before any write.
  */
 export const quickCreateAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => parseInput(quickAccountSchema, d))
   .handler(async ({ data, context }): Promise<AccountHit> => {
     const p = await writeAccess(context);
+    if (isFieldOnly(p)) throw new Error(OFFICE_ADDS_CUSTOMERS);
     const sb = context.supabase;
     const { source, ...fields } = data;
     const { data: account, error } = await sb

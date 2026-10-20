@@ -446,8 +446,9 @@ describe("a. the login page's stalled notice; the provider's bounded hold", () =
     expect(login).toContain("disabled={submitting || leaving}");
   });
   it("the provider: the SIGNED_IN hold is cleared after PROFILE_HOLD_MS if the profile never settles", () => {
-    expect(auth).toContain(
-      'import { PROFILE_HOLD_MS, shouldHoldForProfile } from "@/lib/auth-flow";',
+    // Oct 21: the import grew (nextProfileState and the refresh toast); both names stay in it.
+    expect(auth).toMatch(
+      /import \{[^}]*\bPROFILE_HOLD_MS\b[^}]*\bshouldHoldForProfile\b[^}]*\} from "@\/lib\/auth-flow";/,
     );
     expect(auth).toMatch(
       /if \(shouldHoldForProfile\(had, next, event\)\) \{\s*setLoading\(true\);[\s\S]{0,200}guard = setTimeout\(\(\) => \{\s*if \(active\) setLoading\(false\);\s*\}, PROFILE_HOLD_MS\);\s*\}\s*setSession\(next\);\s*await loadProfile\(next\);\s*if \(guard\) clearTimeout\(guard\);\s*setLoading\(false\);/,

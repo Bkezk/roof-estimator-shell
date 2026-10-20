@@ -72,7 +72,7 @@ export type GateDecision = "no-session" | "open" | "blocked";
 
 /**
  * May the gate render this route (Oct 20, the fifth audit)? `page` is pageForPath(pathname):
- * null routes (/my-work, /account, /inventory, /followups, /opportunities, "/") are every
+ * null routes (/my-work, /service/today, /account, /followups, /opportunities, "/") are every
  * signed-in user's and always "open". A route that belongs to a page needs the profile: with
  * one, the page's own rule (admin → isAdmin, manager → managesTickets, else canAccess); with
  * none still loading (`profileFailed` false), "open" as before — nothing is blocked while the
@@ -103,6 +103,52 @@ export function gateDecision(
   return ok ? "open" : "blocked";
 }
 
+/**
+ * Is this block the FAILED profile load's, not a real access miss (Oct 21, the sixth audit)?
+ * The gate then says so (PROFILE_MISSING_TOAST with a "Try again" that runs refreshProfile)
+ * instead of redirecting home in silence. With a profile in hand a block is the page's rule.
+ */
+export const blockedForProfile = (
+  blocked: boolean,
+  profile: unknown,
+  profileFailed: boolean,
+): boolean => blocked && !profile && profileFailed;
+
 /** Has a sign-in waited long enough to offer the way out? */
 export const signInStalled = (leaving: boolean, waitedMs: number): boolean =>
   leaving && waitedMs >= SIGN_IN_STALL_MS;
+
+/** What the provider says when a profile RE-read fails while a profile is already held. */
+export const PROFILE_REFRESH_FAILED_TOAST =
+  "Could not refresh your profile — some things may be out of date";
+/** How often, at most, that toast is shown (a tab that wakes every minute is told once). */
+export const PROFILE_REFRESH_WARN_EVERY_MS = 5 * 60_000;
+
+/** What one profile load came back with: a row, no row (after the retry), or a throw. */
+export type ProfileLoadResult<P> = { ok: true; profile: P | null } | { ok: false };
+
+export interface ProfileState<P> {
+  profile: P | null;
+  /** The load failed and nothing is held: the gate blocks the pages that need a profile. */
+  failed: boolean;
+  /** The held profile was kept because the re-read failed (warn; do not evict). */
+  kept: boolean;
+}
+
+/**
+ * The provider's profile after a load (Oct 21, the sixth audit). A row: it is the profile,
+ * nothing failed. No row, or a throw, with a profile already HELD this session (a re-read on
+ * TOKEN_REFRESHED, a tab-wake SIGNED_IN, refreshProfile): the held one is KEPT and nothing
+ * failed — nulling it sent the person home from the page they were on (gateDecision blocks a
+ * gated page on `profileFailed`) over a blip on the profile read. No row or a throw with no
+ * profile to begin with: null and failed, as before.
+ */
+export function nextProfileState<P>(held: P | null, result: ProfileLoadResult<P>): ProfileState<P> {
+  if (result.ok && result.profile) return { profile: result.profile, failed: false, kept: false };
+  if (held) return { profile: held, failed: false, kept: true };
+  return { profile: null, failed: true, kept: false };
+}
+
+/** Is the "could not refresh" toast due (none yet, or the last one PROFILE_REFRESH_WARN_EVERY_MS ago)? */
+export const profileRefreshWarnDue = (lastWarnedAt: number | null, now: number): boolean =>
+  lastWarnedAt === null || now - lastWarnedAt >= PROFILE_REFRESH_WARN_EVERY_MS;

@@ -47,12 +47,22 @@ const officeLike = (p: { role: string; access: string[] }) =>
 /** A follow-up with its assignee's name (admins and Customers users see everyone's). */
 export type FollowupWithName = FollowupRow & { assignee_name: string };
 
+/**
+ * The Follow-ups list. Scoped on the server as crm_followups_read is (Oct 21, the sixth audit):
+ * Customers access reads everyone's; anyone else — a technician, a Service-only office user —
+ * their own (`assignee_id = me`, like listMyWork's scope). Until
+ * 20261021090000_followups_write_split.sql the FOR ALL write policy let a Service token read
+ * every row (35 of 35 as the technician-only test login); the server says the same whichever is
+ * applied first.
+ */
 export const listFollowups = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ include_closed: z.boolean().optional() }).parse(d ?? {}))
   .handler(async ({ data, context }): Promise<FollowupWithName[]> => {
     const sb = context.supabase;
+    const p = await me(context);
     let q = sb.from("crm_followups").select("*").order("due_at").limit(1000);
+    if (!canAccess(p, "customers")) q = q.eq("assignee_id", context.userId);
     if (!data.include_closed) q = q.eq("status", "open");
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);

@@ -68,6 +68,11 @@ describe("per-page access", () => {
     // Every signed-in user: the server lists a rep only their own (audit, Oct 2).
     expect(pageForPath("/opportunities")).toBeNull();
     expect(pageForPath("/followups")).toBeNull();
+    // My tickets too (Oct 21): the technician-only landing page must not block on a failed
+    // first profile load; the server lists the caller's own tickets whoever they are.
+    expect(pageForPath("/service/today")).toBeNull();
+    expect(pageForPath("/service/board")).toBe("service");
+    expect(pageForPath("/service/invoices")).toBe("invoices");
   });
 
   it("a manager reaches every page, Estimate Pricing included (owner, Oct 1), and no admin page", () => {

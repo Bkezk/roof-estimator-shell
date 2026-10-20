@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-store";
 import { canAccess, homeFor, pageForPath } from "@/lib/access";
 import {
+  blockedForProfile,
   gateDecision,
   landingDecision,
   PROFILE_MISSING_TOAST,
@@ -159,6 +160,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }, PROFILE_RETRY_MS);
     return () => clearTimeout(t);
   }, [decision, tries]);
+
+  // Oct 21 (the sixth audit): a block on a FAILED profile load (not a real access miss) is said
+  // out loud — once per block, with "Try again" running refreshProfile — instead of a silent
+  // redirect home. A block with a profile in hand is the page's own rule and stays quiet.
+  const profileBlock = blockedForProfile(blocked, profile, profileFailed);
+  useEffect(() => {
+    if (loading || !profileBlock) return;
+    toast.warning(PROFILE_MISSING_TOAST, {
+      action: { label: "Try again", onClick: () => void refreshRef.current() },
+    });
+  }, [loading, profileBlock]);
 
   // The login screen renders full-bleed, with no app chrome.
   if (isLogin) return <>{children}</>;

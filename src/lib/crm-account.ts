@@ -28,6 +28,15 @@ export function hasContactMethod(a: {
 /** The warning on a customer saved before the rule (no email or phone on file). */
 export const NO_CONTACT_ON_FILE = `${CONTACT_REQUIRED}: this customer has no email or phone on file. Edit to add one.`;
 
+/**
+ * A technician-only user asked to add a customer (Oct 21, the sixth audit): the office owns the
+ * customer book; a technician works the tickets assigned to them. quickCreateAccount says this,
+ * and the ticket page's picker does not offer "Add … as a new customer" to them (an account a
+ * technician created was unreadable to their own token under the fence, so the ticket's save
+ * then failed "Customer not found").
+ */
+export const OFFICE_ADDS_CUSTOMERS = "The office adds customers";
+
 /** The one message for a customer whose address must be complete (an opportunity's quick add). */
 export const ADDRESS_REQUIRED = "Add the street address, city, state and ZIP";
 
