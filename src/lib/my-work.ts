@@ -814,9 +814,10 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
  * column title and every empty-column chip shows it (the page's BucketHelp tooltip).
  */
 export const BUCKET_HELP: Record<WorkBucket, string> = {
-  // Oct 15: tasks too (they have sat here since Oct 9).
+  // Oct 15: tasks too (they have sat here since Oct 9). Oct 20: role-neutral — only people
+  // ticked Technician can Claim (canClaim); everyone else puts someone on it with Assign to.
   unassigned:
-    "Tickets, tasks and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+    "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
   overdue:
     "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
   today: "Due today.",
@@ -1046,9 +1047,27 @@ export function presetGroups(groups: WorkGroup[], preset?: BucketPreset | null):
  * the preset (?bucket=, the Owner view's links) when there is one, else the first group in
  * order with anything in it (Overdue before This week…), else This week.
  */
-export function defaultBucket(groups: WorkGroup[], preset?: BucketPreset | null): WorkBucket {
+export function defaultBucket(
+  groups: ReadonlyArray<{ bucket: WorkBucket; items: unknown[] }>,
+  preset?: BucketPreset | null,
+): WorkBucket {
   if (preset) return presetBucket(preset);
   return groups.find((g) => g.items.length > 0)?.bucket ?? "week";
+}
+
+/**
+ * The phone's selected tab (Oct 20): the one the person picked while it is still among the
+ * columns, else the default (`defaultBucket`). A pick outlives its group — the last item of the
+ * picked group gets done or claimed and the fold (`splitEmptyGroups`) drops the column — and
+ * until now the stale pick left no tab selected and the panel labelled by a tab that was gone.
+ */
+export function activeTab(
+  columns: ReadonlyArray<{ bucket: WorkBucket; items: unknown[] }>,
+  picked: WorkBucket | null,
+  preset?: BucketPreset | null,
+): WorkBucket {
+  if (picked && columns.some((c) => c.bucket === picked)) return picked;
+  return defaultBucket(columns, preset);
 }
 
 // ---- calendar ------------------------------------------------------------------------------

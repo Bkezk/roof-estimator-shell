@@ -198,6 +198,27 @@ export function assignedToast(name: string, day: string | null, kept: string | n
   return day ? `Assigned to ${name} for ${monthDay(day)}` : `Assigned to ${name}`;
 }
 
+/** The toast's second line when the assigned ticket leaves the viewer's own Work Overview. */
+export const ASSIGNED_TICKET_NOTE = "It now shows on the Service board";
+
+/**
+ * What the "Assigned to …" toast adds (Oct 20): a dispatcher without the Technician tick sees
+ * only their own tickets on Work Overview, so a ticket they just handed out leaves their list at
+ * once — the toast says where it went and an "Open" action opens it on the Service board. For
+ * whoever sees everyone's work (an admin, a manager) the ticket stays listed under its new
+ * person, and a task or an opportunity is listed for them either way: nothing to add.
+ */
+export function assignedToastExtra(
+  viewer: Viewer,
+  plan: Pick<AssignPlan, "kind" | "id">,
+): { description: string; action: { label: string; href: string } } | null {
+  if (plan.kind !== "ticket" || seesEveryone(viewer)) return null;
+  return {
+    description: ASSIGNED_TICKET_NOTE,
+    action: { label: "Open", href: `/service?id=${encodeURIComponent(plan.id)}` },
+  };
+}
+
 /**
  * Does the Calendar show the Unassigned pane (owner, Oct 20)? For whoever may act on nobody's
  * work: a claimer (`canClaim`) always — their Oct 8 pane, "Nothing waiting." included — and

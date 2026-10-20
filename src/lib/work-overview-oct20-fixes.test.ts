@@ -512,8 +512,12 @@ describe("7. activityText: a done task links its building, or nothing", () => {
 
 describe("8. AuthGate reads the rendered location, not the pending one", () => {
   const gate = read("src/components/auth-gate.tsx");
-  it("resolvedLocation (moves with the matches) with location as the first-render fallback", () => {
-    expect(gate).toContain("select: (s) => (s.resolvedLocation ?? s.location).pathname,");
+  it("the committed matches' pathname (the third audit: resolvedLocation lagged the other way)", () => {
+    // Oct 20, later: resolvedLocation moves AFTER the commit that renders the destination, so the
+    // page after a sign-in rendered once bare; the committed matches move with the Outlet
+    // (lib/committed-pathname.ts, work-overview-oct20-audit3.test.ts).
+    expect(gate).toContain("const pathname = useRouterState({ select: committedPathname });");
+    expect(gate).not.toContain("resolvedLocation ??");
     expect(gate).not.toContain("select: (s) => s.location.pathname,");
     // The gate still renders the login screen bare and everyone else inside the shell.
     expect(gate).toContain("if (isLogin) return <>{children}</>;");
@@ -566,9 +570,12 @@ describe("a. shouldSeedWorkLayout: stamped by the request's start, held while sa
 
 describe("b. a failed save: the browser's copy wins until a later save succeeds", () => {
   it("localWins is set on error, cleared on success; every change retries the save", () => {
-    expect(page).toContain("const [localWins, setLocalWins] = useState(false);");
+    // Oct 20, later: the hold starts from the browser's flag (work-overview-oct20-audit3.test.ts).
     expect(page).toMatch(
-      /onSuccess: \(\) => setLocalWins\(false\),\s*onError: \(\) => \{\s*setLocalWins\(true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
+      /const \[localWins, setLocalWins\] = useState\(\s*\(\) => !!userId && !!readStoredWork\(storage, userId\)\?\.unsaved,\s*\);/,
+    );
+    expect(page).toMatch(
+      /onSuccess: \(_r, l\) => \{\s*setLocalWins\(false\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l\);\s*\},\s*onError: \(_e, l\) => \{\s*setLocalWins\(true\);\s*if \(userId\) writeStoredWorkLayout\(storage, userId, l, true\);\s*toast\.error\(LAYOUT_SAVE_FAILED, \{ duration: 10_000 \}\);\s*\}/,
     );
     // commitLayout saves on every change (the retry), after the browser's copy is written.
     expect(page).toMatch(

@@ -137,7 +137,7 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
     expect(BUCKET_HELP).toEqual({
       // Oct 15: tasks named too (they have sat in the group since Oct 9).
       unassigned:
-        "Tickets, tasks and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+        "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
       overdue:
         "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
       today: "Due today.",
@@ -190,7 +190,7 @@ describe("the page: chips above the columns, a ⓘ on every title and chip, the 
     expect(list).toContain("{columns.map((g) => (");
     expect(list).not.toContain("{shown.map(");
     // The tab to start on and the fallback group still read every shown group.
-    expect(list).toContain("const bucket = picked ?? defaultBucket(shown, preset);");
+    expect(list).toContain("const bucket = activeTab(columns, picked, preset);");
     expect(list).toContain("const group = shown.find((g) => g.bucket === bucket) ??");
   });
   it('the "Empty:" row: a chip per empty group with its label, count and ⓘ, wrapping; both layouts', () => {
@@ -210,9 +210,9 @@ describe("the page: chips above the columns, a ⓘ on every title and chip, the 
     expect(bar).not.toContain("onLayout(");
     // Above the columns on a desktop, above the tabs on a phone, after the Hidden row in each.
     expect(list.match(/\{layoutBar\}\s*\{emptyBar\}\s*\{nothing\}/g)?.length).toBe(2);
-    expect(list).toContain(
-      '<p className="text-sm text-muted-foreground">Nothing to do: every group is empty.</p>',
-    );
+    // Oct 20: one line when every shown group is empty, another when every column is hidden.
+    expect(list).toContain('"Nothing to do: every group is empty."');
+    expect(list).toContain('"Every column is hidden — bring one back from Hidden."');
   });
   it("every column title and every phone tab carries the ⓘ", () => {
     const desktop = list.slice(list.indexOf("{columns.map((g) => ("), list.indexOf("lg:hidden"));

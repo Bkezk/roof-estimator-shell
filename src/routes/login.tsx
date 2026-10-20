@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -15,18 +15,17 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const navigate = useNavigate();
-  const { session, loading } = useAuth();
+  const { session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Already signed in? Leave the login screen.
-  if (!loading && session) {
-    navigate({ to: "/bids" });
-    return null;
-  }
+  // Signed in — just now, or already when the screen opened: the AuthGate sends the person to
+  // their home (homeFor: Work Overview, My tickets for a technician-only user) once their profile
+  // has loaded. This page used to navigate to /bids on its own as well (Oct 20): two competing
+  // navigations, the wrong one for a technician. Until the gate moves, the button stays busy.
+  const leaving = !!session;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,8 +35,8 @@ function LoginPage() {
       email: email.trim(),
       password,
     });
-    setSubmitting(false);
     if (signInError) {
+      setSubmitting(false);
       // A rejected password comes back as HTTP 400; anything else (no network, a blocked host,
       // a 5xx) is not the user's fault and must not read as a wrong password.
       const status = (signInError as { status?: number }).status;
@@ -48,7 +47,8 @@ function LoginPage() {
       );
       return;
     }
-    navigate({ to: "/bids" });
+    // Signed in: the gate takes it from here (the session arrives through onAuthStateChange).
+    setSubmitting(false);
   };
 
   return (
@@ -82,8 +82,8 @@ function LoginPage() {
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? "Signing in…" : "Sign in"}
+          <Button type="submit" className="w-full" disabled={submitting || leaving}>
+            {submitting || leaving ? "Signing in…" : "Sign in"}
           </Button>
         </form>
         <p className="mt-6 text-center text-xs text-muted-foreground">

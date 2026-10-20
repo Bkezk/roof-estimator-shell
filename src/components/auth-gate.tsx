@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { canAccess, homeFor, isAdmin, managesTickets, pageForPath } from "@/lib/access";
+import { committedPathname } from "@/lib/committed-pathname";
 import { dispatchRemindersIfDue } from "@/lib/followups.functions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationsBell } from "@/components/notifications-bell";
@@ -116,16 +117,16 @@ function AuthedShell({ children }: { children: ReactNode }) {
 export function AuthGate({ children }: { children: ReactNode }) {
   const { session, profile, loading } = useAuth();
   const navigate = useNavigate();
-  // The pathname of what the Outlet is RENDERING (Oct 20): resolvedLocation moves with the
-  // matches when a navigation commits; `location` moves the moment one starts. Reading
+  // The pathname of what the Outlet is RENDERING (Oct 20): the committed matches' leaf, which
+  // moves in the same router commit as the Outlet's content (lib/committed-pathname.ts). Reading
   // `location` here let the signed-out redirect to /login flip `isLogin` on while the Outlet
   // still held the page being left — so that page (Work Overview, five column tooltips) rendered
   // once outside AuthedShell, with no TooltipProvider, and the error boundary caught "Tooltip
-  // must be used within TooltipProvider" ×5 on the way to the sign-in screen. Before the first
-  // commit there is no resolvedLocation; `location` is right then.
-  const pathname = useRouterState({
-    select: (s) => (s.resolvedLocation ?? s.location).pathname,
-  });
+  // must be used within TooltipProvider" ×5 on the way to the sign-in screen. Reading
+  // `resolvedLocation` (the first fix) had the opposite leg: it moves in a layout effect AFTER
+  // the commit that renders the destination, so leaving /login after a sign-in rendered the
+  // destination once bare — a cached Work Overview, the same five tooltips, the same boundary.
+  const pathname = useRouterState({ select: committedPathname });
 
   const isLogin = pathname === "/login";
   // Per-page access (src/lib/access.ts): a route belongs to a page; a user without that page is

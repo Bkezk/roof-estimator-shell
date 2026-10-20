@@ -210,7 +210,7 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     expect(list).toContain("aria-selected={selected}");
     expect(list).toContain("({g.items.length})");
     // The tab to start on is among the columns the user shows (Oct 7 layout).
-    expect(list).toContain("const bucket = picked ?? defaultBucket(shown, preset);");
+    expect(list).toContain("const bucket = activeTab(columns, picked, preset);");
     expect(list).toContain('role="tabpanel"');
     // Each group's items, or its muted empty line, come from one place for both layouts.
     expect(list).toContain(
@@ -223,7 +223,8 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     expect(list).toContain('g.bucket === "overdue"\n      ? g.items.length > 0');
     expect(list).toContain('g.bucket === "unassigned" && g.items.some((i) => i.flag)');
     // Picking another tab drops a ?bucket= preset; a new preset wins over an earlier pick.
-    expect(list).toContain("if (preset && b !== preset) onClearPreset();");
+    // Oct 20: compared with the preset's BUCKET (?bucket=today opens This week).
+    expect(list).toContain("if (preset && b !== presetBucket(preset)) onClearPreset();");
     expect(list).toContain("if (prevPreset !== preset) {");
     // The List uses the whole width like the other views; no "Nothing assigned" or "Show all".
     expect(page).toContain('<div className="mx-auto max-w-none space-y-5">');

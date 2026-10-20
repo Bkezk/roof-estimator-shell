@@ -282,11 +282,22 @@ export function moveBucket(layout: WorkLayout, bucket: WorkBucket, target: WorkB
   return { ...layout, order };
 }
 
-/** Close a column with the X. The last one showing cannot be closed. */
-export function hideBucket(layout: WorkLayout, bucket: WorkBucket): WorkLayout {
+/**
+ * Close a column with the X. The last one showing cannot be closed — among the columns the
+ * viewer HAS (`present`, the List's groups; Oct 20): `order` holds every bucket there is, but a
+ * viewer who neither authorizes nor invoices has no Needs authorization or Authorized column, so
+ * counting those let them hide everything they could see and read "Nothing to do".
+ */
+export function hideBucket(
+  layout: WorkLayout,
+  bucket: WorkBucket,
+  present: readonly WorkBucket[] | null = null,
+): WorkLayout {
   if (layout.hidden.includes(bucket)) return layout;
-  const showing = layout.order.filter((b) => !layout.hidden.includes(b));
-  if (showing.length <= 1) return layout;
+  const showing = layout.order.filter(
+    (b) => !layout.hidden.includes(b) && (!present || present.includes(b)),
+  );
+  if (!showing.some((b) => b !== bucket)) return layout;
   return { ...layout, hidden: [...layout.hidden, bucket] };
 }
 
@@ -306,30 +317,79 @@ type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const keyFor = (userId: string) => `${WORK_LAYOUT_STORAGE_KEY}:${userId}`;
 
-/** The layout cached for this user in this browser, or null. */
-export function readStoredWorkLayout(
+/**
+ * The browser's copy with its flag (Oct 20): `unsaved` — the last save to the profile failed
+ * ("kept on this device only"), so this copy is the only good one and holds the list's seed off
+ * until a save succeeds (the page retries once on mount). Stored beside the layout's own fields;
+ * `normalizeWorkLayout` reads the old shape (no flag) and never carries the flag along, so it
+ * is never sent to the profile.
+ */
+export interface StoredWorkLayout {
+  layout: WorkLayout;
+  unsaved: boolean;
+}
+
+/** The layout cached for this user in this browser, with its unsaved flag, or null. */
+export function readStoredWork(
   storage: StorageLike | null,
   userId: string,
-): WorkLayout | null {
+): StoredWorkLayout | null {
   try {
     const raw = storage?.getItem(keyFor(userId));
     if (!raw) return null;
-    return normalizeWorkLayout(JSON.parse(raw));
+    const parsed: unknown = JSON.parse(raw);
+    const unsaved =
+      !!parsed && typeof parsed === "object" && (parsed as { unsaved?: unknown }).unsaved === true;
+    return { layout: normalizeWorkLayout(parsed), unsaved };
   } catch {
     return null;
   }
 }
 
-/** Cache the layout for this user in this browser (nothing to remember clears the cache). */
+/** The layout cached for this user in this browser, or null. */
+export function readStoredWorkLayout(
+  storage: StorageLike | null,
+  userId: string,
+): WorkLayout | null {
+  return readStoredWork(storage, userId)?.layout ?? null;
+}
+
+/**
+ * Cache the layout for this user in this browser (nothing to remember clears the cache — unless
+ * it is `unsaved`: a Reset the profile refused must still be the copy that wins on remount).
+ */
 export function writeStoredWorkLayout(
   storage: StorageLike | null,
   userId: string,
   layout: WorkLayout,
+  unsaved = false,
 ): void {
   try {
-    if (isEmptyWorkLayout(layout)) storage?.removeItem(keyFor(userId));
-    else storage?.setItem(keyFor(userId), JSON.stringify(layout));
+    if (isEmptyWorkLayout(layout) && !unsaved) storage?.removeItem(keyFor(userId));
+    else
+      storage?.setItem(
+        keyFor(userId),
+        JSON.stringify(unsaved ? { ...layout, unsaved: true } : layout),
+      );
   } catch {
     // A private window or a full store: the page still lays out from memory.
   }
+}
+
+// ---- the person picker while peeking ---------------------------------------------------------
+
+/**
+ * Does picking a person under Show remember them on the layout (Oct 20)? Not while the person is
+ * PEEKING: the page landed with an explicit `?view=list` (an Owner-view number link) that differs
+ * from the view the layout remembers — the admin is on the List for a look at one person's work
+ * and goes back to the Owner view; remembering that person would rewrite whose work they see
+ * everywhere else. The view buttons remember as before (once the view is their own choice, the
+ * URL's view and the layout's agree, and picks remember again).
+ */
+export function shouldRememberWho(
+  landing: { viewExplicit: boolean; urlView: string | null | undefined },
+  layoutView: WorkViewName | undefined,
+): boolean {
+  if (!landing.viewExplicit || landing.urlView !== "list") return true;
+  return (layoutView ?? "list") === "list";
 }

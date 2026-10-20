@@ -255,7 +255,7 @@ describe("the 'needs assignment' timer (owner, Oct 7: overdue just by nature of 
     expect(by["opportunity:new"]).toMatchObject({ since: TODAY, flag: false });
     expect(by["ticket:mine"]!.flag).toBeUndefined();
   });
-  it("the timer lives in Setup › Reminders (crm_settings.unassigned_overdue_days) and reaches the page", () => {
+  it("the timer lives in Admin › Reminders (crm_settings.unassigned_overdue_days) and reaches the page", () => {
     const migration = read("../../supabase/migrations/20261007100000_unassigned_overdue.sql");
     expect(migration).toContain(
       "add column if not exists unassigned_overdue_days integer not null default 1",

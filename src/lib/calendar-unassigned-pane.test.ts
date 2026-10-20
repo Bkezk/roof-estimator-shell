@@ -474,7 +474,9 @@ describe("5. the page: the pane for assigners, their drag, the dialog", () => {
       /assignOppFn\(\{\s*data: \{ id: v\.id, assignee_id: v\.assignee, date: v\.date \?\? null \},\s*\}\)/,
     );
     expect(hook).toContain("return r.dateKept || v.dateKept ? (r.expected_close ?? null) : null;");
-    expect(hook).toContain("toast.success(assignedToast(v.name, v.day, kept));");
+    // Oct 20, later: with a second line and an Open action for a dispatcher who no longer lists
+    // the ticket (work-overview-oct20-audit3.test.ts).
+    expect(hook).toMatch(/toast\.success\(\s*assignedToast\(v\.name, v\.day, kept\),/);
     // The row's own pick has no day (its toast is "Assigned to …" as before).
     expect(hook).toContain("assign.mutate({ ...plan, name, day: null });");
   });

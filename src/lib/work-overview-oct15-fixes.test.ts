@@ -294,7 +294,7 @@ describe("7. Owner view task lines: the map only for a task with a building", ()
 describe("9. wording", () => {
   it("the Unassigned help names tasks", () => {
     expect(BUCKET_HELP.unassigned).toBe(
-      "Tickets, tasks and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
+      "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
     );
   });
   it("an Authorize follow-up row reads Done — to authorize", () => {

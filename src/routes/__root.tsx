@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth-context";
 import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import { ThemeProvider } from "@/lib/theme-context";
 
@@ -145,9 +146,14 @@ function RootComponent() {
         {/* The theme reads the signed-in user (their saved choice), so it sits inside auth; the
             Toaster is inside it too so the toasts follow the theme. */}
         <ThemeProvider>
-          <AuthGate>
-            <Outlet />
-          </AuthGate>
+          {/* One TooltipProvider over every page (Oct 20): a page rendered outside the shell for a
+              commit — the sign-in screen's neighbour, a cached page on the way out — must never
+              throw for lack of one (the shell's own, in ui/sidebar, nests inside it). */}
+          <TooltipProvider delayDuration={0}>
+            <AuthGate>
+              <Outlet />
+            </AuthGate>
+          </TooltipProvider>
           <Toaster />
         </ThemeProvider>
       </AuthProvider>

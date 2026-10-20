@@ -178,12 +178,12 @@ describe("the layout follows the user", () => {
     expect(page).toContain("onLayout(moveBucket(layout, dragging, target))");
     expect(page).toContain("draggable");
     expect(page).toContain("aria-label={`Hide ${g.label}`}");
-    expect(page).toContain("onLayout(hideBucket(layout, g.bucket))");
+    expect(page).toContain("onLayout(hideBucket(layout, g.bucket, present))");
     expect(page).toContain("onLayout(showBucket(layout, g.bucket))");
     expect(page).toContain("Reset layout");
     expect(page).toContain("onLayout(defaultWorkLayout())");
     expect(page).toContain("writeStoredWorkLayout(storage, userId, l)");
     expect(page).toContain("saveLayout.mutate(l)");
-    expect(page).toContain("defaultBucket(shown, preset)");
+    expect(page).toContain("activeTab(columns, picked, preset)");
   });
 });

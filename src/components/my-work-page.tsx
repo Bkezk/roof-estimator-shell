@@ -18,7 +18,7 @@
  * (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts, the follow-up
  * state in src/lib/followup-rules.ts.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
@@ -56,6 +56,7 @@ import { claimOpportunity } from "@/lib/opportunities.functions";
 import { claimTask } from "@/lib/tasks.functions";
 import {
   KIND_LABELS,
+  activeTab,
   addMonths,
   cellItems,
   dayIsOverdue,
@@ -108,9 +109,11 @@ import {
   kindsSummary,
   landingSearch,
   moveBucket,
+  readStoredWork,
   readStoredWorkLayout,
   rememberView,
   rememberWho,
+  shouldRememberWho,
   shouldSeedWorkLayout,
   showBucket,
   toggleKind,
@@ -432,10 +435,11 @@ function WaitingSince({ since, today }: { since: string | null; today: string })
 /**
  * The ⓘ beside a column title, a tab or an empty-column chip (owner, Oct 12): a tooltip saying
  * in one or two plain sentences what the column holds (my-work.ts BUCKET_HELP). A button, so a
- * keyboard or a phone (tap / focus) opens it too; the shell's TooltipProvider (ui/sidebar)
- * supplies the delay — the page renders inside AuthedShell only (auth-gate.tsx reads the
- * rendered location, Oct 20, so a sign-out redirect no longer renders it outside). It stops the
- * click so a heading's drag or a tab's pick is not started.
+ * keyboard or a phone (tap / focus) opens it too; the root's TooltipProvider (routes/__root.tsx,
+ * Oct 20 — over every page, the shell's own in ui/sidebar nested inside it) supplies the delay,
+ * so no commit that renders this page outside AuthedShell can throw for lack of one
+ * (auth-gate.tsx reads the committed matches' pathname too, so none should). It stops the click
+ * so a heading's drag or a tab's pick is not started.
  */
 function BucketHelp({ bucket, label }: { bucket: WorkBucket; label: string }) {
   return (
@@ -514,6 +518,9 @@ function ListView({
     [groups, layout, keep],
   );
   const { columns, empty } = useMemo(() => splitEmptyGroups(shown, keep), [shown, keep]);
+  // The columns this viewer HAS (Oct 20): the X refuses to hide the last of these, not the last
+  // of every bucket there is (a sales person has no Needs authorization or Authorized column).
+  const present = useMemo(() => groups.map((g) => g.bucket), [groups]);
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
   const [prevPreset, setPrevPreset] = useState(preset);
@@ -521,7 +528,9 @@ function ListView({
     setPrevPreset(preset);
     setPicked(null);
   }
-  const bucket = picked ?? defaultBucket(shown, preset);
+  // The phone's tab: the pick while its column is still there, else the default (Oct 20 —
+  // activeTab: a pick whose group emptied and folded away left no tab selected).
+  const bucket = activeTab(columns, picked, preset);
   // The shown groups cover every pick; the fallback is for the types.
   const group = shown.find((g) => g.bucket === bucket) ??
     groups.find((g) => g.bucket === bucket) ?? {
@@ -531,7 +540,9 @@ function ListView({
     };
   const pick = (b: WorkBucket) => {
     setPicked(b);
-    if (preset && b !== preset) onClearPreset();
+    // Tapping the preset's own tab keeps the preset (Oct 20: ?bucket=today opens This week, and
+    // "week" !== "today" cleared it on the tap).
+    if (preset && b !== presetBucket(preset)) onClearPreset();
   };
   // Red: anything overdue, or unassigned work past the "needs assignment" timer.
   const isAlert = (g: WorkGroup) =>
@@ -620,8 +631,14 @@ function ListView({
       ))}
     </div>
   );
+  // No columns: every group the viewer shows is empty — or (Oct 20) every one is hidden, which
+  // is a different line, since the Hidden chips above are the way back.
   const nothing = columns.length === 0 && (
-    <p className="text-sm text-muted-foreground">Nothing to do: every group is empty.</p>
+    <p className="text-sm text-muted-foreground">
+      {shown.length === 0
+        ? "Every column is hidden — bring one back from Hidden."
+        : "Nothing to do: every group is empty."}
+    </p>
   );
 
   return (
@@ -692,7 +709,7 @@ function ListView({
                     type="button"
                     aria-label={`Hide ${g.label}`}
                     title="Hide this column (bring it back from the Hidden chips)"
-                    onClick={() => onLayout(hideBucket(layout, g.bucket))}
+                    onClick={() => onLayout(hideBucket(layout, g.bucket, present))}
                     className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -1219,7 +1236,12 @@ export function MyWorkPage(props: {
   // the next change retries it, and a success lifts the hold).
   const listLayout = q.data?.layout;
   const listRequestedAt = q.data?.requestedAt ?? 0;
-  const [localWins, setLocalWins] = useState(false);
+  // Oct 20: the hold outlives the page — the flag sits beside the browser's copy
+  // (writeStoredWorkLayout `unsaved`), so a remount reads it back before the first seed could
+  // put the profile's older copy over the one kept here; the copy is retried once (below).
+  const [localWins, setLocalWins] = useState(
+    () => !!userId && !!readStoredWork(storage, userId)?.unsaved,
+  );
   const saveLayout = useMutation({
     mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
     onMutate: (l) => {
@@ -1227,13 +1249,29 @@ export function MyWorkPage(props: {
         layout: isEmptyWorkLayout(l) ? null : l,
       });
     },
-    onSuccess: () => setLocalWins(false),
-    onError: () => {
+    onSuccess: (_r, l) => {
+      setLocalWins(false);
+      if (userId) writeStoredWorkLayout(storage, userId, l);
+    },
+    onError: (_e, l) => {
       setLocalWins(true);
+      if (userId) writeStoredWorkLayout(storage, userId, l, true);
       toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 });
     },
   });
   const saving = saveLayout.isPending;
+  // The unsaved copy's one retry on mount (Oct 20): before any seed, so a success lifts the hold
+  // and a failure says so again. `mutate` is stable; the ref keeps it to once per mount.
+  const retriedUnsaved = useRef(false);
+  const { mutate: retrySave } = saveLayout;
+  useEffect(() => {
+    if (!userId || retriedUnsaved.current) return;
+    const stored = readStoredWork(storage, userId);
+    if (!stored?.unsaved) return;
+    retriedUnsaved.current = true;
+    setLocalWins(true);
+    retrySave(stored.layout);
+  }, [retrySave, storage, userId]);
   useEffect(() => {
     if (listLayout === undefined || !userId) return;
     if (
@@ -1274,9 +1312,16 @@ export function MyWorkPage(props: {
     if (next !== layout) commitLayout(next);
     props.onView(v);
   };
+  // Oct 20: not while peeking — an Owner-view link landed here with an explicit ?view=list that
+  // differs from the remembered view (shouldRememberWho); the pick goes to the URL only, so the
+  // look at one person does not rewrite whose work the admin sees everywhere else.
   const changeWho = (w: string) => {
-    const next = rememberWho(layout, whoParam(w, profile));
-    if (next !== layout) commitLayout(next);
+    if (
+      shouldRememberWho({ viewExplicit: props.view !== null, urlView: props.view }, layout.view)
+    ) {
+      const next = rememberWho(layout, whoParam(w, profile));
+      if (next !== layout) commitLayout(next);
+    }
     props.onWho(w);
   };
 

@@ -215,7 +215,7 @@ export const listMyWork = createServerFn({ method: "GET" })
           .order("due_date", { ascending: true, nullsFirst: false })
           .limit(LIMIT)
       : Promise.resolve({ data: [] as TaskIn[], error: null });
-    // The "needs assignment" timer (Setup › Reminders; 20261007100000_unassigned_overdue.sql).
+    // The "needs assignment" timer (Admin › Reminders; 20261007100000_unassigned_overdue.sql).
     // Until that migration is applied the column is missing and the default stands.
     const uDays = showUnassigned
       ? sb.from("crm_settings").select("unassigned_overdue_days").eq("id", 1).maybeSingle()

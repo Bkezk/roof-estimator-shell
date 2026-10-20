@@ -21,6 +21,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
@@ -31,6 +32,7 @@ import {
   assignKind,
   assignPlan,
   assignedToast,
+  assignedToastExtra,
   canEditWorkTask,
   canMoveWork,
   dropAssigns,
@@ -105,6 +107,7 @@ export function useWorkActions(profile: UserProfile | null): {
   assignDialog: ReactNode;
 } {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["my-work"] });
 
   // Open in place: the row carries only what the list shows; the dialog needs the whole task.
@@ -189,7 +192,21 @@ export function useWorkActions(profile: UserProfile | null): {
       return r.dateKept || v.dateKept ? (r.expected_close ?? null) : null;
     },
     onSuccess: (kept, v) => {
-      toast.success(assignedToast(v.name, v.day, kept));
+      // Oct 20: a dispatcher without the tick loses sight of the ticket (Work Overview lists only
+      // their own) — the toast says it is on the Service board, with an Open action to it.
+      const extra = assignedToastExtra(profile, v);
+      toast.success(
+        assignedToast(v.name, v.day, kept),
+        extra
+          ? {
+              description: extra.description,
+              action: {
+                label: extra.action.label,
+                onClick: () => void navigate({ href: extra.action.href }),
+              },
+            }
+          : undefined,
+      );
       invalidate();
     },
     // "Someone already has it" or any other refusal: the row is stale, so the list is refetched
