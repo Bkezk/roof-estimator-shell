@@ -325,6 +325,15 @@ describe("activityText: one line per source", () => {
       text: "Marked Task 'Send warranty' done",
       href: "/prospect?building=b1",
     });
+    // Oct 20: without a building there is no link (the bare map was a dead one).
+    expect(
+      activityText({
+        source: "task",
+        at: "2026-10-01T13:14:00Z",
+        title: "Send warranty",
+        building_id: null,
+      }),
+    ).toEqual({ at: "2026-10-01T13:14:00Z", text: "Marked Task 'Send warranty' done" });
   });
   it("time entries (the field buttons' own entries are their event's repeat)", () => {
     const base = {
@@ -416,6 +425,13 @@ describe("recentActivity: newest first, five", () => {
     ]);
     expect(recentActivity(rows).length).toBe(5);
     expect(recentActivity([], 5)).toEqual([]);
+    // Oct 20: the building-less task line carries no link (the bare map was a dead one).
+    const taskLine = recentActivity(rows, 5).find((a) => a.text.startsWith("Marked Task"));
+    expect(taskLine).toEqual({
+      at: "2026-10-01T09:00:00Z",
+      text: "Marked Task 'Send warranty' done",
+    });
+    expect(taskLine).not.toHaveProperty("href");
   });
 });
 

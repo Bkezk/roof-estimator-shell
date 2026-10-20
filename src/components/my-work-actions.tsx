@@ -6,11 +6,12 @@
  *   - openTask: a task row opens in the TaskDialog (getTask fetches the whole row).
  *   - markDone: the row's Done tick (setTaskStatus), with an Undo on the toast that reopens it.
  *   - move: a ticket or a task dropped on another calendar day (assignServiceJob with its
- *     technician unchanged / moveTaskDate).
+ *     technician unchanged / moveTaskDate); the toast says when the ticket's hold ended with it.
  *   - assign: the "Assign to…" select on an Unassigned row (assignServiceJob / assignTask /
  *     assignOpportunity); its roster loads the first time a select of that kind opens.
  *
- * Every change invalidates ["my-work"] and toasts; an error toasts the server's message.
+ * Every change invalidates ["my-work"] and toasts; an error toasts the server's message and
+ * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it).
  */
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,7 +26,7 @@ import {
   canEditWorkTask,
   canMoveWork,
   dropPlan,
-  monthDay,
+  movedToast,
   taskOpensInPlace,
   workId,
   type AssignKind,
@@ -57,6 +58,8 @@ export interface WorkActions {
   canEditTask: (item: WorkItem) => boolean;
   /** The Done tick: mark the task done; the toast's Undo reopens it. */
   markDone: (item: WorkItem) => void;
+  /** Is THIS row's Done tick in flight (the tick shows ticked meanwhile; Oct 20: not for any other change)? */
+  markingDone: (item: WorkItem) => boolean;
   /** The "Assign to…" select for an Unassigned row; null when the viewer may not assign it. */
   assign: (item: WorkItem) => ReactNode;
   /** May the viewer drag this row onto another calendar day? */
@@ -105,18 +108,26 @@ export function useWorkActions(profile: UserProfile | null): {
   const assignTicketFn = useServerFn(assignServiceJob);
   const moveTaskFn = useServerFn(moveTaskDate);
   const move = useMutation({
-    mutationFn: async (plan: DropPlan) => {
-      if (plan.kind === "ticket")
-        await assignTicketFn({
+    /** Resolves to whether the ticket's follow-up hold ended with the move (a task: never). */
+    mutationFn: async (plan: DropPlan): Promise<boolean> => {
+      if (plan.kind === "ticket") {
+        const r = await assignTicketFn({
           data: { id: plan.id, technician_id: plan.technicianId, scheduled_date: plan.date },
         });
-      else await moveTaskFn({ data: { id: plan.id, date: plan.date } });
+        return !!r.snooze_cleared;
+      }
+      await moveTaskFn({ data: { id: plan.id, date: plan.date } });
+      return false;
     },
-    onSuccess: (_r, plan) => {
-      toast.success(`Moved to ${monthDay(plan.date)}`);
+    onSuccess: (snoozeCleared, plan) => {
+      toast.success(movedToast(plan.date, snoozeCleared));
       invalidate();
     },
-    onError: (e) => toast.error(errText(e) || "Could not move it"),
+    // The row is stale either way (Oct 20): the list is refetched.
+    onError: (e) => {
+      toast.error(errText(e) || "Could not move it");
+      invalidate();
+    },
   });
 
   // "Assign to…" on an Unassigned row.
@@ -142,7 +153,12 @@ export function useWorkActions(profile: UserProfile | null): {
       toast.success(`Assigned to ${v.name}`);
       invalidate();
     },
-    onError: (e) => toast.error(errText(e) || "Could not assign it"),
+    // "Someone already has it" or any other refusal: the row is stale, so the list is refetched
+    // (Oct 20; the claim's onError on the page has done the same since Oct 15).
+    onError: (e) => {
+      toast.error(errText(e) || "Could not assign it");
+      invalidate();
+    },
   });
 
   // The rosters, loaded the first time a select of that kind opens (not for a page that never
@@ -191,6 +207,10 @@ export function useWorkActions(profile: UserProfile | null): {
     openTask: (item) => open.mutate(workId(item)),
     canEditTask: (item) => canEditWorkTask(item, profile),
     markDone: (item) => status.mutate({ id: workId(item), status: "done" }),
+    markingDone: (item) =>
+      status.isPending &&
+      status.variables?.status === "done" &&
+      status.variables.id === workId(item),
     assign: (item) => {
       const kind = assignKind(item, profile);
       if (!kind) return null;

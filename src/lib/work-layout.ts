@@ -199,15 +199,28 @@ export function landingSearch(
  * layout back over a Reset or a hidden column. (Until Oct 15 the rule was a 4-minute wall-clock
  * window on the cache, which let exactly that stale list through once the window had passed.)
  * The list refreshes every five minutes, so a change made on another device shows within one.
+ *
+ * Oct 20, `listRequestedAt` is when the list request STARTED (the page stamps its queryFn), not
+ * React Query's dataUpdatedAt, which is stamped when the fetch RESOLVES: a 5-minute refresh in
+ * flight across a local change read the profile before the save, resolved after it with a newer
+ * stamp, and seeded the pre-save layout back. The server read the layout no later than the
+ * request started, so that is the stamp to compare. Two more holds (`opts`): nothing seeds while
+ * a save is in flight (`saving`: its result settles the cache), and nothing seeds while the
+ * browser's copy is the only good one (`localWins`: the last save failed — "kept on this device
+ * only" — so a list bringing the server's copy must not undo it; the next change retries the
+ * save and a success lifts the hold).
  */
 export const shouldSeedWorkLayout = (
   cached: { data?: unknown; dataUpdatedAt: number } | undefined,
-  listUpdatedAt: number,
+  listRequestedAt: number,
+  opts: { saving?: boolean; localWins?: boolean } = {},
 ): boolean =>
-  !cached ||
-  cached.data === undefined ||
-  !cached.dataUpdatedAt ||
-  listUpdatedAt > cached.dataUpdatedAt;
+  !opts.saving &&
+  !opts.localWins &&
+  (!cached ||
+    cached.data === undefined ||
+    !cached.dataUpdatedAt ||
+    listRequestedAt > cached.dataUpdatedAt);
 
 /** Tick or untick a kind under Show. The last kind showing cannot be unticked. */
 export function toggleKind(layout: WorkLayout, kind: WorkKind): WorkLayout {

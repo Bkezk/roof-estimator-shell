@@ -46,6 +46,13 @@ export interface MyWorkResult {
   names: Record<string, string>;
   /** The "Show" picker's people: admins and managers only (empty for everyone else). */
   people: WorkPerson[];
+  /**
+   * Is `people` the whole roster (Oct 20)? True only when work_people() answered; false when
+   * it failed and technician_options() stood in (Service people only), and for a caller who
+   * cannot pick. The page second-guesses a remembered person only against a complete roster
+   * (my-work.ts effectiveWho) — an incomplete one made it forget a real person.
+   */
+  rosterComplete: boolean;
   /** May the caller pick Everyone / another person? */
   canPick: boolean;
   /** Whose items came back: "all" or the profile ids. */
@@ -360,7 +367,7 @@ export const listMyWork = createServerFn({ method: "GET" })
         (followups.data ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),
       ),
     ];
-    const [buildings, accounts, people, opps] = await Promise.all([
+    const [buildings, accounts, roster, opps] = await Promise.all([
       buildingIds.length
         ? sb.from("buildings").select("id, name, address1, city").in("id", buildingIds)
         : Promise.resolve({
@@ -369,7 +376,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       accountIds.length
         ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      canPick ? loadPeople(sb) : Promise.resolve([] as WorkPerson[]),
+      canPick ? loadPeople(sb) : Promise.resolve({ people: [] as WorkPerson[], complete: false }),
       oppIds.length
         ? sb.from("crm_opportunities").select("id, status").in("id", oppIds)
         : Promise.resolve({ data: [] as { id: string; status: string }[] }),
@@ -387,6 +394,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       building_label: t.building_id ? (buildingLabel.get(t.building_id) ?? null) : null,
     });
     const names: Record<string, string> = {};
+    const people = roster.people;
     for (const p of people) names[p.id] = p.name;
     // The caller's own name, so their own cards say who (owner, Oct 9: "why doesnt this show
     // who its assigned to on the card?"); a plain user reads no other profile and holds no
@@ -418,6 +426,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       })),
       names,
       people,
+      rosterComplete: roster.complete,
       canPick,
       scope,
       authorizer,
@@ -461,12 +470,15 @@ type BidRow = Pick<
 /**
  * Everyone an admin or a manager can pick: `work_people()` (SECURITY DEFINER; profiles RLS hides
  * other users' rows from a manager). Until that migration is applied, the ticket assignee roster
- * `technician_options()` stands in.
+ * `technician_options()` stands in — an incomplete roster, and `complete` says so (Oct 20).
  */
-async function loadPeople(sb: SupabaseClient<Database>): Promise<WorkPerson[]> {
+async function loadPeople(
+  sb: SupabaseClient<Database>,
+): Promise<{ people: WorkPerson[]; complete: boolean }> {
   const all = await sb.rpc("work_people");
   const rows = all.error ? (await sb.rpc("technician_options")).data : all.data;
-  return (rows ?? [])
+  const people = (rows ?? [])
     .map((r) => ({ id: r.id, name: nameOf(r), technician: r.technician }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  return { people, complete: !all.error };
 }

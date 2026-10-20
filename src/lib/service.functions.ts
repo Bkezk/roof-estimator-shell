@@ -31,6 +31,7 @@ import {
 } from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
+import type { SyncResult } from "@/lib/followups.server";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
@@ -598,6 +599,8 @@ const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced
  * 9; ticket-events.server.ts afterTicketDispatch) — once, from here, whichever path it was.
  * `quiet` (followups.server.ts SyncArgs): a timer started here sends the technician no "assigned"
  * notice — the restore of a deleted ticket (owner, Oct 12, item 5), which is not a new assignment.
+ * Answers what the sync did (SyncResult; Oct 20: "snooze_cleared" when a date move ended the
+ * follow-up's hold, which assignServiceJob passes on for Work Overview's toast).
  */
 async function syncTicketFollowup(
   row: ServiceJobRow,
@@ -606,12 +609,12 @@ async function syncTicketFollowup(
   prevStage: string | null,
   before?: { technician_id: string | null; scheduled_date: string | null },
   opts: { quiet?: boolean } = {},
-): Promise<void> {
+): Promise<SyncResult> {
   const { syncFollowup } = await import("@/lib/followups.server");
   const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
   await afterTicketStage(row, prevStage, actor, sb);
   if (before) await afterTicketDispatch(row, before, actor, sb);
-  await syncFollowup(
+  return syncFollowup(
     {
       kind: "ticket",
       itemId: row.id,
@@ -692,7 +695,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
+  .handler(async ({ data, context }): Promise<ServiceJobWithTech & { snooze_cleared: boolean }> => {
     const p = await serviceWrite(context);
     if (!dispatchesTickets(p)) throw new Error("Only the office or a manager dispatches tickets");
     const dateProblem = assignDateProblem(data.scheduled_date);
@@ -738,9 +741,18 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     // Row 0 of a named crew mirrors the technician (the board shows and moves the lead).
     const { syncCrewLead } = await import("@/lib/service-crew.server");
     await syncCrewLead(sb, row.id, row.technician_id);
-    // The technician's reassigned / date-moved notice rides on `cur` (owner, Oct 12).
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
-    return withTechName(sb, row);
+    // The technician's reassigned / date-moved notice rides on `cur` (owner, Oct 12). Oct 20: a
+    // held follow-up loses its hold when its day moves (followup_sync_upsert clears
+    // snoozed_until), and the drop said nothing — the answer now carries `snooze_cleared` so
+    // Work Overview's toast can ("Moved to Oct 22 — its hold was ended"). The move is not blocked.
+    const synced = await syncTicketFollowup(
+      row,
+      { id: context.userId, name: nameOf(p) },
+      sb,
+      cur.stage,
+      cur,
+    );
+    return { ...(await withTechName(sb, row)), snooze_cleared: synced === "snooze_cleared" };
   });
 
 /**

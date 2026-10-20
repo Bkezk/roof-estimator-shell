@@ -4,11 +4,11 @@ import { MyWorkPage } from "@/components/my-work-page";
 import { homeFor, isFieldOnly } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import {
+  nextWorkSearch,
   parseBucketPreset,
   parseMonthParam,
   parseViewParam,
   resolveWho,
-  whoParam,
   type BucketPreset,
   type WorkViewParam,
 } from "@/lib/my-work";
@@ -28,7 +28,9 @@ export const Route = createFileRoute("/my-work")({
   // picked (remembered on their profile with the layout; lib/work-layout.ts landingSearch), so
   // the page gets the URL's values as they are — absent when absent — and resolves them itself.
   // An explicit ?view=list is kept too (Oct 15): the Owner view's number links say so, and the
-  // remembered "owner" must not win over it (landingSearch treats any URL view as final).
+  // remembered "owner" must not win over it (landingSearch treats any URL view as final) — and
+  // the page's own navigations keep it explicit (Oct 20, nextWorkSearch: the first one used to
+  // drop it, and the remembered view bounced the admin off the List).
   validateSearch: (s: Record<string, unknown>): MyWorkSearch => {
     const view = parseViewParam(s["view"]);
     const who = s["who"];
@@ -65,23 +67,17 @@ function MyWorkRoute() {
   // No ?who: Everyone for admins and managers, Mine for anyone else (defaultWho).
   const curWho = resolveWho(who, profile);
   /**
-   * The search without default keys (the list, the caller's default `who`, no preset) — the
-   * page's own navigations may drop "list"; only an incoming link needs it explicit.
+   * The search without default keys (the caller's default `who`, no preset off the List; the
+   * rule is lib/my-work.ts nextWorkSearch). "list" is dropped only when the URL was silent on
+   * the view; a URL that named it — an Owner-view link, ?view=list included — keeps naming it.
    */
   const searchOf = (
     v: WorkViewParam,
     w: string,
     b?: BucketPreset | null,
     m?: string | null,
-  ): MyWorkSearch => {
-    const wp = whoParam(w, profile);
-    return {
-      ...(v !== "list" ? { view: v } : {}),
-      ...(wp ? { who: wp } : {}),
-      ...(b && v === "list" ? { bucket: b } : {}),
-      ...(m ? { month: m } : {}),
-    };
-  };
+  ): MyWorkSearch =>
+    nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);
   return (
     <MyWorkPage
       view={view ?? null}

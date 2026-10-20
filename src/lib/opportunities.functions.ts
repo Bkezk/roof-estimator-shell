@@ -74,10 +74,15 @@ export type OpportunityWithNames = OpportunityRow & {
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
+/**
+ * The caller's profile as the rules read it. `technician` is what canClaim needs (Oct 20: it was
+ * left out, so claimOpportunity answered CLAIM_NEEDS_TICK to everyone — the test passed because
+ * the fake client returned whole rows whatever was selected; it projects columns now).
+ */
 async function me(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
-    .select("role, access, full_name, email")
+    .select("role, access, technician, full_name, email")
     .eq("id", ctx.userId)
     .maybeSingle();
   if (!data) throw new Error("Profile not found");

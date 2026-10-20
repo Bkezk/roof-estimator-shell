@@ -3,8 +3,9 @@
  * one, assigned to a user with an expected close date. Without an id the page lists them
  * grouped by status (Open → No response) like the Tickets page; `?new=1` opens a blank one and
  * `?id=<uuid>` an existing one. Saving (or a status change) syncs the follow-up timer on the
- * server; its state shows with Snooze / Close beside the form (a right-hand column on xl, below
- * the form otherwise), with the contact log. Won, Lost and No response stop the reminders.
+ * server; its state shows with Snooze beside the form (a right-hand column on xl, below the form
+ * otherwise; no Close since Oct 15), with the contact log. Won, Lost and No response stop the
+ * reminders.
  *
  * Owner, Oct 1: the status lives in the header only (a new one starts Open); the assignee is
  * required; the lead source picks from a maintained list (Settings › General › Lead sources,
@@ -1434,10 +1435,10 @@ function OppCustomerBlock(props: {
   );
 }
 
-/** The opportunity's open follow-up (if any) with Snooze / Close. */
+/** The opportunity's open follow-up (if any) with Snooze (no Close since Oct 15). */
 function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: OppStatus }) {
   const { session, profile } = useAuth();
-  // Snooze / Close are a manager's (owner, Oct 1); everyone else sees the state only.
+  // Snooze is a manager's (owner, Oct 1); everyone else sees the state only.
   const canManage = canManageFollowup(profile);
   // This one item's open follow-up, read by item (audit, Oct 2: searching the first 1,000 rows
   // of listFollowups said "No open follow-up" past them). Under the ["followups", …] key, so

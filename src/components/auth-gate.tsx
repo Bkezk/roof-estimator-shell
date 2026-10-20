@@ -116,8 +116,15 @@ function AuthedShell({ children }: { children: ReactNode }) {
 export function AuthGate({ children }: { children: ReactNode }) {
   const { session, profile, loading } = useAuth();
   const navigate = useNavigate();
+  // The pathname of what the Outlet is RENDERING (Oct 20): resolvedLocation moves with the
+  // matches when a navigation commits; `location` moves the moment one starts. Reading
+  // `location` here let the signed-out redirect to /login flip `isLogin` on while the Outlet
+  // still held the page being left — so that page (Work Overview, five column tooltips) rendered
+  // once outside AuthedShell, with no TooltipProvider, and the error boundary caught "Tooltip
+  // must be used within TooltipProvider" ×5 on the way to the sign-in screen. Before the first
+  // commit there is no resolvedLocation; `location` is right then.
   const pathname = useRouterState({
-    select: (s) => s.location.pathname,
+    select: (s) => (s.resolvedLocation ?? s.location).pathname,
   });
 
   const isLogin = pathname === "/login";

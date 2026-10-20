@@ -5,8 +5,9 @@
  *   - A task row opens the task in place, in the TaskDialog (`taskOpensInPlace`): its old link
  *     led to the Prospecting map (a bare map for a task without a building — a dead link), so the
  *     map is a small "Open on map" link instead, only for a task that has a building
- *     (`taskMapHref`). Every other kind keeps its link. An unassigned task for someone who can
- *     neither Claim nor assign it does not open (getTask would refuse): plain text with a hint.
+ *     (`taskMapHref`). Every other kind keeps its link. An unassigned task opens only for an
+ *     admin or a manager (getTask refuses everyone else, a ticked office person included): for
+ *     anyone else it is plain text with a hint, and Claim when they may (`unassignedTaskHint`).
  *   - A Done tick on a task row (`canEditWorkTask`): for whoever may change the task — the
  *     server's rule (setTaskStatus / saveTask: canSeeTask — the creator, the assignee, an
  *     attendee, or an admin / manager). The page knows a row's assignee, not its creator or
@@ -22,7 +23,7 @@
  *   - The toolbar's New ticket / New opportunity links (`newTicketHref`, NEW_OPPORTUNITY_HREF):
  *     from the Calendar the ticket carries the selected day.
  */
-import { canClaim, dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
+import { dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
 import { ymdParts, type WorkItem, type WorkKind } from "@/lib/my-work";
 
 /** The signed-in person as the rules read them: role, access, technician, and their id. */
@@ -39,11 +40,12 @@ const isTicketKind = (k: WorkKind) => k === "ticket" || k === "inspection";
 /**
  * Does the row open in place (the TaskDialog) rather than follow its link? Every task (owner,
  * Oct 15: "every task row opens the task in place"); the map is `taskMapHref`. One exception
- * (Oct 15, later): a task nobody is on, for a viewer who can neither Claim it (`canClaim`) nor
- * assign it (`seesEveryone`) — an office or sales user without the Technician tick. getTask
- * refuses them ("Claim it first"), so the button was a dead end: the row is plain text with a
- * hint instead (`UNASSIGNED_TASK_HINT`). Every other task — an admin's, a manager's, a ticked
- * office person's, or an assigned task for its assignee — opens as before.
+ * (Oct 15, later): a task nobody is on opens only for a viewer who sees everyone's tasks — an
+ * admin or a manager (`seesEveryone`), the server's rule in getTask (tasks.ts canSeeTask: the
+ * creator, the assignee, an attendee, or an admin / manager). Oct 20: until then a viewer who
+ * could Claim it (`canClaim`, a ticked office person) got the button too, and getTask refused
+ * them ("Claim it first") — a dead button. Now they get the inert row with the hint and Claim,
+ * like the office without the tick; an assigned task opens for its assignee as before.
  */
 export function taskOpensInPlace(
   item: Pick<WorkItem, "kind" | "unassigned">,
@@ -51,11 +53,19 @@ export function taskOpensInPlace(
 ): boolean {
   if (item.kind !== "task") return false;
   if (!item.unassigned) return true;
-  return canClaim(viewer) || seesEveryone(viewer);
+  return seesEveryone(viewer);
 }
 
-/** The muted line under an unassigned task row that does not open (`taskOpensInPlace`). */
-export const UNASSIGNED_TASK_HINT = "Claim it, or ask a manager to assign it";
+/**
+ * The muted line under an unassigned task row that does not open (`taskOpensInPlace`): for a
+ * viewer who may Claim it (the row shows Claim), and for one who may not (Oct 20: the ticked
+ * office person used to get a button that failed; the wording now fits both).
+ */
+export const UNASSIGNED_TASK_HINT_CLAIM = "Claim it to open it, or ask a manager to assign it";
+export const UNASSIGNED_TASK_HINT =
+  "Claim it if you are ticked Technician, or ask a manager to assign it";
+export const unassignedTaskHint = (canClaimIt: boolean): string =>
+  canClaimIt ? UNASSIGNED_TASK_HINT_CLAIM : UNASSIGNED_TASK_HINT;
 
 /** A task's "Open on map" link: its building on the Prospecting map; null without a building. */
 export const taskMapHref = (item: Pick<WorkItem, "kind" | "href">): string | null =>
@@ -160,3 +170,15 @@ export function monthDay(ymd: string): string {
   const [, m, d] = ymdParts(ymd);
   return `${MONTHS[m - 1] ?? "?"} ${d}`;
 }
+
+/** The suffix of the move toast when the ticket's follow-up hold ended with the move. */
+export const HOLD_ENDED_SUFFIX = " — its hold was ended";
+
+/**
+ * The "Moved to …" toast (Oct 20): a held ticket dragged to another day loses its hold —
+ * followup_sync_upsert clears snoozed_until on a date move and reports `snooze_cleared` — and
+ * until now the drop said nothing about it (assignServiceJob dropped the sync's answer). The
+ * drag is not blocked; the toast says what happened: "Moved to Oct 22 — its hold was ended".
+ */
+export const movedToast = (day: string, snoozeCleared: boolean): string =>
+  `Moved to ${monthDay(day)}${snoozeCleared ? HOLD_ENDED_SUFFIX : ""}`;

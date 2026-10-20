@@ -107,7 +107,7 @@ export function visibleUserIds(
   return [caller.id];
 }
 
-type RoleLike = { role: string | null | undefined } | null | undefined;
+type RoleLike = { role: string | null | undefined; id?: string | null } | null | undefined;
 
 /**
  * Whose work the page shows when the URL names nobody (owner, Oct 1: "default to Everyone"):
@@ -117,9 +117,17 @@ type RoleLike = { role: string | null | undefined } | null | undefined;
 export const defaultWho = (profile: RoleLike): "mine" | "all" =>
   seesEveryone(profile) ? "all" : "mine";
 
-/** The `who` the page uses: the URL's, else the caller's default. */
+/**
+ * The caller's own id, as a `who`, is "mine" (Oct 20): the Owner view's number on the admin's own
+ * row linked ?who=<their id>, which the Show picker has no option for (it lists Mine, Everyone and
+ * the other people) — a blank picker and "Someone else".
+ */
+const ownToMine = (who: string, profile: RoleLike): string =>
+  profile?.id && who === profile.id ? "mine" : who;
+
+/** The `who` the page uses: the URL's (the caller's own id reads as Mine), else their default. */
 export const resolveWho = (who: string | null | undefined, profile: RoleLike): WorkWho =>
-  who || defaultWho(profile);
+  who ? ownToMine(who, profile) : defaultWho(profile);
 
 /**
  * The `who` to put in the URL: nothing when it is the caller's default, so Everyone is the bare
@@ -131,21 +139,56 @@ export const whoParam = (who: string, profile: RoleLike): string | undefined =>
 /**
  * The `who` the page can show (Oct 15): "mine", "all" or a person on the roster. A remembered or
  * linked person who is no longer there (deleted, or never one of the roster) rendered a blank
- * Select and "Someone else: …"; once the roster has loaded (`loaded`), such a `who` falls back to
- * the caller's default. Before it loads, `who` stands (nothing to check it against).
+ * Select and "Someone else: …"; once the WHOLE roster is here (`rosterComplete`:
+ * MyWorkResult.rosterComplete — work_people answered; Oct 20), such a `who` falls back to the
+ * caller's default. Before that, `who` stands: an incomplete roster (work_people failed and
+ * technician_options stood in, which lists only Service people) proves nothing about a person
+ * who is not on it, and until Oct 20 it forgot a real, remembered person. The caller's own id is
+ * "mine" (`ownToMine`).
  */
 export function effectiveWho(
   who: string,
   people: readonly { id: string }[],
   profile: RoleLike,
-  loaded: boolean,
+  rosterComplete: boolean,
 ): WorkWho {
-  if (!loaded || who === "mine" || who === "all") return who;
-  return people.some((p) => p.id === who) ? who : defaultWho(profile);
+  if (who === "mine" || who === "all") return who;
+  const w = ownToMine(who, profile);
+  if (w === "mine" || !rosterComplete) return w;
+  return people.some((p) => p.id === w) ? w : defaultWho(profile);
 }
 
 /** The three views; `effectiveView` (owner-view.ts) still downgrades "owner" for a non-admin. */
 export type WorkViewParam = "list" | "calendar" | "owner";
+
+/**
+ * The search the route writes on the page's own navigations (picking a person, a bucket preset,
+ * a month, a view): no default keys — the caller's default `who` (whoParam) and no preset off
+ * the List — so Everyone on the List is the bare URL. The view: "list" is dropped as the default
+ * ONLY when the URL was silent on the view (`viewExplicit` false; the page then keeps applying
+ * the remembered one, landingSearch). Oct 20: an Owner-view link lands with ?view=list explicit,
+ * and the first in-page navigation used to drop it — the URL fell silent, landingSearch fell
+ * back to the remembered "owner" (or "calendar"), and the admin was bounced off the List. An
+ * explicit view stays explicit for the rest of the visit.
+ */
+export function nextWorkSearch(
+  next: {
+    view: WorkViewParam;
+    who: string;
+    bucket?: BucketPreset | null | undefined;
+    month?: string | null | undefined;
+  },
+  profile: RoleLike,
+  viewExplicit: boolean,
+): { view?: WorkViewParam; who?: string; bucket?: BucketPreset; month?: string } {
+  const wp = whoParam(next.who, profile);
+  return {
+    ...(next.view !== "list" || viewExplicit ? { view: next.view } : {}),
+    ...(wp ? { who: wp } : {}),
+    ...(next.bucket && next.view === "list" ? { bucket: next.bucket } : {}),
+    ...(next.month ? { month: next.month } : {}),
+  };
+}
 
 /**
  * ?view= from the URL, "list" included (Oct 15): an explicit List — the Owner view's number links

@@ -238,7 +238,7 @@ export function OwnerView() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">{r.role}</TableCell>
                         <TableCell className="text-right" title={dueParts(r.dueToday)}>
-                          <Link {...myWorkHref(r.id, "today")} className={linkCls}>
+                          <Link {...myWorkHref(r.id, "today", profile?.id)} className={linkCls}>
                             {due}
                           </Link>
                           {due > 0 && (
@@ -250,7 +250,7 @@ export function OwnerView() {
                         <TableCell
                           className={`text-right ${r.overdue > 0 ? "text-destructive" : ""}`}
                         >
-                          <Link {...myWorkHref(r.id, "overdue")} className={linkCls}>
+                          <Link {...myWorkHref(r.id, "overdue", profile?.id)} className={linkCls}>
                             {r.overdue}
                           </Link>
                           {r.overdueOpps > 0 && (

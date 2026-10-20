@@ -34,6 +34,7 @@
  *                   for admins).
  */
 import { isAdmin, isSalesPm, type AccessLike } from "@/lib/access";
+import { taskMapHref } from "@/lib/my-work-actions";
 import {
   KIND_LABELS,
   addDays,
@@ -464,13 +465,17 @@ export type OwnerCell = "today" | "overdue";
  * reopened the Owner view (work-layout.ts landingSearch: an explicit URL view is final). The
  * person is only peeking at a list, so the landing does not change the remembered view. Done
  * this week has nowhere to land (the List has no Done group): its number expands the person's
- * row instead (components/owner-view.tsx), so it is not a cell here.
+ * row instead (components/owner-view.tsx), so it is not a cell here. The viewer's own row links
+ * `who: "mine"` (Oct 20, `viewerId`): their id is not an option of the Show picker (Mine stands
+ * for it), so the link rendered a blank picker and "Someone else".
  */
 export function myWorkHref(
   who: string,
   cell: OwnerCell,
+  viewerId?: string | null,
 ): { to: "/my-work"; search: { view: "list"; who: string; bucket: OwnerCell } } {
-  return { to: "/my-work", search: { view: "list", who, bucket: cell } };
+  const w = viewerId && who === viewerId ? "mine" : who;
+  return { to: "/my-work", search: { view: "list", who: w, bucket: cell } };
 }
 
 /**
@@ -800,12 +805,16 @@ export function activityText(row: ActivityRow): ActivityItem | null {
         };
       return { at, text: `${verb} on ${ticketName(row.ticket)}`, href: ticketHref(row.itemId) };
     }
-    case "task":
-      return {
-        at,
-        text: `Marked Task '${row.title}' done`,
+    case "task": {
+      // Its building on the Prospecting map; no link without one (Oct 20: the bare map was a
+      // dead link, as the detail lines' taskMapHref already knew — the same rule here).
+      const href = taskMapHref({
+        kind: "task",
         href: row.building_id ? `/prospect?building=${row.building_id}` : "/prospect",
-      };
+      });
+      const text = `Marked Task '${row.title}' done`;
+      return href ? { at, text, href } : { at, text };
+    }
     case "time": {
       if (row.origin === "buttons") return null;
       const what = `${hoursText(row.hours)} ${row.kind} on ${ticketName(row.ticket)}`;

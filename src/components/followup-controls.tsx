@@ -1,8 +1,8 @@
 /**
- * The follow-up controls (moved here from the old Follow-ups page, owner, Oct 1): the Snooze
- * popover and the Close dialog (optional reason). Work Overview and the opportunity page's
- * follow-up strip render them only for admins and managers (seesEveryone); the mutations and the
- * other helpers live in followups-shared.ts.
+ * The follow-up control (moved here from the old Follow-ups page, owner, Oct 1): the Snooze
+ * popover. Work Overview and the opportunity page's follow-up strip render it only for admins and
+ * managers (seesEveryone); the mutation and the other helpers live in followups-shared.ts. The
+ * Close dialog that sat beside it went on Oct 15 (owner: "it may cause more issues than not").
  *
  * Snooze (owner, Oct 9) is a hold with a date and a reason, not "N days": presets 1 week / 2
  * weeks / 1 month, or "Until a date" (tomorrow through 180 days out), and a required reason

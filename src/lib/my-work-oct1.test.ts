@@ -63,7 +63,11 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
     expect(route).toContain('import { useAuth } from "@/lib/auth-store";');
     expect(route).toContain("const { profile } = useAuth();");
     expect(route).toContain("const curWho = resolveWho(who, profile);");
-    expect(route).toContain("const wp = whoParam(w, profile);");
+    // The search rule moved to lib/my-work.ts nextWorkSearch (Oct 20); the route hands it the profile.
+    expect(route).toContain(
+      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);",
+    );
+    expect(read("src/lib/my-work.ts")).toContain("const wp = whoParam(next.who, profile);");
     // validateSearch no longer drops ?who=mine (it would turn back into Everyone).
     expect(route).not.toContain('who !== "mine"');
     expect(route).not.toContain('who ?? "mine"');

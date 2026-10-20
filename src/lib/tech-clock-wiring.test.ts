@@ -421,9 +421,9 @@ describe("myClock", () => {
     setup();
     expect(await call(myClock, {})).toBeNull();
     await press(A, "on_site");
-    // (The fake gives every inserted row an id; the real select names its columns.)
+    // The columns the select names (Oct 20: the fake projects them, as PostgREST does; the
+    // row's id is not among them, and MyClock has no id).
     expect(await call(myClock, {})).toEqual({
-      id: expect.any(String),
       technician_id: TECH,
       service_job_id: A,
       kind: "labor",

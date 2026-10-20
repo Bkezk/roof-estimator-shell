@@ -195,7 +195,8 @@ describe("the page", () => {
   const page = readFileSync("src/components/my-work-page.tsx", "utf8");
   it("5 — the list query refreshes every five minutes, not in a background tab", () => {
     expect(page).toMatch(
-      /queryKey: \["my-work", who\],\s*queryFn: \(\) => listFn\(\{ data: \{ who \} \}\),\s*enabled: !!session && view !== "owner",(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
+      // The queryFn stamps the request's start for the layout seed (Oct 20).
+      /queryKey: \["my-work", who\],(?:\s*\/\/[^\n]*)*\s*queryFn: async \(\) => \{\s*const requestedAt = Date\.now\(\);\s*return \{ \.\.\.\(await listFn\(\{ data: \{ who \} \}\)\), requestedAt \};\s*\},\s*enabled: !!session && view !== "owner",(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
     );
   });
   it("10a — the task dialog's roster is read once it opens", () => {

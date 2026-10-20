@@ -86,12 +86,14 @@ describe("a task row opens in place (bug 2, then owner: every task)", () => {
     expect(taskOpensInPlace(item({ kind: "opportunity" }), admin)).toBe(false);
     expect(taskOpensInPlace(item({ kind: "bid" }), admin)).toBe(false);
   });
-  it("Oct 15: nobody's task does not open for a viewer who can neither Claim nor assign it", () => {
+  it("Oct 15: nobody's task opens only for a viewer who sees everyone's tasks (Oct 20: not a claimer)", () => {
     const un = task({ unassigned: true, assigneeId: null, assigneeName: null });
-    // Admins and managers assign it; a ticked office person claims it: the row opens.
+    // Admins and managers assign it (and getTask answers them): the row opens.
     expect(taskOpensInPlace(un, admin)).toBe(true);
     expect(taskOpensInPlace(un, manager)).toBe(true);
-    expect(taskOpensInPlace(un, { ...office, technician: true })).toBe(true);
+    // A ticked office person claims it, but getTask refuses them until they do (Oct 20): the
+    // inert row with Claim, not a button that fails (work-overview-oct20-fixes.test.ts).
+    expect(taskOpensInPlace(un, { ...office, technician: true })).toBe(false);
     // The office or sales without the tick: getTask would refuse ("Claim it first") — no button.
     expect(taskOpensInPlace(un, office)).toBe(false);
     expect(taskOpensInPlace(un, customersOnly)).toBe(false);
@@ -102,7 +104,9 @@ describe("a task row opens in place (bug 2, then owner: every task)", () => {
     // An assigned task opens for its assignee, as before.
     expect(taskOpensInPlace(task({ assigneeId: ME }), office)).toBe(true);
     expect(taskOpensInPlace(task({ assigneeId: BOB }), office)).toBe(true);
-    expect(UNASSIGNED_TASK_HINT).toBe("Claim it, or ask a manager to assign it");
+    expect(UNASSIGNED_TASK_HINT).toBe(
+      "Claim it if you are ticked Technician, or ask a manager to assign it",
+    );
   });
   it("the page: such a row is plain text with the hint, keeps its flags and Open on map", () => {
     const page = read("src/components/my-work-page.tsx");
@@ -114,7 +118,7 @@ describe("a task row opens in place (bug 2, then owner: every task)", () => {
     expect(row).toContain('const inert = !!actions && item.kind === "task" && !act;');
     expect(row).toContain("const mapHref = act || inert ? taskMapHref(item) : null;");
     expect(row).toContain(') : inert ? (\n        <div className="p-3" data-row="inert-task">');
-    expect(row).toContain("{UNASSIGNED_TASK_HINT}");
+    expect(row).toContain("{unassignedTaskHint(!!claim)}");
     // The same body (title, badge, Unassigned / Overdue flags) as every other row.
     expect(row.match(/\{body\}/g)).toHaveLength(3);
     const hook = read("src/components/my-work-actions.tsx");
@@ -258,7 +262,7 @@ describe("dropPlan: drag an assigned ticket or task onto another day", () => {
     expect(hook).toContain("const plan = dropPlan(item, day, profile);");
     expect(hook).toContain("technician_id: plan.technicianId, scheduled_date: plan.date");
     expect(hook).toContain("moveTaskFn({ data: { id: plan.id, date: plan.date } })");
-    expect(hook).toContain("toast.success(`Moved to ${monthDay(plan.date)}`);");
+    expect(hook).toContain("toast.success(movedToast(plan.date, snoozeCleared));");
     const fns = read("src/lib/tasks.functions.ts");
     expect(fns).toContain("export const moveTaskDate = createServerFn");
     expect(fns).toContain("const cur = await loadVisible(context, data.id, profile);");

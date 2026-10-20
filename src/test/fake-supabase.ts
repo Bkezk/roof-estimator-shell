@@ -10,6 +10,16 @@
  * per request whatever .limit() asks). `opts.objects` is a storage bucket (path → bytes) for
  * `db.storage.from(…).download / upload`; what is uploaded lands in it (`uploads` lists the
  * calls). Not imported by the app.
+ *
+ * Column projection (Oct 20): `.select("a, b")` answers only those columns, as PostgREST does —
+ * until then every select returned whole rows, so a server function that forgot a column its
+ * rule needs (opportunities.functions.ts me() without `technician`, read by canClaim) passed its
+ * test and failed live. A plain comma-separated list and `*` are understood (`parseSelect`); a
+ * select the fake cannot parse — an embedded or joined resource (`site:properties(name)`), an
+ * alias (`name:full_name`), a hint (`!inner`) — still returns whole rows, so tests of those
+ * functions keep working but do not prove their column lists. Only the keys a row actually has
+ * are copied (a column the test did not seed stays absent, as undefined, where PostgREST would
+ * answer null).
  */
 type Row = Record<string, unknown>;
 export interface FakeWrite {
@@ -36,6 +46,31 @@ const likeToRegExp = (pattern: string) =>
       .join(".*")}$`,
     "is",
   );
+
+/**
+ * The columns a `.select()` string names, or null when it means whole rows: nothing, `*`, or a
+ * shape the fake does not parse (an embedded resource, an alias, a hint — anything beyond plain
+ * comma-separated names).
+ */
+export const parseSelect = (cols: string | undefined): string[] | null => {
+  const s = (cols ?? "").trim();
+  if (!s || s === "*" || /[():!]/.test(s)) return null;
+  const names = s
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (names.length === 0 || names.includes("*")) return null;
+  if (!names.every((c) => /^\w+$/.test(c))) return null;
+  return names;
+};
+
+/** `row` reduced to `cols` (the keys it has), or as is when `cols` is null. */
+const project = (row: Row, cols: string[] | null): Row => {
+  if (!cols) return { ...row };
+  const out: Row = {};
+  for (const c of cols) if (c in row) out[c] = row[c];
+  return out;
+};
 
 /** PostgREST's `in` list: `(a,b,"c d")` → the values. */
 const inListValues = (list: string): string[] => {
@@ -127,6 +162,7 @@ export function fakeSupabase(
     let wantCount = false;
     let max = Infinity;
     let offset = 0;
+    let cols: string[] | null = null;
     const preds: Array<(r: Row) => boolean> = [];
     const filters: string[] = [];
     const run = (): Result => {
@@ -135,7 +171,7 @@ export function fakeSupabase(
         const made = list.map((p) => ({ id: `new-${++seq}`, ...p }));
         rows().push(...made);
         writes.push({ table, op, payload: list[0] ?? null, filters, rows: made.length });
-        return { data: made.map((r) => ({ ...r })), error: null, count: made.length };
+        return { data: made.map((r) => project(r, cols)), error: null, count: made.length };
       }
       const hit = rows().filter((r) => preds.every((p) => p(r)));
       if (op === "update" && hit.length) {
@@ -147,9 +183,9 @@ export function fakeSupabase(
         writes.push({ table, op, payload: null, filters, rows: hit.length });
       }
       const cap = Math.min(max, opts.maxRows ?? Infinity);
-      const data = (op === "select" ? hit.slice(offset, offset + cap) : hit).map((r) => ({
-        ...r,
-      }));
+      const data = (op === "select" ? hit.slice(offset, offset + cap) : hit).map((r) =>
+        project(r, cols),
+      );
       return { data, error: null, count: wantCount ? hit.length : null };
     };
     const filter = (label: string, p: (r: Row) => boolean) => {
@@ -158,8 +194,9 @@ export function fakeSupabase(
       return b;
     };
     const b = {
-      select: (_cols?: string, opts?: { count?: string; head?: boolean }) => {
+      select: (c?: string, opts?: { count?: string; head?: boolean }) => {
         if (opts?.count) wantCount = true;
+        cols = parseSelect(c);
         return b;
       },
       order: () => b,

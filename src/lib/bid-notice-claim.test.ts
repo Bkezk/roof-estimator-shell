@@ -303,13 +303,14 @@ describe("B4. Admin › Reminders lists the bid notice failures", () => {
     });
     const list = h["bid_failures"] as Row[];
     expect(list).toHaveLength(20);
+    // The five columns the select names (Oct 20: the fake projects them now; deleted_at is the
+    // filter's, not the result's — BidNoticeFailure has no such field).
     expect(list[0]).toEqual({
       id: "b1",
       name: "Gym reroof bid",
       due_date: "2026-10-13",
       notify_error: "down",
       updated_at: "2026-10-12T15:00:00Z",
-      deleted_at: null,
     });
     expect(list.map((b) => b["id"])).not.toContain("fine");
     expect(list.map((b) => b["id"])).not.toContain("gone");

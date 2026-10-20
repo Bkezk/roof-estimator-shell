@@ -22,6 +22,8 @@ vi.mock("@tanstack/react-start", async () => ({
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
+import { QueryClient } from "@tanstack/react-query";
+
 import { effectiveView } from "@/lib/owner-view";
 import {
   defaultWorkLayout,
@@ -238,6 +240,64 @@ describe("shouldSeedWorkLayout: the list's copy of the layout and the cache", ()
   });
 });
 
+describe("Oct 20: a list fetch IN FLIGHT across a local change, with the real QueryClient", () => {
+  const KEY = ["work-layout", ME];
+  const LIST = ["my-work", "all"];
+  const hidden = (b: string): WorkLayout => ({ ...defaultWorkLayout(), hidden: [b as never] });
+  /** The page's seed effect: seed when the rule says so. */
+  const seed = (qc: QueryClient, listLayout: WorkLayout | null, stamp: number, saving = false) => {
+    if (shouldSeedWorkLayout(qc.getQueryState(KEY), stamp, { saving })) {
+      qc.setQueryData<{ layout: WorkLayout | null }>(KEY, { layout: listLayout });
+      return "seeded";
+    }
+    return "not-seeded";
+  };
+  it("stamped at RESOLUTION (dataUpdatedAt) the stale list seeded the pre-save layout back; stamped at the request's START it does not", async () => {
+    vi.useFakeTimers();
+    try {
+      const qc = new QueryClient();
+      // The 5-minute refresh starts: the page's queryFn stamps the start; the server reads the
+      // profile's layout NOW (pre-save).
+      let resolve!: (v: { layout: WorkLayout; requestedAt: number }) => void;
+      const requestedAt = Date.now();
+      const p = qc.fetchQuery({
+        queryKey: LIST,
+        queryFn: () =>
+          new Promise<{ layout: WorkLayout; requestedAt: number }>((r) => (resolve = r)),
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      // 300 ms later the user hides a column: the save's onMutate stamps the cache.
+      vi.advanceTimersByTime(300);
+      qc.setQueryData(KEY, { layout: hidden("later") });
+      const T_SAVE = qc.getQueryState(KEY)!.dataUpdatedAt;
+      expect(T_SAVE).toBeGreaterThan(requestedAt);
+      // 500 ms later the fetch resolves with the layout the server read before the save.
+      vi.advanceTimersByTime(500);
+      resolve({ layout: defaultWorkLayout(), requestedAt });
+      await p;
+      const st = qc.getQueryState(LIST)!;
+      const data = st.data as { layout: WorkLayout; requestedAt: number };
+      expect(st.dataUpdatedAt).toBeGreaterThan(T_SAVE); // React Query stamps the resolution
+      // The old rule (q.dataUpdatedAt): seeded — the cache held the OLD layout again.
+      expect(shouldSeedWorkLayout(qc.getQueryState(KEY), st.dataUpdatedAt)).toBe(true);
+      // The rule now (the request's start): not seeded; the hidden column stands.
+      expect(seed(qc, data.layout, data.requestedAt)).toBe("not-seeded");
+      expect(qc.getQueryData(KEY)).toEqual({ layout: hidden("later") });
+      // The next refresh, requested after the save, brings the saved layout and seeds.
+      vi.advanceTimersByTime(5 * 60_000);
+      expect(seed(qc, hidden("later"), Date.now())).toBe("seeded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("while the save is in flight nothing seeds, whatever the stamps say", () => {
+    const qc = new QueryClient();
+    expect(seed(qc, defaultWorkLayout(), Date.now(), true)).toBe("not-seeded");
+    expect(qc.getQueryData(KEY)).toBeUndefined();
+    expect(seed(qc, defaultWorkLayout(), Date.now(), false)).toBe("seeded");
+  });
+});
+
 describe("the page and the route", () => {
   const page = readFileSync("src/components/my-work-page.tsx", "utf8");
   const route = readFileSync("src/routes/my-work.tsx", "utf8");
@@ -275,11 +335,15 @@ describe("the page and the route", () => {
     expect(page).toMatch(
       /queryKey: \["work-layout", userId\],\s*queryFn: \(\) => layoutFn\(\),\s*enabled: false,/,
     );
-    // The list's own stamp, not the clock (Oct 15).
-    expect(page).toContain("const listUpdatedAt = q.dataUpdatedAt;");
-    expect(page).toContain(
-      'if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), listUpdatedAt))',
+    // The list's own stamp, not the clock (Oct 15) — the request's START (Oct 20), stamped in the
+    // queryFn and carried on the result, not React Query's resolution stamp.
+    expect(page).toContain("const listRequestedAt = q.data?.requestedAt ?? 0;");
+    expect(page).toContain("const requestedAt = Date.now();");
+    expect(page).toContain("return { ...(await listFn({ data: { who } })), requestedAt };");
+    expect(page).toMatch(
+      /shouldSeedWorkLayout\(qc\.getQueryState\(\["work-layout", userId\]\), listRequestedAt, \{\s*saving,\s*localWins,\s*\}\)/,
     );
+    expect(page).not.toContain("= q.dataUpdatedAt;");
     expect(page).not.toContain("Date.now()))");
     expect(page).not.toContain("enabled: !!session && !!userId,");
   });
@@ -288,7 +352,11 @@ describe("the page and the route", () => {
     expect(route).toContain("who={who ?? null}");
     expect(route).toContain("month={month ?? null}");
     expect(route).toContain('const month = parseMonthParam(s["month"]);');
-    expect(route).toContain("...(m ? { month: m } : {}),");
+    // The search rule is lib/my-work.ts nextWorkSearch (Oct 20); the month rides on every search.
+    expect(readFileSync("src/lib/my-work.ts", "utf8")).toContain(
+      "...(next.month ? { month: next.month } : {}),",
+    );
+    expect(route).toContain("nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile");
     expect(route).toContain("searchOf(v, curWho, null, month)");
     expect(route).toContain("searchOf(curView, w, bucket, month)");
     expect(route).not.toContain("view={curView}");

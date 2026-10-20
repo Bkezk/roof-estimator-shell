@@ -196,8 +196,9 @@ describe("every path reaches it once", () => {
       svc.indexOf("export const claimServiceJob"),
     );
     expect(assign).toContain('.select("stage, scheduled_date, technician_id")');
-    expect(assign).toContain(
-      "await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);",
+    // Oct 20: its answer is kept (snooze_cleared for Work Overview's move toast).
+    expect(assign).toMatch(
+      /const synced = await syncTicketFollowup\(\s*row,\s*\{ id: context\.userId, name: nameOf\(p\) \},\s*sb,\s*cur\.stage,\s*cur,\s*\);/,
     );
     // No PO notice, no Closed notice (owner).
     const events = readFileSync("src/lib/ticket-events.server.ts", "utf8");

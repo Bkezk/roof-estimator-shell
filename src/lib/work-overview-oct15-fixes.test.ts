@@ -104,12 +104,14 @@ describe("1. an Owner view number opens the List, whatever view is remembered", 
     expect(parseViewParam(undefined)).toBeUndefined();
     expect(parseViewParam(1)).toBeUndefined();
   });
-  it("the route uses it; the page's own navigations may still drop the default", () => {
+  it("the route uses it; the page's own navigations drop the default only when the URL was silent (Oct 20)", () => {
     expect(route).toContain('const view = parseViewParam(s["view"]);');
     expect(route).toContain("...(view ? { view } : {}),");
     expect(route).not.toContain('view === "calendar" || view === "owner"');
     expect(route).toContain("view?: WorkViewParam;");
-    expect(route).toContain('...(v !== "list" ? { view: v } : {}),');
+    expect(route).toContain(
+      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);",
+    );
   });
   it("landing on a link does not change the remembered view: changeView runs on the three buttons only", () => {
     expect(page.match(/changeView\(/g)).toHaveLength(3); // the three onClicks, nothing else
@@ -467,8 +469,9 @@ describe("d. a layout save the profile refuses is heard", () => {
     expect(await save(() => ({ data: null, error: null }))).toEqual({ saved: true });
     expect(LAYOUT_SAVE_FAILED).toBe("Could not save your layout — kept on this device only");
   });
-  it("the page toasts it for ten seconds", () => {
-    expect(page).toContain("onError: () => toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 }),");
+  it("the page toasts it for ten seconds (and, Oct 20, keeps the browser's copy ahead of the list)", () => {
+    expect(page).toContain("toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 });");
+    expect(page).toContain("setLocalWins(true);");
   });
 });
 
@@ -489,7 +492,9 @@ describe("e. effectiveWho: an unknown person falls back to the caller's default 
     expect(effectiveWho(BOB, [], admin, false)).toBe(BOB);
   });
   it("the page: changeWho once, which clears the remembered who and the URL", () => {
-    expect(page).toContain("const shownWho = effectiveWho(who, people, profile, !!q.data);");
+    expect(page).toContain(
+      "const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);",
+    );
     expect(page).toMatch(/useEffect\(\(\) => \{\s*if \(shownWho !== who\) changeWho\(shownWho\);/);
     expect(page).toContain("const next = rememberWho(layout, whoParam(w, profile));");
   });

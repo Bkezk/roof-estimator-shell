@@ -12,9 +12,9 @@
  * state (Due / Overdue N days / On hold until … · reason · held by … / Reminders every N days)
  * and, once a hold has ended and nothing was logged since, a "Back from hold" badge with the
  * reason (owner, Oct 9). Snooze (a hold with a date and a reason) is for admins and managers
- * only (seesEveryone; the server and the database refuse anyone else) — no Close on this page
- * since Oct 15 (owner: "it may cause more issues than not"; the Opportunities page keeps its
- * own); everyone else sees the state with one line saying their manager manages follow-ups. The rules
+ * only (seesEveryone; the server and the database refuse anyone else) — no Close anywhere since
+ * Oct 15 (owner: "it may cause more issues than not"; the Opportunities page lost its own the
+ * same day); everyone else sees the state with one line saying their manager manages follow-ups. The rules
  * (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts, the follow-up
  * state in src/lib/followup-rules.ts.
  */
@@ -87,10 +87,10 @@ import {
 } from "@/lib/my-work";
 import {
   NEW_OPPORTUNITY_HREF,
-  UNASSIGNED_TASK_HINT,
   monthDay,
   newTicketHref,
   taskMapHref,
+  unassignedTaskHint,
 } from "@/lib/my-work-actions";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
@@ -287,8 +287,9 @@ function WorkRow({
   // Owner, Oct 15: every task row opens the task in place (the TaskDialog) — its link led to the
   // Prospecting map, a bare one for a task without a building. The map is the "Open on map" link
   // below, for a task with a building (taskMapHref). Every other kind stays a real link. One
-  // task row opens nowhere (lib/my-work-actions.ts taskOpensInPlace): nobody's task for a viewer
-  // who can neither Claim nor assign it — getTask would refuse — is plain text with a hint.
+  // task row opens nowhere (lib/my-work-actions.ts taskOpensInPlace): nobody's task for anyone
+  // but an admin or a manager — getTask would refuse — is plain text with a hint (and Claim when
+  // the viewer may; Oct 20: a ticked office person got a button that failed).
   const act = actions && actions.opensInPlace(item) ? actions : null;
   const inert = !!actions && item.kind === "task" && !act;
   const busy = !!actions?.busy(item);
@@ -349,7 +350,7 @@ function WorkRow({
       ) : inert ? (
         <div className="p-3" data-row="inert-task">
           {body}
-          <p className="mt-1 text-xs text-muted-foreground">{UNASSIGNED_TASK_HINT}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{unassignedTaskHint(!!claim)}</p>
         </div>
       ) : (
         <a href={item.href} className="block p-3" onClick={followLink(navigate, item.href)}>
@@ -364,11 +365,13 @@ function WorkRow({
       {(tick || mapHref || assignNode || showClaim) && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            {/* The Done tick (owner, Oct 15): no confirm; the toast's Undo reopens it. */}
+            {/* The Done tick (owner, Oct 15): no confirm; the toast's Undo reopens it. It shows
+                ticked only while THIS tick is in flight (Oct 20: `busy` covered any change to
+                the row — opening it, a move — and ticked the box for those too). */}
             {act && tick && (
               <label className="flex items-center gap-2" data-tick="task">
                 <Checkbox
-                  checked={busy}
+                  checked={act.markingDone(item)}
                   disabled={busy}
                   aria-label={`Mark ${item.title} done`}
                   onCheckedChange={(v) => {
@@ -427,7 +430,9 @@ function WaitingSince({ since, today }: { since: string | null; today: string })
  * The ⓘ beside a column title, a tab or an empty-column chip (owner, Oct 12): a tooltip saying
  * in one or two plain sentences what the column holds (my-work.ts BUCKET_HELP). A button, so a
  * keyboard or a phone (tap / focus) opens it too; the shell's TooltipProvider (ui/sidebar)
- * supplies the delay. It stops the click so a heading's drag or a tab's pick is not started.
+ * supplies the delay — the page renders inside AuthedShell only (auth-gate.tsx reads the
+ * rendered location, Oct 20, so a sign-out redirect no longer renders it outside). It stops the
+ * click so a heading's drag or a tab's pick is not started.
  */
 function BucketHelp({ bucket, label }: { bucket: WorkBucket; label: string }) {
   return (
@@ -1090,7 +1095,12 @@ export function MyWorkPage(props: {
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
     queryKey: ["my-work", who],
-    queryFn: () => listFn({ data: { who } }),
+    // `requestedAt` (Oct 20): when the request STARTED — the stamp the layout seed compares
+    // (below), since the server read the profile's layout no later than that.
+    queryFn: async () => {
+      const requestedAt = Date.now();
+      return { ...(await listFn({ data: { who } })), requestedAt };
+    },
     enabled: !!session && view !== "owner",
     // Owner, Oct 15: "do every 5 minutes just so we're not constantly refreshing" — the list
     // refreshes itself while the page sits open, not while the tab is in the background.
@@ -1181,15 +1191,40 @@ export function MyWorkPage(props: {
     enabled: false,
     staleTime: 5 * 60_000,
   });
+  // Oct 20: the list is stamped by when its request started (`requestedAt`), not by when it
+  // resolved (q.dataUpdatedAt) — a refresh in flight across a local change resolved later with
+  // the pre-save layout and a newer stamp, and seeded it back. Nothing seeds while a save is in
+  // flight, nor while the browser's copy is the only good one (`localWins`: the last save failed;
+  // the next change retries it, and a success lifts the hold).
   const listLayout = q.data?.layout;
-  const listUpdatedAt = q.dataUpdatedAt;
+  const listRequestedAt = q.data?.requestedAt ?? 0;
+  const [localWins, setLocalWins] = useState(false);
+  const saveLayout = useMutation({
+    mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
+    onMutate: (l) => {
+      qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
+        layout: isEmptyWorkLayout(l) ? null : l,
+      });
+    },
+    onSuccess: () => setLocalWins(false),
+    onError: () => {
+      setLocalWins(true);
+      toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 });
+    },
+  });
+  const saving = saveLayout.isPending;
   useEffect(() => {
     if (listLayout === undefined || !userId) return;
-    if (shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), listUpdatedAt))
+    if (
+      shouldSeedWorkLayout(qc.getQueryState(["work-layout", userId]), listRequestedAt, {
+        saving,
+        localWins,
+      })
+    )
       qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
         layout: listLayout,
       });
-  }, [listLayout, listUpdatedAt, qc, userId]);
+  }, [listLayout, listRequestedAt, localWins, qc, saving, userId]);
   // The profile's copy wins: a layout applies as it is; null (the server's default — another
   // device's Reset, Oct 15) applies the default and drops this browser's copy. Before this null
   // was ignored, so a Reset made elsewhere never arrived here.
@@ -1199,19 +1234,11 @@ export function MyWorkPage(props: {
     setLayout(l);
     writeStoredWorkLayout(storage, userId, l);
   }, [savedLayout.data, storage, userId]);
-  // The saved-layout cache follows every save (owner, Oct 9: "i restored the layout on the work
-  // overview but it doesnt remember i restored it when i navigate away and then back" — the
-  // stale cached copy was re-applied on the next mount and written back over the reset). A save
-  // the profile refused says so (Oct 15; setMyWorkLayout throws): the browser's copy stands.
-  const saveLayout = useMutation({
-    mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
-    onMutate: (l) => {
-      qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
-        layout: isEmptyWorkLayout(l) ? null : l,
-      });
-    },
-    onError: () => toast.error(LAYOUT_SAVE_FAILED, { duration: 10_000 }),
-  });
+  // The saved-layout cache follows every save (saveLayout's onMutate, above; owner, Oct 9: "i
+  // restored the layout on the work overview but it doesnt remember i restored it when i
+  // navigate away and then back" — the stale cached copy was re-applied on the next mount and
+  // written back over the reset). A save the profile refused says so (Oct 15; setMyWorkLayout
+  // throws): the browser's copy stands, and stands against the next list too (localWins).
   const commitLayout = (l: WorkLayout) => {
     setLayout(l);
     if (userId) writeStoredWorkLayout(storage, userId, l);
@@ -1234,9 +1261,9 @@ export function MyWorkPage(props: {
 
   // Follow-ups are management's (owner, Oct 1): Snooze only under seesEveryone (admin or
   // manager); the server (canManageFollowup) and the database trigger refuse anyone else. No
-  // Close here since Oct 15 (owner: "i think it may cause more issues than not") — a follow-up
-  // closes with its item (the ticket authorized, the opportunity won or lost); the Opportunities
-  // page keeps its own Close.
+  // Close anywhere since Oct 15 (owner: "i think it may cause more issues than not") — a
+  // follow-up closes with its item (the ticket authorized, the opportunity won or lost); the
+  // Opportunities page lost its own the same day.
   const canManage = seesEveryone(profile);
   const { snooze } = useFollowupActions();
   const manage: ManageFollowup | null = canManage
@@ -1263,9 +1290,10 @@ export function MyWorkPage(props: {
   const showWho = !!scope && !mineOnly;
   const people = q.data?.people ?? [];
   // A remembered or linked person who is not on the roster any more (Oct 15: a blank Select and
-  // "Someone else: …"): once the roster is here, fall back to the caller's default and forget
-  // them, once (changeWho clears the remembered who and the URL).
-  const shownWho = effectiveWho(who, people, profile, !!q.data);
+  // "Someone else: …"): once the WHOLE roster is here (rosterComplete; Oct 20 — the fallback
+  // roster forgot a real person), fall back to the caller's default and forget them, once
+  // (changeWho clears the remembered who and the URL). The caller's own id reads as Mine.
+  const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);
   useEffect(() => {
     if (shownWho !== who) changeWho(shownWho);
     // changeWho is re-made every render; the fallback depends on `who` and the roster only.
