@@ -405,12 +405,11 @@ export const saveOpportunity = createServerFn({ method: "POST" })
     // manager's from Oct 2): the log says who.
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
-      const { data: s } = await sb
-        .from("crm_settings")
-        .select("opportunity_close_days")
-        .eq("id", 1)
-        .maybeSingle();
-      expected = defaultExpectedClose(s?.opportunity_close_days ?? 30);
+      // Admin › Reminders' close window through `opportunity_close_days()` (20261020120000:
+      // crm_settings itself is an admin's and a manager's to read now; the front desk still
+      // enters opportunities). Missing before that migration: the default.
+      const { data: days } = await sb.rpc("opportunity_close_days");
+      expected = defaultExpectedClose(typeof days === "number" ? days : 30);
     }
     const patch = {
       account_id,

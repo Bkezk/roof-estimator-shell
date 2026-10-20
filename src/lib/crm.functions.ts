@@ -23,7 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, seesEveryone } from "@/lib/access";
+import { canAccess, isFieldOnly, seesEveryone } from "@/lib/access";
 import {
   ACCOUNT_ALREADY_DELETED,
   ACCOUNT_DELETED,
@@ -70,6 +70,18 @@ async function readAccess(ctx: Ctx) {
   const p = await me(ctx);
   if (!p || !(canAccess(p, "customers") || canAccess(p, "service") || canAccess(p, "estimate")))
     throw new Error("Forbidden: Customers access required");
+  return p;
+}
+/**
+ * The customer BOOK — every account (listAccounts). readAccess admits Service so a technician's
+ * ticket page can show its customer, property and contact (getAccount, listContacts); the book
+ * itself is not theirs (owner, Oct 8: "inventory and the tickets assigned to them"), and since
+ * 20261020122000_technician_customer_fence.sql the database hands a technician-only token only
+ * the rows of their own tickets. The server says so first (the fifth audit, Oct 20).
+ */
+async function bookAccess(ctx: Ctx) {
+  const p = await readAccess(ctx);
+  if (isFieldOnly(p)) throw new Error("Forbidden: Customers access required");
   return p;
 }
 async function writeAccess(ctx: Ctx) {
@@ -200,7 +212,7 @@ export interface AccountListRow extends AccountRow {
 export const listAccounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AccountListRow[]> => {
-    await readAccess(context);
+    await bookAccess(context);
     const sb = context.supabase;
     // Every row, 1,000 at a time (paging.ts: PostgREST caps a request at 1,000 rows, so
     // asking for 2,000 stopped at 1,000 customers and the counts at 1,000 sites / tickets).

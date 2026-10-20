@@ -11,6 +11,9 @@ import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-stor
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // Oct 20: the last load failed (thrown, or no row after the retry); cleared by a load that
+  // succeeds and by a session ending. The gate blocks the pages that need a profile on it.
+  const [profileFailed, setProfileFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   // The query cache (routes/__root.tsx provides it above this): cleared when a session ends, so a
   // shared device never shows the previous person's cached rows (Oct 20 — Work Overview kept
@@ -25,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!current) {
       profileRef.current = null;
       setProfile(null);
+      setProfileFailed(false);
       return;
     }
     try {
@@ -37,9 +41,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       profileRef.current = p;
       setProfile(p);
+      // No row after the retry is a failed load too: the gate must not fail open on it.
+      setProfileFailed(!p);
     } catch {
       profileRef.current = null;
       setProfile(null);
+      setProfileFailed(true);
     }
   }
 
@@ -97,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       profileRef.current = null;
       setProfile(null);
+      setProfileFailed(false);
       setLoading(false);
       queryClient.clear();
     };
@@ -116,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     role: profile?.role ?? null,
     can: (page) => canAccess(profile, page),
     loading,
+    profileFailed,
     signOut: async () => {
       // A shared phone must not keep receiving the previous user's reminders (push is per
       // device); best effort, before the session goes.
@@ -128,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut();
       profileRef.current = null;
       setProfile(null);
+      setProfileFailed(false);
       // Nothing of this person stays for the next one (the gate has already swapped the page for
       // its spinner on the SIGNED_OUT event, so no mounted query is left reading the cache).
       queryClient.clear();

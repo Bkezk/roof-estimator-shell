@@ -18,6 +18,15 @@
  *    profile read after a sign-in never settles (the same bound as its mount guard).
  */
 
+import {
+  canAccess,
+  EVERYONE_PAGES,
+  isAdmin,
+  managesTickets,
+  type AccessLike,
+  type Page,
+} from "@/lib/access";
+
 /** How long a sign-in may hang before the way out is offered (the gate's Waiting uses it too). */
 export const SIGN_IN_STALL_MS = 8_000;
 /** How long the provider holds `loading` for a sign-in's profile before giving it up. */
@@ -57,6 +66,41 @@ export function landingDecision(
   if (!session) return "stay";
   if (profile) return "home";
   return tries < PROFILE_LANDING_TRIES ? "retry" : "home-without-profile";
+}
+
+export type GateDecision = "no-session" | "open" | "blocked";
+
+/**
+ * May the gate render this route (Oct 20, the fifth audit)? `page` is pageForPath(pathname):
+ * null routes (/my-work, /account, /inventory, /followups, /opportunities, "/") are every
+ * signed-in user's and always "open". A route that belongs to a page needs the profile: with
+ * one, the page's own rule (admin → isAdmin, manager → managesTickets, else canAccess); with
+ * none still loading (`profileFailed` false), "open" as before — nothing is blocked while the
+ * profile is merely pending; with the load FAILED (getMyProfile threw, or found no row after its
+ * retry), "blocked" — the gate used to fail open there, rendering the page's chrome and letting
+ * its queries run (the server refused them one by one). The pages every signed-in user has
+ * without a tick (EVERYONE_PAGES: Inventory) stay open on a failed load, as the null routes do.
+ * Without a session, "no-session".
+ */
+export function gateDecision(
+  session: unknown,
+  profile: AccessLike | null | undefined,
+  profileFailed: boolean,
+  page: Page | "admin" | "manager" | null,
+): GateDecision {
+  if (!session) return "no-session";
+  if (page === null) return "open";
+  if (!profile)
+    return profileFailed && !(EVERYONE_PAGES as readonly string[]).includes(page)
+      ? "blocked"
+      : "open";
+  const ok =
+    page === "admin"
+      ? isAdmin(profile)
+      : page === "manager"
+        ? managesTickets(profile)
+        : canAccess(profile, page);
+  return ok ? "open" : "blocked";
 }
 
 /** Has a sign-in waited long enough to offer the way out? */

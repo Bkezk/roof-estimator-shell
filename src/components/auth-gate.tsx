@@ -4,8 +4,9 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
-import { canAccess, homeFor, isAdmin, managesTickets, pageForPath } from "@/lib/access";
+import { canAccess, homeFor, pageForPath } from "@/lib/access";
 import {
+  gateDecision,
   landingDecision,
   PROFILE_MISSING_TOAST,
   PROFILE_RETRY_MS,
@@ -95,7 +96,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
 // Central access control. UI routing here is convenience; the real enforcement
 // is RLS + the admin checks inside every server function.
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { session, profile, loading, refreshProfile } = useAuth();
+  const { session, profile, profileFailed, loading, refreshProfile } = useAuth();
   const navigate = useNavigate();
   // The pathname of what the Outlet is RENDERING (Oct 20): the committed matches' leaf, which
   // moves in the same router commit as the Outlet's content (lib/committed-pathname.ts). Reading
@@ -110,16 +111,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const isLogin = pathname === "/login";
   // Per-page access (src/lib/access.ts): a route belongs to a page; a user without that page is
-  // sent to the first page they may open. Until the profile has loaded nothing is blocked.
+  // sent to the first page they may open. Until the profile has loaded nothing is blocked; once
+  // its load has FAILED (Oct 20, lib/auth-flow.ts gateDecision) a page that needs it is blocked
+  // instead of rendered — the routes every signed-in user may open (pageForPath null: Work
+  // Overview, /account, Inventory …) stay open.
   const page = pageForPath(pathname);
-  const blocked =
-    !!profile &&
-    page !== null &&
-    (page === "admin"
-      ? !isAdmin(profile)
-      : page === "manager"
-        ? !managesTickets(profile)
-        : !canAccess(profile, page));
+  const blocked = gateDecision(session, profile, profileFailed, page) === "blocked";
   const home = homeFor(profile);
 
   // Oct 20 (d): a signed-in visitor of /login with no profile yet is not sent anywhere — the

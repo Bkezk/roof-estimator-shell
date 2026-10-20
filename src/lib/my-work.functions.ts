@@ -215,10 +215,12 @@ export const listMyWork = createServerFn({ method: "GET" })
           .order("due_date", { ascending: true, nullsFirst: false })
           .limit(LIMIT)
       : Promise.resolve({ data: [] as TaskIn[], error: null });
-    // The "needs assignment" timer (Admin › Reminders; 20261007100000_unassigned_overdue.sql).
-    // Until that migration is applied the column is missing and the default stands.
+    // The "needs assignment" timer (Admin › Reminders; 20261007100000_unassigned_overdue.sql),
+    // through `unassigned_overdue_days()` (20261020120000: crm_settings itself is an admin's and
+    // a manager's to read now). Until that migration is applied the function is missing (an
+    // error, data null) and the default stands.
     const uDays = showUnassigned
-      ? sb.from("crm_settings").select("unassigned_overdue_days").eq("id", 1).maybeSingle()
+      ? sb.rpc("unassigned_overdue_days")
       : Promise.resolve({ data: null, error: null });
     // The Authorized tickets, for whoever invoices (owner, Oct 12: "Authorized — to invoice" on
     // Work Overview; seesInvoices, the Invoice block's own rule). Whatever `who` asks for: the
@@ -328,9 +330,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     if (toAuthorize.error) throw new Error(`Tickets to authorize: ${toAuthorize.error.message}`);
     if (bids.error) throw new Error(`Bids: ${bids.error.message}`);
     const unassignedOverdueDays =
-      !days.error && typeof days.data?.unassigned_overdue_days === "number"
-        ? days.data.unassigned_overdue_days
-        : UNASSIGNED_OVERDUE_DAYS_DEFAULT;
+      !days.error && typeof days.data === "number" ? days.data : UNASSIGNED_OVERDUE_DAYS_DEFAULT;
     if (unTickets.error) throw new Error(`Unassigned tickets: ${unTickets.error.message}`);
     if (unOpps.error) throw new Error(`Unassigned opportunities: ${unOpps.error.message}`);
     if (unTasks.error) throw new Error(`Unassigned tasks: ${unTasks.error.message}`);

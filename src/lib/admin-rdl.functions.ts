@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { assertPageAccess } from "@/lib/auth.functions";
+import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
 
 export interface RdlData {
   base?: {
@@ -47,6 +47,7 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
 export const getRdlCombos = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<RdlComboRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase.from("rdl_combos").select("*").order("sort");
     if (error) throw error;
     return data ?? [];
@@ -75,6 +76,7 @@ export type RdlLaborTableRow = Database["public"]["Tables"]["rdl_labor_tables"][
 export const getLaborTables = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<RdlLaborTableRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("rdl_labor_tables")
       .select("*")
@@ -106,6 +108,7 @@ export type AccessoryLaborRow = Database["public"]["Tables"]["accessory_labor"][
 export const getAccessoryLabor = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AccessoryLaborRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("accessory_labor")
       .select("*")

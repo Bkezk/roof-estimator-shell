@@ -488,8 +488,9 @@ export async function loadBundle(sb: Client, invoiceId: string): Promise<Invoice
       .select("*")
       .eq("service_job_id", invoice.service_job_id)
       .order("created_at"),
+    // The price-free view (Oct 20): an invoicer with the Invoices tick alone reads no settings row.
     sb
-      .from("company_settings")
+      .from("company_settings_public")
       .select("company_name, address, city, state, zip, phone")
       .eq("id", 1)
       .maybeSingle(),

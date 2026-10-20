@@ -69,7 +69,10 @@ describe("the page", () => {
   it("a Show menu of tick boxes on List and Calendar, saved through the layout", () => {
     expect(page).toContain('<Eye className="h-4 w-4" /> Show: {kindsSummary(layout)}');
     expect(page).toContain("{WORK_KINDS.map((k) => {");
-    expect(page).toContain("onCheckedChange={() => onLayout(toggleKind(layout, k))}");
+    // Oct 20: the tick also clears an Owner-view preset (kindToggleClearsPreset).
+    expect(page).toMatch(
+      /onCheckedChange=\{\(\) => \{\s*onLayout\(toggleKind\(layout, k\)\);[\s\S]*?if \(kindToggleClearsPreset\(props\.bucket\)\) props\.onBucket\(null\);\s*\}\}/,
+    );
     expect(page).toContain(
       "const last = on && layout.hiddenKinds.length >= WORK_KINDS.length - 1;",
     );

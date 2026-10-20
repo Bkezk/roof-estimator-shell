@@ -16,6 +16,12 @@ export interface AuthState {
   /** May this user open the page? Admins always; managers all but pricing; users as granted. */
   can: (page: Page) => boolean;
   loading: boolean;
+  /**
+   * The last profile load FAILED (getMyProfile threw, or found no row after its retry) and no
+   * load has succeeded since (Oct 20): the gate blocks the pages that need a profile instead of
+   * failing open (lib/auth-flow.ts gateDecision). False while a load is merely pending.
+   */
+  profileFailed: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }

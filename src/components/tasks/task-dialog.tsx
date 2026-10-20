@@ -20,6 +20,7 @@ import {
   isValidEmail,
   openTaskInput,
   TASK_CHANGED,
+  taskChangeNotice,
   taskInputSchema,
   taskSavePayload,
   taskToInput,
@@ -91,9 +92,12 @@ export function TaskDialog(props: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Oct 20 (a lost update): the Done box's status goes to the server only when the person
   // touched it, so an edit never reopens a task someone else ticked Done meanwhile
-  // (taskSavePayload); `live` is the row as last reloaded here, after TASK_CHANGED.
+  // (taskSavePayload); `live` is the row as last reloaded here, after TASK_CHANGED. `changed`
+  // (the fifth audit): what changed on the server since the row was opened (taskChangeNotice),
+  // shown with "Save again" / "Discard my changes" — the typed values are kept, never replaced.
   const [statusTouched, setStatusTouched] = useState(false);
   const [live, setLive] = useState<TaskRow | null>(null);
+  const [changed, setChanged] = useState<string[] | null>(null);
   const set = (patch: Partial<TaskInput>) => setF((cur) => ({ ...cur, ...patch }));
 
   // Reset each time the dialog opens (or opens on another task). A new task is dated today
@@ -106,6 +110,7 @@ export function TaskDialog(props: {
     setEmailText("");
     setStatusTouched(false);
     setLive(null);
+    setChanged(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open / another task
   }, [props.open, taskId]);
   // The row the save is checked against: the one reloaded after a refusal, else the one opened.
@@ -124,23 +129,32 @@ export function TaskDialog(props: {
   });
 
   const invalidate = useInvalidateTasks();
-  // After "This task changed since you opened it": the fresh row replaces the form (the dialog
-  // stays open; the person sees what changed and saves again if they still want to).
+  // After "This task changed since you opened it": the fresh row is kept as `live` (its stamp is
+  // what "Save again" sends) and the form keeps what was typed; the notice lists what changed on
+  // the server since the row was opened. Nothing is replaced until "Discard my changes".
   const getTaskFn = useServerFn(getTask);
   const reload = useMutation({
     mutationFn: (id: string) => getTaskFn({ data: { id } }),
     onSuccess: (row) => {
+      const opened = live ?? props.task;
+      setChanged(opened ? taskChangeNotice(taskToInput(opened), taskToInput(row)) : []);
       setLive(row);
-      setF(taskToInput(row));
-      setStatusTouched(false);
       invalidate();
     },
     onError: (e) => toast.error(errText(e)),
   });
+  // "Discard my changes": the fresh row replaces the form.
+  const discardMine = () => {
+    if (!live) return;
+    setF(taskToInput(live));
+    setStatusTouched(false);
+    setChanged(null);
+  };
   const saveFn = useServerFn(saveTask);
   const save = useMutation({
     mutationFn: (input: TaskInput) => saveFn({ data: input }),
     onSuccess: (r) => {
+      setChanged(null);
       toast.success(
         r.notified
           ? `Task saved — ${r.notified} notified`
@@ -488,6 +502,41 @@ export function TaskDialog(props: {
             <p className="text-xs text-destructive">
               Last notice problem: {props.task.notify_error}
             </p>
+          )}
+          {changed && (
+            <div
+              role="status"
+              className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-700 dark:bg-amber-950/40"
+            >
+              <p className="font-medium">
+                This task changed since you opened it. Your edits are still here.
+              </p>
+              {changed.length ? (
+                <ul className="list-disc pl-4">
+                  {changed.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground">
+                  Nothing you can see is different — it was touched by someone else.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" disabled={busy} onClick={submit}>
+                  Save again
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={discardMine}
+                >
+                  Discard my changes
+                </Button>
+              </div>
+            </div>
           )}
 
           <DialogFooter className="gap-2 sm:justify-between">

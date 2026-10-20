@@ -3951,6 +3951,8 @@ export type Database = {
           assignee_name: string | null;
           attendees: string[];
           building_id: string | null;
+          /** When a column other than the notification stamps last changed (20261020121000). */
+          content_updated_at: string;
           created_at: string;
           created_by: string | null;
           created_by_name: string | null;
@@ -3981,6 +3983,7 @@ export type Database = {
           assignee_name?: string | null;
           attendees?: string[];
           building_id?: string | null;
+          content_updated_at?: string;
           created_at?: string;
           created_by?: string | null;
           created_by_name?: string | null;
@@ -4011,6 +4014,7 @@ export type Database = {
           assignee_name?: string | null;
           attendees?: string[];
           building_id?: string | null;
+          content_updated_at?: string;
           created_at?: string;
           created_by?: string | null;
           created_by_name?: string | null;
@@ -4322,6 +4326,46 @@ export type Database = {
           },
         ];
       };
+      /** pricing_catalog without its prices, for the inventory (20261020120000_pricing_reads_narrowed.sql). */
+      pricing_catalog_units: {
+        Row: {
+          branch: string | null;
+          category: string | null;
+          /** columns by name, each row's label / Subtype / Part # / pack-size cells, an adhesive's name and unit_type (lib/catalog-units.ts). */
+          data: Json | null;
+          id: string | null;
+          sort: number | null;
+        };
+        Relationships: [];
+      };
+      /** catalog_item_numbers without last_price (20261020120000_pricing_reads_narrowed.sql). */
+      catalog_item_numbers_map: {
+        Row: {
+          dl_description: string | null;
+          item_no: string | null;
+          price_col: string | null;
+          row_label: string | null;
+          screen_id: string | null;
+        };
+        Relationships: [];
+      };
+      /** company_settings without the pricing columns (20261020120000_pricing_reads_narrowed.sql). */
+      company_settings_public: {
+        Row: {
+          address: string | null;
+          city: string | null;
+          company_name: string | null;
+          id: number | null;
+          phone: string | null;
+          shop_address: string | null;
+          shop_city: string | null;
+          shop_state: string | null;
+          shop_zip: string | null;
+          state: string | null;
+          zip: string | null;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       acquire_bid_lock: {
@@ -4344,6 +4388,14 @@ export type Database = {
       lead_source_use_count: { Args: { p_name: string }; Returns: number };
       rename_lead_source: { Args: { p_id: string; p_name: string }; Returns: number };
       estimator_names: { Args: never; Returns: string[] };
+      /** crm_settings getters for everyone's paths (20261020120000_pricing_reads_narrowed.sql). */
+      unassigned_overdue_days: { Args: never; Returns: number };
+      opportunity_close_days: { Args: never; Returns: number };
+      crm_last_dispatch_at: { Args: never; Returns: string | null };
+      /** The technician's window on the customer book (20261020122000_technician_customer_fence.sql). */
+      tech_sees_account: { Args: { acct: string }; Returns: boolean };
+      tech_sees_site: { Args: { site: string }; Returns: boolean };
+      tech_sees_contact: { Args: { contact: string }; Returns: boolean };
       classify_place: {
         Args: { place_type: string; landmark: string };
         Returns: string;

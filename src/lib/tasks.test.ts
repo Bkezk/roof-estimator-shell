@@ -26,6 +26,7 @@ const et = (ymd: string, hm: string) => zonedTime(ymd, hm, TZ);
 
 const task = (over: Partial<TaskRow> = {}): TaskRow => ({
   id: "00000000-0000-4000-8000-000000000001",
+  content_updated_at: "2026-10-01T12:00:00.000Z",
   title: "Walk the roof",
   details: null,
   due_date: "2026-10-02",

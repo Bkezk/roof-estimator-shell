@@ -396,16 +396,81 @@ export const taskInputSchema = z.object({
     .default([]),
   status: z.enum(["open", "done"]).optional(),
   /**
-   * The row's updated_at as the dialog loaded it (Oct 20): saveTask refuses to write over a row
-   * someone changed since (TASK_CHANGED). Absent on a new task, and on the callers that never
-   * loaded the row — then nothing is checked.
+   * The row's content stamp as the dialog loaded it (Oct 20; `contentStamp`: content_updated_at,
+   * 20261020121000 — updated_at until that migration is applied): saveTask refuses to write over
+   * a row someone changed since (TASK_CHANGED). Absent on a new task, and on the callers that
+   * never loaded the row — then nothing is checked. Named for the column so an older bundle's
+   * `expect_updated_at` (the row's updated_at, which the reminder pass moves) is dropped by the
+   * parse instead of being compared with the content stamp and refused for ever.
    */
-  expect_updated_at: z.string().optional(),
+  expect_content_updated_at: z.string().optional(),
 });
 export type TaskInput = z.infer<typeof taskInputSchema>;
 
-/** saveTask's refusal when the row changed under the dialog; the dialog reloads the task on it. */
+/**
+ * saveTask's refusal when the row's CONTENT changed under the dialog; the dialog keeps what was
+ * typed, reloads the row and shows what changed (taskChangeNotice) with "Save again".
+ */
 export const TASK_CHANGED = "This task changed since you opened it — reopen it";
+
+/**
+ * The stamp a save is checked against (Oct 20, the fifth audit): content_updated_at — moved by
+ * the content trigger of 20261020121000 only when a column other than the notification stamps
+ * changed — so the reminder cron stamping notified_morning_at / notify_error (which bumps
+ * updated_at) never trips TASK_CHANGED. Until that migration is applied the rows carry no
+ * content_updated_at and updated_at stands in, as before.
+ */
+export type StampedTask = Pick<TaskRow, "updated_at"> & {
+  content_updated_at?: string | null | undefined;
+};
+export const contentStampColumn = (t: StampedTask): "content_updated_at" | "updated_at" =>
+  typeof t.content_updated_at === "string" && t.content_updated_at
+    ? "content_updated_at"
+    : "updated_at";
+export const contentStamp = (t: StampedTask): string =>
+  contentStampColumn(t) === "content_updated_at" ? t.content_updated_at! : t.updated_at;
+
+/** The fields of the form, as the notice names them (taskChangeNotice). */
+const NOTICE_FIELDS: readonly [keyof TaskInput, string][] = [
+  ["title", "What"],
+  ["account_name", "Company"],
+  ["site_name", "Property"],
+  ["date", "Date"],
+  ["time", "Time"],
+  ["all_day", "All day"],
+  ["assignee", "Assigned to"],
+  ["attendees", "Attendees"],
+  ["external_emails", "Outside attendees"],
+  ["details", "Notes"],
+  ["status", "Done"],
+];
+
+const noticeValue = (k: keyof TaskInput, v: unknown): string => {
+  if (k === "status") return v === "done" ? "ticked" : "not ticked";
+  if (k === "all_day") return v ? "on" : "off";
+  if (Array.isArray(v)) return v.length ? `${v.length}` : "none";
+  const s = String(v ?? "").trim();
+  return s ? s : "blank";
+};
+
+/**
+ * What changed on the server since the dialog opened (Oct 20): the row as opened against the row
+ * as reloaded after TASK_CHANGED, one line per field ("Date: 2026-10-21 → 2026-10-22"). The
+ * person's typed values are not consulted — the dialog keeps them and lets the person decide
+ * ("Save again" with the fresh stamp, or "Discard my changes"). Attendee and email lists read as
+ * counts; the assignee as its id (the dialog names it). Empty when only the stamps moved.
+ */
+export function taskChangeNotice(opened: TaskInput, fresh: TaskInput): string[] {
+  const out: string[] = [];
+  for (const [k, label] of NOTICE_FIELDS) {
+    const a = opened[k];
+    const b = fresh[k];
+    const same =
+      Array.isArray(a) && Array.isArray(b) ? a.join("\u0000") === b.join("\u0000") : a === b;
+    if (!same) out.push(`${label}: ${noticeValue(k, a)} → ${noticeValue(k, b)}`);
+  }
+  return out;
+}
 
 /** due_at for a date + time (or all day) in the office zone; null without a date. */
 export function dueAtFor(
@@ -452,12 +517,13 @@ export function taskToInput(t: TaskRow, tz: string = TASK_TZ): TaskInput {
  * else had just ticked Done, because the form always sent the status it loaded, and saveTask
  * wrote it over the live row). Editing an existing task: `status` goes only when the person
  * touched the Done box (`statusTouched`), so saveTask keeps the live status otherwise; and the
- * row's `updated_at` rides along as `expect_updated_at`, so a save over a row that changed since
- * is refused (TASK_CHANGED) instead of applied. A new task is sent as it is.
+ * row's content stamp (`contentStamp`: content_updated_at, not updated_at — the reminder pass
+ * moves that) rides along as `expect_content_updated_at`, so a save over a row whose content
+ * changed since is refused (TASK_CHANGED) instead of applied. A new task is sent as it is.
  */
 export function taskSavePayload(
   input: TaskInput,
-  task: Pick<TaskRow, "updated_at"> | null | undefined,
+  task: StampedTask | null | undefined,
   statusTouched: boolean,
 ): TaskInput {
   if (!task) return input;
@@ -465,7 +531,7 @@ export function taskSavePayload(
   return {
     ...rest,
     ...(statusTouched && status ? { status } : {}),
-    expect_updated_at: task.updated_at,
+    expect_content_updated_at: contentStamp(task),
   };
 }
 

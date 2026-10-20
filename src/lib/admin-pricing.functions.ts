@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { assertPageAccess } from "@/lib/auth.functions";
+import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
 
 export type PricingRow = Database["public"]["Tables"]["pricing_catalog"]["Row"];
 
@@ -28,6 +28,7 @@ export const getPricingCatalog = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d) => branchSchema.parse(d))
   .handler(async ({ data, context }): Promise<PricingRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data: rows, error } = await context.supabase
       .from("pricing_catalog")
       .select("*")
@@ -48,6 +49,7 @@ export const getPricingScreen = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d) => idSchema.parse(d))
   .handler(async ({ data, context }): Promise<PricingRow | null> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data: row, error } = await context.supabase
       .from("pricing_catalog")
       .select("*")

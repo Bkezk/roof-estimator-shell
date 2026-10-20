@@ -20,7 +20,15 @@
  * functions keep working but do not prove their column lists. Only the keys a row actually has
  * are copied (a column the test did not seed stays absent, as undefined, where PostgREST would
  * answer null).
+ *
+ * The price-free views of 20261020120000_pricing_reads_narrowed.sql (Oct 20) are served from
+ * their base tables the way the database does — `pricing_catalog_units` through lib/catalog-units
+ * unitDataOf, `catalog_item_numbers_map` and `company_settings_public` as their column lists —
+ * unless a test seeds the view by name; and the three crm_settings functions answer from the
+ * seeded crm_settings row (VIEWS, DEFAULT_RPCS).
  */
+import { unitDataOf } from "@/lib/catalog-units";
+
 type Row = Record<string, unknown>;
 export interface FakeWrite {
   table: string;
@@ -126,6 +134,54 @@ export type FakeRpcAnswer = (
   args: Row | undefined,
 ) => { data: unknown; error: { code?: string; message: string } | null } | undefined;
 
+const pick = (r: Row, cols: readonly string[]): Row => {
+  const out: Row = {};
+  for (const c of cols) if (c in r) out[c] = r[c];
+  return out;
+};
+
+/** The views, derived from their base tables on every read (read-only; a write is a mistake). */
+const VIEWS: Record<string, (tables: Record<string, Row[]>) => Row[]> = {
+  pricing_catalog_units: (t) =>
+    (t["pricing_catalog"] ?? []).map((r) => ({
+      ...pick(r, ["id", "branch", "category", "sort"]),
+      data: unitDataOf(r["data"]),
+    })),
+  catalog_item_numbers_map: (t) =>
+    (t["catalog_item_numbers"] ?? []).map((r) =>
+      pick(r, ["item_no", "screen_id", "row_label", "price_col", "dl_description"]),
+    ),
+  company_settings_public: (t) =>
+    (t["company_settings"] ?? []).map((r) =>
+      pick(r, [
+        "id",
+        "company_name",
+        "address",
+        "city",
+        "state",
+        "zip",
+        "phone",
+        "shop_address",
+        "shop_city",
+        "shop_state",
+        "shop_zip",
+      ]),
+    ),
+};
+
+/** The SECURITY DEFINER getters over crm_settings (20261020120000), from the seeded row. */
+const DEFAULT_RPCS: Record<string, FakeRpc> = {
+  unassigned_overdue_days: (_a, t) => {
+    const v = t["crm_settings"]?.[0]?.["unassigned_overdue_days"];
+    return typeof v === "number" ? v : 1;
+  },
+  opportunity_close_days: (_a, t) => {
+    const v = t["crm_settings"]?.[0]?.["opportunity_close_days"];
+    return typeof v === "number" ? v : 30;
+  },
+  crm_last_dispatch_at: (_a, t) => t["crm_settings"]?.[0]?.["last_dispatch_at"] ?? null,
+};
+
 export function fakeSupabase(
   tables: Record<string, Row[]>,
   opts: {
@@ -156,7 +212,14 @@ export function fakeSupabase(
   };
   let seq = 0;
   const from = (table: string) => {
-    const rows = () => (tables[table] ??= []);
+    const view = tables[table] === undefined ? VIEWS[table] : undefined;
+    const rows = () => {
+      if (view) {
+        if (op !== "select") throw new Error(`fake: ${table} is a view (read-only)`);
+        return view(tables);
+      }
+      return (tables[table] ??= []);
+    };
     let op: "select" | FakeWrite["op"] = "select";
     let payload: Row | Row[] | null = null;
     let wantCount = false;
@@ -274,7 +337,7 @@ export function fakeSupabase(
     rpcCalls.push({ fn, args });
     const custom = opts.rpc?.(fn, args);
     if (custom) return custom;
-    const own = opts.rpcs?.[fn];
+    const own = opts.rpcs?.[fn] ?? DEFAULT_RPCS[fn];
     if (own) {
       try {
         return { data: own(args, tables), error: null };

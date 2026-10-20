@@ -71,8 +71,11 @@ describe("the gate and the Admin group", () => {
     expect(pageForPath("/admin/settings")).toBe("pricing");
   });
   it('the auth gate lets "manager" pages through on managesTickets', () => {
+    // Oct 20: the gate's rule is lib/auth-flow.ts gateDecision (the gate calls it).
     const gate = read("src/components/auth-gate.tsx");
-    expect(gate).toMatch(/page === "manager"\s*\?\s*!managesTickets\(profile\)/);
+    expect(gate).toContain('gateDecision(session, profile, profileFailed, page) === "blocked"');
+    const flow = read("src/lib/auth-flow.ts");
+    expect(flow).toMatch(/page === "manager"\s*\?\s*managesTickets\(profile\)/);
   });
   it("the sidebar: Setup (managers and admins) under Opportunities; the Admin group admins only", () => {
     // Owner, Oct 5: Service Rates became Setup, under Opportunities in the Customers group; with

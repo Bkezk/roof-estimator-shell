@@ -191,13 +191,15 @@ export interface MovementRow {
  * dialog's reports (inventory-export.functions.ts) name categories the same way.
  */
 export async function categories(sb: SupabaseClient<Database>) {
+  // The price-free view (Oct 20): Inventory is everyone's, the catalog's prices are not.
   const [{ data, error }, materials] = await Promise.all([
-    sb.from("pricing_catalog").select("id, category").eq("branch", "duro_last"),
+    sb.from("pricing_catalog_units").select("id, category").eq("branch", "duro_last"),
     loadServiceMaterialLinks(sb),
   ]);
   if (error) throw new Error(error.message);
   const m = new Map<string, string>();
-  for (const s of data ?? []) m.set(s.id, s.category);
+  // (A view's columns type as nullable; the base table's never are.)
+  for (const s of data ?? []) if (s.id && s.category) m.set(s.id, s.category);
   // Service materials with no bid-catalog twin (owner, Oct 6: ISO is Underlayment, Acetone is
   // Cleaning Supplies …; service-materials.ts).
   return (screenId: string, rowLabel: string): string =>
@@ -221,7 +223,7 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
   const [data, cats, { data: nums, error }, materials] = await Promise.all([
     readAllMovements(sb),
     categories(sb),
-    sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
+    sb.from("catalog_item_numbers_map").select("screen_id, row_label, price_col, item_no"),
     loadServiceMaterialLinks(sb),
   ]);
   if (error) throw new Error(error.message);
@@ -252,6 +254,7 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
   }
   const numsByCell = new Map<string, string[]>();
   for (const n of nums ?? []) {
+    if (!n.item_no) continue; // a view's columns type as nullable; the key never is
     const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
     const list = numsByCell.get(k) ?? [];
     if (!list.includes(n.item_no)) list.push(n.item_no);
@@ -504,7 +507,7 @@ export const addMovement = createServerFn({ method: "POST" })
       }
     }
     const { data: itemRows } = await sb
-      .from("catalog_item_numbers")
+      .from("catalog_item_numbers_map")
       .select("item_no")
       .eq("screen_id", data.screen_id)
       .eq("row_label", data.row_label)
@@ -599,8 +602,10 @@ export async function cellUnit(
     if (!m) throw new Error(`"${cell.row_label}" is not on the service material list`);
     return { unit: unitWord(m.unit), piece: null };
   }
+  // The price-free view (Oct 20; lib/catalog-units.ts is its twin): the labels, the pack sizes
+  // and an adhesive's unit type — the screen's columns by name, never a price.
   const { data: screen, error } = await sb
-    .from("pricing_catalog")
+    .from("pricing_catalog_units")
     .select("data")
     .eq("id", cell.screen_id)
     .maybeSingle();
@@ -693,7 +698,7 @@ export const transferStock = createServerFn({ method: "POST" })
         `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${from.kind === "shop" ? "on the shelf" : `on ${from.name}`}`,
       );
     const { data: itemRows } = await sb
-      .from("catalog_item_numbers")
+      .from("catalog_item_numbers_map")
       .select("item_no")
       .eq("screen_id", data.screen_id)
       .eq("row_label", data.row_label)

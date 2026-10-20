@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { assertPageAccess } from "@/lib/auth.functions";
+import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
 
 type Tables = Database["public"]["Tables"];
 export type CompanySettings = Tables["company_settings"]["Row"];
@@ -26,11 +26,12 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
   await assertPageAccess(supabase, userId, "pricing");
 }
 
-// Whole General group in one round trip. Any signed-in user may read (estimators
-// need these values to price a bid); RLS enforces that.
+// Whole General group in one round trip. Estimate Pricing or Estimate access (estimators need
+// these values to price a bid; assertPricingRead, Oct 20); RLS enforces the same.
 export const getGeneralSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<GeneralSettings> => {
+    await assertPricingRead(context.supabase, context.userId);
     const sb = context.supabase;
     const [company, steps, markup, warr, wind] = await Promise.all([
       sb.from("company_settings").select("*").eq("id", 1).maybeSingle(),

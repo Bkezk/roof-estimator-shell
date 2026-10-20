@@ -5,7 +5,7 @@
  *  1. A lost update: editing a task in the dialog reopened one somebody else had just ticked
  *     Done — the form always sent the status it loaded and saveTask wrote it over the live row.
  *     Two halves: the dialog sends `status` only when the Done box was touched (taskSavePayload,
- *     `statusTouched`), and carries the row's updated_at as `expect_updated_at`, which saveTask
+ *     `statusTouched`), and carries the row's updated_at as `expect_content_updated_at`, which saveTask
  *     checks before and in the write (TASK_CHANGED); the dialog reloads the task on it.
  *  3. The Owner view's numbers opened a List that could not show what they counted: the List
  *     applied the unticked kinds (kindsForLanding shows every kind for that landing, and says
@@ -92,7 +92,10 @@ const call = <T>(fn: unknown, data: Row, db: unknown, userId: string) =>
 
 // ---- 1. the lost update ------------------------------------------------------------------------
 
-describe("1. taskSavePayload: status only when touched; the row's updated_at rides along", () => {
+// Oct 20, the fifth audit: the stamp is the row's content_updated_at (20261020121000), with
+// updated_at standing in until that migration is applied — these rows carry none, so the
+// fallback is what is pinned here; src/lib/task-content-stamp.test.ts covers the content stamp.
+describe("1. taskSavePayload: status only when touched; the row's stamp rides along", () => {
   const input: TaskInput = taskInputSchema.parse({
     id: TASK,
     title: "Walk the roof",
@@ -102,16 +105,16 @@ describe("1. taskSavePayload: status only when touched; the row's updated_at rid
     status: "open",
   });
   const row = { updated_at: T1 };
-  it("editing, Done untouched: no status (the server keeps the live one), expect_updated_at set", () => {
+  it("editing, Done untouched: no status (the server keeps the live one), expect_content_updated_at set", () => {
     const p = taskSavePayload(input, row, false);
     expect("status" in p).toBe(false);
-    expect(p.expect_updated_at).toBe(T1);
+    expect(p.expect_content_updated_at).toBe(T1);
     expect(p.title).toBe("Walk the roof");
   });
-  it("editing, Done touched: the status goes (explicit intent), expect_updated_at set", () => {
+  it("editing, Done touched: the status goes (explicit intent), expect_content_updated_at set", () => {
     expect(taskSavePayload({ ...input, status: "done" }, row, true)).toMatchObject({
       status: "done",
-      expect_updated_at: T1,
+      expect_content_updated_at: T1,
     });
     expect(taskSavePayload(input, row, true).status).toBe("open");
   });
@@ -119,7 +122,7 @@ describe("1. taskSavePayload: status only when touched; the row's updated_at rid
     const fresh = { ...input, id: undefined };
     expect(taskSavePayload(fresh, null, false)).toBe(fresh);
     expect(taskSavePayload(fresh, undefined, true)).toBe(fresh);
-    expect(taskInputSchema.parse({ title: "x" }).expect_updated_at).toBeUndefined();
+    expect(taskInputSchema.parse({ title: "x" }).expect_content_updated_at).toBeUndefined();
   });
   it("the wording", () => {
     expect(TASK_CHANGED).toBe("This task changed since you opened it — reopen it");
@@ -182,7 +185,12 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     const e = env();
     await call(setTaskStatus, { id: TASK, status: "done" }, e.db, ANN);
     expect(e.tables["tasks"]![0]!["status"]).toBe("done");
-    const r = await call<SaveTaskResult>(saveTask, bobsForm({ expect_updated_at: T1 }), e.db, BOB);
+    const r = await call<SaveTaskResult>(
+      saveTask,
+      bobsForm({ expect_content_updated_at: T1 }),
+      e.db,
+      BOB,
+    );
     expect(r.task.status).toBe("done");
     expect(r.task.title).toBe("Walk the roof with the facilities manager");
     expect(r.task.done_by).toBe(ANN);
@@ -195,7 +203,7 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     await call(setTaskStatus, { id: TASK, status: "done" }, e.db, ANN);
     const r = await call<SaveTaskResult>(
       saveTask,
-      bobsForm({ status: "open", expect_updated_at: T1 }),
+      bobsForm({ status: "open", expect_content_updated_at: T1 }),
       e.db,
       BOB,
     );
@@ -203,11 +211,11 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     expect(r.task.done_at).toBeNull();
     expect(r.task.done_by).toBeNull();
   });
-  it("a stale expect_updated_at is refused with TASK_CHANGED and nothing is written", async () => {
+  it("a stale expect_content_updated_at is refused with TASK_CHANGED and nothing is written", async () => {
     const e = env();
-    await expect(call(saveTask, bobsForm({ expect_updated_at: T0 }), e.db, BOB)).rejects.toThrow(
-      TASK_CHANGED,
-    );
+    await expect(
+      call(saveTask, bobsForm({ expect_content_updated_at: T0 }), e.db, BOB),
+    ).rejects.toThrow(TASK_CHANGED);
     expect(e.writes).toEqual([]);
     expect(e.tables["tasks"]![0]!["title"]).toBe("Walk the roof");
   });
@@ -229,12 +237,12 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     expect(r.task.status).toBe("open");
     expect(e.writes.some((x) => x.table === "tasks" && x.op === "insert")).toBe(true);
   });
-  it("the server: the compare, the .eq on updated_at, maybeSingle → TASK_CHANGED", () => {
-    expect(fns).toContain("const expected = data.expect_updated_at;");
+  it("the server: the compare, the .eq on the stamp, maybeSingle → TASK_CHANGED", () => {
+    expect(fns).toContain("const expected = data.expect_content_updated_at;");
     expect(fns).toContain(
-      "if (expected && before.updated_at !== expected) throw new Error(TASK_CHANGED);",
+      "if (expected && contentStamp(before) !== expected) throw new Error(TASK_CHANGED);",
     );
-    expect(fns).toContain('if (expected) upd = upd.eq("updated_at", expected);');
+    expect(fns).toContain("if (expected) upd = upd.eq(contentStampColumn(before), expected);");
     expect(fns).toContain("const { data: saved, error } = await upd.select().maybeSingle();");
     expect(fns).toContain("if (!saved) throw new Error(TASK_CHANGED);");
     // The insert path is unchanged.
@@ -246,7 +254,7 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     expect(dialog).toContain("const task = live ?? props.task;");
     // Reset with the form on open.
     expect(dialog).toMatch(
-      /setEmailText\(""\);\s*setStatusTouched\(false\);\s*setLive\(null\);\s*\/\/ eslint-disable-next-line/,
+      /setEmailText\(""\);\s*setStatusTouched\(false\);\s*setLive\(null\);\s*setChanged\(null\);\s*\/\/ eslint-disable-next-line/,
     );
     expect(dialog).toMatch(
       /onCheckedChange=\{\(v\) => \{\s*setStatusTouched\(true\);\s*set\(\{ status: v === true \? "done" : "open" \}\);\s*\}\}/,
@@ -256,8 +264,9 @@ describe("1. saveTask through the fake: A ticks Done, B saves a stale form", () 
     expect(dialog).toMatch(
       /onError: \(e\) => \{\s*toast\.error\(errText\(e\)\);\s*if \(errText\(e\) === TASK_CHANGED && task\) reload\.mutate\(task\.id\);\s*\},/,
     );
+    // The fifth audit: the reload keeps the typed form (no setF) and notes what changed.
     expect(dialog).toMatch(
-      /const reload = useMutation\(\{\s*mutationFn: \(id: string\) => getTaskFn\(\{ data: \{ id \} \}\),\s*onSuccess: \(row\) => \{\s*setLive\(row\);\s*setF\(taskToInput\(row\)\);\s*setStatusTouched\(false\);\s*invalidate\(\);\s*\},/,
+      /const reload = useMutation\(\{\s*mutationFn: \(id: string\) => getTaskFn\(\{ data: \{ id \} \}\),\s*onSuccess: \(row\) => \{\s*const opened = live \?\? props\.task;\s*setChanged\(opened \? taskChangeNotice\(taskToInput\(opened\), taskToInput\(row\)\) : \[\]\);\s*setLive\(row\);\s*invalidate\(\);\s*\},/,
     );
     // The dialog stays open on the refusal (onSuccess alone closes it).
     expect(dialog).toContain(
@@ -523,7 +532,9 @@ describe("d. landingDecision: retry for the profile, then home with a toast", ()
     );
   });
   it("the gate: tries, the retry effect through refreshProfile, the give-up toast to homeFor(null)", () => {
-    expect(gate).toContain("const { session, profile, loading, refreshProfile } = useAuth();");
+    expect(gate).toContain(
+      "const { session, profile, profileFailed, loading, refreshProfile } = useAuth();",
+    );
     expect(gate).toContain("const [tries, setTries] = useState(0);");
     expect(gate).toMatch(
       /useEffect\(\(\) => \{\s*if \(!session\) setTries\(0\);\s*\}, \[session\]\);/,

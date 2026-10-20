@@ -10,6 +10,7 @@ import {
   bidReminderColumns,
   bidStatusStamps,
 } from "@/lib/bid-status";
+import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
@@ -523,10 +524,11 @@ export interface MarkupPreset {
   isDefault: boolean;
 }
 
-/** Labor & markup presets for the estimator's preset picker. Authenticated read. */
+/** Labor & markup presets for the estimator's preset picker. Estimate Pricing or Estimate access. */
 export const getMarkupPresets = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<MarkupPreset[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("markup_options")
       .select(
@@ -545,10 +547,11 @@ export const getMarkupPresets = createServerFn({ method: "GET" })
     }));
   });
 
-/** Warranty + high-wind pricing tables for the estimator's warranty picker. Authenticated read. */
+/** Warranty + high-wind pricing tables for the estimator's warranty picker. Estimate Pricing or Estimate access. */
 export const getWarrantyData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    await assertPricingRead(context.supabase, context.userId);
     const [wRes, hwRes] = await Promise.all([
       context.supabase
         .from("warranties")
@@ -581,12 +584,16 @@ export const getWarrantyData = createServerFn({ method: "GET" })
     };
   });
 
-/** Company header fields for the proposal (any signed-in user; no admin gate). */
+/**
+ * Company header fields for the proposal (any signed-in user; no admin gate). Read through the
+ * price-free `company_settings_public` view (Oct 20): the settings row itself — tax rate, labor
+ * display, shipping — is Estimate Pricing / Estimate only now.
+ */
 export const getCompanyInfo = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<CompanyInfo> => {
     const { data, error } = await context.supabase
-      .from("company_settings")
+      .from("company_settings_public")
       .select("company_name, address, city, state, zip, phone")
       .eq("id", 1)
       .maybeSingle();

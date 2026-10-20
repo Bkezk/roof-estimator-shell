@@ -10,6 +10,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
+import { assertPricingRead } from "@/lib/auth.functions";
 import type { MechFastenerRow } from "@/lib/engine/fastener-spacing";
 import {
   assembleEngineAdminData,
@@ -70,6 +71,10 @@ const UNDERLAYMENT_SCREEN_ID = "duro_last:underlayment";
 export const getEngineAdminData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<EngineAdminData> => {
+    // Estimate Pricing or Estimate (Oct 20): the twin of the catalog and labor tables' SELECT
+    // policies; a technician reads no price. Takeoff's Setup and drains read this too — with
+    // Estimate access, as every estimator has.
+    await assertPricingRead(context.supabase, context.userId);
     const sb = context.supabase;
 
     const [
@@ -303,6 +308,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
 export const getAccessoryCatalog = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AccessoryCatalogItem[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("pricing_catalog")
       .select("id, category, data")
@@ -325,6 +331,7 @@ export const getAccessoryCatalog = createServerFn({ method: "GET" })
 export const getAccessoryLaborLookup = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<Record<string, number>> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("accessory_labor")
       .select("id, category, data")
@@ -342,6 +349,7 @@ export const getAccessoryLaborLookup = createServerFn({ method: "GET" })
 export const getNonDlCatalog = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<NonDlCatalogItem[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("pricing_catalog")
       .select("id, category, data")
@@ -360,6 +368,7 @@ export const getNonDlCatalog = createServerFn({ method: "GET" })
 export const getMetalsCatalog = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<MetalsCatalogItem[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("pricing_catalog")
       .select("data")
@@ -377,6 +386,7 @@ export const getMetalsCatalog = createServerFn({ method: "GET" })
 export const getFastenerLookup = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<MechFastenerRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const sb = context.supabase as unknown as {
       from: (t: string) => {
         select: (c: string) => PromiseLike<{

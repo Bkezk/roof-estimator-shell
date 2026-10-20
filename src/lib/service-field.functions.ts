@@ -863,8 +863,9 @@ export const estimateTravel = createServerFn({ method: "GET" })
     await me(context);
     const sb = context.supabase;
     try {
+      // The price-free view (Oct 20): the office and shop addresses, not the settings row.
       const { data: office } = await sb
-        .from("company_settings")
+        .from("company_settings_public")
         .select("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip")
         .eq("id", 1)
         .maybeSingle();
@@ -1515,7 +1516,7 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
     const sb = context.supabase;
     const [materials, { data: nums }] = await Promise.all([
       loadServiceMaterialLinks(sb),
-      sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
+      sb.from("catalog_item_numbers_map").select("screen_id, row_label, price_col, item_no"),
     ]);
     // A twin cell counts in the catalog's pieces (a box of 1,000 fasteners) unless the material
     // says otherwise (servicePiece); owner, Oct 9: a tap must log one screw, not one box.
@@ -1537,6 +1538,7 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
     };
     const numsByCell = new Map<string, string[]>();
     for (const n of nums ?? []) {
+      if (!n.item_no) continue; // a view's columns type as nullable; the key never is
       const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
       const list = numsByCell.get(k) ?? [];
       if (!list.includes(n.item_no)) list.push(n.item_no);

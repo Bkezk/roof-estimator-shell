@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { assertPageAccess } from "@/lib/auth.functions";
+import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
 
 type Tables = Database["public"]["Tables"];
 export type SetupStep = Tables["labor_setup_steps"]["Row"];
@@ -39,6 +39,7 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
 export const getLaborEngines = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<LaborEngines> => {
+    await assertPricingRead(context.supabase, context.userId);
     const sb = context.supabase;
     const [setup, steps, insp, tpls, adj, curb, cdeck, ctype, para] = await Promise.all([
       sb.from("labor_setup").select("*").eq("id", 1).maybeSingle(),

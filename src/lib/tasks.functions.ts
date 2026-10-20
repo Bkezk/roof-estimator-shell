@@ -27,6 +27,8 @@ import {
   noticeRecipients,
   seesAllTasks,
   TASK_CHANGED,
+  contentStamp,
+  contentStampColumn,
   taskDueAt,
   taskInputSchema,
   type TaskRow,
@@ -197,15 +199,18 @@ export const saveTask = createServerFn({ method: "POST" })
     };
     let row: TaskRow;
     if (before) {
-      // Optimistic concurrency (Oct 20): the dialog says which row it loaded (expect_updated_at);
-      // a row changed since — someone ticked it Done, moved it — is not written over. Checked
-      // before the write, and again by the write itself (the .eq on updated_at: a change that
-      // lands between the read and the update matches nothing). Callers that never loaded the
-      // row send no expectation and are not checked.
-      const expected = data.expect_updated_at;
-      if (expected && before.updated_at !== expected) throw new Error(TASK_CHANGED);
+      // Optimistic concurrency (Oct 20): the dialog says which row it loaded
+      // (expect_content_updated_at); a row whose CONTENT changed since — someone ticked it Done,
+      // moved it — is not written over. The stamp is content_updated_at (20261020121000; the
+      // reminder pass stamping notified_* / notify_error moves updated_at, never this), or
+      // updated_at until that migration is applied (contentStampColumn). Checked before the
+      // write, and again by the write itself (the .eq on the stamp: a change that lands between
+      // the read and the update matches nothing). Callers that never loaded the row send no
+      // expectation and are not checked.
+      const expected = data.expect_content_updated_at;
+      if (expected && contentStamp(before) !== expected) throw new Error(TASK_CHANGED);
       let upd = sb.from("tasks").update(fields).eq("id", before.id);
-      if (expected) upd = upd.eq("updated_at", expected);
+      if (expected) upd = upd.eq(contentStampColumn(before), expected);
       const { data: saved, error } = await upd.select().maybeSingle();
       if (error) throw new Error(error.message);
       if (!saved) throw new Error(TASK_CHANGED);

@@ -9,7 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, seesEveryone } from "@/lib/access";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 import { easternYmd } from "@/lib/field-day";
@@ -492,9 +492,16 @@ export const sendTestNotification = createServerFn({ method: "POST" })
     return { email_configured: emailConfigured(), app_url: appUrl() };
   });
 
+/**
+ * Admin › Reminders' settings row (the page is an admin's: pageForPath /admin/reminders → admin).
+ * Admins and managers (Oct 20) — the twin of crm_settings_read (20261020120000: is_admin() or
+ * is_manager()); everyone else used to read the whole row.
+ */
 export const getCrmSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<CrmSettingsRow> => {
+    const p = await me(context);
+    if (!seesEveryone(p)) throw new Error("Forbidden: admin or manager access required");
     const { data, error } = await context.supabase
       .from("crm_settings")
       .select("*")
@@ -652,12 +659,10 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
   .handler(async ({ context }): Promise<ReminderRunResult> => {
     const p = await me(context);
     if (!officeLike(p)) return notRun();
-    const { data: s } = await context.supabase
-      .from("crm_settings")
-      .select("last_dispatch_at")
-      .eq("id", 1)
-      .maybeSingle();
-    const last = s?.last_dispatch_at ? Date.parse(s.last_dispatch_at) : 0;
+    // The throttle's stamp through `crm_last_dispatch_at()` (20261020120000: an office user may
+    // not read crm_settings any more, and still runs this pass).
+    const { data: lastAt } = await context.supabase.rpc("crm_last_dispatch_at");
+    const last = typeof lastAt === "string" && lastAt ? Date.parse(lastAt) : 0;
     if (Date.now() - last < 10 * 60 * 1000) return notRun();
     const out: ReminderRunResult = { ...notRun(), ran: true };
     const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));

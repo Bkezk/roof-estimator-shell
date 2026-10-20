@@ -109,6 +109,7 @@ import {
   keepRemembered,
   KIND_PLURALS,
   kindsForLanding,
+  kindToggleClearsPreset,
   kindsSummary,
   landingSearch,
   moveBucket,
@@ -1507,7 +1508,12 @@ export function MyWorkPage(props: {
                     checked={on}
                     disabled={last}
                     onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => onLayout(toggleKind(layout, k))}
+                    onCheckedChange={() => {
+                      onLayout(toggleKind(layout, k));
+                      // Oct 20: a tick under an Owner-view preset clears the preset, so the ticks
+                      // apply again (kindsForLanding showed every kind while it was set).
+                      if (kindToggleClearsPreset(props.bucket)) props.onBucket(null);
+                    }}
                   >
                     {KIND_PLURALS[k]}
                   </DropdownMenuCheckboxItem>

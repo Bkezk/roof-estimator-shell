@@ -292,7 +292,9 @@ describe("listServiceMaterialOptions", () => {
         piece_name: null,
       },
     ],
-    catalog_item_numbers: [
+    // The price-free view (catalog_item_numbers without last_price; 20261020120000) the
+    // close-out's material list reads since Oct 20.
+    catalog_item_numbers_map: [
       {
         screen_id: "duro_last:pipe_stacks",
         row_label: '2" Closed/Open',

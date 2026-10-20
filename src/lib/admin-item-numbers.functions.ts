@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { assertPageAccess } from "@/lib/auth.functions";
+import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
 
 export type ItemNumberRow = Database["public"]["Tables"]["catalog_item_numbers"]["Row"];
 
@@ -23,6 +23,7 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
 export const listItemNumbers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<ItemNumberRow[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("catalog_item_numbers")
       .select("*")
@@ -82,6 +83,7 @@ const NON_PRICE_COLS = new Set([
 export const listPriceTargets = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<PriceTarget[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("pricing_catalog")
       .select("id, category, data")
@@ -455,6 +457,7 @@ export interface PriceImportChange {
 export const listPriceImportRuns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<PriceImportRun[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("price_import_runs")
       .select(
@@ -471,6 +474,7 @@ export const listPriceImportChanges = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d) => z.object({ run_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<PriceImportChange[]> => {
+    await assertPricingRead(context.supabase, context.userId);
     const { data: rows, error } = await context.supabase
       .from("price_import_changes")
       .select(

@@ -263,6 +263,15 @@ export function kindsForLanding(
 }
 
 /**
+ * Does a Show tick clear the ?bucket= preset (Oct 20, the fifth audit)? Arriving from an
+ * Owner-view link, kindsForLanding shows every kind while the preset is in the URL — and desktop
+ * never cleared it, so ticking a kind off in Show did nothing visible. A tick with a preset set
+ * clears it (the page calls onBucket(null)), so the person's ticks apply again; without a preset
+ * there is nothing to clear.
+ */
+export const kindToggleClearsPreset = (preset: string | null | undefined): boolean => !!preset;
+
+/**
  * What a settled layout save writes (Oct 20 — two overlapping saves could resurrect the older
  * one: each wrote its own layout on settling, so a late failure of an older save re-flagged and
  * re-stored it over a newer one). `latest` is the layout last committed (the page's

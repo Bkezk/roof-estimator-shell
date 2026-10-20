@@ -684,7 +684,8 @@ describe("the Time section prefills a Travel line from the estimate (close-out o
   it("the server function takes the office from company_settings (the shop's street, else the invoice header's address: travelOrigin), the destination in order, then the router before the arithmetic", () => {
     const fns = readFileSync("src/lib/service-field.functions.ts", "utf8");
     expect(fns).toMatch(
-      /\.from\("company_settings"\)\s*\.select\("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip"\)\s*\.eq\("id", 1\)\s*\.maybeSingle\(\);\s*const origin = office \? travelOrigin\(office\) : null;\s*if \(!origin\) return null;/,
+      // Oct 20: the price-free view (20261020120000) — the settings row is an estimator's now.
+      /\.from\("company_settings_public"\)\s*\.select\("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip"\)\s*\.eq\("id", 1\)\s*\.maybeSingle\(\);\s*const origin = office \? travelOrigin\(office\) : null;\s*if \(!origin\) return null;/,
     );
     expect(fns).not.toContain("officeAddressLine(");
     expect(fns).toContain('.select("id, site_id, site_address, account_id")');

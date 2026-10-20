@@ -269,7 +269,9 @@ describe("the 'needs assignment' timer (owner, Oct 7: overdue just by nature of 
     expect(setup).toContain("Needs assignment");
     expect(setup).toContain('daysFields("unassigned")');
     const fn = read("./my-work.functions.ts");
-    expect(fn).toContain('.select("unassigned_overdue_days")');
+    // Oct 20 (20261020120000): through the SECURITY DEFINER getter — crm_settings itself is an
+    // admin's and a manager's to read now.
+    expect(fn).toContain('sb.rpc("unassigned_overdue_days")');
     expect(fn).toMatch(/technician_id, created_at"/);
     expect(fn).toContain('"id, title, status, expected_close, account_id, created_at"');
     expect(fn).toContain("unassignedOverdueDays,");

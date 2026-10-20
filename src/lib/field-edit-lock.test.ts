@@ -203,10 +203,19 @@ function world(stage: string, who: string) {
     inventory_locations: [{ id: "shop", name: "Shop", kind: "shop", sort: 0, active: true }],
     inventory_movements: [{ location_id: "shop", ...CELL, qty: 10, reason: "leftover" }],
     catalog_item_numbers: [],
+    catalog_item_numbers_map: [],
     pricing_catalog: [
       {
         id: "fasteners",
         data: { columns: ["Description", "Price"], rows: [{ Description: "Seam tape", Price: 4 }] },
+      },
+    ],
+    // The price-free view the inventory reads since Oct 20 (20261020120000): the same screen
+    // without its Price cells.
+    pricing_catalog_units: [
+      {
+        id: "fasteners",
+        data: { columns: ["Description", "Price"], rows: [{ Description: "Seam tape" }] },
       },
     ],
   };

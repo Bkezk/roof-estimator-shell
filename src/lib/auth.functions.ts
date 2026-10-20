@@ -66,6 +66,26 @@ export async function assertPageAccess(
     throw new Error(`Forbidden: ${PAGE_LABELS[page]} access required`);
 }
 
+export const PRICING_READ_FORBIDDEN = "Forbidden: Estimate Pricing or Estimate access required";
+
+/**
+ * Who reads prices (Oct 20, the fifth audit: every pricing / labor / settings read used to be any
+ * signed-in token's): Estimate Pricing, or Estimate — an estimator prices bids and must keep
+ * reading the catalog and the labor tables. Saves stay `assertPageAccess(…, "pricing")`. The
+ * server-side twin of the SELECT policies of 20261020120000_pricing_reads_narrowed.sql
+ * (`has_access('pricing') or has_access('estimate')`). A technician, or an office user without
+ * either page, is refused before any row is read.
+ */
+export async function assertPricingRead(supabase: SupabaseClient<Database>, userId: string) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role, access")
+    .eq("id", userId)
+    .single();
+  if (error || !data || !(canAccess(data, "pricing") || canAccess(data, "estimate")))
+    throw new Error(PRICING_READ_FORBIDDEN);
+}
+
 // supabaseAdmin bypasses RLS and requires SUPABASE_SERVICE_ROLE_KEY; it is only
 // needed for the auth.admin API (createUser/deleteUser). Everything else runs
 // under RLS through the caller's own client so it works without the key.
