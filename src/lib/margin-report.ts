@@ -33,9 +33,34 @@
  *    two rows), customers by the bill-to name (the only name the invoice has). A ticket with
  *    nobody assigned is "Unassigned"; an invoice whose ticket is missing is "No ticket". Every
  *    amount is rounded to cents.
+ *
+ * Won bids (owner, Oct 21: "do bids that are accepted go into that report? if not please add
+ * them and have it to where you can filter just service, just bids, or both"; and "there also
+ * needs to be a way to adjust the date the bid was won … go with the bid won on day add"):
+ *  - A won bid (bid-status.ts: status won, the legacy accepted folded in; never a draft,
+ *    submitted, lost or deleted one) is a row like an invoice, `kind` "bid", status "won". The
+ *    Include select (MARGIN_SOURCES) asks for service and bids (the default), service only, or
+ *    bids only; the comparison period follows the same choice.
+ *  - Its money is the estimator's stored figures (bid-figures.ts, bids.figures, written at every
+ *    save): revenue = the bid total BEFORE tax; material, labor (direct + subs and services) and
+ *    other (warranty, shipping, per diem, commission) are the cost; hours the direct-labor hours;
+ *    no purchase orders. A won bid saved before the figures existed (null column) is counted
+ *    nowhere — not a row, not the totals, not the charts, not the CSV — and only listed
+ *    (MarginReportResult.bidsWithoutFigures) so it can be opened and saved once.
+ *  - Its day is the day it was won (`bidWonDay`): bids.won_on, the business day the office picked
+ *    or that was stamped when it was marked Won; an older won row without one falls back to
+ *    status_changed_at's office day (tasks.ts localYmd, TASK_TZ), then updated_at's.
+ *  - Its number is the bid's name; its customer the linked account's name, else the name typed
+ *    on the bid (data.customer.name), else ""; its "technician" is the estimator who made it
+ *    (created_by's profile), keyed by that id, so grouping by Technician / estimator puts a
+ *    technician's invoices and an estimator's won bids side by side.
+ *  - The status split gains a Won bids tile (counted as bids). The CSV is left as it was: its
+ *    rows are groups, and a group mixes invoices and bids; Include says what the file covers.
  */
+import type { BidFigures } from "@/lib/bid-figures";
 import { approvedPoTotal, type PoLike } from "@/lib/purchase-orders";
 import { poCostForInvoice, splitPosByLines, type TicketInvoiceRef } from "@/lib/invoice-totals";
+import { TASK_TZ, localYmd } from "@/lib/tasks";
 
 /** Cents-rounded, like the server (invoices.server.ts r2). */
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -49,12 +74,38 @@ export type MarginGroupBy = (typeof MARGIN_GROUPS)[number];
 export const MARGIN_GROUP_LABELS: Record<MarginGroupBy, string> = {
   month: "Month",
   customer: "Customer",
-  technician: "Technician",
+  /** A ticket's technician, or the estimator who made a won bid (owner, Oct 21). */
+  technician: "Technician / estimator",
 };
 
 /** The invoice statuses the report counts (invoices.functions.ts INVOICE_STATUSES less draft and void). */
 export const COUNTED_INVOICE_STATUSES = ["final", "sent", "paid"] as const;
 export type CountedInvoiceStatus = (typeof COUNTED_INVOICE_STATUSES)[number];
+/** A row's status: a counted invoice's, or "won" for a bid. */
+export type MarginRowStatus = CountedInvoiceStatus | "won";
+/** What a row is: a service invoice, or a won bid. */
+export type MarginRowKind = "service" | "bid";
+
+/** The Include select (owner, Oct 21: "filter just service, just bids, or both"). */
+export const MARGIN_SOURCES = ["both", "service", "bids"] as const;
+export type MarginSource = (typeof MARGIN_SOURCES)[number];
+export const MARGIN_SOURCE_LABELS: Record<MarginSource, string> = {
+  both: "Service and bids",
+  service: "Service only",
+  bids: "Bids only",
+};
+/** The count column's heading per Include (a row is an invoice or a bid). */
+export const MARGIN_COUNT_LABELS: Record<MarginSource, string> = {
+  both: "Invoices + bids",
+  service: "Invoices",
+  bids: "Bids",
+};
+/** The average column's heading per Include. */
+export const MARGIN_AVG_LABELS: Record<MarginSource, string> = {
+  both: "Avg / item",
+  service: "Avg / invoice",
+  bids: "Avg / bid",
+};
 
 export const UNASSIGNED_LABEL = "Unassigned";
 export const NO_TICKET_LABEL = "No ticket";
@@ -150,31 +201,88 @@ export function poCostCarried(
 
 // ---- the invoices -------------------------------------------------------------------------
 
-/** One counted invoice, resolved: its day, names and cost parts (the server builds these). */
+/** One counted invoice or won bid, resolved: its day, names and cost parts (the server builds these). */
 export interface MarginInvoiceIn {
   id: string;
-  /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel). */
+  /** A service invoice, or a won bid (bidToMarginIn). */
+  kind: MarginRowKind;
+  /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel), or the bid's name. */
   number: string;
-  /** YYYY-MM-DD (invoiceDay). */
+  /** YYYY-MM-DD (invoiceDay; bidWonDay for a bid). */
   day: string;
-  status: CountedInvoiceStatus;
-  /** Revenue: the subtotal, before tax. */
+  status: MarginRowStatus;
+  /** Revenue: the subtotal, before tax (a bid: its total less the tax charged). */
   subtotal: number | string;
-  /** The bill-to name (customer account or vendor); "" when none is known. */
+  /** The bill-to name (customer account or vendor); a bid's account or typed customer; "" when none is known. */
   customer: string;
-  /** The ticket's technician's name; null when nobody is assigned (or there is no ticket). */
+  /** The ticket's technician's name, or the bid's estimator's; null when nobody is assigned (or there is no ticket). */
   technician: string | null;
-  /** The technician's profile id (the grouping key); null when nobody is assigned. */
+  /** The technician's (estimator's) profile id (the grouping key); null when nobody is assigned. */
   technicianId: string | null;
-  /** Does the invoice's ticket exist (false → "No ticket")? */
+  /** Does the invoice's ticket exist (false → "No ticket")? Always true for a bid. */
   ticket: boolean;
-  /** The labor and travel hours on the lines. */
+  /** The labor and travel hours on the lines; a bid's direct-labor hours. */
   hours: number;
   material: number;
   labor: number;
   other: number;
-  /** poCostCarried for this invoice. */
+  /** poCostCarried for this invoice; 0 for a bid. */
   purchaseOrders: number;
+}
+
+/** A won bid as the server reads and resolves it, before it becomes a MarginInvoiceIn. */
+export interface MarginBidIn {
+  id: string;
+  name: string;
+  /** bids.won_on (YYYY-MM-DD), the day the office says it was won; null on older rows. */
+  won_on: string | null | undefined;
+  /** When the status last changed (null on rows older than Oct 12). */
+  status_changed_at: string | null | undefined;
+  updated_at: string;
+  /** The linked crm_accounts row's name, when there is one. */
+  accountName: string | null | undefined;
+  /** The customer name typed on the bid (data.customer.name). */
+  dataCustomerName: string | null | undefined;
+  /** The estimator (created_by's profile): name and id. */
+  estimator: string | null;
+  estimatorId: string | null;
+  figures: BidFigures;
+}
+
+/**
+ * The day a bid was won: won_on (a day the office picked or that was stamped when it was marked
+ * Won), else the office's calendar day (TASK_TZ) of status_changed_at, else of updated_at (a row
+ * marked won before Oct 12 has no status_changed_at).
+ */
+export function bidWonDay(b: {
+  won_on: string | null | undefined;
+  status_changed_at: string | null | undefined;
+  updated_at: string;
+}): string {
+  if (b.won_on && /^\d{4}-\d{2}-\d{2}$/.test(b.won_on)) return b.won_on;
+  return localYmd(new Date(b.status_changed_at || b.updated_at), TASK_TZ);
+}
+
+/** A won bid as a report row input: the rules at the top of the file. */
+export function bidToMarginIn(b: MarginBidIn): MarginInvoiceIn {
+  const f = b.figures;
+  return {
+    id: b.id,
+    kind: "bid",
+    number: b.name,
+    day: bidWonDay(b),
+    status: "won",
+    subtotal: f.revenue,
+    customer: (b.accountName ?? "").trim() || (b.dataCustomerName ?? "").trim(),
+    technician: b.estimator,
+    technicianId: b.estimatorId,
+    ticket: true,
+    hours: f.hours,
+    material: f.material,
+    labor: f.labor,
+    other: f.other,
+    purchaseOrders: 0,
+  };
 }
 
 /**
@@ -183,9 +291,10 @@ export interface MarginInvoiceIn {
  */
 export interface MarginInvoiceRow {
   id: string;
+  kind: MarginRowKind;
   number: string;
   day: string;
-  status: CountedInvoiceStatus;
+  status: MarginRowStatus;
   customer: string;
   technician: string | null;
   technicianId: string | null;
@@ -219,6 +328,7 @@ export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
   const margin = r2(revenue - cost);
   return {
     id: inv.id,
+    kind: inv.kind,
     number: inv.number,
     day: inv.day,
     status: inv.status,
@@ -274,9 +384,16 @@ export interface MarginPeriod {
 
 export interface MarginReportResult extends MarginPeriod {
   groupBy: MarginGroupBy;
+  /** What was included: service invoices, won bids, or both (the comparison follows it). */
+  source: MarginSource;
+  /**
+   * Won bids of the range whose figures column is null (saved before Oct 21, 2026): counted
+   * nowhere, listed so each can be opened in the estimator and saved once.
+   */
+  bidsWithoutFigures: { id: string; name: string; day: string }[];
   /** When the numbers were read (ISO). */
   generatedAt: string;
-  /** The comparison period, when one was asked for (the same groupBy). */
+  /** The comparison period, when one was asked for (the same groupBy and source). */
   comparison?: MarginPeriod;
 }
 
@@ -389,20 +506,25 @@ export function aggregateMargin(
 
 // ---- the status split ---------------------------------------------------------------------
 
-export type StatusSplit = Record<CountedInvoiceStatus, { invoices: number; revenue: number }>;
-/** The words of the split's three tiles (the component). */
-export const STATUS_SPLIT_LABELS: Record<CountedInvoiceStatus, string> = {
+/** The split's tiles in order: the three invoice statuses, then the won bids. */
+export const MARGIN_SPLIT_STATUSES = [...COUNTED_INVOICE_STATUSES, "won"] as const;
+/** `invoices` counts rows: invoices in the first three buckets, bids in `won`. */
+export type StatusSplit = Record<MarginRowStatus, { invoices: number; revenue: number }>;
+/** The words of the split's tiles (the component). */
+export const STATUS_SPLIT_LABELS: Record<MarginRowStatus, string> = {
   paid: "Paid",
   sent: "Sent, unpaid",
   final: "Final, not yet sent",
+  won: "Won bids",
 };
 
-/** Of the period's revenue (before tax), how much is paid, sent and unpaid, final not yet sent. */
+/** Of the period's revenue (before tax), how much is paid, sent and unpaid, final not yet sent, and won bids. */
 export function statusSplit(invoices: readonly MarginInvoiceRow[]): StatusSplit {
   const out: StatusSplit = {
     paid: { invoices: 0, revenue: 0 },
     sent: { invoices: 0, revenue: 0 },
     final: { invoices: 0, revenue: 0 },
+    won: { invoices: 0, revenue: 0 },
   };
   for (const i of invoices) {
     const slot = out[i.status];
@@ -410,7 +532,7 @@ export function statusSplit(invoices: readonly MarginInvoiceRow[]): StatusSplit 
     slot.invoices += 1;
     slot.revenue += i.revenue;
   }
-  for (const s of COUNTED_INVOICE_STATUSES) out[s].revenue = r2(out[s].revenue);
+  for (const s of MARGIN_SPLIT_STATUSES) out[s].revenue = r2(out[s].revenue);
   return out;
 }
 

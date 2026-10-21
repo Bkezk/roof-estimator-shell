@@ -3,13 +3,17 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
+import { isAdmin, isManager } from "@/lib/access";
 import {
   asBidStatus,
   BID_STATUSES,
   bidDueDateProblem,
+  bidOfficeToday,
   bidReminderColumns,
   bidStatusStamps,
+  wonOnColumns,
 } from "@/lib/bid-status";
+import { bidFiguresSchema } from "@/lib/bid-figures";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
@@ -79,6 +83,8 @@ export const listDeletedBids = createServerFn({ method: "GET" })
 
 /** A folder name as typed; normalizeFolder trims, collapses and cuts it to FOLDER_MAX. */
 const folderText = z.string().max(400);
+/** The won day as sent: a day (YYYY-MM-DD). */
+const WON_ON = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "The won day must be a day (YYYY-MM-DD)");
 
 const saveBidSchema = z.object({
   // Prospecting link (nullable spine column); absent = leave as is.
@@ -93,9 +99,20 @@ const saveBidSchema = z.object({
   name: z.string().min(1).max(200),
   data: z.record(z.string(), z.unknown()),
   grandTotal: z.number(),
+  /**
+   * The estimator's money figures for the Margin report (bids.figures; owner, Oct 21; lib/
+   * bid-figures.ts bidFigures on the browser's engine result). Sent on every save, null when the
+   * page had no result yet; absent = leave as is.
+   */
+  figures: bidFiguresSchema.nullable().optional(),
   status: z.enum(BID_STATUSES).optional(),
   /** Why the bid was lost (only meaningful with status "lost"; null clears it). */
   lostReason: z.string().trim().max(300).nullable().optional(),
+  /**
+   * The day the bid was won (bids.won_on, YYYY-MM-DD; owner, Oct 21). With status won: this day,
+   * else the stored one, else today (bid-status.ts wonOnColumns); any other status clears it.
+   */
+  wonOn: WON_ON.nullable().optional(),
   /**
    * When the bid must go out (bids.due_date, YYYY-MM-DD; owner, Oct 12). Required on a new bid
    * (no id): the save is refused with BID_DUE_REQUIRED without it. On an existing bid: absent =
@@ -161,6 +178,7 @@ export const saveBid = createServerFn({ method: "POST" })
       name: data.name,
       data: data.data as Json,
       grand_total: data.grandTotal,
+      ...(data.figures !== undefined ? { figures: data.figures } : {}),
       updated_at: new Date().toISOString(),
       updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       ...(data.status ? { status: data.status } : {}),
@@ -185,7 +203,9 @@ export const saveBid = createServerFn({ method: "POST" })
         );
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
-        .select("updated_at, updated_by_name, status, submitted_at, due_date")
+        .select(
+          "updated_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",
+        )
         .eq("id", data.id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
@@ -203,9 +223,19 @@ export const saveBid = createServerFn({ method: "POST" })
       // The status stamps (owner, Oct 12): status_changed_at on a change, submitted_at the first
       // time it is submitted (never overwritten).
       const statusChanged = !!data.status && !!cur && asBidStatus(cur.status) !== data.status;
+      // The won day (owner, Oct 21): the day sent, else the stored one, else today while the bid
+      // is won; cleared by any other status (bid-status.ts wonOnColumns).
       const { data: bid, error } = await context.supabase
         .from("bids")
-        .update({ ...payload, ...(data.status && cur ? bidStatusStamps(cur, data.status) : {}) })
+        .update({
+          ...payload,
+          ...(data.status && cur ? bidStatusStamps(cur, data.status) : {}),
+          ...wonOnColumns(
+            cur ?? null,
+            { status: data.status ?? cur?.status, wonOn: data.wonOn },
+            bidOfficeToday(),
+          ),
+        })
         .eq("id", data.id)
         .select()
         .single();
@@ -228,7 +258,12 @@ export const saveBid = createServerFn({ method: "POST" })
     if (dueProblem) throw new Error(dueProblem);
     const { data: bid, error } = await context.supabase
       .from("bids")
-      .insert({ ...payload, status, ...bidStatusStamps(null, status) })
+      .insert({
+        ...payload,
+        status,
+        ...bidStatusStamps(null, status),
+        ...wonOnColumns(null, { status, wonOn: data.wonOn }, bidOfficeToday()),
+      })
       .select()
       .single();
     if (error) throw new Error(error.message);
@@ -361,8 +396,10 @@ export const listBidFolders = createServerFn({ method: "GET" })
 
 /**
  * Change a bid's status from the list (Bids page dropdown); stamps who and when like a save, the
- * status stamps (bidStatusStamps), and then drives the linked opportunity (owner, Oct 12:
- * opportunities.functions.ts syncOpportunityFromBid — submitted → quoted, won → won, lost → lost).
+ * status stamps (bidStatusStamps), the won day (wonOnColumns: the day the list asked for when
+ * marking Won, else the stored one, else today; cleared otherwise), and then drives the linked
+ * opportunity (owner, Oct 12: opportunities.functions.ts syncOpportunityFromBid — submitted →
+ * quoted, won → won, lost → lost).
  */
 export const setBidStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -372,6 +409,7 @@ export const setBidStatus = createServerFn({ method: "POST" })
         id: z.string().uuid(),
         status: z.enum(BID_STATUSES),
         lostReason: z.string().trim().max(300).nullable().optional(),
+        wonOn: WON_ON.nullable().optional(),
       })
       .parse(d),
   )
@@ -382,7 +420,11 @@ export const setBidStatus = createServerFn({ method: "POST" })
         .select("full_name, email")
         .eq("id", context.userId)
         .maybeSingle(),
-      context.supabase.from("bids").select("status, submitted_at").eq("id", data.id).maybeSingle(),
+      context.supabase
+        .from("bids")
+        .select("status, submitted_at, won_on, status_changed_at")
+        .eq("id", data.id)
+        .maybeSingle(),
     ]);
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Bid not found (it may have been deleted).");
@@ -394,13 +436,48 @@ export const setBidStatus = createServerFn({ method: "POST" })
         updated_at: new Date().toISOString(),
         updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
         ...bidStatusStamps(cur, data.status),
+        ...wonOnColumns(cur, { status: data.status, wonOn: data.wonOn }, bidOfficeToday()),
       })
       .eq("id", data.id)
-      .select("id, status, updated_at, updated_by_name, submitted_at")
+      .select("id, status, updated_at, updated_by_name, submitted_at, won_on")
       .single();
     if (error) throw new Error(error.message);
     if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);
     return bid;
+  });
+
+/**
+ * Move the day a won bid was won (bids.won_on; owner, Oct 21: "a way to adjust the date the bid
+ * was won to ensure the data appears correctly") — the Margin report's inline Won-on box. Admins
+ * and managers only (the role from the caller's own profile row); a bid that is not won has no
+ * won day and is refused; a deleted bid is not found. Writes won_on and nothing else: the row's
+ * "Last saved … by" stays, so an estimator tab with the bid open is not told its copy is stale.
+ */
+export const setBidWonOn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ id: z.string().uuid(), wonOn: WON_ON }).parse(d))
+  .handler(async ({ data, context }): Promise<{ id: string; won_on: string }> => {
+    const [{ data: me, error: meErr }, { data: cur, error: cErr }] = await Promise.all([
+      context.supabase.from("profiles").select("id, role").eq("id", context.userId).maybeSingle(),
+      context.supabase
+        .from("bids")
+        .select("id, status")
+        .eq("id", data.id)
+        .is("deleted_at", null)
+        .maybeSingle(),
+    ]);
+    if (meErr) throw new Error(meErr.message);
+    if (!me || !(isAdmin(me) || isManager(me)))
+      throw new Error("Forbidden: admins and managers only");
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Bid not found (it may have been deleted).");
+    if (asBidStatus(cur.status) !== "won") throw new Error("Only a won bid has a Won-on day");
+    const { error } = await context.supabase
+      .from("bids")
+      .update({ won_on: data.wonOn })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { id: data.id, won_on: data.wonOn };
   });
 
 const getBidSchema = z.object({ id: z.string().uuid() });

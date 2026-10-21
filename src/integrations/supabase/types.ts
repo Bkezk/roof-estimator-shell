@@ -310,6 +310,7 @@ export type Database = {
           data: Json;
           deleted_at: string | null;
           due_date: string | null;
+          figures: Json | null;
           folder: string | null;
           grand_total: number;
           lost_reason: string | null;
@@ -330,6 +331,7 @@ export type Database = {
           takeoff_id: string | null;
           updated_at: string;
           updated_by_name: string | null;
+          won_on: string | null;
         };
         Insert: {
           account_id?: string | null;
@@ -339,6 +341,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           due_date?: string | null;
+          figures?: Json | null;
           folder?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
@@ -359,6 +362,7 @@ export type Database = {
           takeoff_id?: string | null;
           updated_at?: string;
           updated_by_name?: string | null;
+          won_on?: string | null;
         };
         Update: {
           account_id?: string | null;
@@ -368,6 +372,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           due_date?: string | null;
+          figures?: Json | null;
           folder?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
@@ -388,6 +393,7 @@ export type Database = {
           takeoff_id?: string | null;
           updated_at?: string;
           updated_by_name?: string | null;
+          won_on?: string | null;
         };
         Relationships: [
           {

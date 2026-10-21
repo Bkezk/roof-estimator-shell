@@ -5,6 +5,9 @@
  * hands in plain rows and the viewer's day; everything here is arithmetic, so it is tested
  * without a database. Money is read from the invoices as they stand — nothing is estimated.
  */
+import { asBidStatus } from "@/lib/bid-status";
+import { bidWonDay } from "@/lib/margin-report";
+import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { OPEN_OPP_STATUSES, isOverdueTicket } from "@/lib/work-counts";
 
 export interface BizTicket {
@@ -29,6 +32,13 @@ export interface BizPo {
   /** The ticket (the server leaves out orders on deleted tickets before these arrive). */
   service_job_id?: string;
 }
+/** A won or lost bid (bids; owner, Oct 21: the Won / Lost tile counts bids, not opportunities). */
+export interface BizBid {
+  status: string;
+  won_on: string | null;
+  status_changed_at: string | null;
+  updated_at: string;
+}
 export interface BizOpp {
   status: string;
   est_value: number | string | null;
@@ -45,6 +55,8 @@ export interface BusinessIn {
   invoices: readonly BizInvoice[];
   pos: readonly BizPo[];
   opps: readonly BizOpp[];
+  /** The live won / lost bids (absent in older callers: nothing won or lost). */
+  bids?: readonly BizBid[];
   /** Open follow-ups snoozed past now. */
   snoozed: number;
   /** crm_untouched(): items past Setup's untouched limits, by kind; null when the rpc is absent. */
@@ -149,6 +161,18 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
     (OPEN_OPP_STATUSES as readonly string[]).includes(o.status),
   );
   const closing = openOpps.filter((o) => inRange(o.expected_close, month));
+  // Won / Lost this month (owner, Oct 21): BIDS, not opportunities — won by the Won-on day
+  // (lib/margin-report.ts bidWonDay: won_on, else the status stamp's office day), lost by the
+  // office day the status changed. Opportunities' Won / Lost follow the bid anyway.
+  const bids = i.bids ?? [];
+  const wonBids = bids.filter(
+    (b) => asBidStatus(b.status) === "won" && inRange(bidWonDay(b), month),
+  ).length;
+  const lostBids = bids.filter(
+    (b) =>
+      asBidStatus(b.status) === "lost" &&
+      inRange(localYmd(new Date(b.status_changed_at || b.updated_at), TASK_TZ), month),
+  ).length;
   // The one "overdue ticket" rule — the Overdue tickets tile's (owner, Oct 12, items 6 and 11):
   // Open / Scheduled past its day, with a technician (one without is Unassigned, not overdue),
   // not on hold (a held follow-up waits); a Done ticket is waiting to be invoiced, never overdue.
@@ -185,9 +209,8 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
     pipeline: {
       open: { count: openOpps.length, value: sumBy(openOpps, (o) => num(o.est_value)) },
       closingThisMonth: { count: closing.length, value: sumBy(closing, (o) => num(o.est_value)) },
-      wonThisMonth: i.opps.filter((o) => o.status === "won" && inRange(o.updated_at, month)).length,
-      lostThisMonth: i.opps.filter((o) => o.status === "lost" && inRange(o.updated_at, month))
-        .length,
+      wonThisMonth: wonBids,
+      lostThisMonth: lostBids,
     },
     stale: {
       pastDue,
@@ -204,6 +227,8 @@ export const BUSINESS_HREFS = {
   toInvoice: "/service/invoices?tab=to-invoice",
   unpaid: "/service/invoices?status=unpaid",
   pipeline: "/opportunities?status=allopen",
+  // Won / Lost this month: the bids (owner, Oct 21).
+  bids: "/bids",
   // The Tickets list filtered to the tickets carrying an order still waiting (owner, Oct 21).
   pos: "/service?po=waiting",
   pastDue: "/service?overdue=1",

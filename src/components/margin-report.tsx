@@ -20,12 +20,23 @@
  *    change sit under revenue, cost, margin and margin % in grey; the charts draw the earlier
  *    period faded; the CSV carries both periods.
  *
- * Read-only, so no number box; a loss reads in red like the invoice page's Internal fold. The
- * table scrolls sideways on a phone; a refetch holds the previous frame instead of flashing.
- * Theme tokens only (dark mode).
+ * Won bids (owner, Oct 21: "do bids that are accepted go into that report? if not please add
+ * them and have it to where you can filter just service, just bids, or both"; "there also needs
+ * to be a way to adjust the date the bid was won"): an Include select after Group by — Service
+ * and bids (the default), Service only, Bids only — in the query key, so the server reads only
+ * what is asked for. A won bid is a row like an invoice (lib/margin-report.ts has the rules): in
+ * the drill-down it links to the estimator with a small Bid badge, reads Won, and its Day cell is
+ * a date box (Won on) that moves the day it counts on (bids.functions.ts setBidWonOn) and reloads
+ * the report. A fourth status tile, Won bids, shows when bids are included. Won bids saved before
+ * their cost figures existed are not counted; an amber notice lists them with links so each can
+ * be opened and saved once.
+ *
+ * Read-only otherwise, so no number box; a loss reads in red like the invoice page's Internal
+ * fold. The table scrolls sideways on a phone; a refetch holds the previous frame instead of
+ * flashing. Theme tokens only (dark mode).
  */
 import { Fragment, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronDown, ChevronRight, FileDown, Loader2 } from "lucide-react";
@@ -33,6 +44,7 @@ import { toast } from "sonner";
 
 import { MarginCharts } from "@/components/margin-charts";
 import { STATUS_LABELS, downloadBlob, money } from "@/components/service/invoice-utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +65,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth-store";
+import { STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
+import { setBidWonOn } from "@/lib/bids.functions";
 import {
   COMPARE_LABELS,
   COMPARE_MODES,
@@ -64,9 +78,13 @@ import {
   type Delta,
 } from "@/lib/margin-compare";
 import {
-  COUNTED_INVOICE_STATUSES,
+  MARGIN_AVG_LABELS,
+  MARGIN_COUNT_LABELS,
   MARGIN_GROUPS,
   MARGIN_GROUP_LABELS,
+  MARGIN_SOURCES,
+  MARGIN_SOURCE_LABELS,
+  MARGIN_SPLIT_STATUSES,
   STATUS_SPLIT_LABELS,
   defaultMarginRange,
   marginCsvFileName,
@@ -76,6 +94,7 @@ import {
   type MarginGroupBy,
   type MarginInvoiceRow,
   type MarginReportResult,
+  type MarginSource,
   type MarginTotals,
 } from "@/lib/margin-report";
 import { listMarginReport } from "@/lib/margin-report.functions";
@@ -144,16 +163,36 @@ function MoneyCells({ t, c }: { t: MarginTotals; c: Compared | null | undefined 
   );
 }
 
-/** The invoices behind an expanded group, newest first. */
-function InvoiceRows({ invoices }: { invoices: MarginInvoiceRow[] }) {
+/** A row's status word: Won for a bid (lib/bid-status), the invoice labels otherwise. */
+const rowStatus = (i: MarginInvoiceRow) =>
+  i.status === "won" ? BID_STATUS_LABELS.won : STATUS_LABELS[i.status];
+
+/**
+ * The invoices and won bids behind an expanded group, newest first. A bid links to the estimator
+ * and its Day is the Won on box: changing it moves the day the bid counts on (setBidWonOn) and
+ * reloads the report. `source` picks the first column's heading.
+ */
+function InvoiceRows({ invoices, source }: { invoices: MarginInvoiceRow[]; source: MarginSource }) {
+  const qc = useQueryClient();
+  const wonOnFn = useServerFn(setBidWonOn);
+  const moveWonOn = useMutation({
+    mutationFn: (v: { id: string; wonOn: string }) => wonOnFn({ data: v }),
+    onSuccess: (r) => {
+      toast.success(`Won on ${r.won_on}`);
+      void qc.invalidateQueries({ queryKey: ["margin-report"] });
+    },
+    onError: (e: unknown) => toast.error(`Could not move the won day: ${errText(e)}`),
+  });
   return (
     <Table className="text-xs">
       <TableHeader>
         <TableRow>
-          <TableHead>Invoice</TableHead>
+          <TableHead>
+            {source === "bids" ? "Bid" : source === "both" ? "Invoice / bid" : "Invoice"}
+          </TableHead>
           <TableHead>Day</TableHead>
           <TableHead>Customer</TableHead>
-          <TableHead>Technician</TableHead>
+          <TableHead>Technician / estimator</TableHead>
           <TableHead className="text-right">Hours</TableHead>
           <TableHead className="text-right">Revenue</TableHead>
           <TableHead className="text-right">Cost</TableHead>
@@ -168,15 +207,48 @@ function InvoiceRows({ invoices }: { invoices: MarginInvoiceRow[] }) {
           return (
             <TableRow key={i.id}>
               <TableCell className="whitespace-nowrap">
-                <Link
-                  to="/service/invoices"
-                  search={{ id: i.id }}
-                  className="font-medium underline-offset-2 hover:underline"
-                >
-                  {i.number || "Invoice"}
-                </Link>
+                {i.kind === "bid" ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Link
+                      to="/estimate"
+                      search={{ bid: i.id }}
+                      className="font-medium underline-offset-2 hover:underline"
+                    >
+                      {i.number || "Bid"}
+                    </Link>
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
+                      Bid
+                    </Badge>
+                  </span>
+                ) : (
+                  <Link
+                    to="/service/invoices"
+                    search={{ id: i.id }}
+                    className="font-medium underline-offset-2 hover:underline"
+                  >
+                    {i.number || "Invoice"}
+                  </Link>
+                )}
               </TableCell>
-              <TableCell className="whitespace-nowrap tabular-nums">{i.day}</TableCell>
+              <TableCell className="whitespace-nowrap tabular-nums">
+                {i.kind === "bid" ? (
+                  <Input
+                    type="date"
+                    aria-label="Won on"
+                    title="The day the bid was won; the report counts it on this day."
+                    className="h-7 w-[9.5rem] px-1.5 text-xs"
+                    defaultValue={i.day}
+                    key={`${i.id}-${i.day}`}
+                    disabled={moveWonOn.isPending}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v && v !== i.day) moveWonOn.mutate({ id: i.id, wonOn: v });
+                    }}
+                  />
+                ) : (
+                  i.day
+                )}
+              </TableCell>
               <TableCell>{i.customer || "No customer name"}</TableCell>
               <TableCell>{i.ticket ? (i.technician ?? "Unassigned") : "No ticket"}</TableCell>
               <TableCell className="text-right tabular-nums">{hours(i.hours)}</TableCell>
@@ -188,7 +260,7 @@ function InvoiceRows({ invoices }: { invoices: MarginInvoiceRow[] }) {
               <TableCell className={`text-right tabular-nums ${loss}`}>
                 {pct(i.marginPct)}
               </TableCell>
-              <TableCell>{STATUS_LABELS[i.status]}</TableCell>
+              <TableCell>{rowStatus(i)}</TableCell>
             </TableRow>
           );
         })}
@@ -207,6 +279,8 @@ export function MarginReport() {
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
   const [groupBy, setGroupBy] = useState<MarginGroupBy>("month");
+  // Include (owner, Oct 21): service invoices, won bids, or both.
+  const [source, setSource] = useState<MarginSource>("both");
   const [compareMode, setCompareMode] = useState<CompareMode>("off");
   // The comparison's own From / To: blank until a preset fills them or Custom is typed into.
   const [compareFrom, setCompareFrom] = useState("");
@@ -233,8 +307,8 @@ export function MarginReport() {
   };
 
   const q = useQuery({
-    queryKey: ["margin-report", from, to, groupBy, compare?.from ?? "", compare?.to ?? ""],
-    queryFn: () => fn({ data: { from, to, groupBy, ...(compare ? { compare } : {}) } }),
+    queryKey: ["margin-report", from, to, groupBy, source, compare?.from ?? "", compare?.to ?? ""],
+    queryFn: () => fn({ data: { from, to, groupBy, source, ...(compare ? { compare } : {}) } }),
     enabled: !!session && valid,
     refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
@@ -267,7 +341,10 @@ export function MarginReport() {
           material + labor &amp; travel + other lines + the ticket&apos;s approved purchase orders
           (each counted once, on the ticket&apos;s first invoice). Margin = revenue − cost; Margin %
           = margin ÷ revenue. Hours are the labor and travel hours on the invoices. Compare shows
-          the earlier period in grey and the change beside each figure.
+          the earlier period in grey and the change beside each figure. Won bids count too
+          (Include): revenue is the bid total before tax; cost is the bid&apos;s material, labor,
+          subs and services, warranty, shipping, per diem and commission; counted on its Won-on day
+          (editable here and in the estimator).
         </p>
       </div>
 
@@ -302,6 +379,21 @@ export function MarginReport() {
               {MARGIN_GROUPS.map((g) => (
                 <SelectItem key={g} value={g}>
                   {MARGIN_GROUP_LABELS[g]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="margin-source">Include</Label>
+          <Select value={source} onValueChange={(v) => setSource(v as MarginSource)}>
+            <SelectTrigger id="margin-source" className="w-[11rem]" aria-label="Include">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MARGIN_SOURCES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {MARGIN_SOURCE_LABELS[s]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -387,8 +479,33 @@ export function MarginReport() {
           </Button>
         </div>
       )}
+      {d && d.bidsWithoutFigures.length > 0 && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          {d.bidsWithoutFigures.length} won bid{d.bidsWithoutFigures.length === 1 ? "" : "s"} have
+          no cost figures yet (saved before Oct 21, 2026) and are not counted: open each in the
+          estimator and save it once.{" "}
+          {d.bidsWithoutFigures.map((b, n) => (
+            <Fragment key={b.id}>
+              {n > 0 && ", "}
+              <Link
+                to="/estimate"
+                search={{ bid: b.id }}
+                className="font-medium underline-offset-2 hover:underline"
+              >
+                {b.name || "Bid"}
+              </Link>
+            </Fragment>
+          ))}
+        </p>
+      )}
       {d && d.rows.length === 0 && (
-        <p className="text-sm text-muted-foreground">No finalized invoices in this range.</p>
+        <p className="text-sm text-muted-foreground">
+          {d.source === "service"
+            ? "No finalized invoices in this range."
+            : d.source === "bids"
+              ? "No won bids in this range."
+              : "No finalized invoices or won bids in this range."}
+        </p>
       )}
       {d && d.rows.length > 0 && (
         <div className={`space-y-4 ${q.isFetching ? "opacity-60 transition-opacity" : ""}`}>
@@ -399,10 +516,10 @@ export function MarginReport() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{MARGIN_GROUP_LABELS[d.groupBy]}</TableHead>
-                  <TableHead className="text-right">Invoices</TableHead>
+                  <TableHead className="text-right">{MARGIN_COUNT_LABELS[d.source]}</TableHead>
                   <TableHead className="text-right">Hours</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead className="text-right">Avg / invoice</TableHead>
+                  <TableHead className="text-right">{MARGIN_AVG_LABELS[d.source]}</TableHead>
                   <TableHead className="text-right">Material</TableHead>
                   <TableHead className="text-right">Labor &amp; travel</TableHead>
                   <TableHead className="text-right">Purchase orders</TableHead>
@@ -446,7 +563,7 @@ export function MarginReport() {
                       {isOpen && (
                         <TableRow id={detailId} className="bg-muted/40 hover:bg-muted/40">
                           <TableCell colSpan={COLUMNS} className="p-2 pl-6">
-                            <InvoiceRows invoices={invoicesOf(r.key)} />
+                            <InvoiceRows invoices={invoicesOf(r.key)} source={d.source} />
                           </TableCell>
                         </TableRow>
                       )}
@@ -471,14 +588,16 @@ export function MarginReport() {
           </div>
 
           {split && (
-            <dl className="grid gap-2 text-sm sm:grid-cols-3">
-              {COUNTED_INVOICE_STATUSES.map((s) => (
+            <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              {/* The Won bids tile only when bids are included (owner, Oct 21). */}
+              {MARGIN_SPLIT_STATUSES.filter((s) => s !== "won" || source !== "service").map((s) => (
                 <div key={s} className="rounded-md border px-3 py-2">
                   <dt className="text-xs text-muted-foreground">{STATUS_SPLIT_LABELS[s]}</dt>
                   <dd className="flex items-baseline justify-between gap-2">
                     <span className="font-medium tabular-nums">{money(split[s].revenue)}</span>
                     <span className="text-xs text-muted-foreground">
-                      {split[s].invoices} invoice{split[s].invoices === 1 ? "" : "s"}
+                      {split[s].invoices} {s === "won" ? "bid" : "invoice"}
+                      {split[s].invoices === 1 ? "" : "s"}
                     </span>
                   </dd>
                 </div>

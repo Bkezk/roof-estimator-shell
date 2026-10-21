@@ -178,9 +178,10 @@ export function OwnerBusiness() {
         />
         <Tile
           title="Won / Lost this month"
-          href={BUSINESS_HREFS.pipeline}
+          help="Bids marked Won, by their Won-on day (editable in the estimator and in the margin report), and bids marked Lost, by the day the status changed."
+          href={BUSINESS_HREFS.bids}
           value={d ? `${d.pipeline.wonThisMonth} / ${d.pipeline.lostThisMonth}` : ""}
-          sub={d ? "By the opportunity's last update" : ""}
+          sub={d ? "Bids, by the Won-on day · lost by status change" : ""}
         />
       </div>
       <section className="rounded-lg border p-3">

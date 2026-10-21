@@ -45,6 +45,7 @@ import {
 const read = (p: string) => readFileSync(p, "utf8");
 
 const inv = (over: Partial<MarginInvoiceIn> & { id: string }): MarginInvoiceIn => ({
+  kind: "service",
   number: over.id,
   day: "2026-10-05",
   status: "paid",
@@ -71,6 +72,8 @@ const result = (
   from,
   to,
   groupBy,
+  source: "both",
+  bidsWithoutFigures: [],
   generatedAt: "2026-10-21T15:00:00.000Z",
   invoices: invoices.map(toMarginInvoiceRow),
   ...aggregateMargin(invoices, groupBy),

@@ -55,7 +55,7 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
     const now = new Date();
     const today = viewerToday(data.today, now);
 
-    const [tickets, invoices, pos, opps, snoozed, untouched] = await Promise.all([
+    const [tickets, invoices, pos, opps, bids, snoozed, untouched] = await Promise.all([
       // Open / Scheduled for Past due, Done for the "awaiting authorization" line, Authorized for
       // the Waiting to invoice tile (owner, Oct 12, item 6: the Authorized queue, as Work
       // Overview and the Invoices badge count it).
@@ -75,6 +75,13 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         .from("crm_opportunities")
         .select("status, est_value, expected_close, updated_at")
         .is("deleted_at", null)
+        .limit(LIMIT),
+      // Won / Lost this month counts bids (owner, Oct 21), by the Won-on day / status change.
+      sb
+        .from("bids")
+        .select("status, won_on, status_changed_at, updated_at")
+        .is("deleted_at", null)
+        .in("status", ["won", "accepted", "lost", "denied"])
         .limit(LIMIT),
       // Every open follow-up with a hold: the "snoozed right now" count, and the ticket holds
       // that keep a ticket out of Past due (work-counts.ts heldTicketIds).
@@ -107,6 +114,7 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
       invoices: must("invoices", invoices),
       pos: waiting.filter((p) => liveIds.has(p.service_job_id)),
       opps: must("opportunities", opps),
+      bids: must("bids", bids),
       snoozed: holds.filter((f) => !!f.snoozed_until && f.snoozed_until > nowIso).length,
       untouched,
       heldTickets: heldTicketIds(holds, today),

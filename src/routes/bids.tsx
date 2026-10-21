@@ -38,6 +38,7 @@ import {
   BID_STATUSES,
   STATUS_LABELS,
   asBidStatus,
+  bidOfficeToday,
   fromOpportunityLine,
   type BidStatus,
 } from "@/lib/bid-status";
@@ -70,6 +71,7 @@ import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { ImportBaxDialog } from "@/components/import-bax-dialog";
 import { ImportPlanSwiftDialog } from "@/components/import-planswift-dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -309,9 +311,16 @@ function BidsPage() {
     void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
   };
   const [lostFor, setLostFor] = useState<{ id: string; name: string } | null>(null);
+  // Marking Won asks for the day it was won (bids.won_on; owner, Oct 21: "a way to adjust the
+  // date the bid was won to ensure the data appears correctly"), today's office day to start.
+  const [wonFor, setWonFor] = useState<{ id: string; name: string; day: string } | null>(null);
   const setStatus = useMutation({
-    mutationFn: (v: { id: string; status: BidStatus; lostReason?: string | null }) =>
-      setStatusFn({ data: v }),
+    mutationFn: (v: {
+      id: string;
+      status: BidStatus;
+      lostReason?: string | null;
+      wonOn?: string | null;
+    }) => setStatusFn({ data: v }),
     onSuccess: (b) => {
       toast.success(`Status: ${STATUS_LABELS[asBidStatus(b.status)]}`);
       refresh();
@@ -602,9 +611,11 @@ function BidsPage() {
             <Select
               value={st}
               onValueChange={(v) =>
-                v === "lost"
-                  ? setLostFor({ id: bid.id, name: bid.name })
-                  : setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                v === "won"
+                  ? setWonFor({ id: bid.id, name: bid.name, day: bidOfficeToday() })
+                  : v === "lost"
+                    ? setLostFor({ id: bid.id, name: bid.name })
+                    : setStatus.mutate({ id: bid.id, status: v as BidStatus })
               }
             >
               <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
@@ -1308,6 +1319,49 @@ function BidsPage() {
             setLostFor(null);
           }}
         />
+      )}
+      {/* Owner, Oct 21: the day the bid was won, asked when it is marked Won here; the Margin
+          report counts the bid on this day (bids.won_on; changeable later in the report and in
+          the estimator). */}
+      {wonFor && (
+        <Dialog open onOpenChange={(o) => !o && setWonFor(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setStatus.mutate({ id: wonFor.id, status: "won", wonOn: wonFor.day || null });
+                setWonFor(null);
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>When was it won?</DialogTitle>
+                <DialogDescription>
+                  {wonFor.name} is being marked Won. The Margin report counts it on this day; it can
+                  be changed later in the report or in the estimator.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1 py-3">
+                <Label htmlFor="bid-won-on-list">Won on</Label>
+                <Input
+                  id="bid-won-on-list"
+                  type="date"
+                  autoFocus
+                  value={wonFor.day}
+                  onChange={(e) => setWonFor({ ...wonFor, day: e.target.value })}
+                  className="w-[11rem]"
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" onClick={() => setWonFor(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={setStatus.isPending}>
+                  Mark won
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
       <AlertDialog
         open={confirmPurge !== null}

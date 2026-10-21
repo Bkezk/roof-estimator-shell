@@ -24,6 +24,16 @@
  * The answer carries the groups, the totals and the lean per-invoice rows (margin-report.ts
  * MarginInvoiceRow: ids, numbers, names, day, status, the money — no tax, no lines) so the report
  * can open a group and show the invoices behind it without another read.
+ *
+ * Won bids (owner, Oct 21; `readWonBids`, when Include is not "service only"): the live
+ * (deleted_at null) bids whose status is won (the legacy accepted too), read by keyset page like
+ * the invoices, with the customer name as the JSON path `data->customer->>name` so the bid's data
+ * blob — the whole estimator payload and pricing snapshot — never crosses the wire. The won day
+ * is settled in code (margin-report.ts bidWonDay: won_on, else status_changed_at's office day,
+ * else updated_at's), so the range filter is in code too; won bids are few, and every one of them
+ * is a page or two. The account's name (crm_accounts) and the estimator's (profiles, created_by)
+ * are resolved with the same chunked reads. A won bid in the range whose figures column is null
+ * (saved before the column existed) is reported in `bidsWithoutFigures` and counted nowhere.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -32,13 +42,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { isAdmin } from "@/lib/access";
+import { asBidFigures } from "@/lib/bid-figures";
+import { asBidStatus } from "@/lib/bid-status";
 import { readInChunks } from "@/lib/chunk-ids";
 import { invoiceLabel } from "@/lib/invoice-numbering";
 import type { TicketInvoiceRef } from "@/lib/invoice-totals";
 import {
   COUNTED_INVOICE_STATUSES,
   MARGIN_GROUPS,
+  MARGIN_SOURCES,
   aggregateMarginRows,
+  bidToMarginIn,
+  bidWonDay,
   invoiceDay,
   lineCosts,
   poCostCarried,
@@ -48,6 +63,7 @@ import {
   type MarginInvoiceRow,
   type MarginPeriod,
   type MarginReportResult,
+  type MarginSource,
 } from "@/lib/margin-report";
 import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
 
@@ -58,7 +74,14 @@ const RANGE = z
   .object({ from: YMD, to: YMD })
   .refine((d) => d.from <= d.to, { message: "From must be on or before To" });
 const INPUT = z
-  .object({ from: YMD, to: YMD, groupBy: z.enum(MARGIN_GROUPS), compare: RANGE.optional() })
+  .object({
+    from: YMD,
+    to: YMD,
+    groupBy: z.enum(MARGIN_GROUPS),
+    compare: RANGE.optional(),
+    /** Include: service invoices, won bids, or both (the default). */
+    source: z.enum(MARGIN_SOURCES).optional(),
+  })
   .refine((d) => d.from <= d.to, { message: "From must be on or before To" });
 export type MarginReportInput = z.infer<typeof INPUT>;
 
@@ -91,7 +114,7 @@ function byIds<T extends { id: RowId }>(
 }
 
 /** The counted invoices of from..to as lean per-invoice rows (the reads described at the top). */
-async function readPeriod(sb: Sb, from: string, to: string): Promise<MarginInvoiceRow[]> {
+async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInvoiceRow[]> {
   const invoices = must(
     "invoices",
     await readAll((after) =>
@@ -209,6 +232,7 @@ async function readPeriod(sb: Sb, from: string, to: string): Promise<MarginInvoi
     const technicianId = ticket?.technician_id ?? null;
     return toMarginInvoiceRow({
       id: i.id,
+      kind: "service",
       number: invoiceLabel(i),
       day: invoiceDay(i),
       // The read filtered on these statuses; the cast only names the narrower type.
@@ -224,6 +248,104 @@ async function readPeriod(sb: Sb, from: string, to: string): Promise<MarginInvoi
         : 0,
     });
   });
+}
+
+/** A won bid as the read answers it (the select below; the JSON path alias is a plain text column). */
+interface WonBidRead {
+  id: string;
+  name: string;
+  status: string;
+  status_changed_at: string | null;
+  updated_at: string;
+  created_at: string;
+  account_id: string | null;
+  created_by: string | null;
+  grand_total: number | string | null;
+  figures: unknown;
+  won_on: string | null;
+  customer_name: string | null;
+}
+
+interface PeriodRead {
+  rows: MarginInvoiceRow[];
+  bidsWithoutFigures: MarginReportResult["bidsWithoutFigures"];
+}
+
+/** The won bids whose won day falls in from..to, as rows; and those without figures, listed. */
+async function readWonBids(sb: Sb, from: string, to: string): Promise<PeriodRead> {
+  const all = must(
+    "bids",
+    await readAll((after) =>
+      afterId(
+        sb
+          .from("bids")
+          .select(
+            "id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name",
+          )
+          .in("status", ["won", "accepted"])
+          .is("deleted_at", null)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+    ),
+  ) as unknown as WonBidRead[];
+  // The read's status filter already keeps won and the legacy accepted; asBidStatus names it.
+  const inRange = all.filter((b) => {
+    if (asBidStatus(b.status) !== "won") return false;
+    const day = bidWonDay(b);
+    return day >= from && day <= to;
+  });
+  const [accounts, profiles] = await Promise.all([
+    readInChunks(uniq(inRange.map((b) => b.account_id)), (chunk) =>
+      sb.from("crm_accounts").select("id, name").in("id", chunk),
+    ),
+    readInChunks(uniq(inRange.map((b) => b.created_by)), (chunk) =>
+      sb.from("profiles").select("id, full_name, email").in("id", chunk),
+    ),
+  ]);
+  const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  const estimatorName = new Map(profiles.map((p) => [p.id, nameOf(p)]));
+  const rows: MarginInvoiceRow[] = [];
+  const bidsWithoutFigures: PeriodRead["bidsWithoutFigures"] = [];
+  for (const b of inRange) {
+    const figures = asBidFigures(b.figures);
+    if (!figures) {
+      bidsWithoutFigures.push({ id: b.id, name: b.name, day: bidWonDay(b) });
+      continue;
+    }
+    rows.push(
+      toMarginInvoiceRow(
+        bidToMarginIn({
+          id: b.id,
+          name: b.name,
+          won_on: b.won_on,
+          status_changed_at: b.status_changed_at,
+          updated_at: b.updated_at,
+          accountName: b.account_id ? accountName.get(b.account_id) : null,
+          dataCustomerName: b.customer_name,
+          estimator: b.created_by ? (estimatorName.get(b.created_by) ?? null) : null,
+          estimatorId: b.created_by,
+          figures,
+        }),
+      ),
+    );
+  }
+  return { rows, bidsWithoutFigures };
+}
+
+/** One period as Include asks for it: the invoices, the won bids, or both, in one list. */
+async function readPeriod(
+  sb: Sb,
+  from: string,
+  to: string,
+  source: MarginSource,
+): Promise<PeriodRead> {
+  const [invoices, bids] = await Promise.all([
+    source !== "bids" ? readInvoices(sb, from, to) : [],
+    source !== "service" ? readWonBids(sb, from, to) : { rows: [], bidsWithoutFigures: [] },
+  ]);
+  return { rows: [...invoices, ...bids.rows], bidsWithoutFigures: bids.bidsWithoutFigures };
 }
 
 const periodOf = (
@@ -247,17 +369,20 @@ export const listMarginReport = createServerFn({ method: "GET" })
     if (meErr) throw new Error(meErr.message);
     if (!me || !isAdmin(me)) throw new Error("Forbidden: admin only");
 
+    const source: MarginSource = data.source ?? "both";
     const [current, earlier] = await Promise.all([
-      readPeriod(sb, data.from, data.to),
-      data.compare ? readPeriod(sb, data.compare.from, data.compare.to) : null,
+      readPeriod(sb, data.from, data.to, source),
+      data.compare ? readPeriod(sb, data.compare.from, data.compare.to, source) : null,
     ]);
 
     return {
-      ...periodOf(data.from, data.to, current, data.groupBy),
+      ...periodOf(data.from, data.to, current.rows, data.groupBy),
       groupBy: data.groupBy,
+      source,
+      bidsWithoutFigures: current.bidsWithoutFigures,
       generatedAt: new Date().toISOString(),
       ...(earlier && data.compare
-        ? { comparison: periodOf(data.compare.from, data.compare.to, earlier, data.groupBy) }
+        ? { comparison: periodOf(data.compare.from, data.compare.to, earlier.rows, data.groupBy) }
         : {}),
     };
   });

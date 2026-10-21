@@ -145,11 +145,66 @@ describe("businessNumbers", () => {
   it("Purchase orders waiting: the unapproved ones", () => {
     expect(n.pos).toEqual({ count: 2, total: 199.99 });
   });
-  it("Pipeline: open statuses and their value; closing this month; won / lost by last update", () => {
+  it("Pipeline: open statuses and their value; closing this month", () => {
     expect(n.pipeline.open).toEqual({ count: 3, value: 12500 });
     expect(n.pipeline.closingThisMonth).toEqual({ count: 1, value: 10000 });
-    expect(n.pipeline.wonThisMonth).toBe(1);
-    expect(n.pipeline.lostThisMonth).toBe(1);
+  });
+  it("Won / Lost this month counts BIDS (owner, Oct 21): won by the Won-on day (the status stamp's office day when none), lost by the day the status changed", () => {
+    const bids = [
+      // Won on a day this month (counted), whatever the stamp says.
+      {
+        status: "won",
+        won_on: "2026-10-03",
+        status_changed_at: "2026-09-30T23:30:00Z",
+        updated_at: "2026-09-30T23:30:00Z",
+      },
+      // No Won-on day yet: the stamp's office day (Oct 1 Eastern) counts.
+      {
+        status: "won",
+        won_on: null,
+        status_changed_at: "2026-10-01T12:00:00Z",
+        updated_at: "2026-10-05T00:00:00Z",
+      },
+      // Legacy "accepted" reads as won.
+      {
+        status: "accepted",
+        won_on: "2026-10-20",
+        status_changed_at: null,
+        updated_at: "2026-10-20T00:00:00Z",
+      },
+      // Won last month: not this month.
+      {
+        status: "won",
+        won_on: "2026-09-03",
+        status_changed_at: null,
+        updated_at: "2026-10-03T00:00:00Z",
+      },
+      // Lost this month / last month.
+      {
+        status: "lost",
+        won_on: null,
+        status_changed_at: "2026-10-04T00:00:00Z",
+        updated_at: "2026-10-04T00:00:00Z",
+      },
+      {
+        status: "lost",
+        won_on: null,
+        status_changed_at: "2026-09-04T00:00:00Z",
+        updated_at: "2026-10-04T00:00:00Z",
+      },
+      // Still in play: neither.
+      {
+        status: "submitted",
+        won_on: null,
+        status_changed_at: "2026-10-04T00:00:00Z",
+        updated_at: "2026-10-04T00:00:00Z",
+      },
+    ];
+    const r = businessNumbers({ ...input, bids });
+    expect(r.pipeline.wonThisMonth).toBe(3);
+    expect(r.pipeline.lostThisMonth).toBe(1);
+    // The opportunities' won / lost no longer feed the tile (two won opps this month in `input`).
+    expect(businessNumbers({ ...input, bids: [] }).pipeline.wonThisMonth).toBe(0);
   });
   it("Going stale: open / scheduled past their day; untouched from the rpc; snoozed as given", () => {
     expect(n.stale).toEqual({ pastDue: 2, untouchedTickets: 2, untouchedOpps: 1, snoozed: 3 });
@@ -216,6 +271,33 @@ describe("listOwnerBusiness (server)", () => {
           // On a deleted ticket: never counted (owner, Oct 21; po-waiting.test.ts).
           { id: "p3", service_job_id: "j2", approved: false, price: 36 },
         ],
+        bids: [
+          {
+            id: "b1",
+            status: "won",
+            won_on: "2026-10-03",
+            status_changed_at: null,
+            updated_at: "2026-10-03T00:00:00Z",
+            deleted_at: null,
+          },
+          // Deleted: never counted.
+          {
+            id: "b2",
+            status: "won",
+            won_on: "2026-10-03",
+            status_changed_at: null,
+            updated_at: "2026-10-03T00:00:00Z",
+            deleted_at: "2026-10-04T00:00:00Z",
+          },
+          {
+            id: "b3",
+            status: "lost",
+            won_on: null,
+            status_changed_at: "2026-10-05T00:00:00Z",
+            updated_at: "2026-10-05T00:00:00Z",
+            deleted_at: null,
+          },
+        ],
         crm_opportunities: [
           {
             id: "o1",
@@ -269,6 +351,8 @@ describe("listOwnerBusiness (server)", () => {
     expect(r.unpaid).toMatchObject({ count: 1, total: 100 });
     expect(r.pos).toEqual({ count: 1, total: 10 });
     expect(r.pipeline.open).toEqual({ count: 1, value: 300 });
+    expect(r.pipeline.wonThisMonth).toBe(1);
+    expect(r.pipeline.lostThisMonth).toBe(1);
     expect(r.stale).toMatchObject({ untouchedTickets: 1, untouchedOpps: 2, snoozed: 1 });
   });
   it("anyone else is refused, like the People tab", async () => {
@@ -303,6 +387,8 @@ describe("the click-throughs", () => {
       toInvoice: "/service/invoices?tab=to-invoice",
       unpaid: "/service/invoices?status=unpaid",
       pipeline: "/opportunities?status=allopen",
+      // Won / Lost this month: the bids (owner, Oct 21).
+      bids: "/bids",
       // The tickets carrying an order still waiting (owner, Oct 21; po-waiting.test.ts).
       pos: "/service?po=waiting",
       pastDue: "/service?overdue=1",
@@ -321,6 +407,9 @@ describe("the click-throughs", () => {
     expect(biz).toContain('title="Authorized, not invoiced"');
     expect(biz).toContain('title="Unpaid"');
     expect(biz).toContain('title="Pipeline"');
+    expect(biz).toContain('title="Won / Lost this month"');
+    expect(biz).toContain("href={BUSINESS_HREFS.bids}");
+    expect(biz).not.toContain("By the opportunity's last update");
     expect(biz).toContain("Going stale");
   });
 });

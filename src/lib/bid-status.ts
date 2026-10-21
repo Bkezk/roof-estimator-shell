@@ -88,6 +88,40 @@ export function bidStatusStamps(
   return out;
 }
 
+/** Today as the office's calendar day (YYYY-MM-DD, TASK_TZ) — the day a bid is marked Won on. */
+export const bidOfficeToday = (): string => localYmd(new Date(), TASK_TZ);
+
+/**
+ * The day a bid was won (bids.won_on; owner, Oct 21: "there also needs to be a way to adjust the
+ * date the bid was won to ensure the data appears correctly … go with the bid won on day add").
+ * The Margin report counts a won bid on this day. The one rule, applied by saveBid and
+ * setBidStatus alike: when the bid is (or becomes) won, won_on is the day given (`next.wonOn`,
+ * YYYY-MM-DD; anything else counts as not given), else the day already stored, else — for a bid
+ * that was ALREADY won before the column existed — the office's day of its status_changed_at
+ * (the day it was marked Won; the day the Margin report was already dating it by, so saving it
+ * once to store its figures does not move it to today), else `today` (the office's day,
+ * bidOfficeToday). So a won bid never has a blank won_on, and a day picked in the estimator or
+ * the Bids list wins over the stored one. Any other status clears it, whatever day came with it:
+ * a draft or a lost bid has no won day.
+ */
+export function wonOnColumns(
+  prev: {
+    status: string | null | undefined;
+    won_on: string | null | undefined;
+    status_changed_at?: string | null | undefined;
+  } | null,
+  next: { status: string | null | undefined; wonOn?: string | null | undefined },
+  today: string,
+): { won_on: string | null } {
+  if (asBidStatus(next.status) !== "won") return { won_on: null };
+  const given = next.wonOn && YMD.test(next.wonOn) ? next.wonOn : null;
+  if (given) return { won_on: given };
+  if (prev?.won_on) return { won_on: prev.won_on };
+  if (prev && asBidStatus(prev.status) === "won" && prev.status_changed_at)
+    return { won_on: stampDay(prev.status_changed_at) };
+  return { won_on: today };
+}
+
 /** The line on the opportunity's bid card and beside the estimator's Status select. */
 export const BID_DRIVES_OPP_NOTE =
   "Won/Lost on the bid updates this opportunity; closing the opportunity leaves the bid alone.";

@@ -38,8 +38,8 @@ describe("the wiring", () => {
     const src = read("./bids.functions.ts");
     expect(src).toContain("expectUpdatedAt: z.string().datetime({ offset: true }).optional()");
     const check = src.indexOf("bidSaveIsStale(data.expectUpdatedAt, cur.updated_at)");
-    // Since Oct 12 the update carries the status stamps beside the payload.
-    const write = src.indexOf('.from("bids")\n        .update({ ...payload,');
+    // Since Oct 12 the update carries the status stamps beside the payload; since Oct 21 the won day too.
+    const write = src.indexOf('.from("bids")\n        .update({\n          ...payload,');
     expect(check).toBeGreaterThan(0);
     expect(write).toBeGreaterThan(check);
   });

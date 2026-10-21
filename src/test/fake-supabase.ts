@@ -56,27 +56,63 @@ const likeToRegExp = (pattern: string) =>
   );
 
 /**
- * The columns a `.select()` string names, or null when it means whole rows: nothing, `*`, or a
- * shape the fake does not parse (an embedded resource, an alias, a hint — anything beyond plain
- * comma-separated names).
+ * One aliased JSON path of a select — `customer_name:data->customer->>name` — answered as `as`
+ * from the jsonb column `column` walked down `path` (Oct 21: the Margin report reads a won bid's
+ * customer name this way so the whole data blob never crosses the wire; until then an alias
+ * meant whole rows, and the test could not prove the column list).
  */
-export const parseSelect = (cols: string | undefined): string[] | null => {
+export interface SelectJsonPath {
+  as: string;
+  column: string;
+  path: string[];
+}
+export type SelectColumn = string | SelectJsonPath;
+
+/**
+ * The columns a `.select()` string names, or null when it means whole rows: nothing, `*`, or a
+ * shape the fake does not parse (an embedded resource, a plain alias, a hint — anything beyond
+ * plain comma-separated names and aliased JSON paths).
+ */
+export const parseSelect = (cols: string | undefined): SelectColumn[] | null => {
   const s = (cols ?? "").trim();
-  if (!s || s === "*" || /[():!]/.test(s)) return null;
+  if (!s || s === "*" || /[()!]/.test(s)) return null;
   const names = s
     .split(",")
     .map((c) => c.trim())
     .filter(Boolean);
   if (names.length === 0 || names.includes("*")) return null;
-  if (!names.every((c) => /^\w+$/.test(c))) return null;
-  return names;
+  const out: SelectColumn[] = [];
+  for (const c of names) {
+    if (/^\w+$/.test(c)) {
+      out.push(c);
+      continue;
+    }
+    const m = /^(\w+):(\w+)((?:->>?\w+)+)$/.exec(c);
+    if (!m) return null;
+    out.push({
+      as: m[1]!,
+      column: m[2]!,
+      path: m[3]!.split(/->>?/).filter(Boolean),
+    });
+  }
+  return out;
 };
 
 /** `row` reduced to `cols` (the keys it has), or as is when `cols` is null. */
-const project = (row: Row, cols: string[] | null): Row => {
+const project = (row: Row, cols: SelectColumn[] | null): Row => {
   if (!cols) return { ...row };
   const out: Row = {};
-  for (const c of cols) if (c in row) out[c] = row[c];
+  for (const c of cols) {
+    if (typeof c === "string") {
+      if (c in row) out[c] = row[c];
+      continue;
+    }
+    // PostgREST answers null for a missing key or a non-object on the way.
+    let v: unknown = row[c.column];
+    for (const k of c.path)
+      v = v !== null && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined;
+    out[c.as] = v === undefined || v === null ? null : typeof v === "string" ? v : String(v);
+  }
   return out;
 };
 
@@ -225,7 +261,7 @@ export function fakeSupabase(
     let wantCount = false;
     let max = Infinity;
     let offset = 0;
-    let cols: string[] | null = null;
+    let cols: SelectColumn[] | null = null;
     const preds: Array<(r: Row) => boolean> = [];
     const filters: string[] = [];
     const run = (): Result => {

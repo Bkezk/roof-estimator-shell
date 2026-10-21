@@ -35,6 +35,7 @@ import {
   getMarkupPresets,
 } from "@/lib/bids.functions";
 import { FOLDER_MAX, normalizeFolder, suggestFolder, UNFILED } from "@/lib/bids-folders";
+import { bidFigures } from "@/lib/bid-figures";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
@@ -163,6 +164,7 @@ import {
   BID_REMINDER_NOTE_PLACEHOLDER,
   BID_STATUSES,
   bidDueDateProblem,
+  bidOfficeToday,
   bidRemindedLine,
   fromOpportunityLine,
   STATUS_LABELS,
@@ -650,6 +652,12 @@ function EstimatePage() {
   // Where an imported bid came from (.bax or PlanSwift): kept through saves.
   const [importInfo, setImportInfo] = useState<SavedBidState["importInfo"]>(undefined);
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
+  // The day the bid was won (bids.won_on, on the row; owner, Oct 21: "a way to adjust the date
+  // the bid was won to ensure the data appears correctly"): the Margin report counts the bid on
+  // this day. Seeded from the row, or today's office day when the status is switched to Won
+  // here; "" = none (only a won bid has one). Sent as wonOn; the server keeps the stored day
+  // when none comes and clears it on any other status (bid-status.ts wonOnColumns).
+  const [wonOnDay, setWonOnDay] = useState("");
   const [lostReason, setLostReason] = useState<string | null>(null);
   const [askLost, setAskLost] = useState(false);
   // When the bid must go out (bids.due_date, on the row — not in the data blob; owner, Oct 12):
@@ -675,6 +683,8 @@ function EstimatePage() {
       setAskLost(true);
       return;
     }
+    // Switched to Won now: today is the won day until the user picks another (owner, Oct 21).
+    if (st === "won" && !wonOnDay) setWonOnDay(bidOfficeToday());
     setBidStatus(st);
     setLostReason(null);
   };
@@ -1180,6 +1190,7 @@ function EstimatePage() {
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
     setLostReason(loadedBid.lost_reason ?? null);
+    setWonOnDay(loadedBid.won_on ?? "");
     setBidDueDate(loadedBid.due_date ?? "");
     setBidFolder(loadedBid.folder ?? "");
     setBidReminderOn(loadedBid.reminder_on ?? "");
@@ -2274,8 +2285,13 @@ function EstimatePage() {
           name: bidName.trim() || "Untitled bid",
           data: payload as unknown as Record<string, unknown>,
           grandTotal,
+          // The money figures the Margin report reads for a won bid (owner, Oct 21; lib/
+          // bid-figures.ts): the browser's engine result, stored at every save.
+          figures: result ? bidFigures(result.r) : null,
           status: bidStatus,
           lostReason: bidStatus === "lost" ? lostReason : null,
+          // The day it was won (null unless Won; the server keeps the stored day when none comes).
+          wonOn: bidStatus === "won" ? wonOnDay || null : null,
           // The due date rides on the row (null = none; the server refuses a new bid without one).
           dueDate: bidDueDate || null,
           // So does the folder (owner, Oct 13; null = unfiled).
@@ -6295,6 +6311,24 @@ function EstimatePage() {
                 ))}
               </SelectContent>
             </Select>
+            {/* Owner, Oct 21: the day the bid was won (bids.won_on), the Margin report's day for
+                it; today's office day when Won is picked here, changeable any time after. */}
+            {bidStatus === "won" && (
+              <div className="flex items-center gap-2" data-field="bid-won-on">
+                <Label htmlFor="bid-won-on" className="text-xs whitespace-nowrap">
+                  Won on
+                </Label>
+                <Input
+                  id="bid-won-on"
+                  type="date"
+                  className="h-8 w-[9.5rem] text-xs"
+                  value={wonOnDay}
+                  onChange={(e) => setWonOnDay(e.target.value)}
+                  disabled={readOnly}
+                  title="The day the bid was won. The Margin report counts it on this day."
+                />
+              </div>
+            )}
             {bidStatus === "lost" && (
               <p className="text-[11px] text-muted-foreground">
                 Lost: {lostReason ?? "reason not known"}

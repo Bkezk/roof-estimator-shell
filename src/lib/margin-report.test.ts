@@ -28,11 +28,21 @@ vi.mock("@tanstack/react-start", async () => ({
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
 import { MARGIN_CSV_COMPARE_HEADER, marginCsvRows } from "@/lib/margin-compare";
+import type { BidFigures } from "@/lib/bid-figures";
 import {
   COUNTED_INVOICE_STATUSES,
+  MARGIN_AVG_LABELS,
+  MARGIN_COUNT_LABELS,
   MARGIN_CSV_HEADER,
   MARGIN_GROUPS,
+  MARGIN_GROUP_LABELS,
+  MARGIN_SOURCES,
+  MARGIN_SOURCE_LABELS,
+  MARGIN_SPLIT_STATUSES,
+  STATUS_SPLIT_LABELS,
   aggregateMargin,
+  bidToMarginIn,
+  bidWonDay,
   defaultMarginRange,
   emptyMarginTotals,
   invoiceDay,
@@ -50,13 +60,14 @@ import {
   type MarginReportResult,
 } from "@/lib/margin-report";
 import { listMarginReport } from "@/lib/margin-report.functions";
-import { fakeSupabase } from "@/test/fake-supabase";
+import { fakeSupabase, parseSelect } from "@/test/fake-supabase";
 
 type Row = Record<string, unknown>;
 const read = (p: string) => readFileSync(p, "utf8");
 
 const TOM_ID = "tom-id";
 const inv = (over: Partial<MarginInvoiceIn> & { id: string }): MarginInvoiceIn => ({
+  kind: "service",
   number: over.id,
   day: "2026-10-05",
   status: "paid",
@@ -158,6 +169,7 @@ describe("toMarginInvoiceRow: the lean per-invoice row", () => {
     );
     expect(row).toEqual({
       id: "a",
+      kind: "service",
       number: "a",
       day: "2026-10-05",
       status: "paid",
@@ -352,11 +364,193 @@ describe("statusSplit: of the period's revenue, what is paid, sent and unpaid, f
       paid: { invoices: 2, revenue: 150.5 },
       sent: { invoices: 1, revenue: 200 },
       final: { invoices: 1, revenue: 10 },
+      won: { invoices: 0, revenue: 0 },
     });
     expect(statusSplit([])).toEqual({
       paid: { invoices: 0, revenue: 0 },
       sent: { invoices: 0, revenue: 0 },
       final: { invoices: 0, revenue: 0 },
+      won: { invoices: 0, revenue: 0 },
+    });
+  });
+  it("won bids have their own bucket (the fourth tile, 'Won bids'), by the bid's revenue before tax", () => {
+    const rows: MarginInvoiceRow[] = [
+      toMarginInvoiceRow(inv({ id: "a", status: "paid", subtotal: 100 })),
+      toMarginInvoiceRow(bidIn({ id: "b1", revenue: 10000 })),
+      toMarginInvoiceRow(bidIn({ id: "b2", revenue: 2500.5 })),
+    ];
+    expect(statusSplit(rows).won).toEqual({ invoices: 2, revenue: 12500.5 });
+    expect(statusSplit(rows).paid).toEqual({ invoices: 1, revenue: 100 });
+    expect([...MARGIN_SPLIT_STATUSES]).toEqual(["final", "sent", "paid", "won"]);
+    expect(STATUS_SPLIT_LABELS.won).toBe("Won bids");
+  });
+});
+
+// ---- won bids (owner, Oct 21: "do bids that are accepted go into that report?") ----------
+
+const figures = (over: Partial<BidFigures> = {}): BidFigures => ({
+  v: 1,
+  revenue: 10000,
+  material: 4000,
+  labor: 2500,
+  other: 500,
+  hours: 80,
+  tax: 700,
+  total: 10700,
+  ...over,
+});
+/** A won bid as the server hands it to the pure side, already resolved (names, figures). */
+const bidIn = (
+  over: Partial<MarginInvoiceIn> & { id: string; revenue?: number },
+): MarginInvoiceIn => ({
+  kind: "bid",
+  number: `Bid ${over.id}`,
+  day: "2026-10-12",
+  status: "won",
+  subtotal: over.revenue ?? 10000,
+  customer: "Bell County Schools",
+  technician: "Eve Estimator",
+  technicianId: "eve-id",
+  ticket: true,
+  hours: 80,
+  material: 4000,
+  labor: 2500,
+  other: 500,
+  purchaseOrders: 0,
+  ...over,
+});
+
+describe("a won bid as a report row", () => {
+  it("bidWonDay: won_on first; else the office's day of status_changed_at; else of updated_at", () => {
+    const b = {
+      won_on: null,
+      status_changed_at: "2026-10-13T02:30:00Z", // 10:30 pm Oct 12 in the office
+      updated_at: "2026-10-14T12:00:00Z",
+    };
+    expect(bidWonDay(b)).toBe("2026-10-12");
+    expect(bidWonDay({ ...b, won_on: "2026-10-20" })).toBe("2026-10-20");
+    expect(bidWonDay({ ...b, status_changed_at: null })).toBe("2026-10-14");
+    expect(bidWonDay({ ...b, won_on: "" })).toBe("2026-10-12");
+    // Noon in the office is the same day everywhere.
+    expect(
+      bidWonDay({ won_on: null, status_changed_at: null, updated_at: "2026-09-15T16:00:00Z" }),
+    ).toBe("2026-09-15");
+  });
+  it("bidToMarginIn: the name as the number, the won day, the account's name (else the data's), the estimator as the technician, no purchase orders, the figures as the money", () => {
+    const row = bidToMarginIn({
+      id: "b1",
+      name: "Gym reroof",
+      won_on: null,
+      status_changed_at: "2026-10-13T02:30:00Z",
+      updated_at: "2026-10-14T12:00:00Z",
+      accountName: "Bell County Schools",
+      dataCustomerName: "Gym Customer",
+      estimator: "Eve Estimator",
+      estimatorId: "eve-id",
+      figures: figures(),
+    });
+    expect(row).toEqual({
+      id: "b1",
+      kind: "bid",
+      number: "Gym reroof",
+      day: "2026-10-12",
+      status: "won",
+      subtotal: 10000,
+      customer: "Bell County Schools",
+      technician: "Eve Estimator",
+      technicianId: "eve-id",
+      ticket: true,
+      hours: 80,
+      material: 4000,
+      labor: 2500,
+      other: 500,
+      purchaseOrders: 0,
+    });
+    expect(
+      bidToMarginIn({
+        id: "b2",
+        name: "Walk-in",
+        won_on: "2026-09-15",
+        status_changed_at: null,
+        updated_at: "2026-09-15T16:00:00Z",
+        accountName: null,
+        dataCustomerName: "  Walk-in Co ",
+        estimator: null,
+        estimatorId: null,
+        figures: figures(),
+      }),
+    ).toMatchObject({
+      customer: "Walk-in Co",
+      technician: null,
+      technicianId: null,
+      day: "2026-09-15",
+    });
+    expect(
+      bidToMarginIn({
+        id: "b3",
+        name: "Nobody",
+        won_on: "2026-09-15",
+        status_changed_at: null,
+        updated_at: "2026-09-15T16:00:00Z",
+        accountName: "  ",
+        dataCustomerName: null,
+        estimator: null,
+        estimatorId: null,
+        figures: figures(),
+      }).customer,
+    ).toBe("");
+  });
+  it("the lean row: kind bid, status won, revenue is the figures' revenue (before tax), cost = material + labor + other", () => {
+    const row = toMarginInvoiceRow(bidIn({ id: "b1" }));
+    expect(row).toMatchObject({
+      kind: "bid",
+      status: "won",
+      number: "Bid b1",
+      revenue: 10000,
+      cost: 7000,
+      margin: 3000,
+      marginPct: 30,
+      purchaseOrders: 0,
+      hours: 80,
+    });
+  });
+  it("aggregates with the invoices: by month together; by technician the bid keys on the estimator's id", () => {
+    const r = aggregateMargin(
+      [
+        inv({ id: "a", day: "2026-10-05", subtotal: 1000, material: 100, labor: 200 }),
+        bidIn({ id: "b1", day: "2026-10-12" }),
+        bidIn({
+          id: "b2",
+          day: "2026-09-02",
+          revenue: 5000,
+          material: 2000,
+          labor: 1000,
+          other: 0,
+        }),
+      ],
+      "month",
+    );
+    expect(r.rows.map((x) => [x.key, x.invoices, x.revenue, x.cost, x.margin])).toEqual([
+      ["2026-10", 2, 11000, 7300, 3700],
+      ["2026-09", 1, 5000, 3000, 2000],
+    ]);
+    expect(r.totals).toMatchObject({ invoices: 3, hours: 164, revenue: 16000, margin: 5700 });
+    const t = aggregateMargin(
+      [inv({ id: "a", subtotal: 1000, material: 100, labor: 200 }), bidIn({ id: "b1" })],
+      "technician",
+    );
+    expect(t.rows.map((x) => [x.key, x.label, x.invoices, x.margin])).toEqual([
+      ["eve-id", "Eve Estimator", 1, 3000],
+      [TOM_ID, "Tom Tech", 1, 700],
+    ]);
+    expect(MARGIN_GROUP_LABELS.technician).toBe("Technician / estimator");
+  });
+  it("the Include options: both (the default), service only, bids only", () => {
+    expect([...MARGIN_SOURCES]).toEqual(["both", "service", "bids"]);
+    expect(MARGIN_SOURCE_LABELS).toEqual({
+      both: "Service and bids",
+      service: "Service only",
+      bids: "Bids only",
     });
   });
 });
@@ -382,6 +576,8 @@ const period = (
 describe("the CSV", () => {
   const result: MarginReportResult = {
     groupBy: "month",
+    source: "both",
+    bidsWithoutFigures: [],
     generatedAt: "2026-10-21T15:00:00.000Z",
     ...period("2025-11-01", "2026-10-21", [
       inv({
@@ -770,6 +966,7 @@ describe("listMarginReport", () => {
     const i1 = r.invoices.find((i) => i.id === "i1")!;
     expect(i1).toEqual({
       id: "i1",
+      kind: "service",
       number: "6000",
       day: "2026-10-05",
       status: "paid",
@@ -791,6 +988,7 @@ describe("listMarginReport", () => {
       expect(Object.keys(row).sort()).toEqual(
         [
           "id",
+          "kind",
           "number",
           "day",
           "status",
@@ -821,7 +1019,11 @@ describe("listMarginReport", () => {
       paid: { invoices: 1, revenue: 1000 },
       sent: { invoices: 1, revenue: 400 },
       final: { invoices: 2, revenue: 1000 },
+      won: { invoices: 0, revenue: 0 },
     });
+    // Without bids seeded the answer still says what it covers.
+    expect(r.source).toBe("both");
+    expect(r.bidsWithoutFigures).toEqual([]);
   });
   it("the comparison period comes back in the same call, the same shape, when asked", async () => {
     const r = await call(world(), ANN, { ...range, groupBy: "month", compare: lastYear });
@@ -905,6 +1107,215 @@ describe("listMarginReport", () => {
   });
 });
 
+// ---- the server, with won bids (owner, Oct 21) --------------------------------------------
+
+const A1 = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1"; // crm account
+const B1 = "b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1"; // won Oct 12 (office day of status_changed_at), Tom, account
+const B2 = "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2"; // won, legacy: no status_changed_at → updated_at (Sep 15), Ann
+const B3 = "b3b3b3b3-b3b3-4b3b-8b3b-b3b3b3b3b3b3"; // won, saved before figures existed → listed, not counted
+const B4 = "b4b4b4b4-b4b4-4b4b-8b4b-b4b4b4b4b4b4"; // lost
+const B5 = "b5b5b5b5-b5b5-4b5b-8b5b-b5b5b5b5b5b5"; // draft
+const B6 = "b6b6b6b6-b6b6-4b6b-8b6b-b6b6b6b6b6b6"; // won, deleted
+const B7 = "b7b7b7b7-b7b7-4b7b-8b7b-b7b7b7b7b7b7"; // won last year (the comparison)
+const B8 = "b8b8b8b8-b8b8-4b8b-8b8b-b8b8b8b8b8b8"; // won_on Oct 20 over a November status_changed_at, Mike
+
+const bidRow = (over: Row): Row => ({
+  id: "x",
+  name: "Bid",
+  status: "won",
+  created_at: "2026-09-01T12:00:00Z",
+  updated_at: "2026-10-14T12:00:00Z",
+  status_changed_at: "2026-10-13T02:30:00Z",
+  won_on: null,
+  deleted_at: null,
+  account_id: null,
+  created_by: TOM,
+  grand_total: 10700,
+  data: { customer: { name: "Data Customer" }, roofSystem: "x" },
+  figures: figures(),
+  ...over,
+});
+
+/** world() plus the bids: two counted in range, one without figures, one lost, one draft, one deleted, one last year, one by won_on. */
+function bidWorld(opts: { maxRows?: number } = {}) {
+  const env = world(opts);
+  env.tables["crm_accounts"]!.push({ id: A1, name: "Bell County Schools" });
+  env.tables["bids"] = [
+    bidRow({ id: B1, name: "Gym reroof", account_id: A1 }),
+    bidRow({
+      id: B2,
+      name: "Walk-in bid",
+      status_changed_at: null,
+      updated_at: "2026-09-15T16:00:00Z",
+      created_by: ANN,
+      data: { customer: { name: "Walk-in Co" } },
+      grand_total: 5000,
+      figures: figures({
+        revenue: 5000,
+        material: 2000,
+        labor: 1000,
+        other: 0,
+        hours: 20,
+        tax: 0,
+        total: 5000,
+      }),
+    }),
+    bidRow({
+      id: B3,
+      name: "Old won bid",
+      status_changed_at: "2026-10-01T12:00:00Z",
+      figures: null,
+    }),
+    bidRow({ id: B4, name: "Lost bid", status: "lost" }),
+    bidRow({ id: B5, name: "Draft bid", status: "draft" }),
+    bidRow({ id: B6, name: "Deleted won bid", deleted_at: "2026-10-15T12:00:00Z" }),
+    bidRow({
+      id: B7,
+      name: "Last year's bid",
+      status_changed_at: "2025-10-05T12:00:00Z",
+      updated_at: "2025-10-05T12:00:00Z",
+      figures: figures({
+        revenue: 3000,
+        material: 1000,
+        labor: 1000,
+        other: 0,
+        hours: 30,
+        tax: 0,
+        total: 3000,
+      }),
+    }),
+    bidRow({
+      id: B8,
+      name: "Moved bid",
+      won_on: "2026-10-20",
+      status_changed_at: "2026-11-05T12:00:00Z",
+      updated_at: "2026-11-05T12:00:00Z",
+      created_by: MIKE,
+      data: { customer: { name: "" } },
+      figures: figures({
+        revenue: 2000,
+        material: 500,
+        labor: 500,
+        other: 0,
+        hours: 10,
+        tax: 0,
+        total: 2000,
+      }),
+    }),
+  ];
+  return env;
+}
+
+describe("listMarginReport with won bids", () => {
+  it("Include defaults to both: the invoices and the won bids, by month; a lost, draft or deleted bid never", async () => {
+    const r = await call(bidWorld(), ANN, { ...range, groupBy: "month" });
+    expect(r.source).toBe("both");
+    expect(r.rows.map((x) => [x.key, x.invoices, x.revenue, x.cost, x.margin])).toEqual([
+      ["2026-10", 5, 14200, 9160, 5040], // i1, i2, i6 + B1 (Oct 12) + B8 (won_on Oct 20)
+      ["2026-09", 2, 5200, 3120, 2080], // i5 + B2 (updated_at's day)
+    ]);
+    expect(r.totals).toMatchObject({ invoices: 7, hours: 120, revenue: 19400, margin: 7120 });
+    expect(r.invoices.map((i) => i.id).sort()).toEqual([B1, B2, B8, "i1", "i2", "i5", "i6"].sort());
+    expect(r.invoices.find((i) => i.id === B1)).toEqual({
+      id: B1,
+      kind: "bid",
+      number: "Gym reroof",
+      day: "2026-10-12",
+      status: "won",
+      customer: "Bell County Schools",
+      technician: "Tom Tech",
+      technicianId: TOM,
+      ticket: true,
+      hours: 80,
+      revenue: 10000,
+      material: 4000,
+      labor: 2500,
+      other: 500,
+      purchaseOrders: 0,
+      cost: 7000,
+      margin: 3000,
+      marginPct: 30,
+    });
+    expect(r.invoices.find((i) => i.id === B2)).toMatchObject({
+      day: "2026-09-15",
+      customer: "Walk-in Co",
+      technician: "Ann Admin",
+      technicianId: ANN,
+    });
+    expect(r.invoices.find((i) => i.id === B8)).toMatchObject({
+      day: "2026-10-20",
+      customer: "",
+      technician: "Mike Manager",
+    });
+    expect(statusSplit(r.invoices).won).toEqual({ invoices: 3, revenue: 17000 });
+  });
+  it("a won bid saved before figures existed is listed in bidsWithoutFigures and counted nowhere", async () => {
+    const r = await call(bidWorld(), ANN, { ...range, groupBy: "month" });
+    expect(r.bidsWithoutFigures).toEqual([{ id: B3, name: "Old won bid", day: "2026-10-01" }]);
+    expect(r.invoices.some((i) => i.id === B3)).toBe(false);
+    expect(r.totals.invoices).toBe(7);
+  });
+  it("Service only: the invoices alone, no bid listed; Bids only: the won bids alone", async () => {
+    const s = await call(bidWorld(), ANN, { ...range, groupBy: "month", source: "service" });
+    expect(s.source).toBe("service");
+    expect(s.invoices.map((i) => i.id).sort()).toEqual(["i1", "i2", "i5", "i6"]);
+    expect(s.totals).toMatchObject({ invoices: 4, revenue: 2400 });
+    expect(s.bidsWithoutFigures).toEqual([]);
+    const b = await call(bidWorld(), ANN, { ...range, groupBy: "month", source: "bids" });
+    expect(b.source).toBe("bids");
+    expect(b.invoices.map((i) => i.id).sort()).toEqual([B1, B2, B8].sort());
+    expect(b.rows.map((x) => [x.key, x.invoices, x.revenue, x.margin])).toEqual([
+      ["2026-10", 2, 12000, 4000],
+      ["2026-09", 1, 5000, 2000],
+    ]);
+    expect(b.totals).toMatchObject({ invoices: 3, revenue: 17000, purchaseOrders: 0 });
+    expect(b.bidsWithoutFigures).toEqual([{ id: B3, name: "Old won bid", day: "2026-10-01" }]);
+  });
+  it("by technician / estimator: a bid keys on its estimator (created_by); by customer on the account's name, else the data's", async () => {
+    const t = await call(bidWorld(), ANN, { ...range, groupBy: "technician" });
+    expect(t.rows.map((x) => [x.key, x.label, x.invoices, x.margin])).toEqual([
+      [TOM, "Tom Tech", 4, 4040],
+      [ANN, "Ann Admin", 1, 2000],
+      [MIKE, "Mike Manager", 1, 1000],
+      ["unassigned", "Unassigned", 1, 80],
+    ]);
+    const c = await call(bidWorld(), ANN, { ...range, groupBy: "customer", source: "bids" });
+    expect(c.rows.map((x) => [x.label, x.margin])).toEqual([
+      ["Bell County Schools", 3000],
+      ["Walk-in Co", 2000],
+      ["No customer name", 1000],
+    ]);
+  });
+  it("the comparison period uses the same Include; nothing is capped", async () => {
+    const r = await call(bidWorld({ maxRows: 2 }), ANN, {
+      ...range,
+      groupBy: "month",
+      compare: lastYear,
+    });
+    expect(r.totals.invoices).toBe(7);
+    expect(r.comparison!.invoices.map((i) => i.id).sort()).toEqual([B7, "i7"]);
+    expect(r.comparison!.totals).toMatchObject({ invoices: 2, revenue: 3600, margin: 1500 });
+    const s = await call(bidWorld(), ANN, {
+      ...range,
+      groupBy: "month",
+      compare: lastYear,
+      source: "service",
+    });
+    expect(s.comparison!.invoices.map((i) => i.id)).toEqual(["i7"]);
+  });
+  it("refuses an unknown Include", () => {
+    expect(() => call(bidWorld(), ANN, { ...range, groupBy: "month", source: "all" })).toThrow();
+  });
+  it("the fake serves the customer name as `customer_name:data->customer->>name`, so the report never reads the whole data blob", () => {
+    expect(parseSelect("id, name, customer_name:data->customer->>name")).toEqual([
+      "id",
+      "name",
+      { as: "customer_name", column: "data", path: ["customer", "name"] },
+    ]);
+    expect(parseSelect("name:full_name, email")).toBeNull();
+  });
+});
+
 // ---- component source ---------------------------------------------------------------------
 
 describe("the component, pinned to its source", () => {
@@ -942,7 +1353,15 @@ describe("the component, pinned to its source", () => {
   });
   it("the table has Hours and Avg / invoice columns; the status split; the charts above the table", () => {
     expect(src).toContain(">Hours<");
-    expect(src).toContain(">Avg / invoice<");
+    // The count and average headings follow Include (Invoices / Bids / Invoices + bids; Avg / invoice / bid / item).
+    expect(src).toContain("{MARGIN_COUNT_LABELS[d.source]}");
+    expect(src).toContain("{MARGIN_AVG_LABELS[d.source]}");
+    expect(MARGIN_AVG_LABELS.service).toBe("Avg / invoice");
+    expect(MARGIN_COUNT_LABELS).toEqual({
+      both: "Invoices + bids",
+      service: "Invoices",
+      bids: "Bids",
+    });
     expect(src).toContain("statusSplit(");
     expect(src).toContain('import { MarginCharts } from "@/components/margin-charts";');
     const charts = src.indexOf("<MarginCharts d={d} />");
@@ -954,6 +1373,46 @@ describe("the component, pinned to its source", () => {
     expect(src).toContain('to="/service/invoices"');
     expect(src).toContain("search={{ id: i.id }}");
     expect(src).toContain("STATUS_LABELS[");
+  });
+  it("Include (owner, Oct 21): a select after Group by, Service and bids to start, in the query key; the help text says how a won bid counts", () => {
+    expect(src).toContain('id="margin-source"');
+    expect(src).toContain('aria-label="Include"');
+    expect(src).toMatch(/useState<MarginSource>\("both"\)/);
+    expect(src).toContain("MARGIN_SOURCES.map(");
+    expect(src).toContain("MARGIN_SOURCE_LABELS[");
+    expect(src).toMatch(/queryKey: \["margin-report", from, to, groupBy, source,/);
+    expect(src.indexOf('id="margin-group"')).toBeLessThan(src.indexOf('id="margin-source"'));
+    const flat = src.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "Won bids count too (Include): revenue is the bid total before tax; cost is the bid&apos;s material, labor, subs and services, warranty, shipping, per diem and commission; counted on its Won-on day (editable here and in the estimator).",
+    );
+  });
+  it("the drill-down: a bid row links to the estimator with a Bid badge, reads Won, and its day is an editable Won on box; the column says Technician / estimator", () => {
+    expect(src).toContain('to="/estimate"');
+    expect(src).toContain("search={{ bid: i.id }}");
+    expect(src).toContain("<Badge");
+    expect(src).toMatch(/>\s*Bid\s*<\/Badge>/);
+    expect(src).toContain('import { STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";');
+    expect(src).toContain('i.status === "won" ? BID_STATUS_LABELS.won : STATUS_LABELS[i.status]');
+    expect(src).toContain('aria-label="Won on"');
+    expect(src).toContain("setBidWonOn");
+    expect(src).toContain('queryKey: ["margin-report"]');
+    expect(src).toContain(">Technician / estimator<");
+    expect(src).not.toContain(">Technician<");
+  });
+  it("the status tiles: Won bids only when bids are included, counted as bids; the empty line names what was asked for; the amber notice for bids without figures", () => {
+    expect(src).toContain("MARGIN_SPLIT_STATUSES");
+    expect(src).toMatch(/s !== "won" \|\| source !== "service"/);
+    expect(src).toMatch(/s === "won" \? "bid" : "invoice"/);
+    expect(src).toContain("No finalized invoices in this range.");
+    expect(src).toContain("No won bids in this range.");
+    expect(src).toContain("No finalized invoices or won bids in this range.");
+    expect(src).toContain("d.bidsWithoutFigures.length > 0");
+    const flat = src.replace(/\s+/g, " ");
+    expect(flat).toMatch(
+      /have no cost figures yet \(saved before Oct 21, 2026\) and are not counted: open each in the estimator and save it once\./,
+    );
+    expect(src).toContain("search={{ bid: b.id }}");
   });
   it("the Compare select offers Off, this year vs last year, this month vs the same month last year, Custom; the second From/To starts blank", () => {
     expect(src).toContain("COMPARE_MODES.map(");
@@ -977,5 +1436,16 @@ describe("the server function, pinned to its source", () => {
     expect(fns).toContain("poCostCarried(");
     expect(fns).toContain('"id, invoice_id, kind, cost_total, qty, source"');
     expect(fns).not.toContain("function toCsv");
+  });
+  it("the won bids: live, won (the legacy accepted too), keyset-paged, the customer name as a JSON path (never the whole data blob), the won day filtered in code", () => {
+    expect(fns).toContain(
+      '"id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name"',
+    );
+    expect(fns).toContain('.in("status", ["won", "accepted"])');
+    expect(fns).toContain('.is("deleted_at", null)');
+    expect(fns).toContain("source: z.enum(MARGIN_SOURCES).optional()");
+    expect(fns).toContain("bidWonDay(");
+    expect(fns).toContain("asBidFigures(");
+    expect(fns).not.toMatch(/\.select\("\*"\)/);
   });
 });
