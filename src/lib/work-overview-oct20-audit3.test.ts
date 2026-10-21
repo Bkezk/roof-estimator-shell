@@ -43,6 +43,7 @@ import { ASSIGNED_TICKET_NOTE, assignedToastExtra } from "@/lib/my-work-actions"
 import {
   applyWorkLayout,
   defaultWorkLayout,
+  emptyListLine,
   hideBucket,
   normalizeWorkLayout,
   readStoredWork,
@@ -191,9 +192,13 @@ describe("2. hideBucket counts only the columns the viewer has", () => {
     expect(list).toContain("const present = useMemo(() => groups.map((g) => g.bucket), [groups]);");
     expect(list).toContain("onLayout(hideBucket(layout, g.bucket, present))");
     expect(list).not.toContain("hideBucket(layout, g.bucket))");
+    // Oct 21: the wording moved to emptyListLine (work-layout.ts), which also tells items sitting
+    // in hidden columns from nothing to do (work-overview-oct21-audit7.test.ts).
     expect(list).toMatch(
-      /const nothing = columns\.length === 0 && \(\s*<p className="text-sm text-muted-foreground">\s*\{shown\.length === 0\s*\? "Every column is hidden — bring one back from Hidden\."\s*: "Nothing to do: every group is empty\."\}\s*<\/p>\s*\);/,
+      /const nothing = columns\.length === 0 && \(\s*<p className="text-sm text-muted-foreground">\{emptyListLine\(shown, hidden\)\}<\/p>\s*\);/,
     );
+    expect(emptyListLine([], [])).toBe("Every column is hidden — bring one back from Hidden.");
+    expect(emptyListLine([{}], [])).toBe("Nothing to do: every group is empty.");
   });
 });
 

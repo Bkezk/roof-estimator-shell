@@ -42,7 +42,7 @@ import {
 } from "@/lib/my-work";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
 import { OVERDUE_TICKET_STAGES } from "@/lib/work-counts";
-import { applyWorkLayout, defaultWorkLayout, hideBucket } from "@/lib/work-layout";
+import { applyWorkLayout, defaultWorkLayout, emptyListLine, hideBucket } from "@/lib/work-layout";
 import { fakeSupabase } from "@/test/fake-supabase";
 
 type Row = Record<string, unknown>;
@@ -212,8 +212,11 @@ describe("the page: chips above the columns, a ⓘ on every title and chip, the 
     // Above the columns on a desktop, above the tabs on a phone, after the Hidden row in each.
     expect(list.match(/\{layoutBar\}\s*\{emptyBar\}\s*\{nothing\}/g)?.length).toBe(2);
     // Oct 20: one line when every shown group is empty, another when every column is hidden.
-    expect(list).toContain('"Nothing to do: every group is empty."');
-    expect(list).toContain('"Every column is hidden — bring one back from Hidden."');
+    // Oct 21: both through emptyListLine (work-layout.ts), which also names items sitting in
+    // hidden columns (work-overview-oct21-audit7.test.ts).
+    expect(list).toContain("{emptyListLine(shown, hidden)}");
+    expect(emptyListLine([{}], [])).toBe("Nothing to do: every group is empty.");
+    expect(emptyListLine([], [])).toBe("Every column is hidden — bring one back from Hidden.");
   });
   it("every column title and every phone tab carries the ⓘ", () => {
     const desktop = list.slice(list.indexOf("{columns.map((g) => ("), list.indexOf("lg:hidden"));

@@ -131,7 +131,9 @@ export const resolveWho = (who: string | null | undefined, profile: RoleLike): W
 
 /**
  * The `who` to put in the URL: nothing when it is the caller's default, so Everyone is the bare
- * URL for an admin or manager and ?who=mine stays when they pick Mine.
+ * URL for an admin or manager and ?who=mine stays when they pick Mine. Oct 21: nextWorkSearch
+ * keeps naming the default when the URL already named it (whoExplicit) — this rule alone is for
+ * the remembered layout (rememberWho: nothing remembered means the default).
  */
 export const whoParam = (who: string, profile: RoleLike): string | undefined =>
   !who || who === defaultWho(profile) ? undefined : who;
@@ -170,6 +172,13 @@ export type WorkViewParam = "list" | "calendar" | "owner";
  * and the first in-page navigation used to drop it — the URL fell silent, landingSearch fell
  * back to the remembered "owner" (or "calendar"), and the admin was bounced off the List. An
  * explicit view stays explicit for the rest of the visit.
+ *
+ * Oct 21: the same for `who` (`whoExplicit`). The totals row's link lands with ?who=all explicit,
+ * and the first in-page navigation dropped it as the default — the URL fell silent on the person,
+ * landingSearch read the remembered one, and Everyone turned back into that person. A who the
+ * URL named stays named, the caller's default included; the route also names a pick from the
+ * Show menu whatever the URL had (Everyone picked while peeking is not remembered on the layout,
+ * so the URL has to say it). The bare URL is as it was: silent, so the remembered person applies.
  */
 export function nextWorkSearch(
   next: {
@@ -180,11 +189,12 @@ export function nextWorkSearch(
   },
   profile: RoleLike,
   viewExplicit: boolean,
+  whoExplicit = false,
 ): { view?: WorkViewParam; who?: string; bucket?: BucketPreset; month?: string } {
   const wp = whoParam(next.who, profile);
   return {
     ...(next.view !== "list" || viewExplicit ? { view: next.view } : {}),
-    ...(wp ? { who: wp } : {}),
+    ...(wp ? { who: wp } : whoExplicit && next.who ? { who: next.who } : {}),
     ...(next.bucket && next.view === "list" ? { bucket: next.bucket } : {}),
     ...(next.month ? { month: next.month } : {}),
   };

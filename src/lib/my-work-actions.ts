@@ -110,23 +110,34 @@ export function canMoveWork(item: ActionIn, viewer: Viewer): boolean {
   return false;
 }
 
-/** What a drop on a calendar day does: a ticket keeps its technician and takes the day. */
+/**
+ * What a drop on a calendar day does: a ticket keeps its technician and takes the day.
+ * `expectTechnicianId` (Oct 21, the seventh audit): the technician the row showed — up to five
+ * minutes old — which the server must still find on the ticket, or it refuses (TICKET_CHANGED)
+ * instead of writing that old technician back over a reassignment made in between.
+ */
 export type DropPlan =
-  | { kind: "ticket"; id: string; technicianId: string; date: string }
+  | { kind: "ticket"; id: string; technicianId: string; expectTechnicianId: string; date: string }
   | { kind: "task"; id: string; date: string };
 
 /**
  * The move a drop on `day` makes, or null when there is nothing to do (the same day) or the
  * viewer may not (`canMoveWork`). A ticket: assignServiceJob with its technician unchanged and
- * the new day (a date-only move keeps Scheduled and is logged on the ticket); a task:
- * moveTaskDate (its time of day kept).
+ * the new day (a date-only move keeps Scheduled and is logged on the ticket), guarded by the
+ * technician the row showed (`expectTechnicianId`); a task: moveTaskDate (its time of day kept).
  */
 export function dropPlan(item: ActionIn, day: string, viewer: Viewer): DropPlan | null {
   if (!YMD.test(day) || item.date === day || !canMoveWork(item, viewer)) return null;
   const id = workId(item);
   if (isTicketKind(item.kind))
     return item.assigneeId
-      ? { kind: "ticket", id, technicianId: item.assigneeId, date: day }
+      ? {
+          kind: "ticket",
+          id,
+          technicianId: item.assigneeId,
+          expectTechnicianId: item.assigneeId,
+          date: day,
+        }
       : null;
   return { kind: "task", id, date: day };
 }

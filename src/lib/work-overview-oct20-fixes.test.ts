@@ -264,7 +264,9 @@ describe("2. after an Owner-view link, the next in-page navigation keeps the Lis
     expect(old.view).toBeUndefined();
     expect(landingSearch(savedOwner, { view: null, who: old.who ?? null }).view).toBe("owner");
   });
-  it("a bucket, month or view change after the link keeps view=list too; Everyone stays bare", () => {
+  it("a bucket, month or view change after the link keeps view=list too; Everyone stays bare only while the URL never named it", () => {
+    // Oct 21 (whoExplicit; work-overview-oct21-audit7.test.ts): a URL that named ?who=all keeps
+    // it — the totals row's link does — so these are the URL-silent-on-the-person cases.
     expect(nextWorkSearch({ view: "list", who: "all", bucket: "today" }, admin, true)).toEqual({
       view: "list",
       bucket: "today",
@@ -277,6 +279,10 @@ describe("2. after an Owner-view link, the next in-page navigation keeps the Lis
       view: "calendar",
     });
     expect(whoParam("all", admin)).toBeUndefined();
+    // ... and the named case keeps Everyone by name.
+    expect(
+      nextWorkSearch({ view: "list", who: "all", bucket: "today" }, admin, true, true),
+    ).toEqual({ view: "list", who: "all", bucket: "today" });
   });
   it("the URL silent on the view: the page's own navigations still drop the default (the remembered view keeps applying)", () => {
     expect(nextWorkSearch({ view: "list", who: "all" }, admin, false)).toEqual({});
@@ -297,11 +303,14 @@ describe("2. after an Owner-view link, the next in-page navigation keeps the Lis
     ).toEqual({ view: "calendar", who: BOB });
   });
   it("the route hands nextWorkSearch whether the URL named a view", () => {
+    // Oct 21: and whether it named the person (whoExplicit / whoNamed; onWho always names it —
+    // work-overview-oct21-audit7.test.ts).
+    expect(route).toContain("const viewExplicit = view !== undefined;");
     expect(route).toContain(
-      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);",
+      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);",
     );
     expect(route).not.toContain('...(v !== "list" ? { view: v } : {}),');
-    expect(route).toContain("searchOf(curView, w, bucket, month)");
+    expect(route).toContain("searchOf(curView, w, bucket, month, true)");
   });
 });
 

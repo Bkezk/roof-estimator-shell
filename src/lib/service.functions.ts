@@ -23,6 +23,7 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   CLAIM_NEEDS_TICK,
   CLAIM_TAKEN,
+  TICKET_CHANGED,
   canAccess,
   canClaim,
   dispatchesTickets,
@@ -675,7 +676,15 @@ export const setServiceStage = createServerFn({ method: "POST" })
  * of a Scheduled ticket stays Scheduled — one write, no bounce through Open, so the follow-up
  * keeps its timer and only "Date moved …" is logged (owner, Oct 9: cross-week reschedule in one
  * drag). Managers, admins and the office (`dispatchesTickets`; owner, Oct 9).
+ *
+ * Oct 21 (the seventh audit): Work Overview's drag sends `expect_technician_id`, the technician
+ * its row showed. The row can be five minutes old; until now a drop wrote that technician back
+ * unconditionally, so a ticket somebody had reassigned in between went back to its old person
+ * (who was told "reassigned", and whose follow-up timer came back), and one marked Done in
+ * between had its date moved. With the flag the ticket must still be that technician's and still
+ * Open / Scheduled, both before and in the write — else TICKET_CHANGED and nothing is written.
  */
+const MOVABLE_STAGES: readonly string[] = ["open", "scheduled"];
 export const assignServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -692,6 +701,9 @@ export const assignServiceJob = createServerFn({ method: "POST" })
         // the same ticket cannot both succeed. A plain reassignment (the Board, the ticket page)
         // leaves it out and overwrites as before.
         expect_unassigned: z.boolean().optional(),
+        // Work Overview's drag onto another day (Oct 21): the technician the row showed, who
+        // must still be on the ticket (see above). The Board and the ticket page leave it out.
+        expect_technician_id: z.string().uuid().optional(),
       })
       .parse(d),
   )
@@ -709,6 +721,12 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Ticket not found");
     if (data.expect_unassigned && cur.technician_id) throw new Error(CLAIM_TAKEN);
+    // A move from a stale row (Oct 21): the ticket was reassigned or finished since the page
+    // loaded — refused, so the drop cannot hand it back or move finished work.
+    if (data.expect_technician_id) {
+      if (cur.technician_id !== data.expect_technician_id) throw new Error(TICKET_CHANGED);
+      if (!MOVABLE_STAGES.includes(cur.stage)) throw new Error(TICKET_CHANGED);
+    }
     // A drop onto another day moves the date: the office's or a manager's (owner, Oct 1 / Oct 9;
     // logged below). A drop that only changes the technician on the same day needs no more than
     // dispatching.
@@ -731,9 +749,17 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .eq("id", data.id);
     // The guard against the race (Oct 15): the row must still be nobody's at the write.
     if (data.expect_unassigned) uq = uq.is("technician_id", null);
+    // And the move's guard (Oct 21): still that technician's, still Open / Scheduled.
+    if (data.expect_technician_id)
+      uq = uq.eq("technician_id", data.expect_technician_id).in("stage", [...MOVABLE_STAGES]);
     const { data: row, error } = await uq.select("*").maybeSingle();
     if (error) throw new Error(error.message);
-    if (!row) throw new Error(data.expect_unassigned ? CLAIM_TAKEN : "Ticket not found");
+    const notFound = data.expect_unassigned
+      ? CLAIM_TAKEN
+      : data.expect_technician_id
+        ? TICKET_CHANGED
+        : "Ticket not found";
+    if (!row) throw new Error(notFound);
     await logTicketDateMove(sb, row.id, cur.scheduled_date, row.scheduled_date, {
       id: context.userId,
       name: nameOf(p),

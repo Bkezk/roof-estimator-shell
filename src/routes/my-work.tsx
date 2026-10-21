@@ -31,7 +31,9 @@ export const Route = createFileRoute("/my-work")({
   // An explicit ?view=list is kept too (Oct 15): the Owner view's number links say so, and the
   // remembered "owner" must not win over it (landingSearch treats any URL view as final) — and
   // the page's own navigations keep it explicit (Oct 20, nextWorkSearch: the first one used to
-  // drop it, and the remembered view bounced the admin off the List).
+  // drop it, and the remembered view bounced the admin off the List). The same for an explicit
+  // ?who since Oct 21, ?who=all included: the totals row's link named Everyone, the next tap
+  // dropped it as the default, and the remembered person took over.
   validateSearch: (s: Record<string, unknown>): MyWorkSearch => {
     const view = parseViewParam(s["view"]);
     const who = s["who"];
@@ -76,18 +78,27 @@ function MyWorkRoute() {
   const curView = view ?? "list";
   // No ?who: Everyone for admins and managers, Mine for anyone else (defaultWho).
   const curWho = resolveWho(who, profile);
+  // Whether the URL named them (Oct 20 for the view, Oct 21 for the person): a value the URL
+  // named stays named on every in-page navigation, the default included — otherwise the URL
+  // falls silent and the page applies the remembered one instead (landingSearch).
+  const viewExplicit = view !== undefined;
+  const whoExplicit = who !== undefined;
   /**
    * The search without default keys (the caller's default `who`, no preset off the List; the
    * rule is lib/my-work.ts nextWorkSearch). "list" is dropped only when the URL was silent on
    * the view; a URL that named it — an Owner-view link, ?view=list included — keeps naming it.
+   * The same for `who` (Oct 21: ?who=all from the totals row's link was dropped on the next tap
+   * and the remembered person came back); `whoNamed` is true for a pick from the Show menu
+   * whatever the URL had, since a pick while peeking is not remembered on the layout.
    */
   const searchOf = (
     v: WorkViewParam,
     w: string,
     b?: BucketPreset | null,
     m?: string | null,
+    whoNamed = whoExplicit,
   ): MyWorkSearch =>
-    nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);
+    nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);
   return (
     <MyWorkPage
       view={view ?? null}
@@ -95,7 +106,9 @@ function MyWorkRoute() {
       month={month ?? null}
       bucket={bucket ?? null}
       onView={(v) => void navigate({ search: searchOf(v, curWho, null, month), replace: true })}
-      onWho={(w) => void navigate({ search: searchOf(curView, w, bucket, month), replace: true })}
+      onWho={(w) =>
+        void navigate({ search: searchOf(curView, w, bucket, month, true), replace: true })
+      }
       onMonth={(m) =>
         void navigate({ search: searchOf(curView, curWho, bucket, m), replace: true })
       }

@@ -64,9 +64,10 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
     // Oct 20 (audit 4 d): the route also asks for a missing profile once (refreshProfile).
     expect(route).toContain("const { profile, session, refreshProfile } = useAuth();");
     expect(route).toContain("const curWho = resolveWho(who, profile);");
-    // The search rule moved to lib/my-work.ts nextWorkSearch (Oct 20); the route hands it the profile.
+    // The search rule moved to lib/my-work.ts nextWorkSearch (Oct 20); the route hands it the
+    // profile and whether the URL named the view and the person (Oct 21, whoExplicit).
     expect(route).toContain(
-      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);",
+      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);",
     );
     expect(read("src/lib/my-work.ts")).toContain("const wp = whoParam(next.who, profile);");
     // validateSearch no longer drops ?who=mine (it would turn back into Everyone).

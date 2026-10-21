@@ -202,10 +202,12 @@ describe("dropPlan: drag an assigned ticket or task onto another day", () => {
   const DAY = "2026-10-21";
   it("a ticket for whoever dispatches: its technician unchanged, the new day", () => {
     const t = item({ kind: "ticket", assigneeId: BOB, date: "2026-10-20" });
+    // Oct 21: expectTechnicianId guards the write (work-overview-oct21-audit7-data.test.ts).
     expect(dropPlan(t, DAY, office)).toEqual({
       kind: "ticket",
       id: "t1",
       technicianId: BOB,
+      expectTechnicianId: BOB,
       date: DAY,
     });
     expect(dropPlan(item({ kind: "inspection" }), DAY, manager)).toMatchObject({ kind: "ticket" });
@@ -260,7 +262,9 @@ describe("dropPlan: drag an assigned ticket or task onto another day", () => {
     const hook = read("src/components/my-work-actions.tsx");
     expect(hook).toContain("movable: (item) => canMoveWork(item, profile),");
     expect(hook).toContain("const plan = dropPlan(item, day, profile);");
-    expect(hook).toContain("technician_id: plan.technicianId, scheduled_date: plan.date");
+    expect(hook).toMatch(
+      /technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,/,
+    );
     expect(hook).toContain("moveTaskFn({ data: { id: plan.id, date: plan.date } })");
     expect(hook).toContain("toast.success(movedToast(plan.date, snoozeCleared));");
     const fns = read("src/lib/tasks.functions.ts");

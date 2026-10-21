@@ -358,7 +358,8 @@ describe("the page and the route", () => {
     );
     expect(route).toContain("nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile");
     expect(route).toContain("searchOf(v, curWho, null, month)");
-    expect(route).toContain("searchOf(curView, w, bucket, month)");
+    // Oct 21: a pick names its person in the URL (work-overview-oct21-audit7.test.ts).
+    expect(route).toContain("searchOf(curView, w, bucket, month, true)");
     expect(route).not.toContain("view={curView}");
     // The sidebar's link stays a bare /my-work: the remembered values apply through the page.
     expect(readFileSync("src/components/app-sidebar.tsx", "utf8")).toContain(

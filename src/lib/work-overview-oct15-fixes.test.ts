@@ -109,8 +109,10 @@ describe("1. an Owner view number opens the List, whatever view is remembered", 
     expect(route).toContain("...(view ? { view } : {}),");
     expect(route).not.toContain('view === "calendar" || view === "owner"');
     expect(route).toContain("view?: WorkViewParam;");
+    // Oct 21: the person gets the same flag (whoExplicit; work-overview-oct21-audit7.test.ts).
+    expect(route).toContain("const viewExplicit = view !== undefined;");
     expect(route).toContain(
-      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, view !== undefined);",
+      "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);",
     );
   });
   it("landing on a link does not change the remembered view: changeView runs on the three buttons only", () => {
@@ -417,13 +419,20 @@ describe("b. assignServiceJob with expect_unassigned: the ticket must still be n
       "if (data.expect_unassigned && cur.technician_id) throw new Error(CLAIM_TAKEN);",
     );
     expect(fn).toContain('if (data.expect_unassigned) uq = uq.is("technician_id", null);');
-    expect(fn).toContain(
-      'if (!row) throw new Error(data.expect_unassigned ? CLAIM_TAKEN : "Ticket not found");',
+    // Oct 21: the move's guard (expect_technician_id → TICKET_CHANGED) shares the "no row" line.
+    expect(fn).toMatch(
+      /const notFound = data\.expect_unassigned\s*\? CLAIM_TAKEN\s*: data\.expect_technician_id\s*\? TICKET_CHANGED\s*: "Ticket not found";\s*if \(!row\) throw new Error\(notFound\);/,
     );
-    // The move path (a drop on another day) does not pass it: the ticket has its technician.
-    expect(hook).toMatch(
-      /data: \{ id: plan\.id, technician_id: plan\.technicianId, scheduled_date: plan\.date \},/,
+    // The move path (a drop on another day) does not pass it: the ticket has its technician —
+    // it sends expect_technician_id instead (Oct 21; work-overview-oct21-audit7-data.test.ts).
+    const move = hook.slice(
+      hook.indexOf("const move = useMutation("),
+      hook.indexOf("const assign ="),
     );
+    expect(move).toMatch(
+      /data: \{\s*id: plan\.id,\s*technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,\s*\},/,
+    );
+    expect(move).not.toContain("expect_unassigned");
   });
 });
 
@@ -491,11 +500,15 @@ describe("e. effectiveWho: an unknown person falls back to the caller's default 
     expect(effectiveWho("gone-person", [], admin, false)).toBe("gone-person");
     expect(effectiveWho(BOB, [], admin, false)).toBe(BOB);
   });
-  it("the page: changeWho once, which clears the remembered who and the URL", () => {
+  it("the page: once, forgetting the remembered who and naming the fallback in the URL", () => {
     expect(page).toContain(
       "const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);",
     );
-    expect(page).toMatch(/useEffect\(\(\) => \{\s*if \(shownWho !== who\) changeWho\(shownWho\);/);
+    // Oct 21: forgetWho + props.onWho, not changeWho (which skips the layout while peeking and
+    // wrote a URL without ?who; work-overview-oct21-audit7.test.ts).
+    expect(page).toMatch(
+      /useEffect\(\(\) => \{\s*if \(shownWho === who\) return;\s*const forgotten = forgetWho\(layout, who\);/,
+    );
     expect(page).toContain("const next = rememberWho(layout, whoParam(w, profile));");
   });
 });

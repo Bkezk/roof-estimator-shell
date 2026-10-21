@@ -17,7 +17,10 @@
  *     the viewer may move that date, else the toast says it stayed). Cancel writes nothing.
  *
  * Every change invalidates ["my-work"] and toasts; an error toasts the server's message and
- * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it).
+ * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it;
+ * Oct 21: so did a failed open or Done tick — "Task not found" on every click for five minutes).
+ * A move also carries the technician the row showed (Oct 21, expect_technician_id): a ticket
+ * reassigned or finished since the last refresh is refused with TICKET_CHANGED, not handed back.
  */
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -116,7 +119,12 @@ export function useWorkActions(profile: UserProfile | null): {
   const open = useMutation({
     mutationFn: (id: string) => getTaskFn({ data: { id } }),
     onSuccess: (row) => setEditTask(row),
-    onError: (e) => toast.error(errText(e) || "Could not open the task"),
+    // Oct 21: a task deleted or reassigned elsewhere kept answering "Task not found" on every
+    // click until the five-minute refresh — the row is stale, so the list is refetched too.
+    onError: (e) => {
+      toast.error(errText(e) || "Could not open the task");
+      invalidate();
+    },
   });
 
   // The Done tick (owner, Oct 15: no confirm; the toast's Undo sets it back to open).
@@ -131,7 +139,11 @@ export function useWorkActions(profile: UserProfile | null): {
       else toast.success("Task reopened");
       invalidate();
     },
-    onError: (e) => toast.error(errText(e) || "Could not change the task"),
+    // The same (Oct 21): a failed tick means the row is not what the list showed.
+    onError: (e) => {
+      toast.error(errText(e) || "Could not change the task");
+      invalidate();
+    },
   });
 
   // A drop on another calendar day: a ticket keeps its technician (a date-only move stays
@@ -142,8 +154,16 @@ export function useWorkActions(profile: UserProfile | null): {
     /** Resolves to whether the ticket's follow-up hold ended with the move (a task: never). */
     mutationFn: async (plan: DropPlan): Promise<boolean> => {
       if (plan.kind === "ticket") {
+        // expect_technician_id (Oct 21): the technician the row showed, whom the server must
+        // still find on the ticket — a row gone stale (reassigned or finished since the last
+        // refresh) is refused with TICKET_CHANGED instead of handing the ticket back.
         const r = await assignTicketFn({
-          data: { id: plan.id, technician_id: plan.technicianId, scheduled_date: plan.date },
+          data: {
+            id: plan.id,
+            technician_id: plan.technicianId,
+            scheduled_date: plan.date,
+            expect_technician_id: plan.expectTechnicianId,
+          },
         });
         return !!r.snooze_cleared;
       }
@@ -154,7 +174,7 @@ export function useWorkActions(profile: UserProfile | null): {
       toast.success(movedToast(plan.date, snoozeCleared));
       invalidate();
     },
-    // The row is stale either way (Oct 20): the list is refetched.
+    // The row is stale either way (Oct 20; Oct 21: TICKET_CHANGED says so): the list is refetched.
     onError: (e) => {
       toast.error(errText(e) || "Could not move it");
       invalidate();

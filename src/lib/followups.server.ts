@@ -19,7 +19,7 @@
  */
 import type { Database } from "@/integrations/supabase/types";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
-import { notify, serverClient, type Client } from "@/lib/notify.server";
+import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
 type Settings = {
   opportunity_close_days: number;
   opportunity_first_days: number;
@@ -56,6 +56,31 @@ const isMissingColumn = (e: { code?: string; message?: string }) =>
  */
 export const isMissingFunction = (e: { code?: string; message?: string } | null | undefined) =>
   !!e && (e.code === "PGRST202" || /Could not find the function/i.test(e.message ?? ""));
+/**
+ * The review timer (kind "invoice") is the office's: since 20261021101000 the database starts
+ * and closes it only for the service role, an admin or a manager. The published app has the
+ * server key, so afterTicketStage runs it as the system. The PREVIEW has no key and runs as the
+ * signed-in user — a technician marking a ticket Done there would be refused (42501) after the
+ * stage was already written. Fail safely: say so in the server log and carry on without the
+ * timer; the authorizers still see the Done ticket under Needs authorization (toAuthorize reads
+ * the tickets, not the follow-up). Seventh audit, Oct 21.
+ */
+export const isForbidden = (e: { code?: string; message?: string } | null | undefined) =>
+  !!e && (e.code === "42501" || /review timer/i.test(e.message ?? ""));
+const previewSkipsReviewTimer = (
+  kind: SyncArgs["kind"],
+  e: { code?: string; message?: string } | null | undefined,
+  title: string,
+): boolean => {
+  // The kind and the error first: a test (or an older preview) that stubs notify.server without
+  // hasServiceRole never reaches it unless the database actually refused the timer.
+  if (kind !== "invoice" || !isForbidden(e)) return false;
+  if (hasServiceRole()) return false;
+  console.warn(
+    `Review timer for "${title}" not written: the preview has no server key (SUPABASE_SERVICE_ROLE_KEY); the published app writes it as the system.`,
+  );
+  return true;
+};
 /** A calendar date as 08:00 local-ish (12:00 UTC keeps it on the same day across US zones). */
 const dateAtNoonUtc = (ymd: string) => new Date(`${ymd}T12:00:00Z`);
 
@@ -160,6 +185,7 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
     if (!open) return;
     const viaRpc = await admin.rpc("followup_sync_close", { p_id: open.id, p_reason: reason });
     if (!viaRpc.error) return;
+    if (previewSkipsReviewTimer(a.kind, viaRpc.error, a.title)) return;
     if (!isMissingFunction(viaRpc.error)) throw new Error(viaRpc.error.message);
     // Before 20261002140000: the direct write, marked closed_by_sync so the older trigger
     // (crm_followups_manager_only, 20261001030000) lets it through.
@@ -189,6 +215,7 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
     p_due_date: a.dueDate,
     p_created_by: a.actorId,
   });
+  if (up.error && previewSkipsReviewTimer(a.kind, up.error, a.title)) return "unchanged";
   if (up.error && !isMissingFunction(up.error)) throw new Error(up.error.message);
   if (!up.error) {
     const out = up.data as unknown as UpsertOut;

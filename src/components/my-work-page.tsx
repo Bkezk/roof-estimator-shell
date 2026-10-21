@@ -103,6 +103,8 @@ import {
   applySaveResult,
   applyWorkLayout,
   defaultWorkLayout,
+  emptyListLine,
+  forgetWho,
   hideBucket,
   isDefaultWorkLayout,
   isEmptyWorkLayout,
@@ -117,6 +119,7 @@ import {
   readStoredWorkLayout,
   rememberView,
   rememberWho,
+  safeStorage,
   shouldRememberWho,
   shouldSeedWorkLayout,
   showBucket,
@@ -638,13 +641,10 @@ function ListView({
     </div>
   );
   // No columns: every group the viewer shows is empty — or (Oct 20) every one is hidden, which
-  // is a different line, since the Hidden chips above are the way back.
+  // is a different line, since the Hidden chips above are the way back. Oct 21: with items in
+  // hidden columns the line says so instead of "every group is empty" (emptyListLine).
   const nothing = columns.length === 0 && (
-    <p className="text-sm text-muted-foreground">
-      {shown.length === 0
-        ? "Every column is hidden — bring one back from Hidden."
-        : "Nothing to do: every group is empty."}
-    </p>
+    <p className="text-sm text-muted-foreground">{emptyListLine(shown, hidden)}</p>
   );
 
   return (
@@ -711,15 +711,28 @@ function ListView({
                   <span className="font-normal tabular-nums text-muted-foreground">
                     {g.items.length}
                   </span>
-                  <button
-                    type="button"
-                    aria-label={`Hide ${g.label}`}
-                    title="Hide this column (bring it back from the Hidden chips)"
-                    onClick={() => onLayout(hideBucket(layout, g.bucket, present))}
-                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {/* Oct 21: the preset's own column is shown for this link even when the person
+                    hid it (applyWorkLayout's `keep`); its X did nothing (hideBucket: already
+                    hidden), so there is no X — a note instead, and it is hidden again once the
+                    link's preset is gone. */}
+                  {layout.hidden.includes(g.bucket) ? (
+                    <span
+                      className="text-xs font-normal text-muted-foreground"
+                      title="You hid this column; it shows for this link only."
+                    >
+                      (hidden)
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={`Hide ${g.label}`}
+                      title="Hide this column (bring it back from the Hidden chips)"
+                      onClick={() => onLayout(hideBucket(layout, g.bucket, present))}
+                      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </span>
               </h2>
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">{rows(g)}</div>
@@ -1120,7 +1133,10 @@ export function MyWorkPage(props: {
   // the view and whose work (lib/work-layout.ts): the URL's ?view / ?who win, and when the URL is
   // silent — the sidebar's link, the sign-in landing — the remembered ones apply (landingSearch).
   const userId = profile?.id ?? session?.user.id ?? "";
-  const storage = typeof window === "undefined" ? null : window.localStorage;
+  // Oct 21: through safeStorage — a browser that blocks site storage throws on the property read
+  // itself, and the bare read sent the whole page to the error boundary. Null here means the
+  // profile's copy alone (the read and write helpers take null).
+  const storage = safeStorage();
   const [layout, setLayout] = useState<WorkLayout>(
     () => (userId && readStoredWorkLayout(storage, userId)) || defaultWorkLayout(),
   );
@@ -1385,12 +1401,21 @@ export function MyWorkPage(props: {
   const people = q.data?.people ?? [];
   // A remembered or linked person who is not on the roster any more (Oct 15: a blank Select and
   // "Someone else: …"): once the WHOLE roster is here (rosterComplete; Oct 20 — the fallback
-  // roster forgot a real person), fall back to the caller's default and forget them, once
-  // (changeWho clears the remembered who and the URL). The caller's own id reads as Mine.
+  // roster forgot a real person), fall back to the caller's default and forget them, once. The
+  // caller's own id reads as Mine. Oct 21: not through changeWho — while peeking it skips the
+  // layout (shouldRememberWho), and the URL it wrote had no ?who, so the next render resolved
+  // the same remembered id, the deps stood still and the page stayed blank for good. The gone
+  // person is dropped from the layout whatever the peeking state (forgetWho: the browser's copy
+  // and the profile's, through commitLayout), and the fallback goes in the URL by name (onWho
+  // writes an explicit ?who, Oct 21), so it holds even before the save lands.
   const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);
   useEffect(() => {
-    if (shownWho !== who) changeWho(shownWho);
-    // changeWho is re-made every render; the fallback depends on `who` and the roster only.
+    if (shownWho === who) return;
+    const forgotten = forgetWho(layout, who);
+    if (forgotten !== layout) commitLayout(forgotten);
+    props.onWho(shownWho);
+    // commitLayout and props.onWho are re-made every render; the fallback depends on `who` and
+    // the roster only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownWho, who]);
   const whoName =

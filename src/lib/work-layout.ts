@@ -37,7 +37,8 @@ export interface WorkLayout {
   /**
    * Whose work the user last asked for, in the ?who= form (`whoParam`): "mine", a profile id, or
    * absent for the caller's default (Everyone for admins and managers). Applied when the URL has
-   * no ?who. A person who no longer exists is harmless: the list shows nobody.
+   * no ?who. A person who no longer exists is forgotten once the whole roster says so (Oct 21,
+   * `forgetWho`; until then the list showed nobody and, while peeking, stayed that way).
    */
   who?: string;
 }
@@ -168,6 +169,18 @@ export const rememberWho = (layout: WorkLayout, who: string | undefined): WorkLa
   (layout.who ?? "") === (who ?? "")
     ? layout
     : withRemembered(layout, layout.view, who || undefined);
+
+/**
+ * The layout without `who` as its remembered person (Oct 21): the page could not show them (not
+ * on the complete roster — deleted, or never one of it; effectiveWho fell back), so they are
+ * forgotten whatever the peeking state — changeWho skips the layout while peeking
+ * (shouldRememberWho), and a URL without ?who then resolved the same remembered id again: an
+ * empty list, a blank picker, "Someone else: …" with no way out. The remembered view stays; a
+ * layout that remembers someone else, or nobody, comes back as it is (a link to a gone person
+ * does not forget the one remembered).
+ */
+export const forgetWho = (layout: WorkLayout, who: string): WorkLayout =>
+  layout.who === who ? rememberWho(layout, undefined) : layout;
 
 /**
  * A column or kind change (`next`, from the List or the Show menu — Reset layout included) with
@@ -311,6 +324,23 @@ export function applyWorkLayout<T extends { bucket: WorkBucket }>(
 }
 
 /**
+ * The List's line when it has no column to show (every shown group folded away empty). Every
+ * column hidden is its own line, since the Hidden chips are the way back (Oct 20). Oct 21: with
+ * items sitting in hidden columns (only Overdue had items and the person hid Overdue with its X)
+ * "Nothing to do: every group is empty." was not true — the line now says where the items are;
+ * with nothing hidden, or nothing in the hidden columns, the wording is as before.
+ */
+export function emptyListLine(
+  shown: readonly unknown[],
+  hidden: readonly { items: readonly unknown[] }[],
+): string {
+  if (shown.length === 0) return "Every column is hidden — bring one back from Hidden.";
+  const n = hidden.reduce((sum, g) => sum + g.items.length, 0);
+  if (n === 0) return "Nothing to do: every group is empty.";
+  return `Nothing to do in the groups you show — ${n} item${n === 1 ? " sits" : "s sit"} in hidden groups (bring one back from Hidden).`;
+}
+
+/**
  * Drop `bucket` on `target`: it takes the place before a target that was ahead of it, after a
  * target that was behind it — so dropping on the last column makes it last. Positions are
  * among the columns as ordered (hidden ones ride along).
@@ -357,7 +387,26 @@ export const bucketLabel = (b: WorkBucket): string => BUCKET_LABELS[b];
 
 export const WORK_LAYOUT_STORAGE_KEY = "jbk-portal:work-layout";
 
-type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/**
+ * The browser's localStorage, or null when there is none — the server, or a browser that blocks
+ * site storage (Oct 21: there the `window.localStorage` property read ITSELF throws a
+ * SecurityError, and the page read it bare, so the whole page hit the error boundary before it
+ * drew a thing). Without storage the page lays out from the profile's copy as it always could
+ * (the read and write helpers above take null). `win` is for tests; the page passes nothing.
+ */
+export function safeStorage(
+  win: { readonly localStorage: Storage } | undefined = typeof window === "undefined"
+    ? undefined
+    : window,
+): StorageLike | null {
+  try {
+    return win?.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const keyFor = (userId: string) => `${WORK_LAYOUT_STORAGE_KEY}:${userId}`;
 

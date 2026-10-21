@@ -231,6 +231,13 @@ export const canClaim = (p: AccessLike | null | undefined): boolean =>
 
 export const CLAIM_NEEDS_TICK = "Claiming is for people ticked Technician who see every ticket";
 export const CLAIM_TAKEN = "Someone already has it";
+/**
+ * A Work Overview drag landed on a row that had changed since the page loaded (Oct 21, the
+ * seventh audit): reassigned or finished in between, so assignServiceJob refused the move
+ * instead of handing the ticket back to its old technician. The list is refetched with the toast.
+ */
+export const TICKET_CHANGED =
+  "This ticket changed since the page loaded — it was refreshed, try again";
 
 /**
  * Who runs the tickets and their money: admins and managers only (owner, Oct 1: "only the
