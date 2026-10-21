@@ -30,6 +30,8 @@ import {
 } from "@/lib/margin-compare";
 import {
   aggregateMargin,
+  marginPctDomain,
+  marginPctTicks,
   monthSeries,
   monthsBetween,
   shortMonthLabel,
@@ -481,6 +483,28 @@ describe("the chart series with a comparison", () => {
 
 // ---- the charts component, pinned to its source -------------------------------------------
 
+describe("marginPctDomain: the margin % axis always shows 0 and is never zoomed onto one value", () => {
+  // Owner, Oct 21: one month invoiced at about -1 % made the axis run -1 % to -5 % with nothing
+  // drawn on it.
+  it("one slightly negative month: from a little under 0 up to 10", () => {
+    expect(marginPctDomain([null, null, -1.2])).toEqual([-5, 10]);
+  });
+  it("positive months: 0 up to the next 5 above the top; nothing yet: 0 to 10", () => {
+    expect(marginPctDomain([42.3, 51])).toEqual([0, 55]);
+    expect(marginPctDomain([null, null])).toEqual([0, 10]);
+    expect(marginPctDomain([])).toEqual([0, 10]);
+  });
+  it("a deep loss: down to the next 5 under it, still up to 10", () => {
+    expect(marginPctDomain([-37, 3])).toEqual([-40, 10]);
+  });
+  it("marginPctTicks: round steps, at most seven labels, always through 0", () => {
+    expect(marginPctTicks([-5, 10])).toEqual([-5, 0, 5, 10]);
+    expect(marginPctTicks([0, 55])).toEqual([0, 10, 20, 30, 40, 50]);
+    expect(marginPctTicks([-40, 10])).toEqual([-40, -30, -20, -10, 0, 10]);
+    expect(marginPctTicks([0, 10])).toEqual([0, 5, 10]);
+  });
+});
+
 describe("components/margin-charts.tsx", () => {
   const src = read("src/components/margin-charts.tsx");
   it("exports MarginCharts and draws with the shadcn chart wrapper", () => {
@@ -528,6 +552,13 @@ describe("components/margin-charts.tsx", () => {
     expect(src).toContain("accessibilityLayer");
     expect(src).not.toMatch(/strokeDasharray="3 3"/); // no dashed gridlines
     expect(src).toContain("shortMonthLabel");
+  });
+  it("margin %: a dot on every month (one month alone still shows), the axis from marginPctDomain, a 0 % line", () => {
+    expect(src).toContain("marginPctDomain(");
+    expect(src).toContain("ticks={marginPctTicks(");
+    expect(src).toContain("<ReferenceLine y={0}");
+    expect(src).not.toMatch(/dataKey="marginPct"[\s\S]{0,200}dot=\{false\}/);
+    expect(src).toMatch(/dataKey="marginPct"[\s\S]{0,300}dot=\{\{ r: /);
   });
   it("renders nothing when there are no invoices (the report shows the empty line)", () => {
     expect(src).toContain("if (invoices.length === 0) return null;");

@@ -29,7 +29,16 @@
  * render nothing when there are no invoices — the report shows its own empty line then.
  */
 import type { ReactNode } from "react";
-import { Bar, BarChart, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { money } from "@/components/service/invoice-utils";
 import {
@@ -43,6 +52,8 @@ import {
 import { comparedGroupBars, comparedMonthSeries } from "@/lib/margin-compare";
 import {
   MARGIN_GROUP_LABELS,
+  marginPctDomain,
+  marginPctTicks,
   monthSeries,
   shortMonthLabel,
   type MarginReportResult,
@@ -149,6 +160,7 @@ export function MarginCharts({ d }: { d: MarginReportResult }) {
   if (invoices.length === 0) return null;
   const compare = !!d.comparison;
   const months = comparedMonthSeries(d);
+  const pctDomain = marginPctDomain(months.flatMap((m) => [m.marginPct, m.earlierMarginPct]));
   const mix = monthSeries(invoices, d.from, d.to);
   const byGroup = d.groupBy === "month" ? null : comparedGroupBars(d);
   const earlierNote =
@@ -219,8 +231,12 @@ export function MarginCharts({ d }: { d: MarginReportResult }) {
                 tickLine={false}
                 axisLine={false}
                 width={52}
+                domain={pctDomain}
+                ticks={marginPctTicks(pctDomain)}
+                allowDataOverflow
                 tickFormatter={(v: number) => `${v}%`}
               />
+              <ReferenceLine y={0} stroke="var(--border)" />
               <ChartTooltip
                 content={
                   <ChartTooltipContent
@@ -237,7 +253,12 @@ export function MarginCharts({ d }: { d: MarginReportResult }) {
                   stroke="var(--color-earlierMarginPct)"
                   strokeOpacity={0.6}
                   strokeWidth={2}
-                  dot={false}
+                  dot={{
+                    r: 2.5,
+                    strokeWidth: 0,
+                    fill: "var(--color-earlierMarginPct)",
+                    fillOpacity: 0.6,
+                  }}
                   connectNulls
                 />
               )}
@@ -246,7 +267,8 @@ export function MarginCharts({ d }: { d: MarginReportResult }) {
                 dataKey="marginPct"
                 stroke="var(--color-marginPct)"
                 strokeWidth={2}
-                dot={false}
+                // A dot on every month: a single invoiced month still shows (a line needs two).
+                dot={{ r: 2.5, strokeWidth: 0, fill: "var(--color-marginPct)" }}
                 activeDot={{ r: 4, strokeWidth: 2, stroke: SURFACE }}
                 connectNulls
               />

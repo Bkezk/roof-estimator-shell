@@ -450,6 +450,31 @@ export function monthSeries(
   });
 }
 
+/**
+ * The margin % chart's axis: always shows 0, never zooms onto one value. From the next 5 under
+ * the lowest month (0 when none is negative) up to the next 5 over the highest, at least 10 —
+ * owner, Oct 21: one month invoiced at about −1 % made the axis run −1 % to −5 % with nothing
+ * visible on it. Months without invoices (null) do not count.
+ */
+export function marginPctDomain(values: readonly (number | null)[]): [number, number] {
+  const seen = values.filter((v): v is number => v !== null && Number.isFinite(v));
+  const lo = seen.length ? Math.min(0, Math.floor(Math.min(...seen) / 5) * 5) : 0;
+  const hi = seen.length ? Math.max(10, Math.ceil(Math.max(...seen) / 5) * 5) : 10;
+  return [lo, hi];
+}
+
+/**
+ * The ticks for that axis: round steps (5, 10, 20, 25, 50, 100 …) from the bottom to the top of
+ * the domain, at most seven of them, so the labels read 0 %, 5 %, 10 % rather than 3 %.
+ */
+export function marginPctTicks([lo, hi]: readonly [number, number]): number[] {
+  const steps = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
+  const step = steps.find((st) => (hi - lo) / st <= 6) ?? 1000;
+  const out: number[] = [];
+  for (let v = Math.floor(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
+  return out;
+}
+
 export const OTHERS_KEY = "others";
 export const OTHERS_LABEL = "Others";
 
