@@ -36,7 +36,12 @@ import type { SyncResult } from "@/lib/followups.server";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
-import { TECH_LOCKED_MESSAGE, stageProblem, techStageLocked } from "@/lib/ticket-stage";
+import {
+  reopensTicket,
+  stageProblem,
+  TECH_LOCKED_MESSAGE,
+  techStageLocked,
+} from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { assignedStage } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
@@ -651,9 +656,16 @@ export const setServiceStage = createServerFn({ method: "POST" })
     // the database trigger service_jobs_stage_rule says the same).
     const problem = stageProblem(p, data.stage, prev?.stage);
     if (problem) throw new Error(problem);
+    // Back to Open / Scheduled from Done (or an office stage): the ticket is reopened, so the
+    // first visit's close-out stamp goes with the move (ticket-stage.ts reopensTicket, Oct 21).
+    const reopened = reopensTicket(prev?.stage, data.stage);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
-      .update({ stage: data.stage, updated_by_name: nameOf(p) })
+      .update({
+        stage: data.stage,
+        updated_by_name: nameOf(p),
+        ...(reopened ? { completed_at: null } : {}),
+      })
       .eq("id", data.id)
       .select("*")
       .maybeSingle();

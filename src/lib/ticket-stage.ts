@@ -74,6 +74,20 @@ export function stageProblem(
 }
 
 /**
+ * A move back to the technician's working stages from Done (or an office stage) REOPENS the
+ * ticket (owner, Oct 21: "if managers move a ticket back to scheduled from done does it
+ * reappear on the tech's list?" — it does, and the first visit's close-out stamp must not stay
+ * on it: the Close-out fold said "Done <date>" on a Scheduled ticket, and the second Complete
+ * never logged "Service done" again because the stamp looked already set). setServiceStage
+ * clears completed_at on such a move — what the technician's own Undo already did
+ * (service-field.functions.ts setFieldStatus "undo"). A move between office stages, or Done
+ * set from the picker, leaves the stamp alone.
+ */
+export const reopensTicket = (from: string | null | undefined, to: ServiceStage): boolean =>
+  (from === "done" || OFFICE_STAGES.includes(from as ServiceStage)) &&
+  (to === "open" || to === "scheduled");
+
+/**
  * A technician's edit of a ticket at an office stage is refused (owner, Oct 6): a plain user
  * ticked Technician (the office — anyone else — still saves it, as before). saveServiceJob's
  * check; RLS service_jobs_update says the same (20261006190000_stage_backwards_lock.sql).
