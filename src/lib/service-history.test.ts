@@ -446,7 +446,9 @@ describe("on the screens", () => {
     );
   });
   it("no Open link for a technician-only user — the row carries everything, nothing is said", () => {
-    expect(comp).toContain("const canOpen = !isFieldOnly(profile);");
+    // Oct 21: the field page — no link until the profile is known either (isFieldOnly(null) is
+    // false, and the link showed while the profile loaded).
+    expect(comp).toContain("const canOpen = !!profile && !isFieldOnly(profile);");
     expect(comp).toMatch(/\{canOpen && \(\s*<Link[\s\S]*?>\s*Open\s*<\/Link>\s*\)\}/);
     expect(comp).not.toMatch(/office fixes|the app\b/i);
   });

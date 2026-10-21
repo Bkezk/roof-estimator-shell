@@ -96,6 +96,7 @@ import {
 } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
+import { FIELD_DETAILS_NOTE, fieldNotesInput, isFieldTicketPage } from "@/lib/field-ticket-page";
 import {
   deleteServiceJob,
   getCrewRateDefaults,
@@ -119,7 +120,7 @@ import {
   type ServiceType,
   claimServiceJob,
 } from "@/lib/service.functions";
-import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
+import { getAccount, listContacts, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.functions";
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
@@ -966,7 +967,7 @@ function TicketListRow({
 }
 
 function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const getFn = useServerFn(getServiceJob);
   const job = useQuery({
     queryKey: ["service-job", id],
@@ -978,7 +979,8 @@ function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
     if (job.error)
       return (
         <div className="space-y-3">
-          <BackToList />
+          {/* A saved ticket by id: a technician-only user's Back is My tickets here too. */}
+          <BackToList fieldPage={isFieldTicketPage(profile, { id })} />
           <p className="text-sm text-destructive">
             Could not open the ticket: {errText(job.error)}
           </p>
@@ -1189,15 +1191,21 @@ function NewForAccount({
 /**
  * Back to where the ticket was opened from (owner, Oct 9): the Tech Board at the week it showed
  * (`?from=board&week=`), the Awaiting invoice queue (`?from=invoices`), else the Tickets list —
- * whose filters live in the URL, so the browser's Back lands on them too.
+ * whose filters live in the URL, so the browser's Back lands on them too. The field page (Oct 21,
+ * `fieldPage`: a technician-only user) goes to My tickets — the list and the board are the
+ * office's and send them there anyway.
  */
-function BackToList() {
+function BackToList({ fieldPage }: { fieldPage: boolean }) {
   const { from, week }: { from?: TicketFrom | string; week?: string } = useSearch({
     strict: false,
   });
   return (
-    <Button asChild variant="ghost" size="sm" className="-ml-2">
-      {from === "board" ? (
+    <Button asChild variant="ghost" size="sm" className="-ml-2 h-10">
+      {fieldPage ? (
+        <Link to="/service/today">
+          <ArrowLeft className="mr-1 h-4 w-4" /> My tickets
+        </Link>
+      ) : from === "board" ? (
         <Link to="/service/board" search={week ? { week } : {}}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Tech Board
         </Link>
@@ -1405,6 +1413,14 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const isTech = !isOffice(profile);
   const officeOrAdmin = !isTech;
+  // Oct 21 (the owner, after testing as the technician-only login): a technician-only user's
+  // saved ticket is a FIELD page — the stage as text with no picker (Done comes from the
+  // close-out, Open / Scheduled from the office), the customer, property, contact, description,
+  // PO # / Job #, type, day and arrival as plain text (`fieldDetails`), their Notes still theirs
+  // to edit, Back to My tickets, and every field section as before. True until the profile is
+  // known too (lib/field-ticket-page.ts), so the office's controls never flash first. An office
+  // person ticked Technician sees no change (owner, Oct 8: the office keeps full visibility).
+  const fieldPage = isFieldTicketPage(profile, job);
   // Owner, Oct 8: an office person ticked Technician takes an unassigned ticket for themselves.
   const claimFn = useServerFn(claimServiceJob);
   const claimMut = useMutation({
@@ -1594,49 +1610,53 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const save = useMutation({
     mutationFn: () => {
-      const input: ServiceJobInput = {
-        ...(job ? { id: job.id } : {}),
-        account_id: draft.customer?.account_id ?? null,
-        site_id: draft.customer?.site_id ?? null,
-        contact_id: draft.customer ? draft.contact_id || null : null,
-        location_id: draft.customer?.site_id ? draft.location_id || null : null,
-        // A ticket from before customer profiles keeps its typed name until one is picked.
-        ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
-        description: draft.description,
-        service_type: draft.service_type,
-        // The rate is a manager's call (owner, Oct 1); anyone else's save leaves it as it is.
-        ...(manager ? { labor_rate_kind: draft.labor_rate_kind } : {}),
-        po_number: draft.po_number,
-        // The job number is the office's (a technician's save leaves it as it is).
-        ...(officeOrAdmin ? { job_number: draft.job_number.trim() || null } : {}),
-        technician_id: draft.technician_id || null,
-        ...(sendCrew && crew
-          ? {
-              crew: {
-                lead_rate: crew.lead_rate,
-                others: crew.others
-                  .filter((o) => o.technician_id && o.technician_id !== draft.technician_id)
-                  .map((o) => ({ technician_id: o.technician_id, bill_rate: o.bill_rate })),
-              },
-            }
-          : {}),
-        scheduled_date: draft.scheduled_date || null,
-        // Sent only when it changed, so a save never touches a window it did not show.
-        ...(draft.arrival_window !== (job?.arrival_window ?? "")
-          ? { arrival_window: asArrival(draft.arrival_window) }
-          : {}),
-        // No stage (audit, Oct 2: a stale tab's save sent the stage it had loaded and moved an
-        // Invoiced ticket back to Done). The header's picker is the one way to change it; the
-        // server keeps the stage, moving an Open ticket that now has a technician and a day to
-        // Scheduled itself.
-        notes: draft.notes,
-        centerpoint_ticket: draft.centerpoint_ticket,
-        centerpoint_invoice: draft.centerpoint_invoice,
-        // Written on create only (an opportunity's "Start a ticket").
-        ...(!job && seed?.from_opportunity_id
-          ? { from_opportunity_id: seed.from_opportunity_id }
-          : {}),
-      };
+      // The field page edits the notes alone (Oct 21): the rest goes back as the ticket has it
+      // (lib/field-ticket-page.ts fieldNotesInput), nothing the office owns is sent.
+      const input: ServiceJobInput = fieldPage
+        ? fieldNotesInput(job!, draft.notes)
+        : {
+            ...(job ? { id: job.id } : {}),
+            account_id: draft.customer?.account_id ?? null,
+            site_id: draft.customer?.site_id ?? null,
+            contact_id: draft.customer ? draft.contact_id || null : null,
+            location_id: draft.customer?.site_id ? draft.location_id || null : null,
+            // A ticket from before customer profiles keeps its typed name until one is picked.
+            ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
+            description: draft.description,
+            service_type: draft.service_type,
+            // The rate is a manager's call (owner, Oct 1); anyone else's save leaves it as it is.
+            ...(manager ? { labor_rate_kind: draft.labor_rate_kind } : {}),
+            po_number: draft.po_number,
+            // The job number is the office's (a technician's save leaves it as it is).
+            ...(officeOrAdmin ? { job_number: draft.job_number.trim() || null } : {}),
+            technician_id: draft.technician_id || null,
+            ...(sendCrew && crew
+              ? {
+                  crew: {
+                    lead_rate: crew.lead_rate,
+                    others: crew.others
+                      .filter((o) => o.technician_id && o.technician_id !== draft.technician_id)
+                      .map((o) => ({ technician_id: o.technician_id, bill_rate: o.bill_rate })),
+                  },
+                }
+              : {}),
+            scheduled_date: draft.scheduled_date || null,
+            // Sent only when it changed, so a save never touches a window it did not show.
+            ...(draft.arrival_window !== (job?.arrival_window ?? "")
+              ? { arrival_window: asArrival(draft.arrival_window) }
+              : {}),
+            // No stage (audit, Oct 2: a stale tab's save sent the stage it had loaded and moved an
+            // Invoiced ticket back to Done). The header's picker is the one way to change it; the
+            // server keeps the stage, moving an Open ticket that now has a technician and a day to
+            // Scheduled itself.
+            notes: draft.notes,
+            centerpoint_ticket: draft.centerpoint_ticket,
+            centerpoint_invoice: draft.centerpoint_invoice,
+            // Written on create only (an opportunity's "Start a ticket").
+            ...(!job && seed?.from_opportunity_id
+              ? { from_opportunity_id: seed.from_opportunity_id }
+              : {}),
+          };
       return saveFn({ data: input });
     },
     onSuccess: (row) => {
@@ -1690,13 +1710,16 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const submit = () => {
     if (!canEdit || save.isPending) return;
-    if (!draft.customer && !job?.customer_name) {
-      toast.error("Pick or add the customer first");
-      return;
-    }
-    if (siteMessage) {
-      toast.error(siteMessage);
-      return;
+    // The customer and its site are the office's: the field page's save (notes) skips the checks.
+    if (!fieldPage) {
+      if (!draft.customer && !job?.customer_name) {
+        toast.error("Pick or add the customer first");
+        return;
+      }
+      if (siteMessage) {
+        toast.error(siteMessage);
+        return;
+      }
     }
     save.mutate();
   };
@@ -1884,8 +1907,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // audit): they work the tickets assigned to them and the office owns the customer — no × to
   // change the customer, and the search box offers no "Add … as a new customer" (a customer they
   // created was unreadable to their own token, so the save failed "Customer not found"; the
-  // server refuses them too, crm.functions.ts quickCreateAccount).
-  const ownsCustomer = !isFieldOnly(profile);
+  // server refuses them too, crm.functions.ts quickCreateAccount). Not until the profile is
+  // known either (Oct 21: isFieldOnly(null) is false, which offered them for a moment).
+  const ownsCustomer = !!profile && !isFieldOnly(profile);
   const customerField = (
     <div className="space-y-1">
       <Label htmlFor={draft.customer ? undefined : "ticket-customer"}>Customer</Label>
@@ -2217,6 +2241,97 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       </CollapsibleContent>
     </Collapsible>
   );
+  // The field page's details (Oct 21): what the office set, as plain text a technician reads on
+  // a phone — the customer, the property with a maps link, the site at it, the property contact
+  // with a tap-to-call number, the site's instructions and warranties (as My tickets shows),
+  // the strip that opens History at this property, then the description, type, day with its
+  // arrival window, technician and crew (PO # and Job # sit on the header's "Ticket numbers"
+  // line, text for everyone). Nothing here is a box.
+  const fieldSite = job?.site_id
+    ? accountQ.data?.sites.find((s) => s.id === job.site_id)
+    : undefined;
+  const fieldAddress = job ? [job.site_name, job.site_address].filter(Boolean).join(", ") : "";
+  const fieldDetails = job && (
+    <section className="space-y-3 rounded-lg border p-3 text-sm" aria-label="Ticket details">
+      <div className="space-y-2">
+        <p className="text-base font-medium">{job.customer_name}</p>
+        {fieldAddress ? (
+          <a
+            href={`https://maps.google.com/?q=${encodeURIComponent(fieldAddress)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex min-h-10 items-start gap-2 rounded-md py-1 hover:bg-muted"
+          >
+            <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <span>
+              {job.site_name && <span className="block font-medium">{job.site_name}</span>}
+              {job.site_address && (
+                <span className="text-primary underline underline-offset-2">
+                  {job.site_address}
+                </span>
+              )}
+            </span>
+          </a>
+        ) : (
+          <p className="text-muted-foreground">No property on this ticket</p>
+        )}
+        {job.location_name && (
+          <p>
+            <span className="text-muted-foreground">Site </span>
+            {job.location_name}
+          </p>
+        )}
+        {job.account_id && (
+          <FieldContactLine
+            accountId={job.account_id}
+            siteId={job.site_id}
+            contactId={job.contact_id}
+          />
+        )}
+        {fieldSite?.technician_instructions && (
+          <p className="whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-50">
+            <span className="font-semibold">Instructions: </span>
+            {fieldSite.technician_instructions}
+          </p>
+        )}
+        <WarrantyBadges siteId={job.site_id} />
+        {job.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
+      </div>
+      <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 [&>dt]:text-muted-foreground [&>dd]:min-w-0">
+        <dt>Description</dt>
+        <dd className="whitespace-pre-line">{job.description || "—"}</dd>
+        <dt>Type</dt>
+        <dd>{TYPE_LABELS[asType(job.service_type)]}</dd>
+        <dt>Day</dt>
+        <dd>
+          {job.scheduled_date
+            ? dayWithWindow(day(job.scheduled_date), job.arrival_window)
+            : "No day yet"}
+        </dd>
+        {/* PO # and Job # are on the header's "Ticket numbers" line, as text for everyone. */}
+        <dt>Technician</dt>
+        <dd className="flex flex-wrap items-center gap-2">
+          {job.technician_id
+            ? (techOptions.find((t) => t.id === job.technician_id)?.name ??
+              job.technician_name ??
+              "Former assignee")
+            : "Unassigned"}
+          {job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}
+        </dd>
+        <dt>Crew</dt>
+        <dd>
+          {crewNames.length
+            ? crewNames.join(", ")
+            : job.crew_confirmed_at
+              ? "Alone"
+              : job.helper_count > 0
+                ? `${job.helper_count} helper${job.helper_count > 1 ? "s" : ""}`
+                : "—"}
+        </dd>
+      </dl>
+      <p className="text-xs text-muted-foreground">{FIELD_DETAILS_NOTE}</p>
+    </section>
+  );
   // Notes: two rows to start, growing as they are typed (owner, Oct 1).
   const notesField = (
     <div className="space-y-1">
@@ -2246,7 +2361,14 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         submit();
       }}
     >
-      {isTech ? (
+      {fieldPage ? (
+        // A technician-only user (Oct 21): what the office set as text, the Timeline, their notes.
+        <>
+          {fieldDetails}
+          {customerContact}
+          {notesField}
+        </>
+      ) : isTech ? (
         // A technician: one column, customer → description → PO # → type and date →
         // technician and crew → CenterPoint (folded) → notes.
         <>
@@ -2278,7 +2400,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             type="submit"
             size="lg"
             disabled={
-              save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
+              // The field page saves the notes: a change is all it needs (the day and the
+              // customer are the office's, and go back as they are).
+              fieldPage
+                ? save.isPending || !dirty
+                : save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
             }
           >
             {save.isPending ? (
@@ -2318,7 +2444,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     // Stacked (owner, Oct 6): the whole ticket is one centred column.
     <div className={stacked ? "mx-auto max-w-5xl space-y-6" : "space-y-6"}>
       <div className="space-y-2">
-        <BackToList />
+        <BackToList fieldPage={fieldPage} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight">
             <Wrench className="h-6 w-6 shrink-0" />
@@ -2341,58 +2467,73 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   </Link>
                 </Button>
               )}
-              <Select
-                value={asStage(job.stage)}
-                disabled={ro || lockedStage || stageMut.isPending}
-                onValueChange={(v) => stageMut.mutate(v as ServiceStage)}
-              >
-                <SelectTrigger className="w-[150px]" aria-label="Stage">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {stageOptions.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STAGE_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {dispatcher && repeatable && (
-                <Button asChild variant="outline">
-                  <Link
-                    to="/service"
-                    search={{ new: 1, from: job.id }}
-                    title={
-                      job.site_id ? "New ticket for this property" : "New ticket for this customer"
-                    }
+              {fieldPage ? (
+                // The field page (Oct 21): the stage as text, in the picker's words. Done comes
+                // from the close-out; Open and Scheduled from the office.
+                <span
+                  className="inline-flex min-h-10 items-center rounded-md border px-3 text-sm font-medium"
+                  aria-label="Stage"
+                >
+                  {STAGE_LABELS[asStage(job.stage)]}
+                </span>
+              ) : (
+                <>
+                  <Select
+                    value={asStage(job.stage)}
+                    disabled={ro || lockedStage || stageMut.isPending}
+                    onValueChange={(v) => stageMut.mutate(v as ServiceStage)}
                   >
-                    <CopyPlus className="mr-1 h-4 w-4" />
-                    Repeat
-                  </Link>
-                </Button>
-              )}
-              {manager && (
-                <Button
-                  variant="outline"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 className="mr-1 h-4 w-4" /> Delete
-                </Button>
-              )}
-              {twoPane && (
-                // Only where the two layouts differ (xl and up; narrower screens always stack).
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="hidden xl:inline-flex"
-                  aria-pressed={stacked}
-                  aria-label={stacked ? "Sections beside the form" : "Sections below the form"}
-                  title={stacked ? "Sections beside the form" : "Sections below the form"}
-                  onClick={() => setLayout(stacked ? "side" : "stacked")}
-                >
-                  {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
-                </Button>
+                    <SelectTrigger className="w-[150px]" aria-label="Stage">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stageOptions.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {STAGE_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {dispatcher && repeatable && (
+                    <Button asChild variant="outline">
+                      <Link
+                        to="/service"
+                        search={{ new: 1, from: job.id }}
+                        title={
+                          job.site_id
+                            ? "New ticket for this property"
+                            : "New ticket for this customer"
+                        }
+                      >
+                        <CopyPlus className="mr-1 h-4 w-4" />
+                        Repeat
+                      </Link>
+                    </Button>
+                  )}
+                  {manager && (
+                    <Button
+                      variant="outline"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" /> Delete
+                    </Button>
+                  )}
+                  {twoPane && (
+                    // Only where the two layouts differ (xl and up; narrower screens always stack).
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="hidden xl:inline-flex"
+                      aria-pressed={stacked}
+                      aria-label={stacked ? "Sections beside the form" : "Sections below the form"}
+                      title={stacked ? "Sections beside the form" : "Sections below the form"}
+                      onClick={() => setLayout(stacked ? "side" : "stacked")}
+                    >
+                      {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -2742,6 +2883,58 @@ function BillingNote({ accountId }: { accountId: string | null }) {
   return (
     <p className="whitespace-pre-line text-xs text-amber-700 dark:text-amber-400">
       Billing: {note}
+    </p>
+  );
+}
+
+/**
+ * The field page's property contact (Oct 21): the ticket's contact by name with a tap-to-call
+ * number — the same contacts read the picker makes (ContactSelect), shown as text. Nothing when
+ * the ticket names no contact.
+ */
+function FieldContactLine({
+  accountId,
+  siteId,
+  contactId,
+}: {
+  accountId: string;
+  siteId: string | null;
+  contactId: string | null;
+}) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listContacts);
+  const q = useQuery({
+    queryKey: ["contacts", accountId],
+    queryFn: () => listFn({ data: { account_id: accountId } }),
+    enabled: !!session && !!contactId,
+  });
+  if (!contactId) return null;
+  const c = q.data?.find((r) => r.id === contactId);
+  const phone = c?.mobile || c?.office_phone || "";
+  return (
+    <p className="flex flex-wrap items-center gap-x-2">
+      <span className="text-muted-foreground">Contact </span>
+      {c ? (
+        <>
+          <span>{c.name}</span>
+          {siteId && c.site_ids.includes(siteId) && (
+            <span className="text-xs text-muted-foreground">(this property)</span>
+          )}
+          {phone && (
+            <a
+              href={`tel:${phone}`}
+              className="inline-flex min-h-10 items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+            >
+              <Phone className="h-4 w-4" />
+              {phone}
+            </a>
+          )}
+        </>
+      ) : q.isLoading ? (
+        <span className="text-muted-foreground">Loading…</span>
+      ) : (
+        <span>Former contact</span>
+      )}
     </p>
   );
 }

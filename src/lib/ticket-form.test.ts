@@ -169,7 +169,11 @@ describe("the tighter layout (owner, Oct 1): two columns for the office, one for
   });
 
   it("a technician keeps the single column in the old order", () => {
-    const tech = form.slice(form.indexOf("{isTech ? ("), form.indexOf(") : ("));
+    // Oct 21: the field page (a technician-only user) branches first — `{fieldPage ? ( … ) :
+    // isTech ? (`; this is the office-side technician's branch after it.
+    const techAt = form.indexOf(") : isTech ? (");
+    expect(techAt).toBeGreaterThan(0);
+    const tech = form.slice(techAt, form.indexOf(") : (", techAt));
     expect(tech).not.toContain("grid-cols");
     const seq = [
       "{customerField}",

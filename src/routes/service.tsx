@@ -1,6 +1,8 @@
-import { createFileRoute, Outlet, useChildMatches } from "@tanstack/react-router";
+import { createFileRoute, Navigate, Outlet, useChildMatches } from "@tanstack/react-router";
 
 import { ServicePage } from "@/components/service-page";
+import { isFieldOnly } from "@/lib/access";
+import { useAuth } from "@/lib/auth-store";
 import { parseServiceSearch } from "@/lib/service-search";
 
 export const Route = createFileRoute("/service")({
@@ -14,7 +16,9 @@ export const Route = createFileRoute("/service")({
   // `openwork`), `overdue=1` (the Customers page counts strip), `q=`, `tech=`, `type=` (owner,
   // Oct 9: the list keeps its filters and Back restores them). A ticket's `from=board&week=` /
   // `from=invoices` says where its Back link returns. Parsing: lib/service-search.ts.
-  // Access is the central gate's (pageForPath: /service → Service).
+  // Access is the central gate's (pageForPath: /service → Service). The list itself is the
+  // office's (Oct 21): a technician-only user is sent to My tickets; a ticket (?id) still opens
+  // for them, as the field page (components/service-page.tsx `fieldPage`).
   validateSearch: parseServiceSearch,
   component: ServiceRoute,
 });
@@ -24,7 +28,11 @@ function ServiceRoute() {
   // /service/board and /service/today are child routes of this file (flat-route nesting):
   // render them in place of the list.
   const children = useChildMatches();
+  const { profile } = useAuth();
   if (children.length > 0) return <Outlet />;
+  // The Tickets list (and a blank ticket, which the server refuses them) is the office's: a
+  // technician-only user's page is My tickets (owner, Oct 21; the pattern of routes/my-work.tsx).
+  if (!search.id && isFieldOnly(profile)) return <Navigate to="/service/today" replace />;
   return (
     <ServicePage
       id={search.id}

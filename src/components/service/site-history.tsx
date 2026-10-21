@@ -189,7 +189,9 @@ export function HistoryFold({
 }) {
   const { profile } = useAuth();
   // A technician-only user cannot read another technician's ticket: no Open link, nothing said.
-  const canOpen = !isFieldOnly(profile);
+  // Nor until the profile is known (Oct 21: isFieldOnly(null) is false, and the link showed
+  // while it loaded).
+  const canOpen = !!profile && !isFieldOnly(profile);
   const summary = useHistorySummary(job.id);
   const q = useHistory(job.id, open);
   const rows = useMemo(

@@ -3,7 +3,9 @@
  * Tickets and Invoices are views of the same work, so they sit on one row under the page title.
  * The Tech Board tab (owner, Oct 5: it used to sit folded above the ticket list; first, same day) shows to
  * everyone (owner, Oct 9; dispatch on it stays `managesTickets`); the Invoices tab to admins, managers and
- * sales / project managers (`seesInvoices`; owner, Oct 1); anyone else sees Tickets only.
+ * sales / project managers (`seesInvoices`; owner, Oct 1); anyone else sees Tickets only. Not
+ * shown to a technician-only user at all (owner, Oct 21): the three are the office's views, and
+ * the list and the board send them to My tickets.
  */
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +13,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { CalendarDays, Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets, seesInvoices, type AccessLike } from "@/lib/access";
+import { isFieldOnly, managesTickets, seesInvoices, type AccessLike } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
 import { AWAITING_INVOICE_KEY, listAwaitingInvoice } from "@/lib/service.functions";
 import { cn } from "@/lib/utils";
@@ -45,6 +47,8 @@ export function ServiceTabs() {
     enabled: !!session && seesInvoices(profile),
   });
   const toInvoice = awaiting.data?.count ?? 0;
+  // Oct 21: the office's views; a technician-only user has My tickets (after the hooks above).
+  if (isFieldOnly(profile)) return null;
   const tabs = TABS.filter((t) => t.show(profile));
   if (tabs.length < 2) return null;
   return (

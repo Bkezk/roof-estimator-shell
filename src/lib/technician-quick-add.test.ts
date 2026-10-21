@@ -122,7 +122,8 @@ describe("the ticket page (components/service-page.tsx)", () => {
   const page = read("src/components/service-page.tsx");
   it("passes allowAdd={!isFieldOnly(profile)} to its AccountPicker", () => {
     expect(page).toMatch(/import \{[^}]*\bisFieldOnly\b[^}]*\} from "@\/lib\/access";/);
-    expect(page).toContain("const ownsCustomer = !isFieldOnly(profile);");
+    // Oct 21: the field page — not until the profile is known either (isFieldOnly(null) is false).
+    expect(page).toContain("const ownsCustomer = !!profile && !isFieldOnly(profile);");
     expect(page).toMatch(/<AccountPicker\s+id="ticket-customer"[\s\S]*?allowAdd=\{ownsCustomer\}/);
   });
   it("hides the 'Change the customer' × for a technician-only user", () => {

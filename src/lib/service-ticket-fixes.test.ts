@@ -355,7 +355,12 @@ describe("7. Ticket Save never moves the stage", () => {
     expect(end).toBeGreaterThan(start);
     // The code only (the comment there explains why there is no stage).
     const payload = src.slice(start, end).replace(/\/\/[^\n]*/g, "");
-    expect(payload).toContain("const input: ServiceJobInput = {");
+    // Oct 21: the field page (a technician-only user) saves the notes alone through
+    // fieldNotesInput (lib/field-ticket-page.ts, no stage there either); the form's own payload
+    // is the other arm.
+    expect(payload).toMatch(
+      /const input: ServiceJobInput = fieldPage\s*\? fieldNotesInput\(job!, draft\.notes\)\s*: \{/,
+    );
     expect(payload).not.toMatch(/\bstage\s*[:,]/);
     expect(payload).not.toContain("asStage(job.stage)");
   });
