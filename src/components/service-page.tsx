@@ -155,6 +155,7 @@ import {
 } from "@/lib/ticket-list-filter";
 import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
+import { FoldAllContext } from "@/components/service/field-shared";
 import { HISTORY_FOLD_ID, HistoryFold, HistoryStrip } from "@/components/service/site-history";
 import { HISTORY_OPEN_PARAM } from "@/lib/service-history";
 import { InvoiceBlock } from "@/components/service/invoice-block";
@@ -1475,7 +1476,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     requestAnimationFrame(() =>
       document
         .getElementById(HISTORY_FOLD_ID)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
     );
   const openHistory = () => {
     setHistoryOpen(true);
@@ -2609,53 +2610,57 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         </p>
       )}
 
-      {twoPane && job ? (
-        // Owner, Oct 1 ("the menus that open like aerial, materials, repairs … would go on the
-        // right"): on xl and up, the form (left, ~60%) and the folding sections (right, ~40%,
-        // at least 380 px; its top stays in view while the form scrolls, and it scrolls with
-        // the page). Below xl they stack, the form first. Each section keeps its one-line
-        // summary and remembered open state; Close out stays a header button.
-        // Owner, Oct 6: or the same sections below the form ("stacked", the toggle by Delete).
-        <div className={stacked ? STACKED_PANES : SIDE_PANES}>
-          <div className="min-w-0">{ticketForm}</div>
-          <aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE} aria-label="Ticket sections">
-            {/* Owner, Oct 9: at Done the "Needs authorization" card leads the column — the next
+      {/* Owner, Oct 21: arriving for the history (?open=history from My tickets), every other
+          section starts folded for this visit (FoldAllContext) and the History fold is centred. */}
+      <FoldAllContext.Provider value={arrivedAtHistory ? 1 : 0}>
+        {twoPane && job ? (
+          // Owner, Oct 1 ("the menus that open like aerial, materials, repairs … would go on the
+          // right"): on xl and up, the form (left, ~60%) and the folding sections (right, ~40%,
+          // at least 380 px; its top stays in view while the form scrolls, and it scrolls with
+          // the page). Below xl they stack, the form first. Each section keeps its one-line
+          // summary and remembered open state; Close out stays a header button.
+          // Owner, Oct 6: or the same sections below the form ("stacked", the toggle by Delete).
+          <div className={stacked ? STACKED_PANES : SIDE_PANES}>
+            <div className="min-w-0">{ticketForm}</div>
+            <aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE} aria-label="Ticket sections">
+              {/* Owner, Oct 9: at Done the "Needs authorization" card leads the column — the next
               step on the ticket, not the last block to scroll to. Marking authorized and making
               the invoice stay two steps, done by different people (invoice-block.tsx). */}
-            {jobStage === "done" && <InvoiceBlock job={job} />}
-            <AerialSection job={job} canEdit={canEdit} />
-            <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
-            <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
-            {materials}
-            {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
-            <PurchaseOrdersSection jobId={job.id} />
-            <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
-            {/* What happened at this property before (owner, Oct 21): starts closed; the strip
-                under the property opens it. */}
-            {job.site_id && (
-              <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
-            )}
-            {jobStage !== "done" && <InvoiceBlock job={job} />}
-          </aside>
-        </div>
-      ) : (
-        <>
-          {ticketForm}
-          {job && (
-            // A technician (one column). Owner, Sep 28 ("so much crap on it"): the sections below
-            // the form fold away with a one-line summary each; the open state is remembered.
-            <div className="space-y-4">
-              <TicketExtras job={job} canEdit={canEdit} />
+              {jobStage === "done" && <InvoiceBlock job={job} />}
+              <AerialSection job={job} canEdit={canEdit} />
+              <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
+              <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
               {materials}
+              {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
               <PurchaseOrdersSection jobId={job.id} />
-              <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+              <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
+              {/* What happened at this property before (owner, Oct 21): starts closed; the strip
+                under the property opens it. */}
               {job.site_id && (
                 <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
               )}
-            </div>
-          )}
-        </>
-      )}
+              {jobStage !== "done" && <InvoiceBlock job={job} />}
+            </aside>
+          </div>
+        ) : (
+          <>
+            {ticketForm}
+            {job && (
+              // A technician (one column). Owner, Sep 28 ("so much crap on it"): the sections below
+              // the form fold away with a one-line summary each; the open state is remembered.
+              <div className="space-y-4">
+                <TicketExtras job={job} canEdit={canEdit} />
+                {materials}
+                <PurchaseOrdersSection jobId={job.id} />
+                <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+                {job.site_id && (
+                  <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </FoldAllContext.Provider>
 
       {job && (
         <AlertDialog

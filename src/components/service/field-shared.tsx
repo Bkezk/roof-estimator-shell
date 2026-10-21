@@ -5,7 +5,7 @@
  * box (optionally collapsible, its open state remembered per section).
  */
 import { sectionTone } from "@/components/service/section-tones";
-import { useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -119,6 +119,15 @@ function writeSection(key: string, open: boolean) {
     // Storage blocked (private mode, blocked site data): the toggle still works this visit.
   }
 }
+/**
+ * Owner, Oct 21: arriving at a ticket for its History at this property (the My tickets strip,
+ * ?open=history), every OTHER section folds for that visit so the one box stands alone, centred.
+ * The page provides a token (0 = nothing); each self-managed Box closes when the token is set,
+ * without touching the open state it remembers for next time. A controlled Box (the History fold
+ * itself) is its parent's business and is left alone.
+ */
+export const FoldAllContext = createContext(0);
+
 function initialOpen(storageKey: string | undefined, fallback: boolean) {
   if (!storageKey) return fallback;
   const v = readSections()[storageKey];
@@ -165,6 +174,10 @@ export function Box({
   plain?: boolean | undefined;
 }) {
   const [ownOpen, setOwnOpen] = useState(() => initialOpen(storageKey, defaultOpen));
+  const foldAll = useContext(FoldAllContext);
+  useEffect(() => {
+    if (foldAll && controlledOpen === undefined) setOwnOpen(false);
+  }, [foldAll, controlledOpen]);
   const open = controlledOpen ?? ownOpen;
   const t = sectionTone(toneKey ?? storageKey);
   const hasSummary = summary !== undefined && summary !== null && summary !== false;
