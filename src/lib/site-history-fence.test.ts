@@ -137,8 +137,10 @@ describe("the two narrowed read policies", () => {
       const c = noComments(read(`${DIR}/${n}`));
       return /create policy service_job_(photos|repairs)_read/.test(c);
     });
+    // Oct 21, later the same day: 20261021120000_service_objects_fence.sql follows this file
+    // (the bucket's files); it defines neither policy, which is what the list above checks.
     expect(defining).toEqual(["20260927130000_service_field.sql", FILE]);
-    expect(files[files.length - 1]).toBe(FILE);
+    expect(files.indexOf(FILE)).toBeGreaterThan(files.indexOf("20260927130000_service_field.sql"));
   });
   it("the FOR ALL write policies open nothing wider for a technician: works_on_ticket is their own tickets already", () => {
     const lock = flat(read(`${DIR}/20261006192000_field_edit_lock.sql`));
