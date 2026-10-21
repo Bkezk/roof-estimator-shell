@@ -38,33 +38,43 @@ function memStorage(init: Record<string, string> = {}) {
 const U = "user-1";
 
 describe("the default fold", () => {
-  it("Properties always start open, whatever the count", () => {
-    expect(defaultOpen("properties", 0)).toBe(true);
-    expect(defaultOpen("properties", 100)).toBe(true);
-  });
-  it("every other section opens while it has ten rows or fewer, and folds past that", () => {
-    expect(FOLD_OPEN_MAX).toBe(10);
-    for (const s of FOLD_SECTIONS.filter((x) => x !== "properties")) {
-      expect(defaultOpen(s, 0)).toBe(true);
-      expect(defaultOpen(s, 3)).toBe(true);
-      expect(defaultOpen(s, 10)).toBe(true);
-      expect(defaultOpen(s, 11)).toBe(false);
-      expect(defaultOpen(s, 100)).toBe(false);
+  it("a customer's page: every section starts folded, whatever the count (owner, Oct 21)", () => {
+    for (const s of FOLD_SECTIONS) {
+      expect(defaultOpen("customer", s, 0)).toBe(false);
+      expect(defaultOpen("customer", s, 3)).toBe(false);
+      expect(defaultOpen("customer", s, 100)).toBe(false);
+      expect(defaultOpen("customer", s, null)).toBe(false);
+      expect(defaultOpen("customer", s, undefined)).toBe(false);
     }
   });
-  it("a count not known yet (still loading) leaves it open", () => {
-    expect(defaultOpen("takeoffs", null)).toBe(true);
-    expect(defaultOpen("contacts", undefined)).toBe(true);
+  it("a property's page: a section opens while it has ten rows or fewer, and folds past that", () => {
+    expect(FOLD_OPEN_MAX).toBe(10);
+    for (const s of FOLD_SECTIONS) {
+      expect(defaultOpen("property", s, 0)).toBe(true);
+      expect(defaultOpen("property", s, 3)).toBe(true);
+      expect(defaultOpen("property", s, 10)).toBe(true);
+      expect(defaultOpen("property", s, 11)).toBe(false);
+      expect(defaultOpen("property", s, 100)).toBe(false);
+    }
+  });
+  it("a property's page: a count not known yet (still loading) leaves it open", () => {
+    expect(defaultOpen("property", "bids", null)).toBe(true);
+    expect(defaultOpen("property", "tickets", undefined)).toBe(true);
+  });
+  it("the hook passes the page through", () => {
+    expect(readFileSync("src/lib/use-section-fold.ts", "utf8")).toContain(
+      "const open = isFoldOpen(folds, page, section, count);",
+    );
   });
 });
 
 describe("what the user set wins", () => {
   it("isFoldOpen: the stored value, else the default", () => {
-    expect(isFoldOpen({}, "tickets", 100)).toBe(false);
-    expect(isFoldOpen({ tickets: true }, "tickets", 100)).toBe(true);
-    expect(isFoldOpen({ tickets: false }, "tickets", 3)).toBe(false);
-    expect(isFoldOpen({ properties: false }, "properties", 1)).toBe(false);
-    expect(isFoldOpen({ bids: true }, "tickets", 100)).toBe(false);
+    expect(isFoldOpen({}, "customer", "tickets", 100)).toBe(false);
+    expect(isFoldOpen({ tickets: true }, "customer", "tickets", 100)).toBe(true);
+    expect(isFoldOpen({ tickets: false }, "customer", "tickets", 3)).toBe(false);
+    expect(isFoldOpen({ properties: false }, "customer", "properties", 1)).toBe(false);
+    expect(isFoldOpen({ bids: true }, "customer", "tickets", 100)).toBe(false);
   });
   it("toggleFold sets one section and keeps the rest", () => {
     expect(toggleFold({ tickets: false }, "bids", true)).toEqual({ tickets: false, bids: true });
@@ -202,7 +212,7 @@ describe("the fold header (source)", () => {
     const hook = read("src/lib/use-section-fold.ts");
     expect(hook).toContain("readFolds(storage, page, userId)");
     expect(hook).toContain("writeFolds(storage, page, userId, next)");
-    expect(hook).toContain("const open = isFoldOpen(folds, section, count);");
+    expect(hook).toContain("const open = isFoldOpen(folds, page, section, count);");
     expect(hook).toContain('const userId = profile?.id ?? session?.user.id ?? "";');
   });
   it("the property's page folds the same way, under its own key", () => {

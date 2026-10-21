@@ -4,11 +4,13 @@
  * section — Contacts, Properties, Tickets, Opportunities, Bids, Tasks, Takeoffs — folds under its
  * header; the count stays in the header either way.
  *
- * The default: Properties open; any other section open while it has FOLD_OPEN_MAX rows or fewer
- * and folded past that, so a customer with 100 tickets lands on a short page and one with 3
- * tickets sees them. A fold the user sets is remembered per user, per page, per section in the
- * browser (localStorage; `jbk-portal:customer-folds:<user>` / `jbk-portal:property-folds:<user>`)
- * and wins over the default. Pure rules only; components/section-fold.tsx owns the header.
+ * The default on a CUSTOMER's page (owner, Oct 21: "make each section start collapsed"): every
+ * section folded, whatever its count — the header's count and the coloured ground say what is
+ * there, one tap opens it. On a PROPERTY's page the Oct 15 rule stays: a section open while it
+ * has FOLD_OPEN_MAX rows or fewer and folded past that. A fold the user sets is remembered per
+ * user, per page, per section in the browser (localStorage; `jbk-portal:customer-folds:<user>` /
+ * `jbk-portal:property-folds:<user>`) and wins over the default. Pure rules only;
+ * components/section-fold.tsx owns the header.
  */
 
 export const FOLD_SECTIONS = [
@@ -30,28 +32,35 @@ export type FoldPage = "customer" | "property";
 /** The folds the user set: true = open, false = folded; a section left out follows the default. */
 export type Folds = Partial<Record<FoldSection, boolean>>;
 
-/** A section with more rows than this starts folded (Properties never does). */
+/** On a property's page, a section with more rows than this starts folded. */
 export const FOLD_OPEN_MAX = 10;
 
 /**
- * Whether a section the user never touched starts open: Properties always; anything else while
- * its count is FOLD_OPEN_MAX or under. A count not known yet (null: the rows are still loading)
- * leaves it open, so the loading line shows.
+ * Whether a section the user never touched starts open. A customer's page: never (Oct 21) —
+ * every section starts folded, the Properties one included. A property's page: while its count
+ * is FOLD_OPEN_MAX or under; a count not known yet (null: the rows are still loading) leaves it
+ * open, so the loading line shows.
  */
-export function defaultOpen(section: FoldSection, count: number | null | undefined): boolean {
-  if (section === "properties") return true;
+export function defaultOpen(
+  page: FoldPage,
+  section: FoldSection,
+  count: number | null | undefined,
+): boolean {
+  if (page === "customer") return false;
+  void section;
   if (count === null || count === undefined) return true;
   return count <= FOLD_OPEN_MAX;
 }
 
-/** Open or folded: what the user set for the section, else the default for its count. */
+/** Open or folded: what the user set for the section, else the page's default for its count. */
 export function isFoldOpen(
   folds: Folds,
+  page: FoldPage,
   section: FoldSection,
   count: number | null | undefined,
 ): boolean {
   const set = folds[section];
-  return typeof set === "boolean" ? set : defaultOpen(section, count);
+  return typeof set === "boolean" ? set : defaultOpen(page, section, count);
 }
 
 /** The folds with one section set open or folded (`open` given) or flipped from `current`. */

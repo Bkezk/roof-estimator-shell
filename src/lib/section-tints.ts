@@ -6,17 +6,19 @@
  * Tickets section looks like a Tickets section wherever it is. The rows and cards inside keep
  * the card colour (INNER_BOX), and the outline buttons already stand on it.
  *
- * Every tint carries its dark-mode pair (a deep, translucent wash on the charcoal page), which is
- * also what lets the dark-mode scan (dark-mode.test.ts) accept the light `-50` colours.
+ * A `-100` wash with a `-300` edge (owner, Oct 21: "a tad more vibrant — contacts almost blends
+ * into the background"; the `-50` washes did). Every tint carries its dark-mode pair (a deep,
+ * translucent wash on the charcoal page), which is also what lets the dark-mode scan
+ * (dark-mode.test.ts) accept the fixed light colours.
  */
 export const SECTION_TINTS = {
-  contacts: "border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/40",
-  properties: "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40",
-  tickets: "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40",
-  opportunities: "border-violet-200 bg-violet-50 dark:border-violet-900 dark:bg-violet-950/40",
-  tasks: "border-teal-200 bg-teal-50 dark:border-teal-900 dark:bg-teal-950/40",
-  takeoffs: "border-indigo-200 bg-indigo-50 dark:border-indigo-900 dark:bg-indigo-950/40",
-  bids: "border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/40",
+  contacts: "border-sky-300 bg-sky-100 dark:border-sky-800 dark:bg-sky-950/60",
+  properties: "border-emerald-300 bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60",
+  tickets: "border-amber-300 bg-amber-100 dark:border-amber-800 dark:bg-amber-950/60",
+  opportunities: "border-violet-300 bg-violet-100 dark:border-violet-800 dark:bg-violet-950/60",
+  tasks: "border-teal-300 bg-teal-100 dark:border-teal-800 dark:bg-teal-950/60",
+  takeoffs: "border-indigo-300 bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60",
+  bids: "border-orange-300 bg-orange-100 dark:border-orange-800 dark:bg-orange-950/60",
 } as const;
 
 export type TintedSection = keyof typeof SECTION_TINTS;

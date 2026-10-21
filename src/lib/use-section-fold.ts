@@ -26,7 +26,7 @@ export function useSectionFold(
   const userId = profile?.id ?? session?.user.id ?? "";
   const storage = typeof window === "undefined" ? null : window.localStorage;
   const [folds, setFolds] = useState(() => readFolds(storage, page, userId));
-  const open = isFoldOpen(folds, section, count);
+  const open = isFoldOpen(folds, page, section, count);
   const toggle = () => {
     // Re-read first: another section on the page wrote its own fold since this one was read.
     const next = toggleFold(readFolds(storage, page, userId), section, !open);

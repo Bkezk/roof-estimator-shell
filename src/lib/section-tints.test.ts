@@ -15,15 +15,15 @@ const property = read("src/components/property-page.tsx");
 const ticketRows = read("src/components/crm/ticket-rows.tsx");
 
 describe("the tints", () => {
-  it("one distinct hue per kind, each with a light wash and a dark pair", () => {
+  it("one distinct hue per kind, each a -100 wash with a -300 edge (Oct 21: more vibrant) and a dark pair", () => {
     const hues = new Set<string>();
     for (const [name, cls] of Object.entries(SECTION_TINTS)) {
-      const hue = /bg-([a-z]+)-50\b/.exec(cls)?.[1];
+      const hue = /bg-([a-z]+)-100\b/.exec(cls)?.[1];
       expect(hue, name).toBeTruthy();
       hues.add(hue!);
-      expect(cls, name).toMatch(/dark:bg-[a-z]+-950\/40/);
-      expect(cls, name).toMatch(/border-[a-z]+-200/);
-      expect(cls, name).toMatch(/dark:border-[a-z]+-900/);
+      expect(cls, name).toMatch(/dark:bg-[a-z]+-950\/60/);
+      expect(cls, name).toMatch(/border-[a-z]+-300/);
+      expect(cls, name).toMatch(/dark:border-[a-z]+-800/);
       // Red is the status colour (overdue): never a section's ground.
       expect(hue, name).not.toMatch(/^(red|rose)$/);
     }
