@@ -135,6 +135,8 @@ export function Box({
   storageKey,
   tone: toneKey,
   plain,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   title: string;
   icon: LucideIcon;
@@ -143,6 +145,12 @@ export function Box({
   collapsible?: boolean | undefined;
   /** The first open state, until the user toggles (then the remembered one wins). */
   defaultOpen?: boolean | undefined;
+  /**
+   * Controlled (the History fold, opened from its strip and by ?open=history; owner, Oct 21):
+   * the open state lives with the parent, which hears every toggle.
+   */
+  open?: boolean | undefined;
+  onOpenChange?: ((open: boolean) => void) | undefined;
   /** Shown muted on the right of the header, open or closed. */
   summary?: React.ReactNode;
   /** Remembers the open state under this key (localStorage). */
@@ -156,7 +164,8 @@ export function Box({
    */
   plain?: boolean | undefined;
 }) {
-  const [open, setOpen] = useState(() => initialOpen(storageKey, defaultOpen));
+  const [ownOpen, setOwnOpen] = useState(() => initialOpen(storageKey, defaultOpen));
+  const open = controlledOpen ?? ownOpen;
   const t = sectionTone(toneKey ?? storageKey);
   const hasSummary = summary !== undefined && summary !== null && summary !== false;
 
@@ -187,7 +196,8 @@ export function Box({
   const Chevron = open ? ChevronDown : ChevronRight;
   const toggle = () => {
     const next = !open;
-    setOpen(next);
+    setOwnOpen(next);
+    onOpenChange?.(next);
     if (storageKey) writeSection(storageKey, next);
   };
   return (

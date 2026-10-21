@@ -28,7 +28,6 @@ import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/
 import { easternYmd, resolveFieldDay } from "@/lib/field-day";
 import { clockTransition, durationHours, entryDay, type Clock } from "@/lib/tech-clock";
 import { warrantyBadges, type Warranty } from "@/lib/warranty";
-import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
 import { mentionedIds } from "@/lib/mentions";
 import { mentionRoster } from "@/lib/auth.functions";
 import {
@@ -1559,42 +1558,4 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
       });
     }
     return out;
-  });
-
-/**
- * "Earlier at this site" (service study M4, owner Oct 5): the last tickets at the same site as
- * this one, newest first, not counting this ticket or deleted ones. A ticket with no site has
- * none. A technician sees only their own earlier tickets (row-level security on service_jobs).
- */
-export const listSiteHistory = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<SiteHistoryRow[]> => {
-    await me(context);
-    const sb = context.supabase;
-    const { data: job, error: jobErr } = await sb
-      .from("service_jobs")
-      .select("site_id")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (jobErr) throw new Error(jobErr.message);
-    if (!job?.site_id) return [];
-    const { data: rows, error } = await sb
-      .from("service_jobs")
-      .select(
-        "id, number, stage, service_type, scheduled_date, completed_at, created_at, closing_notes, description, technician_id",
-      )
-      .eq("site_id", job.site_id)
-      .neq("id", data.id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(SITE_HISTORY_LIMIT);
-    if (error) throw new Error(error.message);
-    const { data: techs } = await sb.rpc("technician_options");
-    const names = new Map<string, string>();
-    for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    return (rows ?? []).map(({ technician_id, ...r }) => ({
-      ...r,
-      technician_name: technician_id ? (names.get(technician_id) ?? null) : null,
-    }));
   });

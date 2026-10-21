@@ -2,8 +2,9 @@
  * /service's search params (src/routes/service.tsx validateSearch). Pure, so the parsing is
  * tested without the route.
  *
- *   ?id=<uuid>[&closeout=1][&from=board&week=YYYY-MM-DD|&from=invoices]
- *                             open that ticket (closeout=1, from Today: at its close-out). `from`
+ *   ?id=<uuid>[&closeout=1][&open=history][&from=board&week=YYYY-MM-DD|&from=invoices]
+ *                             open that ticket (closeout=1, from Today: at its close-out;
+ *                             open=history: with its History at this property fold open). `from`
  *                             (owner, Oct 9): where the ticket was opened from, so its Back link
  *                             returns there — the Tech Board at that week, or the Awaiting
  *                             invoice queue; without it, the Tickets list (whose own filters
@@ -44,6 +45,11 @@ export type TicketFrom = (typeof TICKET_FROM)[number];
 export interface ServiceSearch {
   id?: string;
   closeout?: 1;
+  /**
+   * Ticket (`id`): open the "History at this property" fold on arrival (My tickets' history
+   * strip, the close-out's; owner, Oct 21). Only "history" means anything.
+   */
+  open?: "history";
   new?: 1;
   /** New ticket: the technician to prefill (the Board's "+"). List: the Technician select. */
   tech?: string;
@@ -104,6 +110,7 @@ export function parseServiceSearch(s: Record<string, unknown>): ServiceSearch {
     return {
       id,
       ...(isOne(s["closeout"]) ? { closeout: 1 as const } : {}),
+      ...(s["open"] === "history" ? { open: "history" as const } : {}),
       ...(from ? { from } : {}),
       // A week only means something on the way back to the Board.
       ...(from === "board" && typeof week === "string" && YMD.test(week) ? { week } : {}),

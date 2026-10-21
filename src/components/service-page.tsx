@@ -154,6 +154,8 @@ import {
 } from "@/lib/ticket-list-filter";
 import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
+import { HISTORY_FOLD_ID, HistoryFold, HistoryStrip } from "@/components/service/site-history";
+import { HISTORY_OPEN_PARAM } from "@/lib/service-history";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -1432,8 +1434,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage);
   const lockedStage = stageLocked(profile, jobStage);
 
-  // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD.
-  const prefill: { tech?: string; date?: string } = useSearch({ strict: false });
+  // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD. A saved
+  // ticket opened from My tickets' history strip arrives with ?open=history (owner, Oct 21).
+  const prefill: { tech?: string; date?: string; open?: string } = useSearch({ strict: false });
   const [draft, setDraft] = useState<Draft>(() => {
     const d = draftFrom(job);
     if (job) return d;
@@ -1449,6 +1452,25 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [layout, setLayout] = useTicketLayout();
+  // History at this property (owner, Oct 21): the fold starts closed; the strip under the
+  // property opens it and scrolls to it, as does arriving with ?open=history.
+  const [historyOpen, setHistoryOpen] = useState(prefill.open === HISTORY_OPEN_PARAM);
+  const scrollToHistory = () =>
+    requestAnimationFrame(() =>
+      document
+        .getElementById(HISTORY_FOLD_ID)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  const openHistory = () => {
+    setHistoryOpen(true);
+    scrollToHistory();
+  };
+  const arrivedAtHistory = prefill.open === HISTORY_OPEN_PARAM && !!job?.site_id;
+  useEffect(() => {
+    if (arrivedAtHistory) scrollToHistory();
+    // On arrival only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The named crew. An existing ticket's rows load after the ticket; until then (and for a
   // technician, who answers on the close-out instead) nothing about the crew is sent.
@@ -1868,37 +1890,47 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     <div className="space-y-1">
       <Label htmlFor={draft.customer ? undefined : "ticket-customer"}>Customer</Label>
       {draft.customer ? (
-        <CustomerBlock
-          accountId={draft.customer.account_id}
-          siteId={draft.customer.site_id}
-          hit={draft.hit}
-          contactId={draft.contact_id}
-          siteMessage={siteMessage}
-          disabled={ro}
-          allowChange={ownsCustomer}
-          locationId={draft.location_id}
-          locationName={job?.location_name ?? null}
-          onLocation={(v) => set("location_id", v)}
-          onChangeCustomer={() => {
-            setChangingCustomer(true);
-            setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "", location_id: "" }));
-          }}
-          onPickSite={(site, accountName) =>
-            setDraft((d) => ({
-              ...d,
-              // Another property: its own sites (or none).
-              location_id: d.customer?.site_id === site.id ? d.location_id : "",
-              customer: d.customer
-                ? {
-                    account_id: d.customer.account_id,
-                    site_id: site.id,
-                    label: `${site.name} — ${accountName}`,
-                  }
-                : d.customer,
-            }))
-          }
-          onContact={(v) => set("contact_id", v)}
-        />
+        <>
+          <CustomerBlock
+            accountId={draft.customer.account_id}
+            siteId={draft.customer.site_id}
+            hit={draft.hit}
+            contactId={draft.contact_id}
+            siteMessage={siteMessage}
+            disabled={ro}
+            allowChange={ownsCustomer}
+            locationId={draft.location_id}
+            locationName={job?.location_name ?? null}
+            onLocation={(v) => set("location_id", v)}
+            onChangeCustomer={() => {
+              setChangingCustomer(true);
+              setDraft((d) => ({
+                ...d,
+                customer: null,
+                hit: null,
+                contact_id: "",
+                location_id: "",
+              }));
+            }}
+            onPickSite={(site, accountName) =>
+              setDraft((d) => ({
+                ...d,
+                // Another property: its own sites (or none).
+                location_id: d.customer?.site_id === site.id ? d.location_id : "",
+                customer: d.customer
+                  ? {
+                      account_id: d.customer.account_id,
+                      site_id: site.id,
+                      label: `${site.name} — ${accountName}`,
+                    }
+                  : d.customer,
+              }))
+            }
+            onContact={(v) => set("contact_id", v)}
+          />
+          {/* What happened here before (owner, Oct 21): one line, a tap opens the fold below. */}
+          {job?.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
+        </>
       ) : (
         <>
           <AccountPicker
@@ -2457,6 +2489,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
             <PurchaseOrdersSection jobId={job.id} />
             <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
+            {/* What happened at this property before (owner, Oct 21): starts closed; the strip
+                under the property opens it. */}
+            {job.site_id && (
+              <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
+            )}
             {jobStage !== "done" && <InvoiceBlock job={job} />}
           </aside>
         </div>
@@ -2471,6 +2508,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {materials}
               <PurchaseOrdersSection jobId={job.id} />
               <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+              {job.site_id && (
+                <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
+              )}
             </div>
           )}
         </>

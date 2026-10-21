@@ -43,3 +43,23 @@ describe("a crm_sites row is a Property", () => {
     );
   });
 });
+
+// This block lived in site-history.test.ts until the "Earlier at this property" fold became the
+// History at this property fold (service-history.test.ts, Oct 21).
+describe("Sites are called Properties (owner, Oct 6)", () => {
+  it("in the interface; the data keeps its names", () => {
+    const customers = read("src/components/customers-page.tsx");
+    // Since Oct 15 the heading is the section's fold header (components/section-fold.tsx).
+    expect(customers.replace(/\s+/g, " ")).toContain('icon={MapPin} title="Properties"');
+    expect(customers).not.toMatch(/>\s*Sites\s*</);
+    expect(read("src/components/crm/site-select.tsx")).toContain('"Pick the property…"');
+    expect(read("src/components/service-page.tsx")).toMatch(
+      /htmlFor="ticket-site"[^>]*>\s*Property\s*</,
+    );
+    expect(read("src/components/service/invoices-page.tsx")).not.toContain(
+      'font-medium">Site</th>',
+    );
+    // The history fold and strip say "property" too (site-history.tsx).
+    expect(read("src/components/service/site-history.tsx")).not.toMatch(/at this site/i);
+  });
+});

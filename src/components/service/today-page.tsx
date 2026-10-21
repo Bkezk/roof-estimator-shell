@@ -59,6 +59,7 @@ import { seedJobFromToday } from "@/lib/job-cache";
 import { cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
+import { HistoryLink } from "@/components/service/site-history";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
 import { WarrantyBadgeList } from "@/components/crm/site-warranties";
 import {
@@ -474,6 +475,10 @@ function JobCard({
           </span>
         </a>
       )}
+
+      {/* What happened here before (owner, Oct 21): one line, a tap opens the ticket with its
+          History fold open. Left out when this is the first ticket here — the card stays short. */}
+      {j.site_id && <HistoryLink jobId={j.id} whenNone="hide" />}
 
       {j.description && <p className="text-base">{j.description}</p>}
 

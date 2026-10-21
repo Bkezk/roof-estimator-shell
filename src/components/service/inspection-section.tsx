@@ -53,6 +53,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Box } from "@/components/service/field-shared";
+import { LastTimeLine } from "@/components/service/site-history";
 import {
   inspectionKey,
   useInspectionDraft,
@@ -112,7 +113,12 @@ function InspectionBody({
   const legacyNotes = draft.data.inspection?.notes.trim() ?? "";
   return (
     <div className="space-y-3">
-      <ChecklistRows items={draft.items} readOnly={!canEdit} onChange={draft.setItem} />
+      <ChecklistRows
+        items={draft.items}
+        readOnly={!canEdit}
+        onChange={draft.setItem}
+        jobId={job.id}
+      />
       {legacyNotes && (
         <p className="whitespace-pre-line rounded-md bg-muted/40 px-3 py-2 text-sm">
           <span className="text-muted-foreground">Inspection notes: </span>
@@ -128,18 +134,23 @@ function InspectionBody({
 /**
  * The checklist rows, controlled: each item's label, OK / Issue / N/A and a note ("What and
  * where" on an Issue). `extra` renders under a row — the close-out's camera and thumbnails. Both
- * screens render the checklist with this.
+ * screens render the checklist with this. With `jobId`, each row ends with what an earlier
+ * ticket at this property found for that item ("Last time: Jun 12 — …" and its photo; owner,
+ * Oct 21, site-history.tsx LastTimeLine) — photos carry the item's id as item_key.
  */
 export function ChecklistRows({
   items,
   readOnly,
   onChange,
   extra,
+  jobId,
 }: {
   items: readonly InspectionItem[];
   readOnly: boolean;
   onChange: (id: string, patch: Partial<InspectionItem>) => void;
   extra?: ((item: InspectionItem) => React.ReactNode) | undefined;
+  /** The ticket, for the "Last time" line under each item. */
+  jobId?: string | undefined;
 }) {
   if (items.length === 0)
     return (
@@ -177,6 +188,7 @@ export function ChecklistRows({
             />
           )}
           {extra?.(item)}
+          {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
         </li>
       ))}
     </ol>

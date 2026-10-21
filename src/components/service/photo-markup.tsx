@@ -26,6 +26,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
+  ChevronLeft,
+  ChevronRight,
   Circle,
   Download,
   Eraser,
@@ -447,6 +449,7 @@ export function PhotoLightbox({
   canAnnotate,
   ticketNumber,
   ordinal,
+  nav,
 }: {
   photo: JobPhotoRow;
   url: string;
@@ -457,6 +460,11 @@ export function PhotoLightbox({
   ticketNumber: string | number | null | undefined;
   /** The photo's number among the ticket's photos of its role (the file name). */
   ordinal: number;
+  /**
+   * Leafing through a ticket's photos (the History fold; owner, Oct 21): this photo's place in
+   * the set, and the step — arrows on screen, the arrow keys, a swipe on a phone.
+   */
+  nav?: { index: number; count: number; onStep: (delta: 1 | -1) => void } | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -464,6 +472,18 @@ export function PhotoLightbox({
   const marks = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
   const markable = canAnnotate && isAnnotatableRole(photo.role);
   const label = ROLE_LABEL[photo.role] ?? "Photo";
+  const touchX = useRef<number | null>(null);
+  const canPrev = !!nav && nav.index > 0;
+  const canNext = !!nav && nav.index < nav.count - 1;
+  useEffect(() => {
+    if (!open || !nav || editing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && canPrev) nav.onStep(-1);
+      else if (e.key === "ArrowRight" && canNext) nav.onStep(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, nav, editing, canPrev, canNext]);
   const download = async () => {
     setDownloading(true);
     try {
@@ -507,7 +527,22 @@ export function PhotoLightbox({
           />
         ) : (
           <div className="space-y-3">
-            <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-md border bg-neutral-900">
+            <div
+              className="relative mx-auto w-fit max-w-full overflow-hidden rounded-md border bg-neutral-900"
+              // A swipe on a phone leafs through the set (nav): left for the next, right for the one before.
+              onTouchStart={(e) => {
+                touchX.current = nav ? (e.touches[0]?.clientX ?? null) : null;
+              }}
+              onTouchEnd={(e) => {
+                const from = touchX.current;
+                touchX.current = null;
+                const to = e.changedTouches[0]?.clientX;
+                if (!nav || from === null || to === undefined) return;
+                const dx = to - from;
+                if (dx <= -40 && canNext) nav.onStep(1);
+                else if (dx >= 40 && canPrev) nav.onStep(-1);
+              }}
+            >
               <img
                 src={url}
                 alt={`${label} photo`}
@@ -515,6 +550,38 @@ export function PhotoLightbox({
               />
               {size && <MarksOverlay marks={marks} w={size.w} h={size.h} fit="contain" />}
             </div>
+            {nav && nav.count > 1 && (
+              <div
+                className="flex items-center justify-center gap-3 text-sm text-muted-foreground"
+                data-line="photo-nav"
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-11 w-11"
+                  aria-label="Previous photo"
+                  disabled={!canPrev}
+                  onClick={() => nav.onStep(-1)}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <span className="tabular-nums">
+                  {nav.index + 1} of {nav.count}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-11 w-11"
+                  aria-label="Next photo"
+                  disabled={!canNext}
+                  onClick={() => nav.onStep(1)}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </Button>
+              </div>
+            )}
             <MarkList marks={marks} />
             <div className="flex flex-wrap items-center gap-2">
               {markable && (

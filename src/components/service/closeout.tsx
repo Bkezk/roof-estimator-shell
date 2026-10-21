@@ -136,6 +136,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
+import { HistoryLink } from "@/components/service/site-history";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
@@ -326,6 +327,8 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
             {[job.site_name, job.site_address].filter(Boolean).join(", ")}
           </p>
         )}
+        {/* What happened here before (owner, Oct 21): a tap opens the ticket's History fold. */}
+        {job.site_id && <HistoryLink jobId={job.id} whenNone="say" />}
         {job.description && <p className="text-sm">{job.description}</p>}
         {FINISHED.includes(job.stage) && (
           <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">

@@ -33,6 +33,9 @@ export const fieldKeys = {
   pos: (id: string) => ["service-job-pos", id] as const,
   /** The office → site travel estimate (the close-out's Time section; owner, Oct 9). */
   travelEstimate: (id: string) => ["service-travel-estimate", id] as const,
+  /** History at this property (owner, Oct 21): the fold's rows, and the strip's numbers. */
+  history: (id: string) => ["site-history", id] as const,
+  historySummary: (id: string) => ["site-history-summary", id] as const,
   /** My running clock (owner, Oct 15; myClock): the Today banner, the cards, the close-out line. */
   clock: ["service-my-clock"] as const,
   /** The clock running on a ticket, whoever's (clockOnJob): the office ticket page. */

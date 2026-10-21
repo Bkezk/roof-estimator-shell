@@ -162,6 +162,7 @@ export function InspectionChecklistStep({
             items={draft.items}
             readOnly={false}
             onChange={draft.setItem}
+            jobId={job.id}
             extra={(item: InspectionItem) => (
               <PhotoRoll
                 photos={itemPhotos(photos, item.id)}
