@@ -147,9 +147,13 @@ export const listMyWork = createServerFn({ method: "GET" })
     // on the office" group is gone, for everyone) — WORK_TICKET_STAGES is Open / Scheduled. The
     // authorizer sees it under Needs authorization through its Authorize follow-up (`fq`).
 
+    // content_updated_at (Oct 21, the eighth audit): the stamp a Calendar drag hands back to
+    // moveTaskDate, so a task changed or ticked Done since this list was read is not moved over.
     let kq = sb
       .from("tasks")
-      .select("id, title, due_date, status, building_id, assignee, assignee_name")
+      .select(
+        "id, title, due_date, status, building_id, assignee, assignee_name, content_updated_at",
+      )
       .neq("status", "done")
       .order("due_date", { ascending: true, nullsFirst: false })
       .limit(LIMIT);

@@ -605,6 +605,9 @@ const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced
  * 9; ticket-events.server.ts afterTicketDispatch) — once, from here, whichever path it was.
  * `quiet` (followups.server.ts SyncArgs): a timer started here sends the technician no "assigned"
  * notice — the restore of a deleted ticket (owner, Oct 12, item 5), which is not a new assignment.
+ * `reopened` (Oct 21, the eighth audit): the ticket is back at Open / Scheduled from Done or an
+ * office stage, so the timer started here says "Ticket reopened: …", not "assigned to you" (the
+ * wording opportunities have had since Oct 2; setServiceStage never asked for it).
  * Answers what the sync did (SyncResult; Oct 20: "snooze_cleared" when a date move ended the
  * follow-up's hold, which assignServiceJob passes on for Work Overview's toast).
  */
@@ -614,7 +617,7 @@ async function syncTicketFollowup(
   sb: SupabaseClient<Database>,
   prevStage: string | null,
   before?: { technician_id: string | null; scheduled_date: string | null },
-  opts: { quiet?: boolean } = {},
+  opts: { quiet?: boolean; reopened?: boolean } = {},
 ): Promise<SyncResult> {
   const { syncFollowup } = await import("@/lib/followups.server");
   const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
@@ -634,6 +637,7 @@ async function syncTicketFollowup(
       actorId: actor.id,
       actorName: actor.name,
       ...(opts.quiet ? { quiet: true } : {}),
+      ...(opts.reopened ? { reopened: true } : {}),
     },
     sb,
   );
@@ -674,11 +678,15 @@ export const setServiceStage = createServerFn({ method: "POST" })
       throw new Error(
         "Only the assigned technician, the office or an admin can change this ticket",
       );
+    // A reopen tells the technician "reopened", not "assigned to you" (Oct 21, the eighth audit):
+    // the timer closed at Done starts again here, and the notice should say why.
     await syncTicketFollowup(
       row,
       { id: context.userId, name: nameOf(p) },
       context.supabase,
       prev?.stage ?? null,
+      undefined,
+      { reopened },
     );
   });
 
@@ -695,8 +703,17 @@ export const setServiceStage = createServerFn({ method: "POST" })
  * (who was told "reassigned", and whose follow-up timer came back), and one marked Done in
  * between had its date moved. With the flag the ticket must still be that technician's and still
  * Open / Scheduled, both before and in the write — else TICKET_CHANGED and nothing is written.
+ *
+ * Oct 21 (the eighth audit): the guard covered the technician and the stage but not the day. A
+ * moves a ticket Oct 22 → Oct 25; B's page still shows Oct 22 and drags it to Oct 23: the guard
+ * passed, Oct 23 was written over A's Oct 25, "Date moved from Oct 25 to Oct 23" went on the
+ * timeline and the technician heard of a move nobody meant. The drag now also sends
+ * `expect_scheduled_date`, the day its row showed (null: none), checked the same two ways. A
+ * move that names the technician but not the day comes from a page built before this check and
+ * is told to reload (MOVE_NEEDS_DAY) rather than guessed at.
  */
 const MOVABLE_STAGES: readonly string[] = ["open", "scheduled"];
+export const MOVE_NEEDS_DAY = "Your page is out of date — reload it and try again";
 export const assignServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -716,6 +733,13 @@ export const assignServiceJob = createServerFn({ method: "POST" })
         // Work Overview's drag onto another day (Oct 21): the technician the row showed, who
         // must still be on the ticket (see above). The Board and the ticket page leave it out.
         expect_technician_id: z.string().uuid().optional(),
+        // And the day the row showed (Oct 21, the eighth audit): null for a row without one.
+        // Required with expect_technician_id (see above); meaningless without it.
+        expect_scheduled_date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
       })
       .parse(d),
   )
@@ -738,6 +762,11 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     if (data.expect_technician_id) {
       if (cur.technician_id !== data.expect_technician_id) throw new Error(TICKET_CHANGED);
       if (!MOVABLE_STAGES.includes(cur.stage)) throw new Error(TICKET_CHANGED);
+      // And still on the day the row showed (the eighth audit) — a move that does not say which
+      // day it saw comes from a page built before this check.
+      if (data.expect_scheduled_date === undefined) throw new Error(MOVE_NEEDS_DAY);
+      if ((cur.scheduled_date ?? null) !== data.expect_scheduled_date)
+        throw new Error(TICKET_CHANGED);
     }
     // A drop onto another day moves the date: the office's or a manager's (owner, Oct 1 / Oct 9;
     // logged below). A drop that only changes the technician on the same day needs no more than
@@ -761,9 +790,15 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .eq("id", data.id);
     // The guard against the race (Oct 15): the row must still be nobody's at the write.
     if (data.expect_unassigned) uq = uq.is("technician_id", null);
-    // And the move's guard (Oct 21): still that technician's, still Open / Scheduled.
-    if (data.expect_technician_id)
+    // And the move's guard (Oct 21): still that technician's, still Open / Scheduled, and (the
+    // eighth audit) still on the day the row showed — on no day, when it showed none.
+    if (data.expect_technician_id) {
       uq = uq.eq("technician_id", data.expect_technician_id).in("stage", [...MOVABLE_STAGES]);
+      uq =
+        typeof data.expect_scheduled_date === "string"
+          ? uq.eq("scheduled_date", data.expect_scheduled_date)
+          : uq.is("scheduled_date", null);
+    }
     const { data: row, error } = await uq.select("*").maybeSingle();
     if (error) throw new Error(error.message);
     const notFound = data.expect_unassigned

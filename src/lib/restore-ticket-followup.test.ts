@@ -203,7 +203,8 @@ describe("source", () => {
       "syncTicketFollowup( row, { id: context.userId, name: nameOf(p) }, context.supabase, row.stage, undefined, { quiet: true }, )",
     );
     const sync = src.slice(src.indexOf("async function syncTicketFollowup"));
-    expect(sync.slice(0, 1800)).toContain("opts: { quiet?: boolean } = {}");
+    // Oct 21, eighth audit: `reopened` joined `quiet` in the options (setServiceStage's reopen).
+    expect(sync.slice(0, 1800)).toContain("opts: { quiet?: boolean; reopened?: boolean } = {}");
     expect(sync.slice(0, 1800)).toContain("...(opts.quiet ? { quiet: true } : {})");
   });
 });

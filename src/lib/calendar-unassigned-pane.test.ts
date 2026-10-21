@@ -221,6 +221,8 @@ describe("3. assignPlan with a day override; dropPlan unchanged", () => {
       technicianId: BOB,
       // Oct 21: the technician the row showed, which the server must still find on the ticket.
       expectTechnicianId: BOB,
+      // Oct 21, eighth audit: and the day it showed.
+      expectDate: "2026-10-20",
       date: DAY,
     });
     expect(dropPlan(unTicket, DAY, officePlain)).toBeNull();

@@ -432,8 +432,9 @@ describe("b. assignServiceJob with expect_unassigned: the ticket must still be n
       hook.indexOf("const move = useMutation("),
       hook.indexOf("const assign ="),
     );
+    // Oct 21, eighth audit: and expect_scheduled_date, the day the row showed.
     expect(move).toMatch(
-      /data: \{\s*id: plan\.id,\s*technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,\s*\},/,
+      /data: \{\s*id: plan\.id,\s*technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,\s*expect_scheduled_date: plan\.expectDate,\s*\},/,
     );
     expect(move).not.toContain("expect_unassigned");
   });
@@ -508,9 +509,10 @@ describe("e. effectiveWho: an unknown person falls back to the caller's default 
       "const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);",
     );
     // Oct 21: forgetWho + props.onWho, not changeWho (which skips the layout while peeking and
-    // wrote a URL without ?who; work-overview-oct21-audit7.test.ts).
+    // wrote a URL without ?who; work-overview-oct21-audit7.test.ts). Oct 21, eighth audit: the
+    // effect first waits for the profile (work-overview-oct21-audit8-client.test.ts).
     expect(page).toMatch(
-      /useEffect\(\(\) => \{\s*if \(shownWho === who\) return;\s*const forgotten = forgetWho\(layout, who\);/,
+      /if \(!profile\) return;\s*if \(shownWho === who\) return;\s*const forgotten = forgetWho\(layout, who\);/,
     );
     expect(page).toContain("const next = rememberWho(layout, whoParam(w, profile));");
   });

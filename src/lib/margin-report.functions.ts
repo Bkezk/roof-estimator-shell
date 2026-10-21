@@ -6,8 +6,10 @@
  *
  * What is read, and why:
  *  - invoices with status final / sent / paid whose invoice_date is in From..To, every row a page
- *    at a time (read-all.ts: no 1,000-row ceiling). invoice_date is never null, so filtering on it
- *    loses nothing; invoiceDay still applies the finalized / created fallbacks for the grouping.
+ *    at a time (read-all.ts: no 1,000-row ceiling; keyset pages by id since Oct 21's eighth audit,
+ *    so an invoice finalized while the report reads is counted once or not at all, never twice).
+ *    invoice_date is never null, so filtering on it loses nothing; invoiceDay still applies the
+ *    finalized / created fallbacks for the grouping.
  *  - their tickets (technician, account, customer name), their lines (the cost split and the
  *    "po:<id>" sources), the tickets' APPROVED purchase orders, and — for tickets that have one —
  *    every invoice of the ticket whatever its status, because the PO counts toward the ticket's
@@ -38,7 +40,7 @@ import {
   type MarginInvoiceIn,
   type MarginReportResult,
 } from "@/lib/margin-report";
-import { readAll } from "@/lib/read-all";
+import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
 
 type Sb = SupabaseClient<Database>;
 
@@ -59,19 +61,21 @@ function must<T>(label: string, r: { data: T | null; error: { message: string } 
   return (r.data ?? []) as T;
 }
 
-/** Every row of `table` whose `column` is in `ids`: 100 ids a request, each read to its end. */
-function byIds<T>(
+/**
+ * Every row of `table` whose `column` is in `ids`: 100 ids a request, each read to its end by
+ * keyset page (`after` is the last id seen, null first; read-all.ts, Oct 21, eighth audit).
+ */
+function byIds<T extends { id: RowId }>(
   ids: readonly string[],
   page: (
     chunk: string[],
-    from: number,
-    to: number,
+    after: RowId | null,
   ) => PromiseLike<{
     data: T[] | null;
     error: { message: string } | null;
   }>,
 ): Promise<T[]> {
-  return readInChunks(ids, (chunk) => readAll((from, to) => page(chunk, from, to)));
+  return readInChunks(ids, (chunk) => readAll((after) => page(chunk, after)));
 }
 
 export const listMarginReport = createServerFn({ method: "GET" })
@@ -90,17 +94,20 @@ export const listMarginReport = createServerFn({ method: "GET" })
 
     const invoices = must(
       "invoices",
-      await readAll((from, to) =>
-        sb
-          .from("invoices")
-          .select(
-            "id, number, display_number, status, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
-          )
-          .in("status", [...COUNTED_INVOICE_STATUSES])
-          .gte("invoice_date", data.from)
-          .lte("invoice_date", data.to)
-          .order("id")
-          .range(from, to),
+      await readAll((after) =>
+        afterId(
+          sb
+            .from("invoices")
+            .select(
+              "id, number, display_number, status, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
+            )
+            .in("status", [...COUNTED_INVOICE_STATUSES])
+            .gte("invoice_date", data.from)
+            .lte("invoice_date", data.to)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
     );
     const invoiceIds = invoices.map((i) => i.id);
@@ -113,22 +120,28 @@ export const listMarginReport = createServerFn({ method: "GET" })
           .select("id, technician_id, account_id, customer_name")
           .in("id", chunk),
       ),
-      byIds(invoiceIds, (chunk, from, to) =>
-        sb
-          .from("invoice_lines")
-          .select("id, invoice_id, kind, cost_total, source")
-          .in("invoice_id", chunk)
-          .order("id")
-          .range(from, to),
+      byIds(invoiceIds, (chunk, after) =>
+        afterId(
+          sb
+            .from("invoice_lines")
+            .select("id, invoice_id, kind, cost_total, source")
+            .in("invoice_id", chunk)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      byIds(ticketIds, (chunk, from, to) =>
-        sb
-          .from("service_job_purchase_orders")
-          .select("id, service_job_id, approved, price")
-          .eq("approved", true)
-          .in("service_job_id", chunk)
-          .order("id")
-          .range(from, to),
+      byIds(ticketIds, (chunk, after) =>
+        afterId(
+          sb
+            .from("service_job_purchase_orders")
+            .select("id, service_job_id, approved, price")
+            .eq("approved", true)
+            .in("service_job_id", chunk)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
     ]);
     const ticketById = new Map(tickets.map((t) => [t.id, t]));
@@ -162,13 +175,16 @@ export const listMarginReport = createServerFn({ method: "GET" })
       readInChunks(techIds, (chunk) =>
         sb.from("profiles").select("id, full_name, email").in("id", chunk),
       ),
-      byIds([...posByTicket.keys()], (chunk, from, to) =>
-        sb
-          .from("invoices")
-          .select("id, number, display_number, status, created_at, service_job_id")
-          .in("service_job_id", chunk)
-          .order("id")
-          .range(from, to),
+      byIds([...posByTicket.keys()], (chunk, after) =>
+        afterId(
+          sb
+            .from("invoices")
+            .select("id, number, display_number, status, created_at, service_job_id")
+            .in("service_job_id", chunk)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
     ]);
     const vendorName = new Map(vendors.map((v) => [v.id, v.name]));

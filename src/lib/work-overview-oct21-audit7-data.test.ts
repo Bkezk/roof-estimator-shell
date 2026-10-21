@@ -80,11 +80,13 @@ describe("1a. dropPlan carries the technician it believes it keeps", () => {
     ...over,
   });
   it("a ticket: technicianId and expectTechnicianId are both the row's technician", () => {
+    // Oct 21, eighth audit: the plan also carries the day the row showed (expectDate).
     expect(dropPlan(item(), DAY, office)).toEqual({
       kind: "ticket",
       id: JOB,
       technicianId: TECH,
       expectTechnicianId: TECH,
+      expectDate: "2026-10-20",
       date: DAY,
     });
     expect(dropPlan(item({ kind: "inspection" }), DAY, office)).toMatchObject({
@@ -145,6 +147,9 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
   const jobWrites = () => env.writes.filter((w) => w.table === "service_jobs");
   const live = () => env.tables["service_jobs"]![0]!;
 
+  // Oct 21, eighth audit: a move with expect_technician_id must also say which day the row
+  // showed (expect_scheduled_date), and the write's guard carries it too.
+  const SHOWN = "2026-10-20";
   it("the row still that technician's: moved, with the guard on the write", async () => {
     setup();
     const row = await call({
@@ -152,6 +157,7 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
       technician_id: TECH,
       scheduled_date: DAY,
       expect_technician_id: TECH,
+      expect_scheduled_date: SHOWN,
     });
     expect(row).toMatchObject({ technician_id: TECH, scheduled_date: DAY, stage: "scheduled" });
     expect(jobWrites()).toHaveLength(1);
@@ -159,12 +165,19 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
       `eq id=${JOB}`,
       `eq technician_id=${TECH}`,
       "in stage=open,scheduled",
+      `eq scheduled_date=${SHOWN}`,
     ]);
   });
   it("reassigned in between (the stale row said Ted, the live row says Tia): TICKET_CHANGED before the write, nothing written, nobody told", async () => {
     setup({ technician_id: TECH2 });
     await expect(
-      call({ id: JOB, technician_id: TECH, scheduled_date: DAY, expect_technician_id: TECH }),
+      call({
+        id: JOB,
+        technician_id: TECH,
+        scheduled_date: DAY,
+        expect_technician_id: TECH,
+        expect_scheduled_date: SHOWN,
+      }),
     ).rejects.toThrow(TICKET_CHANGED);
     expect(jobWrites()).toEqual([]);
     expect(live()["technician_id"]).toBe(TECH2);
@@ -188,7 +201,13 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
       return b;
     };
     await expect(
-      call({ id: JOB, technician_id: TECH, scheduled_date: DAY, expect_technician_id: TECH }),
+      call({
+        id: JOB,
+        technician_id: TECH,
+        scheduled_date: DAY,
+        expect_technician_id: TECH,
+        expect_scheduled_date: SHOWN,
+      }),
     ).rejects.toThrow(TICKET_CHANGED);
     expect(jobWrites()).toEqual([]);
     expect(live()["technician_id"]).toBe(TECH2);
@@ -197,7 +216,13 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
     for (const stage of ["done", "authorized", "invoiced", "closed"]) {
       setup({ stage });
       await expect(
-        call({ id: JOB, technician_id: TECH, scheduled_date: DAY, expect_technician_id: TECH }),
+        call({
+          id: JOB,
+          technician_id: TECH,
+          scheduled_date: DAY,
+          expect_technician_id: TECH,
+          expect_scheduled_date: SHOWN,
+        }),
       ).rejects.toThrow(TICKET_CHANGED);
       expect(jobWrites()).toEqual([]);
       expect(live()["scheduled_date"]).toBe("2026-10-20");
@@ -243,8 +268,9 @@ describe("1c. the hook sends it on a move and refetches on the refusal; the mess
       hook.indexOf("const move = useMutation("),
       hook.indexOf("const assign ="),
     );
+    // Oct 21, eighth audit: expect_scheduled_date (the day the row showed) rides beside it.
     expect(move).toMatch(
-      /assignTicketFn\(\{\s*data: \{\s*id: plan\.id,\s*technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,\s*\},\s*\}\)/,
+      /assignTicketFn\(\{\s*data: \{\s*id: plan\.id,\s*technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,\s*expect_scheduled_date: plan\.expectDate,\s*\},\s*\}\)/,
     );
     expect(move).not.toContain("expect_unassigned");
     // The refusal toasts the server's message (TICKET_CHANGED) and refetches the stale row.
@@ -272,11 +298,13 @@ describe("1c. the hook sends it on a move and refetches on the refusal; the mess
       svc.indexOf("export const claimServiceJob"),
     );
     expect(fn).toContain("expect_technician_id: z.string().uuid().optional(),");
+    // Oct 21, eighth audit: the day's checks follow the technician's and the stage's, in both
+    // places (work-overview-oct21-audit8-data.test.ts pins them).
     expect(fn).toMatch(
-      /if \(data\.expect_technician_id\) \{\s*if \(cur\.technician_id !== data\.expect_technician_id\) throw new Error\(TICKET_CHANGED\);\s*if \(!MOVABLE_STAGES\.includes\(cur\.stage\)\) throw new Error\(TICKET_CHANGED\);\s*\}/,
+      /if \(data\.expect_technician_id\) \{\s*if \(cur\.technician_id !== data\.expect_technician_id\) throw new Error\(TICKET_CHANGED\);\s*if \(!MOVABLE_STAGES\.includes\(cur\.stage\)\) throw new Error\(TICKET_CHANGED\);/,
     );
     expect(fn).toMatch(
-      /if \(data\.expect_technician_id\)\s*uq = uq\.eq\("technician_id", data\.expect_technician_id\)\.in\("stage", \[\.\.\.MOVABLE_STAGES\]\);/,
+      /if \(data\.expect_technician_id\) \{\s*uq = uq\.eq\("technician_id", data\.expect_technician_id\)\.in\("stage", \[\.\.\.MOVABLE_STAGES\]\);/,
     );
     expect(fn).toMatch(
       /const notFound = data\.expect_unassigned\s*\? CLAIM_TAKEN\s*: data\.expect_technician_id\s*\? TICKET_CHANGED\s*: "Ticket not found";\s*if \(!row\) throw new Error\(notFound\);/,

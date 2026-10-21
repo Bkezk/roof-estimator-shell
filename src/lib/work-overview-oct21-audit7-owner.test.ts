@@ -39,7 +39,10 @@ import { fakeSupabase } from "@/test/fake-supabase";
 type Row = Record<string, unknown>;
 const read = (p: string) => readFileSync(p, "utf8");
 const TODAY = "2026-10-21"; // a Wednesday; the week runs Sun Oct 18 – Sat Oct 24
-/** lib/read-all.ts PAGE: PostgREST's most per request; the reads ask for the next page after a full one. */
+/**
+ * lib/read-all.ts PAGE: PostgREST's most per request; the reads ask for the next page (by keyset,
+ * `.gt("id", last)`, Oct 21 eighth audit) until one comes back empty.
+ */
 const PAGE = 1000;
 const ANN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"; // the admin viewing
 const MIKE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // a manager
@@ -79,8 +82,10 @@ const emptyTables = (): Record<string, Row[]> => ({
   service_time_entries: [],
   audit_log: [],
 });
+// Ids zero-padded (Oct 21, eighth audit): the reads page by keyset on id, and the fake's `.order()`
+// is a no-op, so a seed of 1,500 rows must be in id order or the second page would find none.
 const openTask = (i: number, assignee: string): Row => ({
-  id: `k-${i}`,
+  id: `k-${String(i).padStart(4, "0")}`,
   title: `Task ${i}`,
   due_date: TODAY,
   status: "open",
@@ -89,7 +94,7 @@ const openTask = (i: number, assignee: string): Row => ({
   assignee_name: null,
 });
 const followupRow = (i: number, assignee: string): Row => ({
-  id: `f-${i}`,
+  id: `f-${String(i).padStart(4, "0")}`,
   title: `Follow up ${i}`,
   url: `/opportunities?id=o-${i}`,
   due_at: `${TODAY}T15:00:00Z`,
@@ -185,18 +190,17 @@ describe("B. no 1,000-row ceiling: every counted source is read whole, a page at
     expect(full.today).toHaveLength(PAGE + 500);
     expect(full).not.toHaveProperty("truncated");
   });
-  it("readAll: pages until one comes back short; an error stops it; a query's shape", async () => {
-    const pages: [number, number][] = [];
+  // Oct 21, eighth audit: keyset pages (the cursor is the last id seen) until an EMPTY page, not a
+  // short one — read-all-keyset.test.ts has the why (a changing table; a Max Rows below PAGE).
+  it("readAll: keyset pages until one comes back empty; an error stops it; a query's shape", async () => {
+    const cursors: (string | number | null)[] = [];
     const rows = Array.from({ length: PAGE * 2 + 1 }, (_, i) => ({ id: i }));
-    const r = await readAll<{ id: number }>((from, to) => {
-      pages.push([from, to]);
-      return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
+    const r = await readAll<{ id: number }>((after) => {
+      cursors.push(after);
+      const from = after === null ? 0 : Number(after) + 1;
+      return Promise.resolve({ data: rows.slice(from, from + PAGE), error: null });
     });
-    expect(pages).toEqual([
-      [0, PAGE - 1],
-      [PAGE, 2 * PAGE - 1],
-      [2 * PAGE, 3 * PAGE - 1],
-    ]);
+    expect(cursors).toEqual([null, PAGE - 1, 2 * PAGE - 1, 2 * PAGE]);
     expect(r.data).toHaveLength(PAGE * 2 + 1);
     expect(r.error).toBeNull();
     const short = await readAll<{ id: number }>(() => Promise.resolve({ data: [], error: null }));
@@ -208,8 +212,15 @@ describe("B. no 1,000-row ceiling: every counted source is read whole, a page at
   });
   it("source: every counted read goes through readAll with a stable order; no cap, no line", () => {
     const src = read("src/lib/owner-view.functions.ts");
-    expect(src.match(/readAll\(\(from, to\) =>/g)).toHaveLength(14); // 7 per function
-    expect(src.match(/\.order\("id"\)\s*\.range\(from, to\)/g)).toHaveLength(14);
+    // Oct 21, eighth audit: keyset pages — the builder gets the last id (`after`), orders by id,
+    // asks for PAGE rows and adds `.gt("id", after)` through afterId; no `.range(from, to)`.
+    expect(src.match(/readAll\(\(after\) =>/g)).toHaveLength(14); // 7 per function
+    expect(src.match(/afterId\(/g)).toHaveLength(14);
+    expect(src.match(/\.order\("id"\)\s*\.limit\(PAGE\),\s*after,/g)).toHaveLength(14);
+    expect(src).not.toContain(".range(");
+    // The cursor needs the id: the done-ticket and done-task reads select it too now.
+    expect(src).toContain('.select("id, technician_id, stage, completed_at")');
+    expect(src).toContain('.select("id, assignee, status, done_at")');
     expect(src).not.toMatch(/\.limit\(LIMIT\)/);
     expect(src).not.toContain("truncated");
     const view = read("src/components/owner-view.tsx");
@@ -365,7 +376,10 @@ describe("G. label lookups read ids in chunks of 100", () => {
     const { db, reads } = client(tables);
     const r = await call<MyWorkResult>(listMyWork, {}, db, MIKE);
     expect(r.followups).toHaveLength(250);
-    expect(r.followups.every((f) => f.account_name === `Account ${f.id.slice(2)}`)).toBe(true);
+    // Number(): the ids are zero-padded since Oct 21's eighth audit (keyset pages, see openTask).
+    expect(r.followups.every((f) => f.account_name === `Account ${Number(f.id.slice(2))}`)).toBe(
+      true,
+    );
     expect(r.followups.every((f) => f.opportunity_status === "quoted")).toBe(true);
     expect(reads["crm_accounts"]).toBe(3);
     // One read for Nobody's opportunities (a manager sees unassigned work), then the 3 chunks.
@@ -382,9 +396,9 @@ describe("G. label lookups read ids in chunks of 100", () => {
       db,
     );
     expect(d.today).toHaveLength(250);
-    expect(d.today.every((i) => i.where === `Account ${i.key.slice("followup:f-".length)}`)).toBe(
-      true,
-    );
+    expect(
+      d.today.every((i) => i.where === `Account ${Number(i.key.slice("followup:f-".length))}`),
+    ).toBe(true);
     expect(reads["crm_accounts"]).toBe(3);
   });
   it("source: both label blocks go through readInChunks; no whole-list .in('id', …) is left", () => {

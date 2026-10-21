@@ -23,7 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { readInChunks } from "@/lib/chunk-ids";
-import { readAll } from "@/lib/read-all";
+import { PAGE, afterId, readAll } from "@/lib/read-all";
 import {
   WORK_TICKET_STAGES,
   addDays,
@@ -96,7 +96,10 @@ export interface OwnerViewResult {
 /**
  * The Last-activity bulk window reads at most this many rows per source (ordered newest first);
  * a person missing from a full read gets a lookup of their own, so no cap on the numbers. The
- * counts themselves read every row (readAll, Oct 21: no 1,000-row ceiling any more).
+ * counts themselves read every row (readAll, Oct 21: no 1,000-row ceiling any more), by keyset
+ * page — `.order("id").limit(PAGE)` and `afterId` (Oct 21, eighth audit: an offset page repeated
+ * or skipped a row when the table changed between requests, and nothing here de-duplicates). Each
+ * select carries `id` for the cursor; the pages come by id, and mergeWork / the counters sort.
  */
 const ACTIVITY_LIMIT = 1000;
 /** Bulk window for Last activity; older activity is looked up per person. */
@@ -138,73 +141,95 @@ export const listOwnerView = createServerFn({ method: "GET" })
     const [profiles, tickets, tasks, followups, opps, doneTickets, doneTasks, bids] =
       await Promise.all([
         sb.from("profiles").select("id, full_name, email, role, technician, access"),
-        readAll((from, to) =>
-          sb
-            .from("service_jobs")
-            .select(
-              "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
-            )
-            .is("deleted_at", null)
-            .in("stage", [...WORK_TICKET_STAGES])
-            .not("technician_id", "is", null)
-            .order("id")
-            .range(from, to),
+        readAll((after) =>
+          afterId(
+            sb
+              .from("service_jobs")
+              .select(
+                "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+              )
+              .is("deleted_at", null)
+              .in("stage", [...WORK_TICKET_STAGES])
+              .not("technician_id", "is", null)
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
-        readAll((from, to) =>
-          sb
-            .from("tasks")
-            .select("id, title, due_date, status, building_id, assignee, assignee_name")
-            .neq("status", "done")
-            .not("assignee", "is", null)
-            .order("id")
-            .range(from, to),
+        readAll((after) =>
+          afterId(
+            sb
+              .from("tasks")
+              .select("id, title, due_date, status, building_id, assignee, assignee_name")
+              .neq("status", "done")
+              .not("assignee", "is", null)
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
         // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
-        readAll((from, to) =>
-          sb.from("crm_followups").select("*").eq("status", "open").order("id").range(from, to),
+        readAll((after) =>
+          afterId(
+            sb.from("crm_followups").select("*").eq("status", "open").order("id").limit(PAGE),
+            after,
+          ),
         ),
-        readAll((from, to) =>
-          sb
-            .from("crm_opportunities")
-            .select("id, assignee_id, status, expected_close, est_value")
-            .is("deleted_at", null)
-            .in("status", [...OPEN_OPP_STATUSES])
-            .not("assignee_id", "is", null)
-            .order("id")
-            .range(from, to),
+        readAll((after) =>
+          afterId(
+            sb
+              .from("crm_opportunities")
+              .select("id, assignee_id, status, expected_close, est_value")
+              .is("deleted_at", null)
+              .in("status", [...OPEN_OPP_STATUSES])
+              .not("assignee_id", "is", null)
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
-        readAll((from, to) =>
-          sb
-            .from("service_jobs")
-            .select("technician_id, stage, completed_at")
-            .is("deleted_at", null)
-            .in("stage", [...DONE_TICKET_STAGES])
-            .gte("completed_at", weekFrom)
-            .lt("completed_at", weekTo)
-            .order("id")
-            .range(from, to),
+        readAll((after) =>
+          afterId(
+            sb
+              .from("service_jobs")
+              .select("id, technician_id, stage, completed_at")
+              .is("deleted_at", null)
+              .in("stage", [...DONE_TICKET_STAGES])
+              .gte("completed_at", weekFrom)
+              .lt("completed_at", weekTo)
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
-        readAll((from, to) =>
-          sb
-            .from("tasks")
-            .select("assignee, status, done_at")
-            .eq("status", "done")
-            .gte("done_at", weekFrom)
-            .lt("done_at", weekTo)
-            .order("id")
-            .range(from, to),
+        readAll((after) =>
+          afterId(
+            sb
+              .from("tasks")
+              .select("id, assignee, status, done_at")
+              .eq("status", "done")
+              .gte("done_at", weekFrom)
+              .lt("done_at", weekTo)
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
         // Every draft bid, as listMyWork reads them for Everyone (owner, Oct 12). The counts only
-        // need the day and the maker, so the customer's name is not looked up here.
-        readAll((from, to) =>
-          sb
-            .from("bids")
-            .select("id, name, status, due_date, account_id, created_by")
-            .is("deleted_at", null)
-            .eq("status", "draft")
-            .order("due_date", { ascending: true, nullsFirst: false })
-            .order("id")
-            .range(from, to),
+        // need the day and the maker, so the customer's name is not looked up here. Not in
+        // listMyWork's due_date order (Oct 21, eighth audit): a keyset page is by id, and every
+        // row comes anyway — mergeWork sorts (my-work.ts compareWork).
+        readAll((after) =>
+          afterId(
+            sb
+              .from("bids")
+              .select("id, name, status, due_date, account_id, created_by")
+              .is("deleted_at", null)
+              .eq("status", "draft")
+              .order("id")
+              .limit(PAGE),
+            after,
+          ),
         ),
       ]);
     const people = must("Profiles", profiles);
@@ -426,83 +451,104 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const raw = sb as unknown as SupabaseClient;
 
     const [tickets, tasks, followups, opps, doneTickets, doneTasks, bids] = await Promise.all([
-      readAll((from, to) =>
-        sb
-          .from("service_jobs")
-          .select(
-            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
-          )
-          .is("deleted_at", null)
-          .in("stage", [...WORK_TICKET_STAGES])
-          .eq("technician_id", userId)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("service_jobs")
+            .select(
+              "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+            )
+            .is("deleted_at", null)
+            .in("stage", [...WORK_TICKET_STAGES])
+            .eq("technician_id", userId)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      readAll((from, to) =>
-        sb
-          .from("tasks")
-          .select("id, title, due_date, status, building_id, assignee, assignee_name")
-          .neq("status", "done")
-          .eq("assignee", userId)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("tasks")
+            .select("id, title, due_date, status, building_id, assignee, assignee_name")
+            .neq("status", "done")
+            .eq("assignee", userId)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
       // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
-      readAll((from, to) =>
-        sb
-          .from("crm_followups")
-          .select("*")
-          .eq("status", "open")
-          .eq("assignee_id", userId)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("crm_followups")
+            .select("*")
+            .eq("status", "open")
+            .eq("assignee_id", userId)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      readAll((from, to) =>
-        sb
-          .from("crm_opportunities")
-          .select("id, title, account_id, assignee_id, status, expected_close, est_value")
-          .is("deleted_at", null)
-          .in("status", [...OPEN_OPP_STATUSES])
-          .eq("assignee_id", userId)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("crm_opportunities")
+            .select("id, title, account_id, assignee_id, status, expected_close, est_value")
+            .is("deleted_at", null)
+            .in("status", [...OPEN_OPP_STATUSES])
+            .eq("assignee_id", userId)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      readAll((from, to) =>
-        sb
-          .from("service_jobs")
-          .select(
-            "id, number, description, customer_name, site_name, service_type, technician_id, stage, completed_at",
-          )
-          .is("deleted_at", null)
-          .in("stage", [...DONE_TICKET_STAGES])
-          .eq("technician_id", userId)
-          .gte("completed_at", weekFrom)
-          .lt("completed_at", weekTo)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("service_jobs")
+            .select(
+              "id, number, description, customer_name, site_name, service_type, technician_id, stage, completed_at",
+            )
+            .is("deleted_at", null)
+            .in("stage", [...DONE_TICKET_STAGES])
+            .eq("technician_id", userId)
+            .gte("completed_at", weekFrom)
+            .lt("completed_at", weekTo)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      readAll((from, to) =>
-        sb
-          .from("tasks")
-          .select("id, title, building_id, assignee, status, done_at")
-          .eq("status", "done")
-          .eq("assignee", userId)
-          .gte("done_at", weekFrom)
-          .lt("done_at", weekTo)
-          .order("id")
-          .range(from, to),
+      readAll((after) =>
+        afterId(
+          sb
+            .from("tasks")
+            .select("id, title, building_id, assignee, status, done_at")
+            .eq("status", "done")
+            .eq("assignee", userId)
+            .gte("done_at", weekFrom)
+            .lt("done_at", weekTo)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
-      // The draft bids this person started (owner, Oct 12), as listMyWork reads one person's.
-      readAll((from, to) =>
-        sb
-          .from("bids")
-          .select("id, name, status, due_date, account_id, created_by")
-          .is("deleted_at", null)
-          .eq("status", "draft")
-          .eq("created_by", userId)
-          .order("due_date", { ascending: true, nullsFirst: false })
-          .order("id")
-          .range(from, to),
+      // The draft bids this person started (owner, Oct 12), as listMyWork reads one person's —
+      // by id, not due_date (Oct 21, eighth audit: keyset pages; mergeWork sorts).
+      readAll((after) =>
+        afterId(
+          sb
+            .from("bids")
+            .select("id, name, status, due_date, account_id, created_by")
+            .is("deleted_at", null)
+            .eq("status", "draft")
+            .eq("created_by", userId)
+            .order("id")
+            .limit(PAGE),
+          after,
+        ),
       ),
     ]);
     const ticketRows = must("Tickets", tickets) as TicketIn[];

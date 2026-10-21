@@ -251,6 +251,12 @@ export interface TaskIn {
   site_name?: string | null;
   /** When it was entered (sent for unassigned tasks: the "needs assignment" timer). */
   created_at?: string | null;
+  /**
+   * The content stamp (tasks.content_updated_at, 20261020121000) as listed, which a Calendar
+   * drag hands back to moveTaskDate (Oct 21, the eighth audit: a task ticked Done in between
+   * still had its day moved). Sent for assigned tasks — the ones a drop may move.
+   */
+  content_updated_at?: string | null;
 }
 
 export interface FollowupIn {
@@ -414,6 +420,13 @@ export interface WorkItem {
    * to-invoice or a Needs authorization row.
    */
   waitingSince?: string | null;
+  /**
+   * A task's content stamp as listed (TaskIn.content_updated_at; Oct 21, the eighth audit): a
+   * drag onto another day sends it back (dropPlan `expectStamp` → moveTaskDate
+   * `expect_content_updated_at`), so a task someone changed or ticked Done in between is refused
+   * instead of moved. Absent when the row carried none (before 20261020121000 is applied).
+   */
+  stamp?: string | null;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -571,6 +584,9 @@ export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkIte
     assigneeId: t.assignee,
     assigneeName: (t.assignee ? names[t.assignee] : null) ?? t.assignee_name ?? null,
     followup: null,
+    // The stamp only when the row has one (Oct 21): a row without it (an older list, a database
+    // without 20261020121000) sends no expectation and moves unguarded, as before.
+    ...(t.content_updated_at ? { stamp: t.content_updated_at } : {}),
   };
 }
 
@@ -1094,13 +1110,21 @@ export function activeTab(
  * already on the page — wins over an earlier pick, so the pick is dropped; the preset going away
  * is the person's own tap (`pick` clears it through the URL), so their pick stands. Until now any
  * change reset the pick, the tap included, and the tab fell to the first non-empty column.
+ *
+ * Oct 21 (the eighth audit): the preset also goes away on a Show tick (kindToggleClearsPreset),
+ * with no tap and so no pick — and nothing picked, nothing preset, meant the first non-empty
+ * column: ?bucket=today sat on This week, a kind was ticked off, and the tab jumped to Overdue.
+ * With no pick of their own, the preset's own column (`presetBucket`: Today folds into This week)
+ * becomes the pick, so the tab stays where it was; activeTab still falls back should that column
+ * have folded away.
  */
 export function nextPicked(
   prevPreset: BucketPreset | null,
   preset: BucketPreset | null,
   picked: WorkBucket | null,
 ): WorkBucket | null {
-  return preset !== null && preset !== prevPreset ? null : picked;
+  if (preset !== null) return preset !== prevPreset ? null : picked;
+  return picked ?? (prevPreset ? presetBucket(prevPreset) : null);
 }
 
 // ---- calendar ------------------------------------------------------------------------------

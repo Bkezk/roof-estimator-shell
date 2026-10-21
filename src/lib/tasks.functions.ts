@@ -372,10 +372,21 @@ export const getTask = createServerFn({ method: "GET" })
     return row;
   });
 
+/** moveTaskDate's "no row" without a stamp to blame: deleted, or RLS hid it from the write. */
+const TASK_GONE = "Task not found — it was deleted, or you are not on it";
+
 /**
  * Move a task to another day (owner, Oct 15: drag it onto a calendar day on Work Overview),
  * keeping its time of day (or all day). Whoever may edit the task — the creator, the assignee,
  * an attendee, an admin or a manager (loadVisible, as saveTask); RLS tasks_write says the same.
+ *
+ * Oct 21 (the eighth audit): `expect_content_updated_at`, the row's content stamp as Work
+ * Overview listed it (saveTask's guard, 20261020121000). The dragger's page can be five minutes
+ * old; until now a task somebody had ticked Done in between — gone from their list, still on the
+ * dragger's — had its due date moved all the same. With the stamp the task must still carry it
+ * and still not be done, checked before the write and in it (a change that lands between the
+ * read and the update matches nothing); else TASK_CHANGED and nothing is written. A caller
+ * without the stamp (a page from before this change) moves unguarded, as before.
  */
 export const moveTaskDate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -384,22 +395,27 @@ export const moveTaskDate = createServerFn({ method: "POST" })
       .object({
         id: z.string().uuid(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        expect_content_updated_at: z.string().optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<TaskRow> => {
     const profile = await me(context);
     const cur = await loadVisible(context, data.id, profile);
+    const expected = data.expect_content_updated_at;
+    if (expected && contentStamp(cur) !== expected) throw new Error(TASK_CHANGED);
+    if (expected && cur.status === "done") throw new Error(TASK_CHANGED);
     const at = taskDueAt(cur);
     const allDay = isAllDay(cur);
     const moved = { date: data.date, time: at && !allDay ? localHm(at) : null, all_day: allDay };
-    const { data: row, error } = await context.supabase
+    let upd = context.supabase
       .from("tasks")
       .update({ due_date: moved.date, due_at: dueAtFor(moved) })
-      .eq("id", data.id)
-      .select()
-      .single();
+      .eq("id", data.id);
+    if (expected) upd = upd.eq(contentStampColumn(cur), expected).neq("status", "done");
+    const { data: row, error } = await upd.select().maybeSingle();
     if (error) throw new Error(error.message);
+    if (!row) throw new Error(expected ? TASK_CHANGED : TASK_GONE);
     return row;
   });
 

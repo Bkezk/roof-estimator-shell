@@ -21,6 +21,11 @@
  * Oct 21: so did a failed open or Done tick — "Task not found" on every click for five minutes).
  * A move also carries the technician the row showed (Oct 21, expect_technician_id): a ticket
  * reassigned or finished since the last refresh is refused with TICKET_CHANGED, not handed back.
+ * Oct 21 (the eighth audit): and the day it showed (expect_scheduled_date — a drop from a stale
+ * page wrote its day over one somebody had just moved), and a task's content stamp
+ * (expect_content_updated_at — a task ticked Done in between was still moved, TASK_CHANGED now).
+ * A row whose move is in flight is not draggable and a second drop on it is ignored
+ * (lib/my-work-actions.ts canStartMove): one move, one toast.
  */
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,6 +43,7 @@ import {
   assignedToastExtra,
   canEditWorkTask,
   canMoveWork,
+  canStartMove,
   dropAssigns,
   dropPlan,
   monthDay,
@@ -156,18 +162,25 @@ export function useWorkActions(profile: UserProfile | null): {
       if (plan.kind === "ticket") {
         // expect_technician_id (Oct 21): the technician the row showed, whom the server must
         // still find on the ticket — a row gone stale (reassigned or finished since the last
-        // refresh) is refused with TICKET_CHANGED instead of handing the ticket back.
+        // refresh) is refused with TICKET_CHANGED instead of handing the ticket back. And the
+        // day it showed (expect_scheduled_date, the eighth audit): the same refusal for a ticket
+        // somebody moved in between, instead of moving it back.
         const r = await assignTicketFn({
           data: {
             id: plan.id,
             technician_id: plan.technicianId,
             scheduled_date: plan.date,
             expect_technician_id: plan.expectTechnicianId,
+            expect_scheduled_date: plan.expectDate,
           },
         });
         return !!r.snooze_cleared;
       }
-      await moveTaskFn({ data: { id: plan.id, date: plan.date } });
+      // The task's content stamp as listed (Oct 21): a task changed or ticked Done in between is
+      // refused with TASK_CHANGED (toasted below) instead of moved.
+      await moveTaskFn({
+        data: { id: plan.id, date: plan.date, expect_content_updated_at: plan.expectStamp },
+      });
       return false;
     },
     onSuccess: (snoozeCleared, plan) => {
@@ -379,8 +392,11 @@ export function useWorkActions(profile: UserProfile | null): {
       setPicked("");
       setDrop({ item, day });
     },
-    movable: (item) => canMoveWork(item, profile),
+    // Not while a change to the row is in flight (Oct 21, canStartMove): the cell is not
+    // draggable, and a drop that slipped through before the re-render sends nothing.
+    movable: (item) => canMoveWork(item, profile) && canStartMove(pendingIds, workId(item)),
     move: (item, day) => {
+      if (!canStartMove(pendingIds, workId(item))) return;
       const plan = dropPlan(item, day, profile);
       if (plan) move.mutate(plan);
     },

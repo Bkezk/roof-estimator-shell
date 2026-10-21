@@ -262,8 +262,10 @@ describe("3. forgetWho: the gone person is dropped from the layout whatever the 
   });
   it("the page: the fallback effect forgets through forgetWho and names the fallback through onWho", () => {
     expect(page).toMatch(/import \{[^}]*\bforgetWho\b[^}]*\} from "@\/lib\/work-layout";/);
+    // Oct 21, eighth audit: the effect first waits for the profile (`if (!profile) return;`,
+    // work-overview-oct21-audit8-client.test.ts); the fallback itself is as it was.
     expect(page).toMatch(
-      /useEffect\(\(\) => \{\s*if \(shownWho === who\) return;[\s\S]*?const forgotten = forgetWho\(layout, who\);\s*if \(forgotten !== layout\) commitLayout\(forgotten\);\s*props\.onWho\(shownWho\);/,
+      /if \(!profile\) return;\s*if \(shownWho === who\) return;[\s\S]*?const forgotten = forgetWho\(layout, who\);\s*if \(forgotten !== layout\) commitLayout\(forgotten\);\s*props\.onWho\(shownWho\);/,
     );
     expect(page).not.toContain("if (shownWho !== who) changeWho(shownWho);");
     // changeWho itself is as it was (the Show menu's pick; not remembered while peeking).

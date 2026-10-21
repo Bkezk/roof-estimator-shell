@@ -1400,14 +1400,20 @@ export function MyWorkPage(props: {
   // writes an explicit ?who, Oct 21), so it holds even before the save lands.
   const shownWho = effectiveWho(who, people, profile, !!q.data?.rosterComplete);
   useEffect(() => {
+    // Oct 21 (the eighth audit): not before the profile is known. The gate renders the page on
+    // the session alone (auth-context retries a null first read after 1.2 s) and the work query
+    // runs on it, so the complete roster could land first — and with no profile the default is
+    // "mine", which went in the URL as an explicit ?who=mine and cost an admin Everyone for the
+    // visit. The remembered or linked person simply shows until the profile lands.
+    if (!profile) return;
     if (shownWho === who) return;
     const forgotten = forgetWho(layout, who);
     if (forgotten !== layout) commitLayout(forgotten);
     props.onWho(shownWho);
-    // commitLayout and props.onWho are re-made every render; the fallback depends on `who` and
-    // the roster only.
+    // commitLayout and props.onWho are re-made every render; the fallback depends on `who`, the
+    // roster and the profile only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownWho, who]);
+  }, [profile, shownWho, who]);
   const whoName =
     who === "all"
       ? "Everyone"

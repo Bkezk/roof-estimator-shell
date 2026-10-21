@@ -621,16 +621,18 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
       },
     ],
     crm_accounts: [{ id: ACC, name: "Bell County Schools" }],
+    // In id order (Oct 21, eighth audit): the reads page by keyset on id, and the fake's
+    // `.order()` is a no-op, so rows must be seeded as the server would sort them.
     bids: [
-      bidRow(),
-      bidRow({ id: "b-late", name: "Late bid", due_date: "2026-10-01" }),
-      bidRow({ id: "b-none", name: "Undated bid", due_date: null }),
-      bidRow({ id: "b-week", name: "Later bid", due_date: "2026-10-15" }),
-      bidRow({ id: "b-nobody", name: "Imported bid", created_by: null }),
-      bidRow({ id: "b-sub", name: "Submitted bid", status: "submitted" }),
-      bidRow({ id: "b-won", name: "Won bid", status: "won", due_date: "2026-10-01" }),
-      bidRow({ id: "b-lost", name: "Lost bid", status: "lost", due_date: "2026-10-01" }),
       bidRow({ id: "b-gone", name: "Deleted bid", deleted_at: "2026-10-11T00:00:00Z" }),
+      bidRow({ id: "b-late", name: "Late bid", due_date: "2026-10-01" }),
+      bidRow({ id: "b-lost", name: "Lost bid", status: "lost", due_date: "2026-10-01" }),
+      bidRow({ id: "b-nobody", name: "Imported bid", created_by: null }),
+      bidRow({ id: "b-none", name: "Undated bid", due_date: null }),
+      bidRow({ id: "b-sub", name: "Submitted bid", status: "submitted" }),
+      bidRow(),
+      bidRow({ id: "b-week", name: "Later bid", due_date: "2026-10-15" }),
+      bidRow({ id: "b-won", name: "Won bid", status: "won", due_date: "2026-10-01" }),
     ],
     service_jobs: [],
     tasks: [],
@@ -724,17 +726,23 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
     const detail = src.slice(src.indexOf("export const getOwnerPersonDetail"));
     for (const part of [list, detail]) {
       const q = part.slice(part.indexOf('.from("bids")'));
-      const block = q.slice(0, q.indexOf(".range(from, to)"));
+      // Oct 21, eighth audit: keyset pages — `.order("id").limit(PAGE)` and the cursor, not
+      // `.range(from, to)`; listMyWork's due_date order is not kept (every row comes, and
+      // mergeWork sorts), since a keyset page must be in id order.
+      const block = q.slice(0, q.indexOf(".limit(PAGE)"));
       expect(block).toContain(cols);
       expect(block).toContain('.is("deleted_at", null)');
       expect(block).toContain('.eq("status", "draft")');
-      expect(block).toContain('.order("due_date", { ascending: true, nullsFirst: false })');
+      expect(block).toMatch(/\.order\("id"\)\s*$/);
+      expect(block).not.toContain('.order("due_date"');
+      expect(q).toMatch(/\.order\("id"\)\s*\.limit\(PAGE\),\s*after,/);
     }
     // Everyone's for the table; that person's for the detail.
     expect(list).not.toContain('.eq("created_by", userId)');
     expect(detail).toContain('.eq("created_by", userId)');
-    // Oct 21: no 1,000-row cap — every counted read pages through readAll (lib/read-all.ts).
-    expect(src).toContain('import { readAll } from "@/lib/read-all";');
+    // Oct 21: no 1,000-row cap — every counted read pages through readAll (lib/read-all.ts); by
+    // keyset since the eighth audit (PAGE and afterId come from there too).
+    expect(src).toContain('import { PAGE, afterId, readAll } from "@/lib/read-all";');
     // The rows go through mergeWork as kind "bid" (my-work.ts bidItems), not a path of their own.
     expect(list).toContain('bids: must("Bids", bids),');
     expect(detail).toContain("bids: bidRows.map((b) => ({");

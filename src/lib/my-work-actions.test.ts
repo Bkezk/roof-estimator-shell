@@ -202,12 +202,14 @@ describe("dropPlan: drag an assigned ticket or task onto another day", () => {
   const DAY = "2026-10-21";
   it("a ticket for whoever dispatches: its technician unchanged, the new day", () => {
     const t = item({ kind: "ticket", assigneeId: BOB, date: "2026-10-20" });
-    // Oct 21: expectTechnicianId guards the write (work-overview-oct21-audit7-data.test.ts).
+    // Oct 21: expectTechnicianId guards the write (work-overview-oct21-audit7-data.test.ts);
+    // Oct 21, eighth audit: so does expectDate, the day the row showed.
     expect(dropPlan(t, DAY, office)).toEqual({
       kind: "ticket",
       id: "t1",
       technicianId: BOB,
       expectTechnicianId: BOB,
+      expectDate: "2026-10-20",
       date: DAY,
     });
     expect(dropPlan(item({ kind: "inspection" }), DAY, manager)).toMatchObject({ kind: "ticket" });
@@ -260,12 +262,18 @@ describe("dropPlan: drag an assigned ticket or task onto another day", () => {
     // The Unassigned aside still claims by drop; nothing else moves a follow-up or an opportunity.
     expect(cal).not.toContain("const it = unassigned.find((u) => u.key === key);");
     const hook = read("src/components/my-work-actions.tsx");
-    expect(hook).toContain("movable: (item) => canMoveWork(item, profile),");
+    // Oct 21, eighth audit: movable also asks canStartMove (no drag while a move is in flight),
+    // and the task move carries the row's content stamp (moveTaskDate's change guard).
+    expect(hook).toContain(
+      "movable: (item) => canMoveWork(item, profile) && canStartMove(pendingIds, workId(item)),",
+    );
     expect(hook).toContain("const plan = dropPlan(item, day, profile);");
     expect(hook).toMatch(
       /technician_id: plan\.technicianId,\s*scheduled_date: plan\.date,\s*expect_technician_id: plan\.expectTechnicianId,/,
     );
-    expect(hook).toContain("moveTaskFn({ data: { id: plan.id, date: plan.date } })");
+    expect(hook).toMatch(
+      /moveTaskFn\(\{\s*data: \{ id: plan\.id, date: plan\.date, expect_content_updated_at: plan\.expectStamp \},\s*\}\)/,
+    );
     expect(hook).toContain("toast.success(movedToast(plan.date, snoozeCleared));");
     const fns = read("src/lib/tasks.functions.ts");
     expect(fns).toContain("export const moveTaskDate = createServerFn");

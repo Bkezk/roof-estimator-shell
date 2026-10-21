@@ -16,7 +16,10 @@
  *   - Drag an assigned ticket or task onto another calendar day to reschedule it (`dropPlan`):
  *     tickets for whoever dispatches (`dispatchesTickets`, the server's rule in
  *     assignServiceJob), tasks for whoever may change the task. Follow-ups, opportunities and
- *     bids are not moved this way; nobody's work is claimed by a drop instead (the aside).
+ *     bids are not moved this way; nobody's work is claimed by a drop instead (the aside). The
+ *     plan carries what the row showed (Oct 21: the ticket's technician and day, the task's
+ *     content stamp) so the server refuses a drop from a row someone changed in between, and a
+ *     row whose move is still in flight is not dragged again (`canStartMove`).
  *   - "Assign to…" on an Unassigned row (`assignPlan`): a ticket to a technician for whoever
  *     dispatches; a task or an opportunity to a user for an admin or a manager (`seesEveryone`,
  *     the server's rule in assignTask / assignOpportunity).
@@ -94,7 +97,15 @@ export function canEditWorkTask(
 /** What `dropPlan` and `assignPlan` read of a row. */
 export type ActionIn = Pick<
   WorkItem,
-  "key" | "kind" | "date" | "assigneeId" | "unassigned" | "done" | "needsAuth" | "toInvoice"
+  | "key"
+  | "kind"
+  | "date"
+  | "assigneeId"
+  | "unassigned"
+  | "done"
+  | "needsAuth"
+  | "toInvoice"
+  | "stamp"
 >;
 
 /**
@@ -115,16 +126,29 @@ export function canMoveWork(item: ActionIn, viewer: Viewer): boolean {
  * `expectTechnicianId` (Oct 21, the seventh audit): the technician the row showed — up to five
  * minutes old — which the server must still find on the ticket, or it refuses (TICKET_CHANGED)
  * instead of writing that old technician back over a reassignment made in between.
+ * `expectDate` (Oct 21, the eighth audit): the day the row showed (null: none), which the server
+ * must still find too — the technician guard alone let a drop from a stale page write its day
+ * over one somebody had just moved. `expectStamp` (the same audit): a task's content stamp as
+ * listed, so moveTaskDate refuses a task ticked Done or changed in between (TASK_CHANGED);
+ * absent when the row carried none, and then the move is unguarded as before.
  */
 export type DropPlan =
-  | { kind: "ticket"; id: string; technicianId: string; expectTechnicianId: string; date: string }
-  | { kind: "task"; id: string; date: string };
+  | {
+      kind: "ticket";
+      id: string;
+      technicianId: string;
+      expectTechnicianId: string;
+      expectDate: string | null;
+      date: string;
+    }
+  | { kind: "task"; id: string; date: string; expectStamp?: string };
 
 /**
  * The move a drop on `day` makes, or null when there is nothing to do (the same day) or the
  * viewer may not (`canMoveWork`). A ticket: assignServiceJob with its technician unchanged and
  * the new day (a date-only move keeps Scheduled and is logged on the ticket), guarded by the
- * technician the row showed (`expectTechnicianId`); a task: moveTaskDate (its time of day kept).
+ * technician and the day the row showed (`expectTechnicianId`, `expectDate`); a task:
+ * moveTaskDate (its time of day kept), guarded by the stamp the row showed (`expectStamp`).
  */
 export function dropPlan(item: ActionIn, day: string, viewer: Viewer): DropPlan | null {
   if (!YMD.test(day) || item.date === day || !canMoveWork(item, viewer)) return null;
@@ -136,11 +160,20 @@ export function dropPlan(item: ActionIn, day: string, viewer: Viewer): DropPlan 
           id,
           technicianId: item.assigneeId,
           expectTechnicianId: item.assigneeId,
+          expectDate: item.date,
           date: day,
         }
       : null;
-  return { kind: "task", id, date: day };
+  return { kind: "task", id, date: day, ...(item.stamp ? { expectStamp: item.stamp } : {}) };
 }
+
+/**
+ * May a drag of this row start now (Oct 21, the eighth audit)? Not while a change to it — its
+ * move, its claim — is still in flight: until the list refetched, a second drop sent a second
+ * move (two toasts, and the second refused as a change by the first). The hook asks before it
+ * marks a cell draggable and before it sends a plan; `busy` is its set of in-flight row ids.
+ */
+export const canStartMove = (busy: ReadonlySet<string>, id: string): boolean => !busy.has(id);
 
 export type AssignKind = "ticket" | "task" | "opportunity";
 
