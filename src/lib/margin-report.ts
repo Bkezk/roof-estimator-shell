@@ -2,7 +2,11 @@
  * The Margin report (owner, Oct 21): for admins, what the finished invoices of a date range made
  * and cost, grouped by month (the default), customer or technician, with a CSV export like the
  * inventory one. Pure: no database, no browser; margin-report.functions.ts reads the rows and
- * calls this, components/margin-report.tsx shows the result.
+ * calls this, components/margin-report.tsx shows the result. Extended the same day ("add more
+ * detail to the margin section and add some charts to track over time with the ability to
+ * compare months/years"; "keep it before tax"): hours and the average invoice per group, the lean
+ * per-invoice rows behind each group, the paid / sent / final split, the chart points, and a
+ * comparison period (margin-compare.ts aligns the two).
  *
  * Definitions (the same words sit in the component's help text):
  *  - Only final, sent and paid invoices count — never a draft, never a void one.
@@ -12,8 +16,10 @@
  *    margin. (The per-invoice "Internal — cost and margin" fold, invoice-totals.ts computeTotals,
  *    takes margin off the total INCLUDING tax, so a taxed invoice reads a little higher there
  *    than here. The report's way is the honest one for a margin; the fold is left as it was.)
+ *    Every figure, chart and comparison here is before tax; there is no toggle.
  *  - Material cost = the material lines' cost_total; Labor & travel = the labor and travel lines'
  *    (their cost_rate comes from the rate table, invoice-labor.ts); Other = the other lines'.
+ *  - Hours = the labor and travel lines' qty, summed (what computeTotals calls `hours`).
  *  - Purchase orders = the ticket's APPROVED purchase orders, counted toward exactly ONE invoice
  *    of the ticket, its earliest live one (invoice-totals.ts poCostForInvoice), and never when
  *    the PO is already a "po:<id>" line on the invoice — then it is in the material cost
@@ -21,10 +27,12 @@
  *    here, live, as the invoice page does.
  *  - Cost = material + labor & travel + other + purchase orders. Margin = revenue − cost.
  *    Margin % = margin / revenue as a percent with one decimal; blank (null) when revenue is 0,
- *    never NaN.
+ *    never NaN. Avg / invoice = revenue / invoices; blank when there are none.
  *  - Sorting: months newest first; customers and technicians by margin, biggest first, then by
- *    name. A ticket with nobody assigned is "Unassigned"; an invoice whose ticket is missing is
- *    "No ticket". Every amount is rounded to cents.
+ *    name. Technicians are keyed by the profile's id (two people with the same display name stay
+ *    two rows), customers by the bill-to name (the only name the invoice has). A ticket with
+ *    nobody assigned is "Unassigned"; an invoice whose ticket is missing is "No ticket". Every
+ *    amount is rounded to cents.
  */
 import { approvedPoTotal, type PoLike } from "@/lib/purchase-orders";
 import { poCostForInvoice, splitPosByLines, type TicketInvoiceRef } from "@/lib/invoice-totals";
@@ -46,6 +54,7 @@ export const MARGIN_GROUP_LABELS: Record<MarginGroupBy, string> = {
 
 /** The invoice statuses the report counts (invoices.functions.ts INVOICE_STATUSES less draft and void). */
 export const COUNTED_INVOICE_STATUSES = ["final", "sent", "paid"] as const;
+export type CountedInvoiceStatus = (typeof COUNTED_INVOICE_STATUSES)[number];
 
 export const UNASSIGNED_LABEL = "Unassigned";
 export const NO_TICKET_LABEL = "No ticket";
@@ -73,6 +82,22 @@ export function monthLabel(key: string): string {
   const name = MONTHS[Number(m) - 1];
   return name && y ? `${name} ${y}` : key;
 }
+/** "2026-10" → "Oct 26" (a chart tick). */
+export function shortMonthLabel(key: string): string {
+  const [y, m] = key.split("-");
+  const name = MONTHS[Number(m) - 1];
+  return name && y ? `${name} ${y.slice(2)}` : key;
+}
+
+/** Every month key from `from`'s month to `to`'s, oldest first; none when from is after to. */
+export function monthsBetween(from: string, to: string): string[] {
+  const start = Number(from.slice(0, 4)) * 12 + Number(from.slice(5, 7)) - 1;
+  const end = Number(to.slice(0, 4)) * 12 + Number(to.slice(5, 7)) - 1;
+  const out: string[] = [];
+  for (let i = start; i <= end; i++)
+    out.push(`${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
+  return out;
+}
 
 // ---- cost ---------------------------------------------------------------------------------
 
@@ -81,22 +106,31 @@ export interface LineCosts {
   /** Labor and travel lines together (both are the crew's time). */
   labor: number;
   other: number;
+  /** The labor and travel lines' qty (hours), summed. */
+  hours: number;
 }
 
-/** The lines' cost split by kind; a kind the report does not know counts under Other. */
+/** The lines' cost split by kind, and the hours; a kind the report does not know counts under Other. */
 export function lineCosts(
-  lines: readonly { kind: string; cost_total: number | string | null }[],
+  lines: readonly {
+    kind: string;
+    cost_total: number | string | null;
+    qty?: number | string | null;
+  }[],
 ): LineCosts {
   let material = 0;
   let labor = 0;
   let other = 0;
+  let hours = 0;
   for (const l of lines) {
     const c = num(l.cost_total);
     if (l.kind === "material") material += c;
-    else if (l.kind === "labor" || l.kind === "travel") labor += c;
-    else other += c;
+    else if (l.kind === "labor" || l.kind === "travel") {
+      labor += c;
+      hours += num(l.qty);
+    } else other += c;
   }
-  return { material: r2(material), labor: r2(labor), other: r2(other) };
+  return { material: r2(material), labor: r2(labor), other: r2(other), hours: r2(hours) };
 }
 
 /**
@@ -114,21 +148,28 @@ export function poCostCarried(
   return poCostForInvoice(invoiceId, ticketInvoices, approvedPoTotal(offInvoice)).cost;
 }
 
-// ---- grouping -----------------------------------------------------------------------------
+// ---- the invoices -------------------------------------------------------------------------
 
 /** One counted invoice, resolved: its day, names and cost parts (the server builds these). */
 export interface MarginInvoiceIn {
   id: string;
+  /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel). */
+  number: string;
   /** YYYY-MM-DD (invoiceDay). */
   day: string;
+  status: CountedInvoiceStatus;
   /** Revenue: the subtotal, before tax. */
   subtotal: number | string;
   /** The bill-to name (customer account or vendor); "" when none is known. */
   customer: string;
   /** The ticket's technician's name; null when nobody is assigned (or there is no ticket). */
   technician: string | null;
+  /** The technician's profile id (the grouping key); null when nobody is assigned. */
+  technicianId: string | null;
   /** Does the invoice's ticket exist (false → "No ticket")? */
   ticket: boolean;
+  /** The labor and travel hours on the lines. */
+  hours: number;
   material: number;
   labor: number;
   other: number;
@@ -136,9 +177,76 @@ export interface MarginInvoiceIn {
   purchaseOrders: number;
 }
 
+/**
+ * The lean per-invoice row the report sends and shows under an expanded group: who, when, what
+ * status, and the money — no tax, no lines, no snapshots.
+ */
+export interface MarginInvoiceRow {
+  id: string;
+  number: string;
+  day: string;
+  status: CountedInvoiceStatus;
+  customer: string;
+  technician: string | null;
+  technicianId: string | null;
+  ticket: boolean;
+  hours: number;
+  /** The subtotal, before tax. */
+  revenue: number;
+  material: number;
+  labor: number;
+  other: number;
+  purchaseOrders: number;
+  cost: number;
+  margin: number;
+  marginPct: number | null;
+}
+
+/** margin / revenue as a percent with one decimal; null (blank) at zero revenue, never NaN. */
+export function marginPctOf(margin: number, revenue: number): number | null {
+  if (!(revenue > 0) && !(revenue < 0)) return null;
+  const pct = (margin / revenue) * 100;
+  return Number.isFinite(pct) ? Math.round(pct * 10) / 10 : null;
+}
+
+export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
+  const revenue = r2(num(inv.subtotal));
+  const material = r2(inv.material);
+  const labor = r2(inv.labor);
+  const other = r2(inv.other);
+  const purchaseOrders = r2(inv.purchaseOrders);
+  const cost = r2(material + labor + other + purchaseOrders);
+  const margin = r2(revenue - cost);
+  return {
+    id: inv.id,
+    number: inv.number,
+    day: inv.day,
+    status: inv.status,
+    customer: inv.customer,
+    technician: inv.technician,
+    technicianId: inv.technicianId,
+    ticket: inv.ticket,
+    hours: r2(inv.hours),
+    revenue,
+    material,
+    labor,
+    other,
+    purchaseOrders,
+    cost,
+    margin,
+    marginPct: marginPctOf(margin, revenue),
+  };
+}
+
+// ---- grouping -----------------------------------------------------------------------------
+
 export interface MarginTotals {
   invoices: number;
+  /** Labor and travel hours. */
+  hours: number;
   revenue: number;
+  /** revenue / invoices; null when there are no invoices. */
+  avgRevenue: number | null;
   material: number;
   labor: number;
   other: number;
@@ -155,26 +263,28 @@ export interface MarginRow extends MarginTotals {
   label: string;
 }
 
-export interface MarginReportResult {
+/** One period's answer: its groups, totals and the invoices behind them. */
+export interface MarginPeriod {
   from: string;
   to: string;
-  groupBy: MarginGroupBy;
   rows: MarginRow[];
   totals: MarginTotals;
+  invoices: MarginInvoiceRow[];
+}
+
+export interface MarginReportResult extends MarginPeriod {
+  groupBy: MarginGroupBy;
   /** When the numbers were read (ISO). */
   generatedAt: string;
+  /** The comparison period, when one was asked for (the same groupBy). */
+  comparison?: MarginPeriod;
 }
 
-/** margin / revenue as a percent with one decimal; null (blank) at zero revenue, never NaN. */
-export function marginPctOf(margin: number, revenue: number): number | null {
-  if (!(revenue > 0) && !(revenue < 0)) return null;
-  const pct = (margin / revenue) * 100;
-  return Number.isFinite(pct) ? Math.round(pct * 10) / 10 : null;
-}
-
-const emptyTotals = (): MarginTotals => ({
+export const emptyMarginTotals = (): MarginTotals => ({
   invoices: 0,
+  hours: 0,
   revenue: 0,
+  avgRevenue: null,
   material: 0,
   labor: 0,
   other: 0,
@@ -184,7 +294,16 @@ const emptyTotals = (): MarginTotals => ({
   marginPct: null,
 });
 
-function groupOf(inv: MarginInvoiceIn, groupBy: MarginGroupBy): { key: string; label: string } {
+type GroupFields = Pick<
+  MarginInvoiceRow,
+  "day" | "customer" | "technician" | "technicianId" | "ticket"
+>;
+
+/** The group an invoice falls in under `groupBy`: its key and the label the row shows. */
+export function marginGroupKey(
+  inv: GroupFields,
+  groupBy: MarginGroupBy,
+): { key: string; label: string } {
   if (groupBy === "month") {
     const key = monthKey(inv.day);
     return { key, label: monthLabel(key) };
@@ -194,24 +313,24 @@ function groupOf(inv: MarginInvoiceIn, groupBy: MarginGroupBy): { key: string; l
     return { key: name, label: name };
   }
   if (!inv.ticket) return { key: "no-ticket", label: NO_TICKET_LABEL };
-  const name = (inv.technician ?? "").trim();
-  return name ? { key: name, label: name } : { key: "unassigned", label: UNASSIGNED_LABEL };
+  if (!inv.technicianId) return { key: "unassigned", label: UNASSIGNED_LABEL };
+  return { key: inv.technicianId, label: (inv.technician ?? "").trim() || UNASSIGNED_LABEL };
 }
 
-function add(t: MarginTotals, inv: MarginInvoiceIn): void {
-  const revenue = num(inv.subtotal);
-  const cost = inv.material + inv.labor + inv.other + inv.purchaseOrders;
+function add(t: MarginTotals, inv: MarginInvoiceRow): void {
   t.invoices += 1;
-  t.revenue += revenue;
+  t.hours += inv.hours;
+  t.revenue += inv.revenue;
   t.material += inv.material;
   t.labor += inv.labor;
   t.other += inv.other;
   t.purchaseOrders += inv.purchaseOrders;
-  t.cost += cost;
-  t.margin += revenue - cost;
+  t.cost += inv.cost;
+  t.margin += inv.margin;
 }
 
 function settle(t: MarginTotals): void {
+  t.hours = r2(t.hours);
   t.revenue = r2(t.revenue);
   t.material = r2(t.material);
   t.labor = r2(t.labor);
@@ -220,20 +339,35 @@ function settle(t: MarginTotals): void {
   t.cost = r2(t.cost);
   t.margin = r2(t.margin);
   t.marginPct = marginPctOf(t.margin, t.revenue);
+  t.avgRevenue = t.invoices > 0 ? r2(t.revenue / t.invoices) : null;
 }
 
-/** The rows and totals of `invoices` grouped by `groupBy`, in the report's order. */
-export function aggregateMargin(
-  invoices: readonly MarginInvoiceIn[],
+/** `rows` summed into one MarginTotals (settled). */
+export function sumMarginRows(rows: readonly MarginInvoiceRow[]): MarginTotals {
+  const t = emptyMarginTotals();
+  for (const r of rows) add(t, r);
+  settle(t);
+  return t;
+}
+
+const sortRows = (rows: MarginRow[], groupBy: MarginGroupBy) => {
+  if (groupBy === "month") rows.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
+  else rows.sort((a, b) => b.margin - a.margin || a.label.localeCompare(b.label));
+  return rows;
+};
+
+/** The rows and totals of the per-invoice `rows` grouped by `groupBy`, in the report's order. */
+export function aggregateMarginRows(
+  invoices: readonly MarginInvoiceRow[],
   groupBy: MarginGroupBy,
 ): { rows: MarginRow[]; totals: MarginTotals } {
   const groups = new Map<string, MarginRow>();
-  const totals = emptyTotals();
+  const totals = emptyMarginTotals();
   for (const inv of invoices) {
-    const g = groupOf(inv, groupBy);
+    const g = marginGroupKey(inv, groupBy);
     let row = groups.get(g.key);
     if (!row) {
-      row = { ...emptyTotals(), key: g.key, label: g.label };
+      row = { ...emptyMarginTotals(), key: g.key, label: g.label };
       groups.set(g.key, row);
     }
     add(row, inv);
@@ -242,9 +376,100 @@ export function aggregateMargin(
   const rows = [...groups.values()];
   for (const r of rows) settle(r);
   settle(totals);
-  if (groupBy === "month") rows.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
-  else rows.sort((a, b) => b.margin - a.margin || a.label.localeCompare(b.label));
-  return { rows, totals };
+  return { rows: sortRows(rows, groupBy), totals };
+}
+
+/** The rows and totals of `invoices` grouped by `groupBy`, in the report's order. */
+export function aggregateMargin(
+  invoices: readonly MarginInvoiceIn[],
+  groupBy: MarginGroupBy,
+): { rows: MarginRow[]; totals: MarginTotals } {
+  return aggregateMarginRows(invoices.map(toMarginInvoiceRow), groupBy);
+}
+
+// ---- the status split ---------------------------------------------------------------------
+
+export type StatusSplit = Record<CountedInvoiceStatus, { invoices: number; revenue: number }>;
+/** The words of the split's three tiles (the component). */
+export const STATUS_SPLIT_LABELS: Record<CountedInvoiceStatus, string> = {
+  paid: "Paid",
+  sent: "Sent, unpaid",
+  final: "Final, not yet sent",
+};
+
+/** Of the period's revenue (before tax), how much is paid, sent and unpaid, final not yet sent. */
+export function statusSplit(invoices: readonly MarginInvoiceRow[]): StatusSplit {
+  const out: StatusSplit = {
+    paid: { invoices: 0, revenue: 0 },
+    sent: { invoices: 0, revenue: 0 },
+    final: { invoices: 0, revenue: 0 },
+  };
+  for (const i of invoices) {
+    const slot = out[i.status];
+    if (!slot) continue;
+    slot.invoices += 1;
+    slot.revenue += i.revenue;
+  }
+  for (const s of COUNTED_INVOICE_STATUSES) out[s].revenue = r2(out[s].revenue);
+  return out;
+}
+
+// ---- chart points -------------------------------------------------------------------------
+
+/** One month of the "By month" and "Cost mix" charts; `label` is the "Oct 26" tick. */
+export interface MonthPoint extends MarginTotals {
+  key: string;
+  label: string;
+}
+
+/** Every month of from..to as a point, oldest first, zero where nothing was invoiced. */
+export function monthSeries(
+  invoices: readonly MarginInvoiceRow[],
+  from: string,
+  to: string,
+): MonthPoint[] {
+  const byMonth = new Map(aggregateMarginRows(invoices, "month").rows.map((r) => [r.key, r]));
+  return monthsBetween(from, to).map((key) => {
+    const row = byMonth.get(key);
+    const totals: MarginTotals = row
+      ? {
+          invoices: row.invoices,
+          hours: row.hours,
+          revenue: row.revenue,
+          avgRevenue: row.avgRevenue,
+          material: row.material,
+          labor: row.labor,
+          other: row.other,
+          purchaseOrders: row.purchaseOrders,
+          cost: row.cost,
+          margin: row.margin,
+          marginPct: row.marginPct,
+        }
+      : emptyMarginTotals();
+    return { key, label: shortMonthLabel(key), ...totals };
+  });
+}
+
+export const OTHERS_KEY = "others";
+export const OTHERS_LABEL = "Others";
+
+/** The first `n` rows (they come sorted by margin) and the rest folded into one Others row. */
+export function topByMargin(rows: readonly MarginRow[], n = 10): MarginRow[] {
+  if (rows.length <= n) return [...rows];
+  const others: MarginRow = { ...emptyMarginTotals(), key: OTHERS_KEY, label: OTHERS_LABEL };
+  for (const r of rows.slice(n)) {
+    others.invoices += r.invoices;
+    others.hours += r.hours;
+    others.revenue += r.revenue;
+    others.material += r.material;
+    others.labor += r.labor;
+    others.other += r.other;
+    others.purchaseOrders += r.purchaseOrders;
+    others.cost += r.cost;
+    others.margin += r.margin;
+  }
+  settle(others);
+  return [...rows.slice(0, n), others];
 }
 
 // ---- the default range --------------------------------------------------------------------
@@ -271,7 +496,9 @@ export const marginRangeValid = (from: string, to: string): boolean =>
 export const MARGIN_CSV_HEADER = [
   "Group",
   "Invoices",
+  "Hours",
   "Revenue",
+  "Avg / invoice",
   "Material",
   "Labor & travel",
   "Purchase orders",
@@ -283,11 +510,16 @@ export const MARGIN_CSV_HEADER = [
 
 const cents = (n: number) => n.toFixed(2);
 const pct = (n: number | null) => (n === null ? "" : n.toFixed(1));
+/** Hours as written: "3", "2.5". */
+const hrs = (n: number) => String(r2(n));
 
-const csvLine = (label: string, t: MarginTotals): string[] => [
+/** Money with 2 decimals, percent with 1, blank when none (margin-compare.ts marginCsvRows adds the comparison columns). */
+export const marginCsvLine = (label: string, t: MarginTotals): string[] => [
   label,
   String(t.invoices),
+  hrs(t.hours),
   cents(t.revenue),
+  t.avgRevenue === null ? "" : cents(t.avgRevenue),
   cents(t.material),
   cents(t.labor),
   cents(t.purchaseOrders),
@@ -296,16 +528,14 @@ const csvLine = (label: string, t: MarginTotals): string[] => [
   cents(t.margin),
   pct(t.marginPct),
 ];
+/** The CSV's number formats, for the comparison columns. */
+export const marginCsvFormat = { cents, pct };
 
-/** The header, one row per group and a Totals row; money as plain numbers (review-export.ts toCsv writes it). */
-export function marginCsvRows(result: MarginReportResult): string[][] {
-  return [
-    MARGIN_CSV_HEADER,
-    ...result.rows.map((r) => csvLine(r.label, r)),
-    csvLine("Totals", result.totals),
-  ];
-}
-
-/** "margin-month-2025-11-01-to-2026-10-21.csv" */
-export const marginCsvFileName = (groupBy: MarginGroupBy, from: string, to: string): string =>
-  `margin-${groupBy}-${from}-to-${to}.csv`;
+/** "margin-month-2025-11-01-to-2026-10-21.csv"; "…-vs-<from>-to-<to>.csv" when comparing. */
+export const marginCsvFileName = (
+  groupBy: MarginGroupBy,
+  from: string,
+  to: string,
+  compare?: { from: string; to: string } | null,
+): string =>
+  `margin-${groupBy}-${from}-to-${to}${compare ? `-vs-${compare.from}-to-${compare.to}` : ""}.csv`;

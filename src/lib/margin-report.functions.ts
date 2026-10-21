@@ -4,21 +4,26 @@
  * "Forbidden: admin only" unless its role is admin — never a flag from the client. Reads run under
  * the caller's own client (an admin reads everything by RLS, other users' profiles included).
  *
- * What is read, and why:
+ * What is read, and why (`readPeriod`, once for the range asked for and once more for the
+ * comparison period when `compare` is given — one call from the client, no second round trip):
  *  - invoices with status final / sent / paid whose invoice_date is in From..To, every row a page
  *    at a time (read-all.ts: no 1,000-row ceiling; keyset pages by id since Oct 21's eighth audit,
  *    so an invoice finalized while the report reads is counted once or not at all, never twice).
  *    invoice_date is never null, so filtering on it loses nothing; invoiceDay still applies the
  *    finalized / created fallbacks for the grouping.
- *  - their tickets (technician, account, customer name), their lines (the cost split and the
- *    "po:<id>" sources), the tickets' APPROVED purchase orders, and — for tickets that have one —
- *    every invoice of the ticket whatever its status, because the PO counts toward the ticket's
- *    earliest LIVE invoice (a draft included; invoice-totals.ts poCostInvoice). Id lists go 100
- *    at a time (chunk-ids.ts), each chunk read to the end (readAll) so a chunk with over 1,000
- *    lines is not cut short.
+ *  - their tickets (technician, account, customer name), their lines (the cost split, the hours
+ *    from the labor and travel lines' qty, and the "po:<id>" sources), the tickets' APPROVED
+ *    purchase orders, and — for tickets that have one — every invoice of the ticket whatever its
+ *    status, because the PO counts toward the ticket's earliest LIVE invoice (a draft included;
+ *    invoice-totals.ts poCostInvoice). Id lists go 100 at a time (chunk-ids.ts), each chunk read
+ *    to the end (readAll) so a chunk with over 1,000 lines is not cut short.
  *  - names: the invoice's bill_to snapshot carries the customer's (or vendor's) name, as the
  *    Invoices list shows it (invoices.functions.ts listInvoices); a blank one falls back to the
  *    vendor, the account, then the ticket's customer_name. Technicians come from profiles.
+ *
+ * The answer carries the groups, the totals and the lean per-invoice rows (margin-report.ts
+ * MarginInvoiceRow: ids, numbers, names, day, status, the money — no tax, no lines) so the report
+ * can open a group and show the invoices behind it without another read.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -33,11 +38,15 @@ import type { TicketInvoiceRef } from "@/lib/invoice-totals";
 import {
   COUNTED_INVOICE_STATUSES,
   MARGIN_GROUPS,
-  aggregateMargin,
+  aggregateMarginRows,
   invoiceDay,
   lineCosts,
   poCostCarried,
-  type MarginInvoiceIn,
+  toMarginInvoiceRow,
+  type CountedInvoiceStatus,
+  type MarginGroupBy,
+  type MarginInvoiceRow,
+  type MarginPeriod,
   type MarginReportResult,
 } from "@/lib/margin-report";
 import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
@@ -45,8 +54,11 @@ import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
 type Sb = SupabaseClient<Database>;
 
 const YMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a day as YYYY-MM-DD");
+const RANGE = z
+  .object({ from: YMD, to: YMD })
+  .refine((d) => d.from <= d.to, { message: "From must be on or before To" });
 const INPUT = z
-  .object({ from: YMD, to: YMD, groupBy: z.enum(MARGIN_GROUPS) })
+  .object({ from: YMD, to: YMD, groupBy: z.enum(MARGIN_GROUPS), compare: RANGE.optional() })
   .refine((d) => d.from <= d.to, { message: "From must be on or before To" });
 export type MarginReportInput = z.infer<typeof INPUT>;
 
@@ -78,6 +90,149 @@ function byIds<T extends { id: RowId }>(
   return readInChunks(ids, (chunk) => readAll((after) => page(chunk, after)));
 }
 
+/** The counted invoices of from..to as lean per-invoice rows (the reads described at the top). */
+async function readPeriod(sb: Sb, from: string, to: string): Promise<MarginInvoiceRow[]> {
+  const invoices = must(
+    "invoices",
+    await readAll((after) =>
+      afterId(
+        sb
+          .from("invoices")
+          .select(
+            "id, number, display_number, status, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
+          )
+          .in("status", [...COUNTED_INVOICE_STATUSES])
+          .gte("invoice_date", from)
+          .lte("invoice_date", to)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+    ),
+  );
+  const invoiceIds = invoices.map((i) => i.id);
+  const ticketIds = uniq(invoices.map((i) => i.service_job_id));
+
+  const [tickets, lines, pos] = await Promise.all([
+    readInChunks(ticketIds, (chunk) =>
+      sb
+        .from("service_jobs")
+        .select("id, technician_id, account_id, customer_name")
+        .in("id", chunk),
+    ),
+    byIds(invoiceIds, (chunk, after) =>
+      afterId(
+        sb
+          .from("invoice_lines")
+          .select("id, invoice_id, kind, cost_total, qty, source")
+          .in("invoice_id", chunk)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+    ),
+    byIds(ticketIds, (chunk, after) =>
+      afterId(
+        sb
+          .from("service_job_purchase_orders")
+          .select("id, service_job_id, approved, price")
+          .eq("approved", true)
+          .in("service_job_id", chunk)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+    ),
+  ]);
+  const ticketById = new Map(tickets.map((t) => [t.id, t]));
+  const linesByInvoice = new Map<string, typeof lines>();
+  for (const l of lines) {
+    const list = linesByInvoice.get(l.invoice_id) ?? [];
+    list.push(l);
+    linesByInvoice.set(l.invoice_id, list);
+  }
+  const posByTicket = new Map<string, typeof pos>();
+  for (const p of pos) {
+    const list = posByTicket.get(p.service_job_id) ?? [];
+    list.push(p);
+    posByTicket.set(p.service_job_id, list);
+  }
+
+  // Names, and the carrier rule's invoice lists, in one round.
+  const blankName = (i: (typeof invoices)[number]) => !billToName(i.bill_to);
+  const vendorIds = uniq(invoices.filter(blankName).map((i) => i.bill_to_vendor_id));
+  const accountIds = uniq(
+    invoices
+      .filter((i) => blankName(i) && !i.bill_to_vendor_id)
+      .map((i) => ticketById.get(i.service_job_id)?.account_id),
+  );
+  const techIds = uniq(tickets.map((t) => t.technician_id));
+  const [vendors, accounts, profiles, ticketInvoices] = await Promise.all([
+    readInChunks(vendorIds, (chunk) => sb.from("vendors").select("id, name").in("id", chunk)),
+    readInChunks(accountIds, (chunk) => sb.from("crm_accounts").select("id, name").in("id", chunk)),
+    readInChunks(techIds, (chunk) =>
+      sb.from("profiles").select("id, full_name, email").in("id", chunk),
+    ),
+    byIds([...posByTicket.keys()], (chunk, after) =>
+      afterId(
+        sb
+          .from("invoices")
+          .select("id, number, display_number, status, created_at, service_job_id")
+          .in("service_job_id", chunk)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+    ),
+  ]);
+  const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
+  const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  const techName = new Map(profiles.map((p) => [p.id, nameOf(p)]));
+  const refsByTicket = new Map<string, TicketInvoiceRef[]>();
+  for (const r of ticketInvoices) {
+    const list = refsByTicket.get(r.service_job_id) ?? [];
+    list.push({ id: r.id, label: invoiceLabel(r), status: r.status, created_at: r.created_at });
+    refsByTicket.set(r.service_job_id, list);
+  }
+
+  return invoices.map((i) => {
+    const ticket = ticketById.get(i.service_job_id);
+    const myLines = linesByInvoice.get(i.id) ?? [];
+    const myPos = posByTicket.get(i.service_job_id) ?? [];
+    const costs = lineCosts(myLines);
+    const customer =
+      billToName(i.bill_to) ||
+      (i.bill_to_vendor_id ? vendorName.get(i.bill_to_vendor_id) : undefined) ||
+      (ticket?.account_id ? accountName.get(ticket.account_id) : undefined) ||
+      ticket?.customer_name ||
+      "";
+    const technicianId = ticket?.technician_id ?? null;
+    return toMarginInvoiceRow({
+      id: i.id,
+      number: invoiceLabel(i),
+      day: invoiceDay(i),
+      // The read filtered on these statuses; the cast only names the narrower type.
+      status: i.status as CountedInvoiceStatus,
+      subtotal: Number(i.subtotal),
+      customer,
+      technician: technicianId ? (techName.get(technicianId) ?? null) : null,
+      technicianId,
+      ticket: !!ticket,
+      ...costs,
+      purchaseOrders: myPos.length
+        ? poCostCarried(i.id, refsByTicket.get(i.service_job_id) ?? [], myPos, myLines)
+        : 0,
+    });
+  });
+}
+
+const periodOf = (
+  from: string,
+  to: string,
+  invoices: MarginInvoiceRow[],
+  groupBy: MarginGroupBy,
+): MarginPeriod => ({ from, to, invoices, ...aggregateMarginRows(invoices, groupBy) });
+
 export const listMarginReport = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => INPUT.parse(d))
@@ -92,142 +247,18 @@ export const listMarginReport = createServerFn({ method: "GET" })
     if (meErr) throw new Error(meErr.message);
     if (!me || !isAdmin(me)) throw new Error("Forbidden: admin only");
 
-    const invoices = must(
-      "invoices",
-      await readAll((after) =>
-        afterId(
-          sb
-            .from("invoices")
-            .select(
-              "id, number, display_number, status, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
-            )
-            .in("status", [...COUNTED_INVOICE_STATUSES])
-            .gte("invoice_date", data.from)
-            .lte("invoice_date", data.to)
-            .order("id")
-            .limit(PAGE),
-          after,
-        ),
-      ),
-    );
-    const invoiceIds = invoices.map((i) => i.id);
-    const ticketIds = uniq(invoices.map((i) => i.service_job_id));
-
-    const [tickets, lines, pos] = await Promise.all([
-      readInChunks(ticketIds, (chunk) =>
-        sb
-          .from("service_jobs")
-          .select("id, technician_id, account_id, customer_name")
-          .in("id", chunk),
-      ),
-      byIds(invoiceIds, (chunk, after) =>
-        afterId(
-          sb
-            .from("invoice_lines")
-            .select("id, invoice_id, kind, cost_total, source")
-            .in("invoice_id", chunk)
-            .order("id")
-            .limit(PAGE),
-          after,
-        ),
-      ),
-      byIds(ticketIds, (chunk, after) =>
-        afterId(
-          sb
-            .from("service_job_purchase_orders")
-            .select("id, service_job_id, approved, price")
-            .eq("approved", true)
-            .in("service_job_id", chunk)
-            .order("id")
-            .limit(PAGE),
-          after,
-        ),
-      ),
+    const [current, earlier] = await Promise.all([
+      readPeriod(sb, data.from, data.to),
+      data.compare ? readPeriod(sb, data.compare.from, data.compare.to) : null,
     ]);
-    const ticketById = new Map(tickets.map((t) => [t.id, t]));
-    const linesByInvoice = new Map<string, typeof lines>();
-    for (const l of lines) {
-      const list = linesByInvoice.get(l.invoice_id) ?? [];
-      list.push(l);
-      linesByInvoice.set(l.invoice_id, list);
-    }
-    const posByTicket = new Map<string, typeof pos>();
-    for (const p of pos) {
-      const list = posByTicket.get(p.service_job_id) ?? [];
-      list.push(p);
-      posByTicket.set(p.service_job_id, list);
-    }
-
-    // Names, and the carrier rule's invoice lists, in one round.
-    const blankName = (i: (typeof invoices)[number]) => !billToName(i.bill_to);
-    const vendorIds = uniq(invoices.filter(blankName).map((i) => i.bill_to_vendor_id));
-    const accountIds = uniq(
-      invoices
-        .filter((i) => blankName(i) && !i.bill_to_vendor_id)
-        .map((i) => ticketById.get(i.service_job_id)?.account_id),
-    );
-    const techIds = uniq(tickets.map((t) => t.technician_id));
-    const [vendors, accounts, profiles, ticketInvoices] = await Promise.all([
-      readInChunks(vendorIds, (chunk) => sb.from("vendors").select("id, name").in("id", chunk)),
-      readInChunks(accountIds, (chunk) =>
-        sb.from("crm_accounts").select("id, name").in("id", chunk),
-      ),
-      readInChunks(techIds, (chunk) =>
-        sb.from("profiles").select("id, full_name, email").in("id", chunk),
-      ),
-      byIds([...posByTicket.keys()], (chunk, after) =>
-        afterId(
-          sb
-            .from("invoices")
-            .select("id, number, display_number, status, created_at, service_job_id")
-            .in("service_job_id", chunk)
-            .order("id")
-            .limit(PAGE),
-          after,
-        ),
-      ),
-    ]);
-    const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
-    const accountName = new Map(accounts.map((a) => [a.id, a.name]));
-    const techName = new Map(profiles.map((p) => [p.id, nameOf(p)]));
-    const refsByTicket = new Map<string, TicketInvoiceRef[]>();
-    for (const r of ticketInvoices) {
-      const list = refsByTicket.get(r.service_job_id) ?? [];
-      list.push({ id: r.id, label: invoiceLabel(r), status: r.status, created_at: r.created_at });
-      refsByTicket.set(r.service_job_id, list);
-    }
-
-    const rows: MarginInvoiceIn[] = invoices.map((i) => {
-      const ticket = ticketById.get(i.service_job_id);
-      const myLines = linesByInvoice.get(i.id) ?? [];
-      const myPos = posByTicket.get(i.service_job_id) ?? [];
-      const costs = lineCosts(myLines);
-      const customer =
-        billToName(i.bill_to) ||
-        (i.bill_to_vendor_id ? vendorName.get(i.bill_to_vendor_id) : undefined) ||
-        (ticket?.account_id ? accountName.get(ticket.account_id) : undefined) ||
-        ticket?.customer_name ||
-        "";
-      return {
-        id: i.id,
-        day: invoiceDay(i),
-        subtotal: Number(i.subtotal),
-        customer,
-        technician: ticket?.technician_id ? (techName.get(ticket.technician_id) ?? null) : null,
-        ticket: !!ticket,
-        ...costs,
-        purchaseOrders: myPos.length
-          ? poCostCarried(i.id, refsByTicket.get(i.service_job_id) ?? [], myPos, myLines)
-          : 0,
-      };
-    });
 
     return {
-      from: data.from,
-      to: data.to,
+      ...periodOf(data.from, data.to, current, data.groupBy),
       groupBy: data.groupBy,
-      ...aggregateMargin(rows, data.groupBy),
       generatedAt: new Date().toISOString(),
+      ...(earlier && data.compare
+        ? { comparison: periodOf(data.compare.from, data.compare.to, earlier, data.groupBy) }
+        : {}),
     };
   });
 
