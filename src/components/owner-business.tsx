@@ -1,9 +1,11 @@
 /**
- * The Owner view's Business tab (owner, Oct 8): four money tiles — Authorized, not invoiced (the
- * Awaiting invoice queue, with the Done tickets still to be authorized as its second line; owner,
- * Oct 12, item 6), Unpaid, Invoiced this month, Pipeline — then purchase orders waiting, Won /
- * Lost, and a "Going stale" strip. Every tile is a link to the list already filtered to what it
- * counts. Blank until the numbers arrive (never a placeholder 0); an empty queue reads "—".
+ * The Owner view's Business tab (owner, Oct 8): the money in flight — Authorized, not invoiced
+ * (the Awaiting invoice queue, with the Done tickets still to be authorized as its second line;
+ * owner, Oct 12, item 6), Unpaid, Pipeline, purchase orders waiting, Won / Lost — and a "Going
+ * stale" strip. "Invoiced this month" left on Oct 21 (owner: redundant — the margin report under
+ * these tiles has the month, before tax, with its cost). Every tile is a link to the list already
+ * filtered to what it counts. Blank until the numbers arrive (never a placeholder 0); an empty
+ * queue reads "—".
  */
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -113,10 +115,9 @@ export function OwnerBusiness() {
 
   const count = (n: number | undefined, word: string) =>
     n === undefined ? "" : `${n} ${word}${n === 1 ? "" : "s"}`;
-  const lastMonth = d?.invoiced.lastMonth;
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Tile
           title="Authorized, not invoiced"
           help="Tickets marked Authorized that have no invoice yet — the Invoices page's Awaiting invoice queue and Work Overview's Authorized — to invoice group. Aged from the day they were authorized."
@@ -155,16 +156,6 @@ export function OwnerBusiness() {
           tone={d && d.unpaid.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
         />
         <Tile
-          title="Invoiced this month"
-          href={BUSINESS_HREFS.invoiced}
-          value={d ? money(d.invoiced.month.total, d.invoiced.month.count) : ""}
-          sub={
-            d
-              ? `${count(d.invoiced.month.count, "invoice")}${lastMonth ? ` · last month ${lastMonth.count ? USD.format(lastMonth.total) : "—"}` : ""}`
-              : ""
-          }
-        />
-        <Tile
           title="Pipeline"
           href={BUSINESS_HREFS.pipeline}
           value={d ? money(d.pipeline.open.value, d.pipeline.open.count) : ""}
@@ -178,8 +169,6 @@ export function OwnerBusiness() {
               : ""
           }
         />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
         <Tile
           title="Purchase orders waiting for approval"
           href={BUSINESS_HREFS.pos}

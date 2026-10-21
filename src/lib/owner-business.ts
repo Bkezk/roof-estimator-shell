@@ -26,6 +26,8 @@ export interface BizInvoice {
 export interface BizPo {
   approved: boolean | null;
   price: number | string | null;
+  /** The ticket (the server leaves out orders on deleted tickets before these arrive). */
+  service_job_id?: string;
 }
 export interface BizOpp {
   status: string;
@@ -74,12 +76,7 @@ export interface BusinessNumbers {
   toAuthorize: { count: number; oldestDays: number | null };
   /** Final or sent invoices not marked paid. */
   unpaid: MoneyTile;
-  /** Invoices dated this month and last (final, sent or paid — never drafts or voids). */
-  invoiced: {
-    month: { count: number; total: number };
-    lastMonth: { count: number; total: number };
-  };
-  /** Purchase orders waiting for approval. */
+  /** Purchase orders waiting for approval, on live tickets only. */
   pos: { count: number; total: number };
   pipeline: {
     open: { count: number; value: number };
@@ -113,12 +110,6 @@ export function monthRange(today: string): { start: string; end: string } {
   const mm = String(m).padStart(2, "0");
   return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(last).padStart(2, "0")}` };
 }
-/** The month before `today`'s. */
-export function lastMonthRange(today: string): { start: string; end: string } {
-  const [y, m] = today.split("-").map(Number) as [number, number];
-  const prev = m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, "0")}-01`;
-  return monthRange(prev);
-}
 const inRange = (ymd: string | null | undefined, r: { start: string; end: string }) =>
   !!ymd && ymd.slice(0, 10) >= r.start && ymd.slice(0, 10) <= r.end;
 
@@ -145,21 +136,14 @@ export const TO_INVOICE_STAGES: readonly string[] = ["authorized"];
 /** The tile's second line: Done tickets still to be reviewed (Work Overview's Needs authorization). */
 export const TO_AUTHORIZE_STAGES: readonly string[] = ["done"];
 export const UNPAID_STATUSES: readonly string[] = ["final", "sent"];
-export const BILLED_STATUSES: readonly string[] = ["final", "sent", "paid"];
 
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);
-  const lastMonth = lastMonthRange(i.today);
   const waiting = i.tickets.filter((t) => TO_INVOICE_STAGES.includes(t.stage) && !t.invoice_id);
   const reviewing = i.tickets.filter((t) => TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id);
   const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));
-  const billed = i.invoices.filter((v) => BILLED_STATUSES.includes(v.status));
   const sumBy = <T>(rows: readonly T[], f: (r: T) => number) =>
     round2(rows.reduce((s, r) => s + f(r), 0));
-  const monthOf = (r: { start: string; end: string }) => {
-    const rows = billed.filter((v) => inRange(v.invoice_date, r));
-    return { count: rows.length, total: sumBy(rows, (v) => num(v.total)) };
-  };
   const pos = i.pos.filter((p) => !p.approved);
   const openOpps = i.opps.filter((o) =>
     (OPEN_OPP_STATUSES as readonly string[]).includes(o.status),
@@ -197,7 +181,6 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
         i.now,
       ),
     },
-    invoiced: { month: monthOf(month), lastMonth: monthOf(lastMonth) },
     pos: { count: pos.length, total: sumBy(pos, (p) => num(p.price)) },
     pipeline: {
       open: { count: openOpps.length, value: sumBy(openOpps, (o) => num(o.est_value)) },
@@ -220,9 +203,9 @@ export const BUSINESS_HREFS = {
   // The Authorized tickets the tile counts: the Invoices page's Awaiting invoice queue.
   toInvoice: "/service/invoices?tab=to-invoice",
   unpaid: "/service/invoices?status=unpaid",
-  invoiced: "/service/invoices",
   pipeline: "/opportunities?status=allopen",
-  pos: "/service?stage=openwork",
+  // The Tickets list filtered to the tickets carrying an order still waiting (owner, Oct 21).
+  pos: "/service?po=waiting",
   pastDue: "/service?overdue=1",
   // The untouched items have no list page of their own: each page's "Needs action" strip
   // (components/crm/contact-log.tsx NeedsActionStrip) lists them at the top, and the Service

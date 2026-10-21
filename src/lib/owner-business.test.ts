@@ -11,14 +11,7 @@ vi.mock("@tanstack/react-start", async () => ({
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
-import {
-  BUSINESS_HREFS,
-  businessNumbers,
-  daysOld,
-  lastMonthRange,
-  money,
-  monthRange,
-} from "@/lib/owner-business";
+import { BUSINESS_HREFS, businessNumbers, daysOld, money, monthRange } from "@/lib/owner-business";
 import { listOwnerBusiness } from "@/lib/owner-business.functions";
 import { invoiceSearch } from "@/lib/invoice-search";
 import { fakeSupabase } from "@/test/fake-supabase";
@@ -26,11 +19,9 @@ import { fakeSupabase } from "@/test/fake-supabase";
 const read = (p: string) => readFileSync(p, "utf8").replace(/\s+/g, " ");
 
 describe("months and ages", () => {
-  it("monthRange / lastMonthRange on a mid-month day and a January", () => {
+  it("monthRange on a mid-month day and a February", () => {
     expect(monthRange("2026-10-08")).toEqual({ start: "2026-10-01", end: "2026-10-31" });
     expect(monthRange("2026-02-10")).toEqual({ start: "2026-02-01", end: "2026-02-28" });
-    expect(lastMonthRange("2026-10-08")).toEqual({ start: "2026-09-01", end: "2026-09-30" });
-    expect(lastMonthRange("2026-01-15")).toEqual({ start: "2025-12-01", end: "2025-12-31" });
   });
   it("daysOld: whole days to now, never below 0, null for nothing", () => {
     const now = "2026-10-08T15:00:00Z";
@@ -148,9 +139,8 @@ describe("businessNumbers", () => {
   it("Unpaid: final + sent, their total and the oldest invoice date", () => {
     expect(n.unpaid).toEqual({ count: 2, total: 2000.5, oldestDays: 28 });
   });
-  it("Invoiced this month and last: final, sent and paid by invoice date; drafts and voids never", () => {
-    expect(n.invoiced.month).toEqual({ count: 2, total: 1700.5 });
-    expect(n.invoiced.lastMonth).toEqual({ count: 2, total: 2800 });
+  it("Invoiced this month is no longer a tile (owner, Oct 21: the margin report has the month)", () => {
+    expect(n).not.toHaveProperty("invoiced");
   });
   it("Purchase orders waiting: the unapproved ones", () => {
     expect(n.pos).toEqual({ count: 2, total: 199.99 });
@@ -221,8 +211,10 @@ describe("listOwnerBusiness (server)", () => {
           { id: "i2", status: "paid", total: 50, invoice_date: "2026-10-01" },
         ],
         service_job_purchase_orders: [
-          { id: "p1", approved: false, price: 10 },
-          { id: "p2", approved: true, price: 20 },
+          { id: "p1", service_job_id: "j1", approved: false, price: 10 },
+          { id: "p2", service_job_id: "j1", approved: true, price: 20 },
+          // On a deleted ticket: never counted (owner, Oct 21; po-waiting.test.ts).
+          { id: "p3", service_job_id: "j2", approved: false, price: 36 },
         ],
         crm_opportunities: [
           {
@@ -275,7 +267,6 @@ describe("listOwnerBusiness (server)", () => {
     expect(r.toInvoice.count).toBe(0);
     expect(r.toAuthorize.count).toBe(1);
     expect(r.unpaid).toMatchObject({ count: 1, total: 100 });
-    expect(r.invoiced.month).toEqual({ count: 2, total: 150 });
     expect(r.pos).toEqual({ count: 1, total: 10 });
     expect(r.pipeline.open).toEqual({ count: 1, value: 300 });
     expect(r.stale).toMatchObject({ untouchedTickets: 1, untouchedOpps: 2, snoozed: 1 });
@@ -311,9 +302,9 @@ describe("the click-throughs", () => {
       // The Authorized tickets it counts: the Awaiting invoice queue (owner, Oct 12, item 6).
       toInvoice: "/service/invoices?tab=to-invoice",
       unpaid: "/service/invoices?status=unpaid",
-      invoiced: "/service/invoices",
       pipeline: "/opportunities?status=allopen",
-      pos: "/service?stage=openwork",
+      // The tickets carrying an order still waiting (owner, Oct 21; po-waiting.test.ts).
+      pos: "/service?po=waiting",
       pastDue: "/service?overdue=1",
       // The untouched items sit in each page's Needs action strip; neither page takes a filter.
       untouchedTickets: "/service",
@@ -329,7 +320,6 @@ describe("the click-throughs", () => {
     expect(biz).toContain("enabled: !!session && visibleToOwner(profile),");
     expect(biz).toContain('title="Authorized, not invoiced"');
     expect(biz).toContain('title="Unpaid"');
-    expect(biz).toContain('title="Invoiced this month"');
     expect(biz).toContain('title="Pipeline"');
     expect(biz).toContain("Going stale");
   });

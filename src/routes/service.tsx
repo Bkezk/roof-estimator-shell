@@ -44,6 +44,7 @@ function ServiceRoute() {
       opportunity={search.opportunity}
       stage={search.stage}
       overdue={search.overdue === 1}
+      po={search.po}
       q={search.q}
       tech={search.tech}
       type={search.type}

@@ -14,6 +14,8 @@ export const TECH_UNASSIGNED = "unassigned";
 export type TechFilter = typeof TECH_ALL | typeof TECH_UNASSIGNED | (string & {});
 
 export interface ListTicket {
+  /** The row's id (the PO waiting filter keys on it; absent in older callers). */
+  id?: string;
   number: number;
   stage: string;
   service_type: string;
@@ -36,6 +38,11 @@ export interface TicketListFilters {
   /** "all", "openwork" or one stage. */
   stage: string;
   overdueOnly: boolean;
+  /**
+   * The ids of the tickets with a purchase order waiting for approval, when that chip is on
+   * (listPoWaitingTicketIds; owner, Oct 21): only those pass. null / absent = no such filter.
+   */
+  poWaiting?: ReadonlySet<string> | null;
   /** "all" or one service type. */
   type: string;
   tech: TechFilter;
@@ -71,6 +78,7 @@ export function filterTickets<T extends ListTicket>(jobs: T[], f: TicketListFilt
       if (!isOpenTicketStage(j.stage)) return false;
     } else if (f.stage !== "all" && j.stage !== f.stage) return false;
     if (f.overdueOnly && !isOverdueTicket(j, f.today)) return false;
+    if (f.poWaiting && !(j.id && f.poWaiting.has(j.id))) return false;
     if (f.type !== "all" && j.service_type !== f.type) return false;
     if (f.tech === TECH_UNASSIGNED) {
       if (j.technician_id) return false;
