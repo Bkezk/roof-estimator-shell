@@ -22,6 +22,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { readInChunks } from "@/lib/chunk-ids";
 import {
   WORK_TICKET_STAGES,
   addDays,
@@ -89,9 +90,17 @@ export interface OwnerViewResult {
   rows: OwnerRow[];
   /** Did audit_log answer (false until that table exists)? */
   auditLog: boolean;
+  /**
+   * Did any source hit `LIMIT` (Oct 21, seventh audit)? Each is capped at 1,000 rows per read,
+   * so a number may run low; the view says so, as the List does (listMyWork `truncated`).
+   */
+  truncated: boolean;
 }
 
+/** Each source's cap (the List's too); `truncated` says whether any reached it. */
 const LIMIT = 1000;
+/** Did a read come back full — at the cap, so there may be more? */
+const atCap = (r: { data: unknown[] | null }) => (r.data?.length ?? 0) >= LIMIT;
 /** Bulk window for Last activity; older activity is looked up per person. */
 const ACTIVITY_DAYS = 14;
 
@@ -181,6 +190,9 @@ export const listOwnerView = createServerFn({ method: "GET" })
           .limit(LIMIT),
       ]);
     const people = must("Profiles", profiles);
+    // Oct 21: a source at the cap may be missing rows, so its numbers may run low. The activity
+    // reads are not counted: a person missing from a full bulk read gets a lookup of their own.
+    const truncated = [tickets, tasks, followups, opps, doneTickets, doneTasks, bids].some(atCap);
     const followupRows = must("Follow-ups", followups);
     const items = mergeWork(
       {
@@ -218,26 +230,51 @@ export const listOwnerView = createServerFn({ method: "GET" })
         stale: staleness(last, today, roleLabel(p) === "Admin") === "stale",
       };
     });
-    return { today, at: now.toISOString(), rows: sortOwnerRows(rows), auditLog };
+    return { today, at: now.toISOString(), rows: sortOwnerRows(rows), auditLog, truncated };
   });
 
-/** One source of activity: its table, the person column(s) and the timestamp column. */
+/**
+ * Who a row credits: the person in `col` — unless `unless` names a column that is set on the
+ * row (tasks: the assignee is credited only when nobody is recorded as having ticked it).
+ */
+interface Credit {
+  col: string;
+  unless?: string;
+}
+
+/** One source of activity: its table, the people it credits and the timestamp column. */
 interface Source {
   table: string;
-  who: string[];
+  who: Credit[];
   at: string;
   /** Extra filter (tasks: done ones only). */
   only?: [string, string];
 }
 
 const SOURCES: Source[] = [
-  { table: "service_job_events", who: ["by_user"], at: "at" },
-  { table: "crm_contact_log", who: ["by_user"], at: "at" },
-  { table: "tasks", who: ["assignee"], at: "done_at", only: ["status", "done"] },
+  { table: "service_job_events", who: [{ col: "by_user" }], at: "at" },
+  { table: "crm_contact_log", who: [{ col: "by_user" }], at: "at" },
+  // A task's Done is the action of whoever ticked it — tasks.done_by (20261009100000) — and the
+  // assignee's only on a row with nobody recorded (Oct 21, seventh audit: it always credited the
+  // assignee, so a manager closing a technician's task looked idle and the technician active).
+  {
+    table: "tasks",
+    who: [{ col: "done_by" }, { col: "assignee", unless: "done_by" }],
+    at: "done_at",
+    only: ["status", "done"],
+  },
   // A time entry is the technician's work, and the activity of whoever logged it.
-  { table: "service_time_entries", who: ["technician_id", "created_by"], at: "created_at" },
-  { table: "audit_log", who: ["by_user"], at: "at" },
+  {
+    table: "service_time_entries",
+    who: [{ col: "technician_id" }, { col: "created_by" }],
+    at: "created_at",
+  },
+  { table: "audit_log", who: [{ col: "by_user" }], at: "at" },
 ];
+
+/** The columns a source's bulk read needs: everyone it may credit, the tie-breakers, the time. */
+const sourceColumns = (src: Source) =>
+  [...new Set(src.who.flatMap((c) => (c.unless ? [c.col, c.unless] : [c.col]))), src.at].join(", ");
 
 /**
  * The latest activity per person. The bulk read covers the last ACTIVITY_DAYS days; anyone with
@@ -258,7 +295,11 @@ async function loadLastActivity(
     hits.set(h.who, list);
   };
   const toHits = (src: Source, rows: Record<string, string | null>[]) => {
-    for (const r of rows) for (const w of src.who) add({ who: r[w], at: r[src.at] });
+    for (const r of rows)
+      for (const w of src.who) {
+        if (w.unless && r[w.unless]) continue;
+        add({ who: r[w.col], at: r[src.at] });
+      }
   };
 
   let auditLog = true;
@@ -266,7 +307,7 @@ async function loadLastActivity(
     SOURCES.map((src) => {
       let q = sb
         .from(src.table)
-        .select([...src.who, src.at].join(", "))
+        .select(sourceColumns(src))
         .gte(src.at, since)
         .order(src.at, { ascending: false })
         .limit(LIMIT);
@@ -295,10 +336,11 @@ async function loadLastActivity(
         let q = sb
           .from(src.table)
           .select(src.at)
-          .eq(w, id)
+          .eq(w.col, id)
           .not(src.at, "is", null)
           .order(src.at, { ascending: false })
           .limit(1);
+        if (w.unless) q = q.is(w.unless, null);
         if (src.only) q = q.eq(src.only[0], src.only[1]);
         const r = await q;
         if (r.error) {
@@ -327,10 +369,12 @@ export interface OwnerPersonDetail {
   today: DetailItem[];
   /** Their overdue Work Overview items and opportunities past expected close — the row's Overdue. */
   overdue: DetailItem[];
-  /** Tickets completed and tasks done this Mon–Sun week — the row's Done this week. */
+  /** Tickets completed and tasks done this Sun–Sat week (Oct 21: the List's week) — the row's Done this week. */
   doneThisWeek: DoneItem[];
   /** Their last five actions, newest first. */
   recent: ActivityItem[];
+  /** Did any of their sources hit `LIMIT` (Oct 21)? Then a card may be missing items. */
+  truncated: boolean;
 }
 
 /** Rows read per activity source (some are dropped as repeats before the newest five). */
@@ -434,11 +478,14 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const doneTicketRows = must("Done tickets", doneTickets);
     const doneTaskRows = must("Done tasks", doneTasks);
     const bidRows = must("Bids", bids);
+    const truncated = [tickets, tasks, followups, opps, doneTickets, doneTasks, bids].some(atCap);
 
     const activity = await loadPersonActivity(raw, userId);
 
     // Labels: buildings (tasks), customers (follow-ups, opportunities, bids), ticket numbers and
-    // opportunity titles (activity lines). Best effort: an unreadable label is left blank.
+    // opportunity titles (activity lines). Best effort: an unreadable label is left blank. Read
+    // 100 ids at a time (Oct 21, seventh audit: one `.in` over every id outgrew the request URL
+    // past a few hundred and, best effort, blanked every label at once) — lib/chunk-ids.ts.
     const buildingIds = uniq(
       [...taskRows, ...doneTaskRows, ...activity.tasks].map((t) => t.building_id),
     );
@@ -452,22 +499,22 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
       activity.contacts.filter((c) => c.kind === "opportunity").map((c) => c.item_id),
     );
     const [buildings, accounts, ticketRefs, oppRefs] = await Promise.all([
-      buildingIds.length
-        ? sb.from("buildings").select("id, name, address1, city").in("id", buildingIds)
-        : null,
-      accountIds.length ? sb.from("crm_accounts").select("id, name").in("id", accountIds) : null,
-      ticketIds.length ? sb.from("service_jobs").select("id, number").in("id", ticketIds) : null,
-      oppIds.length ? sb.from("crm_opportunities").select("id, title").in("id", oppIds) : null,
+      readInChunks(buildingIds, (ids) =>
+        sb.from("buildings").select("id, name, address1, city").in("id", ids),
+      ),
+      readInChunks(accountIds, (ids) => sb.from("crm_accounts").select("id, name").in("id", ids)),
+      readInChunks(ticketIds, (ids) => sb.from("service_jobs").select("id, number").in("id", ids)),
+      readInChunks(oppIds, (ids) => sb.from("crm_opportunities").select("id, title").in("id", ids)),
     ]);
     const buildingLabel = new Map(
-      (buildings?.data ?? []).map((b) => [
+      buildings.map((b) => [
         b.id,
         [b.name, [b.address1, b.city].filter(Boolean).join(", ")].filter(Boolean).join(" · "),
       ]),
     );
-    const accountName = new Map((accounts?.data ?? []).map((a) => [a.id, a.name]));
-    const ticketById = new Map((ticketRefs?.data ?? []).map((t) => [t.id, t]));
-    const oppById = new Map((oppRefs?.data ?? []).map((o) => [o.id, o]));
+    const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+    const ticketById = new Map(ticketRefs.map((t) => [t.id, t]));
+    const oppById = new Map(oppRefs.map((o) => [o.id, o]));
     const label = (id: string | null) => (id ? (buildingLabel.get(id) ?? null) : null);
 
     const items = mergeWork(
@@ -555,6 +602,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
       overdue: groups.overdue,
       doneThisWeek: done,
       recent: recentActivity(rows, 5),
+      truncated,
     };
   });
 
@@ -605,7 +653,7 @@ async function loadPersonActivity(sb: SupabaseClient, userId: string): Promise<P
       .order(at, { ascending: false })
       .limit(RECENT_PER_SOURCE);
   const timeCols = "id, service_job_id, kind, hours, source, created_by, created_at";
-  const [events, contacts, tasks, timesBy, timesFor, audit] = await Promise.all([
+  const [events, contacts, tasksTicked, tasksOwn, timesBy, timesFor, audit] = await Promise.all([
     newest(
       "service_job_events",
       "service_job_id, kind, stage, field_status, note, at",
@@ -613,7 +661,12 @@ async function loadPersonActivity(sb: SupabaseClient, userId: string): Promise<P
       "at",
     ),
     newest("crm_contact_log", "kind, item_id, method, at", "by_user", "at"),
-    newest("tasks", "title, building_id, done_at", "assignee", "done_at").eq("status", "done"),
+    // A task's Done is whoever ticked it (done_by), the assignee's only when nobody is recorded
+    // (Oct 21, seventh audit) — the same credit as Last activity's SOURCES.
+    newest("tasks", "title, building_id, done_at", "done_by", "done_at").eq("status", "done"),
+    newest("tasks", "title, building_id, done_at", "assignee", "done_at")
+      .eq("status", "done")
+      .is("done_by", null),
     newest("service_time_entries", timeCols, "created_by", "created_at"),
     newest("service_time_entries", timeCols, "technician_id", "created_at"),
     newest("audit_log", "at, entity, entity_id, action, summary", "by_user", "at"),
@@ -632,7 +685,10 @@ async function loadPersonActivity(sb: SupabaseClient, userId: string): Promise<P
   return {
     events: rowsOf("service_job_events", events),
     contacts: rowsOf("crm_contact_log", contacts),
-    tasks: rowsOf("tasks", tasks),
+    tasks: [
+      ...rowsOf<PersonActivity["tasks"][number]>("tasks", tasksTicked),
+      ...rowsOf<PersonActivity["tasks"][number]>("tasks", tasksOwn),
+    ],
     times: [...times.values()],
     audit: audit.error ? [] : ((audit.data ?? []) as unknown as PersonActivity["audit"]),
   };

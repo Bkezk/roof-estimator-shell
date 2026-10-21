@@ -204,7 +204,9 @@ describe("listMyWork, through the fake client", () => {
     expect(fn).toContain(
       '(followups.data ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),',
     );
-    expect(fn).toContain('sb.from("crm_opportunities").select("id, status").in("id", oppIds)');
+    // Oct 21, seventh audit: the ids go 100 at a time (lib/chunk-ids.ts readInChunks).
+    expect(fn).toContain("readInChunks(oppIds, (ids) =>");
+    expect(fn).toContain('sb.from("crm_opportunities").select("id, status").in("id", ids)');
     expect(fn).toContain('f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,');
     const lib = readFileSync("src/lib/my-work.ts", "utf8");
     expect(lib).toMatch(

@@ -23,8 +23,8 @@
  *                   Work as that follow-up's row (its due date is the expected close), so it is
  *                   counted there, once (audit, Oct 2: an overdue opportunity counted twice —
  *                   Owner said 2 while the Work Overview list it links to showed 1).
- *   Done this week  tickets in done / invoiced / closed whose completed_at falls in this Mon–Sun
- *                   week, plus tasks marked done (done_at) in that week. A bid is neither: a
+ *   Done this week  tickets in done / invoiced / closed whose completed_at falls in this Sun–Sat
+ *                   week (the List's This week; Oct 21), plus tasks marked done (done_at) in that week. A bid is neither: a
  *                   submitted / won / lost bid is not counted anywhere here.
  *   Open opps       opportunities assigned to them, status open / contacted / quoted; the
  *                   number opens the Opportunities list filtered to that person
@@ -89,10 +89,14 @@ export function roleLabel(p: {
 
 // ---- weeks and days ------------------------------------------------------------------------
 
-/** The Monday–Sunday week (YYYY-MM-DD, inclusive) that holds `today`. */
+/**
+ * The Sunday–Saturday week (YYYY-MM-DD, inclusive) that holds `today` — the same week as the
+ * List's "This week" (my-work.ts endOfWeek) and the calendar. Oct 21, seventh audit: it ran
+ * Monday to Sunday, so on a Sunday the Owner view's Done this week and the List's This week were
+ * different weeks on one page; the owner chose the List's.
+ */
 export function weekRange(today: string): { start: string; end: string } {
-  const back = (weekday(today) + 6) % 7; // Monday 0 … Sunday 6
-  const start = addDays(today, -back);
+  const start = addDays(today, -weekday(today)); // Sunday 0 … Saturday 6
   return { start, end: addDays(start, 6) };
 }
 
@@ -279,7 +283,7 @@ const doneTaskInWeek = (t: DoneTaskIn, week: Week, toYmd: (iso: string) => strin
 
 /**
  * Done this week per person: tickets in done / invoiced / closed completed (completed_at) in the
- * Mon–Sun week of `today`, plus tasks done (done_at) in it. Days are Eastern.
+ * Sun–Sat week of `today`, plus tasks done (done_at) in it. Days are Eastern.
  */
 export function doneThisWeek(
   tickets: DoneTicketIn[],

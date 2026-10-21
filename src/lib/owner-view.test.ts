@@ -93,17 +93,18 @@ describe("roleLabel", () => {
   });
 });
 
-describe("weekRange: Eastern Monday–Sunday", () => {
+// Oct 21, seventh audit: Sunday to Saturday, the List's and the calendar's week (it was Mon–Sun).
+describe("weekRange: Eastern Sunday–Saturday", () => {
   it("a Thursday", () => {
-    expect(weekRange("2026-10-01")).toEqual({ start: "2026-09-28", end: "2026-10-04" });
+    expect(weekRange("2026-10-01")).toEqual({ start: "2026-09-27", end: "2026-10-03" });
   });
-  it("Monday and Sunday are their own week's ends", () => {
-    expect(weekRange("2026-09-28")).toEqual({ start: "2026-09-28", end: "2026-10-04" });
-    expect(weekRange("2026-10-04")).toEqual({ start: "2026-09-28", end: "2026-10-04" });
-    expect(weekRange("2026-10-05")).toEqual({ start: "2026-10-05", end: "2026-10-11" });
+  it("Sunday and Saturday are their own week's ends", () => {
+    expect(weekRange("2026-09-27")).toEqual({ start: "2026-09-27", end: "2026-10-03" });
+    expect(weekRange("2026-10-03")).toEqual({ start: "2026-09-27", end: "2026-10-03" });
+    expect(weekRange("2026-10-04")).toEqual({ start: "2026-10-04", end: "2026-10-10" });
   });
   it("across a year end", () => {
-    expect(weekRange("2027-01-01")).toEqual({ start: "2026-12-28", end: "2027-01-03" });
+    expect(weekRange("2027-01-01")).toEqual({ start: "2026-12-27", end: "2027-01-02" });
   });
 });
 
@@ -223,16 +224,22 @@ describe("oppCounts", () => {
 });
 
 describe("doneThisWeek", () => {
-  const today = "2026-10-01"; // week Sep 28 – Oct 4
+  const today = "2026-10-01"; // week Sun Sep 27 – Sat Oct 3 (Oct 21: the List's week, not Mon–Sun)
   it("tickets done / invoiced / closed completed this week + tasks done this week (Eastern)", () => {
     const n = doneThisWeek(
       [
         { technician_id: "bob", stage: "done", completed_at: "2026-09-28T14:00:00Z" },
         { technician_id: "bob", stage: "invoiced", completed_at: "2026-10-01T14:00:00Z" },
-        { technician_id: "bob", stage: "closed", completed_at: "2026-10-05T02:00:00Z" }, // Sun 10 pm ET
+        // Sat Oct 3 10 pm Eastern = Oct 4 02:00 UTC: the week's last evening.
+        { technician_id: "bob", stage: "closed", completed_at: "2026-10-04T02:00:00Z" },
         { technician_id: "bob", stage: "scheduled", completed_at: "2026-09-29T14:00:00Z" },
-        // Sun Sep 27 11 pm Eastern = Sep 28 03:00 UTC: last week.
+        // Sun Sep 27 11 pm Eastern = Sep 28 03:00 UTC: this week's first evening (it was last
+        // week's under Mon–Sun).
         { technician_id: "bob", stage: "done", completed_at: "2026-09-28T03:00:00Z" },
+        // Sat Sep 26 11 pm Eastern = Sep 27 03:00 UTC: last week.
+        { technician_id: "bob", stage: "done", completed_at: "2026-09-27T03:00:00Z" },
+        // Sun Oct 4 10 pm Eastern: next week (it was this week's last evening under Mon–Sun).
+        { technician_id: "bob", stage: "closed", completed_at: "2026-10-05T02:00:00Z" },
         { technician_id: "bob", stage: "done", completed_at: null },
       ],
       [
@@ -242,7 +249,7 @@ describe("doneThisWeek", () => {
       ],
       today,
     );
-    expect(n).toEqual({ bob: 3, ann: 1 });
+    expect(n).toEqual({ bob: 4, ann: 1 });
   });
 });
 

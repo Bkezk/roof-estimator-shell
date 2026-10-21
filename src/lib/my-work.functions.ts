@@ -15,6 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
+import { readInChunks } from "@/lib/chunk-ids";
 import {
   TO_AUTHORIZE_STAGE,
   TO_INVOICE_STAGE,
@@ -343,7 +344,9 @@ export const listMyWork = createServerFn({ method: "GET" })
     if (followups.error) throw new Error(`Follow-ups: ${followups.error.message}`);
 
     // Labels for tasks (their building) and follow-ups (their customer): best effort — a caller
-    // who may not read buildings or accounts simply gets the rows without them.
+    // who may not read buildings or accounts simply gets the rows without them. Read 100 ids at
+    // a time (Oct 21, seventh audit: one `.in` over every id — up to 1,000 per list — outgrew the
+    // request URL past a few hundred and, best effort, blanked every label at once).
     const buildingIds = [
       ...new Set(
         [...(tasks.data ?? []), ...(unTasks.data ?? [])]
@@ -368,27 +371,23 @@ export const listMyWork = createServerFn({ method: "GET" })
       ),
     ];
     const [buildings, accounts, roster, opps] = await Promise.all([
-      buildingIds.length
-        ? sb.from("buildings").select("id, name, address1, city").in("id", buildingIds)
-        : Promise.resolve({
-            data: [] as { id: string; name: string; address1: string; city: string | null }[],
-          }),
-      accountIds.length
-        ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      readInChunks(buildingIds, (ids) =>
+        sb.from("buildings").select("id, name, address1, city").in("id", ids),
+      ),
+      readInChunks(accountIds, (ids) => sb.from("crm_accounts").select("id, name").in("id", ids)),
       canPick ? loadPeople(sb) : Promise.resolve({ people: [] as WorkPerson[], complete: false }),
-      oppIds.length
-        ? sb.from("crm_opportunities").select("id, status").in("id", oppIds)
-        : Promise.resolve({ data: [] as { id: string; status: string }[] }),
+      readInChunks(oppIds, (ids) =>
+        sb.from("crm_opportunities").select("id, status").in("id", ids),
+      ),
     ]);
-    const oppStatus = new Map((opps.data ?? []).map((o) => [o.id, o.status]));
+    const oppStatus = new Map(opps.map((o) => [o.id, o.status]));
     const buildingLabel = new Map(
-      (buildings.data ?? []).map((b) => [
+      buildings.map((b) => [
         b.id,
         [b.name, [b.address1, b.city].filter(Boolean).join(", ")].filter(Boolean).join(" · "),
       ]),
     );
-    const accountName = new Map((accounts.data ?? []).map((a) => [a.id, a.name]));
+    const accountName = new Map(accounts.map((a) => [a.id, a.name]));
     const withBuilding = (t: TaskIn): TaskIn => ({
       ...t,
       building_label: t.building_id ? (buildingLabel.get(t.building_id) ?? null) : null,

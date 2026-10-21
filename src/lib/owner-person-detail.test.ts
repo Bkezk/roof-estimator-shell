@@ -27,7 +27,7 @@ import {
 } from "@/lib/owner-view";
 
 const read = (p: string) => readFileSync(p, "utf8");
-const TODAY = "2026-10-01"; // a Thursday; week Sep 28 – Oct 4
+const TODAY = "2026-10-01"; // a Thursday; week Sun Sep 27 – Sat Oct 3 (Oct 21: the List's week)
 const BOB = "11111111-1111-4111-8111-111111111111";
 const ANN = "22222222-2222-4222-8222-222222222222";
 
@@ -129,7 +129,7 @@ const doneTickets: DoneTicketRow[] = [
     completed_at: "2026-10-01T13:00:00Z",
   },
   {
-    // Sun Sep 27 11 pm Eastern: last week.
+    // Sat Sep 26 11 pm Eastern (Sep 27 03:00 UTC): last week, whichever day converts it.
     id: "d3",
     number: 6003,
     description: "Old",
@@ -138,7 +138,7 @@ const doneTickets: DoneTicketRow[] = [
     service_type: "leak",
     technician_id: BOB,
     stage: "closed",
-    completed_at: "2026-09-28T03:00:00Z",
+    completed_at: "2026-09-26T20:00:00Z",
   },
   {
     id: "d4",
@@ -218,7 +218,7 @@ describe("detail groups hold exactly what the row's numbers count", () => {
       href: "/service?id=t3",
     });
   });
-  it("Bob's Done this week: tickets and tasks in this Mon–Sun week, newest first", () => {
+  it("Bob's Done this week: tickets and tasks in this Sun–Sat week, newest first", () => {
     const done = doneItemsFor(BOB, doneTickets, doneTasks, weekRange(TODAY));
     expect(done).toEqual([
       {
