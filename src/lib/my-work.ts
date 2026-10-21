@@ -164,7 +164,7 @@ export function effectiveWho(
 export type WorkViewParam = "list" | "calendar";
 /**
  * ?view= as the route reads it: the two views, plus the old "owner" — kept so routes/my-work.tsx
- * can send an old link (/my-work?view=owner, a bookmark) on to /owner?tab=team (Oct 21). The page
+ * can send an old link (/my-work?view=owner, a bookmark) on to /owner (Oct 21). The page
  * never sees it.
  */
 export type WorkViewUrl = WorkViewParam | "owner";

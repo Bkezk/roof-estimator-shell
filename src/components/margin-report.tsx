@@ -1,5 +1,5 @@
 /**
- * The Margin report (owner, Oct 21), the Owner page's Margin tab: a date range (the last 12
+ * The Margin report (owner, Oct 21), under the tiles of the Owner page's Business tab: a date range (the last 12
  * months to start with), a Group by (Month, Customer, Technician), one table with a Totals row,
  * and Export CSV (the inventory export's way: toCsv + downloadBlob, no server round trip — the
  * rows on screen are the rows in the file). The numbers come from lib/margin-report.functions.ts;

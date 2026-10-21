@@ -10,15 +10,17 @@ import { parseOwnerTab, type OwnerTab } from "@/lib/owner-page";
  * are the owners, no new setting: the central gate blocks anyone else (lib/access.ts
  * pageForPath: /owner → "admin", as Admin › Users), and this route sends a signed-in non-admin
  * to Work Overview the way routes/my-work.tsx sends a technician-only user to My tickets. ?tab=
- * is the tab — team (the Owner view that lived on Work Overview until today) or margin (the
- * margin report) — kept in the URL so a tab can be linked and Back works; Team is the default
- * and is not written. An old /my-work?view=owner link lands here (routes/my-work.tsx).
+ * is the tab — people (the Owner view that lived on Work Overview until today) or business (the
+ * money tiles with the margin report under them; owner, Oct 21: "merge them into business") —
+ * kept in the URL so a tab can be linked and Back works; People is the default and is not
+ * written; the old names team / margin still land (lib/owner-page.ts parseOwnerTab). An old
+ * /my-work?view=owner link lands here (routes/my-work.tsx).
  */
 export const Route = createFileRoute("/owner")({
   head: () => ({ meta: [{ title: "Owner — JBK Portal" }] }),
   validateSearch: (s: Record<string, unknown>): OwnerSearch => {
     const tab = parseOwnerTab(s["tab"]);
-    return tab === "team" ? {} : { tab };
+    return tab === "people" ? {} : { tab };
   },
   component: OwnerRoute,
 });
@@ -35,8 +37,8 @@ function OwnerRoute() {
   if (profile && !isAdmin(profile)) return <Navigate to="/my-work" replace />;
   return (
     <OwnerPage
-      tab={tab ?? "team"}
-      onTab={(t) => void navigate({ search: t === "team" ? {} : { tab: t }, replace: true })}
+      tab={tab ?? "people"}
+      onTab={(t) => void navigate({ search: t === "people" ? {} : { tab: t }, replace: true })}
     />
   );
 }

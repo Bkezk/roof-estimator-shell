@@ -2,7 +2,7 @@
  * The Owner view (owner, Oct 1): "The owner should see everything in a format that is
  * easily digestible and have a view that allows him to see who is doing what they should be
  * doing, when they should be doing it" — "just ensure no one can see it but them." It lived on
- * Work Overview until Oct 21 ("owner should be its own tab"); it is now the Team tab of the Owner
+ * Work Overview until Oct 21 ("owner should be its own tab"); it is now the People tab of the Owner
  * page (/owner, routes/owner.tsx), moved as it was.
  *
  * One row per person: Role, Due today, Overdue, Done this week, Open opportunities, Last
@@ -55,7 +55,7 @@ import { OPP_ALL_OPEN, isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
 
 /**
  * Only admins (the owner) may see the Owner view — the client mirror of the server check. Oct 21:
- * the view is the Owner page's Team tab (routes/owner.tsx sends anyone else to Work Overview);
+ * the view is the Owner page's People tab (routes/owner.tsx sends anyone else to Work Overview);
  * `effectiveView`, which downgraded ?view=owner on Work Overview, went with it.
  */
 export const visibleToOwner = (p: AccessLike | null | undefined): boolean => isAdmin(p);

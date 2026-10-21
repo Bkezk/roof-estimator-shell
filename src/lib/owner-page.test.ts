@@ -2,7 +2,7 @@
  * The Owner section (owner, Oct 21: "owner should be its own tab"): a sidebar item of its own,
  * admins only, with two tabs — Team (the Owner view that lived on Work Overview until today, moved
  * as it was) and Margin (the margin report; a placeholder until it lands). Work Overview keeps the
- * List and the Calendar; an old link to /my-work?view=owner is sent on to /owner?tab=team, and a
+ * List and the Calendar; an old link to /my-work?view=owner is sent on to /owner, and a
  * remembered "owner" view on a profile or in the browser reads as the List. The same day the
  * Admin group of the sidebar lost its CenterPoint import entry (the page stays, by address).
  */
@@ -31,13 +31,15 @@ describe("access: /owner is an admin page, like Admin › Users", () => {
 });
 
 describe("the ?tab= of /owner", () => {
-  it("team and margin; anything else, or nothing, is Team", () => {
-    expect(OWNER_TABS).toEqual(["team", "margin"]);
-    expect(parseOwnerTab("team")).toBe("team");
-    expect(parseOwnerTab("margin")).toBe("margin");
-    expect(parseOwnerTab("people")).toBe("team");
-    expect(parseOwnerTab(undefined)).toBe("team");
-    expect(parseOwnerTab(1)).toBe("team");
+  it("people and business; the old names land; anything else, or nothing, is People (Oct 21)", () => {
+    expect(OWNER_TABS).toEqual(["people", "business"]);
+    expect(parseOwnerTab("people")).toBe("people");
+    expect(parseOwnerTab("business")).toBe("business");
+    // The first cut's names (Team | Margin), kept as aliases for bookmarks.
+    expect(parseOwnerTab("team")).toBe("people");
+    expect(parseOwnerTab("margin")).toBe("business");
+    expect(parseOwnerTab(undefined)).toBe("people");
+    expect(parseOwnerTab(1)).toBe("people");
   });
 });
 
@@ -86,22 +88,32 @@ describe("source: the /owner route", () => {
 
 describe("source: the Owner page", () => {
   const page = read("src/components/owner-page.tsx");
-  it("h1 Owner with an icon, the Team | Margin strip, the tab in the URL", () => {
+  it("h1 Owner with an icon, the People | Business strip (Oct 21: no Team wrapper, no Margin tab), the tab in the URL", () => {
     expect(page).toMatch(/<Crown className="h-6 w-6" \/> Owner\s*<\/h1>/);
-    expect(page).toMatch(/aria-pressed=\{tab === "team"\}/);
-    expect(page).toMatch(/aria-pressed=\{tab === "margin"\}/);
-    expect(page).toContain('onClick={() => props.onTab("team")}');
-    expect(page).toContain('onClick={() => props.onTab("margin")}');
-    expect(page).toMatch(/>\s*Team\s*<\/Button>/);
-    expect(page).toMatch(/>\s*Margin\s*<\/Button>/);
+    expect(page).toMatch(/aria-pressed=\{tab === "people"\}/);
+    expect(page).toMatch(/aria-pressed=\{tab === "business"\}/);
+    expect(page).toContain('onClick={() => props.onTab("people")}');
+    expect(page).toContain('onClick={() => props.onTab("business")}');
+    expect(page).toMatch(/>\s*People\s*<\/Button>/);
+    expect(page).toMatch(/>\s*Business\s*<\/Button>/);
+    expect(page.match(/aria-pressed=/g)).toHaveLength(2);
+    expect(page).not.toMatch(/>\s*Team\s*<\/Button>/);
+    expect(page).not.toMatch(/>\s*Margin\s*<\/Button>/);
   });
-  it("Team renders the Owner view, as it was, under its line; Margin the margin report", () => {
+  it("People renders the Owner view under its line; Business the tiles with the margin report under them", () => {
     expect(page).toContain('import { OwnerView } from "@/components/owner-view";');
+    expect(page).toContain('import { OwnerBusiness } from "@/components/owner-business";');
     expect(page).toContain('import { MarginReport } from "@/components/margin-report";');
     expect(page).toMatch(
-      /tab === "team" \? \(\s*<>\s*<p className="text-sm text-muted-foreground">\s*Everyone: what is due today, what is overdue, what got done this week\.\s*<\/p>\s*<OwnerView \/>\s*<\/>\s*\) : \(\s*(?:\/\/[^\n]*\s*)?<MarginReport \/>\s*\)/,
+      /tab === "people" \? \(\s*<>\s*<p className="text-sm text-muted-foreground">\s*Everyone: what is due today, what is overdue, what got done this week\.\s*<\/p>\s*<OwnerView \/>\s*<\/>\s*\) : \(/,
     );
-    expect(page).not.toContain("coming next");
+    const biz = page.slice(page.indexOf('tab === "people" ? ('));
+    expect(biz.indexOf("<OwnerBusiness />")).toBeGreaterThan(0);
+    expect(biz.indexOf("<MarginReport />")).toBeGreaterThan(biz.indexOf("<OwnerBusiness />"));
+    // The Owner view no longer carries its own People / Business toggle.
+    const view = read("src/components/owner-view.tsx");
+    expect(view).not.toContain('useState<"people" | "business">');
+    expect(view).not.toContain("<OwnerBusiness />");
   });
 });
 
@@ -145,10 +157,10 @@ describe("source: Work Overview without the Owner view", () => {
     expect(page).toContain('onClick={() => changeView("calendar")}');
     expect(page.match(/changeView\("/g)).toHaveLength(2);
   });
-  it("the route sends ?view=owner on: /owner?tab=team for an admin, the List for anyone else", () => {
+  it("the route sends ?view=owner on: /owner (People) for an admin, the List for anyone else", () => {
     // Once the profile is here (an admin's bookmark must not be dropped before the role is known).
     expect(route).toMatch(
-      /if \(view === "owner" && profile\)\s*return isAdmin\(profile\) \? \(\s*<Navigate to="\/owner" search=\{\{ tab: "team" \}\} replace \/>\s*\) : \(\s*<Navigate\s+to="\/my-work"\s+search=\{\{[\s\S]*?\}\}\s+replace\s*\/>\s*\);/,
+      /if \(view === "owner" && profile\)\s*return isAdmin\(profile\) \? \(\s*<Navigate to="\/owner" search=\{\{\}\} replace \/>\s*\) : \(\s*<Navigate\s+to="\/my-work"\s+search=\{\{[\s\S]*?\}\}\s+replace\s*\/>\s*\);/,
     );
     // Meanwhile the page never sees "owner": the List (or the remembered Calendar).
     expect(route).toContain(

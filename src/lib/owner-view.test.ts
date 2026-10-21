@@ -430,7 +430,7 @@ describe("My Work List: ?bucket=today|overdue preset", () => {
 });
 
 describe("Source: admin-only on the client and the server", () => {
-  // Oct 21: the Owner view moved to /owner (the Team tab) — the admin check is the route's and
+  // Oct 21: the Owner view moved to /owner (the People tab) — the admin check is the route's and
   // the gate's now, not a toggle on Work Overview.
   it("the Owner page renders <OwnerView /> behind the /owner route's admin check", () => {
     const route = read("src/routes/owner.tsx");

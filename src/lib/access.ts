@@ -316,7 +316,7 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
     pathname.startsWith("/admin/centerpoint-import")
   )
     return "admin";
-  // The Owner section (owner, Oct 21: "owner should be its own tab"): the Team and Margin tabs
+  // The Owner section (owner, Oct 21: "owner should be its own tab"): the People and Business tabs
   // are the owners' — both admins — so the gate blocks it as it blocks Admin › Users.
   if (pathname.startsWith("/owner")) return "admin";
   // Setup (service rates, inspection checklist, vehicles) is ticket money: a manager's too

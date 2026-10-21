@@ -321,10 +321,10 @@ describe("the click-throughs", () => {
       snoozed: "/my-work",
     });
   });
-  it("the Owner view has People / Business tabs and the Business tab is admin-only like the rest", () => {
-    const view = read("src/components/owner-view.tsx");
-    expect(view).toContain('useState<"people" | "business">("people")');
-    expect(view).toContain("<OwnerBusiness />");
+  it("the Owner page has People / Business tabs (Oct 21: moved up from the Owner view) and Business is admin-only like the rest", () => {
+    const page = read("src/components/owner-page.tsx");
+    expect(page).toContain('onClick={() => props.onTab("business")}');
+    expect(page).toContain("<OwnerBusiness />");
     const biz = read("src/components/owner-business.tsx");
     expect(biz).toContain("enabled: !!session && visibleToOwner(profile),");
     expect(biz).toContain('title="Authorized, not invoiced"');

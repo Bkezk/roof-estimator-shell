@@ -20,7 +20,7 @@ export const Route = createFileRoute("/my-work")({
   // Every signed-in user (pageForPath: /my-work → null) and everyone's landing page (homeFor).
   // ?view=calendar opens the month calendar (the list otherwise). ?view=owner was the Owner view
   // until Oct 21 ("owner should be its own tab"): it is still read, and an old link or bookmark
-  // is sent on to /owner?tab=team (admins) or lands on the List without it (anyone else).
+  // is sent on to /owner (admins; the People tab) or lands on the List without it (anyone else).
   // ?who=mine | all | <profile id> is the "Show" picker of admins and
   // managers — the server ignores it for anyone else. Without ?who the page shows the caller's
   // default (defaultWho: Everyone for admins and managers, owner Oct 1; Mine for anyone else), so
@@ -76,13 +76,13 @@ function MyWorkRoute() {
   // Work Overview for them, and an old link or the sign-in redirect lands there instead.
   if (isFieldOnly(profile)) return <Navigate to={homeFor(profile)} replace />;
   // Oct 21: the Owner view is its own page now. An old link (/my-work?view=owner) goes on to
-  // its Team tab for an admin; anyone else — whom the view never showed — lands on the List with
+  // its People tab for an admin; anyone else — whom the view never showed — lands on the List with
   // the rest of the search kept and the view dropped. Until the profile is here nothing is
   // decided (the gate does not block Work Overview on a missing profile, and an admin's bookmark
   // must not be dropped before their role is known): the List renders meanwhile (`pageView`).
   if (view === "owner" && profile)
     return isAdmin(profile) ? (
-      <Navigate to="/owner" search={{ tab: "team" }} replace />
+      <Navigate to="/owner" search={{}} replace />
     ) : (
       <Navigate
         to="/my-work"
