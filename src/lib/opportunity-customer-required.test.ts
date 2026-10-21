@@ -434,11 +434,11 @@ describe("4. Start a ticket", () => {
   it("the ticket says where it came from", () => {
     expect(form.fromOpportunityLabel("Reroof gym")).toBe("From opportunity: Reroof gym");
     const page = read("src/components/service-page.tsx");
-    const opened = page.indexOf('data-line="opened"');
+    // Under the tags line (the Opened text itself is gone, Oct 21: the strip shows it).
+    const tags = page.indexOf('data-line="tags"');
     const note = page.indexOf("<FromOpportunityNote");
-    expect(note).toBeGreaterThan(opened);
-    // The Opened badge grew a technician_id prop (Oct 12: unassigned tickets carry no overdue tag).
-    expect(note - opened).toBeLessThan(700);
+    expect(note).toBeGreaterThan(tags);
+    expect(note - tags).toBeLessThan(700);
     expect(page).toContain("fromOpportunityLabel(q.data.title)");
   });
   it("the column: migration (idempotent, nullable, no backfill) and types", () => {

@@ -124,7 +124,7 @@ import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.f
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
-import { openedLine, openerName, shortDate, ticketStageStrip } from "@/lib/stage-dates";
+import { shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
@@ -1567,9 +1567,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     void qc.invalidateQueries({ queryKey: fieldKeys.events(job.id) });
   }, [job, qc]);
   const stageCells = job ? ticketStageStrip(asStage(job.stage), eventsQ.data ?? []) : [];
-  const opened = job
-    ? openedLine(job.created_at, openerName(job.created_by, techs.data, eventsQ.data ?? []))
-    : "";
+  // No separate "Opened <date> by <name>" line any more (owner, Oct 21: "the opened date is
+  // shown twice; the one on the timeline is sufficient") — the strip's Open cell carries it.
 
   const save = useMutation({
     mutationFn: () => {
@@ -2366,12 +2365,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             </div>
           )}
         </div>
-        {job && opened && (
+        {job && (
           <p
             className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
-            data-line="opened"
+            data-line="tags"
           >
-            {opened}
             <OverdueBadge
               days={ticketOverdueDays(
                 {

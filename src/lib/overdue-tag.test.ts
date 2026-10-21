@@ -95,7 +95,7 @@ describe("where the tag shows", () => {
     );
     expect(service).toMatch(/<TicketListRow[\s\S]*?today=\{today\}/);
     expect(count(service, "ticketOverdueDays(")).toBe(2);
-    expect(service).toMatch(/data-line="opened"[\s\S]{0,80}\{opened\}\s*<OverdueBadge/);
+    expect(service).toMatch(/data-line="tags"[\s\S]{0,80}<OverdueBadge/);
   });
 
   it("each opportunity row and the open opportunity's header, by the list's own day", () => {
@@ -103,6 +103,6 @@ describe("where the tag shows", () => {
     expect(opps).toContain("days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}");
     expect(opps).toMatch(/<OppListRow[\s\S]*?today=\{today\}/);
     expect(count(opps, "oppOverdueDays(")).toBe(2);
-    expect(opps).toMatch(/data-line="opened"[\s\S]{0,80}\{opened\}\s*<OverdueBadge/);
+    expect(opps).toMatch(/data-line="tags"[\s\S]{0,80}<OverdueBadge/);
   });
 });

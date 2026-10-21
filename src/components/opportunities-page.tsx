@@ -107,7 +107,7 @@ import {
   type OpportunityWithNames,
 } from "@/lib/opportunities.functions";
 import { followupForItem, getCrmSettings } from "@/lib/followups.functions";
-import { oppStatusStrip, openedLine, openerName } from "@/lib/stage-dates";
+import { oppStatusStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
@@ -749,9 +749,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     enabled: !!session && !!opp,
   });
   const statusCells = opp ? oppStatusStrip(asStatus(opp.status), events.data ?? []) : [];
-  const opened = opp
-    ? openedLine(opp.created_at, openerName(opp.created_by, people.data, events.data ?? []))
-    : "";
+  // No separate "Opened <date> by <name>" line (owner, Oct 21: shown twice; the status strip's
+  // first cell carries it).
   // Tickets started from it ("Start a ticket"): "Ticket #6004" in the header. Read under the
   // tickets' RLS, so only for those with Service access.
   const tickets = useQuery({
@@ -1216,12 +1215,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )}
           </div>
         )}
-        {opp && opened && (
+        {opp && (
           <p
             className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
-            data-line="opened"
+            data-line="tags"
           >
-            {opened}
             <OverdueBadge
               days={oppOverdueDays(
                 { status: asStatus(opp.status), expected_close: opp.expected_close },

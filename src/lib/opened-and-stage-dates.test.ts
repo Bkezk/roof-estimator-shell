@@ -422,12 +422,10 @@ describe("StageStrip: a compact stepper — dots on a line, label and date benea
   });
 });
 
-describe("the ticket page: 'Opened … by …' under the title, the stage strip under the header", () => {
+describe("the ticket page: the stage strip under the header carries the opened date and name", () => {
   const src = read("src/components/service-page.tsx");
   it("imports the helpers, the strip and the timeline's reader", () => {
-    expect(src).toContain(
-      'import { openedLine, openerName, shortDate, ticketStageStrip } from "@/lib/stage-dates";',
-    );
+    expect(src).toContain('import { shortDate, ticketStageStrip } from "@/lib/stage-dates";');
     expect(src).toContain('import { StageStrip } from "@/components/stage-strip";');
     expect(src).toContain('import { listJobEvents } from "@/lib/service-field.functions";');
   });
@@ -438,20 +436,21 @@ describe("the ticket page: 'Opened … by …' under the title, the stage strip 
     expect(src).toContain(
       "const stageCells = job ? ticketStageStrip(asStage(job.stage), eventsQ.data ?? []) : [];",
     );
-    expect(flat(src)).toContain(
-      "openedLine(job.created_at, openerName(job.created_by, techs.data, eventsQ.data ?? []))",
-    );
+    // Owner, Oct 21: "the opened date is shown twice; the one on the timeline is sufficient" —
+    // no separate Opened line; the strip's Open cell (date, "by <name>") is the one place.
+    expect(src).not.toContain("openedLine(");
+    expect(src).not.toContain("openerName(");
+    expect(src).not.toContain('data-line="opened"');
   });
-  it("the Opened line sits right under the <h1> row, before the ticket numbers", () => {
+  it("the tags line (Overdue) sits right under the <h1> row, before the ticket numbers", () => {
     const h1 = src.indexOf('<h1 className="flex min-w-0 items-center gap-2 text-2xl');
-    const opened = src.indexOf('data-line="opened"');
+    const tags = src.indexOf('data-line="tags"');
     const numbers = src.indexOf('aria-label="Ticket numbers"');
     expect(h1).toBeGreaterThan(0);
-    expect(opened).toBeGreaterThan(h1);
-    expect(opened).toBeLessThan(numbers);
-    // Owner, Oct 2: the red Overdue tag sits inline after the Opened text (overdue-tag.test.ts).
+    expect(tags).toBeGreaterThan(h1);
+    expect(tags).toBeLessThan(numbers);
     expect(src).toMatch(
-      /<p\s+className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"\s+data-line="opened"\s*>/,
+      /<p\s+className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"\s+data-line="tags"\s*>/,
     );
   });
   it("the strip closes the header, on every width; the stage picker stays", () => {
@@ -471,32 +470,31 @@ describe("the ticket page: 'Opened … by …' under the title, the stage strip 
   });
 });
 
-describe("the opportunity page: 'Opened … by …' and the status strip", () => {
+describe("the opportunity page: the status strip carries the opened date and name", () => {
   const src = read("src/components/opportunities-page.tsx");
   it("imports the helpers, the strip and the log's reader", () => {
-    expect(src).toContain(
-      'import { oppStatusStrip, openedLine, openerName } from "@/lib/stage-dates";',
-    );
+    expect(src).toContain('import { oppStatusStrip } from "@/lib/stage-dates";');
     expect(src).toContain('import { StageStrip } from "@/components/stage-strip";');
     expect(src).toMatch(/listOpportunityEvents,\n/);
   });
-  it("the log's query dates the strip and names the opener", () => {
+  it("the log's query dates the strip", () => {
     expect(flat(src)).toContain(
       'queryKey: ["opportunity-events", opp?.id ?? "new"], queryFn: () => eventsFn({ data: { id: opp!.id } })',
     );
     expect(src).toContain(
       "const statusCells = opp ? oppStatusStrip(asStatus(opp.status), events.data ?? []) : [];",
     );
-    expect(flat(src)).toContain(
-      "openedLine(opp.created_at, openerName(opp.created_by, people.data, events.data ?? []))",
-    );
+    // Oct 21: no separate Opened line here either (see the ticket page above).
+    expect(src).not.toContain("openedLine(");
+    expect(src).not.toContain("openerName(");
+    expect(src).not.toContain('data-line="opened"');
   });
-  it("the Opened line under the title; the strip ends the header; the status select stays", () => {
+  it("the tags line under the title; the strip ends the header; the status select stays", () => {
     const h1 = src.indexOf("<h1 ");
-    const opened = src.indexOf('data-line="opened"');
+    const tags = src.indexOf('data-line="tags"');
     const strip = src.indexOf('<StageStrip cells={statusCells} label="Status history" />');
-    expect(opened).toBeGreaterThan(h1);
-    expect(strip).toBeGreaterThan(opened);
+    expect(tags).toBeGreaterThan(h1);
+    expect(strip).toBeGreaterThan(tags);
     expect(src.slice(strip, strip + 90)).toMatch(/\/>}\s*\n\s*<\/div>/);
     expect(src).toContain("{statusSelect}");
   });
