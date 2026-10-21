@@ -887,12 +887,13 @@ describe("Admin › Import from CenterPoint", () => {
   const route = readFileSync("src/routes/admin.centerpoint-import.tsx", "utf8");
   const nav = readFileSync("src/components/app-sidebar.tsx", "utf8");
   const access = readFileSync("src/lib/access.ts", "utf8");
-  it("has its route and sidebar entry, admins only", () => {
+  it("has its route, admins only; since Oct 21 no sidebar entry (reachable by address)", () => {
     expect(route).toContain('createFileRoute("/admin/centerpoint-import")');
     expect(route).toContain("component: CenterpointImportPage");
-    expect(nav).toMatch(
-      /\{\s*title: "Import from CenterPoint",\s*url: "\/admin\/centerpoint-import",\s*icon: Upload,\s*adminOnly: true,?\s*\}/,
-    );
+    // Oct 21 (owner: "we can re-add it later if needed so keep the code and remove it from the
+    // nav bar"): the menu entry went, the route and the access rule stayed.
+    expect(nav).not.toContain("/admin/centerpoint-import");
+    expect(nav).not.toContain("Import from CenterPoint");
     expect(access).toContain('pathname.startsWith("/admin/centerpoint-import")');
   });
   it("takes three CSV files, runs a dry run, and only then offers Import", () => {

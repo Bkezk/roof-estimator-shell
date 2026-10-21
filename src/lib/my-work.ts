@@ -160,8 +160,14 @@ export function effectiveWho(
   return people.some((p) => p.id === w) ? w : defaultWho(profile);
 }
 
-/** The three views; `effectiveView` (owner-view.ts) still downgrades "owner" for a non-admin. */
-export type WorkViewParam = "list" | "calendar" | "owner";
+/** Work Overview's two views (Oct 21: the Owner view moved to its own page, /owner). */
+export type WorkViewParam = "list" | "calendar";
+/**
+ * ?view= as the route reads it: the two views, plus the old "owner" — kept so routes/my-work.tsx
+ * can send an old link (/my-work?view=owner, a bookmark) on to /owner?tab=team (Oct 21). The page
+ * never sees it.
+ */
+export type WorkViewUrl = WorkViewParam | "owner";
 
 /**
  * The search the route writes on the page's own navigations (picking a person, a bucket preset,
@@ -203,9 +209,10 @@ export function nextWorkSearch(
 /**
  * ?view= from the URL, "list" included (Oct 15): an explicit List — the Owner view's number links
  * — must beat the remembered view (work-layout.ts landingSearch), so the route keeps it rather
- * than dropping it as the default. Anything else is no view (the remembered one applies).
+ * than dropping it as the default. Anything else is no view (the remembered one applies). "owner"
+ * is still read (Oct 21) only so the route can redirect the old link.
  */
-export const parseViewParam = (v: unknown): WorkViewParam | undefined =>
+export const parseViewParam = (v: unknown): WorkViewUrl | undefined =>
   v === "list" || v === "calendar" || v === "owner" ? v : undefined;
 
 // ---- rows in -------------------------------------------------------------------------------

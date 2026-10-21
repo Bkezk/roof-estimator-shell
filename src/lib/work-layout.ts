@@ -43,9 +43,12 @@ export interface WorkLayout {
   who?: string;
 }
 
-/** The three views; the page's effectiveView downgrades "owner" for anyone but an admin. */
-export type WorkViewName = "list" | "calendar" | "owner";
-const isView = (v: unknown): v is WorkViewName => v === "list" || v === "calendar" || v === "owner";
+/**
+ * The two views. Oct 21: the Owner view moved to its own page (/owner), so a remembered "owner" —
+ * still on profiles and in browsers from before — is not a view here and reads as the List.
+ */
+export type WorkViewName = "list" | "calendar";
+const isView = (v: unknown): v is WorkViewName => v === "list" || v === "calendar";
 
 /** The kinds the Show menu offers, in the same-day order. */
 export const WORK_KINDS: readonly WorkKind[] = [
@@ -192,8 +195,10 @@ export const keepRemembered = (next: WorkLayout, cur: WorkLayout): WorkLayout =>
 /**
  * What Work Overview opens on: the URL's ?view / ?who when given, else the remembered ones, else
  * the defaults (the List; `who` null = the caller's default, resolveWho). The sidebar's link and
- * the sign-in landing carry no search, so they open where the user was (owner, Oct 15). The view
- * still goes through effectiveView (a remembered "owner" for a non-admin becomes the List).
+ * the sign-in landing carry no search, so they open where the user was (owner, Oct 15). Oct 21:
+ * the Owner view moved to /owner, so a URL's ?view=owner is no view here (the route sends an old
+ * link on before the page sees it) and a remembered "owner" was already dropped by
+ * normalizeWorkLayout.
  */
 export function landingSearch(
   saved: Pick<WorkLayout, "view" | "who"> | null | undefined,

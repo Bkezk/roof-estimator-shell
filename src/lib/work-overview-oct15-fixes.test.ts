@@ -56,7 +56,7 @@ import {
 } from "@/lib/my-work";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
 import { taskMapHref } from "@/lib/my-work-actions";
-import { doneItemsFor, effectiveView, myWorkHref } from "@/lib/owner-view";
+import { doneItemsFor, myWorkHref } from "@/lib/owner-view";
 import { assignServiceJob } from "@/lib/service.functions";
 import { defaultWorkLayout, landingSearch } from "@/lib/work-layout";
 import { LAYOUT_SAVE_FAILED, setMyWorkLayout } from "@/lib/work-layout.functions";
@@ -77,8 +77,10 @@ const TODAY = "2026-10-15";
 // ---- 1. the Owner view's number links land on the List ------------------------------------
 
 describe("1. an Owner view number opens the List, whatever view is remembered", () => {
-  it("myWorkHref → validateSearch (parseViewParam) → landingSearch → effectiveView = list, preset kept", () => {
-    const saved = { ...defaultWorkLayout(), view: "owner" as const, who: BOB };
+  it("myWorkHref → validateSearch (parseViewParam) → landingSearch = list, preset kept", () => {
+    // Oct 21: the Owner view moved to /owner, so the remembered view that must not win is the
+    // Calendar now (it was "owner"), and effectiveView is gone.
+    const saved = { ...defaultWorkLayout(), view: "calendar" as const, who: BOB };
     for (const cell of ["today", "overdue"] as const) {
       const link = myWorkHref(BOB, cell);
       // The route keeps an explicit "list" now (it used to keep only calendar / owner).
@@ -91,12 +93,11 @@ describe("1. an Owner view number opens the List, whatever view is remembered", 
       expect(url.bucket).toBe(cell);
       const landing = landingSearch(saved, { view: url.view ?? null, who: url.who });
       expect(landing).toEqual({ view: "list", who: BOB });
-      expect(effectiveView(landing.view, admin)).toBe("list");
     }
-    // The old search (no view) still lands on the remembered Owner view — the bug this fixes.
-    expect(landingSearch(saved, { who: BOB }).view).toBe("owner");
+    // The old search (no view) still lands on the remembered view — the bug this fixes.
+    expect(landingSearch(saved, { who: BOB }).view).toBe("calendar");
   });
-  it("parseViewParam keeps all three views and nothing else", () => {
+  it("parseViewParam keeps all three views and nothing else (Oct 21: 'owner' only for the redirect to /owner)", () => {
     expect(parseViewParam("list")).toBe("list");
     expect(parseViewParam("calendar")).toBe("calendar");
     expect(parseViewParam("owner")).toBe("owner");
@@ -108,16 +109,18 @@ describe("1. an Owner view number opens the List, whatever view is remembered", 
     expect(route).toContain('const view = parseViewParam(s["view"]);');
     expect(route).toContain("...(view ? { view } : {}),");
     expect(route).not.toContain('view === "calendar" || view === "owner"');
-    expect(route).toContain("view?: WorkViewParam;");
+    // Oct 21: the Owner view moved to /owner; the URL type still admits "owner" for the redirect.
+    expect(route).toContain("view?: WorkViewUrl;");
     // Oct 21: the person gets the same flag (whoExplicit; work-overview-oct21-audit7.test.ts).
     expect(route).toContain("const viewExplicit = view !== undefined;");
     expect(route).toContain(
       "nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);",
     );
   });
-  it("landing on a link does not change the remembered view: changeView runs on the three buttons only", () => {
-    expect(page.match(/changeView\(/g)).toHaveLength(3); // the three onClicks, nothing else
-    expect(page).toContain("const changeView = (v: MyWorkView) => {");
+  it("landing on a link does not change the remembered view: changeView runs on the two buttons only", () => {
+    // Oct 21: the Owner view moved to /owner — two buttons (List, Calendar), not three.
+    expect(page.match(/changeView\(/g)).toHaveLength(2); // the two onClicks, nothing else
+    expect(page).toContain("const changeView = (v: WorkViewName) => {");
   });
 });
 
@@ -517,7 +520,8 @@ describe("e. effectiveWho: an unknown person falls back to the caller's default 
 
 describe("f. the truncation line on the List and the Calendar", () => {
   it("shown for both; the advice to narrow only on Everyone", () => {
-    expect(page).toContain('{view !== "owner" && !errMsg && q.data?.truncated && (');
+    // Oct 21: the Owner view moved to /owner, so no view check is left on the line.
+    expect(page).toContain("{!errMsg && q.data?.truncated && (");
     expect(page).toContain('{who === "all" ? " Narrow to one person to see everything." : ""}');
   });
 });

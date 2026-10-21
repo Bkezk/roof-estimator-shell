@@ -36,18 +36,11 @@ import {
   MapPin,
   Plus,
   RotateCcw,
-  Users,
   X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import {
-  canClaim,
-  dispatchesTickets,
-  isAdmin,
-  seesEveryone,
-  seesOpportunitiesList,
-} from "@/lib/access";
+import { canClaim, dispatchesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/access";
 import { backFromHold } from "@/lib/followup-holds";
 import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
@@ -97,7 +90,6 @@ import {
   unassignedTaskHint,
   type Viewer,
 } from "@/lib/my-work-actions";
-import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import {
   applyKinds,
   applySaveResult,
@@ -125,13 +117,13 @@ import {
   showBucket,
   toggleKind,
   type WorkLayout,
+  type WorkViewName,
   WORK_KINDS,
   writeStoredWorkLayout,
 } from "@/lib/work-layout";
 import { LAYOUT_SAVE_FAILED, getMyWorkLayout, setMyWorkLayout } from "@/lib/work-layout.functions";
 import { SnoozeMenu } from "@/components/followup-controls";
 import { useFollowupActions } from "@/components/followups-shared";
-import { OwnerView } from "@/components/owner-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -1116,11 +1108,11 @@ function CalendarView({
 
 export function MyWorkPage(props: {
   /** The URL's ?view, ?who and ?month as they are — null when absent (the remembered ones apply). */
-  view: MyWorkView | null;
+  view: WorkViewName | null;
   who: string | null;
   month: string | null;
   bucket: BucketPreset | null;
-  onView: (v: MyWorkView) => void;
+  onView: (v: WorkViewName) => void;
   onWho: (who: string) => void;
   onMonth: (month: string | null) => void;
   onBucket: (b: BucketPreset | null) => void;
@@ -1146,12 +1138,10 @@ export function MyWorkPage(props: {
     if (stored) setLayout(stored);
   }, [storage, userId]);
   const landing = landingSearch(layout, { view: props.view, who: props.who });
-  // ?view=owner is honoured for admins only; anyone else gets the list.
-  const view = effectiveView(landing.view, profile);
+  // The List or the Calendar (Oct 21: the Owner view moved to its own page, /owner).
+  const view = landing.view;
   // No ?who: the remembered person, else Everyone for admins and managers, Mine for anyone else.
   const who = resolveWho(landing.who, profile);
-  // The Owner toggle: admins only (the server's listOwnerView refuses anyone else too).
-  const ownerToggle = isAdmin(profile);
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
     queryKey: ["my-work", who],
@@ -1161,7 +1151,7 @@ export function MyWorkPage(props: {
       const requestedAt = Date.now();
       return { ...(await listFn({ data: { who } })), requestedAt };
     },
-    enabled: !!session && view !== "owner",
+    enabled: !!session,
     // Owner, Oct 15: "do every 5 minutes just so we're not constantly refreshing" — the list
     // refreshes itself while the page sits open, not while the tab is in the background.
     refetchInterval: 5 * 60_000,
@@ -1345,7 +1335,7 @@ export function MyWorkPage(props: {
   // along (Reset layout resets the columns, not where the user was).
   const onLayout = (l: WorkLayout) => commitLayout(keepRemembered(l, layout));
   // The view and the person (owner, Oct 15: remembered per user): saved, then put in the URL.
-  const changeView = (v: MyWorkView) => {
+  const changeView = (v: WorkViewName) => {
     const next = rememberView(layout, v);
     if (next !== layout) commitLayout(next);
     props.onView(v);
@@ -1434,11 +1424,9 @@ export function MyWorkPage(props: {
           <ListTodo className="h-6 w-6" /> Work Overview
         </h1>
         <p className="text-sm text-muted-foreground">
-          {view === "owner"
-            ? "Everyone: what is due today, what is overdue, what got done this week."
-            : mineOnly || !scope
-              ? "Your tickets, tasks, follow-ups, opportunities and bids, by date."
-              : `${whoName ?? "Someone else"}: tickets, tasks, follow-ups, opportunities and bids, by date.`}
+          {mineOnly || !scope
+            ? "Your tickets, tasks, follow-ups, opportunities and bids, by date."
+            : `${whoName ?? "Someone else"}: tickets, tasks, follow-ups, opportunities and bids, by date.`}
         </p>
       </div>
 
@@ -1498,60 +1486,49 @@ export function MyWorkPage(props: {
           >
             <CalendarDays className="h-4 w-4" /> Calendar
           </Button>
-          {ownerToggle && (
+        </div>
+        {/* Oct 21: the Owner toggle that sat here moved to the sidebar — the Owner page, /owner. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
               size="sm"
-              variant={view === "owner" ? "default" : "ghost"}
-              aria-pressed={view === "owner"}
-              onClick={() => changeView("owner")}
+              variant="outline"
+              aria-label="Which kinds of work to show"
+              title="Tick the kinds of work you want on this page"
             >
-              <Users className="h-4 w-4" /> Owner
+              <Eye className="h-4 w-4" /> Show: {kindsSummary(layout)}
             </Button>
-          )}
-        </div>
-        {view !== "owner" && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label="Which kinds of work to show"
-                title="Tick the kinds of work you want on this page"
-              >
-                <Eye className="h-4 w-4" /> Show: {kindsSummary(layout)}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuLabel>Show on this page</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {WORK_KINDS.map((k) => {
-                const on = !layout.hiddenKinds.includes(k);
-                const last = on && layout.hiddenKinds.length >= WORK_KINDS.length - 1;
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={k}
-                    checked={on}
-                    disabled={last}
-                    onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => {
-                      onLayout(toggleKind(layout, k));
-                      // Oct 20: a tick under an Owner-view preset clears the preset, so the ticks
-                      // apply again (kindsForLanding showed every kind while it was set).
-                      if (kindToggleClearsPreset(props.bucket)) props.onBucket(null);
-                    }}
-                  >
-                    {KIND_PLURALS[k]}
-                  </DropdownMenuCheckboxItem>
-                );
-              })}
-              <DropdownMenuSeparator />
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                Remembered for you on every device. One kind always stays on.
-              </p>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {canPick && view !== "owner" && (
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuLabel>Show on this page</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {WORK_KINDS.map((k) => {
+              const on = !layout.hiddenKinds.includes(k);
+              const last = on && layout.hiddenKinds.length >= WORK_KINDS.length - 1;
+              return (
+                <DropdownMenuCheckboxItem
+                  key={k}
+                  checked={on}
+                  disabled={last}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={() => {
+                    onLayout(toggleKind(layout, k));
+                    // Oct 20: a tick under an Owner-view preset clears the preset, so the ticks
+                    // apply again (kindsForLanding showed every kind while it was set).
+                    if (kindToggleClearsPreset(props.bucket)) props.onBucket(null);
+                  }}
+                >
+                  {KIND_PLURALS[k]}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+            <DropdownMenuSeparator />
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              Remembered for you on every device. One kind always stays on.
+            </p>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {canPick && (
           <Select value={who} onValueChange={changeWho}>
             <SelectTrigger className="h-9 w-[220px]" aria-label="Show">
               <span className="mr-1 text-muted-foreground">Show:</span>
@@ -1579,18 +1556,16 @@ export function MyWorkPage(props: {
             </SelectContent>
           </Select>
         )}
-        {q.isFetching && view !== "owner" && (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        )}
+        {q.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
-      {!canManage && hasFollowups && !errMsg && view !== "owner" && (
+      {!canManage && hasFollowups && !errMsg && (
         <p className="text-xs text-muted-foreground">Follow-ups are managed by your manager.</p>
       )}
       {/* Owner, Oct 15: each kind is capped at 1,000 rows (listMyWork LIMIT); say so when hit —
           on the Calendar too (it shows the same rows), and "narrow to one person" only when the
           page is on Everyone (one person's list is already as narrow as it gets). */}
-      {view !== "owner" && !errMsg && q.data?.truncated && (
+      {!errMsg && q.data?.truncated && (
         <p className="text-xs text-muted-foreground" data-row="truncated">
           Showing the first 1,000 of each kind.
           {who === "all" ? " Narrow to one person to see everything." : ""}
@@ -1602,9 +1577,7 @@ export function MyWorkPage(props: {
         </p>
       )}
 
-      {view === "owner" && ownerToggle ? (
-        <OwnerView />
-      ) : q.isLoading ? (
+      {q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : errMsg && !q.data ? (
         <div className="space-y-2">

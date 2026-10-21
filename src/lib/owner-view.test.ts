@@ -32,7 +32,6 @@ import {
   digestLine,
   doneThisWeek,
   dueTotal,
-  effectiveView,
   lastActivity,
   myWorkHref,
   oppCounts,
@@ -60,21 +59,15 @@ const MANAGER = { role: "manager" };
 const USER = { role: "user" };
 const TECH = { role: "user", technician: true };
 
-describe("visibleToOwner / effectiveView: admins only", () => {
+describe("visibleToOwner: admins only", () => {
   it("only an admin sees the Owner view", () => {
     expect(visibleToOwner(ADMIN)).toBe(true);
     for (const p of [MANAGER, USER, TECH, { role: "sales_pm" }, null, undefined])
       expect(visibleToOwner(p)).toBe(false);
   });
-  it("?view=owner falls back to the list for anyone but an admin", () => {
-    expect(effectiveView("owner", ADMIN)).toBe("owner");
-    expect(effectiveView("owner", MANAGER)).toBe("list");
-    expect(effectiveView("owner", USER)).toBe("list");
-    expect(effectiveView("owner", null)).toBe("list");
-    expect(effectiveView("calendar", USER)).toBe("calendar");
-    expect(effectiveView(undefined, ADMIN)).toBe("list");
-    expect(effectiveView("bogus", ADMIN)).toBe("list");
-  });
+  // Oct 21: the Owner view moved to /owner; `effectiveView` (?view=owner downgraded to the List
+  // for a non-admin on Work Overview) went with it — the route and the gate keep them out now
+  // (owner-page.test.ts).
 });
 
 describe("roleLabel", () => {
@@ -437,19 +430,25 @@ describe("My Work List: ?bucket=today|overdue preset", () => {
 });
 
 describe("Source: admin-only on the client and the server", () => {
-  const page = read("src/components/my-work-page.tsx");
-  it("the Owner toggle renders only under isAdmin(profile)", () => {
-    expect(page).toMatch(/const ownerToggle = isAdmin\(profile\);/);
-    const guard = page.indexOf("{ownerToggle && (");
-    const owner = page.indexOf("<Users ");
-    expect(guard).toBeGreaterThan(0);
-    expect(owner).toBeGreaterThan(guard);
-    expect(page.indexOf("\n          )}", guard)).toBeGreaterThan(owner);
-    // The only Owner button and the only <OwnerView /> are behind the admin checks.
-    expect(page.match(/> Owner/g)?.length).toBe(1);
-    expect(page).toMatch(/view === "owner" && ownerToggle \? \(\s*<OwnerView \/>/);
-    // Oct 15: the URL's ?view, else the remembered one (landingSearch), still through effectiveView.
-    expect(page).toContain("const view = effectiveView(landing.view, profile);");
+  // Oct 21: the Owner view moved to /owner (the Team tab) — the admin check is the route's and
+  // the gate's now, not a toggle on Work Overview.
+  it("the Owner page renders <OwnerView /> behind the /owner route's admin check", () => {
+    const route = read("src/routes/owner.tsx");
+    expect(route).toContain(
+      'if (profile && !isAdmin(profile)) return <Navigate to="/my-work" replace />;',
+    );
+    expect(read("src/lib/access.ts")).toContain(
+      'if (pathname.startsWith("/owner")) return "admin";',
+    );
+    const page = read("src/components/owner-page.tsx");
+    expect(page.match(/<OwnerView \/>/g)?.length).toBe(1);
+    // Work Overview has no Owner toggle and no owner branch any more.
+    const work = read("src/components/my-work-page.tsx");
+    expect(work).not.toContain("ownerToggle");
+    expect(work).not.toContain('"owner"');
+    expect(work).not.toContain("OwnerView");
+    // Oct 15: the URL's ?view, else the remembered one (landingSearch).
+    expect(work).toContain("const view = landing.view;");
   });
   it("listOwnerView checks the role from the caller's own profile and refuses non-admins", () => {
     const src = read("src/lib/owner-view.functions.ts");
@@ -478,10 +477,11 @@ describe("Source: admin-only on the client and the server", () => {
     expect(view).toContain("refetchInterval: 60_000");
     expect(view).toContain("enabled: !!session && visibleToOwner(profile)");
   });
-  it("no new nav item", () => {
-    expect(read("src/components/app-sidebar.tsx")).not.toMatch(
-      /title:\s*"Owner"|my-work?view=owner|view: "owner"/,
-    );
+  it("the nav item (Oct 21: the Owner view moved to /owner) sits in the admins-only Admin group", () => {
+    // Until Oct 21 the pin was "no new nav item": the view was a toggle on Work Overview.
+    const nav = read("src/components/app-sidebar.tsx");
+    expect(nav).toContain('{ title: "Owner", url: "/owner", icon: Crown, adminOnly: true },');
+    expect(nav).not.toMatch(/my-work\?view=owner|view: "owner"/);
   });
 });
 

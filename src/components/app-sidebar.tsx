@@ -21,7 +21,7 @@ import {
   Contact,
   Target,
   BellRing,
-  Upload,
+  Crown,
   CalendarCheck,
   CalendarDays,
   ListTodo,
@@ -130,19 +130,17 @@ const prospectItems = [
   // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
   { title: "Bid Board", url: "/prospect/leads", icon: Radar },
 ];
-// The Admin group: who can sign in and which pages each person may open, and the reminder and
-// untouched-work rules — admins only. (Service Rates moved out to Setup, under Opportunities,
-// owner Oct 5.) Owner, Sep 28: their own pages under Admin, not tabs of Estimate Pricing › General.
+// The Admin group: the Owner section (the team's work today and the margin; owner, Oct 21: "owner
+// should be its own tab", first in the group), then who can sign in and which pages each person
+// may open, and the reminder and untouched-work rules — admins only. (Service Rates moved out to
+// Setup, under Opportunities, owner Oct 5.) Owner, Sep 28: their own pages under Admin, not tabs
+// of Estimate Pricing › General.
 const adminGroupItems = [
+  { title: "Owner", url: "/owner", icon: Crown, adminOnly: true },
   { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
-  // Owner, Oct 13: the one-time CenterPoint Book of Business import (customers, properties, contacts).
-  {
-    title: "Import from CenterPoint",
-    url: "/admin/centerpoint-import",
-    icon: Upload,
-    adminOnly: true,
-  },
+  // Oct 21: the CenterPoint import (Oct 13) left the menu, not the code — its page still opens by
+  // address (admin/centerpoint-import) and can be listed here again if needed.
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's

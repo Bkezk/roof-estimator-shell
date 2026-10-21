@@ -196,7 +196,8 @@ describe("the page", () => {
   it("5 — the list query refreshes every five minutes, not in a background tab", () => {
     expect(page).toMatch(
       // The queryFn stamps the request's start for the layout seed (Oct 20).
-      /queryKey: \["my-work", who\],(?:\s*\/\/[^\n]*)*\s*queryFn: async \(\) => \{\s*const requestedAt = Date\.now\(\);\s*return \{ \.\.\.\(await listFn\(\{ data: \{ who \} \}\)\), requestedAt \};\s*\},\s*enabled: !!session && view !== "owner",(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
+      // Oct 21: the Owner view moved to /owner, so the query no longer pauses for it.
+      /queryKey: \["my-work", who\],(?:\s*\/\/[^\n]*)*\s*queryFn: async \(\) => \{\s*const requestedAt = Date\.now\(\);\s*return \{ \.\.\.\(await listFn\(\{ data: \{ who \} \}\)\), requestedAt \};\s*\},\s*enabled: !!session,(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
     );
   });
   it("10a — the task dialog's roster is read once it opens", () => {
@@ -217,7 +218,8 @@ describe("the page", () => {
   it("10d — the List and the Calendar say so when a list hit the cap; 'narrow to one person' only on Everyone", () => {
     // Oct 15 (later): the Calendar shows the same capped rows, so it says so too; the advice to
     // narrow is for Everyone only (a person's list is already one person).
-    expect(page).toContain('{view !== "owner" && !errMsg && q.data?.truncated && (');
+    // Oct 21: the Owner view moved to /owner, so no view check is left on the line.
+    expect(page).toContain("{!errMsg && q.data?.truncated && (");
     expect(page).not.toContain('{view === "list" && !errMsg && q.data?.truncated && (');
     expect(page).toContain("Showing the first 1,000 of each kind.");
     expect(page).toContain('{who === "all" ? " Narrow to one person to see everything." : ""}');

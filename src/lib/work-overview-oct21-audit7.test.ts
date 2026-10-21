@@ -36,8 +36,9 @@ import {
   splitEmptyGroups,
   whoParam,
   type WorkBucket,
+  type WorkViewUrl,
 } from "@/lib/my-work";
-import { effectiveView, myWorkHref } from "@/lib/owner-view";
+import { myWorkHref } from "@/lib/owner-view";
 import {
   applyWorkLayout,
   defaultWorkLayout,
@@ -71,13 +72,15 @@ const validate = (s: { view?: string; who?: string; bucket?: string; month?: str
   bucket: parseBucketPreset(s.bucket),
   month: s.month,
 });
+/** The route's pageView (Oct 21, later): "owner" is redirected, never a view of the page. */
+const pageView = (v: WorkViewUrl | undefined) => (v === "owner" ? null : (v ?? null));
 
 /** The route: curView / curWho from the URL, and whether the URL named each. */
 const routeSearch = (
   url: { view?: string; who?: string; bucket?: string; month?: string },
   // A key present with `undefined` is a change TO nothing (a kind tick clears the preset).
   change: {
-    view?: "list" | "calendar" | "owner";
+    view?: "list" | "calendar";
     who?: string;
     bucket?: string | undefined;
     month?: string | undefined;
@@ -86,7 +89,7 @@ const routeSearch = (
 ) =>
   nextWorkSearch(
     {
-      view: change.view ?? validate(url).view ?? "list",
+      view: change.view ?? pageView(validate(url).view) ?? "list",
       who: change.who ?? resolveWho(url.who, admin),
       bucket: "bucket" in change ? parseBucketPreset(change.bucket) : validate(url).bucket,
       month: "month" in change ? change.month : url.month,
@@ -99,7 +102,9 @@ const routeSearch = (
 // ---- 2. an explicit Everyone stays explicit ---------------------------------------------------
 
 describe("2. nextWorkSearch keeps a who the URL named, the caller's default included", () => {
-  const savedBob = { ...defaultWorkLayout(), view: "owner" as const, who: BOB };
+  // Oct 21 (later): the Owner view moved to /owner; the remembered view that differs from the
+  // explicit List is the Calendar now (it was "owner").
+  const savedBob = { ...defaultWorkLayout(), view: "calendar" as const, who: BOB };
   it("the totals row's link, then a bucket tab: ?who=all stays, and the remembered Bob does not return", () => {
     const link = myWorkHref("all", "today", ME);
     const url = validate(link.search);
@@ -108,7 +113,7 @@ describe("2. nextWorkSearch keeps a who the URL named, the caller's default incl
     expect(next).toEqual({ view: "list", who: "all", bucket: "overdue" });
     const landing = landingSearch(savedBob, { view: next.view ?? null, who: next.who ?? null });
     expect(landing).toEqual({ view: "list", who: "all" });
-    expect(effectiveView(landing.view, admin)).toBe("list");
+    expect(landing.view).toBe("list"); // Oct 21 (later): no effectiveView; the view moved to /owner
     // The bug: whoParam drops the default, and without whoExplicit the URL fell silent on the
     // person — landingSearch read the remembered Bob.
     const old = nextWorkSearch({ view: "list", who: "all", bucket: "overdue" }, admin, true);
@@ -167,7 +172,7 @@ describe("2. nextWorkSearch keeps a who the URL named, the caller's default incl
     });
     expect(routeSearch({}, { bucket: "today" })).toEqual({ bucket: "today" });
     expect(landingSearch(savedBob, { view: null, who: null })).toEqual({
-      view: "owner",
+      view: "calendar",
       who: BOB,
     });
     // whoParam itself is unchanged: the default is still nothing.
@@ -198,10 +203,11 @@ describe("2. nextWorkSearch keeps a who the URL named, the caller's default incl
 describe("3. forgetWho: the gone person is dropped from the layout whatever the peeking state", () => {
   const people = [{ id: ME }, { id: BOB }];
   it("forgets the remembered who when it is that person; anyone else stays", () => {
-    const gone: WorkLayout = { ...defaultWorkLayout(), view: "owner", who: GONE };
+    // Oct 21 (later): "calendar" where this read "owner" — the Owner view moved to /owner.
+    const gone: WorkLayout = { ...defaultWorkLayout(), view: "calendar", who: GONE };
     const forgotten = forgetWho(gone, GONE);
     expect(forgotten.who).toBeUndefined();
-    expect(forgotten.view).toBe("owner"); // the view stays remembered
+    expect(forgotten.view).toBe("calendar"); // the view stays remembered
     expect(forgotten.order).toBe(gone.order);
     // A link to a gone person while Bob is remembered: Bob stays.
     const bob = { ...defaultWorkLayout(), who: BOB };
@@ -213,10 +219,12 @@ describe("3. forgetWho: the gone person is dropped from the layout whatever the 
   });
   it("the whole flow while peeking: landing → effectiveWho → forgetWho + ?who=all → Everyone, and it sticks", () => {
     // The layout remembers the Owner view and a person who has since been deleted.
-    const saved: WorkLayout = { ...defaultWorkLayout(), view: "owner", who: GONE };
-    // The sidebar's bare URL lands on the Owner view; its totals row links the List, explicit.
+    // Oct 21 (later): the Owner view moved to /owner; the remembered view is the Calendar here.
+    const saved: WorkLayout = { ...defaultWorkLayout(), view: "calendar", who: GONE };
+    // The sidebar's bare URL lands on the Calendar; the Owner page's totals row links the List,
+    // explicit.
     const bare = landingSearch(saved, { view: null, who: null });
-    expect(bare).toEqual({ view: "owner", who: GONE });
+    expect(bare).toEqual({ view: "calendar", who: GONE });
     // Or an Owner-view link peeks at the List with no person of its own (?view=list only, say
     // after a bookmark): the remembered GONE is resolved.
     const landing = landingSearch(saved, { view: "list", who: null });
@@ -229,7 +237,7 @@ describe("3. forgetWho: the gone person is dropped from the layout whatever the 
     // The page: forget them on the layout (not changeWho, which skips it while peeking) …
     const forgotten = forgetWho(saved, who);
     expect(forgotten.who).toBeUndefined();
-    expect(forgotten.view).toBe("owner");
+    expect(forgotten.view).toBe("calendar");
     // … and onWho names Everyone in the URL, so the next render resolves "all" even before the
     // layout save lands.
     const next = nextWorkSearch({ view: "list", who: shown }, admin, true, true);
@@ -237,9 +245,9 @@ describe("3. forgetWho: the gone person is dropped from the layout whatever the 
     expect(
       resolveWho(landingSearch(saved, { view: "list", who: next.who ?? null }).who, admin),
     ).toBe("all");
-    // And the bare URL afterwards: the Owner view, nobody remembered — the default (Everyone).
+    // And the bare URL afterwards: the Calendar, nobody remembered — the default (Everyone).
     expect(landingSearch(forgotten, { view: null, who: null })).toEqual({
-      view: "owner",
+      view: "calendar",
       who: null,
     });
     // The bug: changeWho's URL had no who, so the same remembered id came back and the effect's

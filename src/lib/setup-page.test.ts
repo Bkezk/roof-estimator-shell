@@ -110,7 +110,8 @@ describe("the sidebar", () => {
       nav.indexOf("const adminGroupItems"),
       nav.indexOf("// Admin pages with"),
     );
-    // Users & access, Reminders and (Oct 13) Import from CenterPoint.
+    // Owner (Oct 21), Users & access, Reminders — the CenterPoint import (Oct 13) left the menu the
+    // same day (owner-page.test.ts has the order).
     expect(adminItems.match(/title: "/g)).toHaveLength(3);
   });
 });

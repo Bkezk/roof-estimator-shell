@@ -376,7 +376,8 @@ describe("c. the login page no longer navigates; the gate's home redirect waits 
 
 describe("d. shouldRememberWho: not while peeking from an Owner-view link", () => {
   it("an explicit ?view=list that differs from the remembered view: the pick is not remembered", () => {
-    expect(shouldRememberWho({ viewExplicit: true, urlView: "list" }, "owner")).toBe(false);
+    // Oct 21: the Owner view moved to /owner, so the Calendar is the one remembered view that
+    // differs from the explicit List (the first line here read "owner").
     expect(shouldRememberWho({ viewExplicit: true, urlView: "list" }, "calendar")).toBe(false);
   });
   it("otherwise the pick is remembered as before", () => {
@@ -384,18 +385,20 @@ describe("d. shouldRememberWho: not while peeking from an Owner-view link", () =
     expect(shouldRememberWho({ viewExplicit: true, urlView: "list" }, undefined)).toBe(true);
     expect(shouldRememberWho({ viewExplicit: true, urlView: "list" }, "list")).toBe(true);
     // No explicit view: the sidebar's link, the sign-in landing.
-    expect(shouldRememberWho({ viewExplicit: false, urlView: null }, "owner")).toBe(true);
-    // An explicit Calendar or Owner view is the person's own choice.
-    expect(shouldRememberWho({ viewExplicit: true, urlView: "calendar" }, "owner")).toBe(true);
-    expect(shouldRememberWho({ viewExplicit: true, urlView: "owner" }, undefined)).toBe(true);
+    // (Oct 21: "calendar" where these read "owner" — the Owner view moved to /owner.)
+    expect(shouldRememberWho({ viewExplicit: false, urlView: null }, "calendar")).toBe(true);
+    // An explicit Calendar is the person's own choice.
+    expect(shouldRememberWho({ viewExplicit: true, urlView: "calendar" }, "calendar")).toBe(true);
+    expect(shouldRememberWho({ viewExplicit: true, urlView: "calendar" }, undefined)).toBe(true);
   });
   it("the page: changeWho asks it; the view buttons remember as before", () => {
     expect(page).toMatch(/import \{[^}]*\bshouldRememberWho\b[^}]*\} from "@\/lib\/work-layout";/);
     expect(page).toMatch(
       /const changeWho = \(w: string\) => \{\s*if \(\s*shouldRememberWho\(\s*\{ viewExplicit: props\.view !== null, urlView: props\.view \},\s*layout\.view,?\s*\)\s*\) \{\s*const next = rememberWho\(layout, whoParam\(w, profile\)\);\s*if \(next !== layout\) commitLayout\(next\);\s*\}\s*props\.onWho\(w\);\s*\};/,
     );
+    // Oct 21: the Owner view moved to /owner; the view type is work-layout's WorkViewName now.
     expect(page).toMatch(
-      /const changeView = \(v: MyWorkView\) => \{\s*const next = rememberView\(layout, v\);\s*if \(next !== layout\) commitLayout\(next\);\s*props\.onView\(v\);\s*\};/,
+      /const changeView = \(v: WorkViewName\) => \{\s*const next = rememberView\(layout, v\);\s*if \(next !== layout\) commitLayout\(next\);\s*props\.onView\(v\);\s*\};/,
     );
   });
 });

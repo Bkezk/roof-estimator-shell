@@ -20,6 +20,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as MyWorkRouteImport } from './routes/my-work'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OpportunitiesRouteImport } from './routes/opportunities'
+import { Route as OwnerRouteImport } from './routes/owner'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
 import { Route as ServiceRouteImport } from './routes/service'
@@ -101,6 +102,11 @@ const NotificationsRoute = NotificationsRouteImport.update({
 const OpportunitiesRoute = OpportunitiesRouteImport.update({
   id: '/opportunities',
   path: '/opportunities',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OwnerRoute = OwnerRouteImport.update({
+  id: '/owner',
+  path: '/owner',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProposalRoute = ProposalRouteImport.update({
@@ -251,6 +257,7 @@ export interface FileRoutesByFullPath {
   '/my-work': typeof MyWorkRoute
   '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
+  '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
@@ -291,6 +298,7 @@ export interface FileRoutesByTo {
   '/my-work': typeof MyWorkRoute
   '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
+  '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
@@ -332,6 +340,7 @@ export interface FileRoutesById {
   '/my-work': typeof MyWorkRoute
   '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
+  '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
@@ -374,6 +383,7 @@ export interface FileRouteTypes {
     | '/my-work'
     | '/notifications'
     | '/opportunities'
+    | '/owner'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -414,6 +424,7 @@ export interface FileRouteTypes {
     | '/my-work'
     | '/notifications'
     | '/opportunities'
+    | '/owner'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -454,6 +465,7 @@ export interface FileRouteTypes {
     | '/my-work'
     | '/notifications'
     | '/opportunities'
+    | '/owner'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -495,6 +507,7 @@ export interface RootRouteChildren {
   MyWorkRoute: typeof MyWorkRoute
   NotificationsRoute: typeof NotificationsRoute
   OpportunitiesRoute: typeof OpportunitiesRoute
+  OwnerRoute: typeof OwnerRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
   ServiceRoute: typeof ServiceRouteWithChildren
@@ -598,6 +611,13 @@ declare module '@tanstack/react-router' {
       path: '/opportunities'
       fullPath: '/opportunities'
       preLoaderRoute: typeof OpportunitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/owner': {
+      id: '/owner'
+      path: '/owner'
+      fullPath: '/owner'
+      preLoaderRoute: typeof OwnerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/proposal': {
@@ -819,6 +839,7 @@ const rootRouteChildren: RootRouteChildren = {
   MyWorkRoute: MyWorkRoute,
   NotificationsRoute: NotificationsRoute,
   OpportunitiesRoute: OpportunitiesRoute,
+  OwnerRoute: OwnerRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
   ServiceRoute: ServiceRouteWithChildren,

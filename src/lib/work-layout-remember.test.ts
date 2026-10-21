@@ -24,7 +24,6 @@ vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupa
 
 import { QueryClient } from "@tanstack/react-query";
 
-import { effectiveView } from "@/lib/owner-view";
 import {
   defaultWorkLayout,
   hideBucket,
@@ -101,9 +100,10 @@ describe("bug: the Show kinds reach the profile", () => {
 });
 
 describe("the remembered view and person on the layout", () => {
-  it("normalize: calendar / owner kept, list (the default) and junk dropped; who a short string", () => {
+  it("normalize: calendar kept, list (the default), owner (Oct 21) and junk dropped; who a short string", () => {
     expect(normalizeWorkLayout({ view: "calendar" }).view).toBe("calendar");
-    expect(normalizeWorkLayout({ view: "owner" }).view).toBe("owner");
+    // Oct 21: the Owner view moved to /owner; a remembered "owner" from before reads as the List.
+    expect(normalizeWorkLayout({ view: "owner" })).not.toHaveProperty("view");
     expect(normalizeWorkLayout({ view: "list" })).not.toHaveProperty("view");
     expect(normalizeWorkLayout({ view: "kanban" })).not.toHaveProperty("view");
     expect(normalizeWorkLayout({ who: "mine" }).who).toBe("mine");
@@ -195,10 +195,11 @@ describe("landingSearch: the URL when it speaks, else what is remembered, else t
     });
   });
   it("the URL wins, key by key", () => {
-    expect(landingSearch(saved, { view: "owner" })).toEqual({ view: "owner", who: "mine" });
+    // Oct 21: the Owner view moved to /owner, so the explicit view here is the List, not "owner".
+    expect(landingSearch(saved, { view: "list" })).toEqual({ view: "list", who: "mine" });
     expect(landingSearch(saved, { who: PAT })).toEqual({ view: "calendar", who: PAT });
-    expect(landingSearch(saved, { view: "owner", who: "all" })).toEqual({
-      view: "owner",
+    expect(landingSearch(saved, { view: "list", who: "all" })).toEqual({
+      view: "list",
       who: "all",
     });
     // Junk in the URL is as good as nothing.
@@ -207,10 +208,10 @@ describe("landingSearch: the URL when it speaks, else what is remembered, else t
       who: "mine",
     });
   });
-  it("a remembered Owner view for a non-admin becomes the List (effectiveView); an admin keeps it", () => {
-    const l = landingSearch({ ...defaultWorkLayout(), view: "owner" }, {});
-    expect(effectiveView(l.view, user)).toBe("list");
-    expect(effectiveView(l.view, admin)).toBe("owner");
+  it("a remembered Owner view from before Oct 21 is the List for everyone (the view moved to /owner)", () => {
+    // Until Oct 21: the List for a non-admin (effectiveView), the Owner view for an admin.
+    const l = landingSearch(normalizeWorkLayout({ view: "owner" }), {});
+    expect(l.view).toBe("list");
   });
 });
 
@@ -305,7 +306,8 @@ describe("the page and the route", () => {
     expect(page).toContain(
       "const landing = landingSearch(layout, { view: props.view, who: props.who });",
     );
-    expect(page).toContain("const view = effectiveView(landing.view, profile);");
+    // Oct 21: the Owner view moved to /owner; no effectiveView any more, the landing view is final.
+    expect(page).toContain("const view = landing.view;");
     expect(page).toContain("const who = resolveWho(landing.who, profile);");
     expect(page).toContain('queryKey: ["my-work", who],');
     // The browser's copy is there from the first render (no flash of the List, one list fetch).
@@ -319,7 +321,8 @@ describe("the page and the route", () => {
     expect(page.match(/if \(next !== layout\) commitLayout\(next\);/g)).toHaveLength(2);
     expect(page).toContain('onClick={() => changeView("list")}');
     expect(page).toContain('onClick={() => changeView("calendar")}');
-    expect(page).toContain('onClick={() => changeView("owner")}');
+    // Oct 21: the Owner view moved to /owner — no third button.
+    expect(page).not.toContain('changeView("owner")');
     expect(page).toContain("<Select value={who} onValueChange={changeWho}>");
     expect(page).not.toContain('props.onView("');
     // Column and kind changes keep them.
@@ -348,7 +351,12 @@ describe("the page and the route", () => {
     expect(page).not.toContain("enabled: !!session && !!userId,");
   });
   it("the route hands the page the URL's values as they are, and keeps ?month across views", () => {
-    expect(route).toContain("view={view ?? null}");
+    // Oct 21: the Owner view moved to /owner; `pageView` is the URL's view with "owner" read as
+    // nothing (the route redirects it once the profile is here).
+    expect(route).toContain("view={pageView}");
+    expect(route).toContain(
+      'const pageView: WorkViewParam | null = view === "owner" ? null : (view ?? null);',
+    );
     expect(route).toContain("who={who ?? null}");
     expect(route).toContain("month={month ?? null}");
     expect(route).toContain('const month = parseMonthParam(s["month"]);');

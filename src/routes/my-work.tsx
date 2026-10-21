@@ -2,7 +2,7 @@ import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { MyWorkPage } from "@/components/my-work-page";
-import { homeFor, isFieldOnly } from "@/lib/access";
+import { homeFor, isAdmin, isFieldOnly } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import {
   nextWorkSearch,
@@ -12,14 +12,16 @@ import {
   resolveWho,
   type BucketPreset,
   type WorkViewParam,
+  type WorkViewUrl,
 } from "@/lib/my-work";
 
 export const Route = createFileRoute("/my-work")({
   head: () => ({ meta: [{ title: "Work Overview — JBK Portal" }] }),
   // Every signed-in user (pageForPath: /my-work → null) and everyone's landing page (homeFor).
-  // ?view=calendar opens the month calendar (the list otherwise); ?view=owner the Owner view,
-  // admins only — the page falls back to the list for anyone else (effectiveView) and the
-  // server refuses them. ?who=mine | all | <profile id> is the "Show" picker of admins and
+  // ?view=calendar opens the month calendar (the list otherwise). ?view=owner was the Owner view
+  // until Oct 21 ("owner should be its own tab"): it is still read, and an old link or bookmark
+  // is sent on to /owner?tab=team (admins) or lands on the List without it (anyone else).
+  // ?who=mine | all | <profile id> is the "Show" picker of admins and
   // managers — the server ignores it for anyone else. Without ?who the page shows the caller's
   // default (defaultWho: Everyone for admins and managers, owner Oct 1; Mine for anyone else), so
   // ?who=mine is kept in the URL when an admin or manager picks Mine. ?bucket=today|overdue
@@ -50,7 +52,8 @@ export const Route = createFileRoute("/my-work")({
 });
 
 type MyWorkSearch = {
-  view?: WorkViewParam;
+  // Oct 21: WorkViewUrl, not WorkViewParam — the URL may still say "owner" (redirected below).
+  view?: WorkViewUrl;
   who?: string;
   bucket?: BucketPreset;
   month?: string;
@@ -72,10 +75,32 @@ function MyWorkRoute() {
   // A technician-only user's page is My tickets (owner, Oct 15; homeFor): the sidebar has no
   // Work Overview for them, and an old link or the sign-in redirect lands there instead.
   if (isFieldOnly(profile)) return <Navigate to={homeFor(profile)} replace />;
+  // Oct 21: the Owner view is its own page now. An old link (/my-work?view=owner) goes on to
+  // its Team tab for an admin; anyone else — whom the view never showed — lands on the List with
+  // the rest of the search kept and the view dropped. Until the profile is here nothing is
+  // decided (the gate does not block Work Overview on a missing profile, and an admin's bookmark
+  // must not be dropped before their role is known): the List renders meanwhile (`pageView`).
+  if (view === "owner" && profile)
+    return isAdmin(profile) ? (
+      <Navigate to="/owner" search={{ tab: "team" }} replace />
+    ) : (
+      <Navigate
+        to="/my-work"
+        search={{
+          ...(who ? { who } : {}),
+          ...(bucket ? { bucket } : {}),
+          ...(month ? { month } : {}),
+        }}
+        replace
+      />
+    );
+  // The view the page gets: "owner" is no view of Work Overview — nothing, so the List or the
+  // remembered Calendar shows while the redirect above waits for the profile.
+  const pageView: WorkViewParam | null = view === "owner" ? null : (view ?? null);
   // The URL's own values, for the next URL: no ?view reads as the list and no ?who as the
   // caller's default here (the page applies the remembered ones when the URL is silent, and a
   // search without them keeps letting it).
-  const curView = view ?? "list";
+  const curView: WorkViewParam = pageView ?? "list";
   // No ?who: Everyone for admins and managers, Mine for anyone else (defaultWho).
   const curWho = resolveWho(who, profile);
   // Whether the URL named them (Oct 20 for the view, Oct 21 for the person): a value the URL
@@ -101,7 +126,7 @@ function MyWorkRoute() {
     nextWorkSearch({ view: v, who: w, bucket: b, month: m }, profile, viewExplicit, whoNamed);
   return (
     <MyWorkPage
-      view={view ?? null}
+      view={pageView}
       who={who ?? null}
       month={month ?? null}
       bucket={bucket ?? null}

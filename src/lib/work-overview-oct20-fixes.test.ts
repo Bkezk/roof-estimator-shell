@@ -68,7 +68,7 @@ import {
 } from "@/lib/my-work-actions";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
 import { claimOpportunity } from "@/lib/opportunities.functions";
-import { activityText, effectiveView, myWorkHref, recentActivity } from "@/lib/owner-view";
+import { activityText, myWorkHref, recentActivity } from "@/lib/owner-view";
 import { assignServiceJob } from "@/lib/service.functions";
 import { getTask } from "@/lib/tasks.functions";
 import { landingSearch, shouldSeedWorkLayout } from "@/lib/work-layout";
@@ -236,7 +236,9 @@ describe("1. claimOpportunity reads technician: a ticked office person claims", 
 // ---- 2. an explicit view stays explicit on the page's own navigations -------------------------
 
 describe("2. after an Owner-view link, the next in-page navigation keeps the List", () => {
-  const savedOwner = { view: "owner" as const };
+  // Oct 21: the Owner view moved to /owner; the remembered view that must not win is the Calendar
+  // now (it was "owner"), and effectiveView is gone.
+  const savedOwner = { view: "calendar" as const };
   /** What the route's validateSearch keeps of a search (parseViewParam / parseBucketPreset). */
   const validate = (s: { view?: string; who?: string; bucket?: string }) => ({
     view: parseViewParam(s.view),
@@ -248,8 +250,14 @@ describe("2. after an Owner-view link, the next in-page navigation keeps the Lis
     const url = validate(link.search);
     expect(url).toEqual({ view: "list", who: BOB, bucket: "overdue" });
     // The route: curView = view ?? "list", and the URL named its view → explicit stays explicit.
+    // (Oct 21: "owner" is no view of the page any more — the route redirects it — hence the guard.)
     const next = nextWorkSearch(
-      { view: url.view ?? "list", who: ME, bucket: url.bucket, month: null },
+      {
+        view: url.view === "owner" ? "list" : (url.view ?? "list"),
+        who: ME,
+        bucket: url.bucket,
+        month: null,
+      },
       admin,
       url.view !== undefined,
     );
@@ -257,12 +265,10 @@ describe("2. after an Owner-view link, the next in-page navigation keeps the Lis
     const url2 = validate(next);
     const landing = landingSearch(savedOwner, { view: url2.view ?? null, who: url2.who ?? null });
     expect(landing).toEqual({ view: "list", who: ME });
-    expect(effectiveView(landing.view, admin)).toBe("list");
-    // The bug: the old searchOf dropped "list", the URL fell silent, and the remembered Owner
-    // view won.
+    // The bug: the old searchOf dropped "list", the URL fell silent, and the remembered view won.
     const old = nextWorkSearch({ view: "list", who: ME, bucket: "overdue" }, admin, false);
     expect(old.view).toBeUndefined();
-    expect(landingSearch(savedOwner, { view: null, who: old.who ?? null }).view).toBe("owner");
+    expect(landingSearch(savedOwner, { view: null, who: old.who ?? null }).view).toBe("calendar");
   });
   it("a bucket, month or view change after the link keeps view=list too; Everyone stays bare only while the URL never named it", () => {
     // Oct 21 (whoExplicit; work-overview-oct21-audit7.test.ts): a URL that named ?who=all keeps

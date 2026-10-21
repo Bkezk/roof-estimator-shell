@@ -1,10 +1,12 @@
 /**
- * The Owner view on Work Overview (owner, Oct 1): "The owner should see everything in a format that is
+ * The Owner view (owner, Oct 1): "The owner should see everything in a format that is
  * easily digestible and have a view that allows him to see who is doing what they should be
- * doing, when they should be doing it" — "just ensure no one can see it but them."
+ * doing, when they should be doing it" — "just ensure no one can see it but them." It lived on
+ * Work Overview until Oct 21 ("owner should be its own tab"); it is now the Team tab of the Owner
+ * page (/owner, routes/owner.tsx), moved as it was.
  *
  * One row per person: Role, Due today, Overdue, Done this week, Open opportunities, Last
- * activity; a totals row; a one-line digest above. Admins only: the toggle renders only under
+ * activity; a totals row; a one-line digest above. Admins only: the page renders it only under
  * `visibleToOwner(profile)` (= isAdmin) and the server function `listOwnerView` refuses anyone
  * else on the role read from the caller's own profile. Pure rules only (no I/O) — the server
  * function in owner-view.functions.ts reads the rows, components/owner-view.tsx renders them.
@@ -51,20 +53,12 @@ import { OPP_ALL_OPEN, isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
 
 // ---- who may see it -----------------------------------------------------------------------
 
-/** Only admins (the owner) may see the Owner view — the client mirror of the server check. */
+/**
+ * Only admins (the owner) may see the Owner view — the client mirror of the server check. Oct 21:
+ * the view is the Owner page's Team tab (routes/owner.tsx sends anyone else to Work Overview);
+ * `effectiveView`, which downgraded ?view=owner on Work Overview, went with it.
+ */
 export const visibleToOwner = (p: AccessLike | null | undefined): boolean => isAdmin(p);
-
-export type MyWorkView = "list" | "calendar" | "owner";
-
-/** The view a profile actually gets: `owner` only for admins; anyone else falls back to list. */
-export function effectiveView(
-  requested: string | null | undefined,
-  p: AccessLike | null | undefined,
-): MyWorkView {
-  if (requested === "calendar") return "calendar";
-  if (requested === "owner" && visibleToOwner(p)) return "owner";
-  return "list";
-}
 
 // ---- role ----------------------------------------------------------------------------------
 

@@ -1,8 +1,10 @@
 /**
- * Work Overview › Owner (owner, Oct 1): who is doing what they should be doing, when they should be
- * doing it — one row per person (Role, Due today, Overdue, Done this week, Open opportunities,
- * Last activity), a totals row and a one-line digest above. Admins only: Work Overview renders this
- * only under `visibleToOwner(profile)`, and `listOwnerView` refuses anyone else on the server.
+ * Owner › Team (owner, Oct 1, as Work Overview › Owner; its own page since Oct 21 — "owner should
+ * be its own tab" — components/owner-page.tsx, moved as it was): who is doing what they should be
+ * doing, when they should be doing it — one row per person (Role, Due today, Overdue, Done this
+ * week, Open opportunities, Last activity), a totals row and a one-line digest above. Admins
+ * only: the page renders only under `visibleToOwner(profile)` (the route and the gate send anyone
+ * else away), and `listOwnerView` refuses anyone else on the server.
  * Definitions are in src/lib/owner-view.ts.
  *
  * Due today and Overdue link into Work Overview's List for that person (`who`) with the preset
