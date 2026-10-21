@@ -147,12 +147,10 @@ describe("the customer's page (source)", () => {
       // The old always-open heading is gone.
       expect(body, name).not.toContain('<h2 className="flex items-center gap-2 font-semibold">');
     }
-    // The section cards keep their frame (white card on the off-white page, Oct 14).
+    // The section cards keep their frame; since Oct 21 each stands on its own tint (section-tints.ts).
+    expect(page).toContain('<section className={sectionClass("tickets")} aria-label="Tickets">');
     expect(page).toContain(
-      '<section className="space-y-3 rounded-lg border p-4" aria-label="Tickets">',
-    );
-    expect(page).toContain(
-      '<section className="space-y-3 rounded-lg border p-4" aria-label="Properties">',
+      '<section className={sectionClass("properties")} aria-label="Properties">',
     );
   });
   it("the sections' buttons sit beside the toggle (the header's children), and open the fold they add into", () => {

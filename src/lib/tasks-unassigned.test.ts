@@ -301,9 +301,7 @@ describe("a customer's Tasks list", () => {
     const tasks = page.indexOf("<TasksSection");
     expect(tickets).toBeGreaterThan(0);
     expect(tasks).toBeGreaterThan(tickets);
-    expect(page).toContain(
-      '<section className="space-y-3 rounded-lg border p-4" aria-label="Tasks">',
-    );
+    expect(page).toContain('<section className={sectionClass("tasks")} aria-label="Tasks">');
     expect(page).toContain("const rows = orderAccountTasks(tasks);");
     expect(page).toContain("onClick={() => setDialog({ task: t })}");
     expect(page).toContain('{t.assignee_name ?? "Unassigned"}');

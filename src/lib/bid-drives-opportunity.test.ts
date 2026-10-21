@@ -710,7 +710,7 @@ describe("D. the customer's Opportunities section", () => {
     expect(opps).toBeGreaterThan(tickets);
     expect(bids).toBeGreaterThan(opps);
     expect(page).toContain(
-      '<section className="space-y-3 rounded-lg border p-4" aria-label="Opportunities">',
+      '<section className={sectionClass("opportunities")} aria-label="Opportunities">',
     );
     expect(page).toContain('<Link key={o.id} to="/opportunities" search={{ id: o.id }}');
     expect(page).toContain('{showClosed ? "Hide" : "Show"} {closed.length} closed');

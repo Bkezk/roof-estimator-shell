@@ -31,6 +31,7 @@ import {
 import { deletedLine } from "@/lib/crm-account";
 import { AuditHistory } from "@/components/audit-history";
 import { FoldHeader } from "@/components/section-fold";
+import { INNER_BOX, sectionClass } from "@/lib/section-tints";
 import { useSectionFold } from "@/lib/use-section-fold";
 import { TicketRows } from "@/components/crm/ticket-rows";
 import { OpportunitiesSection, TasksSection } from "@/components/customers-page";
@@ -133,7 +134,7 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
         </div>
       )}
 
-      <section className="space-y-3 rounded-lg border p-4" aria-label="Property details">
+      <section className={sectionClass("properties")} aria-label="Property details">
         {editing && !deleted ? (
           <SiteForm
             accountId={d.account.id}
@@ -240,7 +241,7 @@ function PropertyTickets({
 }) {
   const fold = useSectionFold("property", "tickets", jobs.length);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Tickets">
+    <section className={sectionClass("tickets")} aria-label="Tickets">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -265,7 +266,7 @@ function PropertyTickets({
 function PropertyBids({ bids }: { bids: LinkedBidRow[] }) {
   const fold = useSectionFold("property", "bids", bids.length);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Bids">
+    <section className={sectionClass("bids")} aria-label="Bids">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -278,7 +279,7 @@ function PropertyBids({ bids }: { bids: LinkedBidRow[] }) {
           No bids linked to this property. A bid is linked on its Setup tab or on the customer.
         </p>
       ) : (
-        <div className="divide-y rounded-md border">
+        <div className={`divide-y rounded-md border ${INNER_BOX}`}>
           {bids.map((b) => (
             <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
               <Link

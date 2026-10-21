@@ -3,6 +3,7 @@
  * property's page since Oct 15: "#1234 · Open · <property> · <description> · <day or Updated>",
  * each a link to the ticket. No money: technicians read these too.
  */
+import { INNER_BOX } from "@/lib/section-tints";
 import { Link } from "@tanstack/react-router";
 
 import type { Database } from "@/integrations/supabase/types";
@@ -37,7 +38,7 @@ export function TicketRows({
   showSite?: boolean;
 }) {
   return (
-    <div className="divide-y rounded-md border">
+    <div className={`divide-y rounded-md border ${INNER_BOX}`}>
       {jobs.map((j) => (
         <Link
           key={j.id}

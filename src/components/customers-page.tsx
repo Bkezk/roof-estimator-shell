@@ -67,6 +67,7 @@ import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-statu
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { FoldHeader } from "@/components/section-fold";
+import { INNER_BOX, sectionClass } from "@/lib/section-tints";
 import { useSectionFold } from "@/lib/use-section-fold";
 import { TicketRows } from "@/components/crm/ticket-rows";
 import { countBy } from "@/lib/paging";
@@ -1089,7 +1090,7 @@ function ContactsSection({
   const fold = useSectionFold("customer", "contacts", contacts.data ? rows.length : null);
 
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Contacts">
+    <section className={sectionClass("contacts")} aria-label="Contacts">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1144,7 +1145,7 @@ function ContactsSection({
           ) : (
             <div
               key={c.id}
-              className="flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2"
+              className={`flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2 ${INNER_BOX}`}
             >
               <div className="min-w-0 flex-1 space-y-0.5">
                 <p className="flex flex-wrap items-center gap-2">
@@ -1484,7 +1485,7 @@ function SitesSection({
   });
 
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Properties">
+    <section className={sectionClass("properties")} aria-label="Properties">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1526,7 +1527,7 @@ function SitesSection({
           ) : (
             <div
               key={s.id}
-              className="flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2"
+              className={`flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2 ${INNER_BOX}`}
             >
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-baseline gap-x-2">
@@ -1651,7 +1652,7 @@ function SitesSection({
 function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
   const fold = useSectionFold("customer", "tickets", jobs.length);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Tickets">
+    <section className={sectionClass("tickets")} aria-label="Tickets">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1714,7 +1715,7 @@ export function OpportunitiesSection({
     </Link>
   );
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Opportunities">
+    <section className={sectionClass("opportunities")} aria-label="Opportunities">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1726,7 +1727,9 @@ export function OpportunitiesSection({
         <p className="text-sm text-muted-foreground">{emptyText}</p>
       ) : (
         <>
-          {live.length > 0 && <div className="divide-y rounded-md border">{live.map(row)}</div>}
+          {live.length > 0 && (
+            <div className={`divide-y rounded-md border ${INNER_BOX}`}>{live.map(row)}</div>
+          )}
           {closed.length > 0 && (
             <div className="space-y-2">
               <button
@@ -1737,7 +1740,9 @@ export function OpportunitiesSection({
               >
                 {showClosed ? "Hide" : "Show"} {closed.length} closed
               </button>
-              {showClosed && <div className="divide-y rounded-md border">{closed.map(row)}</div>}
+              {showClosed && (
+                <div className={`divide-y rounded-md border ${INNER_BOX}`}>{closed.map(row)}</div>
+              )}
             </div>
           )}
         </>
@@ -1770,7 +1775,7 @@ export function TasksSection({
   const rows = orderAccountTasks(tasks);
   const fold = useSectionFold(site ? "property" : "customer", "tasks", rows.length);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Tasks">
+    <section className={sectionClass("tasks")} aria-label="Tasks">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1789,7 +1794,7 @@ export function TasksSection({
           No tasks for this {site ? "property" : "customer"}.
         </p>
       ) : (
-        <div className="divide-y rounded-md border">
+        <div className={`divide-y rounded-md border ${INNER_BOX}`}>
           {rows.map((t) => {
             const stamp = doneStamp(t);
             return (
@@ -1854,7 +1859,7 @@ function TakeoffsSection({ accountId }: { accountId: string }) {
   const rows = list.data ?? [];
   const fold = useSectionFold("customer", "takeoffs", list.data ? rows.length : null);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Takeoffs">
+    <section className={sectionClass("takeoffs")} aria-label="Takeoffs">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -1875,7 +1880,7 @@ function TakeoffsSection({ accountId }: { accountId: string }) {
           No takeoffs linked to this customer. Link one from its Setup tab in Takeoff.
         </p>
       ) : (
-        <div className="divide-y rounded-md border">
+        <div className={`divide-y rounded-md border ${INNER_BOX}`}>
           {rows.map((t) => (
             <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
               <Link
@@ -1952,7 +1957,7 @@ function BidsSection({
 
   const fold = useSectionFold("customer", "bids", bids.length);
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Bids">
+    <section className={sectionClass("bids")} aria-label="Bids">
       <FoldHeader
         open={fold.open}
         onToggle={fold.toggle}
@@ -2017,7 +2022,7 @@ function BidsSection({
           {bids.length === 0 ? (
             <p className="text-sm text-muted-foreground">No bids linked to this customer.</p>
           ) : (
-            <div className="divide-y rounded-md border">
+            <div className={`divide-y rounded-md border ${INNER_BOX}`}>
               {bids.map((b) => (
                 <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
                   <Link
