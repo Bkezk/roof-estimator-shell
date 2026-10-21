@@ -4,9 +4,10 @@
  *  A. Two "this week"s on one page: the List's This week ends Saturday (my-work.ts endOfWeek —
  *     Sunday to Saturday, like the calendar) while the Owner view's Done this week ran Monday to
  *     Sunday (owner-view.ts weekRange). Owner: the Owner view follows the List and the calendar.
- *  B. Every Owner view source stopped at 1,000 rows (LIMIT) and said nothing about it, unlike the
- *     List (listMyWork `truncated` and my-work-page.tsx's line). Now `truncated` rides on both
- *     results and owner-view.tsx says so in one plain line.
+ *  B. Every Owner view source stopped at 1,000 rows and said nothing about it. First a
+ *     `truncated` flag and a line; then, the same day (owner: "I'd rather not worry about it"),
+ *     no ceiling at all: every counted source reads every row a page at a time (lib/read-all.ts),
+ *     so the numbers are exact at any size and the line is gone.
  *  F. Last activity credited a task's Done to its assignee, though tasks.done_by records who
  *     ticked it (20261009100000_tasks_tracking.sql): a manager closing a technician's task made
  *     the technician look active and the manager idle. Credit done_by when set, else the assignee.
@@ -26,6 +27,7 @@ import { ID_CHUNK, chunkIds, readInChunks } from "@/lib/chunk-ids";
 import { addDays, endOfWeek } from "@/lib/my-work";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
 import { weekRange } from "@/lib/owner-view";
+import { readAll } from "@/lib/read-all";
 import {
   getOwnerPersonDetail,
   listOwnerView,
@@ -37,8 +39,8 @@ import { fakeSupabase } from "@/test/fake-supabase";
 type Row = Record<string, unknown>;
 const read = (p: string) => readFileSync(p, "utf8");
 const TODAY = "2026-10-21"; // a Wednesday; the week runs Sun Oct 18 – Sat Oct 24
-/** owner-view.functions.ts LIMIT (pinned below). */
-const LIMIT = 1000;
+/** lib/read-all.ts PAGE: PostgREST's most per request; the reads ask for the next page after a full one. */
+const PAGE = 1000;
 const ANN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"; // the admin viewing
 const MIKE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // a manager
 const TOM = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"; // a technician
@@ -158,49 +160,61 @@ describe("A. weekRange: Sunday to Saturday, the List's and the calendar's week",
 
 // ---- B ------------------------------------------------------------------------------------
 
-describe("B. truncated: the Owner view says when a source hit its 1,000-row cap", () => {
-  it("1,000 open tasks: truncated; 999: everything came", async () => {
+describe("B. no 1,000-row ceiling: every counted source is read whole, a page at a time", () => {
+  it("1,500 open tasks (two pages): the count is 1,500, not 1,000", async () => {
     const tables = emptyTables();
-    tables["tasks"] = Array.from({ length: LIMIT }, (_, i) => openTask(i, TOM));
+    tables["tasks"] = Array.from({ length: PAGE + 500 }, (_, i) => openTask(i, TOM));
     const full = await call<OwnerViewResult>(listOwnerView, { today: TODAY }, client(tables).db);
-    expect(full.truncated).toBe(true);
-    expect(full.rows.find((r) => r.id === TOM)!.dueToday.tasks).toBe(LIMIT);
-    tables["tasks"] = tables["tasks"].slice(1);
-    const under = await call<OwnerViewResult>(listOwnerView, { today: TODAY }, client(tables).db);
-    expect(under.truncated).toBe(false);
+    expect(full.rows.find((r) => r.id === TOM)!.dueToday.tasks).toBe(PAGE + 500);
+    expect(full).not.toHaveProperty("truncated");
   });
-  it("one person's detail says so too", async () => {
+  it("exactly one full page: the count is exact", async () => {
     const tables = emptyTables();
-    tables["tasks"] = Array.from({ length: LIMIT }, (_, i) => openTask(i, TOM));
+    tables["tasks"] = Array.from({ length: PAGE }, (_, i) => openTask(i, TOM));
+    const full = await call<OwnerViewResult>(listOwnerView, { today: TODAY }, client(tables).db);
+    expect(full.rows.find((r) => r.id === TOM)!.dueToday.tasks).toBe(PAGE);
+  });
+  it("one person's detail lists every item too", async () => {
+    const tables = emptyTables();
+    tables["tasks"] = Array.from({ length: PAGE + 500 }, (_, i) => openTask(i, TOM));
     const full = await call<OwnerPersonDetail>(
       getOwnerPersonDetail,
       { userId: TOM, today: TODAY },
       client(tables).db,
     );
-    expect(full.truncated).toBe(true);
-    expect(full.today).toHaveLength(LIMIT);
-    tables["tasks"] = tables["tasks"].slice(1);
-    const under = await call<OwnerPersonDetail>(
-      getOwnerPersonDetail,
-      { userId: TOM, today: TODAY },
-      client(tables).db,
-    );
-    expect(under.truncated).toBe(false);
+    expect(full.today).toHaveLength(PAGE + 500);
+    expect(full).not.toHaveProperty("truncated");
   });
-  it("source: every capped source counts, in both functions; the component says so in one plain line", () => {
+  it("readAll: pages until one comes back short; an error stops it; a query's shape", async () => {
+    const pages: [number, number][] = [];
+    const rows = Array.from({ length: PAGE * 2 + 1 }, (_, i) => ({ id: i }));
+    const r = await readAll<{ id: number }>((from, to) => {
+      pages.push([from, to]);
+      return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
+    });
+    expect(pages).toEqual([
+      [0, PAGE - 1],
+      [PAGE, 2 * PAGE - 1],
+      [2 * PAGE, 3 * PAGE - 1],
+    ]);
+    expect(r.data).toHaveLength(PAGE * 2 + 1);
+    expect(r.error).toBeNull();
+    const short = await readAll<{ id: number }>(() => Promise.resolve({ data: [], error: null }));
+    expect(short).toEqual({ data: [], error: null });
+    const bad = await readAll<{ id: number }>(() =>
+      Promise.resolve({ data: null, error: { message: "boom" } }),
+    );
+    expect(bad).toEqual({ data: null, error: { message: "boom" } });
+  });
+  it("source: every counted read goes through readAll with a stable order; no cap, no line", () => {
     const src = read("src/lib/owner-view.functions.ts");
-    expect(src).toContain("const LIMIT = 1000;");
-    expect(
-      src.match(
-        /\[\s*tickets,\s*tasks,\s*followups,\s*opps,\s*doneTickets,\s*doneTasks,\s*bids,?\s*\]\.some\(atCap\)/g,
-      ),
-    ).toHaveLength(2);
+    expect(src.match(/readAll\(\(from, to\) =>/g)).toHaveLength(14); // 7 per function
+    expect(src.match(/\.order\("id"\)\s*\.range\(from, to\)/g)).toHaveLength(14);
+    expect(src).not.toMatch(/\.limit\(LIMIT\)/);
+    expect(src).not.toContain("truncated");
     const view = read("src/components/owner-view.tsx");
-    expect(view.match(/data-row="truncated"/g)).toHaveLength(2); // the table and the detail
-    expect(view).toContain("data?.truncated &&");
-    expect(view).toContain("d.truncated &&");
-    expect(view).toContain("first 1,000");
-    expect(view).not.toMatch(/the app/);
+    expect(view).not.toContain("truncated");
+    expect(view).not.toContain("first 1,000");
   });
 });
 

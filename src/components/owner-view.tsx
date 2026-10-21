@@ -352,15 +352,6 @@ export function OwnerView() {
           </Table>
         </div>
       )}
-      {/* Oct 21, seventh audit: each source is capped at 1,000 rows (listOwnerView LIMIT), as the
-          List's are — say so when one is hit, the way my-work-page.tsx does. A person's own row
-          reads their items alone, so it is the nearest thing to "narrow to one person" here. */}
-      {data?.truncated && (
-        <p className="text-xs text-muted-foreground" data-row="truncated">
-          Counting the first 1,000 of each kind, so a number may run low. Open a person's row to see
-          their items.
-        </p>
-      )}
       {data && !data.auditLog && (
         <p className="text-xs text-muted-foreground">
           Last activity: tickets, contact log, tasks and time entries (no audit log yet).
@@ -620,16 +611,6 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
   const dated = (date: string | null) => (date ? dayLabel(date) : "No date");
   return (
     <div className="grid gap-4 whitespace-normal md:grid-cols-2 xl:grid-cols-4">
-      {/* Oct 21: one person's sources are capped at 1,000 rows too (getOwnerPersonDetail); the
-          line spans the row of cards. */}
-      {d.truncated && (
-        <p
-          className="text-xs text-muted-foreground md:col-span-2 xl:col-span-4"
-          data-row="truncated"
-        >
-          Showing the first 1,000 of each kind.
-        </p>
-      )}
       <DetailGroup
         title="Today"
         empty="Nothing due today"

@@ -711,7 +711,7 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
     const src = read("src/lib/owner-view.functions.ts");
     expect(src.indexOf("Forbidden: admin only")).toBeLessThan(src.indexOf('from("bids")'));
   });
-  it("the queries read bids the way listMyWork does: the same columns and filters, one read each, 1,000 rows", () => {
+  it("the queries read bids the way listMyWork does: the same columns and filters, every row by page", () => {
     const src = read("src/lib/owner-view.functions.ts");
     const mine = read("src/lib/my-work.functions.ts");
     const cols = '.select("id, name, status, due_date, account_id, created_by")';
@@ -724,7 +724,7 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
     const detail = src.slice(src.indexOf("export const getOwnerPersonDetail"));
     for (const part of [list, detail]) {
       const q = part.slice(part.indexOf('.from("bids")'));
-      const block = q.slice(0, q.indexOf(".limit(LIMIT)"));
+      const block = q.slice(0, q.indexOf(".range(from, to)"));
       expect(block).toContain(cols);
       expect(block).toContain('.is("deleted_at", null)');
       expect(block).toContain('.eq("status", "draft")');
@@ -733,7 +733,8 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
     // Everyone's for the table; that person's for the detail.
     expect(list).not.toContain('.eq("created_by", userId)');
     expect(detail).toContain('.eq("created_by", userId)');
-    expect(src).toContain("const LIMIT = 1000;");
+    // Oct 21: no 1,000-row cap — every counted read pages through readAll (lib/read-all.ts).
+    expect(src).toContain('import { readAll } from "@/lib/read-all";');
     // The rows go through mergeWork as kind "bid" (my-work.ts bidItems), not a path of their own.
     expect(list).toContain('bids: must("Bids", bids),');
     expect(detail).toContain("bids: bidRows.map((b) => ({");

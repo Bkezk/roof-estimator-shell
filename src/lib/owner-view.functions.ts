@@ -23,6 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { readInChunks } from "@/lib/chunk-ids";
+import { readAll } from "@/lib/read-all";
 import {
   WORK_TICKET_STAGES,
   addDays,
@@ -90,17 +91,14 @@ export interface OwnerViewResult {
   rows: OwnerRow[];
   /** Did audit_log answer (false until that table exists)? */
   auditLog: boolean;
-  /**
-   * Did any source hit `LIMIT` (Oct 21, seventh audit)? Each is capped at 1,000 rows per read,
-   * so a number may run low; the view says so, as the List does (listMyWork `truncated`).
-   */
-  truncated: boolean;
 }
 
-/** Each source's cap (the List's too); `truncated` says whether any reached it. */
-const LIMIT = 1000;
-/** Did a read come back full — at the cap, so there may be more? */
-const atCap = (r: { data: unknown[] | null }) => (r.data?.length ?? 0) >= LIMIT;
+/**
+ * The Last-activity bulk window reads at most this many rows per source (ordered newest first);
+ * a person missing from a full read gets a lookup of their own, so no cap on the numbers. The
+ * counts themselves read every row (readAll, Oct 21: no 1,000-row ceiling any more).
+ */
+const ACTIVITY_LIMIT = 1000;
 /** Bulk window for Last activity; older activity is looked up per person. */
 const ACTIVITY_DAYS = 14;
 
@@ -140,59 +138,76 @@ export const listOwnerView = createServerFn({ method: "GET" })
     const [profiles, tickets, tasks, followups, opps, doneTickets, doneTasks, bids] =
       await Promise.all([
         sb.from("profiles").select("id, full_name, email, role, technician, access"),
-        sb
-          .from("service_jobs")
-          .select(
-            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
-          )
-          .is("deleted_at", null)
-          .in("stage", [...WORK_TICKET_STAGES])
-          .not("technician_id", "is", null)
-          .limit(LIMIT),
-        sb
-          .from("tasks")
-          .select("id, title, due_date, status, building_id, assignee, assignee_name")
-          .neq("status", "done")
-          .not("assignee", "is", null)
-          .limit(LIMIT),
+        readAll((from, to) =>
+          sb
+            .from("service_jobs")
+            .select(
+              "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+            )
+            .is("deleted_at", null)
+            .in("stage", [...WORK_TICKET_STAGES])
+            .not("technician_id", "is", null)
+            .order("id")
+            .range(from, to),
+        ),
+        readAll((from, to) =>
+          sb
+            .from("tasks")
+            .select("id, title, due_date, status, building_id, assignee, assignee_name")
+            .neq("status", "done")
+            .not("assignee", "is", null)
+            .order("id")
+            .range(from, to),
+        ),
         // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
-        sb.from("crm_followups").select("*").eq("status", "open").limit(LIMIT),
-        sb
-          .from("crm_opportunities")
-          .select("id, assignee_id, status, expected_close, est_value")
-          .is("deleted_at", null)
-          .in("status", [...OPEN_OPP_STATUSES])
-          .not("assignee_id", "is", null)
-          .limit(LIMIT),
-        sb
-          .from("service_jobs")
-          .select("technician_id, stage, completed_at")
-          .is("deleted_at", null)
-          .in("stage", [...DONE_TICKET_STAGES])
-          .gte("completed_at", weekFrom)
-          .lt("completed_at", weekTo)
-          .limit(LIMIT),
-        sb
-          .from("tasks")
-          .select("assignee, status, done_at")
-          .eq("status", "done")
-          .gte("done_at", weekFrom)
-          .lt("done_at", weekTo)
-          .limit(LIMIT),
+        readAll((from, to) =>
+          sb.from("crm_followups").select("*").eq("status", "open").order("id").range(from, to),
+        ),
+        readAll((from, to) =>
+          sb
+            .from("crm_opportunities")
+            .select("id, assignee_id, status, expected_close, est_value")
+            .is("deleted_at", null)
+            .in("status", [...OPEN_OPP_STATUSES])
+            .not("assignee_id", "is", null)
+            .order("id")
+            .range(from, to),
+        ),
+        readAll((from, to) =>
+          sb
+            .from("service_jobs")
+            .select("technician_id, stage, completed_at")
+            .is("deleted_at", null)
+            .in("stage", [...DONE_TICKET_STAGES])
+            .gte("completed_at", weekFrom)
+            .lt("completed_at", weekTo)
+            .order("id")
+            .range(from, to),
+        ),
+        readAll((from, to) =>
+          sb
+            .from("tasks")
+            .select("assignee, status, done_at")
+            .eq("status", "done")
+            .gte("done_at", weekFrom)
+            .lt("done_at", weekTo)
+            .order("id")
+            .range(from, to),
+        ),
         // Every draft bid, as listMyWork reads them for Everyone (owner, Oct 12). The counts only
         // need the day and the maker, so the customer's name is not looked up here.
-        sb
-          .from("bids")
-          .select("id, name, status, due_date, account_id, created_by")
-          .is("deleted_at", null)
-          .eq("status", "draft")
-          .order("due_date", { ascending: true, nullsFirst: false })
-          .limit(LIMIT),
+        readAll((from, to) =>
+          sb
+            .from("bids")
+            .select("id, name, status, due_date, account_id, created_by")
+            .is("deleted_at", null)
+            .eq("status", "draft")
+            .order("due_date", { ascending: true, nullsFirst: false })
+            .order("id")
+            .range(from, to),
+        ),
       ]);
     const people = must("Profiles", profiles);
-    // Oct 21: a source at the cap may be missing rows, so its numbers may run low. The activity
-    // reads are not counted: a person missing from a full bulk read gets a lookup of their own.
-    const truncated = [tickets, tasks, followups, opps, doneTickets, doneTasks, bids].some(atCap);
     const followupRows = must("Follow-ups", followups);
     const items = mergeWork(
       {
@@ -230,7 +245,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
         stale: staleness(last, today, roleLabel(p) === "Admin") === "stale",
       };
     });
-    return { today, at: now.toISOString(), rows: sortOwnerRows(rows), auditLog, truncated };
+    return { today, at: now.toISOString(), rows: sortOwnerRows(rows), auditLog };
   });
 
 /**
@@ -310,7 +325,7 @@ async function loadLastActivity(
         .select(sourceColumns(src))
         .gte(src.at, since)
         .order(src.at, { ascending: false })
-        .limit(LIMIT);
+        .limit(ACTIVITY_LIMIT);
       if (src.only) q = q.eq(src.only[0], src.only[1]);
       return q;
     }),
@@ -373,8 +388,6 @@ export interface OwnerPersonDetail {
   doneThisWeek: DoneItem[];
   /** Their last five actions, newest first. */
   recent: ActivityItem[];
-  /** Did any of their sources hit `LIMIT` (Oct 21)? Then a card may be missing items. */
-  truncated: boolean;
 }
 
 /** Rows read per activity source (some are dropped as repeats before the newest five). */
@@ -413,63 +426,84 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const raw = sb as unknown as SupabaseClient;
 
     const [tickets, tasks, followups, opps, doneTickets, doneTasks, bids] = await Promise.all([
-      sb
-        .from("service_jobs")
-        .select(
-          "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
-        )
-        .is("deleted_at", null)
-        .in("stage", [...WORK_TICKET_STAGES])
-        .eq("technician_id", userId)
-        .limit(LIMIT),
-      sb
-        .from("tasks")
-        .select("id, title, due_date, status, building_id, assignee, assignee_name")
-        .neq("status", "done")
-        .eq("assignee", userId)
-        .limit(LIMIT),
+      readAll((from, to) =>
+        sb
+          .from("service_jobs")
+          .select(
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+          )
+          .is("deleted_at", null)
+          .in("stage", [...WORK_TICKET_STAGES])
+          .eq("technician_id", userId)
+          .order("id")
+          .range(from, to),
+      ),
+      readAll((from, to) =>
+        sb
+          .from("tasks")
+          .select("id, title, due_date, status, building_id, assignee, assignee_name")
+          .neq("status", "done")
+          .eq("assignee", userId)
+          .order("id")
+          .range(from, to),
+      ),
       // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
-      sb
-        .from("crm_followups")
-        .select("*")
-        .eq("status", "open")
-        .eq("assignee_id", userId)
-        .limit(LIMIT),
-      sb
-        .from("crm_opportunities")
-        .select("id, title, account_id, assignee_id, status, expected_close, est_value")
-        .is("deleted_at", null)
-        .in("status", [...OPEN_OPP_STATUSES])
-        .eq("assignee_id", userId)
-        .limit(LIMIT),
-      sb
-        .from("service_jobs")
-        .select(
-          "id, number, description, customer_name, site_name, service_type, technician_id, stage, completed_at",
-        )
-        .is("deleted_at", null)
-        .in("stage", [...DONE_TICKET_STAGES])
-        .eq("technician_id", userId)
-        .gte("completed_at", weekFrom)
-        .lt("completed_at", weekTo)
-        .limit(LIMIT),
-      sb
-        .from("tasks")
-        .select("id, title, building_id, assignee, status, done_at")
-        .eq("status", "done")
-        .eq("assignee", userId)
-        .gte("done_at", weekFrom)
-        .lt("done_at", weekTo)
-        .limit(LIMIT),
+      readAll((from, to) =>
+        sb
+          .from("crm_followups")
+          .select("*")
+          .eq("status", "open")
+          .eq("assignee_id", userId)
+          .order("id")
+          .range(from, to),
+      ),
+      readAll((from, to) =>
+        sb
+          .from("crm_opportunities")
+          .select("id, title, account_id, assignee_id, status, expected_close, est_value")
+          .is("deleted_at", null)
+          .in("status", [...OPEN_OPP_STATUSES])
+          .eq("assignee_id", userId)
+          .order("id")
+          .range(from, to),
+      ),
+      readAll((from, to) =>
+        sb
+          .from("service_jobs")
+          .select(
+            "id, number, description, customer_name, site_name, service_type, technician_id, stage, completed_at",
+          )
+          .is("deleted_at", null)
+          .in("stage", [...DONE_TICKET_STAGES])
+          .eq("technician_id", userId)
+          .gte("completed_at", weekFrom)
+          .lt("completed_at", weekTo)
+          .order("id")
+          .range(from, to),
+      ),
+      readAll((from, to) =>
+        sb
+          .from("tasks")
+          .select("id, title, building_id, assignee, status, done_at")
+          .eq("status", "done")
+          .eq("assignee", userId)
+          .gte("done_at", weekFrom)
+          .lt("done_at", weekTo)
+          .order("id")
+          .range(from, to),
+      ),
       // The draft bids this person started (owner, Oct 12), as listMyWork reads one person's.
-      sb
-        .from("bids")
-        .select("id, name, status, due_date, account_id, created_by")
-        .is("deleted_at", null)
-        .eq("status", "draft")
-        .eq("created_by", userId)
-        .order("due_date", { ascending: true, nullsFirst: false })
-        .limit(LIMIT),
+      readAll((from, to) =>
+        sb
+          .from("bids")
+          .select("id, name, status, due_date, account_id, created_by")
+          .is("deleted_at", null)
+          .eq("status", "draft")
+          .eq("created_by", userId)
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .order("id")
+          .range(from, to),
+      ),
     ]);
     const ticketRows = must("Tickets", tickets) as TicketIn[];
     const taskRows = must("Tasks", tasks);
@@ -478,7 +512,6 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const doneTicketRows = must("Done tickets", doneTickets);
     const doneTaskRows = must("Done tasks", doneTasks);
     const bidRows = must("Bids", bids);
-    const truncated = [tickets, tasks, followups, opps, doneTickets, doneTasks, bids].some(atCap);
 
     const activity = await loadPersonActivity(raw, userId);
 
@@ -602,7 +635,6 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
       overdue: groups.overdue,
       doneThisWeek: done,
       recent: recentActivity(rows, 5),
-      truncated,
     };
   });
 
