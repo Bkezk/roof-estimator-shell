@@ -241,6 +241,8 @@ const adminItems: {
     url: "/admin/non-dl",
     icon: Package,
     sub: [
+      // Its own page (owner, Oct 22): the two families from the Duro-Last Membrane screen.
+      { title: "Non-DL TPO and EPDM", url: "/admin/non-dl-membrane" },
       { title: "Roof Edge Blocking", cat: "Roof Edge Blocking" },
       { title: "Parapet Wall Blocking", cat: "Parapet Wall Blocking" },
       { title: "Structural Deck Materials", cat: "Structural Deck Materials" },

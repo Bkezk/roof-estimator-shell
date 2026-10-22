@@ -5,6 +5,7 @@ import { AdhesivesTab } from "@/components/adhesives-editor";
 import { ExceptionalMetalsTab } from "@/components/exceptional-metals-editor";
 import { ItemNumbersTab } from "@/components/item-numbers-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { isNonDlMembraneRow, MEMBRANE_CATEGORY } from "@/lib/non-dl-membrane";
 
 const DL_TABS = ["catalog", "adhesives", "metals", "items"] as const;
 type DlTab = (typeof DL_TABS)[number];
@@ -29,7 +30,7 @@ function DuroLastPage() {
         <p className="text-sm text-muted-foreground">
           Duro-Last membrane, underlayment, fasteners, sealants, flashings, drains and accessories.
           Adhesives and Exceptional Metals have their own detail editors. Prices feed the Duro-Last
-          items in a bid.
+          items in a bid. Non-DL TPO and EPDM Rubber are under Non Duro-Last Pricing.
         </p>
       </div>
       <Tabs
@@ -48,6 +49,11 @@ function DuroLastPage() {
             branch="duro_last"
             title="Duro-Last Pricing"
             hideHeader
+            // Non-DL TPO and EPDM Rubber show on their own page (owner, Oct 22); the engine
+            // keeps reading them from this screen — lib/non-dl-membrane.ts.
+            rowFilter={(category, row, labelCol) =>
+              category !== MEMBRANE_CATEGORY || !isNonDlMembraneRow(row, labelCol)
+            }
             {...(cat ? { category: cat } : {})}
             onCategoryChange={(c) =>
               navigate({ search: { tab: "catalog", cat: c }, replace: true })

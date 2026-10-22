@@ -10,6 +10,7 @@ import {
   upsertItemNumber,
 } from "@/lib/admin-item-numbers.functions";
 import { rowKeys } from "@/lib/catalog-row-key";
+import { mergeRows, type CatalogRow } from "@/lib/non-dl-membrane";
 import {
   getPricingCatalog,
   savePricingScreen,
@@ -59,6 +60,9 @@ export function CatalogEditor({
   hideHeader,
   category,
   onCategoryChange,
+  hideCategoryPicker,
+  rowFilter,
+  newRowLabel,
 }: {
   branch: string;
   title: string;
@@ -68,6 +72,18 @@ export function CatalogEditor({
   category?: string;
   /** Called when the user picks a category in the dropdown, so the URL can follow. */
   onCategoryChange?: (category: string) => void;
+  /** One fixed screen (the Non-DL TPO and EPDM page): no Category select. */
+  hideCategoryPicker?: boolean;
+  /**
+   * A view of part of a screen (owner, Oct 22: Non-DL TPO and EPDM on their own page while the
+   * engine keeps reading the one Duro-Last Membrane screen; lib/non-dl-membrane.ts): only the
+   * rows this returns true for are shown and edited; on save they are merged back into the whole
+   * screen (mergeRows), the rest untouched. Called with the screen's category, so one editor can
+   * filter one category and show the others whole.
+   */
+  rowFilter?: (category: string, row: CatalogRow, labelCol: string) => boolean;
+  /** What a row added here starts as (the Non-DL page seeds the family the engine needs). */
+  newRowLabel?: string;
 }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getPricingCatalog);
@@ -138,8 +154,17 @@ export function CatalogEditor({
     }
     return screens?.find((s) => s.id === (selId ?? screens?.[0]?.id));
   }, [screens, selId, category]);
+  // The label column is "Description" on every legacy screen except Underlayment, whose
+  // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
+  const labelColOf = (d: CatalogScreenData) =>
+    d.columns.includes("Description") ? "Description" : (d.columns[0] ?? "Description");
+  // The rows this view shows (rowFilter) — a predicate over the selected screen's rows.
+  const keepRow = (d: CatalogScreenData, cat: string) =>
+    rowFilter ? (row: CatalogRow) => rowFilter(cat, row, labelColOf(d)) : null;
   if (selected && selected.id !== draftId) {
-    setDraft(clone(selected.data as unknown as CatalogScreenData));
+    const whole = clone(selected.data as unknown as CatalogScreenData);
+    const keep = keepRow(whole, selected.category);
+    setDraft(keep ? { ...whole, rows: whole.rows.filter(keep) } : whole);
     setDraftId(selected.id);
   }
 
@@ -158,9 +183,7 @@ export function CatalogEditor({
   const rowKeyOf = (row: Row) => keyByIndex[draft.rows.indexOf(row)] ?? "";
   const itemNosFor = (row: Row) =>
     itemNumbers?.filter((m) => m.screen_id === selected.id && m.row_label === rowKeyOf(row)) ?? [];
-  // The label column is "Description" on every legacy screen except Underlayment, whose
-  // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
-  const labelCol = cols.includes("Description") ? "Description" : (cols[0] ?? "Description");
+  const labelCol = labelColOf(draft);
   const valueCols = cols.filter((c) => c !== labelCol);
 
   const setCell = (ri: number, col: string, v: string | number) =>
@@ -207,7 +230,11 @@ export function CatalogEditor({
   const save = async () => {
     setSaving(true);
     try {
-      await saveFn({ data: { id: selected.id, data: draft as never } });
+      // A filtered view saves the whole screen: its rows merged back among the hidden ones.
+      const stored = selected.data as unknown as CatalogScreenData;
+      const keep = keepRow(stored, selected.category);
+      const data = keep ? { ...draft, rows: mergeRows(stored.rows, keep, draft.rows) } : draft;
+      await saveFn({ data: { id: selected.id, data: data as never } });
       toast.success("Saved");
       qc.invalidateQueries({ queryKey: ["pricing-catalog", branch] });
     } catch (e) {
@@ -233,7 +260,7 @@ export function CatalogEditor({
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className={hideCategoryPicker ? "hidden" : "space-y-2"}>
         <Label className="text-sm">Category</Label>
         <Select
           value={selected.id}
@@ -475,7 +502,7 @@ export function CatalogEditor({
               setDraft((p) => {
                 const n = clone(p!);
                 const blank: Record<string, string | number> = {};
-                for (const c of n.columns) blank[c] = c === labelCol ? "" : 0;
+                for (const c of n.columns) blank[c] = c === labelCol ? (newRowLabel ?? "") : 0;
                 n.rows.push(blank);
                 return n;
               })

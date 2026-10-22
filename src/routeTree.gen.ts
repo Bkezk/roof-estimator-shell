@@ -30,6 +30,7 @@ import { Route as AdminCenterpointImportRouteImport } from './routes/admin.cente
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
+import { Route as AdminNonDlMembraneRouteImport } from './routes/admin.non-dl-membrane'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
 import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
@@ -154,6 +155,11 @@ const AdminNonDlRoute = AdminNonDlRouteImport.update({
   path: '/admin/non-dl',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminNonDlMembraneRoute = AdminNonDlMembraneRouteImport.update({
+  id: '/admin/non-dl-membrane',
+  path: '/admin/non-dl-membrane',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminPriceImportRoute = AdminPriceImportRouteImport.update({
   id: '/admin/price-import',
   path: '/admin/price-import',
@@ -267,6 +273,7 @@ export interface FileRoutesByFullPath {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -308,6 +315,7 @@ export interface FileRoutesByTo {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -350,6 +358,7 @@ export interface FileRoutesById {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -393,6 +402,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-membrane'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -434,6 +444,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-membrane'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -475,6 +486,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-membrane'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -517,6 +529,7 @@ export interface RootRouteChildren {
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
+  AdminNonDlMembraneRoute: typeof AdminNonDlMembraneRoute
   AdminPriceImportRoute: typeof AdminPriceImportRoute
   AdminRemindersRoute: typeof AdminRemindersRoute
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
@@ -681,6 +694,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/non-dl'
       fullPath: '/admin/non-dl'
       preLoaderRoute: typeof AdminNonDlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/non-dl-membrane': {
+      id: '/admin/non-dl-membrane'
+      path: '/admin/non-dl-membrane'
+      fullPath: '/admin/non-dl-membrane'
+      preLoaderRoute: typeof AdminNonDlMembraneRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/price-import': {
@@ -849,6 +869,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
+  AdminNonDlMembraneRoute: AdminNonDlMembraneRoute,
   AdminPriceImportRoute: AdminPriceImportRoute,
   AdminRemindersRoute: AdminRemindersRoute,
   AdminServiceRatesRoute: AdminServiceRatesRoute,
