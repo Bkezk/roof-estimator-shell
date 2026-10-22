@@ -26,6 +26,7 @@ import {
   type BidSectionInput,
 } from "@/lib/engine/bid-builder";
 import { offeredMils, sectionMilChoices } from "@/lib/bid-mils";
+import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import {
   ARP_SIZE_OPTIONS,
   EDGE_SIDES,
@@ -764,6 +765,9 @@ export function SectionsScreen(p: SectionsScreenProps) {
                     .filter((n) => n > 0);
                   if (mils.length && !mils.includes(s.thickness))
                     patch.thickness = mils.includes(60) ? 60 : mils[0]!;
+                  // And a colour the new system offers (EPDM: Black or White, Black by default).
+                  const color = snapMembraneColor(v, s.color, p.colorOptions);
+                  if (color !== s.color) patch.color = color;
                   updWithSpacing(patch);
                 }}
               />
@@ -817,9 +821,11 @@ export function SectionsScreen(p: SectionsScreenProps) {
               <Pick
                 className="w-[120px]"
                 value={s.color}
-                options={
-                  p.colorOptions.includes(s.color) ? p.colorOptions : [s.color, ...p.colorOptions]
-                }
+                // The section's own system's colours (owner, Oct 22: EPDM is Black or White).
+                options={(() => {
+                  const colors = membraneColors(sys.roofSystem, p.colorOptions);
+                  return colors.includes(s.color) ? colors : [s.color, ...colors];
+                })()}
                 onChange={(v) => upd({ color: v })}
               />
             </Field>

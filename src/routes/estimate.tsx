@@ -56,6 +56,8 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
+import { warrantiesForSystem } from "@/lib/warranty-systems";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
@@ -1562,7 +1564,13 @@ function EstimatePage() {
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
   const boardOptions = Object.keys(admin?.underlaymentPrices ?? {});
   const adhesiveOptions = admin?.adhesiveTimes?.adhesives ?? [];
-  const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
+  // The bid system's warranties only (owner, Oct 22: the EPDM 25 / 30 year ones are EPDM's).
+  const warrantyOptions = [
+    "None",
+    ...warrantiesForSystem(warrantyData?.warranties ?? [], roofSystem).map((w) => w.name),
+  ];
+  // The system's colours (owner, Oct 22: EPDM is Black or White, Black by default).
+  const systemColors = membraneColors(roofSystem, colorOptions);
   const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
   /** The estimate's hours per man-day: its own value, else the admin default. */
   const effectiveHoursPerDay =
@@ -3329,6 +3337,19 @@ function EstimatePage() {
                             : sectionDefaults.thickness;
                         if (sdThickness !== sectionDefaults.thickness)
                           setSectionDefaults((p) => ({ ...p, thickness: sdThickness }));
+                        // The new system's colours (owner, Oct 22: EPDM is Black or White,
+                        // Black by default): the bid default and every section that follows the
+                        // bid system snap a colour the system does not offer.
+                        const sdColor = snapMembraneColor(v, sectionDefaults.color, colorOptions);
+                        if (sdColor !== sectionDefaults.color)
+                          setSectionDefaults((p) => ({ ...p, color: sdColor }));
+                        setSections((prev) =>
+                          prev.map((s) =>
+                            s.roofSystem
+                              ? s
+                              : { ...s, color: snapMembraneColor(v, s.color, colorOptions) },
+                          ),
+                        );
                         // Sections / walls that follow the bid system move with it: snap a
                         // mil the new system does not offer (and say so).
                         snapMilsFor({
@@ -3392,7 +3413,7 @@ function EstimatePage() {
                   <Field label="Color">
                     <PickOne
                       value={sectionDefaults.color}
-                      options={colorOptions}
+                      options={withCurrent(systemColors, sectionDefaults.color)}
                       onChange={(v) => setSectionDefaults((p) => ({ ...p, color: v }))}
                     />
                   </Field>
@@ -3555,7 +3576,7 @@ function EstimatePage() {
                   <Field label="Color">
                     <PickOne
                       value={parapetDefaults.color ?? sectionDefaults.color}
-                      options={[...new Set([sectionDefaults.color, ...colorOptions])]}
+                      options={[...new Set([sectionDefaults.color, ...systemColors])]}
                       onChange={(v) =>
                         setParapetDefaults((p) => {
                           const nx = { ...p };

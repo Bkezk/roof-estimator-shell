@@ -20,6 +20,7 @@ import {
 } from "@/lib/admin-settings.functions";
 import { parseStreetAddress } from "@/lib/aerial-address";
 import { officeAddressLine } from "@/lib/travel-estimate";
+import { ALL_SYSTEMS, ROOF_SYSTEMS, systemsFromValue, systemsValue } from "@/lib/warranty-systems";
 import { CountyCodesSettings } from "@/components/crm/county-codes-settings";
 import { LeadSourcesSettings } from "@/components/crm/lead-sources-settings";
 import { Button } from "@/components/ui/button";
@@ -774,6 +775,12 @@ function WarrantiesTab({
             name: w.name,
             price_per_sqft: w.price_per_sqft,
             non_master_elite_surcharge: w.non_master_elite_surcharge,
+            // The legacy flags and the systems ride along (owner, Oct 22): a save used to reset
+            // them (the server deletes and re-inserts the rows).
+            term_years: w.term_years,
+            req_thickness: w.req_thickness,
+            is_high_wind: w.is_high_wind,
+            systems: w.systems,
           })),
         },
       });
@@ -804,7 +811,9 @@ function WarrantiesTab({
         <CardHeader>
           <CardTitle>Warranties</CardTitle>
           <CardDescription>
-            Price per sq ft by warranty type, plus the non-Master/Elite surcharge.
+            Price per sq ft by warranty type, plus the non-Master/Elite surcharge; the term, the
+            thinnest membrane it covers, whether it is a high-wind warranty, and the roof systems it
+            is offered on (EPDM Rubber has its own 25 and 30 year warranties).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -814,6 +823,10 @@ function WarrantiesTab({
                 <TableHead>Warranty</TableHead>
                 <TableHead>Price / SqFt</TableHead>
                 <TableHead>+ Non-Master/Elite / SqFt</TableHead>
+                <TableHead>Term (yrs)</TableHead>
+                <TableHead>Min. mil</TableHead>
+                <TableHead>High wind</TableHead>
+                <TableHead>Systems</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -854,6 +867,72 @@ function WarrantiesTab({
                       }
                       className="max-w-[140px]"
                     />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      step="1"
+                      min={1}
+                      value={w.term_years}
+                      aria-label={`${w.name} term in years`}
+                      onChange={(e) =>
+                        setWarr((prev) =>
+                          prev.map((r, j) =>
+                            j === i ? { ...r, term_years: Math.round(num(e.target.value)) } : r,
+                          ),
+                        )
+                      }
+                      className="max-w-[90px]"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      step="1"
+                      min={0}
+                      value={w.req_thickness}
+                      aria-label={`${w.name} thinnest membrane in mil`}
+                      onChange={(e) =>
+                        setWarr((prev) =>
+                          prev.map((r, j) =>
+                            j === i ? { ...r, req_thickness: Math.round(num(e.target.value)) } : r,
+                          ),
+                        )
+                      }
+                      className="max-w-[90px]"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={w.is_high_wind}
+                      aria-label={`${w.name} is a high-wind warranty`}
+                      onCheckedChange={(v) =>
+                        setWarr((prev) =>
+                          prev.map((r, j) => (j === i ? { ...r, is_high_wind: v } : r)),
+                        )
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <select
+                      className="h-9 rounded-md border bg-card px-2 text-sm"
+                      value={systemsValue(w.systems)}
+                      aria-label={`${w.name} roof systems`}
+                      onChange={(e) =>
+                        setWarr((prev) =>
+                          prev.map((r, j) =>
+                            j === i ? { ...r, systems: systemsFromValue(e.target.value) } : r,
+                          ),
+                        )
+                      }
+                    >
+                      <option value={ALL_SYSTEMS}>Every system</option>
+                      {ROOF_SYSTEMS.map((rs) => (
+                        <option key={rs} value={rs}>
+                          {rs} only
+                        </option>
+                      ))}
+                    </select>
                   </TableCell>
                 </TableRow>
               ))}

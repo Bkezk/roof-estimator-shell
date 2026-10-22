@@ -64,6 +64,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { membraneColors } from "@/lib/membrane-colors";
 
 const usd = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -805,7 +806,13 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                   <Pick
                     className="w-[130px]"
                     value={w.color ?? p.sections[0]?.color ?? "—"}
-                    options={[...new Set([p.sections[0]?.color ?? "—", ...p.colorOptions])]}
+                    // The wall's system's colours (owner, Oct 22: EPDM is Black or White).
+                    options={[
+                      ...new Set([
+                        p.sections[0]?.color ?? "—",
+                        ...membraneColors(ps.roofSystem, p.colorOptions),
+                      ]),
+                    ]}
                     onChange={(v) =>
                       updFn((x) => {
                         const nx = { ...x };

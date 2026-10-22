@@ -633,7 +633,7 @@ export const getWarrantyData = createServerFn({ method: "GET" })
       context.supabase
         .from("warranties")
         .select(
-          "name, price_per_sqft, non_master_elite_surcharge, req_thickness, is_high_wind, term_years",
+          "name, price_per_sqft, non_master_elite_surcharge, req_thickness, is_high_wind, term_years, systems",
         )
         .order("sort"),
       context.supabase
@@ -651,6 +651,8 @@ export const getWarrantyData = createServerFn({ method: "GET" })
         reqThickness: Number(w.req_thickness ?? 40),
         isHighWind: !!w.is_high_wind,
         termYears: Number(w.term_years ?? 15),
+        // The roof systems it is offered on (owner, Oct 22); null = every system.
+        systems: w.systems ?? null,
       })),
       highWind: (hwRes.data ?? []).map((h) => ({
         termYears: Number(h.term_years),

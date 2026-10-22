@@ -4244,6 +4244,7 @@ export type Database = {
           price_per_sqft: number;
           req_thickness: number;
           sort: number;
+          systems: string[] | null;
           term_years: number;
         };
         Insert: {
@@ -4254,6 +4255,7 @@ export type Database = {
           price_per_sqft?: number;
           req_thickness?: number;
           sort?: number;
+          systems?: string[] | null;
           term_years?: number;
         };
         Update: {
@@ -4264,6 +4266,7 @@ export type Database = {
           price_per_sqft?: number;
           req_thickness?: number;
           sort?: number;
+          systems?: string[] | null;
           term_years?: number;
         };
         Relationships: [];

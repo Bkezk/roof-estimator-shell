@@ -242,6 +242,8 @@ export interface WarrantyData {
     reqThickness?: number;
     isHighWind?: boolean;
     termYears?: number;
+    /** The roof systems it is offered on (owner, Oct 22); null / absent = every system. */
+    systems?: string[] | null;
   }>;
   highWind: Array<{
     termYears: number;

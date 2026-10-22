@@ -173,12 +173,20 @@ export const saveMarkupOptions = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// Every column the tab shows rides along (owner, Oct 22): the save deletes and re-inserts the
+// rows, so a column left out came back at its default — the term, required mil and high-wind
+// flag (20260910120000) were reset to 15 / 40 / false by every save until now.
 const warrantySchema = z.object({
   warranties: z.array(
     z.object({
       name: z.string().min(1),
       price_per_sqft: z.number(),
       non_master_elite_surcharge: z.number(),
+      term_years: z.number().int().min(1).max(60),
+      req_thickness: z.number().int().min(0).max(200),
+      is_high_wind: z.boolean(),
+      /** The roof systems it is offered on; null = every system (warranty-systems.ts). */
+      systems: z.array(z.string()).nullable(),
     }),
   ),
 });
