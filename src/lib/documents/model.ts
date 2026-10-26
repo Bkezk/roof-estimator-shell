@@ -20,12 +20,15 @@ import { z } from "zod";
 
 // ---------------------------------------------------------------- rich text (ProseMirror JSON)
 
+/** Node / mark attributes: JSON primitives only (level, textAlign, key …), so a document is serialisable end to end. */
+export type RichAttrs = Record<string, string | number | boolean | null>;
+
 /** A ProseMirror node as TipTap serialises it (editor.getJSON()). */
 export interface RichNode {
   type: string;
-  attrs?: Record<string, unknown> | undefined;
+  attrs?: RichAttrs | undefined;
   content?: RichNode[] | undefined;
-  marks?: Array<{ type: string; attrs?: Record<string, unknown> | undefined }> | undefined;
+  marks?: Array<{ type: string; attrs?: RichAttrs | undefined }> | undefined;
   text?: string | undefined;
 }
 /** The root: `{ type: "doc", content: [...] }`. */
@@ -34,14 +37,16 @@ export interface RichDoc {
   content?: RichNode[] | undefined;
 }
 
+const richAttrsSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean(), z.null()]),
+);
 export const richNodeSchema: z.ZodType<RichNode> = z.lazy(() =>
   z.object({
     type: z.string(),
-    attrs: z.record(z.string(), z.unknown()).optional(),
+    attrs: richAttrsSchema.optional(),
     content: z.array(richNodeSchema).optional(),
-    marks: z
-      .array(z.object({ type: z.string(), attrs: z.record(z.string(), z.unknown()).optional() }))
-      .optional(),
+    marks: z.array(z.object({ type: z.string(), attrs: richAttrsSchema.optional() })).optional(),
     text: z.string().optional(),
   }),
 );

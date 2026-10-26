@@ -50,7 +50,7 @@ export function defaultTemplates(): DefaultTemplate[] {
         },
       ],
     }),
-    { ...newModule("fullPhoto"), heightIn: 4.5 } as DocPage["modules"][number],
+    { ...newModule("fullPhoto"), heightIn: 3.4 } as DocPage["modules"][number],
     newModule("hr"),
     body({
       type: "doc",

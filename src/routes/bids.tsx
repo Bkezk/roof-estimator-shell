@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   FileSpreadsheet,
+  FileText,
   FileUp,
   Folder,
   FolderInput,
@@ -68,6 +69,7 @@ import {
 } from "@/lib/bids-folders";
 import { Button } from "@/components/ui/button";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
+import { DocumentsPanel } from "@/components/documents/documents-panel";
 import { ImportBaxDialog } from "@/components/import-bax-dialog";
 import { ImportPlanSwiftDialog } from "@/components/import-planswift-dialog";
 import { Input } from "@/components/ui/input";
@@ -306,6 +308,9 @@ function BidsPage() {
   const deleteBidFn = useServerFn(deleteBid);
   const setStatusFn = useServerFn(setBidStatus);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  // Documents (owner, Oct 26): the bid's proposals and letters, in one panel at page level with
+  // the chosen row's bid; opened from the row's Documents button.
+  const [documentsFor, setDocumentsFor] = useState<{ id: string; name: string } | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["bids"] });
     void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
@@ -657,6 +662,20 @@ function BidsPage() {
           >
             <Copy className="h-4 w-4" />
             <span className="sr-only">Duplicate</span>
+          </Button>
+          {/* Documents (owner, Oct 26): the bid's proposals and letters, each made by a click. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Documents (proposals, letters)"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDocumentsFor({ id: bid.id, name: bid.name });
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <FileText className="h-4 w-4" />
+            <span className="sr-only">Documents</span>
           </Button>
           <Button
             variant="ghost"
@@ -1309,6 +1328,18 @@ function BidsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* One Documents panel for the whole list, showing the row whose button was clicked. */}
+      {documentsFor && (
+        <DocumentsPanel
+          kind="bid"
+          bidId={documentsFor.id}
+          recordLabel={documentsFor.name || "Untitled bid"}
+          open
+          onOpenChange={(o) => {
+            if (!o) setDocumentsFor(null);
+          }}
+        />
+      )}
       {lostFor && (
         <LostReasonDialog
           open

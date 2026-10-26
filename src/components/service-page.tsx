@@ -67,6 +67,7 @@ import {
   CheckCheck,
   ClipboardCheck,
   CopyPlus,
+  FileText,
   Loader2,
   Lock,
   MapPin,
@@ -157,9 +158,13 @@ import {
 import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { FoldAllContext } from "@/components/service/field-shared";
+// The Documents fold (Oct 26) folds like the other sections; its own line keeps the pin above.
+import { Box } from "@/components/service/field-shared";
 import { HISTORY_FOLD_ID, HistoryFold, HistoryStrip } from "@/components/service/site-history";
 import { HISTORY_OPEN_PARAM } from "@/lib/service-history";
 import { InvoiceBlock } from "@/components/service/invoice-block";
+import { DocumentsList } from "@/components/documents/documents-panel";
+import { NewDocumentDialog } from "@/components/documents/new-document-dialog";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -2686,6 +2691,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                 <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
               )}
               {jobStage !== "done" && <InvoiceBlock job={job} />}
+              {/* Documents (owner, Oct 26): reports and letters made from this ticket, each by a
+                  click. The office's column only, like the Invoice fold — a technician's
+                  one-column page below never shows it. */}
+              <TicketDocumentsFold job={job} />
             </aside>
           </div>
         ) : (
@@ -3098,5 +3107,44 @@ function FromOpportunityNote({ id }: { id: string }) {
         <span className="text-muted-foreground">From an opportunity</span>
       )}
     </p>
+  );
+}
+
+/**
+ * Documents (owner, Oct 26: the CenterPoint-style document generator): the reports and letters
+ * made from this ticket, folded like the other sections, with New document (a template, the
+ * checkboxes, then the editor). Nothing is generated on its own — every document is a click. Shown
+ * in the office's column only (where the Invoice fold is); a technician never sees it.
+ */
+function TicketDocumentsFold({ job }: { job: ServiceJobWithTech }) {
+  const [newOpen, setNewOpen] = useState(false);
+  const recordLabel = `Ticket ${job.number}`;
+  return (
+    <Box
+      title="Documents"
+      icon={FileText}
+      collapsible
+      defaultOpen={false}
+      storageKey="documents"
+      summary="Reports and letters made from this ticket"
+    >
+      <DocumentsList serviceJobId={job.id} compact onNew={() => setNewOpen(true)} />
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        title="A new document for this ticket: pick a template, tick the options, then edit it"
+        onClick={() => setNewOpen(true)}
+      >
+        <Plus className="mr-1 h-4 w-4" /> New document
+      </Button>
+      <NewDocumentDialog
+        kind="ticket"
+        serviceJobId={job.id}
+        recordLabel={recordLabel}
+        open={newOpen}
+        onOpenChange={setNewOpen}
+      />
+    </Box>
   );
 }

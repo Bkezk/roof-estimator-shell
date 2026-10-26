@@ -105,14 +105,17 @@ describe("the sidebar", () => {
   it("no longer lists Service Rates, and the Admin group is admins only", () => {
     expect(nav).not.toMatch(/title: "Service Rates"/);
     expect(nav).not.toContain("/admin/service-rates");
-    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    // Since Oct 26 the group also opens for managers, for Documents alone (owner-page.test.ts).
+    expect(nav).toMatch(
+      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+    );
     const adminItems = nav.slice(
       nav.indexOf("const adminGroupItems"),
       nav.indexOf("// Admin pages with"),
     );
     // Owner (Oct 21), Users & access, Reminders — the CenterPoint import (Oct 13) left the menu the
-    // same day (owner-page.test.ts has the order).
-    expect(adminItems.match(/title: "/g)).toHaveLength(3);
+    // same day — plus Documents (Oct 26; owner-page.test.ts has the order).
+    expect(adminItems.match(/title: "/g)).toHaveLength(4);
   });
 });
 

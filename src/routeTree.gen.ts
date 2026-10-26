@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
 import { Route as CustomersRouteImport } from './routes/customers'
+import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as FollowupsRouteImport } from './routes/followups'
 import { Route as InventoryRouteImport } from './routes/inventory'
@@ -27,6 +28,7 @@ import { Route as ServiceRouteImport } from './routes/service'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
 import { Route as AdminCenterpointImportRouteImport } from './routes/admin.centerpoint-import'
+import { Route as AdminDocumentsRouteImport } from './routes/admin.documents'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
@@ -39,6 +41,7 @@ import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiRestoreRouteImport } from './routes/api.restore'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
+import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as ITokenRouteImport } from './routes/i.$token'
 import { Route as PropertiesIdRouteImport } from './routes/properties_.$id'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
@@ -68,6 +71,11 @@ const BidsRoute = BidsRouteImport.update({
 const CustomersRoute = CustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsRoute = DocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EstimateRoute = EstimateRouteImport.update({
@@ -140,6 +148,11 @@ const AdminCenterpointImportRoute = AdminCenterpointImportRouteImport.update({
   path: '/admin/centerpoint-import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminDocumentsRoute = AdminDocumentsRouteImport.update({
+  id: '/admin/documents',
+  path: '/admin/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminDuroLastRoute = AdminDuroLastRouteImport.update({
   id: '/admin/duro-last',
   path: '/admin/duro-last',
@@ -200,6 +213,11 @@ const CustomersIdRoute = CustomersIdRouteImport.update({
   path: '/customers/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DTokenRoute = DTokenRouteImport.update({
+  id: '/d/$token',
+  path: '/d/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ITokenRoute = ITokenRouteImport.update({
   id: '/i/$token',
   path: '/i/$token',
@@ -256,6 +274,7 @@ export interface FileRoutesByFullPath {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
+  '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
@@ -270,6 +289,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
+  '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -282,6 +302,7 @@ export interface FileRoutesByFullPath {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
@@ -298,6 +319,7 @@ export interface FileRoutesByTo {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
+  '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
@@ -312,6 +334,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
+  '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -324,6 +347,7 @@ export interface FileRoutesByTo {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
@@ -341,6 +365,7 @@ export interface FileRoutesById {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
+  '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
@@ -355,6 +380,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
+  '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -367,6 +393,7 @@ export interface FileRoutesById {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers_/$id': typeof CustomersIdRoute
+  '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties_/$id': typeof PropertiesIdRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
@@ -385,6 +412,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/customers'
+    | '/documents'
     | '/estimate'
     | '/followups'
     | '/inventory'
@@ -399,6 +427,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/takeoff'
     | '/admin/centerpoint-import'
+    | '/admin/documents'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -411,6 +440,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers/$id'
+    | '/d/$token'
     | '/i/$token'
     | '/properties/$id'
     | '/prospect/leads'
@@ -427,6 +457,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/customers'
+    | '/documents'
     | '/estimate'
     | '/followups'
     | '/inventory'
@@ -441,6 +472,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/takeoff'
     | '/admin/centerpoint-import'
+    | '/admin/documents'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -453,6 +485,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers/$id'
+    | '/d/$token'
     | '/i/$token'
     | '/properties/$id'
     | '/prospect/leads'
@@ -469,6 +502,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/customers'
+    | '/documents'
     | '/estimate'
     | '/followups'
     | '/inventory'
@@ -483,6 +517,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/takeoff'
     | '/admin/centerpoint-import'
+    | '/admin/documents'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -495,6 +530,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers_/$id'
+    | '/d/$token'
     | '/i/$token'
     | '/properties_/$id'
     | '/prospect_/leads'
@@ -512,6 +548,7 @@ export interface RootRouteChildren {
   AccountRoute: typeof AccountRoute
   BidsRoute: typeof BidsRoute
   CustomersRoute: typeof CustomersRoute
+  DocumentsRoute: typeof DocumentsRoute
   EstimateRoute: typeof EstimateRoute
   FollowupsRoute: typeof FollowupsRoute
   InventoryRoute: typeof InventoryRoute
@@ -526,6 +563,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   TakeoffRoute: typeof TakeoffRoute
   AdminCenterpointImportRoute: typeof AdminCenterpointImportRoute
+  AdminDocumentsRoute: typeof AdminDocumentsRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
@@ -538,6 +576,7 @@ export interface RootRouteChildren {
   ApiBackupRoute: typeof ApiBackupRoute
   ApiRestoreRoute: typeof ApiRestoreRoute
   CustomersIdRoute: typeof CustomersIdRoute
+  DTokenRoute: typeof DTokenRoute
   ITokenRoute: typeof ITokenRoute
   PropertiesIdRoute: typeof PropertiesIdRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
@@ -575,6 +614,13 @@ declare module '@tanstack/react-router' {
       path: '/customers'
       fullPath: '/customers'
       preLoaderRoute: typeof CustomersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents': {
+      id: '/documents'
+      path: '/documents'
+      fullPath: '/documents'
+      preLoaderRoute: typeof DocumentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/estimate': {
@@ -675,6 +721,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCenterpointImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/documents': {
+      id: '/admin/documents'
+      path: '/admin/documents'
+      fullPath: '/admin/documents'
+      preLoaderRoute: typeof AdminDocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/duro-last': {
       id: '/admin/duro-last'
       path: '/admin/duro-last'
@@ -757,6 +810,13 @@ declare module '@tanstack/react-router' {
       path: '/customers/$id'
       fullPath: '/customers/$id'
       preLoaderRoute: typeof CustomersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/d/$token': {
+      id: '/d/$token'
+      path: '/d/$token'
+      fullPath: '/d/$token'
+      preLoaderRoute: typeof DTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/i/$token': {
@@ -852,6 +912,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountRoute: AccountRoute,
   BidsRoute: BidsRoute,
   CustomersRoute: CustomersRoute,
+  DocumentsRoute: DocumentsRoute,
   EstimateRoute: EstimateRoute,
   FollowupsRoute: FollowupsRoute,
   InventoryRoute: InventoryRoute,
@@ -866,6 +927,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   TakeoffRoute: TakeoffRoute,
   AdminCenterpointImportRoute: AdminCenterpointImportRoute,
+  AdminDocumentsRoute: AdminDocumentsRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
@@ -878,6 +940,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBackupRoute: ApiBackupRoute,
   ApiRestoreRoute: ApiRestoreRoute,
   CustomersIdRoute: CustomersIdRoute,
+  DTokenRoute: DTokenRoute,
   ITokenRoute: ITokenRoute,
   PropertiesIdRoute: PropertiesIdRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,

@@ -320,8 +320,13 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   // are the owners' — both admins — so the gate blocks it as it blocks Admin › Users.
   if (pathname.startsWith("/owner")) return "admin";
   // Setup (service rates, inspection checklist, vehicles) is ticket money: a manager's too
-  // (owner, Oct 1); /admin/service-rates is its old address and redirects there.
-  if (pathname.startsWith("/setup") || pathname.startsWith("/admin/service-rates"))
+  // (owner, Oct 1); /admin/service-rates is its old address and redirects there. Document
+  // templates (Admin › Documents, owner Oct 26) are written by admins and managers (RLS too).
+  if (
+    pathname.startsWith("/setup") ||
+    pathname.startsWith("/admin/service-rates") ||
+    pathname.startsWith("/admin/documents")
+  )
     return "manager";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
@@ -345,6 +350,9 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   // assignments (crm_opportunities_read). The sidebar lists the page for Customers / Estimate
   // (seesOpportunitiesList).
   if (pathname.startsWith("/opportunities")) return null;
+  // Documents (owner, Oct 26): every signed-in user may open the page; the server's row security
+  // (documents_access: admins, managers, Estimate / Invoices / Customers) decides what it shows.
+  if (pathname.startsWith("/documents")) return null;
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||

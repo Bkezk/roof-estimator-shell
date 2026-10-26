@@ -38,7 +38,9 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Building2,
+  ChevronDown,
   Contact,
+  FileText,
   Link2,
   ListTodo,
   Loader2,
@@ -66,6 +68,7 @@ import { dispatchesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/ac
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
+import { DocumentsList } from "@/components/documents/documents-panel";
 import { FoldHeader } from "@/components/section-fold";
 import { INNER_BOX, sectionClass } from "@/lib/section-tints";
 import { useSectionFold } from "@/lib/use-section-fold";
@@ -567,6 +570,9 @@ function AccountDetailPane({ id }: { id: string }) {
         readOnly={deleted}
       />
       {can("takeoff") && <TakeoffsSection accountId={id} />}
+      {/* Documents (owner, Oct 26): every proposal, report and letter ever made for this customer,
+          across its bids and tickets, with the record each one is for. */}
+      <DocumentsSection accountId={id} />
       {/* Admins and managers: who changed the customer, its sites and contacts (audit_log). */}
       <AuditHistory entity="account" entityId={id} className="rounded-lg border p-4" />
 
@@ -2109,6 +2115,43 @@ function BidsSection({
           )}
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Documents (owner, Oct 26: the CenterPoint-style document generator): every proposal, report
+ * and letter ever made for this customer, across its bids and tickets — the list's For column
+ * names the record each one belongs to. Documents are made from the bid or the ticket (each by a
+ * click there), so this section only lists and opens them.
+ */
+function DocumentsSection({ accountId }: { accountId: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Documents">
+      <div className="flex items-center justify-between gap-2" data-fold={open ? "open" : "folded"}>
+        <h2 className="min-w-0 flex-1 font-semibold">
+          <button
+            type="button"
+            aria-expanded={open}
+            title={open ? "Fold Documents" : "Show Documents"}
+            className="-mx-1 flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setOpen((o) => !o)}
+          >
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                open ? "" : "-rotate-90"
+              }`}
+              aria-hidden
+            />
+            <FileText className="h-4 w-4 shrink-0" aria-hidden /> Documents
+            <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+              · proposals, reports and letters from this customer's bids and tickets
+            </span>
+          </button>
+        </h2>
+      </div>
+      {open && <DocumentsList accountId={accountId} />}
     </section>
   );
 }

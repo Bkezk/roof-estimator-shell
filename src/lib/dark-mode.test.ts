@@ -183,6 +183,11 @@ const ALLOW: { file: string; has: string; why: string }[] = [
     has: "rounded-md border bg-neutral-800",
     why: "the aerial imagery stage: a dark letterbox around the tiles in both themes",
   },
+  {
+    file: "src/components/documents/editor/page-canvas.tsx",
+    has: "document-sheet",
+    why: "the Documents editor's US-Letter page: white paper with dark ink in both themes, like the PDF it becomes",
+  },
 ];
 
 let sources: { f: string; lits: { text: string; line: number }[] }[] | null = null;

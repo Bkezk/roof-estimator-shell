@@ -1093,6 +1093,292 @@ export type Database = {
         };
         Relationships: [];
       };
+      document_assets: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          id: string;
+          name: string;
+          page_count: number;
+          size_bytes: number;
+          storage_path: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          name: string;
+          page_count: number;
+          size_bytes: number;
+          storage_path: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          name?: string;
+          page_count?: number;
+          size_bytes?: number;
+          storage_path?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_assets_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_modules: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          id: string;
+          module: Json;
+          name: string;
+          updated_at: string;
+          updated_by_name: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          module: Json;
+          name: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          module?: Json;
+          name?: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_modules_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_revisions: {
+        Row: {
+          document_id: string;
+          id: string;
+          options: Json;
+          pages: Json;
+          saved_at: string;
+          saved_by_name: string | null;
+          title: string;
+          version: number;
+        };
+        Insert: {
+          document_id: string;
+          id?: string;
+          options: Json;
+          pages: Json;
+          saved_at?: string;
+          saved_by_name?: string | null;
+          title: string;
+          version: number;
+        };
+        Update: {
+          document_id?: string;
+          id?: string;
+          options?: Json;
+          pages?: Json;
+          saved_at?: string;
+          saved_by_name?: string | null;
+          title?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_revisions_document_id_fkey";
+            columns: ["document_id"];
+            isOneToOne: false;
+            referencedRelation: "documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_templates: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          description: string;
+          id: string;
+          is_default: boolean;
+          kind: string;
+          name: string;
+          options: Json;
+          pages: Json;
+          updated_at: string;
+          updated_by_name: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          description?: string;
+          id?: string;
+          is_default?: boolean;
+          kind: string;
+          name: string;
+          options: Json;
+          pages?: Json;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          description?: string;
+          id?: string;
+          is_default?: boolean;
+          kind?: string;
+          name?: string;
+          options?: Json;
+          pages?: Json;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_templates_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      documents: {
+        Row: {
+          account_id: string | null;
+          bid_id: string | null;
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          id: string;
+          kind: string;
+          options: Json;
+          pages: Json;
+          pdf_path: string | null;
+          rendered_at: string | null;
+          rendered_version: number | null;
+          sent_at: string | null;
+          sent_to: string[];
+          service_job_id: string | null;
+          share_last_viewed_at: string | null;
+          share_token: string | null;
+          share_views: number;
+          template_id: string | null;
+          title: string;
+          updated_at: string;
+          updated_by_name: string | null;
+          variables: Json;
+          version: number;
+        };
+        Insert: {
+          account_id?: string | null;
+          bid_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          kind: string;
+          options: Json;
+          pages: Json;
+          pdf_path?: string | null;
+          rendered_at?: string | null;
+          rendered_version?: number | null;
+          sent_at?: string | null;
+          sent_to?: string[];
+          service_job_id?: string | null;
+          share_last_viewed_at?: string | null;
+          share_token?: string | null;
+          share_views?: number;
+          template_id?: string | null;
+          title: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+          variables?: Json;
+          version?: number;
+        };
+        Update: {
+          account_id?: string | null;
+          bid_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          id?: string;
+          kind?: string;
+          options?: Json;
+          pages?: Json;
+          pdf_path?: string | null;
+          rendered_at?: string | null;
+          rendered_version?: number | null;
+          sent_at?: string | null;
+          sent_to?: string[];
+          service_job_id?: string | null;
+          share_last_viewed_at?: string | null;
+          share_token?: string | null;
+          share_views?: number;
+          template_id?: string | null;
+          title?: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+          variables?: Json;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "documents_bid_id_fkey";
+            columns: ["bid_id"];
+            isOneToOne: false;
+            referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "documents_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "documents_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "documents_template_id_fkey";
+            columns: ["template_id"];
+            isOneToOne: false;
+            referencedRelation: "document_templates";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       building_storm_hits: {
         Row: { building_id: string; distance_mi: number; report_id: number };
         Insert: { building_id: string; distance_mi: number; report_id: number };
@@ -1320,6 +1606,7 @@ export type Database = {
           city: string | null;
           company_name: string | null;
           dl_account: string | null;
+          email: string | null;
           hours_per_man_day: number;
           id: number;
           labor_display: string;
@@ -1335,6 +1622,7 @@ export type Database = {
           shop_zip: string | null;
           state: string | null;
           updated_at: string;
+          website: string | null;
           zip: string | null;
         };
         Insert: {
@@ -1342,6 +1630,7 @@ export type Database = {
           city?: string | null;
           company_name?: string | null;
           dl_account?: string | null;
+          email?: string | null;
           hours_per_man_day?: number;
           id?: number;
           labor_display?: string;
@@ -1357,6 +1646,7 @@ export type Database = {
           shop_zip?: string | null;
           state?: string | null;
           updated_at?: string;
+          website?: string | null;
           zip?: string | null;
         };
         Update: {
@@ -4437,6 +4727,8 @@ export type Database = {
         Args: { p_county: string; p_max_m?: number; p_limit?: number };
         Returns: number;
       };
+      document_share_viewed: { Args: { p_token: string }; Returns: undefined };
+      documents_access: { Args: never; Returns: boolean };
       has_access: { Args: { page: string }; Returns: boolean };
       inventory_bid_options: {
         Args: never;

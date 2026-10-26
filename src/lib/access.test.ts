@@ -47,6 +47,10 @@ describe("per-page access", () => {
     expect(pageForPath("/admin/reminders")).toBe("admin");
     expect(pageForPath("/setup")).toBe("manager");
     expect(pageForPath("/admin/service-rates")).toBe("manager");
+    // Document templates (owner, Oct 26) are a manager's; the Documents page is every signed-in
+    // user's, the server's row security deciding what it shows (like /opportunities).
+    expect(pageForPath("/admin/documents")).toBe("manager");
+    expect(pageForPath("/documents")).toBeNull();
     expect(pageForPath("/account")).toBeNull();
   });
 

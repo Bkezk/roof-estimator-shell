@@ -24,6 +24,8 @@ export const SEARCH_KINDS = [
   "bid",
   "invoice",
   "vendor",
+  // Documents (owner, Oct 26: the document generator) by title; they open in the editor.
+  "document",
 ] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
@@ -37,6 +39,7 @@ export const SEARCH_KIND_ONE: Record<SearchKind, string> = {
   bid: "Project Bid",
   invoice: "Invoice",
   vendor: "Vendor",
+  document: "Document",
 };
 
 export const SEARCH_KIND_LABELS: Record<SearchKind, string> = {
@@ -48,6 +51,7 @@ export const SEARCH_KIND_LABELS: Record<SearchKind, string> = {
   bid: "Project Bids",
   invoice: "Invoices",
   vendor: "Vendors",
+  document: "Documents",
 };
 
 export interface SearchHit {
@@ -106,6 +110,7 @@ export const SEARCH_COLUMNS: Record<SearchKind, readonly string[]> = {
   // with "operator does not exist: jsonb ~~* unknown" — owner's phone, Oct 6).
   invoice: ["display_number", "bill_to->>name", "property->>name", "po_number", "job_code"],
   vendor: ["name", "contact_name", "city"],
+  document: ["title"],
 };
 
 /**
@@ -154,6 +159,8 @@ export function hitRoute(
       return { to: "/service/invoices", search: { id: row.id } };
     case "vendor":
       return { to: "/customers", search: { tab: "vendors" } };
+    case "document":
+      return { to: "/documents", search: { id: row.id } };
   }
 }
 

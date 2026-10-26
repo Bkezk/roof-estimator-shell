@@ -81,7 +81,11 @@ describe("the gate and the Admin group", () => {
     // Owner, Oct 5: Service Rates became Setup, under Opportunities in the Customers group; with
     // it gone the Admin group holds only admin pages (setup-page.test.ts has the detail).
     const nav = read("src/components/app-sidebar.tsx");
-    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    // Since Oct 26 the group also opens for managers, for Documents alone; Users & access and
+    // Reminders stay admin-only (owner-page.test.ts).
+    expect(nav).toMatch(
+      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+    );
     expect(nav).toMatch(
       /title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true/,
     );

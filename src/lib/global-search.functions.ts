@@ -65,86 +65,99 @@ export const globalSearch = createServerFn({ method: "GET" })
       }
     };
 
-    const [tickets, accounts, sites, contacts, opps, bids, invoices, vendors] = await Promise.all([
-      read("ticket", () =>
-        sb
-          .from("service_jobs")
-          .select(
-            "id, number, customer_name, site_name, description, stage, job_number, po_number, scheduled_date",
-          )
-          .is("deleted_at", null)
-          .or(searchFilter("ticket", q))
-          .order("number", { ascending: false })
-          .limit(SEARCH_LIMIT),
-      ),
-      read("customer", () =>
-        sb
-          .from("crm_accounts")
-          .select("id, name, contact_name, city, state")
-          .is("deleted_at", null)
-          .or(searchFilter("customer", q))
-          .order("name")
-          .limit(SEARCH_LIMIT),
-      ),
-      read("property", () =>
-        sb
-          .from("crm_sites")
-          .select("id, name, address1, city, state, account_id")
-          .is("deleted_at", null)
-          .or(searchFilter("property", q))
-          .order("name")
-          .limit(SEARCH_LIMIT),
-      ),
-      read("contact", () =>
-        sb
-          .from("crm_contacts")
-          .select("id, name, email, mobile, office_phone, position, account_id")
-          .is("deleted_at", null)
-          .or(searchFilter("contact", q))
-          .order("name")
-          .limit(SEARCH_LIMIT),
-      ),
-      read("opportunity", () =>
-        sb
-          .from("crm_opportunities")
-          .select("id, title, status, account_id")
-          .is("deleted_at", null)
-          .or(searchFilter("opportunity", q))
-          .order("updated_at", { ascending: false })
-          .limit(SEARCH_LIMIT),
-      ),
-      read("bid", () =>
-        sb
-          .from("bids")
-          .select("id, name, status, updated_at, account_id")
-          .is("deleted_at", null)
-          .or(searchFilter("bid", q))
-          .order("updated_at", { ascending: false })
-          .limit(SEARCH_LIMIT),
-      ),
-      read("invoice", () =>
-        sb
-          .from("invoices")
-          .select("id, number, display_number, status, bill_to, property, total")
-          .or(searchFilter("invoice", q))
-          .order("number", { ascending: false })
-          .limit(SEARCH_LIMIT),
-      ),
-      read("vendor", () =>
-        sb
-          .from("vendors")
-          .select("id, name, city, state")
-          .is("archived_at", null)
-          .or(searchFilter("vendor", q))
-          .order("name")
-          .limit(SEARCH_LIMIT),
-      ),
-    ]);
+    const [tickets, accounts, sites, contacts, opps, bids, invoices, vendors, documents] =
+      await Promise.all([
+        read("ticket", () =>
+          sb
+            .from("service_jobs")
+            .select(
+              "id, number, customer_name, site_name, description, stage, job_number, po_number, scheduled_date",
+            )
+            .is("deleted_at", null)
+            .or(searchFilter("ticket", q))
+            .order("number", { ascending: false })
+            .limit(SEARCH_LIMIT),
+        ),
+        read("customer", () =>
+          sb
+            .from("crm_accounts")
+            .select("id, name, contact_name, city, state")
+            .is("deleted_at", null)
+            .or(searchFilter("customer", q))
+            .order("name")
+            .limit(SEARCH_LIMIT),
+        ),
+        read("property", () =>
+          sb
+            .from("crm_sites")
+            .select("id, name, address1, city, state, account_id")
+            .is("deleted_at", null)
+            .or(searchFilter("property", q))
+            .order("name")
+            .limit(SEARCH_LIMIT),
+        ),
+        read("contact", () =>
+          sb
+            .from("crm_contacts")
+            .select("id, name, email, mobile, office_phone, position, account_id")
+            .is("deleted_at", null)
+            .or(searchFilter("contact", q))
+            .order("name")
+            .limit(SEARCH_LIMIT),
+        ),
+        read("opportunity", () =>
+          sb
+            .from("crm_opportunities")
+            .select("id, title, status, account_id")
+            .is("deleted_at", null)
+            .or(searchFilter("opportunity", q))
+            .order("updated_at", { ascending: false })
+            .limit(SEARCH_LIMIT),
+        ),
+        read("bid", () =>
+          sb
+            .from("bids")
+            .select("id, name, status, updated_at, account_id")
+            .is("deleted_at", null)
+            .or(searchFilter("bid", q))
+            .order("updated_at", { ascending: false })
+            .limit(SEARCH_LIMIT),
+        ),
+        read("invoice", () =>
+          sb
+            .from("invoices")
+            .select("id, number, display_number, status, bill_to, property, total")
+            .or(searchFilter("invoice", q))
+            .order("number", { ascending: false })
+            .limit(SEARCH_LIMIT),
+        ),
+        read("vendor", () =>
+          sb
+            .from("vendors")
+            .select("id, name, city, state")
+            .is("archived_at", null)
+            .or(searchFilter("vendor", q))
+            .order("name")
+            .limit(SEARCH_LIMIT),
+        ),
+        // Documents (owner, Oct 26) by title; row security (documents_access) decides who finds them.
+        read("document", () =>
+          sb
+            .from("documents")
+            .select("id, title, kind, account_id, updated_at")
+            .is("deleted_at", null)
+            .or(searchFilter("document", q))
+            .order("updated_at", { ascending: false })
+            .limit(SEARCH_LIMIT),
+        ),
+      ]);
 
     // Customer names for the rows that only carry an account id.
     const accountIds = [
       ...new Set(
-        [...sites, ...contacts, ...opps, ...bids].map((r) => s(r["account_id"])).filter(Boolean),
+        [...sites, ...contacts, ...opps, ...bids, ...documents]
+          .map((r) => s(r["account_id"]))
+          .filter(Boolean),
       ),
     ];
     const accountName = new Map<string, string>();
@@ -236,6 +249,14 @@ export const globalSearch = createServerFn({ method: "GET" })
         title: s(r["name"]),
         subtitle: [s(r["city"]), s(r["state"])].filter(Boolean).join(", "),
         ...hitRoute("vendor", { id: s(r["id"]) }),
+      });
+    for (const r of documents)
+      hits.push({
+        kind: "document",
+        id: s(r["id"]),
+        title: s(r["title"]),
+        subtitle: joinParts(nameOf(r), s(r["kind"]) === "bid" ? "Bid document" : "Ticket document"),
+        ...hitRoute("document", { id: s(r["id"]) }),
       });
 
     return { hits: rankHits(hits, q), errors };

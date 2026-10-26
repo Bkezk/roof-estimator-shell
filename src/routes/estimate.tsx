@@ -17,6 +17,7 @@ import {
   ChevronUp,
   Link2,
   Lock,
+  FileText,
 } from "lucide-react";
 
 import {
@@ -186,6 +187,7 @@ import { useAuth } from "@/lib/auth-store";
 import { useBidLock } from "@/lib/use-bid-lock";
 import { LayerStack, TileGlyph } from "@/components/layer-stack";
 import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-dialog";
+import { DocumentsPanel } from "@/components/documents/documents-panel";
 import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
 import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
@@ -605,6 +607,10 @@ function EstimatePage() {
   // stamp until "Upgrade to Latest Formulas" (Update Bid Options).
   const [formulasVersion, setFormulasVersion] = useState<string>(CURRENT_FORMULAS_VERSION);
   const [updateOpen, setUpdateOpen] = useState(false);
+  // Documents (owner, Oct 26): the CenterPoint-style document generator — proposals and letters
+  // made from this bid. No automation: every document is a click, from the header's Documents
+  // button, once the bid is saved (a document hangs off bids.id).
+  const [documentsOpen, setDocumentsOpen] = useState(false);
   const [warrantyName, setWarrantyName] = useState("");
   // Legacy Home > Defaults panel: material defaults for NEW roof sections.
   const [sectionDefaults, setSectionDefaults] = useState<
@@ -2925,6 +2931,21 @@ function EstimatePage() {
                 aria-label="Unsaved changes"
               />
             )}
+          </Button>
+          {/* Documents (owner, Oct 26): the CenterPoint-style document generator — proposals and
+              letters for this bid, each made by a click here; nothing is generated on its own. */}
+          <Button
+            variant="outline"
+            onClick={() => setDocumentsOpen(true)}
+            disabled={!bidId}
+            title={
+              bidId
+                ? "Documents for this bid: proposals and letters"
+                : "Save the bid first — documents hang off a saved bid"
+            }
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Documents
           </Button>
           {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
               on the right in black; the dot marks management data newer than the bid's copy. */}
@@ -6510,6 +6531,15 @@ function EstimatePage() {
         latestFormulasVersion={CURRENT_FORMULAS_VERSION}
         onApply={applyUpdateOptions}
       />
+      {bidId && (
+        <DocumentsPanel
+          kind="bid"
+          bidId={bidId}
+          recordLabel={bidName.trim() || "Untitled bid"}
+          open={documentsOpen}
+          onOpenChange={setDocumentsOpen}
+        />
+      )}
       <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
         <div className="flex flex-wrap items-end gap-2">
           {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so

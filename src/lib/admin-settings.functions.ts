@@ -71,6 +71,10 @@ const companySchema = z.object({
   shop_city: z.string().nullable().optional(),
   shop_state: z.string().nullable().optional(),
   shop_zip: z.string().nullable().optional(),
+  // The company's website and email (owner, Oct 26): the document generator's letterhead
+  // variables (account.website / account.email). Optional for the same reason as the shop fields.
+  website: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
 });
 
 /**
@@ -84,7 +88,7 @@ export const saveCompanySettings = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     // A shop column the sender left out (undefined) is not written, so the stored value stays.
-    const { shop_address, shop_city, shop_state, shop_zip, ...rest } = data;
+    const { shop_address, shop_city, shop_state, shop_zip, website, email, ...rest } = data;
     const row = {
       id: 1,
       ...rest,
@@ -92,6 +96,8 @@ export const saveCompanySettings = createServerFn({ method: "POST" })
       ...(shop_city !== undefined ? { shop_city } : {}),
       ...(shop_state !== undefined ? { shop_state } : {}),
       ...(shop_zip !== undefined ? { shop_zip } : {}),
+      ...(website !== undefined ? { website } : {}),
+      ...(email !== undefined ? { email } : {}),
     };
     const { error } = await context.supabase.from("company_settings").upsert(row);
     if (error) throw new Error(error.message);

@@ -146,6 +146,7 @@ import {
 } from "@/components/ui/select";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
+import { DocumentsList } from "@/components/documents/documents-panel";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -1362,6 +1363,14 @@ function BidCard({ opp }: { opp: OpportunityWithNames }) {
         )}
       </div>
       <p className="text-xs text-muted-foreground">{BID_DRIVES_OPP_NOTE}</p>
+      {/* Documents (owner, Oct 26): the proposals and letters made from the linked bid, each by a
+          click in the estimator or on Project Bids; listed here so the opportunity shows them. */}
+      <div className="space-y-1 border-t pt-2" data-section="documents">
+        <h3 className="flex items-center gap-1 text-xs font-semibold">
+          <FileText className="h-3.5 w-3.5" aria-hidden /> Documents
+        </h3>
+        <DocumentsList bidId={opp.bid_id!} compact />
+      </div>
     </div>
   );
 }

@@ -108,6 +108,11 @@ describe("hitRoute / hitHref", () => {
       to: "/customers",
       search: { tab: "vendors" },
     });
+    // A document (owner, Oct 26) opens in its editor.
+    expect(hitRoute("document", { id: "d1" })).toEqual({
+      to: "/documents",
+      search: { id: "d1" },
+    });
     expect(hitHref({ to: "/service", search: { id: "t1" } })).toBe("/service?id=t1");
     expect(hitHref({ to: "/customers", search: {} })).toBe("/customers");
   });
@@ -176,11 +181,12 @@ describe("the wiring", () => {
       "bids",
       "invoices",
       "vendors",
+      "documents",
     ])
       expect(fn).toContain(`.from("${t}")`);
     expect(fn).not.toMatch(/service_role|createServiceClient|SUPABASE_SERVICE/);
-    expect((fn.match(/\.limit\(SEARCH_LIMIT\)/g) ?? []).length).toBe(8);
-    expect((fn.match(/\.is\("deleted_at", null\)/g) ?? []).length).toBe(6);
+    expect((fn.match(/\.limit\(SEARCH_LIMIT\)/g) ?? []).length).toBe(9);
+    expect((fn.match(/\.is\("deleted_at", null\)/g) ?? []).length).toBe(7);
     expect(fn).toContain('.is("archived_at", null)');
     expect(fn).toContain("errors.push({ kind, message:");
   });

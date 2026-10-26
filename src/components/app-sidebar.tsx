@@ -26,6 +26,7 @@ import {
   CalendarDays,
   ListTodo,
   Settings2,
+  Files,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -139,6 +140,10 @@ const adminGroupItems = [
   { title: "Owner", url: "/owner", icon: Crown, adminOnly: true },
   { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
+  // Documents (owner, Oct 26: the CenterPoint-style document generator): the templates proposals
+  // and letters start from, saved modules and the PDF library. A manager's too, as Setup is
+  // (pageForPath: /admin/documents → manager), so the group shows for managers with this one item.
+  { title: "Documents", url: "/admin/documents", icon: Files, adminOnly: false },
   // Oct 21: the CenterPoint import (Oct 13) left the menu, not the code — its page still opens by
   // address (admin/centerpoint-import) and can be listed here again if needed.
 ];
@@ -572,7 +577,9 @@ export function AppSidebar() {
           </NavGroup>
         )}
 
-        {role === "admin" && (
+        {/* Admins; managers too since Oct 26, for Documents alone (the `adminOnly` items stay the
+            admins', as Setup's gate — managesTickets — is the manager's). */}
+        {(role === "admin" || managesTickets(profile)) && (
           <NavGroup label="Admin" id="admin" iconMode={collapsed}>
             <SidebarMenu>
               {adminGroupItems

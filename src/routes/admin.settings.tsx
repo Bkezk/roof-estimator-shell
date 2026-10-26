@@ -176,6 +176,9 @@ function blankCompany(): CompanySettings {
     hours_per_man_day: 9,
     shipping_method: "stepped",
     shipping_percent: 0,
+    // The letterhead's website and email (documents, Oct 26).
+    website: "",
+    email: "",
     shop_address: "",
     shop_city: "",
     shop_state: "",
@@ -233,6 +236,8 @@ function useCompanyDraft(initial: CompanySettings | null, onSaved: () => void, s
           shop_city: c.shop_city,
           shop_state: c.shop_state,
           shop_zip: c.shop_zip,
+          website: c.website,
+          email: c.email,
         },
       });
       toast.success(savedMsg);
@@ -274,6 +279,23 @@ function ContractorTab({ initial, onSaved }: CompanyTabProps) {
           </Field>
           <Field label="Phone">
             <Input value={c.phone ?? ""} onChange={(e) => set("phone", e.target.value)} />
+          </Field>
+          {/* Website and email (owner, Oct 26): printed on document letterheads (the Account
+              variables of the document generator). */}
+          <Field label="Website">
+            <Input
+              type="url"
+              placeholder="https://"
+              value={c.website ?? ""}
+              onChange={(e) => set("website", e.target.value)}
+            />
+          </Field>
+          <Field label="Email">
+            <Input
+              type="email"
+              value={c.email ?? ""}
+              onChange={(e) => set("email", e.target.value)}
+            />
           </Field>
           <Field label="Address">
             <Input value={c.address ?? ""} onChange={(e) => set("address", e.target.value)} />

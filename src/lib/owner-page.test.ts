@@ -127,9 +127,16 @@ describe("source: the sidebar", () => {
     expect(adminItems).toMatch(
       /\{ title: "Owner", url: "\/owner", icon: Crown, adminOnly: true \},\s*\{ title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true \},\s*\{ title: "Reminders", url: "\/admin\/reminders", icon: BellRing, adminOnly: true \},/,
     );
-    expect(adminItems.match(/title: "/g)).toHaveLength(3);
-    // The group itself renders for admins only, and so does every item in it.
-    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    // Plus Documents (Oct 26), the one item a manager sees too.
+    expect(adminItems.match(/title: "/g)).toHaveLength(4);
+    expect(adminItems).toMatch(
+      /title: "Documents", url: "\/admin\/documents", icon: Files, adminOnly: false/,
+    );
+    // The group renders for admins, and for managers since Oct 26 (Documents); every other item
+    // in it stays the admins'.
+    expect(nav).toMatch(
+      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+    );
     expect(nav).toContain('.filter((item) => !item.adminOnly || role === "admin")');
     // Owner is not a second item under Work Overview.
     expect(nav.match(/"\/owner"/g)).toHaveLength(1);
