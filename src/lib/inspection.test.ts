@@ -8,12 +8,18 @@ import {
   DESCRIPTION_MAX,
   bidPrefillFromInspection,
   fromInspectionLabel,
+  inspectedLine,
   inspectionComplete,
+  inspectionCounts,
+  inspectionPayload,
   inspectionSchema,
   inspectionSummary,
+  isFlagged,
+  issueCountText,
   mergeChecklist,
   parseInspection,
   repairTicketText,
+  unattachedTicketPhotos,
   type ChecklistItem,
   type Inspection,
   type InspectionItem,
@@ -50,7 +56,7 @@ const done: Inspection = {
 };
 
 describe("the checklist on a ticket", () => {
-  it("starts as the admin's checklist, in order, unanswered", () => {
+  it("starts as the admin's checklist, in order, nothing flagged", () => {
     const rows = mergeChecklist(null, [...checklist].reverse());
     expect(rows.map((r) => r.label)).toEqual([...DEFAULT_CHECKLIST]);
     expect(rows.every((r) => r.status === null && r.note === "")).toBe(true);
@@ -63,10 +69,85 @@ describe("the checklist on a ticket", () => {
     expect(rows).toHaveLength(4 + (checklist.length - 4));
     expect(rows.slice(4).every((r) => r.status === null)).toBe(true);
   });
-  it("summarises the answers", () => {
+  it("summarises the answers: a row with no status reads as OK (owner, Oct 26), never 'not checked' or 'unanswered'", () => {
     expect(inspectionSummary(done.items)).toBe("2 issues · 1 OK · 1 N/A");
-    expect(inspectionSummary(mergeChecklist(null, checklist))).toBe("10 not checked");
+    expect(inspectionSummary(mergeChecklist(null, checklist))).toBe("No issues · 10 OK");
+    expect(inspectionSummary([item("a", "Seams", "issue"), item("b", "Drains", null)])).toBe(
+      "1 issue · 1 OK",
+    );
     expect(inspectionSummary([])).toBe("nothing to check");
+    expect(inspectionCounts([item("a", "Seams", null), item("b", "Drains", "ok")])).toEqual({
+      ok: 2,
+      issue: 0,
+      na: 0,
+    });
+    expect(isFlagged(item("a", "Seams", "issue"))).toBe(true);
+    expect(isFlagged(item("a", "Seams", null))).toBe(false);
+    expect(isFlagged(item("a", "Seams", "ok"))).toBe(false);
+    expect([0, 1, 3].map(issueCountText)).toEqual(["No issues", "1 issue", "3 issues"]);
+  });
+  it("the saved line's tail: Inspected <day> · Grade <g>, either alone, or nothing", () => {
+    expect(inspectedLine({ inspected_on: "2026-10-20", grade: "D" })).toBe(
+      "Inspected Oct 20 · Grade D",
+    );
+    expect(inspectedLine({ inspected_on: "2026-10-20", grade: null })).toBe("Inspected Oct 20");
+    expect(inspectedLine({ inspected_on: null, grade: "A" })).toBe("Grade A");
+    expect(inspectedLine({ inspected_on: null, grade: null })).toBeNull();
+    // A calendar day, not UTC's: Oct 20 stays Oct 20 whatever the zone.
+    expect(inspectedLine({ inspected_on: "2026-01-01", grade: null })).toBe("Inspected Jan 1");
+  });
+  it("the draft → payload mapping: notes trimmed, a blank date is null, a grade outside A–F is null", () => {
+    const items = [item("a", "Seams", "issue", "  open at NE  "), item("b", "Drains", null)];
+    expect(
+      inspectionPayload({ items, recommend_repairs: true, inspected_on: "", grade: null }),
+    ).toEqual({
+      items: [item("a", "Seams", "issue", "open at NE"), item("b", "Drains", null)],
+      recommend_repairs: true,
+      inspected_on: null,
+      grade: null,
+    });
+    expect(
+      inspectionPayload({
+        items: [],
+        recommend_repairs: false,
+        inspected_on: "2026-10-20",
+        grade: "B",
+      }),
+    ).toEqual({ items: [], recommend_repairs: false, inspected_on: "2026-10-20", grade: "B" });
+    expect(
+      inspectionPayload({
+        items: [],
+        recommend_repairs: false,
+        inspected_on: "20/10/2026",
+        grade: "E" as never,
+      }),
+    ).toMatchObject({ inspected_on: null, grade: null });
+    // The server takes exactly these fields.
+    expect(
+      inspectionSchema
+        .pick({ items: true, recommend_repairs: true, inspected_on: true, grade: true })
+        .safeParse(
+          inspectionPayload({
+            items,
+            recommend_repairs: false,
+            inspected_on: "2026-10-20",
+            grade: "F",
+          }),
+        ).success,
+    ).toBe(true);
+  });
+  it("the picker's available photos: loose ticket pictures only — role other, no repair, no item", () => {
+    const photos = [
+      { id: "loose", role: "other", repair_id: null, item_key: null },
+      { id: "on-item", role: "other", repair_id: null, item_key: "c2" },
+      { id: "repair", role: "before", repair_id: "r1", role_note: "", item_key: null },
+      { id: "repair-other", role: "other", repair_id: "r1", item_key: null },
+      { id: "signature", role: "signature", repair_id: null, item_key: null },
+      { id: "aerial", role: "aerial", repair_id: null, item_key: null },
+      { id: "loose-2", role: "other", repair_id: null, item_key: null },
+    ];
+    expect(unattachedTicketPhotos(photos).map((p) => p.id)).toEqual(["loose", "loose-2"]);
+    expect(unattachedTicketPhotos([])).toEqual([]);
   });
   it("stores and reads back its JSON; anything else reads as none", () => {
     const stored = JSON.parse(JSON.stringify(done)) as unknown;

@@ -3,16 +3,21 @@
  * closeoutSteps("inspection"), the screen closeout.tsx):
  *
  *   step 2 · Checklist — the Aerial fold once (plain, inside the card; only with an address),
- *   then every checklist item with OK / Issue / N/A, a note, an optional camera (a photo of role
- *   "other" on no repair, `item_key` naming the item) and its thumbnails; under them the counts
+ *   then every checklist item as one compact line (inspection-section.tsx ChecklistRows; owner,
+ *   Oct 26: only a problem needs a status or a note). A flagged item opens to its note, its
+ *   camera (a photo of role "other" on no repair, `item_key` naming the item), its thumbnails
+ *   (Detach puts one back among the ticket's loose photos) and "From ticket photos" (attach
+ *   loose ticket pictures to the item — inspection-item-photos.tsx); under the rows the counts
  *   and whether the server has the answers (inspection-draft.ts: saved as you go, "Save now"
- *   when the signal dropped). No repair picker.
+ *   when the signal dropped or nothing was flagged). No repair picker.
  *
  *   step 3 · Findings — ONE note (the ticket's closing_notes: step 6's Closing notes box is not
  *   shown on an inspection), the "Recommend repairs" switch (service_jobs.inspection
  *   .recommend_repairs) and the "Recommend a new roof" switch (service_jobs.recommend_new_roof),
- *   an optional photo roll (role "other", no repair, no item), and "Nothing to add" — the same
- *   per-ticket phone mark step 6 uses (notesSkippedKey).
+ *   Property inspected (a date; "Today" is the phone's own day) and Property grade (A–F), saved
+ *   with the checklist (inspection-section.tsx InspectionDetails), an optional photo roll (role
+ *   "other", no repair, no item), and "Nothing to add" — the same per-ticket phone mark step 6
+ *   uses (notesSkippedKey).
  *
  * Photos are optional everywhere here: none is ever a gap. The camera is one hidden input and
  * one upload mutation for the whole flow (inspection-camera.ts useInspectionCamera), aimed at an
@@ -22,12 +27,10 @@
  * ticket page's Repairs fold under "Other photos" (ticket-field-sections.tsx lists every photo
  * that is not a signature, loose ones under that heading).
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { Camera, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 import type { ServiceJobRow } from "@/lib/service.functions";
-import { deleteJobPhoto, type JobPhotoRow } from "@/lib/service-field.functions";
+import type { JobPhotoRow } from "@/lib/service-field.functions";
 import type { InspectionItem } from "@/lib/inspection";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -35,56 +38,78 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { AerialSection } from "@/components/service/aerial-markup";
 import { PhotoThumb } from "@/components/service/field-shared";
-import { ChecklistRows, ChecklistSavedLine } from "@/components/service/inspection-section";
+import {
+  ChecklistRows,
+  ChecklistSavedLine,
+  InspectionDetails,
+} from "@/components/service/inspection-section";
 import type { InspectionDraftState } from "@/components/service/inspection-draft";
+import {
+  FromTicketPhotosButton,
+  ItemPhotoThumbs,
+} from "@/components/service/inspection-item-photos";
+import { useDeleteJobPhoto } from "@/components/service/item-photo-mutations";
 import type {
   InspectionCamera,
   InspectionPhotoControls,
 } from "@/components/service/inspection-camera";
-import { errText, fieldKeys, loudError } from "@/components/service/field-utils";
+import { errText } from "@/components/service/field-utils";
 
-/** The camera button with its count, the thumbnails, and a failed shot's Retry / Discard. */
+/**
+ * The camera button with its count, the thumbnails, and a failed shot's Retry / Discard. On a
+ * checklist item (`itemKey`) the thumbnails carry Detach and the row offers "From ticket photos"
+ * (inspection-item-photos.tsx); the findings roll (no item) is the plain roll.
+ */
 function PhotoRoll({
   photos,
+  allPhotos,
+  itemKey,
   camera,
   label,
   jobId,
   ticketNumber,
   compact,
 }: {
+  /** The roll's own photos (the item's, or the loose ones on the findings step). */
   photos: JobPhotoRow[];
+  /** Every photo on the ticket (the item's pictures and the loose ones to attach). */
+  allPhotos: readonly JobPhotoRow[];
+  itemKey: string | null;
   camera: InspectionPhotoControls;
   label: string;
   jobId: string;
   ticketNumber: number;
   compact?: boolean | undefined;
 }) {
-  const qc = useQueryClient();
-  const deletePhotoFn = useServerFn(deleteJobPhoto);
-  const delPhoto = useMutation({
-    mutationFn: (id: string) => deletePhotoFn({ data: { id, service_job_id: jobId } }),
-    onSuccess: (_r, id) =>
-      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) =>
-        old?.filter((p) => p.id !== id),
-      ),
-    onError: (e) => loudError("Could not delete the photo", e),
-  });
+  const delPhoto = useDeleteJobPhoto(jobId);
   return (
     <div className="space-y-2">
-      {photos.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {photos.map((p) => (
-            <PhotoThumb
-              key={p.id}
-              photo={p}
-              size={compact ? "sm" : undefined}
-              deleting={delPhoto.isPending && delPhoto.variables === p.id}
-              onDelete={() => delPhoto.mutate(p.id)}
-              canAnnotate
-              ticketNumber={ticketNumber}
-            />
-          ))}
-        </div>
+      {itemKey ? (
+        <ItemPhotoThumbs
+          jobId={jobId}
+          itemKey={itemKey}
+          itemLabel={label}
+          photos={allPhotos}
+          ticketNumber={ticketNumber}
+          canEdit
+          compact={compact}
+        />
+      ) : (
+        photos.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {photos.map((p) => (
+              <PhotoThumb
+                key={p.id}
+                photo={p}
+                size={compact ? "sm" : undefined}
+                deleting={delPhoto.isPending && delPhoto.variables === p.id}
+                onDelete={() => delPhoto.mutate(p.id)}
+                canAnnotate
+                ticketNumber={ticketNumber}
+              />
+            ))}
+          </div>
+        )
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -104,6 +129,15 @@ function PhotoRoll({
           )}
           Photo{photos.length ? ` (${photos.length})` : ""}
         </Button>
+        {itemKey && (
+          <FromTicketPhotosButton
+            jobId={jobId}
+            itemKey={itemKey}
+            itemLabel={label}
+            photos={allPhotos}
+            compact={compact}
+          />
+        )}
         <span className="text-xs text-muted-foreground">Optional</span>
         {camera.failed && (
           <>
@@ -166,6 +200,8 @@ export function InspectionChecklistStep({
             extra={(item: InspectionItem) => (
               <PhotoRoll
                 photos={itemPhotos(photos, item.id)}
+                allPhotos={photos}
+                itemKey={item.id}
                 camera={camera.controls(item.id)}
                 label={item.label}
                 jobId={job.id}
@@ -186,6 +222,7 @@ export function InspectionChecklistStep({
 
 export function InspectionFindingsStep({
   job,
+  draft,
   notes,
   onNotes,
   recommendRepairs,
@@ -198,6 +235,8 @@ export function InspectionFindingsStep({
   camera,
 }: {
   job: ServiceJobRow;
+  /** The checklist draft: Property inspected / Property grade save with it (owner, Oct 26). */
+  draft: InspectionDraftState;
   /** The ticket's closing_notes draft (closeout.tsx TextDraft): the one notes box. */
   notes: string;
   onNotes: (v: string) => void;
@@ -241,8 +280,11 @@ export function InspectionFindingsStep({
           aria-label="Recommend a new roof"
         />
       </label>
+      <InspectionDetails draft={draft} canEdit idPrefix="co" />
       <PhotoRoll
         photos={itemPhotos(photos, null)}
+        allPhotos={photos}
+        itemKey={null}
         camera={camera.controls(null)}
         label="Findings"
         jobId={job.id}

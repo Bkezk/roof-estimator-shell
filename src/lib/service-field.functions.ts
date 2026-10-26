@@ -547,8 +547,9 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       // stamp supplies it) or there is no signature; the gaps come back in the message. A manager
       // completes anyway. A ticket the office already finished is only stamped (above).
       if (!finished && !managesTickets(p)) {
-        // An inspection (owner, Oct 12): its gaps are the checklist's unanswered items (the
-        // saved answers merged with the live checklist) and the time; no photo, no signature.
+        // An inspection (owner, Oct 12): its gaps are a checklist never saved (the saved
+        // answers merged with the live checklist; Oct 26: no row is ever "unanswered" — a row
+        // with no status reads as OK) and the time; no photo, no signature.
         const inspection = job.service_type === "inspection";
         const [repairs, photos, time, checklist] = await Promise.all([
           sb.from("service_job_repairs").select("id, name").eq("service_job_id", job.id),
@@ -1261,6 +1262,50 @@ export const savePhotoAnnotations = createServerFn({ method: "POST" })
     const { data: row, error } = await sb
       .from("service_job_photos")
       .update({ annotations: value as unknown as Json })
+      .eq("id", photo.id)
+      .eq("service_job_id", job.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+/** Attach a ticket photo to a checklist item, or detach it (item_key null): the photo, its ticket, the item. */
+export const setJobPhotoItemInput = z.object({
+  id: z.string().uuid(),
+  service_job_id: z.string().uuid(),
+  /** inspection_checklist_items.id as kept in the ticket's inspection JSON; null detaches. */
+  item_key: z.string().min(1).max(60).nullable(),
+});
+/**
+ * Owner, Oct 26: "add pictures from the service ticket to each part of the inspection". A loose
+ * ticket photo (role "other", on no repair) is attached to a checklist item by setting its
+ * item_key — the row stays the ticket's, only its place in the checklist changes; Detach sets it
+ * back to null and the photo stays on the ticket. The same rules as recording a photo or saving
+ * its marks: Service access, and a technician only on their own ticket (ownJob). A repair's
+ * Before / After, the signature and an aerial never move onto an item.
+ */
+export const setJobPhotoItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => setJobPhotoItemInput.parse(d))
+  .handler(async ({ data, context }): Promise<JobPhotoRow> => {
+    const job = await ownJob(context, data.service_job_id);
+    const sb = context.supabase;
+    const { data: photo, error: pErr } = await sb
+      .from("service_job_photos")
+      .select("id, role, repair_id")
+      .eq("id", data.id)
+      .eq("service_job_id", job.id)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!photo) throw new Error("That photo is not on this ticket (it may have been deleted)");
+    if (data.item_key !== null && (photo.role !== "other" || photo.repair_id))
+      throw new Error(
+        "Only a loose ticket photo (not a repair's, the signature or an aerial) goes on a checklist item",
+      );
+    const { data: row, error } = await sb
+      .from("service_job_photos")
+      .update({ item_key: data.item_key })
       .eq("id", photo.id)
       .eq("service_job_id", job.id)
       .select("*")

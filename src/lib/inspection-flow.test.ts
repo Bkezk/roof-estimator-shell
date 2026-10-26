@@ -71,14 +71,15 @@ import {
   outcomeLine,
   parseInspection,
   recommendationText,
+  flaggedItems,
   unansweredCount,
-  unansweredGap,
   unansweredItems,
   visibleChecklist,
   type ChecklistItem,
   type Inspection,
 } from "@/lib/inspection";
-import { setFieldStatus } from "@/lib/service-field.functions";
+import { CHECKLIST_NOT_SAVED } from "@/lib/closeout-check";
+import { setFieldStatus, setJobPhotoItem } from "@/lib/service-field.functions";
 import {
   createRepairFromInspection,
   getTicketInspection,
@@ -219,34 +220,42 @@ const whole: StepState = {
 const statusList = (s: StepState, open?: StepId | null) =>
   stepStatuses(s, open === undefined ? firstOpenStep(s) : open).map((x) => x.status);
 
-describe("2a. the checklist step: every visible item answered AND saved on the server", () => {
-  it("done with every item answered and saved; the Next line counts what is left, then asks for the save", () => {
+describe("2a. the checklist step: saved on the server (Oct 26: only a problem needs a status)", () => {
+  it("done once saved, whatever the rows say; unsaved, the Next line asks for the save", () => {
     expect(stepDone("checklist", whole)).toBe(true);
     expect(stepMissing("checklist", whole)).toBeNull();
+    // Rows with no status read as OK: nothing is "left" to answer.
     const two = { ...whole, checklist: [answered("ok"), answered(null), answered(null)] };
-    expect(stepDone("checklist", two)).toBe(false);
-    expect(stepMissing("checklist", two)).toBe("Answer every item (2 left)");
-    const one = { ...whole, checklist: [answered("ok"), answered(null)] };
-    expect(stepMissing("checklist", one)).toBe("Answer every item (1 left)");
+    expect(stepDone("checklist", two)).toBe(true);
+    expect(stepMissing("checklist", two)).toBeNull();
+    const none = { ...whole, checklist: [answered(null), answered(null)] };
+    expect(stepDone("checklist", none)).toBe(true);
     const unsaved = { ...whole, checklistSaved: false };
     expect(stepDone("checklist", unsaved)).toBe(false);
-    expect(stepMissing("checklist", unsaved)).toBe("Save the checklist");
-    // Nothing answered yet: the checklist is current, the rest locked.
+    expect(stepMissing("checklist", unsaved)).toBe(
+      "Save the checklist (flag only what has a problem)",
+    );
+    expect(stepMissing("checklist", unsaved)).not.toMatch(/unanswered|Answer every/);
+    // Nothing flagged and not saved yet: the checklist is current, the rest locked.
     const fresh = {
       ...whole,
       checklist: [answered(null), answered(null)],
+      checklistSaved: false,
       closingNotes: "",
       timeHours: 0,
     };
     expect(firstOpenStep(fresh)).toBe("checklist");
     expect(statusList(fresh)).toEqual(["done", "current", "locked", "done", "locked", "done"]);
+    // Saved with nothing flagged: on to the findings.
+    expect(firstOpenStep({ ...fresh, checklistSaved: true })).toBe("findings");
   });
-  it("the summary is the inspection's counts", () => {
+  it("the summary is the inspection's counts, a row with no status counted OK", () => {
     expect(stepSummary("checklist", whole)).toBe("1 issue · 2 OK · 1 N/A");
     expect(
       stepSummary("checklist", { ...whole, checklist: [answered(null), answered("ok")] }),
-    ).toBe("1 OK · 1 not checked");
+    ).toBe("No issues · 2 OK");
     expect(stepSummary("checklist", { ...whole, checklist: [] })).toBe("nothing to check");
+    expect(INSPECTION_STEPS.find((s) => s.id === "findings")!.unlocks).toBe("The checklist saved");
   });
 });
 
@@ -337,7 +346,7 @@ const reads = {
 };
 
 describe("3. completeGaps / closeoutGaps on an inspection", () => {
-  it("unanswered items are a gap, counted; answered and saved with time: none — no photo, no signature asked", () => {
+  it("rows with no status are never a gap (Oct 26); saved with time: none — no photo, no signature asked", () => {
     const base = {
       finished: false,
       service_type: "inspection",
@@ -349,22 +358,30 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
     expect(
       completeGaps({ ...base, checklist: { data: [ok("Seams"), ok("Drains")], error: null } }),
     ).toEqual({ gaps: [], unread: false });
+    // Only a problem needs a status: a row left alone reads as OK.
     expect(
       completeGaps({
         ...base,
         checklist: { data: [ok("Seams"), open("Drains"), open("Ponding")], error: null },
-      }).gaps,
-    ).toEqual(["2 checklist items unanswered"]);
+      }),
+    ).toEqual({ gaps: [], unread: false });
     expect(
       completeGaps({ ...base, checklist: { data: [open("Drains")], error: null } }).gaps,
-    ).toEqual(["1 checklist item unanswered"]);
-    // The hidden "Recommend repairs" row never counts.
+    ).toEqual([]);
     expect(
       completeGaps({
         ...base,
         checklist: { data: [ok("Seams"), open("Recommend repairs")], error: null },
       }).gaps,
     ).toEqual([]);
+    // A flagged row with no note is not a gap either; the note is the tech's to write.
+    expect(
+      completeGaps({
+        ...base,
+        checklist: { data: [{ label: "Seams", status: "issue" as const }], error: null },
+      }).gaps,
+    ).toEqual([]);
+    expect(check).not.toContain("unanswered");
   });
   it("an unsaved draft is a gap; no time is a gap; a checklist read with no rows is a line with Retry", () => {
     const base = {
@@ -403,7 +420,7 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
       }),
     ).toEqual({ gaps: [], unread: false });
   });
-  it("closeoutGaps (the server): the saved JSON merged with the live checklist; an item added since is unanswered", () => {
+  it("closeoutGaps (the server): the saved JSON merged with the live checklist; never saved is the one gap", () => {
     const checklist: ChecklistItem[] = [
       { id: "c1", label: "Seams", sort: 10 },
       { id: "c2", label: "Drains", sort: 20 },
@@ -433,13 +450,28 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
       checklist,
     };
     expect(closeoutGaps(rows)).toEqual([]);
-    expect(closeoutGaps({ ...rows, inspection: null })).toEqual(["2 checklist items unanswered"]);
+    // No inspection JSON at all with rows to save: the checklist is not saved.
+    expect(closeoutGaps({ ...rows, inspection: null })).toEqual([CHECKLIST_NOT_SAVED]);
+    expect(CHECKLIST_NOT_SAVED).toBe("The checklist is not saved yet");
+    // No JSON and no visible row either (the hidden seed row only): nothing to save, no gap.
+    expect(closeoutGaps({ ...rows, inspection: null, checklist: [checklist[2]!] })).toEqual([]);
+    // An item added since the save reads as OK (Oct 26), not as unanswered.
     expect(
       closeoutGaps({
         ...rows,
         checklist: [...checklist, { id: "c4", label: "Ponding", sort: 40 }],
       }),
-    ).toEqual(["1 checklist item unanswered"]);
+    ).toEqual([]);
+    // Saved with every status null — nothing flagged — passes.
+    expect(
+      closeoutGaps({
+        ...rows,
+        inspection: {
+          ...saved,
+          items: saved.items.map((i) => ({ ...i, status: null, note: "" })),
+        },
+      }),
+    ).toEqual([]);
     expect(closeoutGaps({ ...rows, time: [] })).toEqual(["No time logged"]);
     // A repair ticket's list is unchanged.
     expect(
@@ -460,23 +492,23 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
       }),
     ).toEqual([]);
   });
-  it("the pure helpers: hidden row, unanswered count, the gap's words", () => {
+  it("the pure helpers: hidden row, the flagged rows; nothing is ever unanswered", () => {
     expect(RECOMMEND_REPAIRS_LABEL).toBe("Recommend repairs");
     expect(hiddenChecklistItem(" recommend REPAIRS ")).toBe(true);
     expect(hiddenChecklistItem("Seams")).toBe(false);
     expect(visibleChecklist([ok("Seams"), open("Recommend repairs")])).toEqual([ok("Seams")]);
-    expect(unansweredItems([ok("Seams"), open("Drains"), open("Recommend repairs")])).toEqual([
-      open("Drains"),
-    ]);
+    const issue = (label: string) => ({ label, status: "issue" as const });
+    expect(
+      flaggedItems([ok("Seams"), open("Drains"), issue("Ponding"), issue("Recommend repairs")]),
+    ).toEqual([issue("Ponding")]);
+    // The Oct 12 helpers still compile for their callers, answering "nothing".
+    expect(unansweredItems([ok("Seams"), open("Drains"), open("Recommend repairs")])).toEqual([]);
     const checklist: ChecklistItem[] = DEFAULT_CHECKLIST.map((label, i) => ({
       id: `c${i}`,
       label,
       sort: i,
     }));
-    // Ten seeded rows, one hidden: nine to answer.
-    expect(unansweredCount(null, checklist)).toBe(9);
-    expect(unansweredGap(1)).toBe("1 checklist item unanswered");
-    expect(unansweredGap(3)).toBe("3 checklist items unanswered");
+    expect(unansweredCount(null, checklist)).toBe(0);
     // The seed stays where it was: in the migration (the live table), mirrored in DEFAULT_CHECKLIST.
     expect(DEFAULT_CHECKLIST).toContain("Recommend repairs");
     expect(read("supabase/migrations/20260930092000_ticket_aerial_inspection.sql")).toContain(
@@ -585,16 +617,27 @@ const envWith = (jobRow: Row) => ({
 });
 
 describe("4a. setFieldStatus 'done' on an inspection", () => {
-  it("refuses a technician while a checklist item is unanswered (the saved JSON merged with the live checklist); nothing written", async () => {
-    const tables = envWith(job({ inspection: savedJson({ items: [savedJson().items[0]!] }) }));
-    await expect(call(setFieldStatus, { id: JOB, to: "done" }, tables, TECH)).rejects.toThrow(
-      "The close-out is not complete: 1 checklist item unanswered. Add what is missing, then press Complete again.",
-    );
-    expect(tables.service_jobs[0]).toMatchObject({ stage: "scheduled", completed_at: null });
-    // Never saved at all: both visible items are unanswered (the hidden row is not counted).
+  it("refuses a technician while the checklist was never saved; a partial save (rows left alone read as OK) goes through", async () => {
+    // Never saved at all, with rows to save: the one checklist gap.
     const none = envWith(job());
     await expect(call(setFieldStatus, { id: JOB, to: "done" }, none, TECH)).rejects.toThrow(
-      "2 checklist items unanswered",
+      "The close-out is not complete: The checklist is not saved yet. Add what is missing, then press Complete again.",
+    );
+    expect(none.service_jobs[0]).toMatchObject({ stage: "scheduled", completed_at: null });
+    // Saved with one of the two visible items: the other reads as OK (Oct 26), not unanswered.
+    const tables = envWith(job({ inspection: savedJson({ items: [savedJson().items[0]!] }) }));
+    const row = await call<Row>(setFieldStatus, { id: JOB, to: "done" }, tables, TECH);
+    expect(row["stage"]).toBe("done");
+    // Saved with nothing flagged at all: a clean roof is a complete inspection.
+    const clean = envWith(
+      job({
+        inspection: savedJson({
+          items: savedJson().items.map((i) => ({ ...i, status: null, note: "" })),
+        }),
+      }),
+    );
+    expect((await call<Row>(setFieldStatus, { id: JOB, to: "done" }, clean, TECH))["stage"]).toBe(
+      "done",
     );
   });
   it("lets a technician through with every item answered and time logged — no photo, no signature", async () => {
@@ -943,10 +986,14 @@ describe("6b. the checklist saves as you go, on both screens; the manual button 
     expect(draftHook).toContain(
       'toast.info("Restored the checklist answers you gave here before; saving them now.");',
     );
+    // Oct 26: saved also means the server holds a record; Save now sends an untouched draft.
     expect(draftHook).toContain(
-      "saved: draft !== null && snapshot !== null && sameDraft(draft, snapshot),",
+      "saved: hasRecord && draft !== null && snapshot !== null && sameDraft(draft, snapshot),",
     );
-    expect(draftHook).toContain("saveNow: autosave.flush,");
+    expect(draftHook).toContain(
+      "if (!hasRecord && !opts.readOnly && latest.current) autosave.push(latest.current);",
+    );
+    expect(draftHook).toContain("await autosave.flush();");
     // The ticket row's cache carries the saved JSON (the header, the office's actions, the notice).
     expect(draftHook).toContain("qc.setQueryData<ServiceJobRow>(fieldKeys.job(job.id), (old) =>");
   });
@@ -1013,6 +1060,160 @@ describe("6d. the office's After the inspection panel", () => {
     // The findings note feeds the bid when the JSON has no notes of its own.
     expect(section).toContain('notes: ins.notes.trim() || (job.closing_notes ?? "")');
     expect(inspFn).toContain('notes: ins.notes.trim() || (job.closing_notes ?? ""),');
+  });
+});
+
+// ── 6e. Oct 26: only problems need a status; pictures from the ticket on each item ─────────
+
+const PHOTO = "55555555-5555-4555-8555-555555555555";
+const PHOTO2 = "66666666-6666-4666-8666-666666666666";
+const REPAIR_PHOTO = "77777777-7777-4777-8777-777777777777";
+const OTHER_JOB = "88888888-8888-4888-8888-888888888888";
+const photoRow = (over: Row = {}): Row => ({
+  id: PHOTO,
+  service_job_id: JOB,
+  repair_id: null,
+  role: "other",
+  item_key: null,
+  storage_path: `${JOB}/1.jpg`,
+  annotations: null,
+  file_name: "1.jpg",
+  ...over,
+});
+
+describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and off it", () => {
+  const photos = () => [
+    photoRow(),
+    photoRow({ id: PHOTO2, item_key: "c2", storage_path: `${JOB}/2.jpg` }),
+    photoRow({ id: REPAIR_PHOTO, repair_id: "r1", role: "before", storage_path: `${JOB}/3.jpg` }),
+  ];
+  it("the assigned technician attaches (item_key set) and detaches (null); the row comes back", async () => {
+    const tables = { ...envWith(job()), service_job_photos: photos() };
+    const row = await call<Row>(
+      setJobPhotoItem,
+      { id: PHOTO, service_job_id: JOB, item_key: "c1" },
+      tables,
+      TECH,
+    );
+    expect(row).toMatchObject({ id: PHOTO, item_key: "c1", role: "other" });
+    expect(tables.service_job_photos[0]!["item_key"]).toBe("c1");
+    const off = await call<Row>(
+      setJobPhotoItem,
+      { id: PHOTO2, service_job_id: JOB, item_key: null },
+      tables,
+      OFFICE,
+    );
+    expect(off["item_key"]).toBeNull();
+    // The photo stays on the ticket: nothing deleted, the path untouched.
+    expect(tables.service_job_photos).toHaveLength(3);
+    expect(tables.service_job_photos[1]!["storage_path"]).toBe(`${JOB}/2.jpg`);
+  });
+  it("another technician is refused (ownJob); a repair's photo never moves onto an item; a photo off this ticket is not found; item_key is capped at 60", async () => {
+    const tables = { ...envWith(job()), service_job_photos: photos() };
+    const other = { ...tables, profiles: [...profiles, { ...profiles[0]!, id: OTHER_JOB }] };
+    await expect(
+      call(setJobPhotoItem, { id: PHOTO, service_job_id: JOB, item_key: "c1" }, other, OTHER_JOB),
+    ).rejects.toThrow("This ticket is assigned to someone else");
+    await expect(
+      call(
+        setJobPhotoItem,
+        { id: REPAIR_PHOTO, service_job_id: JOB, item_key: "c1" },
+        tables,
+        TECH,
+      ),
+    ).rejects.toThrow("Only a loose ticket photo");
+    await expect(
+      call(
+        setJobPhotoItem,
+        { id: "99999999-9999-4999-8999-999999999999", service_job_id: JOB, item_key: "c1" },
+        tables,
+        TECH,
+      ),
+    ).rejects.toThrow("That photo is not on this ticket");
+    await expect(
+      Promise.resolve().then(() =>
+        call(
+          setJobPhotoItem,
+          { id: PHOTO, service_job_id: JOB, item_key: "x".repeat(61) },
+          tables,
+          TECH,
+        ),
+      ),
+    ).rejects.toThrow();
+    expect(tables.service_job_photos[0]!["item_key"]).toBeNull();
+    // The guard is ownJob, as on registerJobPhoto / savePhotoAnnotations.
+    const fn = fieldFn.slice(fieldFn.indexOf("export const setJobPhotoItem ="));
+    expect(fn.slice(0, fn.indexOf("const closeoutSchema"))).toContain(
+      "const job = await ownJob(context, data.service_job_id);",
+    );
+    expect(fieldFn).toContain("item_key: z.string().min(1).max(60).nullable(),");
+  });
+});
+
+describe("6f. the screens: compact rows, pictures from the ticket, Property inspected / grade", () => {
+  const itemPhotos = read("src/components/service/inspection-item-photos.tsx");
+  const mutations = read("src/components/service/item-photo-mutations.ts");
+  it("each row is one line — the label and the flag toggle Issue; OK is a subtle tick; N/A a small toggle; only a flagged row opens", () => {
+    expect(section).toContain("aria-label={`${item.label}: flag an issue`}");
+    expect(section).toContain("aria-label={`${item.label}: issue`}");
+    expect(section).toContain("aria-label={`${item.label}: OK`}");
+    expect(section).toContain("aria-label={`${item.label}: not applicable`}");
+    expect(section).toMatch(/aria-pressed=\{flagged\}/);
+    expect(section).toContain(
+      "onChange(item.id, { status: item.status === status ? null : status })",
+    );
+    // The note and the pictures (`extra`) only under a flagged row.
+    expect(section).toMatch(/\{flagged \? \(\s*<div[^>]*>\s*<Input/);
+    expect(section).toMatch(/\{extra\?\.\(item\)\}\s*<\/div>\s*\) : \(/);
+    expect(section).not.toContain("StatusButton");
+    expect(section).not.toContain("INSPECTION_STATUSES.map");
+    // The hint under the rows says the rule, not "unanswered"; no "the app".
+    for (const s of [section, cards, itemPhotos, mutations, steps, check, draftHook]) {
+      // ("not checked" as the old summary's words — `3 not checked` — not as a plain phrase.)
+      expect(s.toLowerCase()).not.toMatch(/unanswered|\} not checked|the app\b|the office fixes/);
+    }
+    expect(section).toContain("Flag only what has a problem — every other row reads as OK.");
+    expect(closeout).toContain("issueCountText(insp.items.filter(isFlagged).length)");
+    expect(closeout).not.toContain("answered\n");
+  });
+  it("pictures from the ticket: the picker lists the loose photos, Attach sets item_key, Detach clears it, on both screens", () => {
+    expect(itemPhotos).toContain("export function TicketPhotoPicker({");
+    expect(itemPhotos).toContain("const loose = unattachedTicketPhotos(photos);");
+    expect(itemPhotos).toContain("From ticket photos");
+    expect(itemPhotos).toContain("setItem.mutate({ ids: [p.id], item_key: null })");
+    expect(itemPhotos).toContain("setItem.mutate({ ids, item_key: itemKey }");
+    expect(mutations).toContain(
+      "void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });",
+    );
+    expect(mutations).toContain("const setFn = useServerFn(setJobPhotoItem);");
+    expect(itemPhotos).toContain(
+      '<MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />',
+    );
+    // The close-out's item roll and the office fold both carry them.
+    expect(cards).toContain("<FromTicketPhotosButton");
+    expect(cards).toContain("<ItemPhotoThumbs");
+    expect(section).toContain("<ItemPhotoTools");
+    expect(section).toContain("queryKey: fieldKeys.photos(job.id),");
+  });
+  it("Property inspected (blank; Today is the phone's day) and Property grade (A–F, none pressed) on the Findings step and the office fold, saved through saveTicketInspection", () => {
+    expect(section).toContain("export function InspectionDetails({");
+    expect(section).toContain("<Label htmlFor={dateId}>Property inspected</Label>");
+    expect(section).toContain("onClick={() => draft.setInspectedOn(localYmd())}");
+    expect(section).not.toContain("toISOString().slice(0, 10)");
+    expect(section).toContain("{INSPECTION_GRADES.map((g) => (");
+    expect(section).toContain("aria-label={`Grade ${grade}`}");
+    expect(section).toContain("onClick={() => draft.setGrade(draft.grade === g ? null : g)}");
+    expect(cards).toContain('<InspectionDetails draft={draft} canEdit idPrefix="co" />');
+    expect(section).toContain(
+      "<InspectionDetails draft={draft} canEdit={canEdit} idPrefix={`insp-${job.id}`} />",
+    );
+    expect(inspectionBranch).toContain("draft={insp}");
+    expect(draftHook).toContain(
+      "const ins = await saveFn({ data: { id: job.id, inspection: trimmed(d) } });",
+    );
+    expect(draftHook).toContain("const trimmed = inspectionPayload;");
+    // The saved line carries them.
+    expect(section).toContain("const details = inspectedLine({");
   });
 });
 

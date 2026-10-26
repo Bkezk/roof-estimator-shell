@@ -13,6 +13,12 @@
  * localStorage per ticket (bid-o-matic:closeout-inspection:<id>) until the server has them, so a
  * lost signal on the roof does not lose a checklist; a draft found on open that differs from the
  * server's is restored and saved. Complete clears it (clearInspectionDraft).
+ *
+ * Owner, Oct 26: only a problem needs a status or a note, so a checklist nobody flagged anything
+ * on is a valid answer — but it is not saved until something sends it. `saved` is therefore false
+ * while the server holds no inspection JSON at all (`hasRecord`), and `saveNow` (Complete, the
+ * "Save now" button) sends the draft as it stands in that case, so an all-OK roof is recorded.
+ * The draft also carries Property Inspected / Property Grade (`inspected_on`, `grade`).
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,20 +34,21 @@ import {
 } from "@/lib/service-inspection.functions";
 import {
   INSPECTION_STATUSES,
+  asInspectionGrade,
+  inspectionPayload,
   mergeChecklist,
   visibleChecklist,
   type Inspection,
+  type InspectionDraftFields,
+  type InspectionGrade,
   type InspectionItem,
 } from "@/lib/inspection";
 import { fieldKeys, useAutosave } from "@/components/service/field-utils";
 
 export const inspectionKey = (jobId: string) => ["service-inspection", jobId] as const;
 
-/** What the screen edits and the autosave sends. */
-export interface InspectionDraft {
-  items: InspectionItem[];
-  recommend_repairs: boolean;
-}
+/** What the screen edits and the autosave sends (inspection.ts InspectionDraftFields). */
+export type InspectionDraft = InspectionDraftFields;
 
 const draftKey = (id: string) => `bid-o-matic:closeout-inspection:${id}`;
 const isStatus = (v: unknown): v is InspectionItem["status"] =>
@@ -66,7 +73,12 @@ function readInspectionDraft(id: string): InspectionDraft | null {
         note: typeof o["note"] === "string" ? o["note"] : "",
       });
     }
-    return { items, recommend_repairs: d.recommend_repairs === true };
+    return {
+      items,
+      recommend_repairs: d.recommend_repairs === true,
+      inspected_on: typeof d.inspected_on === "string" ? d.inspected_on : null,
+      grade: asInspectionGrade(d.grade),
+    };
   } catch {
     return null;
   }
@@ -90,11 +102,11 @@ export function clearInspectionDraft(id: string) {
 const fromServer = (data: TicketInspection): InspectionDraft => ({
   items: visibleChecklist(mergeChecklist(data.inspection, data.checklist)),
   recommend_repairs: data.inspection?.recommend_repairs ?? false,
+  inspected_on: data.inspection?.inspected_on ?? null,
+  grade: data.inspection?.grade ?? null,
 });
-const trimmed = (d: InspectionDraft): InspectionDraft => ({
-  items: d.items.map((i) => ({ ...i, note: i.note.trim() })),
-  recommend_repairs: d.recommend_repairs,
-});
+/** The draft as the server takes it (notes trimmed, a blank date null): what is compared and sent. */
+const trimmed = inspectionPayload;
 const sameDraft = (a: InspectionDraft, b: InspectionDraft) =>
   JSON.stringify(trimmed(a)) === JSON.stringify(trimmed(b));
 
@@ -106,12 +118,25 @@ export interface InspectionDraftState {
   /** The visible checklist rows with the draft's answers ([] until the read answers). */
   items: InspectionItem[];
   recommendRepairs: boolean;
-  /** What is on screen is what the server holds (nothing waiting, nothing failed). */
+  /** Property Inspected (YYYY-MM-DD, "" when blank) and Property Grade (owner, Oct 26). */
+  inspectedOn: string;
+  grade: InspectionGrade | null;
+  /**
+   * What is on screen is what the server holds (nothing waiting, nothing failed) — and the
+   * server holds a record at all: a checklist never saved is not saved, even untouched.
+   */
   saved: boolean;
+  /** The server has an inspection JSON for this ticket (a save landed, now or before). */
+  hasRecord: boolean;
   state: ReturnType<typeof useAutosave>["state"];
   setItem: (id: string, patch: Partial<InspectionItem>) => void;
   setRecommendRepairs: (on: boolean) => void;
-  /** Save what is waiting now (Complete, the "Save now" button). */
+  setInspectedOn: (ymd: string) => void;
+  setGrade: (grade: InspectionGrade | null) => void;
+  /**
+   * Save what is waiting now (Complete, the "Save now" button). With no record on the server
+   * yet, the draft as it stands is sent — a checklist with nothing flagged is a real answer.
+   */
   saveNow: () => Promise<void>;
 }
 
@@ -139,8 +164,11 @@ export function useInspectionDraft(
   const latest = useRef<InspectionDraft | null>(null);
   // The server's record as this screen last knew it (the read, then each save's answer).
   const [snapshot, setSnapshot] = useState<InspectionDraft | null>(null);
+  // Whether the server holds any inspection JSON (the read's answer, then true once a save lands).
+  const [hasRecord, setHasRecord] = useState(false);
 
   const landed = (ins: Inspection) => {
+    setHasRecord(true);
     const data = q.data;
     if (data) {
       const next: TicketInspection = { ...data, inspection: ins };
@@ -158,15 +186,7 @@ export function useInspectionDraft(
 
   const autosave = useAutosave<InspectionDraft>(
     async (d) => {
-      const ins = await saveFn({
-        data: {
-          id: job.id,
-          inspection: {
-            items: trimmed(d).items,
-            recommend_repairs: d.recommend_repairs,
-          },
-        },
-      });
+      const ins = await saveFn({ data: { id: job.id, inspection: trimmed(d) } });
       landed(ins);
       if (latest.current && sameDraft(d, latest.current)) clearInspectionDraft(job.id);
     },
@@ -181,6 +201,7 @@ export function useInspectionDraft(
     started.current = true;
     const server = fromServer(q.data);
     setSnapshot(server);
+    setHasRecord(q.data.inspection !== null);
     const stored = opts.readOnly ? null : readInspectionDraft(job.id);
     const first = stored ?? server;
     latest.current = first;
@@ -206,13 +227,22 @@ export function useInspectionDraft(
     error: q.error,
     items: draft?.items ?? [],
     recommendRepairs: draft?.recommend_repairs ?? false,
-    saved: draft !== null && snapshot !== null && sameDraft(draft, snapshot),
+    inspectedOn: draft?.inspected_on ?? "",
+    grade: draft?.grade ?? null,
+    saved: hasRecord && draft !== null && snapshot !== null && sameDraft(draft, snapshot),
+    hasRecord,
     state: autosave.state,
     setItem: (id, patch) =>
       update({
         items: (latest.current?.items ?? []).map((i) => (i.id === id ? { ...i, ...patch } : i)),
       }),
     setRecommendRepairs: (on) => update({ recommend_repairs: on }),
-    saveNow: autosave.flush,
+    setInspectedOn: (ymd) => update({ inspected_on: ymd || null }),
+    setGrade: (grade) => update({ grade }),
+    saveNow: async () => {
+      // Nothing flagged and nothing ever saved: the untouched draft is the answer — send it.
+      if (!hasRecord && !opts.readOnly && latest.current) autosave.push(latest.current);
+      await autosave.flush();
+    },
   };
 }

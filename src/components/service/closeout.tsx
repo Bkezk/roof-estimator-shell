@@ -51,8 +51,8 @@
  * optional photo roll, "Nothing to add"), 4 Materials (Nothing used pre-set: never blocks),
  * 5 Time (required), 6 Signature (optional: "Optional for an inspection", never a gap). Photos
  * are optional everywhere on an inspection. The same StepCard / StepStrip / Next step mechanics,
- * the same server-side gap list ("N checklist items unanswered") and Complete anyway for
- * managers. Leak, warranty, SCOPE and other keep the seven repair steps (the owner did not say
+ * the same server-side gap list ("The checklist is not saved yet"; owner, Oct 26: only a problem
+ * needs a status or a note, so no row is ever "unanswered") and Complete anyway for managers. Leak, warranty, SCOPE and other keep the seven repair steps (the owner did not say
  * otherwise for scope).
  */
 import { useEffect, useRef, useState } from "react";
@@ -193,6 +193,7 @@ import {
   type StepState,
   type StepStatus,
 } from "@/lib/closeout-steps";
+import { isFlagged, issueCountText } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { closedLine, runningLabel } from "@/lib/tech-clock";
 import {
@@ -1025,17 +1026,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           {inspection ? (
             <>
               {/* Step 2 · Checklist (an inspection; owner, Oct 12): the Aerial fold once, then
-                  every item with OK / Issue / N/A, a note and an optional photo — saved as you
-                  go. No repair picker. */}
+                  every item as one compact line — flag only what has a problem (owner, Oct 26);
+                  a flagged item opens to its note and pictures — saved as you go. No repair
+                  picker. */}
               <StepCard
                 {...card("checklist")}
                 icon={ClipboardCheck}
                 aside={
                   insp.items.length > 0 ? (
-                    <span>
-                      {insp.items.filter((i) => i.status !== null).length} of {insp.items.length}{" "}
-                      answered
-                    </span>
+                    <span>{issueCountText(insp.items.filter(isFlagged).length)}</span>
                   ) : undefined
                 }
               >
@@ -1048,10 +1047,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               </StepCard>
 
               {/* Step 3 · Findings: the one notes box (closing_notes), Recommend repairs,
-                  Recommend a new roof, an optional photo roll, Nothing to add. */}
+                  Recommend a new roof, Property inspected / grade (the checklist draft's), an
+                  optional photo roll, Nothing to add. */}
               <StepCard {...card("findings")} icon={ClipboardList}>
                 <InspectionFindingsStep
                   job={job}
+                  draft={insp}
                   notes={draft.closing_notes}
                   onNotes={(v) => update({ closing_notes: v })}
                   recommendRepairs={insp.recommendRepairs}

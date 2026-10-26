@@ -15,13 +15,20 @@
  * (service_jobs.inspection_outcome: repair_ticket / bid / none; INSPECTION_OUTCOMES).
  *
  * Owner, Oct 12: the inspection close-out is its own flow (closeout-steps.ts
- * closeoutSteps("inspection")). The checklist is step 2 and must be answered in full and saved;
- * step 3 "Findings" is ONE note (the ticket's closing_notes) with two switches — "Recommend
- * repairs" (`recommend_repairs`, kept in this JSON: it is an answer of the inspection, read and
- * written with the checklist) and "Recommend a new roof" (service_jobs.recommend_new_roof, as
- * before). The seed's "Recommend repairs" checklist row (20260930092000) stays in the live
- * table — the screen hides a row with that label (hiddenChecklistItem / visibleChecklist) so the
- * question is asked once, by the switch; a hidden row never counts as unanswered.
+ * closeoutSteps("inspection")). The checklist is step 2 and must be saved; step 3 "Findings" is
+ * ONE note (the ticket's closing_notes) with two switches — "Recommend repairs"
+ * (`recommend_repairs`, kept in this JSON: it is an answer of the inspection, read and written
+ * with the checklist) and "Recommend a new roof" (service_jobs.recommend_new_roof, as before),
+ * and since Oct 26 the day the roof was inspected and its grade (`inspected_on`, `grade`). The
+ * seed's "Recommend repairs" checklist row (20260930092000) stays in the live table — the screen
+ * hides a row with that label (hiddenChecklistItem / visibleChecklist) so the question is asked
+ * once, by the switch.
+ *
+ * Owner, Oct 26: "not every part needs a comment or status, just ones with problems". A row is
+ * flagged (status "issue", with its note and pictures) or it is not; a row with no status reads
+ * as OK (isFlagged / inspectionCounts). Nothing is "unanswered" any more: the only checklist gap
+ * on Complete is a checklist never saved (closeout-check.ts). "ok" and "na" stay valid statuses —
+ * older saves carry them, and a row can still be ticked OK or set N/A by hand.
  */
 import { z } from "zod";
 
@@ -98,7 +105,7 @@ export interface ChecklistItem {
 
 /**
  * The rows to show: the saved answers in their saved order (labels as they were), then any
- * checklist item added since, unanswered. A new inspection is the checklist, unanswered.
+ * checklist item added since, unflagged. A new inspection is the checklist, nothing flagged.
  */
 export function mergeChecklist(
   saved: Inspection | null,
@@ -119,7 +126,7 @@ export function mergeChecklist(
 /**
  * The checklist row the switch replaced (owner, Oct 12): the seed's "Recommend repairs" item is
  * still in the live table, so a row with that label is hidden wherever the checklist shows and
- * never counts as unanswered; the findings step's switch (`recommend_repairs`) asks it instead.
+ * never counts; the findings step's switch (`recommend_repairs`) asks it instead.
  */
 export const RECOMMEND_REPAIRS_LABEL = "Recommend repairs";
 export const hiddenChecklistItem = (label: string): boolean =>
@@ -129,52 +136,118 @@ export function visibleChecklist<T extends { label: string }>(items: readonly T[
   return items.filter((i) => !hiddenChecklistItem(i.label));
 }
 
-/** The visible rows still without an answer (the checklist step's rule; the server's gap). */
-export function unansweredItems<T extends { label: string; status: InspectionStatus | null }>(
+/** A row with a problem (owner, Oct 26): status "issue". Every other row reads as OK or N/A. */
+export const isFlagged = (item: { status: InspectionStatus | null }): boolean =>
+  item.status === "issue";
+/** "No issues" / "1 issue" / "3 issues" (the close-out's step aside). */
+export const issueCountText = (n: number): string =>
+  n === 0 ? "No issues" : `${n} ${n === 1 ? "issue" : "issues"}`;
+/** The visible rows flagged as an issue. */
+export function flaggedItems<T extends { label: string; status: InspectionStatus | null }>(
   items: readonly T[],
 ): T[] {
-  return visibleChecklist(items).filter((i) => i.status === null);
+  return visibleChecklist(items).filter(isFlagged);
 }
 
 /**
- * The server's and the screen's count of what is still unanswered: the saved answers merged
- * with the live checklist (an item added since is unanswered), hidden rows left out.
+ * Kept for callers written under the Oct 12 rule ("every item answered"): since Oct 26 a row
+ * with no status reads as OK, so nothing is ever unanswered — always [] / 0.
  */
-export function unansweredCount(saved: Inspection | null, checklist: readonly ChecklistItem[]) {
-  return unansweredItems(mergeChecklist(saved, checklist)).length;
+export function unansweredItems<T extends { label: string; status: InspectionStatus | null }>(
+  _items: readonly T[],
+): T[] {
+  return [];
 }
-
-/** "3 checklist items unanswered" / "1 checklist item unanswered" (the Complete gap). */
-export const unansweredGap = (n: number): string =>
-  `${n} checklist ${n === 1 ? "item" : "items"} unanswered`;
+export function unansweredCount(_saved: Inspection | null, _checklist: readonly ChecklistItem[]) {
+  return 0;
+}
 
 export interface InspectionCounts {
   ok: number;
   issue: number;
   na: number;
-  open: number;
 }
+/** The counts under the checklist: a row with no status counts as OK (owner, Oct 26). */
 export function inspectionCounts(
   items: readonly { status: InspectionStatus | null }[],
 ): InspectionCounts {
-  const c: InspectionCounts = { ok: 0, issue: 0, na: 0, open: 0 };
-  for (const i of items) {
-    if (i.status) c[i.status]++;
-    else c.open++;
-  }
+  const c: InspectionCounts = { ok: 0, issue: 0, na: 0 };
+  for (const i of items) c[i.status ?? "ok"]++;
   return c;
 }
 
-/** "2 issues · 7 OK · 1 N/A · 3 not checked". */
+/** "2 issues · 7 OK · 1 N/A"; with nothing flagged "No issues · 9 OK"; "nothing to check" on []. */
 export function inspectionSummary(items: readonly { status: InspectionStatus | null }[]): string {
+  if (items.length === 0) return "nothing to check";
   const c = inspectionCounts(items);
   const parts = [
-    c.issue ? `${c.issue} ${c.issue === 1 ? "issue" : "issues"}` : null,
+    c.issue ? `${c.issue} ${c.issue === 1 ? "issue" : "issues"}` : "No issues",
     c.ok ? `${c.ok} OK` : null,
     c.na ? `${c.na} N/A` : null,
-    c.open ? `${c.open} not checked` : null,
   ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "nothing to check";
+  return parts.join(" · ");
+}
+
+/** Property Inspected / Property Grade as the screens hold and save them (owner, Oct 26). */
+export interface InspectionDetails {
+  /** YYYY-MM-DD on the technician's own calendar, or null when not given. */
+  inspected_on: string | null;
+  grade: InspectionGrade | null;
+}
+
+/** "Oct 20" from a YYYY-MM-DD read as a calendar day (never UTC's day). */
+export function shortInspectedDay(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/**
+ * The saved line's tail: "Inspected Oct 20 · Grade D", either half alone, or null when neither
+ * is set (the line then says only the counts and the save).
+ */
+export function inspectedLine(d: InspectionDetails): string | null {
+  const parts = [
+    d.inspected_on ? `Inspected ${shortInspectedDay(d.inspected_on)}` : null,
+    d.grade ? `Grade ${d.grade}` : null,
+  ].filter((x): x is string => x !== null);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** What the screens edit (inspection-draft.ts) and the autosave sends. */
+export interface InspectionDraftFields extends InspectionDetails {
+  items: InspectionItem[];
+  recommend_repairs: boolean;
+}
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+export const asInspectionGrade = (v: unknown): InspectionGrade | null =>
+  (INSPECTION_GRADES as readonly unknown[]).includes(v) ? (v as InspectionGrade) : null;
+/**
+ * The draft as saveTicketInspection takes it: notes trimmed, a blank date ("" from the date
+ * input) sent as null, a grade outside A–F as null.
+ */
+export function inspectionPayload(d: InspectionDraftFields): InspectionDraftFields {
+  return {
+    items: d.items.map((i) => ({ ...i, note: i.note.trim() })),
+    recommend_repairs: d.recommend_repairs,
+    inspected_on: d.inspected_on && YMD.test(d.inspected_on) ? d.inspected_on : null,
+    grade: asInspectionGrade(d.grade),
+  };
+}
+
+/** A photo row as the checklist's pictures read it (service_job_photos). */
+export interface ItemPhotoLike {
+  role: string;
+  repair_id: string | null;
+  item_key: string | null;
+}
+/**
+ * The ticket's photos the "From ticket photos" picker offers for a checklist item (owner, Oct
+ * 26): loose pictures of the ticket — role "other", on no repair, attached to no item yet. A
+ * repair's Before / After, the signature, an aerial and another item's pictures are not offered.
+ */
+export function unattachedTicketPhotos<T extends ItemPhotoLike>(photos: readonly T[]): T[] {
+  return photos.filter((p) => p.role === "other" && !p.repair_id && !p.item_key);
 }
 
 /**

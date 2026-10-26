@@ -1,14 +1,20 @@
 /**
  * Inspection tickets (owner, Sep 30; rules in src/lib/inspection.ts). On a ticket of type
  * Inspection — the office ticket page here; the tech's close-out has its own cards
- * (inspection-closeout.tsx) — the checklist (each item OK / Issue / N/A with a note), saved as it
- * is answered (inspection-draft.ts useInspectionDraft; owner, Oct 12: no manual save button —
- * the one there was got lost on Complete). The findings note is the ticket's closing
- * notes (one notes box; the Close-out fold shows it); an older inspection's own notes still show,
- * read-only. Once the ticket is Done the office may turn it into a repair ticket (linked back to
- * the inspection), a bid (the estimator opens with the customer, site and findings prefilled) —
- * or press "No action needed". The choice is recorded on the ticket (service_jobs.inspection_outcome)
- * and shown as "Outcome: … — by <name>, <date>". Nothing is created automatically.
+ * (inspection-closeout.tsx) — the checklist, saved as it is answered (inspection-draft.ts
+ * useInspectionDraft; owner, Oct 12: no manual save button — the one there was got lost on
+ * Complete). Owner, Oct 26: "not every part needs a comment or status, just ones with problems" —
+ * each row is one compact line (ChecklistRows): a tap on the label or the flag marks it an
+ * Issue, and only a flagged row opens up to its note and its pictures (the close-out's camera,
+ * and "From ticket photos" — inspection-item-photos.tsx). A subtle check ticks a row OK by hand;
+ * N/A stays a small toggle. A row with no status reads as OK. Under the rows: Property inspected
+ * (a date, "Today" on the phone's own day) and Property grade (A–F), saved with the checklist
+ * (InspectionDetails). The findings note is the ticket's closing notes (one notes box; the
+ * Close-out fold shows it); an older inspection's own notes still show, read-only. Once the
+ * ticket is Done the office may turn it into a repair ticket (linked back to the inspection), a
+ * bid (the estimator opens with the customer, site and findings prefilled) — or press "No action
+ * needed". The choice is recorded on the ticket (service_jobs.inspection_outcome) and shown as
+ * "Outcome: … — by <name>, <date>". Nothing is created automatically.
  *
  * `FromInspectionNote` is the "From inspection #6012" link on a ticket created from one.
  */
@@ -17,11 +23,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Calculator, CheckCircle2, ClipboardCheck, Loader2, Wrench } from "lucide-react";
+import {
+  Calculator,
+  Check,
+  CheckCircle2,
+  ClipboardCheck,
+  Flag,
+  Loader2,
+  Wrench,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import type { ServiceJobRow } from "@/lib/service.functions";
+import { listJobPhotos } from "@/lib/service-field.functions";
 import {
   createRepairFromInspection,
   getSourceInspection,
@@ -30,21 +45,23 @@ import {
   type TicketInspection,
 } from "@/lib/service-inspection.functions";
 import {
-  INSPECTION_STATUSES,
+  INSPECTION_GRADES,
   ITEM_NOTE_MAX,
-  STATUS_LABELS,
   bidPrefillFromInspection,
   fromInspectionLabel,
+  inspectedLine,
   inspectionComplete,
   inspectionSummary,
+  isFlagged,
   outcomeLine,
   parseInspection,
   visibleChecklist,
+  type InspectionGrade,
   type InspectionItem,
-  type InspectionStatus,
 } from "@/lib/inspection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -59,7 +76,8 @@ import {
   useInspectionDraft,
   type InspectionDraftState,
 } from "@/components/service/inspection-draft";
-import { errText, fieldKeys, whenShort } from "@/components/service/field-utils";
+import { ItemPhotoTools } from "@/components/service/inspection-item-photos";
+import { errText, fieldKeys, localYmd, whenShort } from "@/components/service/field-utils";
 
 /** The Inspection section; only on a ticket of type Inspection. */
 export function InspectionSection({
@@ -98,6 +116,15 @@ function InspectionBody({
   officeOrAdmin: boolean;
 }) {
   const draft = useInspectionDraft(job, { enabled: true, readOnly: !canEdit });
+  const { session } = useAuth();
+  const photosFn = useServerFn(listJobPhotos);
+  // The ticket's photos (the same key as the Photos fold): a flagged row shows its pictures and
+  // offers the loose ones ("From ticket photos").
+  const photos = useQuery({
+    queryKey: fieldKeys.photos(job.id),
+    queryFn: () => photosFn({ data: { id: job.id } }),
+    enabled: !!session,
+  });
   if (draft.error)
     return (
       <p className="text-sm text-destructive">
@@ -118,7 +145,18 @@ function InspectionBody({
         readOnly={!canEdit}
         onChange={draft.setItem}
         jobId={job.id}
+        extra={(item: InspectionItem) => (
+          <ItemPhotoTools
+            jobId={job.id}
+            itemKey={item.id}
+            itemLabel={item.label}
+            photos={photos.data ?? []}
+            ticketNumber={job.number}
+            canEdit={canEdit}
+          />
+        )}
       />
+      <InspectionDetails draft={draft} canEdit={canEdit} idPrefix={`insp-${job.id}`} />
       {legacyNotes && (
         <p className="whitespace-pre-line rounded-md bg-muted/40 px-3 py-2 text-sm">
           <span className="text-muted-foreground">Inspection notes: </span>
@@ -132,11 +170,15 @@ function InspectionBody({
 }
 
 /**
- * The checklist rows, controlled: each item's label, OK / Issue / N/A and a note ("What and
- * where" on an Issue). `extra` renders under a row — the close-out's camera and thumbnails. Both
- * screens render the checklist with this. With `jobId`, each row ends with what an earlier
- * ticket at this property found for that item ("Last time: Jun 12 — …" and its photo; owner,
- * Oct 21, site-history.tsx LastTimeLine) — photos carry the item's id as item_key.
+ * The checklist rows, controlled (owner, Oct 26: "not every part needs a comment or status, just
+ * ones with problems"). Each row is one compact line: the label (a tap flags it ↔ unflags it,
+ * status "issue" ↔ null), a small Issue flag, a subtle OK check and an N/A toggle. Only a
+ * flagged row opens up to its note ("What and where") and `extra` — the pictures: the close-out's
+ * camera and thumbnails, the office's From ticket photos. A row with no status reads as OK; a row
+ * ticked OK (by hand, or on an older save) shows a quiet check; N/A greys the label. Both screens
+ * render the checklist with this. With `jobId`, each row ends with what an earlier ticket at this
+ * property found for that item ("Last time: Jun 12 — …" and its photo; owner, Oct 21,
+ * site-history.tsx LastTimeLine) — photos carry the item's id as item_key.
  */
 export function ChecklistRows({
   items,
@@ -159,46 +201,215 @@ export function ChecklistRows({
       </p>
     );
   return (
-    <ol className="space-y-2">
-      {items.map((item) => (
-        <li key={item.id} className="space-y-2 rounded-md border p-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium">{item.label}</span>
-            <div className="flex gap-1" role="group" aria-label={`${item.label}: result`}>
-              {INSPECTION_STATUSES.map((s) => (
-                <StatusButton
-                  key={s}
-                  status={s}
-                  active={item.status === s}
+    <ol className="space-y-1.5">
+      {items.map((item) => {
+        const flagged = isFlagged(item);
+        const ok = item.status === "ok";
+        const na = item.status === "na";
+        const set = (status: InspectionItem["status"]) =>
+          onChange(item.id, { status: item.status === status ? null : status });
+        return (
+          <li
+            key={item.id}
+            data-row={flagged ? "issue" : (item.status ?? "clear")}
+            className={`space-y-2 rounded-md border px-2 py-1 ${flagged ? "border-red-300 bg-red-50/40 dark:border-red-900/60 dark:bg-red-950/20" : ""}`}
+          >
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
+                aria-pressed={flagged}
+                aria-label={`${item.label}: flag an issue`}
+                disabled={readOnly}
+                onClick={() => set("issue")}
+              >
+                {flagged ? (
+                  <Flag
+                    className="h-4 w-4 shrink-0 fill-red-600 text-red-600 dark:fill-red-400 dark:text-red-400"
+                    aria-hidden
+                  />
+                ) : ok ? (
+                  <Check
+                    className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                    aria-hidden
+                  />
+                ) : (
+                  <span className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+                <span className={na ? "text-muted-foreground line-through" : ""}>{item.label}</span>
+              </button>
+              <div
+                className="flex shrink-0 items-center gap-0.5"
+                role="group"
+                aria-label={`${item.label}: result`}
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-pressed={ok}
+                  aria-label={`${item.label}: OK`}
+                  title="Tick OK (optional — a row with nothing flagged reads as OK)"
                   disabled={readOnly}
-                  onClick={() => onChange(item.id, { status: item.status === s ? null : s })}
-                />
-              ))}
+                  className={`h-9 w-9 p-0 ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60"}`}
+                  onClick={() => set("ok")}
+                >
+                  <Check className="h-4 w-4" aria-hidden />
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-pressed={flagged}
+                  aria-label={`${item.label}: issue`}
+                  disabled={readOnly}
+                  className={`h-9 px-2.5 ${flagged ? "border-transparent bg-red-600 text-white hover:bg-red-600/90" : ""}`}
+                  onClick={() => set("issue")}
+                >
+                  <Flag className="mr-1 h-3.5 w-3.5" aria-hidden /> Issue
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-pressed={na}
+                  aria-label={`${item.label}: not applicable`}
+                  disabled={readOnly}
+                  className={`h-9 px-2 text-xs ${na ? "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500" : "text-muted-foreground"}`}
+                  onClick={() => set("na")}
+                >
+                  N/A
+                </Button>
+              </div>
             </div>
-          </div>
-          {(item.status === "issue" || item.note || !readOnly) && (
-            <Input
-              aria-label={`${item.label}: note`}
-              className="h-10 text-base"
-              placeholder={item.status === "issue" ? "What and where" : "Note"}
-              maxLength={ITEM_NOTE_MAX}
-              value={item.note}
-              disabled={readOnly}
-              onChange={(e) => onChange(item.id, { note: e.target.value })}
-            />
-          )}
-          {extra?.(item)}
-          {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
-        </li>
-      ))}
+            {flagged ? (
+              <div className="space-y-2 pb-1">
+                <Input
+                  aria-label={`${item.label}: note`}
+                  className="h-10 text-base"
+                  placeholder="What and where"
+                  maxLength={ITEM_NOTE_MAX}
+                  value={item.note}
+                  disabled={readOnly}
+                  onChange={(e) => onChange(item.id, { note: e.target.value })}
+                />
+                {extra?.(item)}
+              </div>
+            ) : (
+              item.note && (
+                <p className="whitespace-pre-line px-1 pb-1 text-sm text-muted-foreground">
+                  {item.note}
+                </p>
+              )
+            )}
+            {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
 /**
- * The line under the checklist: the counts, then whether the server has what is on screen —
- * "saved <when> by <who>", "saving…", or "not saved yet" with a Save now button (the autosave
- * tries again on the next change too; this is for a tech watching the signal come back).
+ * Property inspected and Property grade (owner, Oct 26; CenterPoint's Property Inspected /
+ * Property Grade). The date starts blank; "Today" fills the phone's own calendar day
+ * (field-utils.ts localYmd — never UTC's). The grade is A B C D F as segmented buttons, none
+ * pressed until chosen; pressing the chosen one clears it. Both save with the checklist.
+ */
+export function InspectionDetails({
+  draft,
+  canEdit,
+  idPrefix,
+}: {
+  draft: InspectionDraftState;
+  canEdit: boolean;
+  idPrefix: string;
+}) {
+  const dateId = `${idPrefix}-inspected-on`;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" data-section="inspection-details">
+      <div className="space-y-1">
+        <Label htmlFor={dateId}>Property inspected</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id={dateId}
+            type="date"
+            className="h-10 w-[170px]"
+            value={draft.inspectedOn}
+            disabled={!canEdit}
+            onChange={(e) => draft.setInspectedOn(e.target.value)}
+          />
+          {canEdit && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10"
+              onClick={() => draft.setInspectedOn(localYmd())}
+            >
+              Today
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <span className="text-sm font-medium leading-none" id={`${idPrefix}-grade-label`}>
+          Property grade
+        </span>
+        <div
+          className="flex gap-1"
+          role="group"
+          aria-labelledby={`${idPrefix}-grade-label`}
+          data-section="inspection-grade"
+        >
+          {INSPECTION_GRADES.map((g) => (
+            <GradeButton
+              key={g}
+              grade={g}
+              active={draft.grade === g}
+              disabled={!canEdit}
+              onClick={() => draft.setGrade(draft.grade === g ? null : g)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GradeButton({
+  grade,
+  active,
+  disabled,
+  onClick,
+}: {
+  grade: InspectionGrade;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      aria-pressed={active}
+      aria-label={`Grade ${grade}`}
+      disabled={disabled}
+      className={`h-10 w-10 text-base font-semibold ${active ? "border-transparent bg-primary text-primary-foreground hover:bg-primary/90" : ""}`}
+      onClick={onClick}
+    >
+      {grade}
+    </Button>
+  );
+}
+
+/**
+ * The line under the checklist: the counts ("2 issues · 7 OK", "No issues · 9 OK"), the
+ * inspected day and grade when set ("Inspected Oct 20 · Grade D"), then whether the server has
+ * what is on screen — "saved <when> by <who>", "saving…", or "not saved yet" with a Save now
+ * button (the autosave tries again on the next change too; this is for a tech watching the
+ * signal come back — and, since Oct 26, for a roof with nothing to flag: the untouched checklist
+ * is not on the server until it is sent).
  */
 export function ChecklistSavedLine({
   draft,
@@ -216,56 +427,37 @@ export function ChecklistSavedLine({
           ? `saved ${whenShort(rec.saved_at)}${rec.saved_by ? ` by ${rec.saved_by}` : ""}`
           : ""
         : "not saved yet";
+  const details = inspectedLine({
+    inspected_on: draft.inspectedOn || null,
+    grade: draft.grade,
+  });
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-      <span>
-        {inspectionSummary(draft.items)}
-        {savedText ? ` · ${savedText}` : ""}
-      </span>
-      {canEdit && !draft.saved && draft.state !== "saving" && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-9"
-          onClick={() => void draft.saveNow()}
-        >
-          Save now
-        </Button>
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3">
+        <span>
+          {inspectionSummary(draft.items)}
+          {details ? ` · ${details}` : ""}
+          {savedText ? ` · ${savedText}` : ""}
+        </span>
+        {canEdit && !draft.saved && draft.state !== "saving" && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9"
+            onClick={() => void draft.saveNow()}
+          >
+            Save now
+          </Button>
+        )}
+      </div>
+      {canEdit && !draft.hasRecord && draft.state !== "saving" && (
+        <p>
+          Flag only what has a problem — every other row reads as OK. Nothing to flag? Save the
+          checklist as it stands.
+        </p>
       )}
     </div>
-  );
-}
-
-export function StatusButton({
-  status,
-  active,
-  disabled,
-  onClick,
-}: {
-  status: InspectionStatus;
-  active: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  const on =
-    status === "issue"
-      ? "bg-red-600 text-white hover:bg-red-600/90"
-      : status === "ok"
-        ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-        : "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500 dark:hover:bg-slate-500/90";
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      aria-pressed={active}
-      disabled={disabled}
-      className={`h-10 min-w-14 ${active ? `border-transparent ${on}` : ""}`}
-      onClick={onClick}
-    >
-      {STATUS_LABELS[status]}
-    </Button>
   );
 }
 

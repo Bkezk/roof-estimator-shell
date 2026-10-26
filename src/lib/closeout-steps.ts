@@ -84,7 +84,7 @@ export const STEP_COUNT = CLOSEOUT_STEPS.length;
 export const INSPECTION_STEPS: readonly CloseoutStep[] = [
   { id: "crew", n: 1, title: "Who is here", unlocks: "Open from the start" },
   { id: "checklist", n: 2, title: "Checklist", unlocks: "Answer who is on the job" },
-  { id: "findings", n: 3, title: "Findings", unlocks: "Every checklist item answered and saved" },
+  { id: "findings", n: 3, title: "Findings", unlocks: "The checklist saved" },
   {
     id: "materials",
     n: 4,
@@ -193,8 +193,6 @@ const hasPhoto = (photos: readonly StepPhoto[], repairId: string, role: string) 
 /** Repairs are required unless the ticket is an inspection (mirrors missingForComplete). */
 const repairsSuffice = (s: StepState) => isInspection(s.serviceType) || s.repairs.length > 0;
 
-/** The checklist rows still unanswered (the inspection flow's step 2). */
-const openItems = (s: StepState) => (s.checklist ?? []).filter((i) => i.status === null).length;
 /** Step 3 of an inspection: a note, a switch on, or "Nothing to add" pressed. */
 const findingsGiven = (s: StepState) =>
   s.closingNotes.trim().length > 0 ||
@@ -208,8 +206,10 @@ export function stepDone(id: StepId, s: StepState): boolean {
   switch (id) {
     case "crew":
       return s.crewAnswered;
+    // Owner, Oct 26: only a problem needs a status or a note — a row with none reads as OK, so
+    // the step is done once the checklist is saved on the server.
     case "checklist":
-      return openItems(s) === 0 && s.checklistSaved !== false;
+      return s.checklistSaved !== false;
     case "findings":
       return findingsGiven(s);
     case "before":
@@ -311,10 +311,8 @@ export function stepMissing(id: StepId, s: StepState): string | null {
   switch (id) {
     case "crew":
       return "Answer who is on the job";
-    case "checklist": {
-      const n = openItems(s);
-      return n > 0 ? `Answer every item (${n} left)` : "Save the checklist";
-    }
+    case "checklist":
+      return "Save the checklist (flag only what has a problem)";
     case "findings":
       return "Write what you found, turn a switch on, or press Nothing to add";
     case "before": {

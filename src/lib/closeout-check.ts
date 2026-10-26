@@ -8,16 +8,17 @@
  * message, `closeoutRefusal`); a manager's goes through. Pure, so it is tested without the screen.
  *
  * An INSPECTION (owner, Oct 12; closeout-steps.ts closeoutSteps): no repair or photo is ever a
- * gap and the signature is optional, so its list is the checklist — every visible item answered
- * ("N checklist items unanswered") and saved on the server — and the time. The server merges
- * the saved answers (service_jobs.inspection) with the live checklist (inspection_checklist_items)
- * the way the screen does (inspection.ts unansweredCount), so an item added since counts.
+ * gap and the signature is optional, so its list is the checklist — saved on the server
+ * (CHECKLIST_NOT_SAVED) — and the time. Owner, Oct 26: "not every part needs a comment or
+ * status, just ones with problems" — a row with no status reads as OK, so no row is ever a gap
+ * of its own; a checklist nobody flagged anything on passes once it is saved. On the server a
+ * ticket whose inspection JSON is still null is a checklist not saved (when the live checklist
+ * has rows to save at all).
  */
 import {
   mergeChecklist,
   parseInspection,
-  unansweredGap,
-  unansweredItems,
+  visibleChecklist,
   type ChecklistItem,
   type InspectionStatus,
 } from "@/lib/inspection";
@@ -78,13 +79,14 @@ export interface CheckItem {
   status: InspectionStatus | null;
 }
 
-/** The inspection lines: the unanswered rows, then an unsaved draft. [] on a repair ticket. */
-function checklistGaps(items: readonly CheckItem[], saved: boolean): string[] {
-  const out: string[] = [];
-  const open = unansweredItems(items).length;
-  if (open > 0) out.push(unansweredGap(open));
-  if (!saved) out.push("The checklist is not saved yet");
-  return out;
+export const CHECKLIST_NOT_SAVED = "The checklist is not saved yet";
+
+/**
+ * The inspection's one checklist line: an unsaved draft. The rows themselves are never a gap
+ * (owner, Oct 26: a row with no status reads as OK). [] on a repair ticket.
+ */
+function checklistGaps(_items: readonly CheckItem[], saved: boolean): string[] {
+  return saved ? [] : [CHECKLIST_NOT_SAVED];
 }
 
 /** A read the screen holds: its rows when it answered, else its error (or still loading). */
@@ -145,17 +147,17 @@ export interface CloseoutRows {
 /**
  * The same gap list from rows already in hand (the server's check, Oct 12): exactly what
  * `completeGaps` gives the screen once its reads have answered. On an inspection the saved
- * answers are merged with the live checklist (an item added since is unanswered); what the
- * server holds is by definition saved.
+ * answers are merged with the live checklist; a ticket with no inspection JSON at all is a
+ * checklist not saved (Oct 26: the rows are never a gap, the save is).
  */
 export function closeoutGaps(rows: CloseoutRows): string[] {
+  const saved = isInspection(rows.service_type) ? parseInspection(rows.inspection ?? null) : null;
+  const merged = mergeChecklist(saved, rows.checklist ?? []);
   const inspection = isInspection(rows.service_type)
     ? {
-        checklist: {
-          data: mergeChecklist(parseInspection(rows.inspection ?? null), rows.checklist ?? []),
-          error: null,
-        },
-        checklist_saved: true,
+        checklist: { data: merged, error: null },
+        // No JSON yet is "not saved" — unless the live checklist has no visible row to save.
+        checklist_saved: saved !== null || visibleChecklist(merged).length === 0,
       }
     : {};
   return completeGaps({

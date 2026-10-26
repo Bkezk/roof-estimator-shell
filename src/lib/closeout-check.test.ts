@@ -4,7 +4,13 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { missingForComplete, type CloseoutCheckInput } from "@/lib/closeout-check";
+import {
+  CHECKLIST_NOT_SAVED,
+  closeoutGaps,
+  completeGaps,
+  missingForComplete,
+  type CloseoutCheckInput,
+} from "@/lib/closeout-check";
 
 const full: CloseoutCheckInput = {
   service_type: "leak",
@@ -47,6 +53,73 @@ describe("missingForComplete", () => {
     expect(
       missingForComplete({ ...full, service_type: "inspection", repairs: [], photos: [] }),
     ).toEqual([]);
+  });
+});
+
+describe("an inspection's checklist (owner, Oct 26: only a problem needs a status or a note)", () => {
+  const base = {
+    finished: false,
+    service_type: "inspection",
+    signature_path: null,
+    on_site_at: null,
+    repairs: { data: [], error: null },
+    photos: { data: [], error: null },
+    time: { data: [{ hours: 1 }], error: null },
+  };
+  const blank = (label: string) => ({ label, status: null });
+  it("every status null and saved: no gap at all — Complete passes", () => {
+    expect(
+      completeGaps({
+        ...base,
+        checklist: { data: ["Seams", "Flashings", "Drains"].map(blank), error: null },
+        checklist_saved: true,
+      }),
+    ).toEqual({ gaps: [], unread: false });
+  });
+  it("the only checklist line is an unsaved draft; nothing says 'unanswered'", () => {
+    const g = completeGaps({
+      ...base,
+      checklist: { data: ["Seams", "Drains"].map(blank), error: null },
+      checklist_saved: false,
+    });
+    expect(g.gaps).toEqual([CHECKLIST_NOT_SAVED]);
+    expect(CHECKLIST_NOT_SAVED).toBe("The checklist is not saved yet");
+    expect(g.gaps.join(" ")).not.toMatch(/unanswered/);
+  });
+  it("the server: no inspection JSON with rows to save is 'not saved'; saved with nothing flagged passes", () => {
+    const rows = {
+      service_type: "inspection",
+      signature_path: null,
+      on_site_at: null,
+      repairs: [],
+      photos: [],
+      time: [{ hours: 1 }],
+      checklist: [
+        { id: "c1", label: "Seams", sort: 10 },
+        { id: "c2", label: "Drains", sort: 20 },
+      ],
+    };
+    expect(closeoutGaps({ ...rows, inspection: null })).toEqual([CHECKLIST_NOT_SAVED]);
+    expect(
+      closeoutGaps({
+        ...rows,
+        inspection: {
+          v: 1,
+          items: [
+            { id: "c1", label: "Seams", status: null, note: "" },
+            { id: "c2", label: "Drains", status: null, note: "" },
+          ],
+          notes: "",
+          recommend_repairs: false,
+          saved_at: "2026-10-26T15:00:00Z",
+          saved_by: "Ted",
+          inspected_on: null,
+          grade: null,
+        },
+      }),
+    ).toEqual([]);
+    // An empty live checklist has nothing to save: no gap without JSON either.
+    expect(closeoutGaps({ ...rows, inspection: null, checklist: [] })).toEqual([]);
   });
 });
 
