@@ -1,10 +1,14 @@
 /**
  * The legacy frmUnderlayment layer stack: one grey bar per layer (board name + a board glyph —
- * the tan 8'×4' / 4'×4' board, a flame for the Fire Rated tile), the attachment drawn BETWEEN a
- * layer and what it sits on (a black screw for mechanical, a green adhesive bed with the adhesive's
- * name arrowed beside it), and the blue Deck bar at the bottom. Clicking a bar selects that layer.
+ * the tan 8'×4' / 4'×4' board, a flame for the Fire Rated tile) tight on the one below, the blue
+ * Deck bar at the bottom, ONE tall black screw standing in the middle from the topmost
+ * mechanically fastened layer into the deck (owner, Oct 26: like Bid Advantage — it used to be a
+ * short screw between each fastened layer and the one below), and a green adhesive bed with the
+ * adhesive's name arrowed beside it between an adhered layer and what it sits on
+ * (lib/layer-stack-geometry.ts). Clicking a bar selects that layer.
  */
 import type { UnderlaymentLayer } from "@/lib/engine/bid-builder";
+import { ROW, screwSpan, stackRows } from "@/lib/layer-stack-geometry";
 
 export type LayerAttachment = "mechanical" | "adhesive" | "none" | "durobond";
 
@@ -129,73 +133,119 @@ export interface LayerStackProps {
   quoteText?: (l: UnderlaymentLayer) => string | null;
 }
 
-export function LayerStack(p: LayerStackProps) {
+/** The screw head's height above the bar it starts on, in px. */
+const HEAD_PX = 10;
+
+/**
+ * The one tall screw: head up, the shaft threaded down `heightPx` into the deck. Drawn in
+ * currentColor: black, or light grey in dark mode where black would vanish into the page.
+ */
+function TallScrew(props: { heightPx: number }) {
+  const h = HEAD_PX + props.heightPx;
+  const threads: number[] = [];
+  for (let y = HEAD_PX + 6; y < h - 10; y += 6) threads.push(y);
   return (
-    <div className="mx-auto grid w-full max-w-md grid-cols-[3.5rem_13rem_1fr] items-center gap-x-2 text-[11px]">
-      {p.slotsTopDown.map((li) => {
-        const l = p.layers[li];
+    <svg
+      viewBox={`0 0 16 ${h}`}
+      width={16}
+      height={h}
+      className="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 text-black dark:text-neutral-300"
+      style={{ top: -HEAD_PX }}
+      aria-hidden="true"
+    >
+      <rect x="2" y="0" width="12" height="6" rx="1" fill="currentColor" />
+      <rect x="6.5" y="6" width="3" height={h - 12} fill="currentColor" />
+      <path d={`M8 ${h} L4.5 ${h - 6} H11.5 Z`} fill="currentColor" />
+      {threads.map((y) => (
+        <path key={y} d={`M4 ${y} L12 ${y + 1.5}`} stroke="currentColor" strokeWidth="1.4" />
+      ))}
+    </svg>
+  );
+}
+
+export function LayerStack(p: LayerStackProps) {
+  const rows = stackRows(p.slotsTopDown, p.layers, p.attachmentOf);
+  const screw = screwSpan(rows);
+  return (
+    <div className="mx-auto grid w-full max-w-md grid-cols-[3.5rem_13rem_1fr] items-center gap-x-2 gap-y-1 text-[11px]">
+      {rows.map((row, ri) => {
+        if (row.kind === "deck")
+          return (
+            <div key="deck" className="contents">
+              <span className="text-right text-xs">Deck</span>
+              <div
+                className="flex w-full items-center justify-center bg-blue-600 text-xs font-semibold text-white"
+                style={{ height: ROW.deck }}
+              >
+                {p.deckLabel}
+              </div>
+              <span />
+            </div>
+          );
+        if (row.kind === "bed") {
+          const l = p.layers[row.slot];
+          return (
+            <div key={`bed-${row.slot}`} className="contents">
+              <span />
+              <div className="flex w-full items-center" style={{ height: ROW.bed }}>
+                <AdhesiveBed />
+              </div>
+              <span className="whitespace-nowrap text-xs">
+                <svg viewBox="0 0 10 10" className="mr-1 inline h-2.5 w-2.5" aria-hidden="true">
+                  <polygon points="10,0 0,5 10,10" fill="currentColor" />
+                </svg>
+                {l?.adhesiveName || "Adhesive"}
+              </span>
+            </div>
+          );
+        }
+        const li = row.slot;
+        const l = row.kind === "bar" ? p.layers[li] : undefined;
         // A quoted layer draws its own attachment too (owner, Oct 26: a tapered quote attached
         // with None showed a screw — every quoted layer was drawn as mechanical).
         const att = l ? p.attachmentOf(l) : "none";
         const isSel = li === p.selected;
         const quote = l && p.quoteText ? p.quoteText(l) : null;
+        const startsScrew = screw !== null && screw.fromRow === ri;
         return (
           <div key={li} className="contents">
             <span className="text-right text-xs">Layer {li + 1}</span>
-            <button
-              type="button"
-              aria-pressed={isSel}
-              title={`Select Layer ${li + 1}`}
-              onClick={() => p.onSelect(li)}
-              className={`flex w-full cursor-pointer items-center justify-between gap-1 border px-2 text-left text-xs transition hover:shadow-sm ${l ? "h-9" : "h-7"} ${
-                isSel ? "border-2 border-yellow-400" : "border-neutral-500"
-              } ${
-                l
-                  ? "bg-neutral-400 font-medium text-black dark:bg-neutral-500"
-                  : "border-dashed bg-transparent text-muted-foreground"
-              }`}
-            >
-              {l ? (
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate">{l.board}</span>
-                  {quote && (
-                    <span className="truncate text-[10px] font-normal text-neutral-800 dark:text-neutral-100">
-                      {quote}
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span>Add Layer {li + 1}</span>
-              )}
-              {l && <TileGlyph tile={p.tileOf(l.board)} />}
-            </button>
-            <span />
-            {/* Attachment drawn between this layer and what it sits on. */}
-            <span />
-            <div className={`flex w-full items-center justify-center ${l ? "h-7" : "h-2"}`}>
-              {l && att === "mechanical" && <ScrewGlyph />}
-              {l && att === "durobond" && <ScrewGlyph />}
-              {l && att === "adhesive" && <AdhesiveBed />}
+            <div className="relative w-full" style={{ height: l ? ROW.bar : ROW.empty }}>
+              <button
+                type="button"
+                aria-pressed={isSel}
+                title={`Select Layer ${li + 1}`}
+                onClick={() => p.onSelect(li)}
+                className={`flex h-full w-full cursor-pointer items-center justify-between gap-1 border px-2 text-left text-xs transition hover:shadow-sm ${
+                  isSel ? "border-2 border-yellow-400" : "border-neutral-500"
+                } ${
+                  l
+                    ? "bg-neutral-400 font-medium text-black dark:bg-neutral-500"
+                    : "border-dashed bg-transparent text-muted-foreground"
+                }`}
+              >
+                {l ? (
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{l.board}</span>
+                    {quote && (
+                      <span className="truncate text-[10px] font-normal text-neutral-800 dark:text-neutral-100">
+                        {quote}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span>Add Layer {li + 1}</span>
+                )}
+                {l && <TileGlyph tile={p.tileOf(l.board)} />}
+              </button>
+              {startsScrew && <TallScrew heightPx={screw.heightPx} />}
             </div>
             <span className="whitespace-nowrap text-xs">
-              {l && att === "adhesive" && (
-                <>
-                  <svg viewBox="0 0 10 10" className="mr-1 inline h-2.5 w-2.5" aria-hidden="true">
-                    <polygon points="10,0 0,5 10,10" fill="currentColor" />
-                  </svg>
-                  {l.adhesiveName || "Adhesive"}
-                </>
-              )}
               {l && att === "durobond" && "Duro-Bond"}
             </span>
           </div>
         );
       })}
-      <span className="text-right text-xs">Deck</span>
-      <div className="flex h-9 w-full items-center justify-center bg-blue-600 text-xs font-semibold text-white">
-        {p.deckLabel}
-      </div>
-      <span />
     </div>
   );
 }
