@@ -29,9 +29,11 @@ import {
   type ImageRef,
   type LetterheadModule,
   moveModule,
+  type PhotoGridModule,
   type PhotoTextModule,
   type PricingTableModule,
   removeModule,
+  type RepairListModule,
   resolveCellText,
   type SignatureModule,
   type TableModule,
@@ -156,6 +158,10 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
       return <Signature m={m} set={set} />;
     case "hr":
       return <hr className="my-2 border-t border-neutral-800 dark:border-neutral-800" />;
+    case "photoGrid":
+      return <PhotoGrid m={m} set={set} />;
+    case "repairList":
+      return <RepairList m={m} set={set} />;
     case "pdf":
       return (
         <div className="flex items-center gap-3 rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
@@ -168,6 +174,24 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
         </div>
       );
   }
+}
+
+/** Phase 2 (built next): the Photo Grid's pictures with captions. */
+function PhotoGrid({ m }: { m: PhotoGridModule; set: Setter }) {
+  return (
+    <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700">
+      Photo Grid · {m.images.length} {m.images.length === 1 ? "picture" : "pictures"}
+    </div>
+  );
+}
+
+/** Phase 2 (built next): the inspection's issues as a list. */
+function RepairList({ m }: { m: RepairListModule; set: Setter }) {
+  return (
+    <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700">
+      Repair List{m.allItems ? " · every item" : ""}
+    </div>
+  );
 }
 
 // --------------------------------------------------------------------------------- pieces

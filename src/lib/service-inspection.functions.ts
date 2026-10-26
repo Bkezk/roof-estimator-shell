@@ -232,8 +232,14 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
       .object({
         id: z.string().uuid(),
         inspection: inspectionSchema
-          .pick({ items: true, notes: true, recommend_repairs: true })
-          .partial({ notes: true, recommend_repairs: true }),
+          .pick({
+            items: true,
+            notes: true,
+            recommend_repairs: true,
+            inspected_on: true,
+            grade: true,
+          })
+          .partial({ notes: true, recommend_repairs: true, inspected_on: true, grade: true }),
       })
       .parse(d),
   )
@@ -263,6 +269,9 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
       items: data.inspection.items,
       notes: data.inspection.notes ?? before?.notes ?? "",
       recommend_repairs: data.inspection.recommend_repairs ?? before?.recommend_repairs ?? false,
+      // Property Inspected / Property Grade (phase 2): kept when a save leaves them out.
+      inspected_on: data.inspection.inspected_on ?? before?.inspected_on ?? null,
+      grade: data.inspection.grade ?? before?.grade ?? null,
       saved_at: new Date().toISOString(),
       saved_by: nameOf(p),
     };

@@ -45,6 +45,8 @@ const done: Inspection = {
   recommend_repairs: false,
   saved_at: "2026-09-30T14:00:00.000Z",
   saved_by: "Tech Tom",
+  inspected_on: null,
+  grade: null,
 };
 
 describe("the checklist on a ticket", () => {

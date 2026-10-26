@@ -419,6 +419,8 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
       recommend_repairs: true,
       saved_at: "2026-10-12T15:00:00Z",
       saved_by: "Ted",
+      inspected_on: null,
+      grade: null,
     };
     const rows = {
       service_type: "inspection",
@@ -531,6 +533,8 @@ const savedJson = (over: Partial<Inspection> = {}): Inspection => ({
   recommend_repairs: false,
   saved_at: "2026-10-12T15:00:00Z",
   saved_by: "Ted Tech",
+  inspected_on: null,
+  grade: null,
   ...over,
 });
 const job = (over: Row = {}): Row => ({

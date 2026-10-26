@@ -32,7 +32,9 @@ import {
   History,
   Image as ImageIcon,
   Images,
+  LayoutGrid,
   LayoutTemplate,
+  ListChecks,
   Link2,
   Loader2,
   Mail,
@@ -566,6 +568,8 @@ const TILE_ICONS: Record<ModuleType, React.ComponentType<{ className?: string }>
   letterhead: Building2,
   pricingTable: Receipt,
   pdf: FileDown,
+  photoGrid: LayoutGrid,
+  repairList: ListChecks,
 };
 
 function EditorShell(props: {

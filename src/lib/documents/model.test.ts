@@ -14,8 +14,10 @@ import {
   duplicateModule,
   duplicatePage,
   findModule,
+  imageRefSchema,
   instantiatePages,
   MODULE_TILES,
+  moduleSchema,
   moveModule,
   movePage,
   newModule,
@@ -33,10 +35,15 @@ import {
   updateModule,
   type DocPage,
   type FullPhotoModule,
+  type ImageRef,
+  type PhotoGridModule,
+  type RepairListModule,
   type RichDoc,
 } from "./model";
 import {
   type DocumentSource,
+  type InspectionSnapshot,
+  inspectionRows,
   pricingRows,
   resolveVariables,
   sampleVariables,
@@ -169,6 +176,72 @@ describe("generating from a template with the checkboxes", () => {
   });
 });
 
+describe("phase 2 modules and marked-up uploads", () => {
+  it("Photo Grid and Repair List are modules with tiles; a new one starts empty", () => {
+    expect(MODULE_TILES).toContain("photoGrid");
+    expect(MODULE_TILES).toContain("repairList");
+    expect(newModule("photoGrid")).toMatchObject({ type: "photoGrid", images: [], columns: 2 });
+    expect(newModule("repairList")).toMatchObject({
+      type: "repairList",
+      rows: null,
+      photos: true,
+      allItems: false,
+    });
+  });
+  it("an uploaded picture keeps the marks drawn on it; the schema accepts them and a site cover", () => {
+    const img: ImageRef = {
+      kind: "upload",
+      path: "d1/a.jpg",
+      width: 1200,
+      height: 900,
+      marks: [
+        {
+          id: "m1",
+          kind: "ellipse",
+          a: [0.1, 0.1],
+          b: [0.4, 0.3],
+          color: "red",
+        },
+      ],
+    };
+    expect(imageRefSchema.parse(img)).toEqual(img);
+    expect(
+      imageRefSchema.parse({ kind: "siteCover", siteId: "55555555-5555-4555-8555-555555555555" }),
+    ).toEqual({ kind: "siteCover", siteId: "55555555-5555-4555-8555-555555555555" });
+    const grid = { ...newModule("photoGrid"), images: [{ image: img, caption: "NE corner" }] };
+    expect(moduleSchema.parse(grid)).toEqual(grid);
+  });
+  it("the Photos and Marks checkboxes reach the new modules", () => {
+    const pages: DocPage[] = [
+      {
+        id: "p",
+        modules: [
+          newModule("repairList"),
+          {
+            ...newModule("photoGrid"),
+            images: [
+              {
+                image: {
+                  kind: "ticketPhoto" as const,
+                  photoId: "11111111-1111-4111-8111-111111111111",
+                  marks: true,
+                },
+                caption: "",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const noMarks = applyOptionsToPages(pages, { ...DEFAULT_OPTIONS, marks: false });
+    expect((noMarks[0]!.modules[1] as PhotoGridModule).images[0]!.image).toMatchObject({
+      marks: false,
+    });
+    const noPhotos = applyOptionsToPages(pages, { ...DEFAULT_OPTIONS, photos: false });
+    expect((noPhotos[0]!.modules[0] as RepairListModule).photos).toBe(false);
+  });
+});
+
 describe("variables", () => {
   const src: DocumentSource = {
     kind: "bid",
@@ -251,6 +324,70 @@ describe("variables", () => {
     expect(v["ticket.number"]).toBe("6012");
     expect(v["ticket.date"]).toBe("October 20, 2026");
     expect("opportunity.price" in v).toBe(false);
+  });
+  it("an inspection ticket (phase 2): Property Inspected / Grade, the summary; an unflagged item reads as OK", () => {
+    const v = resolveVariables({
+      ...src,
+      kind: "ticket",
+      bid: null,
+      ticket: { number: "6040", description: "Inspection", date: null, po: "", type: "Inspection" },
+      inspection: {
+        inspectedOn: "2026-10-20",
+        grade: "D",
+        technician: "Braden Keck",
+        notes: "",
+        recommendRepairs: true,
+        items: [
+          { id: "c1", label: "Seams", status: "issue", note: "open at NE", photoIds: ["p1"] },
+          { id: "c2", label: "Flashings", status: "issue", note: "", photoIds: [] },
+          { id: "c3", label: "Drains", status: null, note: "", photoIds: [] },
+          { id: "c4", label: "Membrane", status: "ok", note: "", photoIds: [] },
+          { id: "c5", label: "Skylights", status: "na", note: "", photoIds: [] },
+        ],
+      },
+    });
+    expect(v["inspection.date"]).toBe("October 20, 2026");
+    expect(v["inspection.grade"]).toBe("D");
+    expect(v["inspection.summary"]).toBe("2 issues · 2 OK · 1 N/A");
+    expect(v["inspection.issues"]).toBe("Seams; Flashings");
+    expect(v["inspection.recommend"]).toBe("Repairs recommended");
+    expect(v["inspection.technician"]).toBe("Braden Keck");
+    for (const d of variableDefs("ticket")) expect(typeof v[d.key]).toBe("string");
+  });
+  it("a plain ticket leaves the inspection keys blank, never undefined", () => {
+    const v = resolveVariables({
+      ...src,
+      kind: "ticket",
+      bid: null,
+      ticket: { number: "6012", description: "Leak", date: null, po: "", type: "Repair" },
+    });
+    expect(v["inspection.grade"]).toBe("");
+    expect(v["inspection.recommend"]).toBe("");
+  });
+  it("inspectionRows: the issues with their notes and pictures, or every item with its finding", () => {
+    const insp: InspectionSnapshot = {
+      inspectedOn: null,
+      grade: null,
+      technician: "",
+      notes: "",
+      recommendRepairs: false,
+      items: [
+        { id: "c1", label: "Seams", status: "issue", note: "open at NE", photoIds: ["p1", "p2"] },
+        { id: "c3", label: "Drains", status: null, note: "", photoIds: [] },
+        { id: "c5", label: "Skylights", status: "na", note: "", photoIds: [] },
+      ],
+    };
+    expect(inspectionRows(insp, false)).toEqual({
+      columns: ["Item", "Note"],
+      rows: [["Seams", "open at NE"]],
+      photoIds: [["p1", "p2"]],
+    });
+    expect(inspectionRows(insp, true).rows).toEqual([
+      ["Seams", "Issue", "open at NE"],
+      ["Drains", "OK", ""],
+      ["Skylights", "N/A", ""],
+    ]);
+    expect(inspectionRows(null, false).rows).toEqual([]);
   });
   it("samples cover every key; labels are CenterPoint's", () => {
     expect(Object.keys(sampleVariables("bid")).length).toBe(variableDefs("bid").length);

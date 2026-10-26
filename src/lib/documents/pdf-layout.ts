@@ -17,6 +17,8 @@ import {
   type DocModule,
   type ImageRef,
   type PdfModule,
+  type PhotoGridModule,
+  type RepairListModule,
   type RichDoc,
   type RichNode,
   type TextAlign,
@@ -866,9 +868,33 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
       return layoutSignature(m.lines, x, width);
     case "hr":
       return [{ kind: "rule", x, width, height: 12, thickness: 0.75 }];
+    case "photoGrid":
+      return layoutPhotoGrid(m, x, width, ctx);
+    case "repairList":
+      return layoutRepairList(m, x, width, ctx);
     case "pdf":
       return [];
   }
+}
+
+/** Phase 2 (built next): the Photo Grid prints its pictures in rows with captions. */
+export function layoutPhotoGrid(
+  _m: PhotoGridModule,
+  _x: number,
+  _width: number,
+  _ctx: LayoutContext,
+): Piece[] {
+  return [];
+}
+
+/** Phase 2 (built next): the Repair List prints the inspection's issues with their pictures. */
+export function layoutRepairList(
+  _m: RepairListModule,
+  _x: number,
+  _width: number,
+  _ctx: LayoutContext,
+): Piece[] {
+  return [];
 }
 
 /** A page's modules as one flow of pieces, a gap between modules. */

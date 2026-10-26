@@ -56,6 +56,10 @@ export function DocImage(props: {
     const p = env.photos.find((x) => x.id === image.photoId);
     src = p?.url ?? null;
     label ||= p ? `${p.fileName}${image.marks ? " (with marks)" : ""}` : "Ticket photo";
+  } else if (image.kind === "siteCover") {
+    // Phase 2 (built next): the property's cover photo.
+    src = null;
+    label ||= "Property photo";
   } else {
     src = q.data ?? null;
     label ||= image.name ?? "Picture";

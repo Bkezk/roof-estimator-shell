@@ -931,6 +931,7 @@ export type Database = {
           centerpoint_property_id: string | null;
           city: string | null;
           county_code_id: string | null;
+          cover_photo_path: string | null;
           created_at: string;
           deleted_at: string | null;
           id: string;
@@ -949,6 +950,7 @@ export type Database = {
           centerpoint_property_id?: string | null;
           city?: string | null;
           county_code_id?: string | null;
+          cover_photo_path?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;
@@ -967,6 +969,7 @@ export type Database = {
           centerpoint_property_id?: string | null;
           city?: string | null;
           county_code_id?: string | null;
+          cover_photo_path?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;

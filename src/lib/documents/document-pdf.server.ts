@@ -172,6 +172,11 @@ async function loadImages(
         out.set(key, img ? { image: img, width: img.width, height: img.height, marks: [] } : null);
         continue;
       }
+      if (ref.kind === "siteCover") {
+        // Phase 2 (built next): the property's cover photo.
+        out.set(key, null);
+        continue;
+      }
       const row = photos.get(ref.photoId);
       const bytes = row ? await download(sb, SERVICE_BUCKET, row.storage_path) : null;
       const img = bytes ? await embed(pdf, bytes) : null;

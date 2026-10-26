@@ -18,6 +18,8 @@
  */
 import { z } from "zod";
 
+import { type PhotoMark, photoMarkSchema } from "../photo-annotations";
+
 // ---------------------------------------------------------------- rich text (ProseMirror JSON)
 
 /** Node / mark attributes: JSON primitives only (level, textAlign, key …), so a document is serialisable end to end. */
@@ -160,24 +162,41 @@ export function richVariables(
 
 /** What a photo module shows. */
 export type ImageRef =
-  /** A picture uploaded into this document (the "documents" bucket). */
-  | { kind: "upload"; path: string; width: number; height: number; name?: string | undefined }
-  /** A ticket photo (service_job_photos.id), drawn with or without its marks. */
+  /**
+   * A picture uploaded into this document (the "documents" bucket), with the marks drawn on it
+   * in the editor (phase 2, owner Oct 26: "mark up the pictures in the documents").
+   */
+  | {
+      kind: "upload";
+      path: string;
+      width: number;
+      height: number;
+      name?: string | undefined;
+      marks?: PhotoMark[] | undefined;
+    }
+  /** A ticket photo (service_job_photos.id), drawn with or without its marks (the ticket's own). */
   | { kind: "ticketPhoto"; photoId: string; marks: boolean }
+  /** The property's cover photo (crm_sites.cover_photo_path; phase 2). */
+  | { kind: "siteCover"; siteId: string }
   /** The company logo (jbk-logo.server.ts). */
   | { kind: "logo" };
 
-export const imageRefSchema: z.ZodType<ImageRef> = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("upload"),
-    path: z.string().min(1),
-    width: z.number().positive(),
-    height: z.number().positive(),
-    name: z.string().optional(),
-  }),
-  z.object({ kind: z.literal("ticketPhoto"), photoId: z.string().uuid(), marks: z.boolean() }),
-  z.object({ kind: z.literal("logo") }),
-]);
+export const imageRefSchema: z.ZodType<ImageRef, z.ZodTypeDef, unknown> = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({
+      kind: z.literal("upload"),
+      path: z.string().min(1),
+      width: z.number().positive(),
+      height: z.number().positive(),
+      name: z.string().optional(),
+      marks: z.array(photoMarkSchema).max(200).optional(),
+    }),
+    z.object({ kind: z.literal("ticketPhoto"), photoId: z.string().uuid(), marks: z.boolean() }),
+    z.object({ kind: z.literal("siteCover"), siteId: z.string().uuid() }),
+    z.object({ kind: z.literal("logo") }),
+  ],
+);
 
 // --------------------------------------------------------------------------------- modules
 
@@ -194,6 +213,8 @@ export const MODULE_TYPES = [
   "signature",
   "hr",
   "pdf",
+  "photoGrid",
+  "repairList",
 ] as const;
 export type ModuleType = (typeof MODULE_TYPES)[number];
 
@@ -211,6 +232,8 @@ export const MODULE_LABELS: Record<ModuleType, string> = {
   letterhead: "Letterhead",
   pricingTable: "Pricing Table",
   pdf: "Inserted PDF",
+  photoGrid: "Photo Grid",
+  repairList: "Repair List",
 };
 /** The tiles offered on the Modules tab (an inserted PDF comes from Insert PDF, not a tile). */
 export const MODULE_TILES: ModuleType[] = [
@@ -225,6 +248,8 @@ export const MODULE_TILES: ModuleType[] = [
   "hr",
   "letterhead",
   "pricingTable",
+  "photoGrid",
+  "repairList",
 ];
 
 /** How a Pricing Table shows the bid's money (the "with or without cost" checkbox). */
@@ -289,6 +314,25 @@ export interface SignatureModule extends ModuleBase {
 export interface HrModule extends ModuleBase {
   type: "hr";
 }
+/** A grid of pictures with captions (phase 2: the inspection report's photo pages). */
+export interface PhotoGridModule extends ModuleBase {
+  type: "photoGrid";
+  images: Array<{ image: ImageRef; caption: string }>;
+  columns: 2 | 3;
+}
+/**
+ * The inspection's findings (phase 2): one row per checklist item flagged as an issue — the
+ * item, the note, its pictures — from the document's `__inspection` snapshot
+ * (variables.ts inspectionRows). Hand edits after generation: `rows` printed instead.
+ */
+export interface RepairListModule extends ModuleBase {
+  type: "repairList";
+  rows: string[][] | null;
+  /** Print the pictures attached to each item under its row. */
+  photos: boolean;
+  /** Also list the items found OK (a full checklist), not only the issues. */
+  allItems: boolean;
+}
 export interface PdfModule extends ModuleBase {
   type: "pdf";
   /** document_assets.id (the PDF library) and what it was called when inserted. */
@@ -308,68 +352,86 @@ export type DocModule =
   | PricingTableModule
   | SignatureModule
   | HrModule
-  | PdfModule;
+  | PdfModule
+  | PhotoGridModule
+  | RepairListModule;
 
 const align = z.enum(["left", "center", "right"]);
-export const moduleSchema: z.ZodType<DocModule> = z.discriminatedUnion("type", [
-  z.object({
-    id: z.string(),
-    type: z.literal("letterhead"),
-    logo: z.boolean(),
-    text: richDocSchema,
-  }),
-  z.object({ id: z.string(), type: z.literal("body"), text: richDocSchema }),
-  z.object({
-    id: z.string(),
-    type: z.literal("twoColumns"),
-    left: richDocSchema,
-    right: richDocSchema,
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal("fullPhoto"),
-    image: imageRefSchema.nullable(),
-    caption: z.string(),
-    heightIn: z.number().min(0).max(9),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.enum(["photoLeft", "photoRight"]),
-    image: imageRefSchema.nullable(),
-    caption: z.string(),
-    text: richDocSchema,
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal("twoPhotos"),
-    images: z.tuple([imageRefSchema.nullable(), imageRefSchema.nullable()]),
-    captions: z.tuple([z.string(), z.string()]),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal("table"),
-    columns: z.array(
-      z.object({ title: z.string(), align, width: z.number().positive().optional() }),
-    ),
-    rows: z.array(z.array(z.string())),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal("pricingTable"),
-    mode: z.enum(["total", "none"]),
-    rows: z.array(z.array(z.string())).nullable(),
-    showSections: z.boolean(),
-  }),
-  z.object({ id: z.string(), type: z.literal("signature"), lines: z.array(z.string()) }),
-  z.object({ id: z.string(), type: z.literal("hr") }),
-  z.object({
-    id: z.string(),
-    type: z.literal("pdf"),
-    assetId: z.string().uuid(),
-    name: z.string(),
-    pageCount: z.number().int().positive(),
-  }),
-]);
+export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discriminatedUnion(
+  "type",
+  [
+    z.object({
+      id: z.string(),
+      type: z.literal("letterhead"),
+      logo: z.boolean(),
+      text: richDocSchema,
+    }),
+    z.object({ id: z.string(), type: z.literal("body"), text: richDocSchema }),
+    z.object({
+      id: z.string(),
+      type: z.literal("twoColumns"),
+      left: richDocSchema,
+      right: richDocSchema,
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("fullPhoto"),
+      image: imageRefSchema.nullable(),
+      caption: z.string(),
+      heightIn: z.number().min(0).max(9),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.enum(["photoLeft", "photoRight"]),
+      image: imageRefSchema.nullable(),
+      caption: z.string(),
+      text: richDocSchema,
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("twoPhotos"),
+      images: z.tuple([imageRefSchema.nullable(), imageRefSchema.nullable()]),
+      captions: z.tuple([z.string(), z.string()]),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("table"),
+      columns: z.array(
+        z.object({ title: z.string(), align, width: z.number().positive().optional() }),
+      ),
+      rows: z.array(z.array(z.string())),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("pricingTable"),
+      mode: z.enum(["total", "none"]),
+      rows: z.array(z.array(z.string())).nullable(),
+      showSections: z.boolean(),
+    }),
+    z.object({ id: z.string(), type: z.literal("signature"), lines: z.array(z.string()) }),
+    z.object({ id: z.string(), type: z.literal("hr") }),
+    z.object({
+      id: z.string(),
+      type: z.literal("photoGrid"),
+      images: z.array(z.object({ image: imageRefSchema, caption: z.string() })).max(60),
+      columns: z.union([z.literal(2), z.literal(3)]),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("repairList"),
+      rows: z.array(z.array(z.string())).nullable(),
+      photos: z.boolean(),
+      allItems: z.boolean(),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("pdf"),
+      assetId: z.string().uuid(),
+      name: z.string(),
+      pageCount: z.number().int().positive(),
+    }),
+  ],
+);
 
 // ----------------------------------------------------------------------------------- pages
 
@@ -377,7 +439,7 @@ export interface DocPage {
   id: string;
   modules: DocModule[];
 }
-export const pageSchema: z.ZodType<DocPage> = z.object({
+export const pageSchema: z.ZodType<DocPage, z.ZodTypeDef, unknown> = z.object({
   id: z.string(),
   modules: z.array(moduleSchema),
 });
@@ -477,6 +539,10 @@ export function newModule(type: ModuleType): DocModule {
       return { id, type, lines: ["Customer", "Date", "JBK, Inc."] };
     case "hr":
       return { id, type };
+    case "photoGrid":
+      return { id, type, images: [], columns: 2 };
+    case "repairList":
+      return { id, type, rows: null, photos: true, allItems: false };
     case "pdf":
       throw new Error("An inserted PDF is made from the library (newPdfModule), not a tile.");
   }
@@ -526,7 +592,8 @@ export const isPhotoModule = (m: DocModule) =>
   m.type === "fullPhoto" ||
   m.type === "photoLeft" ||
   m.type === "photoRight" ||
-  m.type === "twoPhotos";
+  m.type === "twoPhotos" ||
+  m.type === "photoGrid";
 
 const stripMarks = (img: ImageRef | null, marks: boolean): ImageRef | null =>
   img && img.kind === "ticketPhoto" ? { ...img, marks: marks && img.marks } : img;
@@ -545,6 +612,16 @@ export function applyOptionsToModule(m: DocModule, options: DocOptions): DocModu
         ...m,
         images: [stripMarks(m.images[0], options.marks), stripMarks(m.images[1], options.marks)],
       };
+    case "photoGrid":
+      return {
+        ...m,
+        images: m.images.map((i) => ({
+          ...i,
+          image: stripMarks(i.image, options.marks) ?? i.image,
+        })),
+      };
+    case "repairList":
+      return { ...m, photos: m.photos && options.photos };
     default:
       return m;
   }
@@ -686,6 +763,7 @@ export function pagesVariables(pages: readonly DocPage[]): Set<string> {
       }
       if (m.type === "table") m.rows.forEach((r) => r.forEach(cell));
       if (m.type === "pricingTable" && m.rows) m.rows.forEach((r) => r.forEach(cell));
+      if (m.type === "repairList" && m.rows) m.rows.forEach((r) => r.forEach(cell));
     }
   return keys;
 }

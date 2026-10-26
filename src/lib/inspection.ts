@@ -40,6 +40,9 @@ export const DEFAULT_CHECKLIST = [
 ] as const;
 
 export const INSPECTION_STATUSES = ["ok", "issue", "na"] as const;
+/** The roof's grade on an inspection (CenterPoint's Property Grade). */
+export const INSPECTION_GRADES = ["A", "B", "C", "D", "F"] as const;
+export type InspectionGrade = (typeof INSPECTION_GRADES)[number];
 export type InspectionStatus = (typeof INSPECTION_STATUSES)[number];
 export const STATUS_LABELS: Record<InspectionStatus, string> = {
   ok: "OK",
@@ -68,6 +71,16 @@ export const inspectionSchema = z.object({
   recommend_repairs: z.boolean().default(false),
   saved_at: z.string().max(40).nullable().default(null),
   saved_by: z.string().max(200).nullable().default(null),
+  /**
+   * The day the roof was inspected and its grade (CenterPoint's Property Inspected / Property
+   * Grade; the document generator's variables, phase 2 — owner, Oct 26). Null on older saves.
+   */
+  inspected_on: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .default(null),
+  grade: z.enum(INSPECTION_GRADES).nullable().default(null),
 });
 export type Inspection = z.output<typeof inspectionSchema>;
 

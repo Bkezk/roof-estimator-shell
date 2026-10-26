@@ -105,6 +105,13 @@ export const VARIABLE_DEFS: VariableDef[] = [
   v("ticket.date", "Ticket Date", "Ticket", "October 26, 2026", ["ticket"]),
   v("ticket.po", "Purchase Order", "Ticket", "PO 4471", ["ticket"]),
   v("ticket.type", "Ticket Type", "Ticket", "Repair", ["ticket"]),
+  // The inspection (phase 2, owner Oct 26): service_jobs.inspection (src/lib/inspection.ts).
+  v("inspection.date", "Property Inspected", "Ticket", "October 20, 2026", ["ticket"]),
+  v("inspection.grade", "Property Grade", "Ticket", "D", ["ticket"]),
+  v("inspection.summary", "Inspection Summary", "Ticket", "3 issues · 6 OK", ["ticket"]),
+  v("inspection.issues", "Issues Found", "Ticket", "Seams; Flashings; Ponding", ["ticket"]),
+  v("inspection.recommend", "Recommendation", "Ticket", "Repairs recommended", ["ticket"]),
+  v("inspection.technician", "Inspected By", "Ticket", "Braden Keck", ["ticket"]),
   // People.
   v("manager.name", "Manager Name", "Manager", "Brandon Keck"),
   v("manager.email", "Manager Email", "Manager", "brandon@flatroofonline.com"),
@@ -186,6 +193,8 @@ export interface DocumentSource {
     po: string;
     type: string;
   } | null;
+  /** The inspection on an inspection ticket (phase 2), null on any other ticket. */
+  inspection?: InspectionSnapshot | null;
   manager: { name: string; email: string; phone: string } | null;
   accountManager: { name: string; email: string; phone: string } | null;
 }
@@ -224,6 +233,50 @@ export const dayText = (day: string | null | undefined): string => {
 };
 const cityLine = (p: { city: string; state: string; zip: string }) =>
   [p.city, [p.state, p.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+
+/**
+ * The inspection as a document snapshots it (the reserved `__inspection` key, like `__sections`):
+ * every visible checklist item with its answer, note and the ids of the ticket photos attached
+ * to it (service_job_photos.item_key), plus the findings. Built by the server from
+ * service_jobs.inspection (src/lib/inspection.ts) and the ticket's photos.
+ */
+export interface InspectionSnapshot {
+  inspectedOn: string | null;
+  grade: string | null;
+  technician: string;
+  notes: string;
+  recommendRepairs: boolean;
+  items: Array<{
+    id: string;
+    label: string;
+    /** "ok" | "issue" | "na"; null = never flagged, which reads as OK (owner, Oct 26). */
+    status: "ok" | "issue" | "na" | null;
+    note: string;
+    photoIds: string[];
+  }>;
+}
+
+const INSPECTION_STATUS_TEXT: Record<"ok" | "issue" | "na", string> = {
+  ok: "OK",
+  issue: "Issue",
+  na: "N/A",
+};
+
+/** The Repair List's rows: the issues (or every item), each with its note. */
+export function inspectionRows(
+  insp: InspectionSnapshot | null,
+  allItems: boolean,
+): { columns: string[]; rows: string[][]; photoIds: string[][] } {
+  const columns = allItems ? ["Item", "Finding", "Note"] : ["Item", "Note"];
+  const items = (insp?.items ?? []).filter((i) => allItems || i.status === "issue");
+  return {
+    columns,
+    rows: items.map((i) =>
+      allItems ? [i.label, INSPECTION_STATUS_TEXT[i.status ?? "ok"], i.note] : [i.label, i.note],
+    ),
+    photoIds: items.map((i) => i.photoIds),
+  };
+}
 
 export function resolveVariables(src: DocumentSource): Record<string, string> {
   const out: Record<string, string> = {};
@@ -284,6 +337,28 @@ export function resolveVariables(src: DocumentSource): Record<string, string> {
     out["ticket.date"] = dayText(t.date);
     out["ticket.po"] = t.po;
     out["ticket.type"] = t.type;
+  }
+  if (src.kind === "ticket" && src.inspection) {
+    const i = src.inspection;
+    out["inspection.date"] = dayText(i.inspectedOn);
+    out["inspection.grade"] = i.grade ?? "";
+    const issues = i.items.filter((x) => x.status === "issue");
+    const ok = i.items.filter((x) => x.status === "ok" || x.status === null);
+    const na = i.items.filter((x) => x.status === "na");
+    out["inspection.summary"] = [
+      issues.length ? `${issues.length} ${issues.length === 1 ? "issue" : "issues"}` : null,
+      ok.length ? `${ok.length} OK` : null,
+      na.length ? `${na.length} N/A` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    out["inspection.issues"] = issues.map((x) => x.label).join("; ");
+    out["inspection.recommend"] = i.recommendRepairs
+      ? "Repairs recommended"
+      : issues.length
+        ? "Issues noted; no repairs recommended"
+        : "No issues found";
+    out["inspection.technician"] = i.technician;
   }
   if (src.manager) {
     out["manager.name"] = src.manager.name;
