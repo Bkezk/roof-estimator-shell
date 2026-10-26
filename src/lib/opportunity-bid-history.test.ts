@@ -227,7 +227,7 @@ describe("where the folds sit", () => {
   it("the estimator: at the foot of the bid-total panel, only for a saved bid", () => {
     const est = src("src/routes/estimate.tsx");
     expect(est).toContain(
-      '{bidId && ( <AuditHistory entity="bid" entityId={bidId} className="rounded-lg border px-4 py-3" /> )}',
+      '{bidId && <AuditHistory entity="bid" entityId={bidId} className="px-1 text-xs" />}',
     );
     const panel = est.indexOf('<div id="bid-total-panel"');
     const fold = est.indexOf('<AuditHistory entity="bid"');

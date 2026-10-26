@@ -809,11 +809,11 @@ describe("Setup › Bid Info: the custom reminder", () => {
     expect(due).toBeGreaterThan(-1);
     expect(rem).toBeGreaterThan(due);
     const box = panel.slice(rem, panel.indexOf('data-line="bid-reminded"'));
-    expect(box).toContain(">\n              Remind me on\n            </Label>");
+    expect(box).toContain(">\n                Remind me on\n              </Label>");
     expect(box).toContain('id="bid-reminder-on"');
     expect(box).toContain('type="date"');
     expect(box).toContain("value={bidReminderOn}");
-    expect(box).toContain(">\n              About\n            </Label>");
+    expect(box).toContain(">\n                About\n              </Label>");
     expect(box).toContain('id="bid-reminder-note"');
     expect(box).toContain("value={bidReminderNote}");
     expect(box).toContain("maxLength={BID_REMINDER_NOTE_MAX}");

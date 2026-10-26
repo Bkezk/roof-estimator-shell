@@ -9,6 +9,8 @@ import {
   AlertTriangle,
   Save,
   Copy,
+  Bell,
+  BellRing,
   Download,
   RefreshCw,
   ChevronLeft,
@@ -182,6 +184,7 @@ import {
   fromOpportunityLine,
   STATUS_LABELS,
   type BidStatus,
+  bidCustomerProblem,
 } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-store";
 import { useBidLock } from "@/lib/use-bid-lock";
@@ -696,6 +699,12 @@ function EstimatePage() {
   const [bidReminderNote, setBidReminderNote] = useState("");
   // Set when a save was refused for want of a due date: the box is ringed until it is filled.
   const [dueDateMissing, setDueDateMissing] = useState(false);
+  // Owner, Oct 26: a bid cannot be saved without a linked customer; set by handleSave, cleared
+  // when one is picked (the Customer Name picker offers "Add … as a new customer").
+  const [customerMissing, setCustomerMissing] = useState(false);
+  // The reminder boxes sit behind the bell in the status strip (owner, Oct 26: the rail was
+  // "very busy"); open on their own when the bid carries a reminder.
+  const [reminderOpen, setReminderOpen] = useState(false);
   const dueDateRef = useRef<HTMLInputElement>(null);
   // Picking Lost asks why (the same dialog the Bids list uses); anything else clears the reason.
   const changeStatus = (v: string) => {
@@ -838,6 +847,9 @@ function EstimatePage() {
   // the bid's client / job-site fields once; after that the bid's own fields are the source of
   // truth for the proposal. Nothing here reads or changes pricing.
   const [linkedAccountId, setLinkedAccountId] = useState<string | null>(null);
+  useEffect(() => {
+    if (linkedAccountId) setCustomerMissing(false);
+  }, [linkedAccountId]);
   const [linkedSiteId, setLinkedSiteId] = useState<string | null>(null);
   // "Account · Site" from the pick, shown until the profile itself has loaded.
   const [linkedAccountLabel, setLinkedAccountLabel] = useState("");
@@ -1217,6 +1229,7 @@ function EstimatePage() {
     setBidFolder(loadedBid.folder ?? "");
     setBidReminderOn(loadedBid.reminder_on ?? "");
     setBidReminderNote(loadedBid.reminder_note ?? "");
+    setReminderOpen(!!loadedBid.reminder_on);
     loadedHeader.current = bidHeaderOfRow(loadedBid);
     setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
@@ -2403,6 +2416,23 @@ function EstimatePage() {
     // The bid due date (owner, Oct 12): a new bid needs one before its first save; an existing
     // bid may change it any time and clear it only once won / lost. The same rule runs on the
     // server (saveBid); here it is said plainly and the box is ringed and focused.
+    // The customer first (owner, Oct 26: "bids should be required to have a customer"): the
+    // same rule runs on the server (saveBid); here the picker is ringed and Setup shown.
+    const customerProblem = bidCustomerProblem({
+      accountId: linkedAccountId,
+      storedAccountId: null,
+    });
+    if (customerProblem) {
+      setCustomerMissing(true);
+      toast.error(customerProblem);
+      goStep(0);
+      window.setTimeout(() => {
+        const el = document.getElementById("bid-customer");
+        el?.scrollIntoView({ block: "center" });
+        el?.focus();
+      }, 50);
+      return false;
+    }
     const dueProblem = bidDueDateProblem({
       isNew: !bidId,
       dueDate: bidDueDate || null,
@@ -2692,7 +2722,7 @@ function EstimatePage() {
     }
   };
   /** The Export button's menu (Bid-total panel and the Review step's footer). */
-  const exportMenu = (props: { className?: string; size?: "sm" }) => (
+  const exportMenu = (props: { className?: string; size?: "sm" | "icon"; iconOnly?: boolean }) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
@@ -2700,11 +2730,12 @@ function EstimatePage() {
           size={props.size}
           className={props.className}
           disabled={!result}
+          aria-label="Export"
           title="Export the estimate review (CSV) or a bid summary (PDF)"
         >
-          <Download className="mr-2 h-4 w-4" />
-          Export
-          <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" />
+          <Download className={props.iconOnly ? "h-4 w-4" : "mr-2 h-4 w-4"} />
+          {!props.iconOnly && "Export"}
+          {!props.iconOnly && <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" />}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -2998,12 +3029,22 @@ function EstimatePage() {
                       <Field label="Customer Name">
                         {/* Typing sets the name as before; picking a profile links the bid. */}
                         <AccountPicker
+                          id="bid-customer"
                           allowFreeText
                           value={null}
                           text={customer.name}
                           onText={(v) => setCustomer((c) => ({ ...c, name: v }))}
                           onChange={(hit) => void pickAccount(hit)}
                         />
+                        {customerMissing && (
+                          <p
+                            className="text-[11px] font-medium text-destructive"
+                            data-line="bid-customer-missing"
+                          >
+                            Pick the customer from the list, or choose &ldquo;Add &hellip; as a new
+                            customer&rdquo; if they are not in the system.
+                          </p>
+                        )}
                         {accountChip}
                         {siteBox}
                       </Field>
@@ -6544,11 +6585,13 @@ function EstimatePage() {
         />
       )}
       <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+        {/* The status strip (owner, Oct 26: the rail was "very busy"): Bid due, Status, the
+            reminder behind a bell, Export as an icon — one row. */}
         <div className="flex flex-wrap items-end gap-2">
           {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so
             we can also have those show on this week, overdue, etc" — the row's due_date, beside
             Status. Required on the first save (handleSave rings it and says so); a bid from before
-            due dates existed is not blocked but gets the amber hint until one is set. */}
+            due dates existed is not blocked but gets an amber ring, the hint in its tooltip. */}
           <div className="min-w-0 space-y-1" data-field="bid-due">
             <Label htmlFor="bid-due-date" className="text-xs">
               Bid due
@@ -6557,7 +6600,7 @@ function EstimatePage() {
               id="bid-due-date"
               ref={dueDateRef}
               type="date"
-              className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : ""}`}
+              className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
               value={bidDueDate}
               onChange={(e) => {
                 setBidDueDate(e.target.value);
@@ -6566,22 +6609,17 @@ function EstimatePage() {
               disabled={readOnly}
               required={!bidId}
               aria-invalid={dueDateMissing || undefined}
-              aria-describedby={
-                dueDateMissing || (bidId && !bidDueDate) ? "bid-due-hint" : undefined
+              aria-describedby={dueDateMissing ? "bid-due-hint" : undefined}
+              title={
+                bidId && !bidDueDate
+                  ? BID_NO_DUE_HINT
+                  : "When the bid must go out. Draft bids sit on Work Overview by this day."
               }
-              title="When the bid must go out. Draft bids sit on Work Overview by this day."
             />
-            {dueDateMissing ? (
+            {dueDateMissing && (
               <p id="bid-due-hint" className="text-[11px] font-medium text-destructive">
                 Give the bid a due date before saving
               </p>
-            ) : (
-              bidId &&
-              !bidDueDate && (
-                <p id="bid-due-hint" className="text-[11px] text-amber-700 dark:text-amber-400">
-                  {BID_NO_DUE_HINT}
-                </p>
-              )
             )}
           </div>
           <div className="min-w-0 flex-1 space-y-1">
@@ -6650,52 +6688,70 @@ function EstimatePage() {
               />
             )}
           </div>
-          {exportMenu({ size: "sm", className: "h-9" })}
+          <Button
+            type="button"
+            variant={bidReminderOn ? "secondary" : "outline"}
+            size="icon"
+            className="h-9 w-9"
+            aria-label={reminderOpen ? "Hide the reminder" : "Reminder"}
+            aria-expanded={reminderOpen}
+            title={
+              bidReminderOn
+                ? `Reminder on ${bidReminderOn}${bidReminderNote.trim() ? `: ${bidReminderNote.trim()}` : ""}`
+                : "Set a reminder for this bid (owner, Oct 13)"
+            }
+            onClick={() => setReminderOpen((o) => !o)}
+          >
+            {bidReminderOn ? <BellRing className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+          </Button>
+          {exportMenu({ size: "icon", className: "h-9 w-9", iconOnly: true })}
         </div>
         {/* Owner, Oct 13: "can we have users who set a bid set up a custom reminder on there as
-            well on setup?" — the row's reminder_on / reminder_note, under Bid due. On that day
+            well on setup?" — the row's reminder_on / reminder_note, behind the bell. On that day
             whoever started the bid gets "Bid reminder: <name>" with the note, whatever the status
             (bids-notify.server.ts); once it went, "Reminded <day>" shows here and a new day can be
             picked (changing the date re-arms it). Clearing the date clears the note. */}
-        <div className="flex flex-wrap items-end gap-2" data-field="bid-reminder">
-          <div className="min-w-0 space-y-1">
-            <Label htmlFor="bid-reminder-on" className="text-xs">
-              Remind me on
-            </Label>
-            <Input
-              id="bid-reminder-on"
-              type="date"
-              className="h-9 w-[9.5rem]"
-              value={bidReminderOn}
-              onChange={(e) => {
-                setBidReminderOn(e.target.value);
-                if (!e.target.value) setBidReminderNote("");
-              }}
-              disabled={readOnly}
-              title="A day to be reminded about this bid, whatever its status. Blank = no reminder."
-            />
+        {reminderOpen && (
+          <div className="flex flex-wrap items-end gap-2" data-field="bid-reminder">
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="bid-reminder-on" className="text-xs">
+                Remind me on
+              </Label>
+              <Input
+                id="bid-reminder-on"
+                type="date"
+                className="h-9 w-[9.5rem]"
+                value={bidReminderOn}
+                onChange={(e) => {
+                  setBidReminderOn(e.target.value);
+                  if (!e.target.value) setBidReminderNote("");
+                }}
+                disabled={readOnly}
+                title="A day to be reminded about this bid, whatever its status. Blank = no reminder."
+              />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <Label htmlFor="bid-reminder-note" className="text-xs">
+                About
+              </Label>
+              <Input
+                id="bid-reminder-note"
+                className="h-9"
+                value={bidReminderNote}
+                maxLength={BID_REMINDER_NOTE_MAX}
+                placeholder={BID_REMINDER_NOTE_PLACEHOLDER}
+                onChange={(e) => setBidReminderNote(e.target.value)}
+                disabled={readOnly || !bidReminderOn}
+                title="What the reminder is about — the notice's text."
+              />
+            </div>
+            {loadedBid?.reminded_at && (loadedBid.reminder_on ?? "") === bidReminderOn && (
+              <p className="w-full text-[11px] text-muted-foreground" data-line="bid-reminded">
+                {bidRemindedLine(loadedBid.reminded_at)} — pick a new day for another reminder.
+              </p>
+            )}
           </div>
-          <div className="min-w-0 flex-1 space-y-1">
-            <Label htmlFor="bid-reminder-note" className="text-xs">
-              About
-            </Label>
-            <Input
-              id="bid-reminder-note"
-              className="h-9"
-              value={bidReminderNote}
-              maxLength={BID_REMINDER_NOTE_MAX}
-              placeholder={BID_REMINDER_NOTE_PLACEHOLDER}
-              onChange={(e) => setBidReminderNote(e.target.value)}
-              disabled={readOnly || !bidReminderOn}
-              title="What the reminder is about — the notice's text."
-            />
-          </div>
-          {loadedBid?.reminded_at && (loadedBid.reminder_on ?? "") === bidReminderOn && (
-            <p className="w-full text-[11px] text-muted-foreground" data-line="bid-reminded">
-              {bidRemindedLine(loadedBid.reminded_at)} — pick a new day for another reminder.
-            </p>
-          )}
-        </div>
+        )}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">
             <div className="min-w-0">
@@ -6920,16 +6976,17 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
-        <AccessorySummaryCard
-          result={result?.accessories}
-          extraLines={result?.adhesiveLines}
-          laborRate={laborRate}
-        />
+        {/* The accessories summary only while on the Accessories step (owner, Oct 26). */}
+        {step === 5 && (
+          <AccessorySummaryCard
+            result={result?.accessories}
+            extraLines={result?.adhesiveLines}
+            laborRate={laborRate}
+          />
+        )}
         {/* Admins and managers: the bid's History (audit_log; owner, Oct 12), folded, at the
             foot of the total panel. AuditHistory renders nothing for anyone else. */}
-        {bidId && (
-          <AuditHistory entity="bid" entityId={bidId} className="rounded-lg border px-4 py-3" />
-        )}
+        {bidId && <AuditHistory entity="bid" entityId={bidId} className="px-1 text-xs" />}
       </div>
 
       {/* Mobile: the live total stays in reach on every step (the panel itself sits at the

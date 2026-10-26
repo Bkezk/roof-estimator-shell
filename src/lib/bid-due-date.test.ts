@@ -194,7 +194,8 @@ describe("1. saveBid (the server)", () => {
       data,
       context: { supabase: env.db, userId },
     });
-  const base = { name: "New bid", data: {}, grandTotal: 100, status: "draft" };
+  // A new bid carries its customer (owner, Oct 26).
+  const base = { name: "New bid", data: {}, grandTotal: 100, status: "draft", accountId: ACC };
   const bidWrites = () => env.writes.filter((w) => w.table === "bids");
   const row = () => env.tables["bids"]!.find((r) => r["id"] === BID)!;
 
@@ -246,7 +247,7 @@ describe("1. saveBid (the server)", () => {
   it("the server reads the row's due_date for the rule and keeps the other save behaviour", () => {
     const fn = read("src/lib/bids.functions.ts");
     expect(fn).toContain(
-      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at",',
+      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id",',
     );
     expect(fn).toMatch(/dueDate: z\s*\.string\(\)\s*\.regex\(/);
     expect(fn).toContain("...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),");
@@ -296,7 +297,7 @@ describe("2. the estimator", () => {
     expect(save).toContain("dueDateRef.current?.focus();");
     expect(save).toContain("return false;");
     expect(src).toContain(
-      'className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : ""}`}',
+      'className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}',
     );
     expect(src).toContain("Give the bid a due date before saving");
     expect(src).toContain("aria-invalid={dueDateMissing || undefined}");
@@ -305,9 +306,10 @@ describe("2. the estimator", () => {
     expect(BID_NO_DUE_HINT).toBe(
       "No due date — it will not show on Work Overview until one is set",
     );
-    expect(src).toMatch(
-      /bidId &&\s*!bidDueDate && \(\s*<p id="bid-due-hint" className="text-\[11px\] text-amber-700 dark:text-amber-400">\s*\{BID_NO_DUE_HINT\}/,
-    );
+    // Owner, Oct 26 (the rail was "very busy"): the hint is the box's tooltip and an amber ring,
+    // not a sentence under it.
+    expect(src).toContain("bidId && !bidDueDate\n                  ? BID_NO_DUE_HINT");
+    expect(src).toContain('"border-amber-500 ring-1 ring-amber-500/40"');
   });
   it("a bid started fresh (combine, takeoff, PlanSwift) starts with no due date", () => {
     expect(src.match(/setBidDueDate\(""\);/g)).toHaveLength(3);

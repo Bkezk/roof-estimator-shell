@@ -40,6 +40,7 @@ import {
   storedPricing,
   withStoredPricing,
   customerFromSavedState,
+  propertyFallback,
 } from "./server-pure";
 import { pricingRows } from "./variables";
 
@@ -355,5 +356,43 @@ describe("customerFromSavedState: the Setup customer block when the bid is not l
     const one = customerFromSavedState({ customer: { projectAddress: "77 Ridge Rd" } }, "x");
     expect(one.company?.address).toBe("77 Ridge Rd");
     expect(one.company?.city).toBe("");
+  });
+});
+
+describe("propertyFallback: no property picked (owner, Oct 26, Monticello Banking)", () => {
+  const owens = { address1: "487 Ky 80", city: "Windsor", state: "KY", zip: "42565" };
+  it("uses the linked customer's address under the bid's name when the typed block has none", () => {
+    const typed = {
+      name: "Monticello Banking Company 2026",
+      address: "",
+      city: "",
+      county: "",
+      state: "",
+      zip: "",
+      areaSqFt: null,
+    };
+    expect(propertyFallback(typed, owens, 12000)).toEqual({
+      name: "Monticello Banking Company 2026",
+      address: "487 Ky 80",
+      city: "Windsor",
+      county: "",
+      state: "KY",
+      zip: "42565",
+      areaSqFt: 12000,
+    });
+  });
+  it("a typed project address wins over the customer's; nothing at all → null", () => {
+    const typed = {
+      name: "x",
+      address: "1 Main St",
+      city: "Corbin",
+      county: "",
+      state: "KY",
+      zip: "",
+      areaSqFt: null,
+    };
+    expect(propertyFallback(typed, owens, null)?.address).toBe("1 Main St");
+    expect(propertyFallback(null, null, null)).toBeNull();
+    expect(propertyFallback(null, { address1: "", city: "" }, null)).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import {
   bidReminderColumns,
   bidStatusStamps,
   wonOnColumns,
+  bidCustomerProblem,
 } from "@/lib/bid-status";
 import { bidFiguresSchema } from "@/lib/bid-figures";
 import { assertPricingRead } from "@/lib/auth.functions";
@@ -201,7 +202,7 @@ export const saveBid = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
         .select(
-          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at",
+          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id",
         )
         .eq("id", data.id)
         .maybeSingle();
@@ -217,6 +218,13 @@ export const saveBid = createServerFn({ method: "POST" })
             payload.updated_by_name,
           ),
         );
+      // Every save leaves the bid linked to a customer (owner, Oct 26): the stored link stays
+      // unless the save changes it; unlinking is refused.
+      const customerProblem = bidCustomerProblem({
+        accountId: data.accountId,
+        storedAccountId: cur.account_id,
+      });
+      if (customerProblem) throw new Error(customerProblem);
       // The due date may be changed any time, and cleared only on a won / lost bid (owner, Oct
       // 12); a bid that never had one is not held up.
       const dueProblem = bidDueDateProblem({
@@ -258,8 +266,14 @@ export const saveBid = createServerFn({ method: "POST" })
       return bid;
     }
     const status = data.status ?? "draft";
-    // A new bid needs its due date (owner, Oct 12: "at the origination of bids we should have a
-    // bid due date required"): the estimator asks first; this is the final guard.
+    // A new bid needs its customer (owner, Oct 26) and its due date (owner, Oct 12: "at the
+    // origination of bids we should have a bid due date required"): the estimator asks first;
+    // these are the final guards.
+    const customerProblem = bidCustomerProblem({
+      accountId: data.accountId ?? null,
+      storedAccountId: null,
+    });
+    if (customerProblem) throw new Error(customerProblem);
     const dueProblem = bidDueDateProblem({ isNew: true, dueDate: data.dueDate, status });
     if (dueProblem) throw new Error(dueProblem);
     const { data: bid, error } = await context.supabase

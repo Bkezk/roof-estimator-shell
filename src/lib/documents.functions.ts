@@ -60,6 +60,7 @@ import {
   MAX_IMAGE_BYTES,
   pagesForNewDocument,
   customerFromSavedState,
+  propertyFallback,
   personOf,
   pickContact,
   poLine,
@@ -656,7 +657,7 @@ async function loadSource(
       ? sb
           .from("crm_accounts")
           .select(
-            "id, name, contact_name, phone, email, address1, city, state, zip, external_id, account_manager_id",
+            "id, name, contact_name, phone, mobile, email, address1, city, state, zip, external_id, account_manager_id",
           )
           .eq("id", accountId)
           .maybeSingle()
@@ -719,7 +720,7 @@ async function loadSource(
           name: s(acc.name),
           contact: s(contact?.name) || s(acc.contact_name),
           contactPosition: s(contact?.position),
-          phone: s(contact?.office_phone) || s(contact?.mobile) || s(acc.phone),
+          phone: s(contact?.office_phone) || s(contact?.mobile) || s(acc.phone) || s(acc.mobile),
           email: s(contact?.email) || s(acc.email),
           address: s(acc.address1),
           city: s(acc.city),
@@ -738,7 +739,10 @@ async function loadSource(
           zip: s(site.data.zip),
           areaSqFt: input.kind === "bid" ? (bid?.sqFt ?? null) : null,
         }
-      : fallbackProperty,
+      : // No property picked: the customer's own address rather than blanks (owner, Oct 26,
+        // Monticello: the bid is linked to the general contractor with no property), under the
+        // typed / bid-name property when that carries an address of its own.
+        propertyFallback(fallbackProperty, acc, input.kind === "bid" ? (bid?.sqFt ?? null) : null),
     bid,
     ticket,
     manager:

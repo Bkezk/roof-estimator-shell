@@ -397,7 +397,7 @@ describe("A. the sync on the first save and on link (owner, Oct 12)", () => {
   const makeBid = async (status: string) => {
     const made = await call<Row>(
       saveBid,
-      { name: "New bid", data: {}, grandTotal: 100, status, dueDate: "2026-10-20" },
+      { name: "New bid", data: {}, grandTotal: 100, status, dueDate: "2026-10-20", accountId: ACC },
       EST,
     );
     const row = env.tables["bids"]!.find((r) => r["id"] === made["id"])!;

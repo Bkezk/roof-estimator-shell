@@ -122,7 +122,7 @@ const bidRow = (over: Row = {}): Row => ({
   due_date: "2026-10-30",
   won_on: null,
   deleted_at: null,
-  account_id: null,
+  account_id: "55555555-5555-4555-8555-555555555555", // every saved bid has a customer (Oct 26)
   updated_at: "2026-10-10T12:00:00Z",
   created_at: "2026-10-01T12:00:00Z",
   ...over,
@@ -182,6 +182,7 @@ describe("saveBid writes won_on by the rule", () => {
       saveBid,
       {
         name: "New won bid",
+        accountId: "55555555-5555-4555-8555-555555555555", // every saved bid has a customer (Oct 26)
         data: {},
         grandTotal: 100,
         status: "won",
@@ -193,13 +194,27 @@ describe("saveBid writes won_on by the rule", () => {
     expect(made.won_on).toBe("2026-10-18");
     const made2 = await call<{ id: string; won_on: string | null }>(
       saveBid,
-      { name: "New won bid 2", data: {}, grandTotal: 100, status: "won", dueDate: "2026-10-30" },
+      {
+        name: "New won bid 2",
+        data: {},
+        grandTotal: 100,
+        status: "won",
+        dueDate: "2026-10-30",
+        accountId: "55555555-5555-4555-8555-555555555555",
+      },
       EVE,
     );
     expect(made2.won_on).toBe(today());
     const draft = await call<{ id: string; won_on: string | null }>(
       saveBid,
-      { name: "New draft", data: {}, grandTotal: 100, dueDate: "2026-10-30", wonOn: "2026-10-18" },
+      {
+        name: "New draft",
+        data: {},
+        grandTotal: 100,
+        dueDate: "2026-10-30",
+        wonOn: "2026-10-18",
+        accountId: "55555555-5555-4555-8555-555555555555",
+      },
       EVE,
     );
     expect(draft.won_on).toBeNull();

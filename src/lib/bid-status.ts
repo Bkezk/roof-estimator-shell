@@ -128,6 +128,29 @@ export const BID_DRIVES_OPP_NOTE =
 /** "From opportunity: <title>" on the Bids page and in the estimator (bids.opportunity_id). */
 export const fromOpportunityLine = (title: string) => `From opportunity: ${title}`;
 
+// ---- the bid's customer (owner, Oct 26) ------------------------------------------------------
+
+/** The message a save without a linked customer gets, in the estimator and from the server. */
+export const BID_CUSTOMER_REQUIRED =
+  "Pick the customer before saving — type the name under Setup › Customer Name; if they are not in the system, choose “Add … as a new customer” there";
+
+/**
+ * Owner, Oct 26: "bids should be required to have a customer as well, if the customer isnt in
+ * the system it prompts them to make one". Every save must leave the bid linked to a customer
+ * record (bids.account_id): a new bid must carry one, an existing bid keeps its stored link
+ * unless the save changes it, and unlinking is refused. The estimator and saveBid both call
+ * this, so the message is the same on both sides. Null when the save may go ahead.
+ */
+export function bidCustomerProblem(input: {
+  /** The link the save carries: an id, null to unlink, undefined to leave the stored one. */
+  accountId: string | null | undefined;
+  /** The stored row's link (null for a new bid). */
+  storedAccountId: string | null;
+}): string | null {
+  const after = input.accountId === undefined ? input.storedAccountId : input.accountId;
+  return after ? null : BID_CUSTOMER_REQUIRED;
+}
+
 // ---- the bid due date (owner, Oct 12) --------------------------------------------------------
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;

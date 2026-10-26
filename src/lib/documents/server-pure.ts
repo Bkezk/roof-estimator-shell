@@ -449,6 +449,35 @@ export function customerFromSavedState(
   return { company, property, estimatorName: t(c["estimatorName"]) };
 }
 
+/**
+ * The Property variables when no property (site) is picked: the typed / bid-name fallback when
+ * it carries an address, else the linked customer's own address under that name (owner, Oct 26,
+ * Monticello Banking: the bid is linked to Owens Construction with no property, and the
+ * "Submitted to" block printed blanks). Null when there is neither.
+ */
+export function propertyFallback(
+  typed: DocumentSource["property"],
+  account:
+    | { address1?: string | null; city?: string | null; state?: string | null; zip?: string | null }
+    | null
+    | undefined,
+  areaSqFt: number | null,
+): DocumentSource["property"] {
+  const t = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  if (typed?.address) return { ...typed, areaSqFt };
+  const address = t(account?.address1);
+  if (!account || (!address && !t(account.city))) return typed ? { ...typed, areaSqFt } : null;
+  return {
+    name: typed?.name ?? "",
+    address,
+    city: t(account.city),
+    county: "",
+    state: t(account.state),
+    zip: t(account.zip),
+    areaSqFt,
+  };
+}
+
 export const personOf = (
   p: { full_name?: string | null; email?: string | null } | null | undefined,
   officePhone: string,

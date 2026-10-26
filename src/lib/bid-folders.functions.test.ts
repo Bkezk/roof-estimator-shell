@@ -45,7 +45,7 @@ const bid = (id: string, over: Row = {}): Row => ({
   deleted_at: null,
   due_date: "2026-10-20",
   folder: null,
-  account_id: null,
+  account_id: "55555555-5555-4555-8555-555555555555", // every saved bid has a customer (Oct 26)
   created_by: EST,
   updated_at: "2026-10-10T12:00:00Z",
   updated_by_name: "Brian",
@@ -151,7 +151,13 @@ describe("bid folders on the server", () => {
   });
 
   describe("saveBid", () => {
-    const base = { name: "Bid C", data: {}, grandTotal: 100, status: "draft" as const };
+    const base = {
+      name: "Bid C",
+      data: {},
+      grandTotal: 100,
+      status: "draft" as const,
+      accountId: "55555555-5555-4555-8555-555555555555", // every saved bid has a customer (Oct 26)
+    };
     it("stores the folder with the save (normalized), clears it on null, leaves it alone when absent", async () => {
       await call(saveBid, { ...base, id: C, folder: "  Bell County  Schools " }, env);
       expect(row(C)["folder"]).toBe("Bell County Schools");
