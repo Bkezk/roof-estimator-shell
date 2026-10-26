@@ -2933,19 +2933,22 @@ function EstimatePage() {
             )}
           </Button>
           {/* Documents (owner, Oct 26): the CenterPoint-style document generator — proposals and
-              letters for this bid, each made by a click here; nothing is generated on its own. */}
+              letters for this bid, each made by a click here; nothing is generated on its own.
+              Icon only (owner: "i dont like how this now takes two lines"): the row must stay
+              one line with Save and Update pricing & labor on a laptop. */}
           <Button
             variant="outline"
+            size="icon"
             onClick={() => setDocumentsOpen(true)}
             disabled={!bidId}
+            aria-label="Documents"
             title={
               bidId
                 ? "Documents for this bid: proposals and letters"
                 : "Save the bid first — documents hang off a saved bid"
             }
           >
-            <FileText className="mr-2 h-4 w-4" />
-            Documents
+            <FileText className="h-4 w-4" />
           </Button>
           {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
               on the right in black; the dot marks management data newer than the bid's copy. */}

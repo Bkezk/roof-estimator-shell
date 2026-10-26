@@ -32,7 +32,10 @@ describe("the estimator's Documents button", () => {
     const button = estimate.slice(estimate.lastIndexOf("<Button", docs), docs);
     expect(button).toContain("disabled={!bidId}");
     expect(button).toContain("setDocumentsOpen(true)");
-    expect(estimate).toContain('<FileText className="mr-2 h-4 w-4" />\n            Documents');
+    // Icon only with a label (owner, Oct 26: "i dont like how this now takes two lines").
+    expect(estimate).toContain('size="icon"\n            onClick={() => setDocumentsOpen(true)}');
+    expect(estimate).toContain('aria-label="Documents"');
+    expect(estimate).toContain('<FileText className="h-4 w-4" />');
   });
   it("mounts one DocumentsPanel for the saved bid, named after it", () => {
     expect(estimate).toContain(
