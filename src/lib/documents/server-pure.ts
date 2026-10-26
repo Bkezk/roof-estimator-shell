@@ -390,6 +390,65 @@ export const poLine = (
 };
 
 /** A profile as the Manager / Account Manager variables; the phone is the office's. */
+/**
+ * The estimator's Setup customer block (SavedBidState.customer: name, contact, projectAddress,
+ * estimatorName), used when the bid is not linked to a customer record (owner, Oct 26: "its also
+ * not filling in the customers info" — the bids tried had no customer link; the typed-in block
+ * is what the office has). projectAddress is free text: line 1 the street, a later "City, ST
+ * 12345" line the rest. The property takes the bid's name. Null parts when nothing is typed.
+ */
+export function customerFromSavedState(
+  data: unknown,
+  bidName: string,
+): {
+  company: DocumentSource["company"];
+  property: DocumentSource["property"];
+  estimatorName: string;
+} {
+  const s = (data ?? {}) as Record<string, unknown>;
+  const c = (s["customer"] ?? {}) as Record<string, unknown>;
+  const t = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const name = t(c["name"]);
+  const contact = t(c["contact"]);
+  const lines = t(c["projectAddress"])
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const address = lines[0] ?? "";
+  let city = "";
+  let state = "";
+  let zip = "";
+  for (const l of lines.slice(1)) {
+    const m = /^(.*?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/.exec(l);
+    if (m) {
+      city = m[1]!.trim();
+      state = m[2]!.toUpperCase();
+      zip = m[3]!;
+      break;
+    }
+  }
+  const company =
+    name || contact || address
+      ? {
+          name,
+          contact,
+          contactPosition: "",
+          phone: "",
+          email: "",
+          address,
+          city,
+          state,
+          zip,
+          externalId: "",
+        }
+      : null;
+  const property =
+    bidName.trim() || address
+      ? { name: bidName.trim(), address, city, county: "", state, zip, areaSqFt: null }
+      : null;
+  return { company, property, estimatorName: t(c["estimatorName"]) };
+}
+
 export const personOf = (
   p: { full_name?: string | null; email?: string | null } | null | undefined,
   officePhone: string,

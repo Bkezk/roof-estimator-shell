@@ -78,7 +78,11 @@ describe("the canvas", () => {
   it("has Insert PDF and Add Page under each page, and the Page N tab", () => {
     expect(canvas).toContain("Insert PDF");
     expect(canvas).toContain("Add Page");
-    expect(canvas).toContain("pageTabLabel(i)");
+    // The tab reads "Page N" on a page's first sheet and "Page N · continued" on the sheets its
+    // modules overflow onto (owner, Oct 26: the page break starts a new sheet on screen).
+    expect(canvas).toContain("continuedTabLabel(props.index, part)");
+    expect(canvas).toContain("packIntoSheets(");
+    expect(canvas).toContain("sheetContentLimit(env.options)");
     expect(canvas).toContain("addPage(pages, i + 1)");
   });
   it("is a white US-Letter sheet (allowlisted in dark-mode.test.ts) with the page-break guide", () => {

@@ -32,6 +32,9 @@ import {
   variableNodeJson,
   variableRowValue,
   versionLine,
+  packIntoSheets,
+  sheetContentLimit,
+  continuedTabLabel,
 } from "./editor-helpers";
 import { cloneModule, newModule, newPage, VARIABLE_NODE } from "./model";
 import { pricingRows, sampleVariables, VARIABLE_GROUPS, variableDefs } from "./variables";
@@ -243,5 +246,38 @@ describe("text bits", () => {
   it("dataUrlBase64 strips the prefix", () => {
     expect(dataUrlBase64("data:image/png;base64,AAAA")).toBe("AAAA");
     expect(dataUrlBase64("AAAA")).toBe("AAAA");
+  });
+});
+
+describe("the screen breaks pages where the PDF does (owner, Oct 26: 'the page breaks should start a new page')", () => {
+  it("sheetContentLimit: up to the dotted line with the footer on, else the padded sheet", () => {
+    expect(sheetContentLimit({ footer: true, pageBreakIn: 8.8 })).toBe(Math.round(8.8 * 96) - 72);
+    expect(sheetContentLimit({ footer: false, pageBreakIn: 8.8 })).toBe(1056 - 72 - 72);
+  });
+  it("packIntoSheets: a module that does not fit starts the next sheet; a giant one gets its own", () => {
+    const items = [
+      { id: "a", height: 300 },
+      { id: "b", height: 300 },
+      { id: "c", height: 300 },
+      { id: "d", height: 2000 },
+      { id: "e", height: 10 },
+    ];
+    expect(packIntoSheets(items, 700, 12)).toEqual([["a", "b"], ["c"], ["d"], ["e"]]);
+    // Unmeasured modules weigh nothing, so the first paint is one sheet.
+    expect(
+      packIntoSheets(
+        [
+          { id: "a", height: undefined },
+          { id: "b", height: undefined },
+        ],
+        700,
+        12,
+      ),
+    ).toEqual([["a", "b"]]);
+    expect(packIntoSheets([], 700, 12)).toEqual([[]]);
+  });
+  it("tab labels", () => {
+    expect(continuedTabLabel(0, 0)).toBe("Page 1");
+    expect(continuedTabLabel(1, 2)).toBe("Page 2 · continued");
   });
 });

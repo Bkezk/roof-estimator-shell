@@ -221,6 +221,49 @@ export function sheetScale(available: number, gutter = 32): number {
   return Math.min(1, Math.max(0.3, (available - gutter) / SHEET.width));
 }
 
+/**
+ * The content height a screen sheet offers, in px: up to the page break with the footer on
+ * (owner, Oct 26: "the page breaks should start a new page to see what it looks like rather than
+ * have it continue the page"), else the full padded sheet. The PDF breaks at the same place
+ * (pdf-layout.ts contentHeightFor).
+ */
+export function sheetContentLimit(options: { footer: boolean; pageBreakIn: number }): number {
+  const guide = pageBreakPx(options);
+  return (guide ?? SHEET.height - SHEET.pad) - SHEET.pad;
+}
+
+/**
+ * Pack modules into sheets by their measured heights: a module that does not fit the room left
+ * starts the next sheet; one taller than a whole sheet gets a sheet of its own (and overflows it
+ * on screen, as it continues in the PDF). An unmeasured module (no height yet) counts as 0 so the
+ * first paint is one sheet. Pure, so it is tested.
+ */
+export function packIntoSheets(
+  items: ReadonlyArray<{ id: string; height: number | undefined }>,
+  limit: number,
+  gap: number,
+): string[][] {
+  const sheets: string[][] = [];
+  let cur: string[] = [];
+  let used = 0;
+  for (const it of items) {
+    const h = it.height ?? 0;
+    const need = (cur.length ? gap : 0) + h;
+    if (cur.length && used + need > limit) {
+      sheets.push(cur);
+      cur = [];
+      used = 0;
+    }
+    cur.push(it.id);
+    used += (cur.length > 1 ? gap : 0) + h;
+  }
+  if (cur.length || !sheets.length) sheets.push(cur);
+  return sheets;
+}
+
+export const continuedTabLabel = (index: number, part: number) =>
+  part === 0 ? pageTabLabel(index) : `${pageTabLabel(index)} · continued`;
+
 export const pageTabLabel = (index: number) => `Page ${index + 1}`;
 
 // -------------------------------------------------------------------------------- text bits

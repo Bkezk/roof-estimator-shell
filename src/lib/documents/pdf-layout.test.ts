@@ -44,6 +44,7 @@ import {
   splitColumns,
   tableColumnWidths,
   wrapRuns,
+  contentHeightFor,
 } from "./pdf-layout";
 import { variableLabel } from "./variables";
 
@@ -417,5 +418,19 @@ describe("footer", () => {
     ).toBe("JBK, Inc. · (606) 523-9000 · www.flatroofonline.com");
     expect(footerLine({ "account.name": "JBK, Inc.", "account.phone": "" })).toBe("JBK, Inc.");
     expect(pageLabel(2, 5)).toBe("Page 2 of 5");
+  });
+});
+
+describe("contentHeightFor: the page break sets where the printed page ends (owner, Oct 26)", () => {
+  it("footer on: the page-break inches from the top, less the top margin; clamped to 5–10.5 in", () => {
+    expect(contentHeightFor({ footer: true, pageBreakIn: 8.8 })).toBe(Math.round(8.8 * 72) - 54);
+    expect(contentHeightFor({ footer: true, pageBreakIn: 5 })).toBe(360 - 54);
+    expect(contentHeightFor({ footer: true, pageBreakIn: 99 })).toBe(CONTENT_HEIGHT);
+    expect(contentHeightFor({ footer: true, pageBreakIn: Number.NaN })).toBe(
+      Math.round(8.8 * 72) - 54,
+    );
+  });
+  it("footer off: the whole margin-to-margin page", () => {
+    expect(contentHeightFor({ footer: false, pageBreakIn: 5 })).toBe(CONTENT_HEIGHT);
   });
 });

@@ -54,6 +54,7 @@ import {
   type Placed,
   SIGNATURE_SPACE,
   splitAtPdf,
+  contentHeightFor,
 } from "./pdf-layout";
 import {
   displayVariables,
@@ -450,7 +451,7 @@ export async function renderDocumentPdf(
         continue;
       }
       const pieces = layoutModules(seg.modules, ctx);
-      for (const placed of paginate(pieces, CONTENT_HEIGHT)) {
+      for (const placed of paginate(pieces, contentHeightFor(options))) {
         contentPage();
         drawer.draw(placed, top);
       }

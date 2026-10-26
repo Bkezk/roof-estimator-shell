@@ -59,6 +59,7 @@ import {
   MAX_ASSET_BYTES,
   MAX_IMAGE_BYTES,
   pagesForNewDocument,
+  customerFromSavedState,
   personOf,
   pickContact,
   poLine,
@@ -585,6 +586,8 @@ async function loadSource(
   let contactId: string | null = null;
   let label = "";
   let fallbackProperty: DocumentSource["property"] = null;
+  let fallbackCompany: DocumentSource["company"] = null;
+  let fallbackManagerName = "";
 
   if (input.kind === "bid") {
     const { data: row, error } = await sb
@@ -599,6 +602,14 @@ async function loadSource(
     siteId = row.site_id;
     createdBy = row.created_by;
     label = recordLabel("bid", row);
+    // Not linked to a customer record: the Setup step's typed-in customer block fills the
+    // Company / Property variables (owner, Oct 26), with the bid's name as the property.
+    const typed = customerFromSavedState(row.data, row.name);
+    if (!accountId) fallbackCompany = typed.company;
+    if (!siteId) {
+      fallbackProperty = typed.property ? { ...typed.property, areaSqFt: bid.sqFt ?? null } : null;
+    }
+    fallbackManagerName = typed.estimatorName;
   } else {
     const { data: row, error } = await sb
       .from("service_jobs")
@@ -716,7 +727,7 @@ async function loadSource(
           zip: s(acc.zip),
           externalId: s(acc.external_id),
         }
-      : null,
+      : fallbackCompany,
     property: site.data
       ? {
           name: s(site.data.name),
@@ -730,7 +741,9 @@ async function loadSource(
       : fallbackProperty,
     bid,
     ticket,
-    manager: personOf(manager.data, officePhone),
+    manager:
+      personOf(manager.data, officePhone) ??
+      (fallbackManagerName ? { name: fallbackManagerName, email: "", phone: officePhone } : null),
     accountManager: personOf(accountManager.data, officePhone),
   };
   return { source, label, accountId };

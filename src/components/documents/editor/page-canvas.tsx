@@ -6,18 +6,20 @@
  * fit a narrow canvas. Clicking a sheet selects it (the Modules tab adds there); a module tile
  * dragged from the Modules tab drops onto a sheet.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
 
 import {
+  continuedTabLabel,
   MODULE_DRAG_TYPE,
+  packIntoSheets,
   pageBreakPx,
   pageDomId,
-  pageTabLabel,
   SHEET,
+  sheetContentLimit,
   sheetScale,
 } from "@/lib/documents/editor-helpers";
 import {
@@ -74,6 +76,12 @@ export function PageCanvas(props: {
   const hostRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pdfFor, setPdfFor] = useState<number | null>(null);
+  // How many sheets each page takes on screen (its modules packed up to the page break), so
+  // the sheets' running numbers match what prints.
+  const [sheetCounts, setSheetCounts] = useState<Record<string, number>>({});
+  const onSheetCount = useCallback((pageId: string, n: number) => {
+    setSheetCounts((prev) => (prev[pageId] === n ? prev : { ...prev, [pageId]: n }));
+  }, []);
 
   useEffect(() => {
     const el = hostRef.current;
@@ -85,6 +93,7 @@ export function PageCanvas(props: {
   }, []);
 
   const guide = pageBreakPx(props.options);
+  let running = 0;
   return (
     <div ref={hostRef} className="min-h-full bg-muted/40 px-4 py-4" data-document-canvas>
       <style>{DOC_PROSE_CSS}</style>
@@ -92,68 +101,53 @@ export function PageCanvas(props: {
         className="mx-auto flex flex-col items-center gap-6"
         style={{ width: SHEET.width * scale }}
       >
-        {props.pages.map((page, i) => (
-          <div key={page.id} className="w-full">
-            <div className="mb-1 flex items-end gap-2">
-              <button
-                type="button"
-                className={cn(
-                  "rounded-t-md border border-b-0 px-3 py-1 text-xs font-medium",
-                  props.selectedPageId === page.id
-                    ? "bg-card text-card-foreground"
-                    : "bg-muted text-muted-foreground hover:text-foreground",
-                )}
-                title="Select this page (the Modules tab adds here)"
-                onClick={() => env.dispatch({ type: "selectPage", pageId: page.id })}
-              >
-                {pageTabLabel(i)}
-              </button>
-              {page.modules.length === 0 ? (
-                <span className="pb-1 text-xs text-muted-foreground">
-                  Empty page — add a module from the Modules tab
-                </span>
-              ) : null}
-            </div>
-            <ScaledSheet scale={scale}>
-              <Sheet
+        {props.pages.map((page, i) => {
+          const startNumber = running + 1;
+          running += Math.max(1, sheetCounts[page.id] ?? 1);
+          return (
+            <div key={page.id} className="w-full">
+              <PageSheets
                 page={page}
                 index={i}
                 selected={props.selectedPageId === page.id}
                 guide={guide}
+                scale={scale}
+                startNumber={startNumber}
+                onSheetCount={onSheetCount}
               />
-            </ScaledSheet>
-            <div className="mt-2 flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                title="Insert a PDF from the library as the last module of this page"
-                onClick={() => setPdfFor(i)}
-              >
-                <FileUp className="h-4 w-4" />
-                Insert PDF
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                title="Add a blank page after this one"
-                onClick={() =>
-                  env.dispatch({
-                    type: "setPages",
-                    op: (pages) => {
-                      const next = addPage(pages, i + 1);
-                      return next;
-                    },
-                  })
-                }
-              >
-                <FilePlus2 className="h-4 w-4" />
-                Add Page
-              </Button>
+              <div className="mt-2 flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  title="Insert a PDF from the library as the last module of this page"
+                  onClick={() => setPdfFor(i)}
+                >
+                  <FileUp className="h-4 w-4" />
+                  Insert PDF
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  title="Add a blank page after this one"
+                  onClick={() =>
+                    env.dispatch({
+                      type: "setPages",
+                      op: (pages) => {
+                        const next = addPage(pages, i + 1);
+                        return next;
+                      },
+                    })
+                  }
+                >
+                  <FilePlus2 className="h-4 w-4" />
+                  Add Page
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <InsertPdfDialog
         open={pdfFor !== null}
@@ -176,6 +170,108 @@ export function PageCanvas(props: {
         }}
       />
     </div>
+  );
+}
+
+/** The gap between modules on a sheet (the flex column's gap-3), in px. */
+const MODULE_GAP_PX = 12;
+
+/**
+ * One page's sheets: its modules are measured as they render and packed up to the page break
+ * (owner, Oct 26: "the page breaks should start a new page to see what it looks like rather
+ * than have it continue the page"); what does not fit starts the next sheet, labelled "Page N ·
+ * continued". A module is never split on screen (the PDF splits text more finely, so a long
+ * letter may print on fewer pages than it shows here).
+ */
+function PageSheets(props: {
+  page: DocPage;
+  index: number;
+  selected: boolean;
+  guide: number | null;
+  scale: number;
+  startNumber: number;
+  onSheetCount: (pageId: string, n: number) => void;
+}) {
+  const env = useEditorEnv();
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const observer = useRef<ResizeObserver | null>(null);
+  const elements = useRef(new Map<string, HTMLDivElement>());
+  const measureRef = useCallback((id: string) => {
+    return (el: HTMLDivElement | null) => {
+      const prev = elements.current.get(id);
+      if (prev && prev !== el) observer.current?.unobserve(prev);
+      if (!el) {
+        elements.current.delete(id);
+        return;
+      }
+      elements.current.set(id, el);
+      if (typeof ResizeObserver === "undefined") return;
+      if (!observer.current)
+        observer.current = new ResizeObserver((entries) => {
+          setHeights((cur) => {
+            let next = cur;
+            for (const e of entries) {
+              const mid = (e.target as HTMLElement).dataset["moduleId"];
+              const h = (e.target as HTMLElement).offsetHeight;
+              if (mid && next[mid] !== h) next = { ...next, [mid]: h };
+            }
+            return next;
+          });
+        });
+      observer.current.observe(el);
+    };
+  }, []);
+  useEffect(() => () => observer.current?.disconnect(), []);
+
+  const limit = sheetContentLimit(env.options);
+  const groups = packIntoSheets(
+    props.page.modules.map((m) => ({ id: m.id, height: heights[m.id] })),
+    limit,
+    MODULE_GAP_PX,
+  );
+  useEffect(() => {
+    props.onSheetCount(props.page.id, groups.length);
+  }, [groups.length, props.page.id, props.onSheetCount]);
+
+  return (
+    <>
+      {groups.map((ids, part) => (
+        <div key={part} className={part > 0 ? "mt-4" : undefined}>
+          <div className="mb-1 flex items-end gap-2">
+            <button
+              type="button"
+              className={cn(
+                "rounded-t-md border border-b-0 px-3 py-1 text-xs font-medium",
+                props.selected
+                  ? "bg-card text-card-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+              title="Select this page (the Modules tab adds here)"
+              onClick={() => env.dispatch({ type: "selectPage", pageId: props.page.id })}
+            >
+              {continuedTabLabel(props.index, part)}
+            </button>
+            {part === 0 && props.page.modules.length === 0 ? (
+              <span className="pb-1 text-xs text-muted-foreground">
+                Empty page — add a module from the Modules tab
+              </span>
+            ) : null}
+          </div>
+          <ScaledSheet scale={props.scale}>
+            <Sheet
+              page={props.page}
+              index={props.index}
+              part={part}
+              moduleIds={ids}
+              measureRef={measureRef}
+              printedNumber={props.startNumber + part}
+              selected={props.selected}
+              guide={props.guide}
+            />
+          </ScaledSheet>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -207,12 +303,25 @@ function ScaledSheet(props: { scale: number; children: React.ReactNode }) {
   );
 }
 
-function Sheet(props: { page: DocPage; index: number; selected: boolean; guide: number | null }) {
+function Sheet(props: {
+  page: DocPage;
+  index: number;
+  /** Which sheet of the page this is (0 = the first; the Pages list scrolls to it). */
+  part: number;
+  moduleIds: string[];
+  measureRef: (id: string) => (el: HTMLDivElement | null) => void;
+  printedNumber: number;
+  selected: boolean;
+  guide: number | null;
+}) {
   const env = useEditorEnv();
   const [over, setOver] = useState(false);
+  const shown = props.moduleIds
+    .map((id) => props.page.modules.findIndex((m) => m.id === id))
+    .filter((i) => i >= 0);
   return (
     <div
-      id={pageDomId(props.page.id)}
+      id={props.part === 0 ? pageDomId(props.page.id) : undefined}
       // The paper: white with black ink in both themes (dark-mode.test.ts allowlist).
       className={cn(
         "document-sheet relative bg-white text-black shadow-md ring-1 ring-black/10",
@@ -253,9 +362,14 @@ function Sheet(props: { page: DocPage; index: number; selected: boolean; guide: 
         </div>
       ) : null}
       <div className="flex flex-col gap-3">
-        {props.page.modules.map((m, i) => (
-          <ModuleView key={m.id} module={m} index={i} count={props.page.modules.length} />
-        ))}
+        {shown.map((i) => {
+          const m = props.page.modules[i]!;
+          return (
+            <div key={m.id} ref={props.measureRef(m.id)} data-module-id={m.id}>
+              <ModuleView module={m} index={i} count={props.page.modules.length} />
+            </div>
+          );
+        })}
         {props.page.modules.length === 0 ? (
           <div className="rounded-sm border-2 border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-400">
             Drop a module here, or use + on the Modules tab.
@@ -265,7 +379,7 @@ function Sheet(props: { page: DocPage; index: number; selected: boolean; guide: 
       {env.options.footer ? (
         <div className="pointer-events-none absolute bottom-6 left-0 right-0 flex justify-between px-[72px] text-[9pt] text-neutral-500">
           <span>{env.variables["account.name"] ?? ""}</span>
-          <span>Page {props.index + 1}</span>
+          <span>Page {props.printedNumber}</span>
         </div>
       ) : null}
     </div>

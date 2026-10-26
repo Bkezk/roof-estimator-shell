@@ -31,6 +31,22 @@ import { type DocumentSource, pricingRows } from "./variables";
 
 export const CONTENT_WIDTH = PAGE.widthPt - 2 * PAGE.marginPt;
 export const CONTENT_HEIGHT = PAGE.heightPt - 2 * PAGE.marginPt;
+/** CenterPoint's page break (5–10.5 in from the top, with Footer on): the printed page breaks there too. */
+export const PAGE_BREAK_MIN_IN = 5;
+export const PAGE_BREAK_MAX_IN = 10.5;
+/**
+ * The content height a page offers: with the footer on, the page-break setting (inches from the
+ * top of the page, the editor's dotted line — owner, Oct 26: "the page breaks should start a new
+ * page") minus the top margin; otherwise the full margin-to-margin height. The screen sheet
+ * (editor-helpers.ts sheetContentLimit) uses the same rule, so both break in the same place.
+ */
+export function contentHeightFor(options: { footer: boolean; pageBreakIn: number }): number {
+  if (!options.footer) return CONTENT_HEIGHT;
+  const inches = Number.isFinite(options.pageBreakIn)
+    ? Math.min(PAGE_BREAK_MAX_IN, Math.max(PAGE_BREAK_MIN_IN, options.pageBreakIn))
+    : 8.8;
+  return Math.min(CONTENT_HEIGHT, Math.round(inches * 72) - PAGE.marginPt);
+}
 export const BODY_SIZE = 10.5;
 export const LINE_HEIGHT = 1.35;
 export const HEADING_SIZES: Record<1 | 2 | 3, number> = { 1: 18, 2: 14, 3: 12 };

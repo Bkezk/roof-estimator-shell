@@ -39,6 +39,7 @@ import {
   sniffImageType,
   storedPricing,
   withStoredPricing,
+  customerFromSavedState,
 } from "./server-pure";
 import { pricingRows } from "./variables";
 
@@ -292,5 +293,67 @@ describe("the customer", () => {
       phone: "(606) 523-9000",
     });
     expect(personOf(null, "")).toBeNull();
+  });
+});
+
+describe("customerFromSavedState: the Setup customer block when the bid is not linked (owner, Oct 26)", () => {
+  it("fills Company from the typed block and Property from the bid's name and project address", () => {
+    const out = customerFromSavedState(
+      {
+        customer: {
+          name: "City of Corbin",
+          contact: "Jason Wilson",
+          projectAddress: "128 Civic Center Dr\nCorbin, KY 40701",
+          estimatorName: "Braden Keck",
+        },
+      },
+      "Whitley County Detention Center",
+    );
+    expect(out.company).toEqual({
+      name: "City of Corbin",
+      contact: "Jason Wilson",
+      contactPosition: "",
+      phone: "",
+      email: "",
+      address: "128 Civic Center Dr",
+      city: "Corbin",
+      state: "KY",
+      zip: "40701",
+      externalId: "",
+    });
+    expect(out.property).toEqual({
+      name: "Whitley County Detention Center",
+      address: "128 Civic Center Dr",
+      city: "Corbin",
+      county: "",
+      state: "KY",
+      zip: "40701",
+      areaSqFt: null,
+    });
+    expect(out.estimatorName).toBe("Braden Keck");
+  });
+  it("the Summit case: a name alone (trailing space) still fills Company; blanks stay blank, never undefined", () => {
+    const out = customerFromSavedState(
+      { customer: { name: "Summit ", contact: "", projectAddress: "" } },
+      "Summit Project",
+    );
+    expect(out.company?.name).toBe("Summit");
+    expect(out.company?.address).toBe("");
+    expect(out.property).toEqual({
+      name: "Summit Project",
+      address: "",
+      city: "",
+      county: "",
+      state: "",
+      zip: "",
+      areaSqFt: null,
+    });
+  });
+  it("nothing typed → no company; a one-line address parses no city", () => {
+    expect(customerFromSavedState({}, "").company).toBeNull();
+    expect(customerFromSavedState(null, "").property).toBeNull();
+    const one = customerFromSavedState({ customer: { projectAddress: "77 Ridge Rd" } }, "x");
+    expect(one.company?.address).toBe("77 Ridge Rd");
+    expect(one.company?.city).toBe("");
   });
 });
