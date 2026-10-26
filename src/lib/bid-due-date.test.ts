@@ -246,7 +246,7 @@ describe("1. saveBid (the server)", () => {
   it("the server reads the row's due_date for the rule and keeps the other save behaviour", () => {
     const fn = read("src/lib/bids.functions.ts");
     expect(fn).toContain(
-      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",',
+      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at",',
     );
     expect(fn).toMatch(/dueDate: z\s*\.string\(\)\s*\.regex\(/);
     expect(fn).toContain("...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),");

@@ -46,6 +46,16 @@ export function staleSavedAtText(at: string, now: Date = new Date(), tz: string 
 }
 
 /**
+ * The message a save into a deleted bid gets (owner, Oct 26: a bid deleted from the Bids list
+ * while a tab had it open used to trip the stale rule by accident; with the rule on the contents
+ * stamp it is refused on purpose, saying so). Nothing is written: the tab keeps its edits, and
+ * the bid can be restored from the Bids list's recently deleted bin and saved again.
+ */
+export function bidDeletedMessage(deletedAt: string, now?: Date): string {
+  return `Not saved: this bid was deleted at ${staleSavedAtText(deletedAt, now)}. Restore it from the Bids list (Recently deleted), then save again — your changes are still here.`;
+}
+
+/**
  * The message a stale save gets. `me` is the saver's own display name: when the newer save was
  * theirs it was another tab of theirs, and the message says so instead of "Brian saved this".
  */

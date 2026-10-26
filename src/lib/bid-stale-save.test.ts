@@ -17,7 +17,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { bidSaveIsStale, bidStaleMessage, staleSavedAtText } from "./bid-stale-save";
+import {
+  bidDeletedMessage,
+  bidSaveIsStale,
+  bidStaleMessage,
+  staleSavedAtText,
+} from "./bid-stale-save";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
@@ -104,6 +109,30 @@ describe("bidStaleMessage", () => {
     const m = bidStaleMessage("Brian Folden", at, "Brian Folden", now);
     expect(m).toContain("Not saved: you saved this bid from another tab at 3:07 PM");
     expect(m).not.toContain("Brian Folden saved");
+  });
+});
+
+describe("a save into a deleted bid is refused, saying so (nothing written)", () => {
+  it("names when it was deleted (Eastern) and where to restore it", () => {
+    const m = bidDeletedMessage("2026-10-26T14:19:41.200Z", new Date("2026-10-26T15:00:00Z"));
+    expect(m).toBe(
+      "Not saved: this bid was deleted at 10:19 AM. Restore it from the Bids list (Recently deleted), then save again — your changes are still here.",
+    );
+    expect(
+      bidDeletedMessage("2026-10-22T19:07:28.393Z", new Date("2026-10-26T15:00:00Z")),
+    ).toContain("deleted at Oct 22 at 3:07 PM");
+  });
+  it("saveBid reads deleted_at and refuses before the stale check and the write", () => {
+    const src = read("./bids.functions.ts");
+    expect(src).toContain('status_changed_at, deleted_at",');
+    const gone = src.indexOf(
+      "if (cur.deleted_at) throw new Error(bidDeletedMessage(cur.deleted_at));",
+    );
+    const stale = src.indexOf("bidSaveIsStale(data.expectUpdatedAt, cur)");
+    const write = src.indexOf('.from("bids")\n        .update({\n          ...payload,');
+    expect(gone).toBeGreaterThan(0);
+    expect(stale).toBeGreaterThan(gone);
+    expect(write).toBeGreaterThan(stale);
   });
 });
 

@@ -17,7 +17,7 @@ import { bidFiguresSchema } from "@/lib/bid-figures";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
-import { bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
+import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
 
@@ -201,12 +201,15 @@ export const saveBid = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
         .select(
-          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",
+          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at",
         )
         .eq("id", data.id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
-      if (data.expectUpdatedAt && cur && bidSaveIsStale(data.expectUpdatedAt, cur))
+      if (!cur) throw new Error("Not saved: this bid no longer exists.");
+      // A bid deleted from the Bids list while this tab had it open: refused, nothing written.
+      if (cur.deleted_at) throw new Error(bidDeletedMessage(cur.deleted_at));
+      if (data.expectUpdatedAt && bidSaveIsStale(data.expectUpdatedAt, cur))
         throw new Error(
           bidStaleMessage(
             cur.updated_by_name,
