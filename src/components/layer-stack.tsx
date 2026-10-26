@@ -134,7 +134,9 @@ export function LayerStack(p: LayerStackProps) {
     <div className="mx-auto grid w-full max-w-md grid-cols-[3.5rem_13rem_1fr] items-center gap-x-2 text-[11px]">
       {p.slotsTopDown.map((li) => {
         const l = p.layers[li];
-        const att = l && !l.quote ? p.attachmentOf(l) : l ? "mechanical" : "none";
+        // A quoted layer draws its own attachment too (owner, Oct 26: a tapered quote attached
+        // with None showed a screw — every quoted layer was drawn as mechanical).
+        const att = l ? p.attachmentOf(l) : "none";
         const isSel = li === p.selected;
         const quote = l && p.quoteText ? p.quoteText(l) : null;
         return (

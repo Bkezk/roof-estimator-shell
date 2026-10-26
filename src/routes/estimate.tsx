@@ -57,6 +57,7 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { snapBidSheets, type SheetBidState } from "@/lib/bid-sheets";
+import { nextLayerFromForm } from "@/lib/underlayment-layer";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import { warrantiesForSystem } from "@/lib/warranty-systems";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
@@ -4452,19 +4453,16 @@ function EstimatePage() {
                             // Duro-Bond sections always store the forced legacy option (§22.28).
                             const att: UAttach =
                               (s.roofSystem ?? roofSystem) === "Duro-Bond" ? "durobond" : uAttach;
-                            nextLayers[idx] = {
+                            // The form's layer over the slot's (lib/underlayment-layer.ts): a
+                            // quote on the same board survives an attachment change (owner,
+                            // Oct 26 — None cleared the tapered quotes); §10.7 containers are
+                            // billed verbatim under adhesive over a tapered/crickets-group board.
+                            nextLayers[idx] = nextLayerFromForm(nextLayers[idx], {
                               board: uBoard,
                               attachment: att,
-                              fastenersPerBoard: 0,
-                              adhesiveName: att === "adhesive" ? uAdh : "",
-                              // The engine derives the substrate (deck / layer below, legacy).
-                              substrate: "",
-                              // §10.7: containers billed verbatim when this layer sits over a
-                              // tapered/crickets-group board (engine checks the group).
-                              ...(att === "adhesive" && uQAU > 0
-                                ? { quoteAdhesiveUnits: uQAU }
-                                : {}),
-                            };
+                              adhesiveName: uAdh,
+                              quoteAdhesiveUnits: uQAU,
+                            });
                             return { ...s, layers: nextLayers, underlaymentBoard: "" };
                           }),
                         )
@@ -4910,10 +4908,15 @@ function EstimatePage() {
                                     cur && cur.board === board
                                       ? { ...cur, quote }
                                       : {
+                                          // The form's attachment (owner, Oct 26: a tapered
+                                          // quote is held by the layers above it — None — but
+                                          // every new quote layer was written as mechanical and
+                                          // drawn with a screw). A quote bills no fasteners
+                                          // either way.
                                           board,
-                                          attachment: "mechanical",
+                                          attachment: uAttach,
                                           fastenersPerBoard: 0,
-                                          adhesiveName: "",
+                                          adhesiveName: uAttach === "adhesive" ? uAdh : "",
                                           substrate: "",
                                           quote,
                                         };
