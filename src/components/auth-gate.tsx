@@ -87,7 +87,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
               <NotificationsBell />
             </div>
           </header>
-          <SidebarInset className="p-6">{children}</SidebarInset>
+          <SidebarInset className="p-4 sm:p-6">{children}</SidebarInset>
         </div>
       </div>
     </SidebarProvider>

@@ -299,7 +299,9 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
             ) : (
               <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
-            <span className="min-w-0 truncate text-base font-semibold">{a.name}</span>
+            <span className="min-w-0 break-words text-base font-semibold sm:truncate">
+              {a.name}
+            </span>
             <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
               {a.kind === "individual" ? "Individual" : "Company"}
             </Badge>
@@ -333,7 +335,9 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
             </p>
           )}
         </div>
-        <dl className="grid shrink-0 grid-cols-3 gap-x-6 text-sm sm:text-right">
+        {/* On a phone the three stats take the full width under the name (owner, Oct 26: beside
+            it they squeezed the name to a few letters); from sm up they sit to the right. */}
+        <dl className="grid w-full grid-cols-3 gap-x-3 text-sm sm:w-auto sm:shrink-0 sm:gap-x-6 sm:text-right">
           <div>
             <dt className="text-xs text-muted-foreground">Account manager</dt>
             <dd>{managerName ?? "Unassigned"}</dd>
