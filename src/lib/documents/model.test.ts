@@ -208,7 +208,10 @@ describe("phase 2 modules and marked-up uploads", () => {
     expect(
       imageRefSchema.parse({ kind: "siteCover", siteId: "55555555-5555-4555-8555-555555555555" }),
     ).toEqual({ kind: "siteCover", siteId: "55555555-5555-4555-8555-555555555555" });
-    const grid = { ...newModule("photoGrid"), images: [{ image: img, caption: "NE corner" }] };
+    const grid = {
+      ...(newModule("photoGrid") as PhotoGridModule),
+      images: [{ image: img, caption: "NE corner" }],
+    };
     expect(moduleSchema.parse(grid)).toEqual(grid);
   });
   it("the Photos and Marks checkboxes reach the new modules", () => {
@@ -218,7 +221,7 @@ describe("phase 2 modules and marked-up uploads", () => {
         modules: [
           newModule("repairList"),
           {
-            ...newModule("photoGrid"),
+            ...(newModule("photoGrid") as PhotoGridModule),
             images: [
               {
                 image: {
