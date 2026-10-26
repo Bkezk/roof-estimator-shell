@@ -443,8 +443,9 @@ function AerialEditor({
               onTapEmpty={(lng, lat) => {
                 if (!pick.isPending) pick.mutate({ lat, lng });
               }}
-              focus={view ? { lat: view.center[1], lng: view.center[0] } : null}
-              fitTo={view ? undefined : data.addressState}
+              // Nothing found but the street is on the map (owner, Oct 26): open there.
+              focus={view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? null)}
+              fitTo={view || data.near ? undefined : data.addressState}
               className="h-[60vh] w-full rounded-md border"
             />
           </Suspense>

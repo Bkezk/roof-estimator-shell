@@ -22,20 +22,25 @@ const sidebar = read("src/components/app-sidebar.tsx");
 const settings = read("src/routes/admin.settings.tsx");
 
 describe("the estimator's Documents button", () => {
-  it("sits in the header row after Save, before Update Pricing & Labor, enabled once the bid is saved", () => {
-    const save = estimate.indexOf('{saving ? "Saving…" : bidId ? "Save" : "Save bid"}');
-    const docs = estimate.indexOf('"Documents for this bid: proposals and letters"');
-    const update = estimate.indexOf('frmHome.btnUpdate ("Update Pricing & Labor")');
-    expect(save).toBeGreaterThan(0);
-    expect(docs).toBeGreaterThan(save);
-    expect(update).toBeGreaterThan(docs);
+  it("sits in the rail's square-button row between the reminder bell and Export (owner, Oct 26), enabled once the bid is saved", () => {
+    const row = estimate.indexOf('data-field="bid-rail-buttons"');
+    const bell = estimate.indexOf("<BellRing className", row);
+    const docs = estimate.indexOf('"Documents for this bid: proposals and letters"', row);
+    const exp = estimate.indexOf('exportMenu({ size: "icon"', row);
+    expect(row).toBeGreaterThan(0);
+    expect(bell).toBeGreaterThan(row);
+    expect(docs).toBeGreaterThan(bell);
+    expect(exp).toBeGreaterThan(docs);
     const button = estimate.slice(estimate.lastIndexOf("<Button", docs), docs);
     expect(button).toContain("disabled={!bidId}");
     expect(button).toContain("setDocumentsOpen(true)");
-    // Icon only with a label (owner, Oct 26: "i dont like how this now takes two lines").
-    expect(estimate).toContain('size="icon"\n            onClick={() => setDocumentsOpen(true)}');
+    expect(button).toContain('size="icon"');
     expect(estimate).toContain('aria-label="Documents"');
     expect(estimate).toContain('<FileText className="h-4 w-4" />');
+    // Not in the header row any more (owner: "i dont like how this now takes two lines").
+    const save = estimate.indexOf('{saving ? "Saving…" : bidId ? "Save" : "Save bid"}');
+    const update = estimate.indexOf('frmHome.btnUpdate ("Update Pricing & Labor")');
+    expect(estimate.slice(save, update)).not.toContain("setDocumentsOpen(true)");
   });
   it("mounts one DocumentsPanel for the saved bid, named after it", () => {
     expect(estimate).toContain(

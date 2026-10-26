@@ -2963,24 +2963,6 @@ function EstimatePage() {
               />
             )}
           </Button>
-          {/* Documents (owner, Oct 26): the CenterPoint-style document generator — proposals and
-              letters for this bid, each made by a click here; nothing is generated on its own.
-              Icon only (owner: "i dont like how this now takes two lines"): the row must stay
-              one line with Save and Update pricing & labor on a laptop. */}
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setDocumentsOpen(true)}
-            disabled={!bidId}
-            aria-label="Documents"
-            title={
-              bidId
-                ? "Documents for this bid: proposals and letters"
-                : "Save the bid first — documents hang off a saved bid"
-            }
-          >
-            <FileText className="h-4 w-4" />
-          </Button>
           {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
               on the right in black; the dot marks management data newer than the bid's copy. */}
           <button
@@ -6585,9 +6567,11 @@ function EstimatePage() {
         />
       )}
       <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
-        {/* The status strip (owner, Oct 26: the rail was "very busy"): Bid due, Status, the
-            reminder behind a bell, Export as an icon — one row. */}
-        <div className="flex flex-wrap items-end gap-2">
+        {/* The status strip (owner, Oct 26: the rail was "very busy"; then "lets have the bid due
+            beside the status … below that the notifications, document, and export in that order
+            with the small square buttons"): Bid due and Status side by side, the three square
+            buttons under them. */}
+        <div className="grid grid-cols-2 items-end gap-2">
           {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so
             we can also have those show on this week, overdue, etc" — the row's due_date, beside
             Status. Required on the first save (handleSave rings it and says so); a bid from before
@@ -6600,7 +6584,7 @@ function EstimatePage() {
               id="bid-due-date"
               ref={dueDateRef}
               type="date"
-              className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
+              className={`h-9 w-full ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
               value={bidDueDate}
               onChange={(e) => {
                 setBidDueDate(e.target.value);
@@ -6622,7 +6606,7 @@ function EstimatePage() {
               </p>
             )}
           </div>
-          <div className="min-w-0 flex-1 space-y-1">
+          <div className="min-w-0 space-y-1">
             <Label className="text-xs">Status</Label>
             <Select value={bidStatus} onValueChange={changeStatus} disabled={readOnly}>
               <SelectTrigger className="h-9">
@@ -6688,6 +6672,11 @@ function EstimatePage() {
               />
             )}
           </div>
+        </div>
+        {/* The square buttons (owner, Oct 26): the reminder bell, Documents (the CenterPoint-style
+            document generator — proposals and letters for this bid, each made by a click here;
+            nothing is generated on its own), Export. */}
+        <div className="flex items-center gap-2" data-field="bid-rail-buttons">
           <Button
             type="button"
             variant={bidReminderOn ? "secondary" : "outline"}
@@ -6703,6 +6692,21 @@ function EstimatePage() {
             onClick={() => setReminderOpen((o) => !o)}
           >
             {bidReminderOn ? <BellRing className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            onClick={() => setDocumentsOpen(true)}
+            disabled={!bidId}
+            aria-label="Documents"
+            title={
+              bidId
+                ? "Documents for this bid: proposals and letters"
+                : "Save the bid first — documents hang off a saved bid"
+            }
+          >
+            <FileText className="h-4 w-4" />
           </Button>
           {exportMenu({ size: "icon", className: "h-9 w-9", iconOnly: true })}
         </div>

@@ -789,6 +789,61 @@ export const LOOKUP_HOUSE_RX = /^[0-9]{1,7}[A-Za-z]?$/;
 export const LOOKUP_WORD_RX = /^[A-Za-z0-9]{2,40}$/;
 
 /** The attributes addressPointFromFeature reads (the key, the NG911 address parts, place). */
+/**
+ * The 911 points whose landmark name carries every stem, in a town (owner, Oct 26, the aerial's
+ * "by name" fallback — lib/aerial-fallbacks.ts). Null without stems or a town: a statewide name
+ * search is not a lookup. Post_Comm is matched against the town's spellings (the layer holds
+ * both "Corbin" and "CORBIN"); no UPPER() on the column, which would scan every row.
+ */
+export function landmarksByNameUrl(
+  stems: readonly string[],
+  towns: readonly string[],
+  limit = 40,
+): string | null {
+  if (!stems.length || !towns.length) return null;
+  if (
+    !stems.every((w) => LOOKUP_WORD_RX.test(w)) ||
+    !towns.every((t) => /^[A-Za-z .'-]{2,60}$/.test(t))
+  )
+    return null;
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set(
+    "where",
+    `${stems.map((w) => `LandmkName LIKE ${sqlLit(`%${w.toUpperCase()}%`)}`).join(" AND ")} AND Post_Comm IN (${towns.map(sqlLit).join(",")})`,
+  );
+  p.set("outFields", KY_ADDRESS_POINT_OUT_FIELDS);
+  p.set("returnGeometry", "true");
+  p.set("outSR", "102100");
+  p.set("resultRecordCount", String(limit));
+  return `${KY_ADDRESS_POINTS_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+/**
+ * Every 911 point on a street (by its filter word) in a town, by house number (owner, Oct 26,
+ * the aerial's "nearest numbers" fallback). Null without a town.
+ */
+export function addressPointsOnStreetUrl(
+  streetWord: string,
+  towns: readonly string[],
+  limit = 200,
+): string | null {
+  if (!LOOKUP_WORD_RX.test(streetWord) || !towns.length) return null;
+  if (!towns.every((t) => /^[A-Za-z .'-]{2,60}$/.test(t))) return null;
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set(
+    "where",
+    `LSt_Name LIKE ${sqlLit(`%${streetWord.toUpperCase()}%`)} AND Post_Comm IN (${towns.map(sqlLit).join(",")})`,
+  );
+  p.set("outFields", KY_ADDRESS_POINT_OUT_FIELDS);
+  p.set("returnGeometry", "true");
+  p.set("outSR", "102100");
+  p.set("orderByFields", "Add_Number");
+  p.set("resultRecordCount", String(limit));
+  return `${KY_ADDRESS_POINTS_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
 export const KY_ADDRESS_POINT_OUT_FIELDS =
   "OBJECTID,Site_NGUID,AddNum_Pre,Add_Number,AddNum_Suf,LSt_PreDir,LSt_Name,LSt_Type,LSt_PosDir,Post_Comm,Post_Code,Inc_Muni,County,LandmkName,Place_Type,Lat,Long";
 

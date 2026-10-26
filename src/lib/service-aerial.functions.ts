@@ -24,6 +24,15 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
 import {
+  cityVariants,
+  foundByNameNote,
+  type NamedPoint,
+  nameSearchStems,
+  nearNote,
+  nearestOnStreet,
+  pickByName,
+} from "@/lib/aerial-fallbacks";
+import {
   buildingForPoint,
   parseStreetAddress,
   pickAddressMatch,
@@ -49,6 +58,8 @@ import {
   footprintFromFeature,
   pointInFootprint,
   type FootprintCandidate,
+  addressPointsOnStreetUrl,
+  landmarksByNameUrl,
 } from "@/lib/gis/ky-layers";
 import { USA_STRUCTURES_LAYER, structuresByAddressUrl } from "@/lib/gis/tn-layers";
 import type { ArcGisFeatureSet } from "@/lib/gis/arcgis";
@@ -74,7 +85,7 @@ const nameOf = (p: { full_name: string | null; email: string }) =>
 async function readJob(ctx: Ctx, id: string) {
   const { data: job, error } = await ctx.supabase
     .from("service_jobs")
-    .select("id, number, site_id, site_address, account_id, technician_id, stage")
+    .select("id, number, site_id, site_address, site_name, account_id, technician_id, stage")
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -104,6 +115,11 @@ export interface TicketAerial {
   found: FoundBuilding | null;
   /** Why nothing was found, for the "No aerial for this address" line. */
   note: string | null;
+  /**
+   * Nothing found, but the state has points on that street in that town (owner, Oct 26): where
+   * "Pick the building" opens, with the note naming the numbers found.
+   */
+  near?: { lat: number; lng: number } | null;
 }
 
 const toFound = (
@@ -146,6 +162,7 @@ type AddressLocation =
   | { kind: "stored"; candidate: AddressCandidate; at: { lat: number; lng: number } }
   | { kind: "ambiguous"; count: number }
   | { kind: "live"; live: LiveFound }
+  | { kind: "near"; near: { lat: number; lng: number }; note: string }
   | { kind: "none" };
 
 async function locateAddress(
@@ -153,6 +170,8 @@ async function locateAddress(
   parsed: ParsedAddress,
   word: string,
   addressState: "KY" | "TN" | null,
+  /** The property's name, for the by-name fallback (owner, Oct 26). */
+  propertyName: string | null = null,
 ): Promise<AddressLocation> {
   const { data: cands, error } = await sb.rpc("service_aerial_address_candidates", {
     p_house: parsed.house,
@@ -169,8 +188,9 @@ async function locateAddress(
     };
   if (m.outcome === "ambiguous") return { kind: "ambiguous", count: m.count };
   // Nothing stored for it: the live state layers, which carry every building.
-  const live = await liveAddressLookup(parsed, word, addressState);
-  return live ? { kind: "live", live } : { kind: "none" };
+  const live = await liveAddressLookup(parsed, word, addressState, propertyName);
+  if (!live) return { kind: "none" };
+  return live.kind === "found" ? { kind: "live", live: live.live } : live;
 }
 
 /**
@@ -224,15 +244,17 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     const job = await readJob(context, data.id);
     let address = job.site_address ?? "";
     let siteState: string | null = null;
+    let propertyName: string | null = job.site_name ?? null;
     if (job.site_id) {
       const { data: s } = await sb
         .from("crm_sites")
-        .select("address1, address2, city, state, zip")
+        .select("name, address1, address2, city, state, zip")
         .eq("id", job.site_id)
         .maybeSingle();
       if (s) {
         siteState = s.state;
         if (!address.trim()) address = siteAddressLine(s);
+        if (s.name?.trim()) propertyName = s.name;
       }
     }
     const parsed = parseStreetAddress(address);
@@ -254,11 +276,12 @@ export const getTicketAerial = createServerFn({ method: "GET" })
 
     // 1. The address.
     let note: string | null = null;
+    let near: { lat: number; lng: number } | null = null;
     const word = parsed ? streetFilterWord(parsed) : null;
     if (!address.trim()) note = "The ticket has no address.";
     else if (!parsed || !word) note = "The address has no house number and street to match.";
     else {
-      const where = await locateAddress(sb, parsed, word, addressState);
+      const where = await locateAddress(sb, parsed, word, addressState, propertyName);
       if (where.kind === "stored") {
         const { at, candidate } = where;
         const near = await buildingsNear(context, at.lat, at.lng, 350);
@@ -293,6 +316,11 @@ export const getTicketAerial = createServerFn({ method: "GET" })
       else if (where.kind === "live") {
         const { live } = where;
         return { address, addressState, saved: null, found: live.found, note: live.note };
+      } else if (where.kind === "near") {
+        // Owner, Oct 26: nothing at that number, but the street is on the map — Pick the
+        // building opens there (unless the ticket's own photos say where, below).
+        note = where.note;
+        near = where.near;
       } else note = "No building or 911 address point in our map data matches this address.";
     }
 
@@ -336,7 +364,7 @@ export const getTicketAerial = createServerFn({ method: "GET" })
         note,
       };
     }
-    return { address, addressState, saved: null, found: null, note };
+    return { address, addressState, saved: null, found: null, note, near };
   });
 
 const fetchJson = async (url: string): Promise<unknown> => {
@@ -393,11 +421,10 @@ const liveFound = (
 };
 
 /** Kentucky: the 911 point for the address, then the state's outline under it. */
-async function liveKentucky(parsed: ParsedAddress, word: string): Promise<LiveFound | null> {
-  const url = addressPointsByAddressUrl(parsed.house, word);
-  if (!url) return null;
+/** The 911 points a query returned, as candidates (with the landmark name for the by-name fallback). */
+async function kyPoints(url: string): Promise<NamedPoint[]> {
   const set = (await fetchJson(url)) as ArcGisFeatureSet;
-  const cands: AddressCandidate[] = (set.features ?? []).flatMap((f) => {
+  return (set.features ?? []).flatMap((f) => {
     const p = addressPointFromFeature(f);
     return p
       ? [
@@ -410,13 +437,18 @@ async function liveKentucky(parsed: ParsedAddress, word: string): Promise<LiveFo
             lat: p.lat,
             lng: p.lng,
             building_id: null,
+            landmark: p.landmark,
           },
         ]
       : [];
   });
-  const m = pickAddressMatch(parsed, cands);
-  if (m.outcome !== "match") return null;
-  const at = { lat: m.candidate.lat!, lng: m.candidate.lng! };
+}
+
+/** The state's outline under a point, as the match's building. */
+async function kyFoundAt(
+  at: { lat: number; lng: number },
+  address: string | null,
+): Promise<LiveFound> {
   const page = (await fetchJson(
     footprintAtPointUrl(KY_FOOTPRINTS_LAYER, at.lng, at.lat),
   )) as ArcGisFeatureSet;
@@ -424,7 +456,47 @@ async function liveKentucky(parsed: ParsedAddress, word: string): Promise<LiveFo
     (page.features ?? [])
       .map(footprintFromFeature)
       .find((c) => c !== null && pointInFootprint(at.lng, at.lat, c.geometry?.footprint)) ?? null;
-  return liveFound(hit, { address: m.candidate.address, state: "KY", ...at });
+  return liveFound(hit, { address, state: "KY", ...at });
+}
+
+/**
+ * Kentucky: the 911 point for the number and street; failing that (owner, Oct 26, ticket 6036
+ * — the state lists the building under another number), the landmark that carries the
+ * property's name on that street in that town, then the nearest numbers the layer has on that
+ * street, where Pick the building will open (lib/aerial-fallbacks.ts).
+ */
+async function liveKentucky(
+  parsed: ParsedAddress,
+  word: string,
+  propertyName: string | null = null,
+): Promise<LiveResult | null> {
+  const url = addressPointsByAddressUrl(parsed.house, word);
+  if (!url) return null;
+  const cands = await kyPoints(url);
+  const m = pickAddressMatch(parsed, cands);
+  if (m.outcome === "match") {
+    const at = { lat: m.candidate.lat!, lng: m.candidate.lng! };
+    return { kind: "found", live: await kyFoundAt(at, m.candidate.address) };
+  }
+  const towns = cityVariants(parsed.city);
+  // 1. By name.
+  const nameUrl = landmarksByNameUrl(nameSearchStems(propertyName), towns);
+  if (nameUrl) {
+    const byName = pickByName(parsed, nameSearchStems(propertyName), await kyPoints(nameUrl));
+    if (byName) {
+      const at = { lat: byName.lat!, lng: byName.lng! };
+      const live = await kyFoundAt(at, byName.address);
+      const note = foundByNameNote(byName.landmark ?? propertyName ?? "", byName.address);
+      return { kind: "found", live: { ...live, note: live.note ? `${note} ${live.note}` : note } };
+    }
+  }
+  // 2. The nearest numbers on that street.
+  const streetUrl = addressPointsOnStreetUrl(word, towns);
+  if (streetUrl) {
+    const near = nearestOnStreet(parsed, await kyPoints(streetUrl));
+    if (near) return { kind: "near", near: near.centre, note: nearNote(parsed, near) };
+  }
+  return null;
 }
 
 /** Tennessee: the national layer's structures carry the address, so the match is the outline. */
@@ -463,16 +535,26 @@ async function liveTennessee(parsed: ParsedAddress, word: string): Promise<LiveF
  * not known. Anything that goes wrong (the server down, an odd answer) is null: the ticket then
  * reads as before, with the Pick button.
  */
+type LiveResult =
+  | { kind: "found"; live: LiveFound }
+  | { kind: "near"; near: { lat: number; lng: number }; note: string };
+
 async function liveAddressLookup(
   parsed: ParsedAddress,
   word: string,
   addressState: "KY" | "TN" | null,
-): Promise<LiveFound | null> {
+  propertyName: string | null = null,
+): Promise<LiveResult | null> {
   const states: ("KY" | "TN")[] = addressState ? [addressState] : ["KY", "TN"];
   for (const st of states) {
     try {
-      const r = st === "KY" ? await liveKentucky(parsed, word) : await liveTennessee(parsed, word);
-      if (r) return r;
+      if (st === "KY") {
+        const r = await liveKentucky(parsed, word, propertyName);
+        if (r) return r;
+      } else {
+        const r = await liveTennessee(parsed, word);
+        if (r) return { kind: "found", live: r };
+      }
     } catch {
       // The state server is a best effort here; the stored-data note covers it.
     }

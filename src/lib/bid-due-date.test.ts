@@ -297,7 +297,7 @@ describe("2. the estimator", () => {
     expect(save).toContain("dueDateRef.current?.focus();");
     expect(save).toContain("return false;");
     expect(src).toContain(
-      'className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}',
+      'className={`h-9 w-full ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}',
     );
     expect(src).toContain("Give the bid a due date before saving");
     expect(src).toContain("aria-invalid={dueDateMissing || undefined}");
