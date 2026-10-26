@@ -26,6 +26,7 @@ import {
   type BidSectionInput,
 } from "@/lib/engine/bid-builder";
 import { offeredMils, sectionMilChoices } from "@/lib/bid-mils";
+import { nearestSheetLabel, offeredSheetLabels } from "@/lib/bid-sheets";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import {
   ARP_SIZE_OPTIONS,
@@ -768,6 +769,15 @@ export function SectionsScreen(p: SectionsScreenProps) {
                   // And a colour the new system offers (EPDM: Black or White, Black by default).
                   const color = snapMembraneColor(v, s.color, p.colorOptions);
                   if (color !== s.color) patch.color = color;
+                  // And a sheet size the new combo offers (owner, Oct 26; lib/bid-sheets.ts);
+                  // the lap follows the sheet through the LoadLapSpacings effect above.
+                  if (s.isQuickBid !== false) {
+                    const label = nearestSheetLabel(
+                      offeredSheetLabels(admin, v, att),
+                      s.sheetSizeLabel,
+                    );
+                    if (label !== s.sheetSizeLabel) patch.sheetSizeLabel = label;
+                  }
                   updWithSpacing(patch);
                 }}
               />
@@ -790,12 +800,23 @@ export function SectionsScreen(p: SectionsScreenProps) {
                     onChange={(v) => {
                       const o = opts.find((x) => x.label === v);
                       if (!o) return;
+                      // The new combo's sheets (owner, Oct 26; lib/bid-sheets.ts): a sheet it
+                      // does not offer moves to the nearest; the lap follows the sheet through
+                      // the LoadLapSpacings effect above.
+                      const label =
+                        s.isQuickBid !== false
+                          ? nearestSheetLabel(
+                              offeredSheetLabels(admin, sys.roofSystem, o.attachment),
+                              s.sheetSizeLabel,
+                            )
+                          : s.sheetSizeLabel;
                       updWithSpacing({
                         roofSystem: sys.roofSystem,
                         attachment: o.attachment,
                         ...(o.attachment === "adhered"
                           ? { membraneAdhesiveName: o.adhesiveName }
                           : {}),
+                        ...(label !== s.sheetSizeLabel ? { sheetSizeLabel: label } : {}),
                       });
                     }}
                   />

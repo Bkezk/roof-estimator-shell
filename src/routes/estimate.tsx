@@ -56,6 +56,7 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import { snapBidSheets, type SheetBidState } from "@/lib/bid-sheets";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import { warrantiesForSystem } from "@/lib/warranty-systems";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
@@ -1671,6 +1672,36 @@ function EstimatePage() {
     warnMilChanges("Membrane mil adjusted to the new roof system", r.changes);
   };
 
+  // ── Sheet size / lap guard (owner, Oct 26): a section never carries a sheet size or lap its
+  // system + attachment does not offer — legacy reloads those lists on the attachment picker and
+  // reselects; the web used to keep a mechanical 2000 sf / 60" set-up on an adhered bid, where
+  // the engine warned per section and billed the install labor at ×1 (src/lib/bid-sheets.ts).
+  /** Write `after`'s corrected sheets and laps (by section id) over the state as it is now. */
+  const applySheetFix = (before: SheetBidState, after: SheetBidState) => {
+    if (after.sections !== before.sections) {
+      const by = new Map(after.sections.map((s) => [s.id, s]));
+      setSections((prev) =>
+        prev.map((s) => {
+          const n = by.get(s.id);
+          return n && (n.sheetSizeLabel !== s.sheetSizeLabel || n.fieldLap !== s.fieldLap)
+            ? { ...s, sheetSizeLabel: n.sheetSizeLabel, fieldLap: n.fieldLap }
+            : s;
+        }),
+      );
+    }
+    const sd = after.sectionDefaults;
+    if (sd && sd !== before.sectionDefaults)
+      setSectionDefaults((p) => ({ ...p, sheetSizeLabel: sd.sheetSizeLabel }));
+  };
+  const snapSheetsFor = (over: Partial<MilBidState>) => {
+    if (!admin) return;
+    const before = milState(over);
+    const r = snapBidSheets(before, admin, fastenerLookup);
+    if (!r.changes.length) return;
+    applySheetFix(before, r.state);
+    warnMilChanges("Sheet size / lap adjusted to the new attachment", r.changes);
+  };
+
   /**
    * Legacy frmHome.btnUpdate_Click (docs §22.39): the Update Bid Options dialog's OK. Material
    * pricing = replace the frozen snapshot with live admin data (custom underlayment quotes survive
@@ -1680,6 +1711,7 @@ function EstimatePage() {
   const applyUpdateOptions = async (o: UpdateBidOptions) => {
     const done: string[] = [];
     let milFix: { before: MilBidState; after: MilBidState; changes: string[] } | null = null;
+    let sheetFix: { before: MilBidState; after: MilBidState; changes: string[] } | null = null;
     if (o.materialPricing) {
       const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
       // Legacy NDLCollectionBase.UpdateManagement: Non-DL rows are stored copies — an un-ticked
@@ -1701,6 +1733,9 @@ function EstimatePage() {
       const before = milState();
       const r = snapBidMils(before, a);
       if (r.changes.length) milFix = { before, after: r.state, changes: r.changes };
+      // Likewise a sheet size or lap the new combos no longer offer (src/lib/bid-sheets.ts).
+      const rs = snapBidSheets(before, a, fastenerLookup);
+      if (rs.changes.length) sheetFix = { before, after: rs.state, changes: rs.changes };
       if (o.resetUnderlaymentQuotes) {
         setUnderlaymentPriceOverrides({});
         done.push("underlayment quotes reset");
@@ -1734,6 +1769,16 @@ function EstimatePage() {
       applyMilFix(milFix.before, milFix.after);
       done.push(
         `membrane mil on ${milFix.changes.length} item${milFix.changes.length === 1 ? "" : "s"}`,
+      );
+    }
+    if (sheetFix) {
+      applySheetFix(sheetFix.before, sheetFix.after);
+      done.push(
+        `sheet size / lap on ${sheetFix.changes.length} item${sheetFix.changes.length === 1 ? "" : "s"}`,
+      );
+      warnMilChanges(
+        "The updated labor tables do not offer every sheet / lap this bid had:",
+        sheetFix.changes,
       );
     }
     toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);
@@ -3356,6 +3401,10 @@ function EstimatePage() {
                           roofSystem: v,
                           sectionDefaults: { ...sectionDefaults, thickness: sdThickness },
                         });
+                        snapSheetsFor({
+                          roofSystem: v,
+                          sectionDefaults: { ...sectionDefaults, thickness: sdThickness },
+                        });
                       }}
                     >
                       <SelectTrigger>
@@ -3388,8 +3437,10 @@ function EstimatePage() {
                             if (!o) return;
                             setAttachment(o.attachment);
                             if (o.attachment === "adhered") setMembraneAdhesive(o.adhesiveName);
-                            if (o.attachment !== attachment)
+                            if (o.attachment !== attachment) {
                               snapMilsFor({ attachment: o.attachment });
+                              snapSheetsFor({ attachment: o.attachment });
+                            }
                           }}
                         />
                       );
