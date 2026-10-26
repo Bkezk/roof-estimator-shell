@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { defaultTemplates } from "./defaults";
+import { defaultTemplates, INSPECTION_REPORT_TEMPLATE, missingDefaultTemplates } from "./defaults";
 import {
   addModule,
   addPage,
@@ -32,6 +32,7 @@ import {
   richLine,
   richToText,
   richVariables,
+  stripMarks,
   updateModule,
   type DocPage,
   type FullPhotoModule,
@@ -242,6 +243,105 @@ describe("phase 2 modules and marked-up uploads", () => {
     });
     const noPhotos = applyOptionsToPages(pages, { ...DEFAULT_OPTIONS, photos: false });
     expect((noPhotos[0]!.modules[0] as RepairListModule).photos).toBe(false);
+  });
+  it("Marks off drops the marks drawn on an uploaded picture; on, they stay (stripMarks)", () => {
+    const marked: ImageRef = {
+      kind: "upload",
+      path: "docs/d/a.jpg",
+      width: 800,
+      height: 600,
+      marks: [{ id: "m", kind: "rect", color: "red", a: [0.1, 0.1], b: [0.5, 0.5] }],
+    };
+    expect(stripMarks(marked, false)).toEqual({
+      kind: "upload",
+      path: "docs/d/a.jpg",
+      width: 800,
+      height: 600,
+    });
+    expect(stripMarks(marked, true)).toBe(marked);
+    expect(stripMarks({ kind: "logo" }, false)).toEqual({ kind: "logo" });
+    const page: DocPage = {
+      id: "p",
+      modules: [
+        { ...(newModule("fullPhoto") as FullPhotoModule), image: marked },
+        {
+          ...(newModule("photoGrid") as PhotoGridModule),
+          images: [{ image: marked, caption: "" }],
+        },
+      ],
+    };
+    const off = applyOptionsToPages([page], { ...DEFAULT_OPTIONS, marks: false });
+    expect((off[0]!.modules[0] as FullPhotoModule).image).not.toHaveProperty("marks");
+    expect((off[0]!.modules[1] as PhotoGridModule).images[0]!.image).not.toHaveProperty("marks");
+    const on = applyOptionsToPages([page], DEFAULT_OPTIONS);
+    expect((on[0]!.modules[0] as FullPhotoModule).image).toEqual(marked);
+  });
+});
+
+describe("the Inspection report template (phase 2)", () => {
+  it("is a ticket template of three pages: the cover block, the Repair List with pictures, the photo grid and the recommendation", () => {
+    const t = defaultTemplates().find((x) => x.name === INSPECTION_REPORT_TEMPLATE);
+    expect(t).toBeTruthy();
+    expect(t!.kind).toBe("ticket");
+    expect(t!.options.prices).toBe("none");
+    expect(t!.pages).toHaveLength(3);
+    const [cover, findings, photos] = t!.pages;
+    expect(cover!.modules.map((m) => m.type)).toEqual([
+      "letterhead",
+      "hr",
+      "body",
+      "fullPhoto",
+      "hr",
+      "body",
+    ]);
+    expect((cover!.modules[3] as FullPhotoModule).heightIn).toBe(2.2);
+    const coverText = richToText(
+      (cover!.modules[2] as { text: RichDoc }).text,
+      sampleVariables("ticket"),
+    );
+    expect(coverText).toContain("Roof Inspection Report");
+    const block = richToText((cover!.modules[5] as { text: RichDoc }).text, {}, variableLabel);
+    expect(block).toContain("Property Inspected: [Property Inspected]");
+    expect(block).toContain("Property Grade: [Property Grade]");
+    expect(block).toContain("Inspected By: [Inspected By]");
+    expect(block).toContain("Summary: [Inspection Summary]");
+    expect(findings!.modules.map((m) => m.type)).toEqual(["body", "repairList"]);
+    expect((findings!.modules[1] as RepairListModule).photos).toBe(true);
+    expect(richToText((findings!.modules[0] as { text: RichDoc }).text)).toBe("Findings");
+    expect(photos!.modules.map((m) => m.type)).toEqual(["photoGrid", "body", "signature"]);
+    expect((photos!.modules[0] as PhotoGridModule).columns).toBe(3);
+    expect(richToText((photos!.modules[1] as { text: RichDoc }).text, {}, variableLabel)).toBe(
+      "Recommendation: [Recommendation]",
+    );
+    // The template stores no picture; the cover is filled on create (server-pure placeCoverImage).
+    expect((cover!.modules[3] as FullPhotoModule).image).toBeNull();
+  });
+  it("missingDefaultTemplates adds it to an install that has the others, never resurrects a deleted one, and defaults only a template-less kind", () => {
+    const existing = [
+      { kind: "bid", name: "Proposal", deleted_at: null },
+      { kind: "bid", name: "Scope letter (no prices)", deleted_at: null },
+      { kind: "ticket", name: "Service letter", deleted_at: null },
+    ];
+    const added = missingDefaultTemplates(existing);
+    expect(added.map((t) => t.name)).toEqual([INSPECTION_REPORT_TEMPLATE]);
+    expect(added[0]!.isDefault).toBe(false);
+    // Removed by the office: stays removed.
+    expect(
+      missingDefaultTemplates([
+        ...existing,
+        { kind: "ticket", name: "inspection report", deleted_at: "2026-10-27T00:00:00Z" },
+      ]),
+    ).toEqual([]);
+    // A fresh install: everything, the first of each kind the default.
+    const fresh = missingDefaultTemplates([]);
+    expect(fresh.map((t) => [t.kind, t.isDefault])).toEqual([
+      ["bid", true],
+      ["bid", false],
+      ["ticket", true],
+      ["ticket", false],
+    ]);
+    // Nothing missing: nothing inserted.
+    expect(missingDefaultTemplates(fresh.map((t) => ({ ...t, deleted_at: null })))).toEqual([]);
   });
 });
 

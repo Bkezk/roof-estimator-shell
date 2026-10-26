@@ -5,7 +5,7 @@
  * reducer (updateModule), and a small toolbar at the module's top-right on hover moves, copies,
  * saves or deletes it.
  */
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   AlignCenter,
   AlignLeft,
@@ -15,13 +15,20 @@ import {
   ChevronUp,
   Copy,
   FileText,
+  ImagePlus,
   Minus,
   Plus,
   Trash2,
   X,
 } from "lucide-react";
 
-import { IN_PX, pricingSourceFromVariables } from "@/lib/documents/editor-helpers";
+import {
+  IN_PX,
+  photoGridCaption,
+  pricingSourceFromVariables,
+} from "@/lib/documents/editor-helpers";
+import { NO_INSPECTION_TEXT, repairListData } from "@/lib/documents/pdf-layout";
+import { storedInspection } from "@/lib/documents/server-pure";
 import {
   type DocModule,
   duplicateModule,
@@ -48,7 +55,7 @@ import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 
 import { useEditorEnv } from "./editor-context";
-import { DocImage, ImageSlot } from "./photo-picker";
+import { DocImage, ImageSlot, PhotoPicker } from "./photo-picker";
 import { RichText } from "./rich-text";
 
 // ------------------------------------------------------------------------------- the frame
@@ -176,20 +183,304 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
   }
 }
 
-/** Phase 2 (built next): the Photo Grid's pictures with captions. */
-function PhotoGrid({ m }: { m: PhotoGridModule; set: Setter }) {
+/**
+ * The Photo Grid (phase 2): two or three cells a row, each a picture (the picker) over a caption
+ * line; cells are added one at a time or all the ticket's photos at once (captions from the
+ * checklist item each was taken for, else blank), and removed with ×.
+ */
+function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
+  const env = useEditorEnv();
+  const patch = (f: (g: PhotoGridModule) => PhotoGridModule) => set((c) => f(c as PhotoGridModule));
+  const insp = storedInspection(env.variables);
+  const [adding, setAdding] = useState(false);
+  const setCell = (i: number, cell: Partial<PhotoGridModule["images"][number]>) =>
+    patch((g) => ({ ...g, images: g.images.map((c, k) => (k === i ? { ...c, ...cell } : c)) }));
+  const removeCell = (i: number) =>
+    patch((g) => ({ ...g, images: g.images.filter((_, k) => k !== i) }));
+  const addAll = () =>
+    patch((g) => {
+      const have = new Set(
+        g.images.map((c) => (c.image.kind === "ticketPhoto" ? c.image.photoId : "")),
+      );
+      const fresh = env.photos
+        .filter((p) => !have.has(p.id))
+        .map((p) => ({
+          image: {
+            kind: "ticketPhoto" as const,
+            photoId: p.id,
+            marks: env.options.marks && p.hasMarks,
+          },
+          caption: photoGridCaption(p, insp),
+        }));
+      return { ...g, images: [...g.images, ...fresh] };
+    });
   return (
-    <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700">
-      Photo Grid · {m.images.length} {m.images.length === 1 ? "picture" : "pictures"}
+    <div className="group/grid">
+      <div className="mb-1 hidden items-center gap-3 text-xs text-neutral-500 group-hover/grid:flex">
+        <span className="flex items-center gap-1">
+          Columns
+          {([2, 3] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={cn(
+                "rounded px-1.5 py-0.5 hover:bg-neutral-200",
+                m.columns === n && "bg-neutral-200 font-semibold dark:bg-neutral-200",
+              )}
+              title={`${n} pictures a row`}
+              aria-pressed={m.columns === n}
+              onClick={() => patch((g) => ({ ...g, columns: n }))}
+            >
+              {n}
+            </button>
+          ))}
+        </span>
+        {env.photos.length > 0 ? (
+          <button
+            type="button"
+            className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+            title="One cell per ticket photo not already in the grid"
+            onClick={addAll}
+          >
+            Add all ticket photos
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="ml-auto flex items-center gap-1 underline hover:text-neutral-800 dark:hover:text-neutral-800"
+          title="Add an empty cell and pick its picture"
+          onClick={() => setAdding(true)}
+        >
+          <Plus className="h-3 w-3" /> Add picture
+        </button>
+      </div>
+      {m.images.length === 0 ? (
+        <button
+          type="button"
+          className="flex min-h-24 w-full flex-col items-center justify-center gap-1 rounded-sm border-2 border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400"
+          title="Pick the first picture"
+          onClick={() => setAdding(true)}
+        >
+          <ImagePlus className="h-6 w-6" />
+          <span className="text-sm">Photo Grid: add pictures</span>
+        </button>
+      ) : (
+        <div
+          className="grid gap-2.5"
+          style={{ gridTemplateColumns: `repeat(${m.columns}, minmax(0, 1fr))` }}
+        >
+          {m.images.map((cell, i) => (
+            <div key={i} className="group/cell relative">
+              <ImageSlot
+                image={cell.image}
+                className="aspect-[1.33] bg-transparent"
+                onChange={(image) => (image ? setCell(i, { image }) : removeCell(i))}
+              />
+              <button
+                type="button"
+                className="absolute left-1 top-1 hidden rounded bg-popover p-0.5 text-popover-foreground shadow group-hover/cell:block"
+                title="Remove this cell"
+                aria-label="Remove this cell"
+                onClick={() => removeCell(i)}
+              >
+                <X className="h-3 w-3" />
+              </button>
+              <Caption value={cell.caption} onChange={(caption) => setCell(i, { caption })} />
+            </div>
+          ))}
+        </div>
+      )}
+      <PhotoPicker
+        open={adding}
+        onOpenChange={setAdding}
+        value={null}
+        onPick={(image) => {
+          if (image) patch((g) => ({ ...g, images: [...g.images, { image, caption: "" }] }));
+          setAdding(false);
+        }}
+      />
     </div>
   );
 }
 
-/** Phase 2 (built next): the inspection's issues as a list. */
-function RepairList({ m }: { m: RepairListModule; set: Setter }) {
+/**
+ * The Repair List (phase 2): the inspection's issues (or every item) from the document's
+ * snapshot — editable cells once "Edit rows" copies them, "Reset to the inspection" after — and
+ * each row's ticket photos as thumbnails under it when Pictures is on.
+ */
+function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
+  const env = useEditorEnv();
+  const patch = (f: (t: RepairListModule) => RepairListModule) =>
+    set((c) => f(c as RepairListModule));
+  const insp = storedInspection(env.variables);
+  const data = repairListData(m, insp);
+  const editing = m.rows !== null;
+  const setCell = (r: number, c: number, v: string) =>
+    patch((t) => ({
+      ...t,
+      rows: (t.rows ?? data.rows).map((row, ri) =>
+        ri === r ? row.map((x, ci) => (ci === c ? v : x)) : row,
+      ),
+    }));
+  const addRow = () =>
+    patch((t) => ({
+      ...t,
+      rows: [...(t.rows ?? data.rows), Array<string>(data.columns.length).fill("")],
+    }));
+  const removeRow = (r: number) =>
+    patch((t) => ({ ...t, rows: (t.rows ?? data.rows).filter((_, i) => i !== r) }));
+  const toolbar = (
+    <div className="mb-1 hidden items-center gap-3 text-xs text-neutral-500 group-hover/repairs:flex">
+      <label className="flex items-center gap-1">
+        <Switch
+          checked={m.allItems}
+          onCheckedChange={(allItems) => patch((t) => ({ ...t, allItems, rows: null }))}
+          title="List every checklist item with its finding, not only the issues"
+        />
+        Every item
+      </label>
+      <label className="flex items-center gap-1">
+        <Switch
+          checked={m.photos}
+          disabled={!env.options.photos}
+          onCheckedChange={(photos) => patch((t) => ({ ...t, photos }))}
+          title={
+            env.options.photos
+              ? "Print each item's ticket photos under its row"
+              : "Photos are off for this document"
+          }
+        />
+        Pictures
+      </label>
+      <span className="ml-auto flex items-center gap-2">
+        {editing ? (
+          <button
+            type="button"
+            className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+            title="Back to the inspection's rows"
+            onClick={() => patch((t) => ({ ...t, rows: null }))}
+          >
+            Reset to the inspection
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+            title="Copy the rows so they can be edited by hand"
+            onClick={() => patch((t) => ({ ...t, rows: data.rows.map((r) => [...r]) }))}
+          >
+            Edit rows
+          </button>
+        )}
+      </span>
+    </div>
+  );
+  if (!insp)
+    return (
+      <div className="group/repairs">
+        {toolbar}
+        <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
+          {env.mode === "template"
+            ? "Repair List: the inspection's findings print here"
+            : NO_INSPECTION_TEXT}
+        </div>
+      </div>
+    );
   return (
-    <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700">
-      Repair List{m.allItems ? " · every item" : ""}
+    <div className="group/repairs">
+      {toolbar}
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            {data.columns.map((col, c) => (
+              <th
+                key={c}
+                className="border border-neutral-300 bg-neutral-100 px-2 py-1 text-left font-semibold dark:bg-neutral-100"
+              >
+                {col.title}
+              </th>
+            ))}
+            {editing ? <th className="w-6 border-0 p-0" /> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.length === 0 ? (
+            <tr>
+              <td
+                colSpan={data.columns.length}
+                className="border border-neutral-300 px-2 py-2 text-center text-xs text-neutral-500"
+              >
+                {m.allItems ? "No checklist items" : "No issues found"}
+              </td>
+            </tr>
+          ) : (
+            data.rows.map((row, r) => {
+              const ids = data.photoIds[r] ?? [];
+              return (
+                <Fragment key={r}>
+                  <tr>
+                    {data.columns.map((_, c) => (
+                      <td key={c} className="border border-neutral-300 px-2 py-1 align-top">
+                        {editing ? (
+                          <input
+                            className={paperInput}
+                            value={row[c] ?? ""}
+                            onChange={(e) => setCell(r, c, e.target.value)}
+                          />
+                        ) : (
+                          <span>{resolveCellText(row[c] ?? "", env.variables, variableLabel)}</span>
+                        )}
+                      </td>
+                    ))}
+                    {editing ? (
+                      <td className="w-6 border-0 p-0">
+                        <button
+                          type="button"
+                          className="hidden rounded p-0.5 text-neutral-500 hover:bg-neutral-200 group-hover/repairs:block"
+                          title="Remove row"
+                          onClick={() => removeRow(r)}
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                  {ids.length ? (
+                    <tr>
+                      <td
+                        colSpan={data.columns.length + (editing ? 1 : 0)}
+                        className="border border-t-0 border-neutral-300 px-2 py-1.5"
+                      >
+                        <div className="flex flex-wrap gap-2" data-repair-photos={r}>
+                          {ids.map((photoId) => (
+                            // A fixed box, so the marks overlay sits on the picture, not the cell.
+                            <div key={photoId} className="h-[1.2in] w-[1.6in]">
+                              <DocImage
+                                image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                                className="h-full w-full rounded-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+      {editing ? (
+        <button
+          type="button"
+          className="mt-1 hidden items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 group-hover/repairs:flex dark:hover:text-neutral-800"
+          title="Add a row"
+          onClick={addRow}
+        >
+          <Plus className="h-3 w-3" /> Add row
+        </button>
+      ) : null}
     </div>
   );
 }

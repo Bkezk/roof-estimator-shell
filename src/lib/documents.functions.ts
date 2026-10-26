@@ -23,17 +23,19 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { managesTickets } from "@/lib/access";
 import { easternYmd } from "@/lib/field-day";
+import { parseInspection } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
-import { isMarked } from "@/lib/photo-annotations";
+import { parsePhotoMarks, type PhotoMark } from "@/lib/photo-annotations";
 import { toBase64 } from "@/lib/webpush";
 
-import { defaultTemplates } from "./documents/defaults";
+import { missingDefaultTemplates } from "./documents/defaults";
 import {
   DOC_KINDS,
   type DocKind,
   type DocModule,
   type DocOptions,
   type DocPage,
+  type ImageRef,
   moduleSchema,
   optionsSchema,
   pagesSchema,
@@ -54,6 +56,7 @@ import {
   documentSaveIsStale,
   documentShareUrl,
   documentStaleMessage,
+  inspectionSnapshotFrom,
   isDocumentImagePath,
   isPdfBytes,
   MAX_ASSET_BYTES,
@@ -69,6 +72,7 @@ import {
   SERVICE_BUCKET,
   shareOrigin,
   sniffImageType,
+  withStoredInspection,
   withStoredPricing,
 } from "./documents/server-pure";
 import { type DocumentSource, resolveVariables } from "./documents/variables";
@@ -138,35 +142,26 @@ export type DocumentTemplateListRow = Pick<
 >;
 
 /**
- * A kind with no live template gets the shipped ones (documents/defaults.ts), the first of each
- * kind as the default. A reader who may not write templates (RLS) simply sees none yet.
+ * The shipped templates (documents/defaults.ts) a database has never had — by kind and name,
+ * deleted rows counted, so a template the office removed stays removed and one added in a later
+ * phase (the Inspection report, Oct 26) reaches an install that already has the others — are
+ * inserted; the first of a kind with no live template becomes its default. A reader who may not
+ * write templates (RLS) simply sees none yet. Pure: missingDefaultTemplates.
  */
 async function ensureDefaultTemplates(sb: Client, byName: string | null, userId: string) {
-  const { data: live, error } = await sb
-    .from("document_templates")
-    .select("kind")
-    .is("deleted_at", null);
+  const { data: all, error } = await sb.from("document_templates").select("kind, name, deleted_at");
   if (error) throw err(error, "Could not read the templates");
-  const have = new Set((live ?? []).map((r) => r.kind));
-  const missing = DOC_KINDS.filter((k) => !have.has(k));
-  if (!missing.length) return;
-  const seen = new Set<DocKind>();
-  const rows = defaultTemplates()
-    .filter((t) => missing.includes(t.kind))
-    .map((t) => {
-      const first = !seen.has(t.kind);
-      seen.add(t.kind);
-      return {
-        kind: t.kind,
-        name: t.name,
-        description: t.description,
-        pages: json(t.pages),
-        options: json(t.options),
-        is_default: first,
-        created_by: userId,
-        updated_by_name: byName,
-      };
-    });
+  const rows = missingDefaultTemplates(all ?? []).map((t) => ({
+    kind: t.kind,
+    name: t.name,
+    description: t.description,
+    pages: json(t.pages),
+    options: json(t.options),
+    is_default: t.isDefault,
+    created_by: userId,
+    updated_by_name: byName,
+  }));
+  if (!rows.length) return;
   const { error: iErr } = await sb.from("document_templates").insert(rows);
   if (iErr) console.warn(`Documents: the default templates were not inserted (${iErr.message})`);
 }
@@ -556,6 +551,9 @@ interface LoadedSource {
   source: DocumentSource;
   label: string;
   accountId: string | null;
+  /** The record's property and its cover photo (phase 2), when it has them. */
+  siteId: string | null;
+  siteCoverPath: string | null;
 }
 
 const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -589,6 +587,7 @@ async function loadSource(
   let fallbackProperty: DocumentSource["property"] = null;
   let fallbackCompany: DocumentSource["company"] = null;
   let fallbackManagerName = "";
+  let inspection: DocumentSource["inspection"] = null;
 
   if (input.kind === "bid") {
     const { data: row, error } = await sb
@@ -615,7 +614,7 @@ async function loadSource(
     const { data: row, error } = await sb
       .from("service_jobs")
       .select(
-        "id, number, description, scheduled_date, created_at, service_type, account_id, site_id, created_by, po_number, site_name, site_address, contact_id",
+        "id, number, description, scheduled_date, created_at, service_type, account_id, site_id, created_by, po_number, site_name, site_address, contact_id, inspection, technician_id",
       )
       .eq("id", input.serviceJobId!)
       .maybeSingle();
@@ -626,6 +625,7 @@ async function loadSource(
       .select("po_number")
       .eq("service_job_id", row.id)
       .order("created_at");
+    if (row.service_type === "inspection") inspection = await loadInspection(sb, row);
     ticket = {
       number: String(row.number),
       description: s(row.description),
@@ -674,7 +674,7 @@ async function loadSource(
     siteId
       ? sb
           .from("crm_sites")
-          .select("id, name, address1, city, state, zip, county_code_id")
+          .select("id, name, address1, city, state, zip, county_code_id, cover_photo_path")
           .eq("id", siteId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -745,17 +745,58 @@ async function loadSource(
         propertyFallback(fallbackProperty, acc, input.kind === "bid" ? (bid?.sqFt ?? null) : null),
     bid,
     ticket,
+    inspection,
     manager:
       personOf(manager.data, officePhone) ??
       (fallbackManagerName ? { name: fallbackManagerName, email: "", phone: officePhone } : null),
     accountManager: personOf(accountManager.data, officePhone),
   };
-  return { source, label, accountId };
+  return {
+    source,
+    label,
+    accountId,
+    siteId: site.data?.id ?? null,
+    siteCoverPath: s(site.data?.cover_photo_path) || null,
+  };
 }
 
-/** The variables map a document stores: the resolved text plus the reserved pricing key. */
+/**
+ * An inspection ticket's snapshot (phase 2): the saved checklist (service_jobs.inspection) merged
+ * with the live checklist, each item's photos (role other, no repair, item_key = the item), and
+ * the technician's name (else the inspection's saved_by). server-pure.ts inspectionSnapshotFrom.
+ */
+async function loadInspection(
+  sb: Client,
+  row: { id: string; inspection: unknown; technician_id: string | null },
+): Promise<NonNullable<DocumentSource["inspection"]>> {
+  const [checklist, photos, tech] = await Promise.all([
+    sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
+    sb
+      .from("service_job_photos")
+      .select("id, role, repair_id, item_key, created_at")
+      .eq("service_job_id", row.id)
+      .eq("role", "other")
+      .is("repair_id", null)
+      .not("item_key", "is", null)
+      .order("created_at"),
+    row.technician_id
+      ? sb.from("profiles").select("full_name, email").eq("id", row.technician_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  return inspectionSnapshotFrom(
+    parseInspection(row.inspection),
+    checklist.data ?? [],
+    photos.data ?? [],
+    displayName(tech.data),
+  );
+}
+
+/** The variables map a document stores: the resolved text plus the reserved pricing / inspection keys. */
 const snapshot = (src: DocumentSource) =>
-  withStoredPricing(resolveVariables(src), src.kind === "bid" ? src.bid : null);
+  withStoredInspection(
+    withStoredPricing(resolveVariables(src), src.kind === "bid" ? src.bid : null),
+    src.kind === "ticket" ? src.inspection : null,
+  );
 
 export const resolveDocumentVariables = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -823,7 +864,10 @@ export const createDocument = createServerFn({ method: "POST" })
       const parsed = pagesSchema.safeParse(t.pages);
       templatePages = parsed.success ? parsed.data : [];
     }
-    const pages = pagesForNewDocument(templatePages, data.options);
+    // The property's cover photo (phase 2) fills the template's first empty Full Photo on page 1.
+    const cover: ImageRef | null =
+      loaded.siteId && loaded.siteCoverPath ? { kind: "siteCover", siteId: loaded.siteId } : null;
+    const pages = pagesForNewDocument(templatePages, data.options, cover);
     const variables = snapshot(loaded.source);
     const { data: row, error } = await sb
       .from("documents")
@@ -858,9 +902,14 @@ export const createDocument = createServerFn({ method: "POST" })
 
 export interface DocumentPhoto {
   id: string;
+  serviceJobId: string;
   fileName: string;
   url: string;
   hasMarks: boolean;
+  /** The ticket's marks (photo-annotations.ts), drawn on the editor's canvas (phase 2). */
+  marks: PhotoMark[];
+  /** The checklist item the photo was taken for (service_job_photos.item_key), or null. */
+  itemKey: string | null;
   takenAt: string | null;
 }
 export interface DocumentBundle {
@@ -870,6 +919,9 @@ export interface DocumentBundle {
   backTo: ReturnType<typeof backTo>;
   contacts: Array<{ name: string; email: string }>;
   templateName: string | null;
+  /** The record's property (phase 2) and a signed link to its cover photo, when it has one. */
+  siteId: string | null;
+  siteCoverUrl: string | null;
 }
 
 /** The record's label for a document row (its bid's name or "Ticket <number>"). */
@@ -896,7 +948,7 @@ export const getDocument = createServerFn({ method: "POST" })
     await whoami(context);
     const sb = context.supabase;
     const doc = await documentRow(sb, data.id, true);
-    const [label, photos, contacts, template] = await Promise.all([
+    const [label, photos, contacts, template, site] = await Promise.all([
       labelOf(sb, doc),
       ticketPhotos(sb, doc),
       doc.account_id
@@ -912,6 +964,7 @@ export const getDocument = createServerFn({ method: "POST" })
       doc.template_id
         ? sb.from("document_templates").select("name").eq("id", doc.template_id).maybeSingle()
         : Promise.resolve({ data: null }),
+      recordSite(sb, doc),
     ]);
     return {
       document: doc,
@@ -922,15 +975,44 @@ export const getDocument = createServerFn({ method: "POST" })
         .filter((c) => s(c.email))
         .map((c) => ({ name: s(c.name), email: s(c.email) })),
       templateName: template.data?.name ?? null,
+      siteId: site.id,
+      siteCoverUrl: site.coverUrl,
     };
   });
+
+/** The record's property and a signed link (an hour) to its cover photo (phase 2); none → nulls. */
+async function recordSite(
+  sb: Client,
+  doc: Pick<DocumentRow, "kind" | "bid_id" | "service_job_id">,
+): Promise<{ id: string | null; coverUrl: string | null }> {
+  const none = { id: null, coverUrl: null };
+  const rec =
+    doc.kind === "bid" && doc.bid_id
+      ? await sb.from("bids").select("site_id").eq("id", doc.bid_id).maybeSingle()
+      : doc.service_job_id
+        ? await sb.from("service_jobs").select("site_id").eq("id", doc.service_job_id).maybeSingle()
+        : { data: null };
+  const siteId = rec.data?.site_id ?? null;
+  if (!siteId) return none;
+  const { data: site } = await sb
+    .from("crm_sites")
+    .select("id, cover_photo_path")
+    .eq("id", siteId)
+    .maybeSingle();
+  if (!site) return none;
+  if (!site.cover_photo_path) return { id: site.id, coverUrl: null };
+  const { data: signed } = await sb.storage
+    .from(DOCUMENTS_BUCKET)
+    .createSignedUrl(site.cover_photo_path, SIGNED_SECONDS);
+  return { id: site.id, coverUrl: signed?.signedUrl ?? null };
+}
 
 /** A ticket document's photos (signed an hour), for the editor's picture picker; a bid's: none. */
 async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto[]> {
   if (doc.kind !== "ticket" || !doc.service_job_id) return [];
   const { data: rows } = await sb
     .from("service_job_photos")
-    .select("id, file_name, storage_path, annotations, taken_at, created_at, role")
+    .select("id, file_name, storage_path, annotations, taken_at, created_at, role, item_key")
     .eq("service_job_id", doc.service_job_id)
     .neq("role", "signature")
     .order("created_at");
@@ -944,13 +1026,19 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
     if (d.path && d.signedUrl && !d.error) urls.set(d.path, d.signedUrl);
   return rows
     .filter((r) => urls.has(r.storage_path))
-    .map((r) => ({
-      id: r.id,
-      fileName: r.file_name ?? "",
-      url: urls.get(r.storage_path)!,
-      hasMarks: isMarked(r.annotations),
-      takenAt: r.taken_at ?? r.created_at,
-    }));
+    .map((r) => {
+      const marks = parsePhotoMarks(r.annotations);
+      return {
+        id: r.id,
+        serviceJobId: doc.service_job_id!,
+        fileName: r.file_name ?? "",
+        url: urls.get(r.storage_path)!,
+        hasMarks: marks.length > 0,
+        marks,
+        itemKey: r.item_key,
+        takenAt: r.taken_at ?? r.created_at,
+      };
+    });
 }
 
 /**

@@ -50,8 +50,11 @@ import {
   type Measure,
   pageLabel,
   paginate,
+  photoGridKey,
   type Piece,
   type Placed,
+  repairListData,
+  repairListKey,
   SIGNATURE_SPACE,
   splitAtPdf,
   contentHeightFor,
@@ -62,8 +65,9 @@ import {
   documentAssetPath,
   pricingSource,
   SERVICE_BUCKET,
+  storedInspection,
 } from "./server-pure";
-import { variableLabel } from "./variables";
+import { type InspectionSnapshot, variableLabel } from "./variables";
 
 type Client = SupabaseClient<Database>;
 export type DocumentRow = Database["public"]["Tables"]["documents"]["Row"];
@@ -90,15 +94,22 @@ const clean = (s: string) =>
     .replace(/[“”]/g, '"')
     .replace(/[^ -ÿ•\n\r\t]/g, "?");
 
-interface LoadedImage {
+export interface LoadedImage {
   image: PDFImage;
   width: number;
   height: number;
   marks: PhotoMark[];
 }
 
-/** Every picture a page list shows, by the key the layout uses (`${module id}:${slot}`). */
-export function imageRefs(pages: readonly DocPage[]): Map<string, ImageRef> {
+/**
+ * Every picture a page list shows, by the key the layout uses (`${module id}:${slot}`). A Repair
+ * List's pictures come from the document's inspection snapshot (phase 2), drawn with the ticket's
+ * marks when the Marks checkbox is on.
+ */
+export function imageRefs(
+  pages: readonly DocPage[],
+  opts: { inspection?: InspectionSnapshot | null | undefined; marks?: boolean | undefined } = {},
+): Map<string, ImageRef> {
   const out = new Map<string, ImageRef>();
   for (const p of pages)
     for (const m of p.modules) {
@@ -109,6 +120,20 @@ export function imageRefs(pages: readonly DocPage[]): Map<string, ImageRef> {
         m.images.forEach((img, i) => {
           if (img) out.set(`${m.id}:${i}`, img);
         });
+      if (m.type === "photoGrid")
+        m.images.forEach((cell, i) => out.set(photoGridKey(m.id, i), cell.image));
+      if (m.type === "repairList" && m.photos && opts.inspection) {
+        const data = repairListData(m, opts.inspection);
+        data.photoIds.forEach((ids, ri) =>
+          ids.forEach((photoId, pi) =>
+            out.set(repairListKey(m.id, ri, pi), {
+              kind: "ticketPhoto",
+              photoId,
+              marks: opts.marks !== false,
+            }),
+          ),
+        );
+      }
     }
   return out;
 }
@@ -136,8 +161,8 @@ async function download(sb: Client, bucket: string, path: string): Promise<Uint8
   }
 }
 
-/** Load and embed every picture; a failure is a null (the layout draws a placeholder). */
-async function loadImages(
+/** Load and embed every picture; a failure is a null (the layout draws a placeholder). Exported for its test. */
+export async function loadImages(
   sb: Client,
   pdf: PDFDocument,
   refs: Map<string, ImageRef>,
@@ -155,6 +180,28 @@ async function loadImages(
       .in("id", [...new Set(photoIds)]);
     for (const p of data ?? []) photos.set(p.id, p);
   }
+  // The property cover photos (phase 2): the row's path in the documents bucket, by site id.
+  const siteIds = [...refs.values()]
+    .filter((r): r is Extract<ImageRef, { kind: "siteCover" }> => r.kind === "siteCover")
+    .map((r) => r.siteId);
+  const coverPaths = new Map<string, string>();
+  if (siteIds.length) {
+    const { data } = await sb
+      .from("crm_sites")
+      .select("id, cover_photo_path")
+      .in("id", [...new Set(siteIds)]);
+    for (const s of data ?? []) if (s.cover_photo_path) coverPaths.set(s.id, s.cover_photo_path);
+  }
+  // The same file is embedded once however many pictures show it.
+  const embedded = new Map<string, PDFImage | null>();
+  const embedPath = async (bucket: string, path: string): Promise<PDFImage | null> => {
+    const k = `${bucket}/${path}`;
+    if (embedded.has(k)) return embedded.get(k)!;
+    const bytes = await download(sb, bucket, path);
+    const img = bytes ? await embed(pdf, bytes) : null;
+    embedded.set(k, img);
+    return img;
+  };
   let logo: PDFImage | null | undefined;
   for (const [key, ref] of refs) {
     try {
@@ -167,19 +214,23 @@ async function loadImages(
         continue;
       }
       if (ref.kind === "upload") {
-        const bytes = await download(sb, DOCUMENTS_BUCKET, ref.path);
-        const img = bytes ? await embed(pdf, bytes) : null;
-        out.set(key, img ? { image: img, width: img.width, height: img.height, marks: [] } : null);
+        const img = await embedPath(DOCUMENTS_BUCKET, ref.path);
+        // The marks drawn on it in the editor (phase 2); applyOptionsToModule drops them when
+        // the Marks checkbox is off, so what is on the ref is what prints.
+        out.set(
+          key,
+          img ? { image: img, width: img.width, height: img.height, marks: ref.marks ?? [] } : null,
+        );
         continue;
       }
       if (ref.kind === "siteCover") {
-        // Phase 2 (built next): the property's cover photo.
-        out.set(key, null);
+        const path = coverPaths.get(ref.siteId);
+        const img = path ? await embedPath(DOCUMENTS_BUCKET, path) : null;
+        out.set(key, img ? { image: img, width: img.width, height: img.height, marks: [] } : null);
         continue;
       }
       const row = photos.get(ref.photoId);
-      const bytes = row ? await download(sb, SERVICE_BUCKET, row.storage_path) : null;
-      const img = bytes ? await embed(pdf, bytes) : null;
+      const img = row ? await embedPath(SERVICE_BUCKET, row.storage_path) : null;
       out.set(
         key,
         img
@@ -406,6 +457,7 @@ export async function renderDocumentPdf(
   const { pages, options } = parseDocument(doc);
   const vars = displayVariables(doc.variables as Parameters<typeof displayVariables>[0]);
   const pricing = pricingSource(doc.variables);
+  const inspection = storedInspection(doc.variables);
 
   const pdf = await PDFDocument.create();
   const fonts: Record<FontKey, PDFFont> = {
@@ -416,7 +468,7 @@ export async function renderDocumentPdf(
   };
   const measure: Measure = (text, font, size) => fonts[font].widthOfTextAtSize(clean(text), size);
   const [images, assets] = await Promise.all([
-    loadImages(sb, pdf, imageRefs(pages), deps),
+    loadImages(sb, pdf, imageRefs(pages, { inspection, marks: options.marks }), deps),
     loadAssets(sb, pages),
   ]);
   const ctx: LayoutContext = {
@@ -429,6 +481,8 @@ export async function renderDocumentPdf(
       return img ? { width: img.width, height: img.height } : null;
     },
     pricing,
+    inspection,
+    marks: options.marks,
   };
   const drawer = new Drawer(pdf, fonts, images);
   const top = PAGE.heightPt - PAGE.marginPt;

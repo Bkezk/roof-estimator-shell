@@ -5,9 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_OPTIONS, newModule, newPage } from "./model";
+import { DEFAULT_OPTIONS, type FullPhotoModule, type ImageRef, newModule, newPage } from "./model";
 import {
   backTo,
+  INSPECTION_KEY,
+  inspectionSnapshotFrom,
+  placeCoverImage,
+  storedInspection,
+  withStoredInspection,
   bidFromSavedState,
   bytesFromBase64,
   copyName,
@@ -394,5 +399,118 @@ describe("propertyFallback: no property picked (owner, Oct 26, Monticello Bankin
     expect(propertyFallback(typed, owens, null)?.address).toBe("1 Main St");
     expect(propertyFallback(null, null, null)).toBeNull();
     expect(propertyFallback(null, { address1: "", city: "" }, null)).toBeNull();
+  });
+});
+
+describe("the reserved inspection variable (phase 2)", () => {
+  const checklist = [
+    { id: "c-seams", label: "Seams", sort: 20 },
+    { id: "c-membrane", label: "Membrane condition", sort: 10 },
+    { id: "c-rec", label: "Recommend repairs", sort: 100 },
+    { id: "c-new", label: "Debris", sort: 30 },
+  ];
+  const saved = {
+    v: 1 as const,
+    items: [
+      { id: "c-membrane", label: "Membrane", status: "ok" as const, note: "" },
+      { id: "c-seams", label: "Seams", status: "issue" as const, note: "Open lap NE corner" },
+      { id: "c-rec", label: "Recommend repairs", status: "issue" as const, note: "" },
+    ],
+    notes: "Roof is tired.",
+    recommend_repairs: true,
+    saved_at: "2026-10-20T15:00:00Z",
+    saved_by: "Terry Tech",
+    inspected_on: "2026-10-20",
+    grade: "D" as const,
+  };
+  const photos = [
+    { id: "p1", role: "other", repair_id: null, item_key: "c-seams" },
+    { id: "p2", role: "other", repair_id: null, item_key: "c-seams" },
+    { id: "p3", role: "other", repair_id: null, item_key: null },
+    { id: "p4", role: "before", repair_id: null, item_key: "c-seams" },
+    { id: "p5", role: "other", repair_id: "r1", item_key: "c-seams" },
+  ];
+  it("inspectionSnapshotFrom: the saved answers in order, new items as never flagged, the hidden row out, photos by item, the technician's name", () => {
+    const snap = inspectionSnapshotFrom(saved, checklist, photos, "Braden Keck");
+    expect(snap).toEqual({
+      inspectedOn: "2026-10-20",
+      grade: "D",
+      technician: "Braden Keck",
+      notes: "Roof is tired.",
+      recommendRepairs: true,
+      items: [
+        { id: "c-membrane", label: "Membrane", status: "ok", note: "", photoIds: [] },
+        {
+          id: "c-seams",
+          label: "Seams",
+          status: "issue",
+          note: "Open lap NE corner",
+          photoIds: ["p1", "p2"],
+        },
+        { id: "c-new", label: "Debris", status: null, note: "", photoIds: [] },
+      ],
+    });
+    // No technician on the ticket: whoever saved the inspection.
+    expect(inspectionSnapshotFrom(saved, checklist, [], null).technician).toBe("Terry Tech");
+    // No saved inspection: the checklist, never flagged (reads as OK), nothing recommended.
+    const none = inspectionSnapshotFrom(null, checklist, photos, "  ");
+    expect(none.items.map((i) => [i.label, i.status])).toEqual([
+      ["Membrane condition", null],
+      ["Seams", null],
+      ["Debris", null],
+    ]);
+    expect(none.recommendRepairs).toBe(false);
+    expect(none.technician).toBe("");
+  });
+  it("__inspection stores the snapshot as JSON and reads back; a bid or garbage stores / reads none", () => {
+    const snap = inspectionSnapshotFrom(saved, checklist, photos, "Braden Keck");
+    const vars = withStoredInspection({ today: "x", [INSPECTION_KEY]: "old" }, snap);
+    expect(Object.keys(vars).sort()).toEqual([INSPECTION_KEY, "today"]);
+    expect(isReservedVariable(INSPECTION_KEY)).toBe(true);
+    expect(storedInspection(vars)).toEqual(snap);
+    expect(withStoredInspection({ a: "b", [INSPECTION_KEY]: "{}" }, null)).toEqual({ a: "b" });
+    expect(storedInspection({ [INSPECTION_KEY]: "{not json" })).toBeNull();
+    expect(storedInspection({ [INSPECTION_KEY]: JSON.stringify({ items: "no" }) })).toBeNull();
+    expect(storedInspection({})).toBeNull();
+    expect(storedInspection(null)).toBeNull();
+    // Lenient on a hand-made row: bad items dropped, unknown statuses read as never flagged.
+    expect(
+      storedInspection({
+        [INSPECTION_KEY]: JSON.stringify({
+          items: [{ id: "x", label: "X", status: "weird", photoIds: ["a", 1] }, 7],
+        }),
+      }),
+    ).toEqual({
+      inspectedOn: null,
+      grade: null,
+      technician: "",
+      notes: "",
+      recommendRepairs: false,
+      items: [{ id: "x", label: "X", status: null, note: "", photoIds: ["a"] }],
+    });
+    // The display map hides it like the pricing key.
+    expect(displayVariables(vars)).toEqual({ today: "x" });
+  });
+  it("the property's cover photo fills the first empty Full Photo on page 1 of a new document, photos on only", () => {
+    const cover: ImageRef = { kind: "siteCover", siteId: "55555555-5555-4555-8555-555555555555" };
+    const filled = { ...newModule("fullPhoto"), image: { kind: "logo" } } as FullPhotoModule;
+    const tpl = [
+      newPage([newModule("body"), filled, newModule("fullPhoto"), newModule("fullPhoto")]),
+      newPage([newModule("fullPhoto")]),
+    ];
+    const pages = pagesForNewDocument(tpl, DEFAULT_OPTIONS, cover);
+    const first = pages[0]!.modules.filter((m) => m.type === "fullPhoto") as FullPhotoModule[];
+    expect(first.map((m) => m.image)).toEqual([{ kind: "logo" }, cover, null]);
+    expect((pages[1]!.modules[0] as FullPhotoModule).image).toBeNull();
+    // Photos off: the photo modules are gone, nothing to fill.
+    const noPhotos = pagesForNewDocument(tpl, { ...DEFAULT_OPTIONS, photos: false }, cover);
+    expect(noPhotos[0]!.modules.map((m) => m.type)).toEqual(["body"]);
+    // No cover, or no slot: the pages as they were.
+    expect(pagesForNewDocument(tpl, DEFAULT_OPTIONS, null)[0]!.modules[2]).toMatchObject({
+      image: null,
+    });
+    const noSlot = [newPage([newModule("body")])];
+    expect(placeCoverImage(noSlot, cover)).toEqual(noSlot);
+    expect(placeCoverImage([], cover)).toEqual([]);
   });
 });

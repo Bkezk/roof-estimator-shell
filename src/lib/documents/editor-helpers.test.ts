@@ -7,8 +7,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   backHref,
+  canMarkUp,
   chipText,
   clampPageBreak,
+  imageMarks,
+  photoGridCaption,
   dataUrlBase64,
   documentSearch,
   emailDefaults,
@@ -279,5 +282,60 @@ describe("the screen breaks pages where the PDF does (owner, Oct 26: 'the page b
   it("tab labels", () => {
     expect(continuedTabLabel(0, 0)).toBe("Page 1");
     expect(continuedTabLabel(1, 2)).toBe("Page 2 · continued");
+  });
+});
+
+describe("pictures and the photo grid (phase 2)", () => {
+  const rect = {
+    id: "m",
+    kind: "rect" as const,
+    color: "red" as const,
+    a: [0, 0] as [number, number],
+    b: [1, 1] as [number, number],
+  };
+  const photos = [
+    { id: "p1", marks: [rect] },
+    { id: "p2", marks: [] },
+  ];
+  it("imageMarks: an upload's own marks; a ticket photo's only when its ref says so; none for the logo", () => {
+    const up = {
+      kind: "upload" as const,
+      path: "docs/d/a.jpg",
+      width: 10,
+      height: 10,
+      marks: [rect],
+    };
+    expect(imageMarks(up, photos)).toBe(up.marks);
+    expect(imageMarks({ ...up, marks: undefined }, photos)).toEqual([]);
+    expect(imageMarks({ kind: "ticketPhoto", photoId: "p1", marks: true }, photos)).toBe(
+      photos[0]!.marks,
+    );
+    expect(imageMarks({ kind: "ticketPhoto", photoId: "p1", marks: false }, photos)).toEqual([]);
+    expect(imageMarks({ kind: "ticketPhoto", photoId: "zz", marks: true }, photos)).toEqual([]);
+    expect(imageMarks({ kind: "logo" }, photos)).toEqual([]);
+    expect(imageMarks({ kind: "siteCover", siteId: "s" }, photos)).toEqual([]);
+  });
+  it("canMarkUp: uploads and ticket photos, not the logo, the property photo or an empty slot", () => {
+    expect(canMarkUp({ kind: "upload", path: "a", width: 1, height: 1 })).toBe(true);
+    expect(canMarkUp({ kind: "ticketPhoto", photoId: "p", marks: false })).toBe(true);
+    expect(canMarkUp({ kind: "logo" })).toBe(false);
+    expect(canMarkUp({ kind: "siteCover", siteId: "s" })).toBe(false);
+    expect(canMarkUp(null)).toBe(false);
+  });
+  it("photoGridCaption: the checklist item the photo was taken for, else blank", () => {
+    const insp = {
+      inspectedOn: null,
+      grade: null,
+      technician: "",
+      notes: "",
+      recommendRepairs: false,
+      items: [
+        { id: "c-seams", label: "Seams", status: "issue" as const, note: "", photoIds: ["p1"] },
+      ],
+    };
+    expect(photoGridCaption({ itemKey: "c-seams" }, insp)).toBe("Seams");
+    expect(photoGridCaption({ itemKey: "c-gone" }, insp)).toBe("");
+    expect(photoGridCaption({ itemKey: null }, insp)).toBe("");
+    expect(photoGridCaption({ itemKey: "c-seams" }, null)).toBe("");
   });
 });

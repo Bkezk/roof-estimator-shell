@@ -164,6 +164,7 @@ import { HISTORY_FOLD_ID, HistoryFold, HistoryStrip } from "@/components/service
 import { HISTORY_OPEN_PARAM } from "@/lib/service-history";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { DocumentsList } from "@/components/documents/documents-panel";
+import { InspectionReportButton } from "@/components/documents/inspection-report-button";
 import { NewDocumentDialog } from "@/components/documents/new-document-dialog";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -3113,8 +3114,10 @@ function FromOpportunityNote({ id }: { id: string }) {
 /**
  * Documents (owner, Oct 26: the CenterPoint-style document generator): the reports and letters
  * made from this ticket, folded like the other sections, with New document (a template, the
- * checkboxes, then the editor). Nothing is generated on its own — every document is a click. Shown
- * in the office's column only (where the Invoice fold is); a technician never sees it.
+ * checkboxes, then the editor — the list's own button; the fold adds no second one). An
+ * inspection ticket gets "Inspection report" first: one tap makes the report from the shipped
+ * template and opens it (phase 2). Nothing is generated on its own — every document is a click.
+ * Shown in the office's column only (where the Invoice fold is); a technician never sees it.
  */
 function TicketDocumentsFold({ job }: { job: ServiceJobWithTech }) {
   const [newOpen, setNewOpen] = useState(false);
@@ -3128,16 +3131,10 @@ function TicketDocumentsFold({ job }: { job: ServiceJobWithTech }) {
       storageKey="documents"
       summary="Reports and letters made from this ticket"
     >
+      {job.service_type === "inspection" && (
+        <InspectionReportButton serviceJobId={job.id} ticketNumber={job.number} />
+      )}
       <DocumentsList serviceJobId={job.id} compact onNew={() => setNewOpen(true)} />
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        title="A new document for this ticket: pick a template, tick the options, then edit it"
-        onClick={() => setNewOpen(true)}
-      >
-        <Plus className="mr-1 h-4 w-4" /> New document
-      </Button>
       <NewDocumentDialog
         kind="ticket"
         serviceJobId={job.id}

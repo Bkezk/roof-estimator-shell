@@ -21,6 +21,9 @@ export interface EditorEnv {
   options: DocOptions;
   documentId?: string | undefined;
   templateId?: string | undefined;
+  /** The record's property and a signed link to its cover photo (phase 2), when it has them. */
+  siteId?: string | null | undefined;
+  siteCoverUrl?: string | null | undefined;
   dispatch: Dispatch<EditorAction>;
   /** The TipTap editor that last had focus (null when it blurred away for good). */
   setActiveEditor: (editor: Editor | null) => void;

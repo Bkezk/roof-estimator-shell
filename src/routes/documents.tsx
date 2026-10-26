@@ -371,6 +371,8 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
       variables={variables}
       photos={bundle.photos}
       documentId={doc.id}
+      siteId={bundle.siteId}
+      siteCoverUrl={bundle.siteCoverUrl}
       recordLabel={bundle.recordLabel}
       back={backHref(bundle.backTo)}
       saving={save.isPending}
@@ -581,6 +583,9 @@ function EditorShell(props: {
   photos: EditorEnv["photos"];
   documentId?: string | undefined;
   templateId?: string | undefined;
+  /** The record's property and its cover photo (phase 2), for the "Property photo" pick. */
+  siteId?: string | null | undefined;
+  siteCoverUrl?: string | null | undefined;
   recordLabel: string;
   back: string;
   saving: boolean;
@@ -625,6 +630,8 @@ function EditorShell(props: {
       options: state.options,
       documentId: props.documentId,
       templateId: props.templateId,
+      siteId: props.siteId ?? null,
+      siteCoverUrl: props.siteCoverUrl ?? null,
       dispatch,
       setActiveEditor: (e) => {
         activeEditorRef.current = e;
@@ -639,6 +646,8 @@ function EditorShell(props: {
       state.options,
       props.documentId,
       props.templateId,
+      props.siteId,
+      props.siteCoverUrl,
       dispatch,
     ],
   );

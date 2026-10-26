@@ -12,6 +12,9 @@ import {
   richLine,
   type DocModule,
   type FullPhotoModule,
+  type ImageRef,
+  type PhotoGridModule,
+  type RepairListModule,
   type RichDoc,
 } from "./model";
 import {
@@ -21,10 +24,15 @@ import {
   CONTENT_WIDTH,
   fitImage,
   footerLine,
+  GRID_BOX_RATIO,
+  GRID_CAPTION_SIZE,
+  GRID_GUTTER,
   HEADING_SIZES,
   inlineRuns,
   layoutModule,
   layoutModules,
+  layoutPhotoGrid,
+  layoutRepairList,
   layoutRich,
   layoutSignature,
   layoutTable,
@@ -34,11 +42,14 @@ import {
   LOGO_WIDTH,
   type Measure,
   MODULE_GAP,
+  NO_INSPECTION_TEXT,
   pageLabel,
   paginate,
   type Piece,
   placeLine,
   pricingTableData,
+  REPAIR_THUMB_WIDTH,
+  repairListData,
   richBlocks,
   splitAtPdf,
   splitColumns,
@@ -46,7 +57,7 @@ import {
   wrapRuns,
   contentHeightFor,
 } from "./pdf-layout";
-import { variableLabel } from "./variables";
+import { type InspectionSnapshot, variableLabel } from "./variables";
 
 const measure: Measure = (text, font, size) =>
   text.length * size * 0.5 * (font === "bold" || font === "boldItalic" ? 1.1 : 1);
@@ -432,5 +443,197 @@ describe("contentHeightFor: the page break sets where the printed page ends (own
   });
   it("footer off: the whole margin-to-margin page", () => {
     expect(contentHeightFor({ footer: false, pageBreakIn: 5 })).toBe(CONTENT_HEIGHT);
+  });
+});
+
+describe("the Photo Grid (phase 2)", () => {
+  const img = (n: number): ImageRef => ({
+    kind: "upload",
+    path: `docs/d/${n}.jpg`,
+    width: 1600,
+    height: 1200,
+  });
+  const grid = (count: number, columns: 2 | 3, caption = "Cap"): PhotoGridModule => ({
+    ...(newModule("photoGrid") as PhotoGridModule),
+    id: "g",
+    columns,
+    images: Array.from({ length: count }, (_, i) => ({ image: img(i), caption })),
+  });
+  const columnsOf = (pieces: Piece[]) =>
+    pieces.filter((p): p is Extract<Piece, { kind: "columns" }> => p.kind === "columns");
+  it("one piece per row of cells, a 10 pt gutter between rows; cells equal with a 10 pt gutter; the picture fits a width × width/1.33 box; the caption is 9 pt", () => {
+    const pieces = layoutPhotoGrid(grid(5, 3), 0, CONTENT_WIDTH, ctx());
+    const rows = columnsOf(pieces);
+    expect(rows).toHaveLength(2);
+    expect(pieces.filter((p) => p.kind === "gap").map((p) => p.height)).toEqual([GRID_GUTTER]);
+    expect(rows[0]!.columns).toHaveLength(3);
+    expect(rows[1]!.columns).toHaveLength(2);
+    const cellW = (CONTENT_WIDTH - 2 * GRID_GUTTER) / 3;
+    expect(rows[0]!.columns.map((c) => c.width)).toEqual([cellW, cellW, cellW]);
+    expect(rows[0]!.columns[1]!.x).toBeCloseTo(cellW + GRID_GUTTER);
+    const cell = rows[0]!.columns[0]!.pieces;
+    const image = cell[0]!;
+    expect(image.kind).toBe("image");
+    if (image.kind === "image") {
+      // 4:3 picture in a 1.33 box: the width decides, the height is width / 1.33.
+      expect(image.width).toBeCloseTo(cellW);
+      expect(image.height).toBeCloseTo(cellW * (1200 / 1600));
+      expect(image.key).toBe("g:0");
+      expect(image.keepWithNext).toBe(true);
+    }
+    const caption = cell[cell.length - 1]!;
+    expect(caption.kind).toBe("text");
+    if (caption.kind === "text") expect(caption.line.size).toBe(GRID_CAPTION_SIZE);
+    // Two columns: wider cells; a missing picture is a placeholder the box's size.
+    const two = columnsOf(
+      layoutPhotoGrid(grid(2, 2, ""), 0, CONTENT_WIDTH, ctx({ image: () => null })),
+    );
+    const w2 = (CONTENT_WIDTH - GRID_GUTTER) / 2;
+    expect(two[0]!.columns[0]!.pieces).toEqual([
+      {
+        kind: "placeholder",
+        x: 0,
+        width: w2,
+        height: w2 / GRID_BOX_RATIO,
+        text: "picture not printable",
+      },
+    ]);
+    expect(layoutPhotoGrid(grid(0, 2), 0, CONTENT_WIDTH, ctx())).toEqual([]);
+  });
+  it("a long grid flows across pages a whole row at a time; no cell is ever cut from its caption", () => {
+    const pieces = layoutPhotoGrid(grid(12, 2), 0, CONTENT_WIDTH, ctx());
+    const pages = paginate(pieces, CONTENT_HEIGHT);
+    expect(pages.length).toBeGreaterThan(1);
+    const rowH = pieces[0]!.height;
+    for (const page of pages) {
+      for (const { piece } of page) {
+        if (piece.kind !== "columns") continue;
+        expect(piece.height).toBeCloseTo(rowH);
+        for (const c of piece.columns) {
+          expect(c.pieces[0]!.kind).toBe("image");
+          expect(c.pieces[c.pieces.length - 1]!.kind).toBe("text");
+        }
+      }
+    }
+    const rowsPlaced = pages.flatMap((p) => p.filter((x) => x.piece.kind === "columns"));
+    expect(rowsPlaced).toHaveLength(6);
+  });
+});
+
+describe("the Repair List (phase 2)", () => {
+  const insp: InspectionSnapshot = {
+    inspectedOn: "2026-10-20",
+    grade: "D",
+    technician: "Braden Keck",
+    notes: "",
+    recommendRepairs: true,
+    items: [
+      { id: "a", label: "Membrane condition", status: "ok", note: "", photoIds: [] },
+      {
+        id: "b",
+        label: "Seams",
+        status: "issue",
+        note: "Open lap NE corner",
+        photoIds: ["p1", "p2", "p3", "p4"],
+      },
+      { id: "c", label: "Flashings", status: "issue", note: "Lifting at curb", photoIds: ["p5"] },
+      { id: "d", label: "Debris", status: null, note: "", photoIds: ["p6"] },
+    ],
+  };
+  const list = (over: Partial<RepairListModule> = {}): RepairListModule => ({
+    ...(newModule("repairList") as RepairListModule),
+    id: "r",
+    ...over,
+  });
+  const rowsOf = (pieces: Piece[]) =>
+    pieces.filter((p): p is Extract<Piece, { kind: "tableRow" }> => p.kind === "tableRow");
+  const thumbsOf = (pieces: Piece[]) =>
+    pieces.filter((p): p is Extract<Piece, { kind: "columns" }> => p.kind === "columns");
+  it("no inspection on the ticket: one muted line saying so", () => {
+    const pieces = layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: null }));
+    expect(texts(pieces)).toEqual([NO_INSPECTION_TEXT]);
+    expect(pieces[0]!.kind === "text" && pieces[0]!.line.color).toBe("muted");
+  });
+  it("the issues as a table (Item, Note) with the header; every item adds the Finding column; a never-flagged item reads OK", () => {
+    const data = repairListData(list(), insp);
+    expect(data.columns.map((c) => c.title)).toEqual(["Item", "Note"]);
+    expect(data.rows).toEqual([
+      ["Seams", "Open lap NE corner"],
+      ["Flashings", "Lifting at curb"],
+    ]);
+    expect(data.photoIds).toEqual([["p1", "p2", "p3", "p4"], ["p5"]]);
+    const all = repairListData(list({ allItems: true }), insp);
+    expect(all.columns.map((c) => c.title)).toEqual(["Item", "Finding", "Note"]);
+    expect(all.rows[0]).toEqual(["Membrane condition", "OK", ""]);
+    expect(all.rows[3]).toEqual(["Debris", "OK", ""]);
+    // Hand-edited rows print instead, keeping their place's pictures; Pictures off prints none.
+    const edited = repairListData(list({ rows: [["Seams (NE)", "Reseal 12 ft"]] }), insp);
+    expect(edited.rows).toEqual([["Seams (NE)", "Reseal 12 ft"]]);
+    expect(edited.photoIds).toEqual([["p1", "p2", "p3", "p4"]]);
+    expect(repairListData(list({ photos: false }), insp).photoIds).toEqual([[], []]);
+    expect(repairListData(list(), null).rows).toEqual([]);
+  });
+  it("prints the header and a row per issue, each row's pictures under it three a line at 1.6 in, keyed for the loader", () => {
+    const pieces = layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: insp }));
+    const rows = rowsOf(pieces);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.header).toBe(true);
+    expect(rows[1]!.cells.map((c) => c.lines.join(" "))).toEqual(["Seams", "Open lap NE corner"]);
+    const thumbs = thumbsOf(pieces);
+    // Seams: four pictures → a line of three and a line of one; Flashings: one line.
+    expect(thumbs.map((t) => t.columns.length)).toEqual([3, 1, 1]);
+    const first = thumbs[0]!.columns[0]!.pieces[0]!;
+    expect(first.kind).toBe("image");
+    if (first.kind === "image") {
+      expect(first.key).toBe("r:r0p0");
+      expect(first.ref).toEqual({ kind: "ticketPhoto", photoId: "p1", marks: true });
+      // 4:3 into 1.6 in × 1.2 in: the width decides.
+      expect(first.width).toBeCloseTo(REPAIR_THUMB_WIDTH);
+    }
+    expect(thumbs[0]!.columns[2]!.pieces[0]).toMatchObject({ key: "r:r0p2" });
+    expect(thumbs[1]!.columns[0]!.pieces[0]).toMatchObject({ key: "r:r0p3" });
+    expect(thumbs[2]!.columns[0]!.pieces[0]).toMatchObject({ key: "r:r1p0" });
+    // The order on the page: header, Seams row, its two lines of pictures, Flashings row, its line.
+    const kinds = pieces.filter((p) => p.kind !== "gap").map((p) => p.kind);
+    expect(kinds).toEqual(["tableRow", "tableRow", "columns", "columns", "tableRow", "columns"]);
+    // Marks off: the refs say so. Pictures off: no thumbnails at all.
+    const noMarks = layoutRepairList(
+      list(),
+      0,
+      CONTENT_WIDTH,
+      ctx({ inspection: insp, marks: false }),
+    );
+    const t0 = thumbsOf(noMarks)[0]!.columns[0]!.pieces[0]!;
+    expect(t0.kind === "image" && t0.ref).toMatchObject({ marks: false });
+    expect(
+      thumbsOf(
+        layoutRepairList(list({ photos: false }), 0, CONTENT_WIDTH, ctx({ inspection: insp })),
+      ),
+    ).toEqual([]);
+    // No issues: the list says so.
+    const clean = { ...insp, items: insp.items.map((i) => ({ ...i, status: "ok" as const })) };
+    expect(texts(layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: clean })))).toEqual([
+      "No issues found",
+    ]);
+    // A picture that cannot print is a small placeholder; nothing throws.
+    const missing = layoutRepairList(
+      list(),
+      0,
+      CONTENT_WIDTH,
+      ctx({ inspection: insp, image: () => null }),
+    );
+    expect(thumbsOf(missing)[0]!.columns[0]!.pieces[0]!.kind).toBe("placeholder");
+  });
+  it("the module in a flow: layoutModule dispatches both, and the paginator keeps a thumbnail line whole", () => {
+    const pieces = layoutModule(list(), 0, CONTENT_WIDTH, ctx({ inspection: insp }));
+    expect(rowsOf(pieces)).toHaveLength(3);
+    expect(
+      layoutModule({ ...(newModule("photoGrid") as PhotoGridModule), images: [] }, 0, 100, ctx()),
+    ).toEqual([]);
+    const pages = paginate(pieces, 200);
+    for (const page of pages)
+      for (const { piece } of page)
+        if (piece.kind === "columns")
+          for (const c of piece.columns) expect(c.pieces).toHaveLength(1);
   });
 });

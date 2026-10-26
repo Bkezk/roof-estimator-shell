@@ -92,6 +92,8 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { isOffice, managesTickets } from "@/lib/access";
+// Phase 2 of the documents (Oct 26): who sees the Inspection report button (documents_access()).
+import { hasDocumentsAccess } from "@/lib/access";
 import { closeoutDestination } from "@/lib/closeout-destination";
 import {
   REPAIR_TAGS,
@@ -146,6 +148,7 @@ import {
   InspectionChecklistStep,
   InspectionFindingsStep,
 } from "@/components/service/inspection-closeout";
+import { InspectionReportButton } from "@/components/documents/inspection-report-button";
 import { useInspectionCamera } from "@/components/service/inspection-camera";
 import { clearInspectionDraft, useInspectionDraft } from "@/components/service/inspection-draft";
 import {
@@ -1064,6 +1067,24 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   photos={photoRows}
                   camera={inspCamera}
                 />
+                {/* Phase 2 (owner, Oct 26): the report, one tap, for whoever has documents access
+                    (a technician-only user has none, so the button is not theirs). */}
+                {hasDocumentsAccess(profile) && (
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-2"
+                    data-line="inspection-report"
+                  >
+                    <InspectionReportButton
+                      serviceJobId={job.id}
+                      ticketNumber={job.number}
+                      size="default"
+                      className="h-11 sm:h-9"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Makes the report from the checklist and photos and opens it to edit.
+                    </span>
+                  </div>
+                )}
               </StepCard>
             </>
           ) : (

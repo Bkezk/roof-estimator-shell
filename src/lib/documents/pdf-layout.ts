@@ -27,7 +27,12 @@ import {
   resolveCellText,
   VARIABLE_NODE,
 } from "./model";
-import { type DocumentSource, pricingRows } from "./variables";
+import {
+  type DocumentSource,
+  type InspectionSnapshot,
+  inspectionRows,
+  pricingRows,
+} from "./variables";
 
 // ------------------------------------------------------------------------------- constants
 
@@ -69,6 +74,16 @@ export const PLACEHOLDER_HEIGHT = 72;
 export const PLACEHOLDER_TEXT = "picture not printable";
 /** The tallest a picture prints when its height is not given (room left for a caption). */
 export const MAX_IMAGE_HEIGHT = CONTENT_HEIGHT - 40;
+/** The Photo Grid (phase 2): the gutter between cells, the cell box's shape and the caption size. */
+export const GRID_GUTTER = 10;
+export const GRID_BOX_RATIO = 1.33;
+export const GRID_CAPTION_SIZE = 9;
+/** The Repair List's pictures (phase 2): up to three a line, about 1.6 in wide each. */
+export const REPAIR_THUMB_WIDTH = 1.6 * PT_PER_IN;
+export const REPAIR_THUMBS_PER_LINE = 3;
+export const REPAIR_THUMB_HEIGHT = 1.2 * PT_PER_IN;
+/** The Repair List's empty state (also the editor's). */
+export const NO_INSPECTION_TEXT = "No inspection on this ticket";
 
 // ----------------------------------------------------------------------------------- types
 
@@ -181,6 +196,10 @@ export interface LayoutContext {
   image: (ref: ImageRef, key: string) => ImageSize | null;
   /** What the Pricing Table is built from (server-pure.ts pricingSource). */
   pricing: Pick<DocumentSource, "bid">;
+  /** What the Repair List is built from (server-pure.ts storedInspection); null on other records. */
+  inspection?: InspectionSnapshot | null | undefined;
+  /** Draw a ticket photo's marks under the Repair List's rows (the document's Marks checkbox). */
+  marks?: boolean | undefined;
 }
 
 export const fontKey = (bold: boolean, italic: boolean): FontKey =>
@@ -877,24 +896,178 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
   }
 }
 
-/** Phase 2 (built next): the Photo Grid prints its pictures in rows with captions. */
-export function layoutPhotoGrid(
-  _m: PhotoGridModule,
-  _x: number,
-  _width: number,
-  _ctx: LayoutContext,
-): Piece[] {
-  return [];
+/** The key the server loads a Photo Grid cell's picture under. */
+export const photoGridKey = (moduleId: string, cell: number) => `${moduleId}:${cell}`;
+/** The key the server loads a Repair List row's picture under. */
+export const repairListKey = (moduleId: string, row: number, photo: number) =>
+  `${moduleId}:r${row}p${photo}`;
+
+/**
+ * A cell's pieces kept together: everything but the last piece drags the next along, so a row
+ * of columns is never split inside a cell (an image from its caption, a caption from its second
+ * line) — the paginator moves the whole row when it does not fit.
+ */
+function keepTogether(pieces: Piece[]): Piece[] {
+  return pieces.map((p, i) =>
+    i < pieces.length - 1 && p.kind !== "gap" && p.kind !== "signature" && p.kind !== "columns"
+      ? { ...p, keepWithNext: true }
+      : p,
+  );
 }
 
-/** Phase 2 (built next): the Repair List prints the inspection's issues with their pictures. */
-export function layoutRepairList(
-  _m: RepairListModule,
-  _x: number,
-  _width: number,
-  _ctx: LayoutContext,
+/**
+ * The Photo Grid (phase 2): cells of equal width with a 10 pt gutter, each picture fitted into a
+ * box width × width / 1.33 and its caption at 9 pt under it. One piece per ROW of cells, so a
+ * long grid flows across pages a row at a time and the paginator never cuts a picture.
+ */
+export function layoutPhotoGrid(
+  m: PhotoGridModule,
+  x: number,
+  width: number,
+  ctx: LayoutContext,
 ): Piece[] {
-  return [];
+  const n = m.columns;
+  const cellW = (width - (n - 1) * GRID_GUTTER) / n;
+  const boxH = cellW / GRID_BOX_RATIO;
+  const out: Piece[] = [];
+  for (let start = 0; start < m.images.length; start += n) {
+    const row = m.images.slice(start, start + n);
+    const columns: Column[] = row.map((cell, k) => {
+      const cx = x + k * (cellW + GRID_GUTTER);
+      const key = photoGridKey(m.id, start + k);
+      const pieces: Piece[] = [];
+      const size = ctx.image(cell.image, key);
+      if (size) {
+        const fit = fitImage(size, cellW, boxH);
+        pieces.push({
+          kind: "image",
+          x: cx + (cellW - fit.width) / 2,
+          width: fit.width,
+          height: fit.height,
+          ref: cell.image,
+          key,
+        });
+      } else {
+        pieces.push({
+          kind: "placeholder",
+          x: cx,
+          width: cellW,
+          height: boxH,
+          text: PLACEHOLDER_TEXT,
+        });
+      }
+      if (cell.caption.trim()) {
+        pieces.push({ kind: "gap", height: 3 });
+        pieces.push(
+          ...layoutPlain(cell.caption, cx, cellW, GRID_CAPTION_SIZE, ctx, {
+            align: "center",
+            color: "muted",
+          }),
+        );
+      }
+      return { x: cx, width: cellW, pieces: keepTogether(pieces) };
+    });
+    if (out.length) out.push({ kind: "gap", height: GRID_GUTTER });
+    out.push(columnsPiece(columns));
+  }
+  return out;
+}
+
+/** The Repair List's columns, rows and the ticket photos under each row (the hand-edited rows win). */
+export function repairListData(
+  m: Pick<RepairListModule, "rows" | "allItems" | "photos">,
+  insp: InspectionSnapshot | null | undefined,
+): { columns: Array<{ title: string; align: TextAlign }>; rows: string[][]; photoIds: string[][] } {
+  const built = inspectionRows(insp ?? null, m.allItems);
+  const rows = m.rows ?? built.rows;
+  const n = Math.max(built.columns.length, ...rows.map((r) => r.length));
+  const columns = Array.from({ length: n }, (_, i) => ({
+    title: built.columns[i] ?? "",
+    align: "left" as TextAlign,
+  }));
+  // Hand-edited rows keep their place: the i-th row prints the i-th item's pictures.
+  const photoIds = rows.map((_, i) => (m.photos ? (built.photoIds[i] ?? []) : []));
+  return { columns, rows, photoIds };
+}
+
+/**
+ * The Repair List (phase 2): the inspection's issues (or every item) as a table — the item, the
+ * finding, the note — and, with Pictures on, each row's ticket photos as small thumbnails under
+ * the row, three a line. With no inspection on the ticket it prints one muted line saying so.
+ */
+export function layoutRepairList(
+  m: RepairListModule,
+  x: number,
+  width: number,
+  ctx: LayoutContext,
+): Piece[] {
+  if (!ctx.inspection)
+    return layoutPlain(NO_INSPECTION_TEXT, x, width, BODY_SIZE, ctx, { color: "muted" });
+  const data = repairListData(m, ctx.inspection);
+  if (!data.rows.length)
+    return layoutPlain(
+      m.allItems ? "No checklist items" : "No issues found",
+      x,
+      width,
+      BODY_SIZE,
+      ctx,
+      { color: "muted" },
+    );
+  // The item column narrower than the note.
+  const columns = data.columns.map((c, i) => ({
+    ...c,
+    width: data.columns.length === 3 ? [1.3, 0.7, 2][i] : [1.1, 2][i],
+  }));
+  const table = layoutTable({ columns, rows: data.rows }, x, width, ctx);
+  const header = table[0]?.kind === "tableRow" && table[0].header ? table.shift()! : null;
+  const out: Piece[] = header ? [header] : [];
+  table.forEach((rowPiece, ri) => {
+    out.push(rowPiece);
+    const ids = data.photoIds[ri] ?? [];
+    if (!ids.length) return;
+    const thumbW = Math.min(
+      REPAIR_THUMB_WIDTH,
+      (width - (REPAIR_THUMBS_PER_LINE - 1) * GRID_GUTTER) / REPAIR_THUMBS_PER_LINE,
+    );
+    for (let start = 0; start < ids.length; start += REPAIR_THUMBS_PER_LINE) {
+      const line = ids.slice(start, start + REPAIR_THUMBS_PER_LINE);
+      out.push({ kind: "gap", height: 4 });
+      out.push(
+        columnsPiece(
+          line.map((photoId, k) => {
+            const cx = x + CELL_PAD + k * (thumbW + GRID_GUTTER);
+            const key = repairListKey(m.id, ri, start + k);
+            const ref: ImageRef = { kind: "ticketPhoto", photoId, marks: ctx.marks !== false };
+            const size = ctx.image(ref, key);
+            const piece: Piece = size
+              ? (() => {
+                  const fit = fitImage(size, thumbW, REPAIR_THUMB_HEIGHT);
+                  return {
+                    kind: "image",
+                    x: cx,
+                    width: fit.width,
+                    height: fit.height,
+                    ref,
+                    key,
+                  };
+                })()
+              : {
+                  kind: "placeholder",
+                  x: cx,
+                  width: thumbW,
+                  height: REPAIR_THUMB_HEIGHT * 0.6,
+                  text: PLACEHOLDER_TEXT,
+                };
+            return { x: cx, width: thumbW, pieces: [piece] };
+          }),
+        ),
+      );
+    }
+    out.push({ kind: "gap", height: 6 });
+  });
+  const last = out[out.length - 1];
+  if (last && last.kind === "gap") out.pop();
+  return out;
 }
 
 /** A page's modules as one flow of pieces, a gap between modules. */

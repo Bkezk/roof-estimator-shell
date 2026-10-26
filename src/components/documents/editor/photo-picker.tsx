@@ -1,18 +1,28 @@
 /**
  * The picture in a photo module: shows an ImageRef (an upload in the documents bucket, a ticket
- * photo with or without its marks, or the company logo) and the dialog that chooses one — the
- * ticket's photos as thumbnails (a "With marks" switch when a photo has marks), "Upload picture"
- * (read as a data URL, measured, sent as base64 to uploadDocumentImage), and "Company logo".
+ * photo with or without its marks, the property's cover photo, or the company logo) and the dialog
+ * that chooses one — the ticket's photos as thumbnails (a "With marks" switch when a photo has
+ * marks), "Property photo" when the record's property has a cover, "Upload picture" (read as a
+ * data URL, measured, sent as base64 to uploadDocumentImage), and "Company logo".
+ *
+ * Phase 2 (owner, Oct 26: "mark up the pictures in the documents"): every picture draws its marks
+ * on the canvas (MarksOverlay, the ticket thumbnails' drawer) and carries a "Mark up" pencil on
+ * hover. An uploaded picture opens the drawing surface (photo-markup.tsx PhotoMarkupSurface) and
+ * keeps the marks on its ImageRef (`upload.marks`); a ticket photo opens the same surface and
+ * saves on the ticket's row (savePhotoAnnotations), as the ticket page does — the document only
+ * draws the ticket's marks. Nothing is saved until Done is pressed.
  */
 import { useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Building2, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { Building2, Home, ImagePlus, Loader2, PenLine, Trash2 } from "lucide-react";
 
-import { dataUrlBase64, LOGO_SRC } from "@/lib/documents/editor-helpers";
+import { canMarkUp, dataUrlBase64, imageMarks, LOGO_SRC } from "@/lib/documents/editor-helpers";
 import type { ImageRef } from "@/lib/documents/model";
 import { documentImageUrl, uploadDocumentImage } from "@/lib/documents.functions";
+import { type PhotoMark, serializePhotoMarks } from "@/lib/photo-annotations";
+import { savePhotoAnnotations } from "@/lib/service-field.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,12 +35,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { MarksOverlay, PhotoMarkupSurface } from "@/components/service/photo-markup";
 
-import { errText, imageUrlKey } from "../document-types";
+import { documentKey, errText, imageUrlKey } from "../document-types";
 import { useEditorEnv } from "./editor-context";
 import { readImageFile } from "./editor-dom";
 
-/** The <img> for an ImageRef (the url of an upload is fetched once per path). */
+/** The <img> for an ImageRef (the url of an upload is fetched once per path), its marks drawn over it. */
 export function DocImage(props: {
   image: ImageRef;
   className?: string | undefined;
@@ -47,6 +58,7 @@ export function DocImage(props: {
     enabled: !!upload,
     staleTime: 10 * 60_000,
   });
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   let src: string | null = null;
   let label = props.alt ?? "";
   if (image.kind === "logo") {
@@ -57,8 +69,7 @@ export function DocImage(props: {
     src = p?.url ?? null;
     label ||= p ? `${p.fileName}${image.marks ? " (with marks)" : ""}` : "Ticket photo";
   } else if (image.kind === "siteCover") {
-    // Phase 2 (built next): the property's cover photo.
-    src = null;
+    src = env.siteCoverUrl ?? null;
     label ||= "Property photo";
   } else {
     src = q.data ?? null;
@@ -78,22 +89,33 @@ export function DocImage(props: {
           ? "Picture not found"
           : image.kind === "ticketPhoto"
             ? "Photo not on this ticket"
-            : "…"}
+            : image.kind === "siteCover"
+              ? "No property photo"
+              : "…"}
       </div>
     );
+  const marks = imageMarks(image, env.photos);
   return (
-    <img
-      src={src}
-      alt={label}
-      title={label}
-      className={cn("object-contain", props.className)}
-      style={props.style}
-      draggable={false}
-    />
+    <span className="relative block h-full w-full">
+      <img
+        src={src}
+        alt={label}
+        title={label}
+        className={cn("object-contain", props.className)}
+        style={props.style}
+        draggable={false}
+        onLoad={(e) =>
+          setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+        }
+      />
+      {natural && marks.length > 0 ? (
+        <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="contain" />
+      ) : null}
+    </span>
   );
 }
 
-/** The empty slot / picture that opens the picker on click. */
+/** The empty slot / picture that opens the picker on click, with Mark up on hover. */
 export function ImageSlot(props: {
   image: ImageRef | null;
   onChange: (image: ImageRef | null) => void;
@@ -103,11 +125,12 @@ export function ImageSlot(props: {
   title?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const [markup, setMarkup] = useState(false);
   const style: React.CSSProperties | undefined = props.heightPx
     ? { height: props.heightPx }
     : undefined;
   return (
-    <>
+    <div className="group/slot relative">
       <button
         type="button"
         title={props.title ?? (props.image ? "Change picture" : "Choose photo")}
@@ -134,6 +157,20 @@ export function ImageSlot(props: {
           </div>
         )}
       </button>
+      {canMarkUp(props.image) ? (
+        <button
+          type="button"
+          title="Mark up"
+          aria-label="Mark up"
+          className="absolute right-1 top-1 hidden items-center gap-1 rounded-md border bg-popover px-1.5 py-1 text-xs text-popover-foreground shadow-md group-hover/slot:flex"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMarkup(true);
+          }}
+        >
+          <PenLine className="h-3.5 w-3.5" /> Mark up
+        </button>
+      ) : null}
       <PhotoPicker
         open={open}
         onOpenChange={setOpen}
@@ -143,7 +180,115 @@ export function ImageSlot(props: {
           setOpen(false);
         }}
       />
-    </>
+      {props.image && canMarkUp(props.image) ? (
+        <MarkupDialog
+          open={markup}
+          onOpenChange={setMarkup}
+          image={props.image}
+          onChange={props.onChange}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Mark up a picture of a photo module (phase 2). An upload keeps the marks on its ImageRef (the
+ * document's own; saved with the document); a ticket photo saves on its row, as the ticket page
+ * does, and the document redraws the ticket's marks. Done saves; closing the dialog does not.
+ */
+export function MarkupDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  image: ImageRef;
+  onChange: (image: ImageRef) => void;
+}) {
+  const env = useEditorEnv();
+  const qc = useQueryClient();
+  const urlFn = useServerFn(documentImageUrl);
+  const saveFn = useServerFn(savePhotoAnnotations);
+  const { image } = props;
+  const upload = image.kind === "upload" ? image : null;
+  const ticket = image.kind === "ticketPhoto" ? image : null;
+  const photo = ticket ? env.photos.find((p) => p.id === ticket.photoId) : null;
+  const q = useQuery({
+    queryKey: imageUrlKey(upload?.path ?? ""),
+    queryFn: async () => (await urlFn({ data: { path: upload!.path } })).url,
+    enabled: !!upload && props.open,
+    staleTime: 10 * 60_000,
+  });
+  const url = upload ? (q.data ?? null) : (photo?.url ?? null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const size = upload ? { w: upload.width, h: upload.height } : natural;
+  const marksAllowed = env.options.marks;
+  const saveTicket = useMutation({
+    mutationFn: (marks: PhotoMark[]) =>
+      saveFn({
+        data: {
+          id: photo!.id,
+          service_job_id: photo!.serviceJobId,
+          annotations: serializePhotoMarks(marks),
+        },
+      }),
+    onSuccess: async (_row, marks) => {
+      // The document redraws the ticket's marks (getDocument reads the row again).
+      if (env.documentId) await qc.invalidateQueries({ queryKey: documentKey(env.documentId) });
+      props.onChange({ ...ticket!, marks: marksAllowed && marks.length > 0 });
+      toast.success("Marks saved on the ticket photo");
+      props.onOpenChange(false);
+    },
+    onError: (e) => toast.error(`The photo's marks did not save: ${errText(e)}`),
+  });
+  const done = (marks: PhotoMark[]) => {
+    if (upload) {
+      const { marks: _old, ...rest } = upload;
+      props.onChange(marks.length ? { ...rest, marks } : rest);
+      props.onOpenChange(false);
+      return;
+    }
+    if (photo) saveTicket.mutate(marks);
+  };
+  const initial = upload ? (upload.marks ?? []) : (photo?.marks ?? []);
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="max-h-[96vh] w-[calc(100vw-1rem)] max-w-4xl overflow-y-auto p-3 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Mark up the picture</DialogTitle>
+          <DialogDescription>
+            {upload
+              ? "Circle the problem, point at it, box it, write on it or tag it. The marks stay with this document; Done keeps them."
+              : "The marks are saved on the ticket's photo when you press Done, and every document drawing it shows them."}
+            {!marksAllowed
+              ? " Marks on photos is off for this document, so they will not print until it is on."
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+        {url && !size ? (
+          <img
+            src={url}
+            alt=""
+            className="hidden"
+            onLoad={(e) =>
+              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+            }
+          />
+        ) : null}
+        {url && size ? (
+          <PhotoMarkupSurface
+            key={`${image.kind}:${upload?.path ?? ticket?.photoId}`}
+            url={url}
+            size={size}
+            initialMarks={initial}
+            onDone={done}
+            status={saveTicket.isPending ? " · saving…" : ""}
+          />
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading the picture…
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -185,6 +330,7 @@ export function PhotoPicker(props: {
     onError: (e) => toast.error(`Could not upload the picture: ${errText(e)}`),
   });
   const marksAllowed = env.options.marks;
+  const siteCover = env.siteId && env.siteCoverUrl ? env.siteId : null;
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -194,6 +340,7 @@ export function PhotoPicker(props: {
             {env.kind === "ticket"
               ? "A photo from the ticket, a picture from your computer, or the company logo."
               : "A picture from your computer, or the company logo."}
+            {siteCover ? " The property's cover photo is here too." : ""}
           </DialogDescription>
         </DialogHeader>
         {env.photos.length > 0 ? (
@@ -275,6 +422,17 @@ export function PhotoPicker(props: {
             )}
             Upload picture
           </Button>
+          {siteCover ? (
+            <Button
+              type="button"
+              variant="outline"
+              title="The property's cover photo (set on the property card)"
+              onClick={() => props.onPick({ kind: "siteCover", siteId: siteCover })}
+            >
+              <Home className="h-4 w-4" />
+              Property photo
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"

@@ -533,3 +533,23 @@ describe("the editor, lightbox, thumbnail and export", () => {
     );
   });
 });
+
+describe("the drawing surface is reusable (phase 2 of the documents, Oct 26)", () => {
+  const ui = read("src/components/service/photo-markup.tsx");
+  it("PhotoMarkupSurface owns the tools and the marks and reports them; the ticket editor wraps it with the autosave and Download", () => {
+    const at = ui.indexOf("export function PhotoMarkupSurface(");
+    expect(at).toBeGreaterThan(0);
+    const surface = ui.slice(at);
+    expect(surface).toMatch(/initialMarks: PhotoMark\[\];/);
+    expect(surface).toMatch(/onChange\?: \(\(marks: PhotoMark\[\]\) => void\) \| undefined;/);
+    expect(surface).toMatch(/onDone: \(marks: PhotoMark\[\]\) => void;/);
+    expect(surface).toContain("report.current?.(history.marks);");
+    expect(surface).not.toContain("useServerFn");
+    expect(surface).not.toContain("useAutosave");
+    const editor = ui.slice(ui.indexOf("export function PhotoMarkupEditor("), at);
+    expect(editor).toContain("<PhotoMarkupSurface");
+    expect(editor).toContain("onChange={setMarks}");
+    expect(editor).toContain("downloadPhoto(photo, ticketNumber, ordinal, marks)");
+    expect(editor).toMatch(/onDone=\{\(\) => \{\s*void autosave\.flush\(\);\s*onDone\(\);/);
+  });
+});

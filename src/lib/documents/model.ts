@@ -595,8 +595,19 @@ export const isPhotoModule = (m: DocModule) =>
   m.type === "twoPhotos" ||
   m.type === "photoGrid";
 
-const stripMarks = (img: ImageRef | null, marks: boolean): ImageRef | null =>
-  img && img.kind === "ticketPhoto" ? { ...img, marks: marks && img.marks } : img;
+/**
+ * The Marks checkbox applied to one picture: a ticket photo keeps its flag only while marks are
+ * on; an uploaded picture loses the marks drawn on it in the editor (phase 2) when they are off.
+ */
+export function stripMarks(img: ImageRef | null, marks: boolean): ImageRef | null {
+  if (!img) return img;
+  if (img.kind === "ticketPhoto") return { ...img, marks: marks && img.marks };
+  if (img.kind === "upload" && !marks && img.marks?.length) {
+    const { marks: _dropped, ...rest } = img;
+    return rest;
+  }
+  return img;
+}
 
 /** The option switches applied to one module (also run when a switch is flipped after generating). */
 export function applyOptionsToModule(m: DocModule, options: DocOptions): DocModule {

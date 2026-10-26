@@ -292,6 +292,19 @@ export const seesInvoices = (p: AccessLike | null | undefined): boolean =>
   managesTickets(p) || isSalesPm(p);
 
 /**
+ * Who sees and makes documents (owner, Oct 26: the CenterPoint-style document generator):
+ * admins, managers, and anyone with Estimate, Invoices or Customers access — whoever makes bids
+ * or deals with customers. A technician-only user is not this, so the field ticket page shows
+ * them no "Inspection report" button. The twin of `public.documents_access()`
+ * (20261026150000_documents.sql).
+ */
+export const hasDocumentsAccess = (p: AccessLike | null | undefined): boolean =>
+  managesTickets(p) ||
+  canAccess(p, "estimate") ||
+  canAccess(p, "invoices") ||
+  canAccess(p, "customers");
+
+/**
  * Who works the whole Opportunities list (the sidebar entry, New opportunity): Customers or
  * Estimate access — the twin of crm_opportunities_read. Anyone else still opens /opportunities
  * (pageForPath: null) and sees only the opportunities assigned to them.

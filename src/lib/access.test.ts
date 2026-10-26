@@ -4,6 +4,7 @@ import {
   EVERYONE_PAGES,
   PAGES,
   canAccess,
+  hasDocumentsAccess,
   homeFor,
   isAdmin,
   isOffice,
@@ -134,5 +135,18 @@ describe("every technician check goes through isOffice (manager clean-up, Oct 1)
     };
     for (const r of roots) if (fs.existsSync(r)) walk(r);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("documents access (phase 2, Oct 26): the twin of documents_access()", () => {
+  it("admins, managers and Estimate / Invoices / Customers access; never a technician-only user", () => {
+    expect(hasDocumentsAccess({ role: "admin", access: [] })).toBe(true);
+    expect(hasDocumentsAccess({ role: "manager", access: [] })).toBe(true);
+    expect(hasDocumentsAccess({ role: "user", access: ["estimate"] })).toBe(true);
+    expect(hasDocumentsAccess({ role: "user", access: ["invoices", "service"] })).toBe(true);
+    expect(hasDocumentsAccess({ role: "user", access: ["customers"] })).toBe(true);
+    expect(hasDocumentsAccess({ role: "user", access: ["service"], technician: true })).toBe(false);
+    expect(hasDocumentsAccess({ role: "user", access: ["inventory", "takeoff"] })).toBe(false);
+    expect(hasDocumentsAccess(null)).toBe(false);
   });
 });

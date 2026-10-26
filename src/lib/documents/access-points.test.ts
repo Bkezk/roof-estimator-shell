@@ -10,6 +10,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { pageForPath } from "@/lib/access";
+import {
+  findInspectionTemplate,
+  INSPECTION_REPORT_OPTIONS,
+} from "@/lib/documents/inspection-report";
 
 const read = (p: string) => readFileSync(p, "utf8");
 const estimate = read("src/routes/estimate.tsx");
@@ -111,7 +115,9 @@ describe("the ticket page's Documents fold", () => {
     expect(fold).toContain(
       "<DocumentsList serviceJobId={job.id} compact onNew={() => setNewOpen(true)} />",
     );
-    expect(fold).toContain("New document");
+    // Phase 2: the list's own "New document" button is the only one — the fold's duplicate is gone.
+    expect(fold).not.toMatch(/<Plus className="mr-1 h-4 w-4" \/> New document/);
+    expect((fold.match(/New document/g) ?? []).length).toBe(0);
     expect(fold).toContain('kind="ticket"');
     expect(fold).toContain("serviceJobId={job.id}");
     expect(fold).toContain("recordLabel={recordLabel}");
@@ -124,6 +130,46 @@ describe("the ticket page's Documents fold", () => {
     expect(service).toContain(
       'import { NewDocumentDialog } from "@/components/documents/new-document-dialog";',
     );
+  });
+  it("an inspection ticket gets the one-tap Inspection report button, on the ticket page and the field close-out (documents access only)", () => {
+    const fold = service.slice(service.indexOf("function TicketDocumentsFold("));
+    expect(fold).toMatch(
+      /\{job\.service_type === "inspection" && \(\s*<InspectionReportButton serviceJobId=\{job\.id\} ticketNumber=\{job\.number\} \/>/,
+    );
+    expect(service).toContain(
+      'import { InspectionReportButton } from "@/components/documents/inspection-report-button";',
+    );
+    const closeout = read("src/components/service/closeout.tsx");
+    expect(closeout).toContain(
+      'import { InspectionReportButton } from "@/components/documents/inspection-report-button";',
+    );
+    expect(closeout).toContain('import { hasDocumentsAccess } from "@/lib/access";');
+    // Inside the inspection branch's Findings step, gated on documents access.
+    const findings = closeout.slice(
+      closeout.indexOf("<InspectionFindingsStep"),
+      closeout.indexOf("Step 2 · Before: the Inspection checklist"),
+    );
+    expect(findings).toMatch(
+      /\{hasDocumentsAccess\(profile\) && \(\s*<div[^>]*data-line="inspection-report"/,
+    );
+    expect(findings).toContain("<InspectionReportButton");
+    // The button itself: the template by name, photos + marks on, no prices, straight to the editor.
+    const button = read("src/components/documents/inspection-report-button.tsx");
+    expect(button).toContain("findInspectionTemplate(templates)");
+    expect(button).toContain("options: INSPECTION_REPORT_OPTIONS");
+    expect(INSPECTION_REPORT_OPTIONS).toMatchObject({ prices: "none", photos: true, marks: true });
+    expect(
+      findInspectionTemplate([
+        { id: "a", kind: "bid", name: "Inspection report" },
+        { id: "b", kind: "ticket", name: " inspection REPORT " },
+      ]),
+    ).toMatchObject({ id: "b" });
+    expect(
+      findInspectionTemplate([{ id: "c", kind: "ticket", name: "Service letter" }]),
+    ).toBeNull();
+    expect(button).toContain('navigate({ to: "/documents", search: { id: r.id } })');
+    expect(button).not.toContain("Dialog");
+    expect(button).toContain("Inspection report\n");
   });
 });
 

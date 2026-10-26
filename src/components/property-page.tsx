@@ -37,7 +37,7 @@ import { TicketRows } from "@/components/crm/ticket-rows";
 import { OpportunitiesSection, TasksSection } from "@/components/customers-page";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties } from "@/components/crm/site-warranties";
-import { PropertySites } from "@/components/crm/property-sites";
+import { PropertySites, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -205,6 +205,8 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
             {/* The roof warranties (M5) and the named sites inside the property (Oct 6). */}
             <SiteWarranties siteId={s.id} />
             <PropertySites propertyId={s.id} />
+            {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
+            <SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!deleted} />
           </>
         )}
       </section>

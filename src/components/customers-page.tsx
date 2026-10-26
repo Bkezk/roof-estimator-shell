@@ -114,7 +114,7 @@ import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties } from "@/components/crm/site-warranties";
-import { PropertySites } from "@/components/crm/property-sites";
+import { PropertySites, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
   AccountManagerSelect,
@@ -1574,6 +1574,8 @@ function SitesSection({
                 <SiteWarranties siteId={s.id} />
                 {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
                 <PropertySites propertyId={s.id} />
+                {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
+                <SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!readOnly} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (

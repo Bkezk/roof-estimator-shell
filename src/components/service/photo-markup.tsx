@@ -659,29 +659,11 @@ export function PhotoMarkupEditor({
   ordinal: number;
   onDone: () => void;
 }) {
-  const { w: W, h: H } = size;
   const qc = useQueryClient();
   const saveFn = useServerFn(savePhotoAnnotations);
-  const [history, dispatch] = useReducer(
-    photoMarksReducer,
-    parsePhotoMarks(photo.annotations),
-    emptyPhotoHistory,
-  );
-  const [tool, setTool] = useState<Tool>("ellipse");
-  const [color, setColor] = useState<PhotoColor>(DEFAULT_PHOTO_COLOR);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState<PhotoView>(() => fullView(W, H));
-  const [draft, setDraft] = useState<{ kind: ShapeKind; a: Pt; b: Pt } | null>(null);
-  const [moving, setMoving] = useState<{ id: string; du: number; dv: number } | null>(null);
-  const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt } | null>(null);
+  const initial = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
+  const [marks, setMarks] = useState<PhotoMark[]>(initial);
   const [downloading, setDownloading] = useState(false);
-  const svg = useRef<SVGSVGElement>(null);
-  const gesture = useRef<
-    | { type: "draw"; kind: ShapeKind; a: Pt }
-    | { type: "move"; id: string; from: Pt }
-    | { type: "pan"; sx: number; sy: number; view: PhotoView; k: number }
-    | null
-  >(null);
 
   // Auto-save every change (debounced); a failure is a loud toast with the server's message.
   const autosave = useAutosave<ReturnType<typeof serializePhotoMarks>>(
@@ -693,17 +675,118 @@ export function PhotoMarkupEditor({
         old?.map((p) => (p.id === row.id ? row : p)),
       );
       void qc.invalidateQueries({ queryKey: ["invoice-photos"] });
+      void qc.invalidateQueries({ queryKey: ["document"] });
     },
     { what: "The photo's marks", delay: 600 },
   );
-  const savedJson = useRef(JSON.stringify(serializePhotoMarks(history.marks)));
+  const savedJson = useRef(JSON.stringify(serializePhotoMarks(marks)));
   useEffect(() => {
-    const next = serializePhotoMarks(history.marks);
+    const next = serializePhotoMarks(marks);
     const json = JSON.stringify(next);
     if (json === savedJson.current) return;
     savedJson.current = json;
     autosave.push(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- push is stable; save on a change only
+  }, [marks]);
+
+  const download = async () => {
+    setDownloading(true);
+    try {
+      await downloadPhoto(photo, ticketNumber, ordinal, marks);
+    } catch (e) {
+      loudError("Could not download the photo", e);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <PhotoMarkupSurface
+      url={url}
+      size={size}
+      initialMarks={initial}
+      onChange={setMarks}
+      status={
+        autosave.state === "saving" || autosave.state === "pending"
+          ? " · saving…"
+          : autosave.state === "saved"
+            ? " · saved"
+            : autosave.state === "error"
+              ? " · not saved"
+              : ""
+      }
+      onDone={() => {
+        void autosave.flush();
+        onDone();
+      }}
+      footer={
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 sm:h-9"
+          disabled={downloading}
+          title="Save the photo with these marks drawn in (PNG)"
+          onClick={() => void download()}
+        >
+          {downloading ? (
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="mr-1 h-4 w-4" />
+          )}
+          Download
+        </Button>
+      }
+    />
+  );
+}
+
+/**
+ * The drawing surface and its tools, reusable (phase 2 of the documents: the same tools mark up a
+ * picture uploaded into a document, whose marks live on the document's ImageRef instead of a
+ * ticket photo row). It owns the marks (undo history, selection, zoom) and reports every change
+ * through onChange; Done hands back the final marks. Nothing here saves.
+ */
+export function PhotoMarkupSurface({
+  url,
+  size,
+  initialMarks,
+  onChange,
+  onDone,
+  status,
+  footer,
+}: {
+  url: string;
+  size: { w: number; h: number };
+  initialMarks: PhotoMark[];
+  onChange?: ((marks: PhotoMark[]) => void) | undefined;
+  onDone: (marks: PhotoMark[]) => void;
+  /** " · saving…" and the like, after the marks summary. */
+  status?: string | undefined;
+  /** Extra buttons beside Done (the ticket version's Download). */
+  footer?: React.ReactNode;
+}) {
+  const { w: W, h: H } = size;
+  const [history, dispatch] = useReducer(photoMarksReducer, initialMarks, emptyPhotoHistory);
+  const [tool, setTool] = useState<Tool>("ellipse");
+  const [color, setColor] = useState<PhotoColor>(DEFAULT_PHOTO_COLOR);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState<PhotoView>(() => fullView(W, H));
+  const [draft, setDraft] = useState<{ kind: ShapeKind; a: Pt; b: Pt } | null>(null);
+  const [moving, setMoving] = useState<{ id: string; du: number; dv: number } | null>(null);
+  const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt } | null>(null);
+  const svg = useRef<SVGSVGElement>(null);
+  const gesture = useRef<
+    | { type: "draw"; kind: ShapeKind; a: Pt }
+    | { type: "move"; id: string; from: Pt }
+    | { type: "pan"; sx: number; sy: number; view: PhotoView; k: number }
+    | null
+  >(null);
+
+  // Every change goes up (the ticket version autosaves it; the document keeps it on the ImageRef).
+  const report = useRef(onChange);
+  report.current = onChange;
+  useEffect(() => {
+    report.current?.(history.marks);
   }, [history.marks]);
 
   // A selection that was undone / removed goes away.
@@ -825,17 +908,6 @@ export function PhotoMarkupEditor({
     setPending(null);
     if (t !== "move") setSelected(null);
   };
-  const download = async () => {
-    setDownloading(true);
-    try {
-      await downloadPhoto(photo, ticketNumber, ordinal, history.marks);
-    } catch (e) {
-      loudError("Could not download the photo", e);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -970,13 +1042,7 @@ export function PhotoMarkupEditor({
         </Button>
         <span className="text-xs text-muted-foreground">
           {marksSummary(history.marks)}
-          {autosave.state === "saving" || autosave.state === "pending"
-            ? " · saving…"
-            : autosave.state === "saved"
-              ? " · saved"
-              : autosave.state === "error"
-                ? " · not saved"
-                : ""}
+          {status ?? ""}
         </span>
       </div>
 
@@ -1009,31 +1075,10 @@ export function PhotoMarkupEditor({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          className="h-11 sm:h-9"
-          onClick={() => {
-            void autosave.flush();
-            onDone();
-          }}
-        >
+        <Button type="button" className="h-11 sm:h-9" onClick={() => onDone(history.marks)}>
           Done
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 sm:h-9"
-          disabled={downloading}
-          title="Save the photo with these marks drawn in (PNG)"
-          onClick={() => void download()}
-        >
-          {downloading ? (
-            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="mr-1 h-4 w-4" />
-          )}
-          Download
-        </Button>
+        {footer}
       </div>
     </div>
   );

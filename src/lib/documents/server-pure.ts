@@ -7,9 +7,22 @@
  * clock (times come in). Tested in server-pure.test.ts.
  */
 import { staleSavedAtText } from "@/lib/bid-stale-save";
+import {
+  type ChecklistItem,
+  type Inspection,
+  mergeChecklist,
+  visibleChecklist,
+} from "@/lib/inspection";
 
-import { type DocKind, type DocOptions, type DocPage, instantiatePages, newPage } from "./model";
-import type { DocumentSource } from "./variables";
+import {
+  type DocKind,
+  type DocOptions,
+  type DocPage,
+  type ImageRef,
+  instantiatePages,
+  newPage,
+} from "./model";
+import type { DocumentSource, InspectionSnapshot } from "./variables";
 
 // ------------------------------------------------------------------------------- the bucket
 
@@ -233,13 +246,31 @@ export function backTo(
   return { to: "/documents", search: {} };
 }
 
-/** A new document's pages: the template's through the checkboxes; no template → one empty page. */
+/**
+ * A new document's pages: the template's through the checkboxes; no template → one empty page.
+ * `coverImage` (phase 2: the property's cover photo) fills the first empty Full Photo on page 1,
+ * so the Proposal's cover carries the building the day it is generated (photos on only).
+ */
 export function pagesForNewDocument(
   templatePages: readonly DocPage[] | null | undefined,
   options: DocOptions,
+  coverImage: ImageRef | null = null,
 ): DocPage[] {
   const pages = templatePages?.length ? instantiatePages(templatePages, options) : [];
-  return pages.length ? pages : [newPage()];
+  const out = pages.length ? pages : [newPage()];
+  return coverImage && options.photos ? placeCoverImage(out, coverImage) : out;
+}
+
+/** The first empty Full Photo on page 1 takes the picture; nothing else changes. */
+export function placeCoverImage(pages: readonly DocPage[], image: ImageRef): DocPage[] {
+  const first = pages[0];
+  if (!first) return [...pages];
+  const i = first.modules.findIndex((m) => m.type === "fullPhoto" && m.image === null);
+  if (i < 0) return [...pages];
+  const modules = first.modules.map((m, k) =>
+    k === i && m.type === "fullPhoto" ? { ...m, image } : m,
+  );
+  return [{ ...first, modules }, ...pages.slice(1)];
 }
 
 // ------------------------------------------------------------------- the saved bid's sections
@@ -359,6 +390,108 @@ export function pricingSource(vars: unknown): Pick<DocumentSource, "bid"> {
           warranty: "",
         }
       : null,
+  };
+}
+
+// ---------------------------------------------------------------- the reserved inspection variable
+
+/**
+ * The second reserved key (phase 2): an inspection ticket's snapshot as JSON — every checklist
+ * item with its answer, note and the ids of its photos (service_job_photos.item_key), the day,
+ * the grade, who inspected and the findings — so the Repair List (variables.ts inspectionRows)
+ * and the inspection variables print from the document alone, the way `__sections` serves the
+ * Pricing Table. Written by createDocument and refreshDocumentVariables; a bid stores none.
+ */
+export const INSPECTION_KEY = "__inspection";
+
+/** The variables map with the inspection stored under the reserved key (none → the key is absent). */
+export function withStoredInspection(
+  vars: Record<string, string>,
+  insp: InspectionSnapshot | null | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(vars)) if (k !== INSPECTION_KEY) out[k] = v;
+  if (insp) out[INSPECTION_KEY] = JSON.stringify(insp);
+  return out;
+}
+
+/** The inspection stored on a document, or null (a bid, a repair ticket, an older row, garbage). */
+export function storedInspection(vars: unknown): InspectionSnapshot | null {
+  if (!vars || typeof vars !== "object") return null;
+  const raw = (vars as Record<string, unknown>)[INSPECTION_KEY];
+  if (typeof raw !== "string") return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!p || typeof p !== "object" || !Array.isArray(p["items"])) return null;
+    const str = (v: unknown) => (typeof v === "string" ? v : "");
+    const items: InspectionSnapshot["items"] = (p["items"] as unknown[])
+      .map((x) => x as Record<string, unknown>)
+      .filter((x) => x && typeof x === "object")
+      .map((x) => ({
+        id: str(x["id"]),
+        label: str(x["label"]),
+        status:
+          x["status"] === "ok" || x["status"] === "issue" || x["status"] === "na"
+            ? x["status"]
+            : null,
+        note: str(x["note"]),
+        photoIds: Array.isArray(x["photoIds"])
+          ? (x["photoIds"] as unknown[]).filter((id): id is string => typeof id === "string")
+          : [],
+      }));
+    return {
+      inspectedOn: typeof p["inspectedOn"] === "string" ? p["inspectedOn"] : null,
+      grade: typeof p["grade"] === "string" ? p["grade"] : null,
+      technician: str(p["technician"]),
+      notes: str(p["notes"]),
+      recommendRepairs: p["recommendRepairs"] === true,
+      items,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The snapshot from the ticket's saved inspection (service_jobs.inspection, src/lib/inspection.ts)
+ * merged with the live checklist (an item added since reads as never flagged = OK), the hidden
+ * "Recommend repairs" row left out, each item's photos (the ticket's `other` photos with no
+ * repair and item_key = the item's id), and who inspected (the technician's name, else the
+ * inspection's saved_by). A ticket with no saved inspection still snapshots the checklist, so the
+ * report lists every item as OK.
+ */
+export function inspectionSnapshotFrom(
+  saved: Inspection | null,
+  checklist: readonly ChecklistItem[],
+  photos: ReadonlyArray<{
+    id: string;
+    role: string;
+    repair_id: string | null;
+    item_key: string | null;
+  }>,
+  technician: string | null | undefined,
+): InspectionSnapshot {
+  const items = visibleChecklist(mergeChecklist(saved, checklist));
+  const byItem = new Map<string, string[]>();
+  for (const p of photos) {
+    if (p.role !== "other" || p.repair_id || !p.item_key) continue;
+    const list = byItem.get(p.item_key) ?? [];
+    list.push(p.id);
+    byItem.set(p.item_key, list);
+  }
+  return {
+    inspectedOn: saved?.inspected_on ?? null,
+    grade: saved?.grade ?? null,
+    technician: (technician ?? "").trim() || (saved?.saved_by ?? "").trim(),
+    notes: saved?.notes ?? "",
+    recommendRepairs: saved?.recommend_repairs ?? false,
+    items: items.map((i) => ({
+      id: i.id,
+      label: i.label,
+      status: i.status,
+      note: i.note,
+      photoIds: byItem.get(i.id) ?? [],
+    })),
   };
 }
 

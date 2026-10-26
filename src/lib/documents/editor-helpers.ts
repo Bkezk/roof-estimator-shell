@@ -5,15 +5,19 @@
  * module names a page carries, the sheet's screen geometry and the small text formats. No React,
  * no server: every rule here is tested in editor-helpers.test.ts.
  */
+import type { PhotoMark } from "@/lib/photo-annotations";
+
 import {
   type DocKind,
   type DocModule,
   type DocPage,
   defaultDocumentTitle,
+  type ImageRef,
   VARIABLE_NODE,
 } from "./model";
 import {
   type DocumentSource,
+  type InspectionSnapshot,
   type VariableDef,
   VARIABLE_GROUPS,
   type VariableGroup,
@@ -152,6 +156,42 @@ export function pricingSourceFromVariables(
       warranty: vars["opportunity.warranty"] ?? "",
     },
   };
+}
+
+// ------------------------------------------------------------------------------ the pictures
+
+/**
+ * The marks a picture draws on the canvas (phase 2): an upload's own (drawn in the editor), a
+ * ticket photo's when its ref says so (the ticket row's, as getDocument read them); none for the
+ * logo or the property photo.
+ */
+export function imageMarks(
+  image: ImageRef,
+  photos: ReadonlyArray<{ id: string; marks: PhotoMark[] }>,
+): PhotoMark[] {
+  if (image.kind === "upload") return image.marks ?? [];
+  if (image.kind === "ticketPhoto" && image.marks)
+    return photos.find((p) => p.id === image.photoId)?.marks ?? [];
+  return [];
+}
+
+/** Can this picture be marked up? An upload or a ticket photo; not the logo or the property photo. */
+export const canMarkUp = (image: ImageRef | null): boolean =>
+  !!image && (image.kind === "upload" || image.kind === "ticketPhoto");
+
+// ---------------------------------------------------------------------------- the photo grid
+
+/**
+ * The caption "Add all ticket photos" gives a picture (phase 2): the checklist item it was taken
+ * for, by its item_key in the document's inspection snapshot, else blank — the camera's own file
+ * name (IMG_1234.jpg) says nothing a customer should read.
+ */
+export function photoGridCaption(
+  photo: { itemKey?: string | null | undefined },
+  insp: InspectionSnapshot | null | undefined,
+): string {
+  if (!photo.itemKey || !insp) return "";
+  return insp.items.find((i) => i.id === photo.itemKey)?.label ?? "";
 }
 
 // ------------------------------------------------------------------------- saved modules

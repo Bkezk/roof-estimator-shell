@@ -195,3 +195,98 @@ describe("the server contract is called the useServerFn way", () => {
     }
   });
 });
+
+describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the editor", () => {
+  const picker = read("src/components/documents/editor/photo-picker.tsx");
+  it("renders the two new modules with their tiles labelled like the others", () => {
+    expect(moduleView).toContain('case "photoGrid":');
+    expect(moduleView).toContain('case "repairList":');
+    expect(moduleView).not.toContain("Phase 2 (built next)");
+    expect(route).toContain("photoGrid: LayoutGrid,");
+    expect(route).toContain("repairList: ListChecks,");
+    expect(route).toContain("title={`${MODULE_LABELS[type]} — drag onto a page`}");
+    expect(route).toContain("title={`Add ${MODULE_LABELS[type]} to the selected page`}");
+  });
+  it("the Photo Grid: 2 or 3 columns, a picker per cell with a caption, remove, Add picture and Add all ticket photos (captions from the checklist item)", () => {
+    const grid = moduleView.slice(
+      moduleView.indexOf("function PhotoGrid("),
+      moduleView.indexOf("function RepairList("),
+    );
+    expect(grid).toContain("([2, 3] as const).map(");
+    expect(grid).toContain("Add all ticket photos");
+    expect(grid).toContain("Add picture");
+    expect(grid).toContain('title="Remove this cell"');
+    expect(grid).toContain("caption: photoGridCaption(p, insp)");
+    expect(grid).toContain("marks: env.options.marks && p.hasMarks");
+    expect(grid).toContain("gridTemplateColumns: `repeat(${m.columns}, minmax(0, 1fr))`");
+    expect(grid).toContain("<ImageSlot");
+    expect(grid).toContain("<Caption value={cell.caption}");
+    expect(grid).toContain("<PhotoPicker");
+  });
+  it("the Repair List: rows from the inspection snapshot, Every item / Pictures switches, Edit rows / Reset to the inspection, the thumbnails under a row, the empty state", () => {
+    const list = moduleView.slice(moduleView.indexOf("function RepairList("));
+    expect(list).toContain("storedInspection(env.variables)");
+    expect(list).toContain("repairListData(m, insp)");
+    expect(list).toContain("Every item");
+    expect(list).toContain("Pictures");
+    expect(list).toContain("Reset to the inspection");
+    expect(list).toContain("Edit rows");
+    expect(list).toContain(": NO_INSPECTION_TEXT}");
+    expect(read("src/lib/documents/pdf-layout.ts")).toContain(
+      'NO_INSPECTION_TEXT = "No inspection on this ticket"',
+    );
+    expect(list).toContain("data-repair-photos={r}");
+    expect(list).toContain('image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}');
+    // Edited cells are inputs; otherwise the text prints with its variables resolved.
+    expect(list).toMatch(/\{editing \? \(\s*<input/);
+    // On the white paper in both themes (dark-mode.test.ts): the grey box says so explicitly.
+    expect(list).toContain("dark:bg-neutral-100 dark:text-neutral-700");
+  });
+  it("every picture draws its marks and offers Mark up: an upload keeps them on its ref, a ticket photo saves on its row through the same drawing surface", () => {
+    expect(picker).toContain(
+      '<MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="contain" />',
+    );
+    expect(picker).toContain("const marks = imageMarks(image, env.photos);");
+    expect(picker).toContain('title="Mark up"');
+    expect(picker).toContain("{canMarkUp(props.image) ? (");
+    expect(picker).toContain("export function MarkupDialog(");
+    expect(picker).toContain("<PhotoMarkupSurface");
+    expect(picker).toContain("props.onChange(marks.length ? { ...rest, marks } : rest);");
+    expect(picker).toContain("useServerFn(savePhotoAnnotations)");
+    expect(picker).toContain("annotations: serializePhotoMarks(marks),");
+    expect(picker).toContain(
+      'import { MarksOverlay, PhotoMarkupSurface } from "@/components/service/photo-markup";',
+    );
+    // The surface is the ticket editor's own tools, split out so both use one drawer.
+    const markup = read("src/components/service/photo-markup.tsx");
+    expect(markup).toContain("export function PhotoMarkupSurface(");
+    const editor = markup.slice(
+      markup.indexOf("export function PhotoMarkupEditor"),
+      markup.indexOf("export function PhotoMarkupSurface"),
+    );
+    expect(editor).toContain("<PhotoMarkupSurface");
+    expect(editor).toContain("useServerFn(savePhotoAnnotations)");
+    const surface = markup.slice(markup.indexOf("export function PhotoMarkupSurface"));
+    expect(surface).not.toContain("savePhotoAnnotations");
+    expect(surface).toContain("onDone(history.marks)");
+    // The editor's photo rows carry the ticket's marks so the canvas can draw them.
+    const fns = read("src/lib/documents.functions.ts");
+    expect(fns).toContain("const marks = parsePhotoMarks(r.annotations);");
+    expect(fns).toMatch(/marks,\s*itemKey: r\.item_key,/);
+  });
+  it("the server fills __inspection for an inspection ticket, on create and on Refresh data", () => {
+    const fns = read("src/lib/documents.functions.ts");
+    expect(fns).toContain(
+      'if (row.service_type === "inspection") inspection = await loadInspection(sb, row);',
+    );
+    expect(fns).toContain("inspectionSnapshotFrom(");
+    expect(fns).toContain('.eq("role", "other")');
+    expect(fns).toContain('.is("repair_id", null)');
+    expect(fns).toContain('.not("item_key", "is", null)');
+    expect(fns).toMatch(/const snapshot = \(src: DocumentSource\) =>\s*withStoredInspection\(/);
+    expect(fns).toContain("missingDefaultTemplates(all ?? [])");
+    // Refresh data goes through the same snapshot.
+    const refresh = fns.slice(fns.indexOf("export const refreshDocumentVariables"));
+    expect(refresh).toContain("const variables = snapshot(loaded.source);");
+  });
+});
