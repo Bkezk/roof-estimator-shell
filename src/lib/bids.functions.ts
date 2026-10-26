@@ -17,6 +17,7 @@ import { bidFiguresSchema } from "@/lib/bid-figures";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
+import { bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
 
@@ -148,20 +149,13 @@ const saveBidSchema = z.object({
   /**
    * The row's updated_at as this tab loaded it (owner, Oct 6: a Towneplace bid "went back in and
    * a lot of things were missing … saved again and the total changed"). A save whose copy is
-   * older than the row refuses, so a stale tab never writes over another save.
+   * older than the last save of the bid's CONTENTS (bids.content_saved_at; lib/bid-stale-save.ts)
+   * refuses, so a stale tab never writes over another save. A filing change from a list page
+   * (folder, customer link, status) moves only updated_at and does not refuse the save; the
+   * estimator sends only the header fields it changed, so the newer filing is kept.
    */
   expectUpdatedAt: z.string().datetime({ offset: true }).optional(),
 });
-
-/** The message a stale save gets; the tab reloads the bid and the estimator re-applies the change. */
-export const BID_STALE_MESSAGE = (who: string | null, at: string) =>
-  `Not saved: ${who?.trim() || "someone"} saved this bid at ${new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}, after you opened it. Reload the bid to see their changes, then make yours again.`;
-
-/** Is the saving tab's copy older than the row? (Pure, so it is tested.) */
-export function bidSaveIsStale(expectUpdatedAt: string | undefined, rowUpdatedAt: string | null) {
-  if (!expectUpdatedAt || !rowUpdatedAt) return false;
-  return new Date(rowUpdatedAt).getTime() > new Date(expectUpdatedAt).getTime() + 1000;
-}
 
 /** Create a new bid or update an existing one (by id) with the full estimator payload. */
 export const saveBid = createServerFn({ method: "POST" })
@@ -174,12 +168,15 @@ export const saveBid = createServerFn({ method: "POST" })
       .select("full_name, email")
       .eq("id", context.userId)
       .maybeSingle();
+    const now = new Date().toISOString();
     const payload = {
       name: data.name,
       data: data.data as Json,
       grand_total: data.grandTotal,
       ...(data.figures !== undefined ? { figures: data.figures } : {}),
-      updated_at: new Date().toISOString(),
+      updated_at: now,
+      // The contents stamp the stale-tab rule reads (the trigger moves updated_at on any update).
+      content_saved_at: now,
       updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       ...(data.status ? { status: data.status } : {}),
       ...(data.status && data.status !== "lost"
@@ -204,13 +201,19 @@ export const saveBid = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
         .select(
-          "updated_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",
+          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",
         )
         .eq("id", data.id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
-      if (data.expectUpdatedAt && cur && bidSaveIsStale(data.expectUpdatedAt, cur.updated_at))
-        throw new Error(BID_STALE_MESSAGE(cur.updated_by_name, cur.updated_at));
+      if (data.expectUpdatedAt && cur && bidSaveIsStale(data.expectUpdatedAt, cur))
+        throw new Error(
+          bidStaleMessage(
+            cur.updated_by_name,
+            cur.content_saved_at ?? cur.updated_at,
+            payload.updated_by_name,
+          ),
+        );
       // The due date may be changed any time, and cleared only on a won / lost bid (owner, Oct
       // 12); a bid that never had one is not held up.
       const dueProblem = bidDueDateProblem({
@@ -312,6 +315,7 @@ export const importBids = createServerFn({ method: "POST" })
       status: b.status,
       created_at: b.createdAt ?? now,
       updated_at: now,
+      content_saved_at: now,
       updated_by_name: who ? `${who} (import)` : "import",
     }));
     const { data: inserted, error } = await context.supabase

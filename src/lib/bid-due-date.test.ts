@@ -246,7 +246,7 @@ describe("1. saveBid (the server)", () => {
   it("the server reads the row's due_date for the rule and keeps the other save behaviour", () => {
     const fn = read("src/lib/bids.functions.ts");
     expect(fn).toContain(
-      '"updated_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",',
+      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at",',
     );
     expect(fn).toMatch(/dueDate: z\s*\.string\(\)\s*\.regex\(/);
     expect(fn).toContain("...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),");
@@ -276,9 +276,11 @@ describe("2. the estimator", () => {
     expect(boxSrc).toContain('type="date"');
     expect(boxSrc).toContain("value={bidDueDate}");
     expect(boxSrc).toContain("disabled={readOnly}");
-    // Not the data blob: the row's column, loaded with the bid and sent on every save.
+    // Not the data blob: the row's column, loaded with the bid and sent when changed in the tab
+    // (bidHeaderPatch; a new bid sends it).
     expect(src).toContain('setBidDueDate(loadedBid.due_date ?? "");');
-    expect(src).toContain("dueDate: bidDueDate || null,");
+    expect(src).toContain("dueDate: bidDueDate,");
+    expect(src).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
     expect(src).not.toMatch(/dueDate:\s*saved\./);
   });
   it("the first save without one is refused with the plain message, the box ringed and focused", () => {

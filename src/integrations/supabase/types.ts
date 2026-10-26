@@ -305,6 +305,7 @@ export type Database = {
         Row: {
           account_id: string | null;
           building_id: string | null;
+          content_saved_at: string;
           created_at: string;
           created_by: string | null;
           data: Json;
@@ -336,6 +337,7 @@ export type Database = {
         Insert: {
           account_id?: string | null;
           building_id?: string | null;
+          content_saved_at?: string;
           created_at?: string;
           created_by?: string | null;
           data?: Json;
@@ -367,6 +369,7 @@ export type Database = {
         Update: {
           account_id?: string | null;
           building_id?: string | null;
+          content_saved_at?: string;
           created_at?: string;
           created_by?: string | null;
           data?: Json;

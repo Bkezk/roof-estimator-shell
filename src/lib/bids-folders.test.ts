@@ -303,9 +303,12 @@ describe("the wiring", () => {
     expect(est).toContain("(bidFolderNames ?? []).map((f) =>");
     expect(est).toContain("listBidFolders");
     expect(est).toContain('setBidFolder(loadedBid.folder ?? "")');
-    expect(est).toContain("folder: normalizeFolder(bidFolder),");
+    // Sent when changed in the tab (bidHeaderPatch; owner, Oct 26: a folder set from the Bids
+    // list while the tab was open is kept, not put back).
+    expect(est).toContain("folder: bidFolder,");
+    expect(est).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
     // A folder change is an unsaved change like a link change.
-    expect(est).toContain('|${normalizeFolder(bidFolder) ?? ""}|');
+    expect(est).toContain('|${normalizeFolder(folder) ?? ""}|');
   });
   it("the server stores it: saveBid takes folder, setBidFolder / renameBidFolder / listBidFolders exist, listBids returns the row", () => {
     const fns = here("./bids.functions.ts");

@@ -827,11 +827,15 @@ describe("Setup › Bid Info: the custom reminder", () => {
   it("loaded from the row, saved with the bid (reminderOn / reminderNote; null clears both), counted as unsaved changes, reset on a fresh start", () => {
     expect(src).toContain('setBidReminderOn(loadedBid.reminder_on ?? "");');
     expect(src).toContain('setBidReminderNote(loadedBid.reminder_note ?? "");');
-    expect(src).toContain("reminderOn: bidReminderOn || null,");
-    expect(src).toContain("reminderNote: bidReminderOn ? bidReminderNote.trim() || null : null,");
+    // Sent through bidHeaderPatch when changed in the tab (owner, Oct 26: a header field changed
+    // elsewhere while the tab was open is kept).
+    expect(src).toContain("reminderOn: bidReminderOn,");
+    expect(src).toContain("reminderNote: bidReminderNote,");
+    expect(src).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
     expect(src).toContain(
-      '|${normalizeFolder(bidFolder) ?? ""}|${bidReminderOn}|${bidReminderOn ? bidReminderNote.trim() : ""}`;',
+      '|${normalizeFolder(folder) ?? ""}|${reminderOn}|${reminderOn ? reminderNote.trim() : ""}`;',
     );
+    expect(src).toContain("savedJsonOf(bidFolder, bidReminderOn, bidReminderNote)");
     expect(src.match(/setBidReminderOn\(""\);/g)).toHaveLength(3);
     expect(src.match(/setBidReminderNote\(""\);/g)).toHaveLength(4); // the three resets + clearing the date
     expect(src).not.toMatch(/reminderOn:\s*saved\./);

@@ -34,6 +34,13 @@ import {
   getWarrantyData,
   getMarkupPresets,
 } from "@/lib/bids.functions";
+import {
+  type BidHeader,
+  bidHeaderOfRow,
+  bidHeaderPatch,
+  keptElsewhere,
+  savedToastText,
+} from "@/lib/bid-header-patch";
 import { FOLDER_MAX, normalizeFolder, suggestFolder, UNFILED } from "@/lib/bids-folders";
 import { bidFigures } from "@/lib/bid-figures";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
@@ -1204,6 +1211,7 @@ function EstimatePage() {
     setBidFolder(loadedBid.folder ?? "");
     setBidReminderOn(loadedBid.reminder_on ?? "");
     setBidReminderNote(loadedBid.reminder_note ?? "");
+    loadedHeader.current = bidHeaderOfRow(loadedBid);
     setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
@@ -1447,6 +1455,9 @@ function EstimatePage() {
   });
   const planswiftSeededFor = useRef<string | null>(null);
   const loadedUpdatedAt = useRef<string | null>(null);
+  // The row's header as this tab loaded (or last saved) it: a save sends only what changed
+  // here, so a filing change made elsewhere meanwhile is kept (lib/bid-header-patch.ts).
+  const loadedHeader = useRef<BidHeader | null>(null);
   useEffect(() => {
     if (!planswiftParam || bidParam || planswiftHandoff === undefined) return;
     if (planswiftSeededFor.current === planswiftParam) return;
@@ -1918,7 +1929,9 @@ function EstimatePage() {
   // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
   // The profile link, the folder and the reminder live on the row, not in `saved`; they count as
   // edits all the same.
-  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(bidFolder) ?? ""}|${bidReminderOn}|${bidReminderOn ? bidReminderNote.trim() : ""}`;
+  const savedJsonOf = (folder: string, reminderOn: string, reminderNote: string) =>
+    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(folder) ?? ""}|${reminderOn}|${reminderOn ? reminderNote.trim() : ""}`;
+  const savedJson = savedJsonOf(bidFolder, bidReminderOn, bidReminderNote);
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
@@ -2434,6 +2447,15 @@ function EstimatePage() {
             }
           : {}),
       };
+      const tabHeader: BidHeader = {
+        status: bidStatus,
+        lostReason,
+        wonOn: wonOnDay,
+        dueDate: bidDueDate,
+        folder: bidFolder,
+        reminderOn: bidReminderOn,
+        reminderNote: bidReminderNote,
+      };
       const row = await saveBidFn({
         data: {
           ...(bidId ? { id: bidId } : {}),
@@ -2445,17 +2467,13 @@ function EstimatePage() {
           // The money figures the Margin report reads for a won bid (owner, Oct 21; lib/
           // bid-figures.ts): the browser's engine result, stored at every save.
           figures: result ? bidFigures(result.r) : null,
-          status: bidStatus,
-          lostReason: bidStatus === "lost" ? lostReason : null,
-          // The day it was won (null unless Won; the server keeps the stored day when none comes).
-          wonOn: bidStatus === "won" ? wonOnDay || null : null,
-          // The due date rides on the row (null = none; the server refuses a new bid without one).
-          dueDate: bidDueDate || null,
-          // So does the folder (owner, Oct 13; null = unfiled).
-          folder: normalizeFolder(bidFolder),
-          // And the estimator's own reminder (owner, Oct 13): null clears the date and the note.
-          reminderOn: bidReminderOn || null,
-          reminderNote: bidReminderOn ? bidReminderNote.trim() || null : null,
+          // The header — status with its lost reason and won day, due date (the server refuses
+          // a new bid without one), folder (owner, Oct 13; null = unfiled), reminder (null
+          // clears the date and the note): all of it on a new bid, else only what changed in
+          // this tab since it loaded the row, so a change made elsewhere meanwhile (a folder
+          // move from the Bids list; owner, Oct 26, Somerset Career Center) is kept, not put
+          // back (lib/bid-header-patch.ts).
+          ...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
           // Only a link changed in this session is sent (null unlinks); absent = left as is.
@@ -2468,10 +2486,29 @@ function EstimatePage() {
       qc.invalidateQueries({ queryKey: ["bid-folders"] });
       // Draft bids sit on Work Overview by due date (owner, Oct 12).
       qc.invalidateQueries({ queryKey: ["my-work"] });
-      toast.success("Bid saved");
+      // The row as saved: a header field changed elsewhere since this tab opened the bid was
+      // kept (bidHeaderPatch); it is shown here and said in the toast.
+      const kept = row ? keptElsewhere(tabHeader, bidHeaderOfRow(row)) : [];
+      toast.success(savedToastText(kept));
       setDueDateMissing(false);
       if (row?.updated_at) loadedUpdatedAt.current = row.updated_at;
-      lastSavedJson.current = savedJson;
+      if (row) {
+        const h = bidHeaderOfRow(row);
+        loadedHeader.current = h;
+        if (kept.length) {
+          setBidStatus(h.status);
+          setLostReason(h.lostReason);
+          setWonOnDay(h.wonOn);
+          setBidDueDate(h.dueDate);
+          setBidFolder(h.folder);
+          setBidReminderOn(h.reminderOn);
+          setBidReminderNote(h.reminderNote);
+        }
+      }
+      lastSavedJson.current =
+        row && kept.length
+          ? savedJsonOf(row.folder ?? "", row.reminder_on ?? "", row.reminder_note ?? "")
+          : savedJson;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
       if (row && !bidId) {

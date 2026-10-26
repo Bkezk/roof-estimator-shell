@@ -283,10 +283,12 @@ describe("the estimator", () => {
     expect(src).toContain('setWonOnDay(loadedBid.won_on ?? "");');
     expect(src).toContain('if (st === "won" && !wonOnDay) setWonOnDay(bidOfficeToday());');
   });
-  it("sends wonOn with the save (null unless Won)", () => {
-    const save = src.indexOf("const row = await saveBidFn({");
-    const payload = src.slice(save, src.indexOf("});", save));
-    expect(payload).toContain('wonOn: bidStatus === "won" ? wonOnDay || null : null,');
+  it("sends wonOn with the save when the status or the day changed in the tab (bidHeaderPatch: null unless Won)", () => {
+    const save = src.indexOf("const tabHeader: BidHeader = {");
+    const call = src.indexOf("const row = await saveBidFn({", save);
+    const payload = src.slice(save, src.indexOf("});", call));
+    expect(payload).toContain("wonOn: wonOnDay,");
+    expect(payload).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
   });
 });
 
