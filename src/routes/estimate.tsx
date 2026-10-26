@@ -6571,7 +6571,8 @@ function EstimatePage() {
             beside the status … below that the notifications, document, and export in that order
             with the small square buttons"): Bid due and Status side by side, the three square
             buttons under them. */}
-        <div className="grid grid-cols-2 items-end gap-2">
+        {/* The date box keeps its natural width (owner, Oct 26: "the date is still a bit cut off"). */}
+        <div className="grid grid-cols-[9.5rem_1fr] items-end gap-2">
           {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so
             we can also have those show on this week, overdue, etc" — the row's due_date, beside
             Status. Required on the first save (handleSave rings it and says so); a bid from before
