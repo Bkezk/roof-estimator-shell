@@ -165,6 +165,12 @@ export interface SavedBidState {
     /** Legacy Home "Design Table (psf)" default (Estimate.defaultRoofSection.DesignTable). */
     designTable?: number;
   };
+  /**
+   * Sections whose field / perimeter / corner o.c. the estimator typed ("Custom spacing" on the
+   * Sections screen), by section id; absent = derived from the pull-test lookup (owner, Oct 26;
+   * src/lib/section-chain.ts). Kept beside the sections: BidSectionInput is the engine's type.
+   */
+  customSpacing?: Record<string, true>;
   /** Legacy Home "5. Parapets Material" + "2. Wall Type" defaults for NEW parapets. */
   parapetDefaults?: {
     /** Legacy Home "5. Parapets Material" Roof System / Attached With / adhesive for NEW walls

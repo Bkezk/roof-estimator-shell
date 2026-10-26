@@ -57,6 +57,7 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { snapBidSheets, type SheetBidState } from "@/lib/bid-sheets";
+import { offeredDesignTables, snapBidChain, type ChainBidState } from "@/lib/section-chain";
 import { nextLayerFromForm } from "@/lib/underlayment-layer";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import { warrantiesForSystem } from "@/lib/warranty-systems";
@@ -469,7 +470,7 @@ function EstimatePage() {
     queryFn: () => getPresetsFn(),
     enabled: authed,
   });
-  const { data: fastenerLookup } = useQuery({
+  const { data: fastenerLookup, isError: fastenerLookupFailed } = useQuery({
     queryKey: ["fastener-lookup"],
     queryFn: () => getFastenerLookupFn(),
     enabled: authed,
@@ -531,6 +532,9 @@ function EstimatePage() {
   // A bid starts with NO roof sections (the total starts at $0 — legacy "Existing Bids" opens
   // on Home with an empty section list); sections are added on the Sections step.
   const [sections, setSections] = useState<BidSectionInput[]>([]);
+  // Sections whose fastener o.c. the estimator typed ("Custom spacing", by section id); every
+  // other section's spacing follows the pull-test lookup (owner, Oct 26; lib/section-chain.ts).
+  const [customSpacing, setCustomSpacing] = useState<Record<string, true>>({});
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [accessoriesCalc, setAccessoriesCalc] = useState<AccessoriesState>(() =>
     emptyAccessoriesState(),
@@ -1081,6 +1085,7 @@ function EstimatePage() {
     setAttachment(d.attachment ?? "mechanical");
     setMembraneAdhesive(d.membraneAdhesiveName ?? "Water Based Adhesive");
     setSections(d.sections.map((s) => ({ ...s, layers: sectionLayers(s) })));
+    setCustomSpacing(d.customSpacing ?? {});
     setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
     setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
     setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
@@ -1703,6 +1708,56 @@ function EstimatePage() {
     warnMilChanges("Sheet size / lap adjusted to the new attachment", r.changes);
   };
 
+  // ── The pull-test chain (owner, Oct 26: "when the pull test, design table, field roll width,
+  // etc are updated they update each other"): every section's design table, lap and derived
+  // fastener spacing, and the Setup default design table, follow the fastener lookup — Bid
+  // Advantage's LoadLapSpacings rule for the whole bid at once (src/lib/section-chain.ts).
+  const chainState = (over: Partial<ChainBidState> = {}): ChainBidState => ({
+    ...milState(over),
+    customSpacing,
+    ...over,
+  });
+  /** Write `after`'s design tables, laps and spacings (by section id) over the state as it is now. */
+  const applyChainFix = (before: ChainBidState, after: ChainBidState) => {
+    if (after.sections !== before.sections) {
+      const by = new Map(after.sections.map((s) => [s.id, s]));
+      setSections((prev) =>
+        prev.map((s) => {
+          const n = by.get(s.id);
+          if (!n) return s;
+          const patch: Partial<BidSectionInput> = {};
+          if (n.designTable !== undefined && n.designTable !== s.designTable)
+            patch.designTable = n.designTable;
+          if (n.fieldLap !== s.fieldLap) patch.fieldLap = n.fieldLap;
+          if (n.fastenerOc !== s.fastenerOc) patch.fastenerOc = n.fastenerOc;
+          if (n.perimFastenerOc !== s.perimFastenerOc) patch.perimFastenerOc = n.perimFastenerOc;
+          if (n.cornerFastenerOc !== s.cornerFastenerOc)
+            patch.cornerFastenerOc = n.cornerFastenerOc;
+          return Object.keys(patch).length ? { ...s, ...patch } : s;
+        }),
+      );
+    }
+    const sd = after.sectionDefaults;
+    if (sd && sd !== before.sectionDefaults && sd.designTable !== undefined) {
+      const designTable = sd.designTable;
+      setSectionDefaults((p) => ({ ...p, designTable }));
+    }
+  };
+  /**
+   * Run the chain after a bid-level change, on top of the mil and sheet snaps the same change
+   * makes (the design table depends on the mil, the lap on the sheet), reporting only its own
+   * corrections.
+   */
+  const snapChainFor = (over: Partial<ChainBidState>) => {
+    if (!admin || !fastenerLookup?.length) return;
+    const before = chainState(over);
+    const base = snapBidSheets(snapBidMils(before, admin).state, admin, fastenerLookup).state;
+    const r = snapBidChain(base, admin, fastenerLookup);
+    if (!r.changes.length) return;
+    applyChainFix(base, r.state);
+    warnMilChanges("Design table / lap / spacing re-derived from the fastener lookup", r.changes);
+  };
+
   /**
    * Legacy frmHome.btnUpdate_Click (docs §22.39): the Update Bid Options dialog's OK. Material
    * pricing = replace the frozen snapshot with live admin data (custom underlayment quotes survive
@@ -1713,6 +1768,7 @@ function EstimatePage() {
     const done: string[] = [];
     let milFix: { before: MilBidState; after: MilBidState; changes: string[] } | null = null;
     let sheetFix: { before: MilBidState; after: MilBidState; changes: string[] } | null = null;
+    let chainFix: { before: ChainBidState; after: ChainBidState; changes: string[] } | null = null;
     if (o.materialPricing) {
       const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
       // Legacy NDLCollectionBase.UpdateManagement: Non-DL rows are stored copies — an un-ticked
@@ -1734,9 +1790,15 @@ function EstimatePage() {
       const before = milState();
       const r = snapBidMils(before, a);
       if (r.changes.length) milFix = { before, after: r.state, changes: r.changes };
-      // Likewise a sheet size or lap the new combos no longer offer (src/lib/bid-sheets.ts).
-      const rs = snapBidSheets(before, a, fastenerLookup);
-      if (rs.changes.length) sheetFix = { before, after: rs.state, changes: rs.changes };
+      // Likewise a sheet size or lap the new combos no longer offer (src/lib/bid-sheets.ts),
+      // checked on the mil-snapped state (the lap list depends on the mil).
+      const rs = snapBidSheets(r.state, a, fastenerLookup);
+      if (rs.changes.length) sheetFix = { before: r.state, after: rs.state, changes: rs.changes };
+      // And the pull-test chain over the result (src/lib/section-chain.ts).
+      const chainBefore = { ...rs.state, customSpacing };
+      const rc = snapBidChain(chainBefore, a, fastenerLookup);
+      if (rc.changes.length)
+        chainFix = { before: chainBefore, after: rc.state, changes: rc.changes };
       if (o.resetUnderlaymentQuotes) {
         setUnderlaymentPriceOverrides({});
         done.push("underlayment quotes reset");
@@ -1782,6 +1844,16 @@ function EstimatePage() {
         sheetFix.changes,
       );
     }
+    if (chainFix) {
+      applyChainFix(chainFix.before, chainFix.after);
+      done.push(
+        `design table / lap / spacing on ${chainFix.changes.length} item${chainFix.changes.length === 1 ? "" : "s"}`,
+      );
+      warnMilChanges(
+        "The fastener lookup re-derived the design table / lap / spacing on this bid:",
+        chainFix.changes,
+      );
+    }
     toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);
     if (milFix)
       warnMilChanges("The updated pricing does not offer every mil this bid had:", milFix.changes);
@@ -1793,6 +1865,7 @@ function EstimatePage() {
     extraShipping,
     membraneAdhesiveName: membraneAdhesive,
     sections,
+    ...(Object.keys(customSpacing).length ? { customSpacing } : {}),
     accessories,
     accessoriesCalc,
     nonDlLines,
@@ -1857,23 +1930,53 @@ function EstimatePage() {
   // price at $0. Runs once per hydrate, after the baseline above, so a correction leaves the bid
   // unsaved ("Save to keep it"). Waits for the live admin data when the bid has no snapshot. A
   // read-only bid is not changed — the list is only shown.
+  // The sheet / lap guard (lib/bid-sheets.ts) and the pull-test chain (lib/section-chain.ts) run
+  // on the same pass, each on the previous one's result and each reported under its own title;
+  // the chain waits for the fastener lookup (a failed fetch does not hold the check).
   useEffect(() => {
     if (milCheckStamp === 0 || milCheckDone.current === milCheckStamp || !admin) return;
+    if (fastenerLookup === undefined && !fastenerLookupFailed) return;
     milCheckDone.current = milCheckStamp;
-    const before = milState();
+    const before = chainState();
     const r = snapBidMils(before, admin);
-    if (!r.changes.length) return;
+    const rs = snapBidSheets(r.state, admin, fastenerLookup);
+    const rc = snapBidChain(rs.state, admin, fastenerLookup);
+    if (!r.changes.length && !rs.changes.length && !rc.changes.length) return;
     if (readOnly) {
-      warnMilChanges("This bid has a membrane mil its roof system does not offer:", r.changes);
+      if (r.changes.length)
+        warnMilChanges("This bid has a membrane mil its roof system does not offer:", r.changes);
+      if (rs.changes.length)
+        warnMilChanges("This bid has a sheet size / lap its system does not offer:", rs.changes);
+      if (rc.changes.length)
+        warnMilChanges(
+          "This bid's design table / lap / spacing do not follow the fastener lookup:",
+          rc.changes,
+        );
       return;
     }
-    applyMilFix(before, r.state);
-    warnMilChanges(
-      "This bid had a membrane mil its roof system does not offer — corrected (save to keep it):",
-      r.changes,
-    );
+    if (r.changes.length) {
+      applyMilFix(before, r.state);
+      warnMilChanges(
+        "This bid had a membrane mil its roof system does not offer — corrected (save to keep it):",
+        r.changes,
+      );
+    }
+    if (rs.changes.length) {
+      applySheetFix(r.state, rs.state);
+      warnMilChanges(
+        "This bid had a sheet size / lap its system does not offer — corrected (save to keep it):",
+        rs.changes,
+      );
+    }
+    if (rc.changes.length) {
+      applyChainFix(rs.state, rc.state);
+      warnMilChanges(
+        "Design table / lap / spacing re-derived from the fastener lookup (save to keep it):",
+        rc.changes,
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hydrate, on that state
-  }, [milCheckStamp, admin]);
+  }, [milCheckStamp, admin, fastenerLookup, fastenerLookupFailed]);
   // A bid loaded already linked (from the Customers page) fills its BLANK client fields — and
   // blank job-site fields when a site is linked — from the profile once it has loaded: no
   // prompt, typed text is never replaced. Once per load (loadFill), so a field cleared by hand
@@ -3406,6 +3509,10 @@ function EstimatePage() {
                           roofSystem: v,
                           sectionDefaults: { ...sectionDefaults, thickness: sdThickness },
                         });
+                        snapChainFor({
+                          roofSystem: v,
+                          sectionDefaults: { ...sectionDefaults, thickness: sdThickness },
+                        });
                       }}
                     >
                       <SelectTrigger>
@@ -3441,6 +3548,7 @@ function EstimatePage() {
                             if (o.attachment !== attachment) {
                               snapMilsFor({ attachment: o.attachment });
                               snapSheetsFor({ attachment: o.attachment });
+                              snapChainFor({ attachment: o.attachment });
                             }
                           }}
                         />
@@ -3472,10 +3580,24 @@ function EstimatePage() {
                   <Field label="Design Table (psf)">
                     <PickOne
                       value={String(sectionDefaults.designTable ?? 60)}
-                      options={DESIGN_TABLE_OPTIONS.map(String)}
-                      onChange={(v) =>
-                        setSectionDefaults((p) => ({ ...p, designTable: Number(v) }))
-                      }
+                      // The tables the fastener lookup has rows for (bid system + default mil)
+                      // on a mechanical bid; the full list otherwise (lib/section-chain.ts).
+                      options={withCurrent(
+                        (attachment === "mechanical" && LEGACY_ROOF_SYSTEM_IDS[roofSystem]
+                          ? offeredDesignTables(
+                              fastenerLookup,
+                              LEGACY_ROOF_SYSTEM_IDS[roofSystem]!,
+                              sectionDefaults.thickness,
+                            )
+                          : DESIGN_TABLE_OPTIONS
+                        ).map(String),
+                        String(sectionDefaults.designTable ?? 60),
+                      )}
+                      onChange={(v) => {
+                        const designTable = Number(v);
+                        setSectionDefaults((p) => ({ ...p, designTable }));
+                        snapChainFor({ sectionDefaults: { ...sectionDefaults, designTable } });
+                      }}
                     />
                   </Field>
                   <Field label="Avg Sheet Size">
@@ -3913,8 +4035,26 @@ function EstimatePage() {
                     // (owner's request; legacy leaves DeckType alone — docs §22.30). The copied
                     // mil is checked against the bid system (owner, Sep 30).
                     const bid = { roofSystem, attachment, membraneAdhesiveName: membraneAdhesive };
-                    const r = applySectionDefaultsToSections(sections, sectionDefaults, bid, admin);
+                    const r0 = applySectionDefaultsToSections(
+                      sections,
+                      sectionDefaults,
+                      bid,
+                      admin,
+                    );
+                    // The copied design table and mil then run the pull-test chain per section
+                    // (owner, Oct 26; lib/section-chain.ts): table → lap → derived spacing.
+                    const rc = snapBidChain(
+                      { ...bid, sections: r0.sections, customSpacing },
+                      admin,
+                      fastenerLookup,
+                    );
+                    const r = { sections: rc.state.sections, changes: r0.changes };
                     setSections(r.sections);
+                    if (rc.changes.length)
+                      warnMilChanges(
+                        "Design table / lap / spacing re-derived from the fastener lookup",
+                        rc.changes,
+                      );
                     // Owner's expectation (docs §22.30): the "2. Wall Type" default beside these
                     // material defaults re-routes the existing walls' drill split as well. A
                     // wall following the first section's mil is re-checked against its system.
@@ -3958,6 +4098,8 @@ function EstimatePage() {
                 bidDefaults={{ roofSystem, attachment, membraneAdhesiveName: membraneAdhesive }}
                 colorOptions={colorOptions}
                 fastenerLookup={fastenerLookup}
+                customSpacing={customSpacing}
+                onCustomSpacing={setCustomSpacing}
                 stdSizeDiscount={stdSizeDiscount}
                 onStdSizeDiscount={setStdSizeDiscount}
                 bidAdjustLaborPct={adjustLaborPct}

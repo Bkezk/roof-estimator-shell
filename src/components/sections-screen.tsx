@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
@@ -27,6 +28,13 @@ import {
 } from "@/lib/engine/bid-builder";
 import { offeredMils, sectionMilChoices } from "@/lib/bid-mils";
 import { nearestSheetLabel, offeredSheetLabels } from "@/lib/bid-sheets";
+import {
+  clearCustomOnUpstreamChange,
+  derivedSpacing,
+  nearestDesignTable,
+  offeredDesignTables,
+  pullTestAdvice,
+} from "@/lib/section-chain";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import {
   ARP_SIZE_OPTIONS,
@@ -46,12 +54,12 @@ import {
   LEGACY_ROOF_SYSTEM_IDS,
   universalFastenerSpacing,
   type MechFastenerRow,
-  type SpacingError,
 } from "@/lib/engine/fastener-spacing";
 import { SectionCalcDialog } from "@/components/section-calc-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -81,11 +89,14 @@ const usd = (v: number) =>
 const n0 = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-const SPACING_ERROR_TEXT: Record<SpacingError, string> = {
-  [-5]: "no lookup rows for this system/thickness",
-  [-1]: "no rows for this design table",
-  [-2]: "no rows for this tab spacing",
-  [-3]: "pull test too low — no permitted spacing",
+/** What changed, for the "Custom spacing … was cleared because <what> changed" toast. */
+const UPSTREAM_WORDS: Record<string, string> = {
+  roofSystem: "the roof system",
+  attachment: "the attachment",
+  thickness: "the membrane mil",
+  designTable: "the design table",
+  fieldLap: "the lap",
+  pullTest: "the pull test",
 };
 
 const ATTACHMENT_LABEL: Record<Attachment, string> = {
@@ -174,6 +185,13 @@ export interface SectionsScreenProps {
   bidDefaults: { roofSystem: string; attachment: Attachment; membraneAdhesiveName: string };
   colorOptions: string[];
   fastenerLookup: MechFastenerRow[] | undefined;
+  /**
+   * Sections whose field / perimeter / corner o.c. were typed by hand ("Custom spacing"), by id;
+   * every other section's o.c. is derived from the pull-test lookup (owner, Oct 26;
+   * src/lib/section-chain.ts). Lives beside the sections, not in the engine's section type.
+   */
+  customSpacing: Record<string, true>;
+  onCustomSpacing: (next: Record<string, true>) => void;
   /** Legacy "Standard Size Sheet Discount" checkbox mirrors the estimate-level flag. */
   stdSizeDiscount: boolean;
   onStdSizeDiscount: (v: boolean) => void;
@@ -232,39 +250,51 @@ export function SectionsScreen(p: SectionsScreenProps) {
   const [pullDraft, setPullDraft] = useState<number | null>(null);
   useEffect(() => setPullDraft(null), [s?.id]);
 
-  // Legacy pull-test autofill (§1): with a pull test entered, re-derive the field/perim/corner
-  // o.c. from MechFastenerLookup whenever a lookup key changes. Manual OC edits still stick.
+  // Legacy pull-test autofill (§1) — the chain the owner asked for (Oct 26: "when the pull test,
+  // design table, field roll width, etc are updated they update each other"). A change to any
+  // lookup key first moves a design table the lookup has no rows for (system + mil) to the
+  // nearest offered one, then re-derives the field / perim / corner o.c. from MechFastenerLookup
+  // (the lap follows through the LoadLapSpacings effect below). A section on "Custom spacing"
+  // keeps its typed o.c. for edits downstream of the lookup; an upstream edit clears the switch
+  // and re-derives, with a toast saying why (src/lib/section-chain.ts).
   const updWithSpacing = (patch: Partial<BidSectionInput>) => {
     if (!s) return;
-    const next = { ...s, ...patch };
+    const fix: Partial<BidSectionInput> = { ...patch };
+    const next = { ...s, ...fix };
     const sys = resolveSectionSystem(p.bidDefaults, next);
     const rsId = LEGACY_ROOF_SYSTEM_IDS[sys.roofSystem];
-    if (
-      !p.fastenerLookup?.length ||
-      !rsId ||
-      sys.attachment !== "mechanical" ||
-      !next.pullTest ||
-      next.pullTest <= 0
-    ) {
-      upd(patch);
+    const lookup = p.fastenerLookup;
+    if (lookup?.length && rsId && sys.attachment === "mechanical") {
+      const table = next.designTable ?? 60;
+      const offered = offeredDesignTables(lookup, rsId, next.thickness);
+      if (offered.length && !offered.includes(table))
+        next.designTable = fix.designTable = nearestDesignTable(offered, table);
+    }
+    // Only keys whose value moved count (the pickers re-send the system with the attachment).
+    const changedKeys = (Object.keys(patch) as (keyof BidSectionInput)[]).filter(
+      (k) => patch[k] !== s[k],
+    );
+    const cleared = clearCustomOnUpstreamChange(p.customSpacing, s.id, changedKeys);
+    if (cleared.cleared) {
+      p.onCustomSpacing(cleared.customSpacing);
+      const what = changedKeys.map((k) => UPSTREAM_WORDS[k]).find(Boolean) ?? "a lookup key";
+      toast.info(
+        `Custom spacing on ${s.name || `Section ${i + 1}`} was cleared because ${what} changed; spacing re-derived.`,
+      );
+    } else if (p.customSpacing[s.id]) {
+      upd(fix);
       return;
     }
-    const base = {
-      roofSystemId: rsId,
-      thickness: next.thickness,
-      designTable: next.designTable ?? 60,
-      tabSpacings: [next.fieldLap],
-      pullTest: next.pullTest,
-    };
-    const field = universalFastenerSpacing(p.fastenerLookup, { ...base, columnOffset: 0 });
-    const perim = universalFastenerSpacing(p.fastenerLookup, { ...base, columnOffset: 1 });
-    const corner = universalFastenerSpacing(p.fastenerLookup, { ...base, columnOffset: 2 });
-    upd({
-      ...patch,
-      ...(field.ok ? { fastenerOc: field.inches } : {}),
-      ...(perim.ok ? { perimFastenerOc: perim.inches } : {}),
-      ...(corner.ok ? { cornerFastenerOc: corner.inches } : {}),
-    });
+    upd({ ...fix, ...derivedSpacing(lookup, next, sys) });
+  };
+  /** The "Custom spacing" switch: on = type your own o.c.; off = back to the lookup's. */
+  const setCustomSpacing = (on: boolean) => {
+    if (!s) return;
+    const nextMap = { ...p.customSpacing };
+    if (on) nextMap[s.id] = true;
+    else delete nextMap[s.id];
+    p.onCustomSpacing(nextMap);
+    if (!on) upd(derivedSpacing(p.fastenerLookup, s, resolveSectionSystem(p.bidDefaults, s)));
   };
 
   // Legacy LoadLapSpacings selection: keep the saved FieldLap while it is still listed, else the
@@ -491,27 +521,36 @@ export function SectionsScreen(p: SectionsScreenProps) {
       ? `Any sheets ordered between 2500 and 3000 square feet have length and width limitations. Please verify that this sheet does not exceed ${sheetLabel} and that Duro-Last will manufacture it in the dimensions you have entered.`
       : null;
 
-  // Calculated spacing label (legacy lblCalcedSpacing).
-  let calcedSpacing: string | null = null;
-  if ((s.pullTest ?? 0) > 0 && sys.attachment === "mechanical" && p.fastenerLookup?.length) {
-    const rsId = LEGACY_ROOF_SYSTEM_IDS[sys.roofSystem];
-    if (rsId) {
-      const res = universalFastenerSpacing(p.fastenerLookup, {
-        roofSystemId: rsId,
-        thickness: s.thickness,
-        designTable: s.designTable ?? 60,
-        tabSpacings: [s.fieldLap],
-        pullTest: s.pullTest!,
-        columnOffset: 0,
-      });
-      // Duro-Bond's lookup columns are induction plates PER 4×8 BOARD (legacy "6 per 4x8"), not
-      // inches on centre.
-      calcedSpacing = res.ok
-        ? sys.rsId === 2
-          ? `${res.inches} per 4x8`
-          : `${res.inches}" oc`
-        : `No Fastener Spacing available for this Pull Test (${SPACING_ERROR_TEXT[res.error]})`;
-    }
+  // Calculated spacing label (legacy lblCalcedSpacing). When the lookup finds nothing — and
+  // whenever the lap pick reads "Check Pull" — the line says why and what fixes it (the lb the
+  // lookup needs, or a lap that works at the entered pull test) instead of the bare error.
+  const isCustom = !!p.customSpacing[s.id];
+  const lookupRsId = sys.attachment === "mechanical" ? LEGACY_ROOF_SYSTEM_IDS[sys.roofSystem] : 0;
+  let calcedSpacing: { text: string; ok: boolean } | null = null;
+  if (lookupRsId && p.fastenerLookup?.length && ((s.pullTest ?? 0) > 0 || lap.checkPull)) {
+    const res = universalFastenerSpacing(p.fastenerLookup, {
+      roofSystemId: lookupRsId,
+      thickness: s.thickness,
+      designTable: s.designTable ?? 60,
+      tabSpacings: [s.fieldLap],
+      pullTest: s.pullTest ?? 0,
+      columnOffset: 0,
+    });
+    // Duro-Bond's lookup columns are induction plates PER 4×8 BOARD (legacy "6 per 4x8"), not
+    // inches on centre.
+    calcedSpacing = res.ok
+      ? { ok: true, text: sys.rsId === 2 ? `${res.inches} per 4x8` : `${res.inches}" oc` }
+      : {
+          ok: false,
+          text: pullTestAdvice(p.fastenerLookup, {
+            roofSystemId: lookupRsId,
+            thickness: s.thickness,
+            designTable: s.designTable ?? 60,
+            lap: lap.checkPull ? 0 : s.fieldLap,
+            pullTest: s.pullTest ?? 0,
+            laps: lap.raw,
+          }).message,
+        };
   }
 
   const sideRow = (side: string) => {
@@ -877,7 +916,17 @@ export function SectionsScreen(p: SectionsScreenProps) {
               <Pick
                 className="w-[100px]"
                 value={String(s.designTable ?? 60)}
-                options={DESIGN_TABLE_OPTIONS.map(String)}
+                // The tables the lookup has rows for (system + mil) under a mechanical
+                // attachment — an adhered section's table is not used by the lookup, so it keeps
+                // the full list. A saved table that is not listed stays, so the box is never
+                // blank (the chain moves it on the next lookup-key edit).
+                options={(() => {
+                  const offered = lookupRsId
+                    ? offeredDesignTables(p.fastenerLookup, lookupRsId, s.thickness)
+                    : DESIGN_TABLE_OPTIONS;
+                  const cur = s.designTable ?? 60;
+                  return (offered.includes(cur) ? offered : [cur, ...offered]).map(String);
+                })()}
                 onChange={(v) => updWithSpacing({ designTable: Number(v) })}
               />
             </Field>
@@ -904,18 +953,37 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 />
               )}
             </Field>
-            <Field label={sys.rsId === 2 ? "Plates per 4×8" : "Fastener OC (in)"}>
-              <Num
-                className="w-[100px]"
-                value={s.fastenerOc}
-                onChange={(v) => upd({ fastenerOc: v })}
-              />
-            </Field>
+            {sys.attachment === "mechanical" && (
+              <>
+                <Field label={sys.rsId === 2 ? "Plates per 4×8" : "Fastener OC (in)"}>
+                  <Num
+                    className="w-[100px]"
+                    value={s.fastenerOc}
+                    disabled={!isCustom}
+                    onChange={(v) => upd({ fastenerOc: v })}
+                  />
+                </Field>
+                <div className="pb-1">
+                  <label className="flex items-center gap-2 text-xs">
+                    <Switch
+                      checked={isCustom}
+                      onCheckedChange={setCustomSpacing}
+                      aria-label="Custom spacing"
+                    />
+                    Custom spacing
+                  </label>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Field, perimeter and corner spacing come from the pull-test lookup; turn this on
+                    to type your own.
+                  </p>
+                </div>
+              </>
+            )}
             {calcedSpacing && (
               <p
-                className={`pb-2 text-xs ${calcedSpacing.startsWith("No ") ? "text-destructive" : "text-muted-foreground"}`}
+                className={`pb-2 text-xs ${calcedSpacing.ok ? "text-muted-foreground" : "text-destructive"}`}
               >
-                Calc&apos;d spacing: {calcedSpacing}
+                Calc&apos;d spacing: {calcedSpacing.text}
               </p>
             )}
           </div>
@@ -1227,20 +1295,27 @@ export function SectionsScreen(p: SectionsScreenProps) {
                   onChange={(v) => upd({ enhancementWidthFt: v })}
                 />
               </Field>
-              <Field label="Perim OC (in)">
-                <Num
-                  className="w-[90px]"
-                  value={s.perimFastenerOc}
-                  onChange={(v) => upd({ perimFastenerOc: v })}
-                />
-              </Field>
-              <Field label="Corner OC (in)">
-                <Num
-                  className="w-[90px]"
-                  value={s.cornerFastenerOc}
-                  onChange={(v) => upd({ cornerFastenerOc: v })}
-                />
-              </Field>
+              {/* Derived from the pull-test lookup unless the section's "Custom spacing" is on. */}
+              {sys.attachment === "mechanical" && (
+                <>
+                  <Field label="Perim OC (in)">
+                    <Num
+                      className="w-[90px]"
+                      value={s.perimFastenerOc}
+                      disabled={!isCustom}
+                      onChange={(v) => upd({ perimFastenerOc: v })}
+                    />
+                  </Field>
+                  <Field label="Corner OC (in)">
+                    <Num
+                      className="w-[90px]"
+                      value={s.cornerFastenerOc}
+                      disabled={!isCustom}
+                      onChange={(v) => upd({ cornerFastenerOc: v })}
+                    />
+                  </Field>
+                </>
+              )}
             </div>
             {isTuffMech && (
               /* Legacy frmRoofSectionAdv "Duro-Tuff Options" (grpDTCustomSettings): Use Custom
