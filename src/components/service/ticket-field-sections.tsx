@@ -2,9 +2,10 @@
  * The field side of a ticket on the office ticket page (docs/service-module-design.md §5.3):
  * the site contact select, and read-only sections for what the technician recorded (repairs
  * with photos, close-out notes and signature, time; time is editable for the office) plus the
- * ticket's timeline with an "Add note" box.
+ * ticket's timeline with an "Add note" box. The office adds pictures to the ticket from the
+ * Photos & repairs fold too (owner, Oct 26), not only through the technician's workflow.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -12,6 +13,7 @@ import {
   CheckCircle2,
   Clock,
   History,
+  ImagePlus,
   Loader2,
   MessageSquare,
   PenLine,
@@ -32,11 +34,14 @@ import { toldSuffix } from "@/lib/mentions";
 import {
   addJobNote,
   clockOnJob,
+  deleteJobPhoto,
   listJobEvents,
   listJobPhotos,
   listJobRepairs,
   listTimeEntries,
+  registerJobPhoto,
   type JobEventRow,
+  type JobPhotoRow,
 } from "@/lib/service-field.functions";
 import { elapsedLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
@@ -52,9 +57,16 @@ import { photoOrdinals } from "@/lib/photo-annotations";
 import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
 import { DownloadAllPhotos } from "@/components/service/photo-markup";
 import {
+  dragHasFiles,
   errText,
   fieldKeys,
+  imageFiles,
   loudError,
+  removeFromServiceBucket,
+  shrinkPhoto,
+  uploadPlan,
+  uploadToServiceBucket,
+  uploadingLabel,
   useSignedUrl,
   whenShort,
 } from "@/components/service/field-utils";
@@ -293,6 +305,80 @@ export function TicketRepairs({
   return <RepairsReadOnly jobId={jobId} ticketNumber={ticketNumber} canEdit={canEdit} />;
 }
 
+/**
+ * Owner, Oct 26: the office adds pictures to a ticket from its page, not only through the
+ * technician's close-out. Each picked (or dropped) file is shrunk, uploaded under the ticket's
+ * folder (field-utils uploadPlan) and recorded as an "other" photo — no repair, no checklist
+ * item — one at a time with an "Uploading 2 of 5…" line; a file that fails is named in a toast
+ * and the rest still go up. The photos list refreshes when the batch is done.
+ */
+function useOfficePictures(jobId: string) {
+  const qc = useQueryClient();
+  const registerFn = useServerFn(registerJobPhoto);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const batch = useMutation({
+    mutationFn: async (picked: File[]) => {
+      const files = imageFiles(picked);
+      if (files.length === 0) {
+        toast.error("Pick picture files (JPG, PNG, HEIC…)");
+        return { landed: 0, total: 0 };
+      }
+      setProgress({ done: 0, total: files.length });
+      let landed = 0;
+      for (const [i, file] of files.entries()) {
+        setProgress({ done: i, total: files.length });
+        try {
+          const shrunk = await shrinkPhoto(file);
+          const [plan] = uploadPlan([shrunk], jobId);
+          const path = plan!.path;
+          await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
+          try {
+            const row = await registerFn({
+              data: {
+                service_job_id: jobId,
+                repair_id: null,
+                item_key: null,
+                role: "other",
+                storage_path: path,
+                file_name: shrunk.name || file.name || null,
+                file_size: shrunk.blob.size,
+                taken_at: new Date(file.lastModified || Date.now()).toISOString(),
+              },
+            });
+            qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) =>
+              old ? [...old, row] : old,
+            );
+            landed += 1;
+          } catch (e) {
+            await removeFromServiceBucket(path);
+            throw e;
+          }
+        } catch (e) {
+          loudError(`${file.name || "A picture"} did not upload`, e);
+        }
+      }
+      return { landed, total: files.length };
+    },
+    onSuccess: ({ landed, total }) => {
+      if (total === 0) return;
+      if (landed > 0) toast.success(landed === 1 ? "Picture added" : `${landed} pictures added`);
+    },
+    onSettled: () => {
+      setProgress(null);
+      void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
+    },
+  });
+  return {
+    add: (files: ArrayLike<File> | null | undefined) => {
+      const list = Array.from(files ?? []);
+      if (list.length > 0 && !batch.isPending) batch.mutate(list);
+    },
+    uploading: batch.isPending,
+    progressText: progress ? uploadingLabel(progress.done, progress.total) : null,
+  };
+}
+
 function RepairsReadOnly({
   jobId,
   ticketNumber,
@@ -303,8 +389,10 @@ function RepairsReadOnly({
   canEdit: boolean;
 }) {
   const { session } = useAuth();
+  const qc = useQueryClient();
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
+  const deletePhotoFn = useServerFn(deleteJobPhoto);
   const repairs = useQuery({
     queryKey: fieldKeys.repairs(jobId),
     queryFn: () => repairsFn({ data: { id: jobId } }),
@@ -314,6 +402,21 @@ function RepairsReadOnly({
     queryKey: fieldKeys.photos(jobId),
     queryFn: () => photosFn({ data: { id: jobId } }),
     enabled: !!session,
+  });
+  const pictures = useOfficePictures(jobId);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  // The office removes a picture it added by mistake (the thumb's X asks first; the field flow's
+  // own delete). The server fn checks the ticket is theirs to touch.
+  const delPhoto = useMutation({
+    mutationFn: (id: string) => deletePhotoFn({ data: { id, service_job_id: jobId } }),
+    onSuccess: (_r, id) => {
+      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) =>
+        old?.filter((p) => p.id !== id),
+      );
+      void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });
+    },
+    onError: (e) => loudError("Could not delete the photo", e),
   });
   const rows = repairs.data ?? [];
   const pics = (photos.data ?? []).filter((p) => p.role !== "signature");
@@ -327,82 +430,162 @@ function RepairsReadOnly({
       canAnnotate={canEdit}
       ticketNumber={ticketNumber}
       ordinal={ord.get(p.id)}
+      onDelete={canEdit ? () => delPhoto.mutate(p.id) : undefined}
+      deleting={delPhoto.isPending && delPhoto.variables === p.id}
     />
   );
-  // Nothing recorded (and nothing wrong): no section at all. Also nothing while loading, so a
-  // ticket without repairs does not flash an empty box.
-  if (!repairs.error && repairs.isLoading) return null;
-  if (!repairs.error && !photos.error && rows.length === 0 && loose.length === 0) return null;
+  // Nothing recorded (and nothing wrong): no section at all for a reader. Also nothing while
+  // loading, so a ticket without repairs does not flash an empty box. The office (`canEdit`)
+  // always gets the fold: it adds the ticket's first pictures here (owner, Oct 26).
+  if (!canEdit && !repairs.error && repairs.isLoading) return null;
+  if (!canEdit && !repairs.error && !photos.error && rows.length === 0 && loose.length === 0)
+    return null;
+  const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
   const summary = repairs.error ? (
     <span className="text-destructive">could not load</span>
+  ) : rows.length > 0 && pics.length > 0 ? (
+    `${count(rows.length, "repair")} · ${count(pics.length, "photo")}`
   ) : rows.length > 0 ? (
-    `${rows.length} ${rows.length === 1 ? "repair" : "repairs"}`
+    count(rows.length, "repair")
+  ) : pics.length > 0 ? (
+    count(pics.length, "photo")
+  ) : repairs.isLoading || photos.isLoading ? (
+    "loading…"
   ) : (
-    `${loose.length} ${loose.length === 1 ? "photo" : "photos"}`
+    "none yet"
   );
+  const title = pics.length > 0 || canEdit ? "Photos & repairs" : "Repairs";
+  const addPictures = canEdit && (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        aria-label="Add pictures"
+        onChange={(e) => {
+          pictures.add(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pictures.uploading}
+        onClick={() => fileRef.current?.click()}
+      >
+        {pictures.uploading ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        ) : (
+          <ImagePlus className="h-4 w-4" aria-hidden />
+        )}
+        Add pictures
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        {pictures.progressText ?? "or drop pictures here"}
+      </span>
+    </div>
+  );
+  // Drag-and-drop onto the fold's photo area (files only: a thumb dragged OUT to the desktop
+  // also passes over this box and must not count).
+  const dropProps = canEdit
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (!dragHasFiles(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          if (!dragOver) setDragOver(true);
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setDragOver(false);
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (!dragHasFiles(e.dataTransfer)) return;
+          e.preventDefault();
+          setDragOver(false);
+          pictures.add(e.dataTransfer.files);
+        },
+      }
+    : {};
   return (
-    <Box title="Repairs" icon={Wrench} collapsible storageKey="repairs" summary={summary}>
-      {repairs.error ? (
-        <p className="text-sm text-destructive">
-          Could not load the repairs: {errText(repairs.error)}
-        </p>
-      ) : repairs.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No repairs recorded yet. The technician adds them at close-out.
-        </p>
-      ) : (
-        <ol className="space-y-3">
-          {rows.map((r) => {
-            const mine = pics.filter((p) => p.repair_id === r.id);
-            return (
-              <li key={r.id} className="space-y-1.5 rounded-md border p-3 text-sm">
-                <p className="font-medium">
-                  {r.name}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    · {Number(r.quantity)} {r.unit}
-                  </span>
-                </p>
-                {r.problem_text && (
-                  <p className="whitespace-pre-line">
-                    <span className="text-muted-foreground">Problem: </span>
-                    {r.problem_text}
+    <Box title={title} icon={Wrench} collapsible storageKey="repairs" summary={summary}>
+      <div
+        {...dropProps}
+        className={`space-y-3 rounded-md ${
+          dragOver ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+        }`}
+      >
+        {repairs.error ? (
+          <p className="text-sm text-destructive">
+            Could not load the repairs: {errText(repairs.error)}
+          </p>
+        ) : repairs.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No repairs recorded yet. The technician adds them at close-out.
+          </p>
+        ) : (
+          <ol className="space-y-3">
+            {rows.map((r) => {
+              const mine = pics.filter((p) => p.repair_id === r.id);
+              return (
+                <li key={r.id} className="space-y-1.5 rounded-md border p-3 text-sm">
+                  <p className="font-medium">
+                    {r.name}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      · {Number(r.quantity)} {r.unit}
+                    </span>
                   </p>
-                )}
-                {r.resolution_text && (
-                  <p className="whitespace-pre-line">
-                    <span className="text-muted-foreground">Work completed: </span>
-                    {r.resolution_text}
-                  </p>
-                )}
-                {mine.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">{mine.map(thumb)}</div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {photos.error && (
-        <p className="text-sm text-destructive">
-          Could not load the photos: {errText(photos.error)}
-        </p>
-      )}
-      {loose.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-xs text-muted-foreground">Other photos</p>
-          <div className="flex flex-wrap gap-2">{loose.map(thumb)}</div>
-        </div>
-      )}
-      {pics.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          <DownloadAllPhotos photos={pics} ticketNumber={ticketNumber} />
-          <span className="text-xs text-muted-foreground">
-            One file per photo, with its marks drawn in.
-          </span>
-        </div>
-      )}
+                  {r.problem_text && (
+                    <p className="whitespace-pre-line">
+                      <span className="text-muted-foreground">Problem: </span>
+                      {r.problem_text}
+                    </p>
+                  )}
+                  {r.resolution_text && (
+                    <p className="whitespace-pre-line">
+                      <span className="text-muted-foreground">Work completed: </span>
+                      {r.resolution_text}
+                    </p>
+                  )}
+                  {mine.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1">{mine.map(thumb)}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        {photos.error && (
+          <p className="text-sm text-destructive">
+            Could not load the photos: {errText(photos.error)}
+          </p>
+        )}
+        {loose.length > 0 ? (
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Other photos</p>
+            <div className="flex flex-wrap gap-2">{loose.map(thumb)}</div>
+          </div>
+        ) : (
+          canEdit &&
+          !photos.isLoading &&
+          !photos.error &&
+          pics.length === 0 && <p className="text-sm text-muted-foreground">No pictures yet</p>
+        )}
+        {addPictures}
+        {pics.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <DownloadAllPhotos photos={pics} ticketNumber={ticketNumber} />
+            <span className="text-xs text-muted-foreground">
+              One file per photo, with its marks drawn in.
+            </span>
+          </div>
+        )}
+      </div>
     </Box>
   );
 }

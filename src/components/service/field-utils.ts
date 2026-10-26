@@ -190,3 +190,81 @@ export function useSignedUrl(path: string | null | undefined) {
     retry: 1,
   });
 }
+
+// ---------------------------------------------------------------------------------------------
+// Pictures added from the office ticket page (owner, Oct 26: "pictures can be added to the
+// ticket via the ticket menu on the service page, not just in the service ticket workflow").
+
+const EXT_BY_TYPE: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/tiff": "tif",
+};
+
+/** The object's extension for a (shrunk) photo's MIME type; the file name's failing that; "jpg". */
+export function photoExtension(type: string, fileName = ""): string {
+  const fromType = EXT_BY_TYPE[(type.split(";")[0] ?? "").trim().toLowerCase()];
+  if (fromType) return fromType;
+  const dot = fileName.lastIndexOf(".");
+  const fromName =
+    dot > 0
+      ? fileName
+          .slice(dot + 1)
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+      : "";
+  return fromName || "jpg";
+}
+
+export interface PlannedUpload<T extends { type: string; name: string }> {
+  /** The file (shrunk already), in the order it was picked. */
+  file: T;
+  /** `${jobId}/<uuid>.<ext>` — under the ticket's own folder, as registerJobPhoto requires. */
+  path: string;
+}
+
+/**
+ * Where each picked picture goes in the "service" bucket: `${jobId}/<uuid>.<ext>`, the extension
+ * from the (shrunk) file's type, in the order picked. Pure: `uuid` is injectable for tests and
+ * for a browser without crypto.randomUUID (an http origin).
+ */
+export function uploadPlan<T extends { type: string; name: string }>(
+  files: readonly T[],
+  jobId: string,
+  uuid: () => string = randomId,
+): PlannedUpload<T>[] {
+  return files.map((file) => ({
+    file,
+    path: `${jobId}/${uuid()}.${photoExtension(file.type, file.name)}`,
+  }));
+}
+
+function randomId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** "Uploading 2 of 5…" — the progress line while the office's pictures go up one at a time. */
+export const uploadingLabel = (done: number, total: number) =>
+  `Uploading ${Math.min(done + 1, total)} of ${total}…`;
+
+/** Does a drag carry files (not a photo thumb dragged out to the desktop, not text)? */
+export function dragHasFiles(dt: Pick<DataTransfer, "types"> | null | undefined): boolean {
+  if (!dt) return false;
+  return Array.from(dt.types ?? []).includes("Files");
+}
+
+/** The image files among what was dropped or picked (a dropped folder or PDF is left out). */
+export function imageFiles(list: ArrayLike<File> | null | undefined): File[] {
+  return Array.from(list ?? []).filter(
+    (f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name),
+  );
+}
