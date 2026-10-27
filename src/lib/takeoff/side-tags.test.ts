@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildObject, duplicateObject, perimeterRunsByRole } from "@/components/takeoff/shapes";
+import { buildObject, duplicateObject, perimeterSidesByRole } from "@/components/takeoff/shapes";
 
 import { bidSeedFromTakeoff } from "./create-bid";
 import { sideRolesOf } from "./edge-lines";
@@ -62,15 +62,18 @@ function areaOnly(points: PagePoint[] = RECT): TakeoffObject[] {
   return [buildObject("area", "a", 0, points, [], setup, page.scale)];
 }
 
-/** "Edge from this area" lines with the given per-side roles, WITHOUT the editor's step. */
+/**
+ * "Edge from this area" lines with the given per-side roles, WITHOUT the editor's step: one line
+ * per side with a role (owner, Oct 27), ids `l<side>`.
+ */
 function withEdgeLines(
   objs: TakeoffObject[],
   roles: Array<LinearRole | null>,
   heightIn?: number,
 ): TakeoffObject[] {
   let out = objs;
-  perimeterRunsByRole(areaOf(objs).points, roles).forEach((run, k) => {
-    const l = buildObject("linear", `l${k}`, 0, run.points, out, setup, page.scale, {
+  perimeterSidesByRole(areaOf(objs).points, roles).forEach((run) => {
+    const l = buildObject("linear", `l${run.sides[0]}`, 0, run.points, out, setup, page.scale, {
       linear: run.role,
       fromArea: "a",
     });
@@ -88,7 +91,10 @@ function withEdgeLines(
 const commit = (prev: TakeoffObject[], fn: (os: TakeoffObject[]) => TakeoffObject[]) =>
   settleEdit(prev, fn(prev), fpp).objects;
 
-/** Gutter along A, a 36 in parapet wall along B, C and D — made with "Edge from this area". */
+/**
+ * Gutter along A, a 36 in parapet wall along B, C and D — made with "Edge from this area": one
+ * line per side (l0 the gutter, l1–l3 the three walls).
+ */
 const made = () =>
   commit(areaOnly(), (os) => withEdgeLines(os, ["gutter", "parapet", "parapet", "parapet"], 36));
 
@@ -99,8 +105,8 @@ describe("side tags: set when the lines are made", () => {
     expect(e.map((x) => [x.alongRole, x.alongLineId])).toEqual([
       ["gutter", "l0"],
       ["parapet", "l1"],
-      ["parapet", "l1"],
-      ["parapet", "l1"],
+      ["parapet", "l2"],
+      ["parapet", "l3"],
     ]);
     // A parapet side: no termination, no blocking; its own details are remembered.
     expect(e[1]).toMatchObject({
@@ -163,21 +169,29 @@ describe("side tags: set when the lines are made", () => {
 });
 
 describe("side tags: kept in sync", () => {
-  it("deleting the line clears the tags and restores each side's termination and blocking", () => {
+  it("deleting a line clears its side's tag and restores that side's termination and blocking", () => {
     const objs = made();
-    const noWall = commit(objs, (os) => os.filter((o) => o.id !== "l1"));
-    const e = edgesOf(noWall);
-    expect(e.map((x) => x.alongRole ?? null)).toEqual(["gutter", null, null, null]);
-    expect(e.slice(1)).toEqual([
+    // Each wall is its own line (owner, Oct 27): deleting the east wall (l1) frees side B only.
+    const noEast = commit(objs, (os) => os.filter((o) => o.id !== "l1"));
+    const e = edgesOf(noEast);
+    expect(e.map((x) => x.alongRole ?? null)).toEqual(["gutter", null, "parapet", "parapet"]);
+    expect(e[1]).toEqual({
+      isPerimeter: true,
+      termination: '4" Fascia',
+      blockingFt: 60,
+      arpSizeIn: 0,
+    });
+    const noWalls = commit(noEast, (os) => os.filter((o) => o.id !== "l2" && o.id !== "l3"));
+    expect(edgesOf(noWalls).slice(1)).toEqual([
       { isPerimeter: true, termination: '4" Fascia', blockingFt: 60, arpSizeIn: 0 },
       { isPerimeter: true, termination: '4" Fascia', blockingFt: 100, arpSizeIn: 0 },
       { isPerimeter: true, termination: '4" Fascia', blockingFt: 60, arpSizeIn: 0 },
     ]);
-    const bare = commit(noWall, (os) => os.filter((o) => o.id !== "l0"));
+    const bare = commit(noWalls, (os) => os.filter((o) => o.id !== "l0"));
     expect(edgesOf(bare)).toEqual(edgesOf(areaOnly()));
   });
 
-  it("changing a line's role updates the tag (restoring before applying the new role)", () => {
+  it("changing a line's role updates its side's tag (restoring before applying the new role)", () => {
     const objs = made();
     const reroled = (role: LinearRole) =>
       commit(objs, (os) =>
@@ -185,20 +199,21 @@ describe("side tags: kept in sync", () => {
           o.id === "l1" && o.kind === "linear" ? { ...o, attrs: { ...o.attrs, role } } : o,
         ),
       );
+    // The east wall (side B) becomes a gutter; C and D keep their own walls.
     const gutters = edgesOf(reroled("gutter"));
     expect(gutters.map((x) => [x.alongRole, x.termination, x.blockingFt])).toEqual([
       ["gutter", '4" Drip Edge', 100],
       ["gutter", '4" Drip Edge', 60],
-      ["gutter", '4" Drip Edge', 100],
-      ["gutter", '4" Drip Edge', 60],
+      ["parapet", "No Termination", 0],
+      ["parapet", "No Termination", 0],
     ]);
     expect(gutters[1]!.beforeRole).toEqual({ termination: '4" Fascia' });
     const joint = edgesOf(reroled("expansion_joint"));
     expect(joint.map((x) => [x.alongRole ?? null, x.termination, x.blockingFt])).toEqual([
       ["gutter", '4" Drip Edge', 100],
       [null, '4" Fascia', 60],
-      [null, '4" Fascia', 100],
-      [null, '4" Fascia', 60],
+      ["parapet", "No Termination", 0],
+      ["parapet", "No Termination", 0],
     ]);
   });
 
@@ -215,14 +230,14 @@ describe("side tags: kept in sync", () => {
     expect(e.map((x) => [x.alongRole, x.alongLineId])).toEqual([
       ["gutter", "l0"],
       ["parapet", "l1"],
-      ["parapet", "l1"],
-      ["parapet", "l1"],
+      ["parapet", "l2"],
+      ["parapet", "l3"],
     ]);
     expect(e.map((x) => x.blockingFt)).toEqual([130, 0, 0, 0]);
     expect(e[2]!.beforeRole).toEqual({ termination: '4" Fascia', blockingFt: 130 });
-    // Delete the wall afterwards: side C gets back its blocking at the NEW length.
-    const back = commit(g, (os) => os.filter((o) => o.id !== "l1"));
-    expect(edgesOf(back).map((x) => x.blockingFt)).toEqual([130, 60, 130, 60]);
+    // Delete the south wall (l2) afterwards: side C gets back its blocking at the NEW length.
+    const back = commit(g, (os) => os.filter((o) => o.id !== "l2"));
+    expect(edgesOf(back).map((x) => x.blockingFt)).toEqual([130, 0, 130, 0]);
   });
 
   it("a split side loses its tag (the line no longer matches it) and gets its details back", () => {
@@ -410,8 +425,8 @@ describe("the Objects tab's edge table", () => {
     ).toEqual([
       ["gutter", false, undefined, "Gutter 1", '4" Drip Edge', 100],
       ["parapet", true, 36, "Parapet 1", "No Termination", 0],
-      ["parapet", true, 36, "Parapet 1", "No Termination", 0],
-      ["parapet", true, 36, "Parapet 1", "No Termination", 0],
+      ["parapet", true, 36, "Parapet 2", "No Termination", 0],
+      ["parapet", true, 36, "Parapet 3", "No Termination", 0],
     ]);
     // A 36 in perimeter wall marks its sides "w/ Wall > 2ft", as the bid does.
     expect(rows.map((r) => r.shown.hasTallWall ?? false)).toEqual([false, true, true, true]);

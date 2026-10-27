@@ -67,7 +67,20 @@ export const LINEAR_ROLE_LABELS: Record<LinearRole, string> = {
   other: "Other",
 };
 
-export const COUNT_ROLES = ["drain", "pipe", "vent", "curb", "scupper", "other"] as const;
+/**
+ * The penetration roles (the toolbar's "Penetrations" tool; the saved kind stays `count`).
+ * "deficiency" (owner, Oct 27) is a spot to show the customer — a tagged problem with a note and
+ * pictures — not a quantity: it never reaches `quantities().counts`, the bid seed or the engine.
+ */
+export const COUNT_ROLES = [
+  "drain",
+  "pipe",
+  "vent",
+  "curb",
+  "scupper",
+  "other",
+  "deficiency",
+] as const;
 export type CountRole = (typeof COUNT_ROLES)[number];
 export const COUNT_ROLE_LABELS: Record<CountRole, string> = {
   drain: "Drain",
@@ -76,7 +89,17 @@ export const COUNT_ROLE_LABELS: Record<CountRole, string> = {
   curb: "Curb",
   scupper: "Scupper",
   other: "Other",
+  deficiency: "Deficiency",
 };
+/** A deficiency pin's colour on the plan and in the markup PDF (every deficiency is red). */
+export const DEFICIENCY_COLOR = "#dc2626";
+/** A picture attached to a deficiency: its object in the private "takeoffs" bucket. */
+export interface DeficiencyPhoto {
+  /** `<takeoffId>/photos/<uuid>.<ext>` in the "takeoffs" storage bucket. */
+  path: string;
+  /** The file's name as picked (alt text). */
+  name?: string;
+}
 
 /** The line roles an area side is tagged with in its edge table (a wall or a gutter along it). */
 export type SideTagRole = "parapet" | "gutter";
@@ -133,6 +156,10 @@ export interface CountAttrs {
   reuseRings?: boolean;
   bootSize?: string;
   ringSize?: string;
+  /** A deficiency: what is wrong at this spot (shown to the customer). */
+  note?: string;
+  /** A deficiency: its pictures (never saved as an empty list or `undefined`). */
+  photos?: DeficiencyPhoto[];
 }
 
 interface ObjectBase {
@@ -331,10 +358,22 @@ export interface CountQuantity {
   ringSize?: string;
   objectIds: string[];
 }
+/** One deficiency, numbered in drawing order across the takeoff (the pin shows the number). */
+export interface DeficiencyQuantity {
+  objectId: string;
+  number: number;
+  name: string;
+  page: number;
+  note?: string;
+  photoCount: number;
+}
 export interface TakeoffQuantities {
   sections: SectionQuantity[];
   linears: LinearQuantity[];
+  /** The penetrations grouped by (role, name, size…); deficiencies are not among them. */
   counts: CountQuantity[];
+  /** The deficiencies, in number order (nothing about them reaches the bid). */
+  deficiencies: DeficiencyQuantity[];
   /** Objects on a page with no scale yet: they have no real-world size. */
   unscaled: Array<{ objectId: string; page: number; name: string }>;
   /**
@@ -353,8 +392,35 @@ export interface TakeoffQuantities {
 }
 
 /**
+ * The deficiency pins of `objects` in drawing order, numbered 1..N across every page (the number
+ * the pin, the Quantities tab, the lightbox and the markup PDF show).
+ */
+export function deficiencyList(objects: readonly TakeoffObject[]): DeficiencyQuantity[] {
+  const out: DeficiencyQuantity[] = [];
+  for (const o of objects) {
+    if (o.kind !== "count" || o.attrs.role !== "deficiency") continue;
+    const d: DeficiencyQuantity = {
+      objectId: o.id,
+      number: out.length + 1,
+      name: o.attrs.name,
+      page: o.page,
+      photoCount: o.attrs.photos?.length ?? 0,
+    };
+    if (o.attrs.note?.trim()) d.note = o.attrs.note.trim();
+    out.push(d);
+  }
+  return out;
+}
+
+/** Deficiency number by object id (for the pins). */
+export function deficiencyNumbers(objects: readonly TakeoffObject[]): Map<string, number> {
+  return new Map(deficiencyList(objects).map((d) => [d.objectId, d.number]));
+}
+
+/**
  * Everything measurable from the drawing, in feet. Counts group by (role, name, size) so ten
- * clicks named "4in drain" become one row of ten.
+ * clicks named "4in drain" become one row of ten. Deficiencies are listed apart and never
+ * counted (they are not a quantity).
  */
 export function takeoffQuantities(
   pages: readonly TakeoffPage[],
@@ -366,6 +432,7 @@ export function takeoffQuantities(
     sections: [],
     linears: [],
     counts: [],
+    deficiencies: deficiencyList(objects),
     unscaled: [],
     totals: {
       roofAreaSqFt: 0,
@@ -381,6 +448,7 @@ export function takeoffQuantities(
     const fpp = fppByPage.get(o.page) ?? null;
     if (o.kind === "count") {
       const a = o.attrs;
+      if (a.role === "deficiency") continue; // listed in `deficiencies`, never a quantity
       const key = [
         a.role,
         a.name.trim().toLowerCase(),

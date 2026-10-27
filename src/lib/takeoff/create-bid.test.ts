@@ -85,6 +85,19 @@ const objects: TakeoffObject[] = [
     points: [[800, 300]],
     attrs: { name: "RTU curb", role: "curb", widthIn: 48, lengthIn: 96 },
   },
+  // A deficiency (owner, Oct 27): a spot to show the customer; nothing about it reaches the bid.
+  {
+    id: "x1",
+    kind: "count",
+    page: 0,
+    points: [[900, 350]],
+    attrs: {
+      name: "Ponding water",
+      role: "deficiency",
+      note: "2 in deep at the north drain",
+      photos: [{ path: "t/photos/a.jpg" }],
+    },
+  },
 ];
 const setup: TakeoffSetup = {
   roofSystem: "Duro-Last",
@@ -220,6 +233,23 @@ describe("bidSeedFromTakeoff", () => {
     expect(seed.summary).toBe(
       'From takeoff "Test job": 1 section, 4000 sq ft, 280 ft of roof edge; 100 ft of parapet; 2 drains, 1 curb, 1 pipe.',
     );
+  });
+
+  it("a deficiency reaches nothing in the seed: not a count, not on the notice, not in the summary", () => {
+    const q = takeoffQuantities([page], objects);
+    expect(q.counts.some((c) => c.role === "deficiency")).toBe(false);
+    expect(q.deficiencies.map((d) => [d.number, d.name, d.photoCount])).toEqual([
+      [1, "Ponding water", 1],
+    ]);
+    const text = JSON.stringify(seed);
+    expect(text).not.toContain("Ponding");
+    expect(text).not.toContain("deficienc");
+    expect(text).not.toContain("photos/");
+    // The same bid with or without it.
+    const without = objects.filter((o) => o.id !== "x1");
+    expect(
+      bidSeedFromTakeoff(setup, takeoffQuantities([page], without), { takeoffName: "Test job" }),
+    ).toEqual(seed);
   });
 });
 

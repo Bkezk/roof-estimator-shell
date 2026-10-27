@@ -251,7 +251,7 @@ function TakeoffList() {
           <p className="text-sm text-muted-foreground">
             Open a plan-sheet PDF or an aerial screenshot and set the scale from a known dimension,
             or search an address for its aerial (scaled for you), then draw the roof areas, walls
-            and counts.
+            and penetrations.
           </p>
         </div>
         <Button size="lg" className="text-base font-semibold" onClick={() => setCreating(true)}>

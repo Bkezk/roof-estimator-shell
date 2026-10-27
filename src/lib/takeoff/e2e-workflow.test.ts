@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildObject,
-  perimeterRunsByRole,
+  perimeterSidesByRole,
   uniqueName,
   type NewObjectRoles,
 } from "@/components/takeoff/shapes";
@@ -200,9 +200,10 @@ function drawTakeoff(opts: { grow?: boolean; regenerateEdges?: boolean } = {}): 
         ? { ...o, attrs: { ...o.attrs, pitch: 4 } }
         : o,
   );
-  // "Edge from this area" on Section 1: side 0 (north, 100 ft) gutter, sides 1–3 parapet.
+  // "Edge from this area" on Section 1: side 0 (north, 100 ft) gutter, sides 1–3 parapet — one
+  // line per side (owner, Oct 27: each wall its own parapet so heights can be edited).
   const edgeRuns = (pts: PagePoint[]) =>
-    perimeterRunsByRole(pts, ["gutter", "parapet", "parapet", "parapet"]);
+    perimeterSidesByRole(pts, ["gutter", "parapet", "parapet", "parapet"]);
   for (const run of edgeRuns(SECTION1))
     add("linear", run.points, { linear: run.role, fromArea: s1.id });
   // The estimator types the parapet wall height on the line (Objects tab).
@@ -425,6 +426,9 @@ const admin: EngineAdminData = {
 };
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+/** The Review ledger's Accessories row and the grand total of the seeded bid (see §3). */
+const ACCESSORIES_ROW = 240;
+const GRAND_TOTAL = 26232.45;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 const objects = drawTakeoff();
@@ -468,7 +472,7 @@ describe("1. Quantities", () => {
     expect(q.totals.slopedPerimeterFt).toBeCloseTo(643.25, 2);
   });
 
-  it("linears per role (Edge from this area = one gutter run + one 3-side parapet run)", () => {
+  it("linears per role (Edge from this area = one gutter line + one parapet line per side)", () => {
     const perRole = Object.fromEntries(
       ["parapet", "gutter", "expansion_joint", "walkway", "other"].map((r) => [
         r,
@@ -482,12 +486,15 @@ describe("1. Quantities", () => {
       walkway: 25,
       other: 12,
     });
-    expect(q.linears.map((l) => l.name)).toEqual([
-      "Gutter 1",
-      "Parapet 1",
-      "Expansion joint 1",
-      "Walkway 1",
-      "Line 1",
+    // Owner, Oct 27: each side is its own line — the east (60), south (100) and west (60) walls.
+    expect(q.linears.map((l) => [l.name, l.lengthFt])).toEqual([
+      ["Gutter 1", 100],
+      ["Parapet 1", 60],
+      ["Parapet 2", 100],
+      ["Parapet 3", 60],
+      ["Expansion joint 1", 60],
+      ["Walkway 1", 25],
+      ["Line 1", 12],
     ]);
     expect(q.totals.parapetFt).toBe(220);
     // FIXED (#12): the penthouse cut-out's 36 ft of wall is reported with its section (and not
@@ -594,12 +601,17 @@ describe("2. Seed → bid", () => {
       expect(sec(n).edges!.every((e) => e.termination === '4" Fascia')).toBe(true);
   });
 
-  it("the parapet run becomes one parapet, from the linear (not from the section)", () => {
-    expect(bid.parapets).toHaveLength(1);
-    const p = bid.parapets![0]!;
+  it("each parapet side becomes its own parapet, from the linear (not from the section)", () => {
+    // Owner, Oct 27: one wall per side, so each height can be edited on its own.
+    expect(bid.parapets!.map((p) => [p.name, p.lengthFt])).toEqual([
+      ["Parapet 1", 60],
+      ["Parapet 2", 100],
+      ["Parapet 3", 60],
+    ]);
+    const p = bid.parapets![1]!;
     expect(p).toMatchObject({
-      name: "Parapet 1",
-      lengthFt: 220,
+      name: "Parapet 2",
+      lengthFt: 100,
       verticalInches: 24,
       heightBand: '0"-30"',
       deckType: "Steel",
@@ -644,8 +656,8 @@ describe("2. Seed → bid", () => {
         bootSize: '4" Drain Boot',
         ringSize: '4" Clamping Ring',
         adjustPct: 0,
-        takeoffObjectId: "o9",
-        takeoffObjectIds: ["o9"],
+        takeoffObjectId: "o11",
+        takeoffObjectIds: ["o11"],
       },
     ]);
     // FIXED (#6): these pipes were counted without a size, so they go to the notice as "size
@@ -752,15 +764,18 @@ describe("3. Engine on the seeded bid", () => {
     expect(row("Curbs")).toBeGreaterThanOrEqual(0);
     expect(est.curbLaborHours).toBeGreaterThan(0);
     expect(row("Roof Sections")).toBeCloseTo(13171.66, 0);
-    expect(row("Parapets")).toBe(888);
+    // Three walls (one per side, owner Oct 27) instead of one 220 ft run: the same 220 ft of
+    // membrane, plus the per-wall pieces ($888 → $904).
+    expect(row("Parapets")).toBe(904);
     // Drains sit in accessoriesCalc; they are priced only when the admin data carries the §12
-    // accessories reference lists, which this fixture does not. The $240 is the wall adhesive
-    // of the ADHERED parapet (#3: the seeded wall takes the Setup's parapet material).
-    expect(row("Accessories")).toBe(240);
+    // accessories reference lists, which this fixture does not. The rest is the wall adhesive of
+    // the ADHERED parapets (#3: a seeded wall takes the Setup's parapet material), now per wall.
+    expect(row("Accessories")).toBe(ACCESSORIES_ROW);
     // Was $25,827.95 before the fixes: the seeded wall now prices as the Setup's adhered system
-    // (+$369.24, #3); the blank curb size (#4) and the edge changes (#1, #5) make up the rest.
-    // Within $1: the two-decimal layout rectangles move the roof area by under 0.01 %.
-    expect(est.money.grandTotal).toBeCloseTo(26188.86, 0);
+    // (+$369.24, #3); the blank curb size (#4) and the edge changes (#1, #5) make up the rest;
+    // per-side walls (Oct 27) add their pieces and per-wall setup (+$43.59). Within $1: the two-decimal
+    // layout rectangles move the roof area by under 0.01 %.
+    expect(est.money.grandTotal).toBeCloseTo(GRAND_TOTAL, 0);
   });
 
   it("unsized curbs are flagged; a size measured in the takeoff prices the real curb", () => {
@@ -811,12 +826,12 @@ describe("3. Engine on the seeded bid", () => {
     };
     const seeded = run(saved.parapets![0]!);
     const byHand = run(hand);
-    // FIXED (#3): same 220 ft wall, same system — the seeded wall is billed as the Setup's
+    // FIXED (#3): same 60 ft east wall, same system — the seeded wall is billed as the Setup's
     // ADHERED parapet system like the hand-added one: same adhesive, same total ($0 gap, was
-    // $369.24).
+    // $369.24 on the old 220 ft run).
     expect([seeded.attachment, byHand.attachment]).toEqual(["adhered", "adhered"]);
     expect(seeded.hours).toBeCloseTo(byHand.hours!, 6);
-    expect([seeded.adhesiveMaterial, byHand.adhesiveMaterial]).toEqual([240, 240]);
+    expect([seeded.adhesiveMaterial, byHand.adhesiveMaterial]).toEqual([120, 120]);
     expect(byHand.grandTotal - seeded.grandTotal).toBeCloseTo(0, 6);
   });
 });
@@ -846,8 +861,11 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
           }
         : s,
     ),
+    // The three seeded walls (one per side), the east wall (Parapet 1) edited by hand.
     parapets: [
-      { ...first.parapets![0]!, termOptionId: 2, attachment: "adhered" },
+      ...first.parapets!.map((p, i) =>
+        i === 0 ? { ...p, termOptionId: 2, attachment: "adhered" as const } : p,
+      ),
       newParapet({ name: "Hand wall", lengthFt: 12 }),
     ],
     curbs: [{ ...first.curbs![0]!, widthIn: 48, lengthIn: 96, curbType: "Closed" }],
@@ -913,23 +931,23 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     ]);
   });
 
-  it("the parapet follows the grown area; re-made edge lines keep the wall's edits", () => {
+  it("the parapets follow the grown area; re-made edge lines keep each wall's edits", () => {
     // FIXED (#11): dragging the area takes its "Edge from this area" lines along (the editor's
-    // commit), so Parapet 1 is re-measured at 240 ft with its hand-set options.
+    // commit), so the south wall (Parapet 2) is re-measured at 120 ft; the east wall keeps its
+    // hand-set options; the west wall is unchanged.
+    const walls = (r: ReturnType<typeof apply>) =>
+      r.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId, p.attachment]);
     const followed = apply(drawTakeoff({ grow: true }));
-    expect(
-      followed.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId, p.attachment]),
-    ).toEqual([
-      ["Parapet 1", 240, 2, "adhered"],
+    expect(walls(followed)).toEqual([
+      ["Parapet 1", 60, 2, "adhered"],
+      ["Parapet 2", 120, undefined, "adhered"],
+      ["Parapet 3", 60, undefined, "adhered"],
       ["Hand wall", 12, undefined, undefined],
     ]);
-    // Re-made (old lines deleted first — new object ids): FIXED (#7) matched by the area sides
-    // the wall runs along, the wall's hand-set options kept.
+    // Re-made (old lines deleted first — new object ids): FIXED (#7) matched by the area side
+    // each wall runs along, the walls' hand-set options kept.
     const fresh = apply(drawTakeoff({ grow: true, regenerateEdges: true }));
-    expect(fresh.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId, p.attachment])).toEqual([
-      ["Parapet 1", 240, 2, "adhered"],
-      ["Hand wall", 12, undefined, undefined],
-    ]);
+    expect(walls(fresh)).toEqual(walls(followed));
   });
 
   it("drains: the takeoff row is updated in place (hand edits kept), the hand-added row kept", () => {
@@ -947,7 +965,7 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     // FIXED (#9): only what changed, with old → new (Sections 2 and 3 and Curb 1 did not).
     expect(r.changes).toEqual([
       "Section 1: 5,920 → 7,120 sq ft; perimeter 320 → 360 ft.",
-      "Parapet 1: 220 → 240 ft.",
+      "Parapet 2: 100 → 120 ft.",
       "Drains: 4 → 5.",
     ]);
     // Bid-level edits are outside what the update touches.
@@ -966,12 +984,13 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     expect(again.notes).toBe("Call before 8am.\nTakeoff notes: Re-roof over existing BUR.");
   });
 
-  it("re-made edge lines in the other order (new first, old deleted after) keep the wall", () => {
-    // Make the new lines while the old ones still exist → "Parapet 2"; then delete the old.
+  it("re-made edge lines in the other order (new first, old deleted after) keep the walls", () => {
+    // Make the new lines while the old ones still exist → "Parapet 4" / 5 / 6; then delete the
+    // old edge lines (the ones without the "n-" ids).
     const objs = drawTakeoff({ grow: true });
     const s1 = objs.find((o) => o.kind === "area" && o.attrs.name === "Section 1")!;
     let next = objs;
-    for (const run of perimeterRunsByRole(SECTION1_GROWN, [
+    for (const run of perimeterSidesByRole(SECTION1_GROWN, [
       "gutter",
       "parapet",
       "parapet",
@@ -979,22 +998,32 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     ]))
       next = [
         ...next,
-        buildObject("linear", `n-${run.role}`, 0, run.points, next, setup, page.scale, {
-          linear: run.role,
-          fromArea: s1.id,
-        }),
+        buildObject(
+          "linear",
+          `n-${run.role}-${run.sides[0]}`,
+          0,
+          run.points,
+          next,
+          setup,
+          page.scale,
+          {
+            linear: run.role,
+            fromArea: s1.id,
+          },
+        ),
       ];
-    next = next.filter(
-      (o) => !(o.kind === "linear" && ["Parapet 1", "Gutter 1"].includes(o.attrs.name)),
-    );
+    next = next.filter((o) => !(o.kind === "linear" && o.attrs.fromArea && !o.id.startsWith("n-")));
     const r = apply(next);
-    // FIXED (#7): the new line runs along the same sides of the same area, so it is the same
-    // wall: it keeps the hand-set termination and takes the drawing's new name.
+    // FIXED (#7): each new line runs along the same side of the same area, so it is the same
+    // wall: the east wall keeps the hand-set termination and every wall takes its new name.
     expect(r.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId])).toEqual([
-      ["Parapet 2", 240, 2],
+      ["Parapet 4", 60, 2],
+      ["Parapet 5", 120, undefined],
+      ["Parapet 6", 60, undefined],
       ["Hand wall", 12, undefined],
     ]);
-    expect(r.changes).toContain('Parapet 1: renamed "Parapet 2"; 220 → 240 ft.');
+    expect(r.changes).toContain('Parapet 1: renamed "Parapet 4".');
+    expect(r.changes).toContain('Parapet 2: renamed "Parapet 5"; 100 → 120 ft.');
   });
 
   it("side tags (the editor's edge table) change nothing: tagged and untagged seed and apply alike", () => {

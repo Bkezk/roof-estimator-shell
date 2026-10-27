@@ -11,10 +11,33 @@
  * While "Edge from this area" is on, its panel takes the top of the tab instead of the selected
  * object's card (owner, Sep 30: "the pop-up is easy to miss"): one row per side — its letter,
  * length and a role Select (the linear roles, or Leave out) — a live summary of what Create
- * makes, and big Create / Cancel buttons. The session is the editor's, shared with the viewer.
+ * makes (one line per side; owner, Oct 27), an optional parapet height for the walls it makes,
+ * and big Create / Cancel buttons. The session is the editor's, shared with the viewer.
+ *
+ * Owner, Oct 27: the Count tool reads "Penetrations". A Deficiency (a penetration role) card has
+ * a note and a picture strip: "Add pictures" is a plain file input (accept image/*, no `capture`,
+ * so a phone offers the camera or the camera roll), each picture is shrunk / converted and
+ * uploaded straight into the "takeoffs" bucket (./deficiency-photos.ts) and kept on the object;
+ * Remove drops it from the object and deletes the file best-effort; View opens the lightbox.
+ * An edge line with several segments (from before lines were made per side) has "Split at
+ * corners": one line per segment, one undo step.
  */
-import { useEffect, useRef } from "react";
-import { AlertTriangle, Copy, Lock, SquareDashed, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
+import {
+  AlertTriangle,
+  Camera,
+  Copy,
+  Eye,
+  ImagePlus,
+  Loader2,
+  Lock,
+  Scissors,
+  SquareDashed,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import {
@@ -26,10 +49,12 @@ import {
 import {
   COUNT_ROLES,
   COUNT_ROLE_LABELS,
+  DEFICIENCY_COLOR,
   LINEAR_ROLES,
   LINEAR_ROLE_LABELS,
   PIPE_SIZE_PICKS,
   feetPerPx,
+  nextColor,
   slopeFactor,
   slopeFactorLabel,
   type CountRole,
@@ -40,6 +65,9 @@ import {
   type TakeoffSetup,
 } from "@/lib/takeoff/model";
 import { areaSideRows, resetEdgesToDefaults } from "@/lib/takeoff/side-tags";
+import { removeTakeoffPhoto, takeoffPhotoUploadPath } from "@/lib/takeoff-photos.functions";
+import { loudError } from "@/components/service/field-utils";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -54,6 +82,15 @@ import {
 } from "@/components/ui/select";
 
 import { pointerCloseAutoFocus } from "./focus";
+import {
+  addPhotos,
+  imageFilesOf,
+  preparePhoto,
+  removePhoto,
+  uploadTakeoffPhoto,
+  useDeficiencyPhotoUrls,
+  withNote,
+} from "./deficiency-photos";
 import { DrainFields } from "./drain-fields";
 import { Tip } from "./toolbar";
 import {
@@ -86,15 +123,21 @@ import {
 type Update = (id: string, fn: (o: TakeoffObject) => TakeoffObject) => void;
 
 export interface ObjectsTabProps {
+  /** The takeoff (its deficiency pictures live under `<takeoffId>/photos/` in the bucket). */
+  takeoffId: string;
   objects: readonly TakeoffObject[];
   pages: readonly TakeoffPage[];
   quantities: TakeoffQuantities;
-  /** The takeoff's setup: a count switched to Drain takes its drain defaults. */
+  /** The takeoff's setup: a penetration switched to Drain takes its drain defaults. */
   setup: TakeoffSetup;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUpdate: Update;
   onDelete: (id: string) => void;
+  /** "Split at corners": an edge line with several segments becomes one line per segment. */
+  onSplit?: (id: string) => void;
+  /** A deficiency's View button: show its pictures in the lightbox. */
+  onViewDeficiency?: (id: string) => void;
   /** "Edge from this area": make linears along the selected area's sides (in the viewer). */
   onEdgeFromArea?: (areaId: string) => void;
   /** "Duplicate and stamp": copies of the selected object follow the cursor (in the viewer). */
@@ -107,7 +150,7 @@ export interface ObjectsTabProps {
   readOnly?: boolean;
 }
 
-const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Counts" } as const;
+const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Penetrations" } as const;
 
 export function ObjectsTab(props: ObjectsTabProps) {
   const { objects, pages, quantities } = props;
@@ -119,8 +162,13 @@ export function ObjectsTab(props: ObjectsTabProps) {
     ? objects.find((o) => o.id === edge.areaId && o.kind === "area")
     : undefined;
 
+  const defNumber = new Map(quantities.deficiencies.map((d) => [d.objectId, d.number]));
   const summary = (o: TakeoffObject): string => {
     const fpp = feetPerPx(pageOf(o.page)?.scale);
+    if (o.kind === "count" && o.attrs.role === "deficiency") {
+      const n = o.attrs.photos?.length ?? 0;
+      return `#${defNumber.get(o.id) ?? "?"} · ${n} picture${n === 1 ? "" : "s"}`;
+    }
     if (o.kind === "count") return `qty ${Math.max(1, o.points.length)}`;
     if (fpp === null) return "";
     if (o.kind === "area")
@@ -149,19 +197,23 @@ export function ObjectsTab(props: ObjectsTabProps) {
         ) : selected ? (
           <SelectedEditor
             key={selected.id}
+            takeoffId={props.takeoffId}
             object={selected}
             page={pageOf(selected.page)}
             objects={objects}
             setup={props.setup}
+            deficiencyNumber={defNumber.get(selected.id)}
             onUpdate={props.onUpdate}
             onDelete={props.onDelete}
             onDuplicate={props.onDuplicate}
+            onSplit={props.onSplit}
+            onViewDeficiency={props.onViewDeficiency}
           />
         ) : (
           <p className="text-sm text-muted-foreground">
             {props.readOnly
               ? "Locked: click an object to see it here (use Edit a copy to change anything)."
-              : "Draw with Area, Linear or Count, or click an object (Select tool) to edit it here."}
+              : "Draw with Area, Linear or Penetrations, or click an object (Select tool) to edit it here."}
           </p>
         )}
         {!edgeArea && selected?.kind === "area" && props.onEdgeFromArea && (
@@ -255,33 +307,85 @@ function withAttr<T extends object, K extends keyof T>(attrs: T, k: K, v: T[K] |
 }
 
 function SelectedEditor(props: {
+  takeoffId: string;
   object: TakeoffObject;
   page: TakeoffPage | undefined;
   objects: readonly TakeoffObject[];
   setup: TakeoffSetup;
+  /** A deficiency's number across the takeoff. */
+  deficiencyNumber?: number | undefined;
   onUpdate: Update;
   onDelete: (id: string) => void;
   onDuplicate?: ((id: string) => void) | undefined;
+  onSplit?: ((id: string) => void) | undefined;
+  onViewDeficiency?: ((id: string) => void) | undefined;
 }) {
   const o = props.object;
   const fpp = feetPerPx(props.page?.scale);
   const update = (fn: (o: TakeoffObject) => TakeoffObject) => props.onUpdate(o.id, fn);
   const setName = (name: string) =>
     update((x) => ({ ...x, attrs: { ...x.attrs, name } }) as TakeoffObject);
+  const isDeficiency = o.kind === "count" && o.attrs.role === "deficiency";
+  const canSplit = o.kind === "linear" && !!o.attrs.fromArea && o.points.length > 2;
 
   return (
     <section className="space-y-3 rounded-md border p-3">
       <div className="flex items-center gap-2">
-        <span
-          className="h-3 w-3 shrink-0 rounded-sm"
-          style={{ backgroundColor: o.color ?? "#2563eb" }}
-        />
+        {isDeficiency ? (
+          <span
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            style={{ backgroundColor: DEFICIENCY_COLOR }}
+            title="Deficiency number (the pin shows it)"
+          >
+            {props.deficiencyNumber ?? "!"}
+          </span>
+        ) : (
+          <span
+            className="h-3 w-3 shrink-0 rounded-sm"
+            style={{ backgroundColor: o.color ?? "#2563eb" }}
+          />
+        )}
         <Input
           className="h-8 flex-1"
           value={o.attrs.name}
           onChange={(e) => setName(e.target.value)}
           aria-label="Name"
         />
+        {isDeficiency && props.onViewDeficiency && (
+          <Tip name="View" text="show this deficiency's pictures full screen (for the customer)">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 px-2"
+              aria-label="View deficiency"
+              onClick={(e) => {
+                props.onViewDeficiency?.(o.id);
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+            >
+              <Eye className="h-4 w-4" /> View
+            </Button>
+          </Tip>
+        )}
+        {canSplit && props.onSplit && (
+          <Tip
+            name="Split at corners"
+            text="one line per side, each with its own height (same role and area; Ctrl+Z undoes)"
+          >
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              aria-label="Split at corners"
+              onClick={(e) => {
+                props.onSplit?.(o.id);
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+            >
+              <Scissors className="h-4 w-4" />
+            </Button>
+          </Tip>
+        )}
         {props.onDuplicate && (
           <Tip name="Duplicate" text="stamp copies of this shape on the drawing (Ctrl+D)">
             <Button
@@ -314,6 +418,12 @@ function SelectedEditor(props: {
       {fpp === null && o.kind !== "count" && (
         <p className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
           No scale on this page — set one with the Scale tool to get real sizes.
+        </p>
+      )}
+      {canSplit && (
+        <p className="rounded bg-sky-100 px-2 py-1 text-xs text-sky-900 dark:bg-sky-900/60 dark:text-sky-100">
+          This line runs along {o.points.length - 1} sides. Split at corners makes one line per side
+          so each can have its own height.
         </p>
       )}
       {o.kind === "area" && (
@@ -401,12 +511,20 @@ function SelectedEditor(props: {
                   if (role !== "drain") attrs = withoutDrainPicks(attrs);
                   else if (x.attrs.role !== "drain")
                     attrs = { ...attrs, ...drainDefaults(props.setup) };
-                  return { ...x, attrs };
+                  // A deficiency is red; back to another role it takes the next pin colour. Its
+                  // note and pictures stay on the object (shown again if it becomes one again).
+                  const color =
+                    role === "deficiency"
+                      ? DEFICIENCY_COLOR
+                      : x.attrs.role === "deficiency"
+                        ? nextColor("count", others)
+                        : x.color;
+                  return color === undefined ? { ...x, attrs } : { ...x, color, attrs };
                 })
               }
             >
               <Tip name={COUNT_ROLE_LABELS[o.attrs.role]} text={COUNT_ROLE_HINTS[o.attrs.role]}>
-                <SelectTrigger className="h-8" aria-label="Count role">
+                <SelectTrigger className="h-8" aria-label="Penetration type">
                   <SelectValue />
                 </SelectTrigger>
               </Tip>
@@ -435,7 +553,10 @@ function SelectedEditor(props: {
               )}
             </div>
           </div>
-          {o.attrs.role !== "curb" && (
+          {o.attrs.role === "deficiency" && (
+            <DeficiencyFields takeoffId={props.takeoffId} object={o} update={update} />
+          )}
+          {o.attrs.role !== "curb" && o.attrs.role !== "deficiency" && (
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">
                 {o.attrs.role === "pipe" ? "Pipe size (in)" : "Size (in)"}
@@ -542,6 +663,175 @@ function SelectedEditor(props: {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * A deficiency's note and pictures (owner, Oct 27). Pictures go up one at a time straight into
+ * the "takeoffs" bucket (shrunk, JPEG / PNG) at the path the server hands out, and each lands on
+ * the object as it finishes, so a batch that half fails keeps what went up; a failure is a loud
+ * toast naming the file. Remove drops the picture from the object at once and deletes its file
+ * best-effort (a failure there is a warning: the file is only an orphan in the bucket).
+ */
+function DeficiencyFields(props: {
+  takeoffId: string;
+  object: Extract<TakeoffObject, { kind: "count" }>;
+  update: (fn: (o: TakeoffObject) => TakeoffObject) => void;
+}) {
+  const { object: o, takeoffId } = props;
+  const photos = o.attrs.photos ?? [];
+  const urls = useDeficiencyPhotoUrls(
+    takeoffId,
+    photos.map((p) => p.path),
+  );
+  const pathFn = useServerFn(takeoffPhotoUploadPath);
+  const removeFn = useServerFn(removeTakeoffPhoto);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = useState<string | null>(null);
+  const idRef = useRef(o.id);
+  idRef.current = o.id;
+
+  const add = async (picked: ArrayLike<File> | null | undefined) => {
+    const files = imageFilesOf(picked);
+    if (!files.length) {
+      toast.error("Pick picture files (JPG, PNG, HEIC…)");
+      return;
+    }
+    let landed = 0;
+    for (const [i, file] of files.entries()) {
+      setProgress(`Uploading ${i + 1} of ${files.length}…`);
+      try {
+        const ready = await preparePhoto(file);
+        const { path } = await pathFn({ data: { takeoff_id: takeoffId, kind: ready.kind } });
+        await uploadTakeoffPhoto(path, ready.blob, ready.kind);
+        const photo = file.name ? { path, name: file.name } : { path };
+        props.update((x) =>
+          x.kind === "count" ? { ...x, attrs: addPhotos(x.attrs, [photo]) } : x,
+        );
+        landed += 1;
+      } catch (e) {
+        loudError(`${file.name || "A picture"} did not upload`, e);
+      }
+    }
+    setProgress(null);
+    if (landed > 0) toast.success(landed === 1 ? "Picture added" : `${landed} pictures added`);
+  };
+  const remove = (path: string) => {
+    props.update((x) => (x.kind === "count" ? { ...x, attrs: removePhoto(x.attrs, path) } : x));
+    removeFn({ data: { takeoff_id: takeoffId, path } }).catch((e: unknown) =>
+      toast.warning(
+        `The picture was taken off the deficiency, but its file could not be deleted from storage: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      ),
+    );
+  };
+
+  return (
+    <>
+      <div className="col-span-2 space-y-1">
+        <Label className="text-xs text-muted-foreground" htmlFor={`def-note-${o.id}`}>
+          Note (what is wrong here — shown to the customer)
+        </Label>
+        <AutoTextarea
+          id={`def-note-${o.id}`}
+          rows={2}
+          className="text-sm"
+          placeholder="e.g. Ponding water at the drain; membrane seam open 3 ft"
+          value={o.attrs.note ?? ""}
+          onChange={(e) => {
+            const note = e.target.value;
+            props.update((x) =>
+              x.kind === "count" ? { ...x, attrs: withNote(x.attrs, note) } : x,
+            );
+          }}
+        />
+      </div>
+      <div className="col-span-2 space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-xs text-muted-foreground">Pictures ({photos.length})</Label>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            aria-label="Add pictures"
+            onChange={(e) => {
+              const list = e.target.files;
+              e.target.value = "";
+              void add(list);
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 px-2"
+            disabled={progress !== null}
+            onClick={() => inputRef.current?.click()}
+            title="Take a picture or pick one from the camera roll (a phone offers both)"
+          >
+            {progress ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ImagePlus className="h-4 w-4" />
+            )}
+            {progress ?? "Add pictures"}
+          </Button>
+        </div>
+        {photos.length === 0 ? (
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Camera className="h-3.5 w-3.5" /> No pictures yet — add one to show the customer.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {photos.map((p, i) => {
+              const url = urls.data?.[p.path];
+              return (
+                <div
+                  key={p.path}
+                  className="relative h-20 w-20 overflow-hidden rounded-md border bg-muted"
+                >
+                  {urls.isLoading ? (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : url ? (
+                    <img
+                      src={url}
+                      alt={p.name ?? `Picture ${i + 1}`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-muted-foreground"
+                      title={urls.error ? String(urls.error) : "Missing from storage"}
+                    >
+                      {urls.error ? "could not load" : "missing"}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80"
+                    aria-label={`Remove picture ${i + 1}`}
+                    title="Remove this picture"
+                    onClick={() => remove(p.path)}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {urls.error && photos.length > 0 && (
+          <p className="text-xs text-destructive">
+            Could not load the pictures:{" "}
+            {String(urls.error instanceof Error ? urls.error.message : urls.error)}
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -672,6 +962,26 @@ function EdgePanel(props: {
           ))}
         </tbody>
       </table>
+      {roles.some((r) => r === "parapet") && (
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">Parapet height (in)</Label>
+          <NumberField
+            className="h-8 w-[96px]"
+            step="any"
+            inputMode="decimal"
+            placeholder="blank"
+            title="The wall height every parapet line made here starts with; blank = set each later"
+            value={edge.heightIn ?? 0}
+            onChange={(v) => {
+              const next = { ...edge };
+              if (v > 0) next.heightIn = v;
+              else delete next.heightIn;
+              props.onChange(next);
+            }}
+          />
+          <span className="text-xs text-muted-foreground">for every parapet side</span>
+        </div>
+      )}
       <p className="rounded border bg-card px-2 py-1.5 text-sm font-medium" aria-live="polite">
         {sum.text}
       </p>
@@ -680,7 +990,7 @@ function EdgePanel(props: {
           name="Create"
           wrap={!sum.lines}
           wrapClassName="flex flex-1"
-          text="make one line per run of sides with the same role (Enter or right-click on the plan)"
+          text="make one line per side, so each wall has its own height (Enter or right-click on the plan)"
         >
           <Button
             className="h-10 flex-1 text-base"

@@ -169,6 +169,9 @@ const COUNT_NOUNS: Record<CountRole, string> = {
   vent: "vent",
   scupper: "scupper",
   other: "other item",
+  // Never counted: `takeoffQuantities` keeps deficiencies out of `counts` (they are not a
+  // quantity and nothing about them reaches the bid).
+  deficiency: "deficiency",
 };
 const SUMMARY_COUNT_ORDER: CountRole[] = ["drain", "curb", "pipe", "vent", "scupper", "other"];
 

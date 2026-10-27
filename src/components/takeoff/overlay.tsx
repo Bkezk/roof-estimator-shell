@@ -5,17 +5,24 @@
  * this area" (each side in its role's colour), and the ghost copy of "Duplicate and stamp".
  * Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen size — stroke, font,
  * marker radius — is divided by the zoom to stay constant on screen.
+ *
+ * Owner, Oct 27: `ObjectsLayer` follows the View menu (./view-prefs.ts): fills, labels and lines
+ * can be hidden and "Only selected" hides every other object; the selected object always keeps
+ * its outline. A deficiency pin (a penetration with the role "deficiency") is red, shows its
+ * number across the takeoff and a small camera badge when it has pictures.
  */
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
 
 import { drawnSideLabels, edgeLengths, polygonArea } from "@/lib/takeoff/geometry";
 import {
+  DEFICIENCY_COLOR,
   LINEAR_ROLE_LABELS,
   type LinearRole,
   type PagePoint,
   type PageScale,
   type TakeoffObject,
 } from "@/lib/takeoff/model";
+import { DEFAULT_VIEW_FLAGS, objectVisible, type ViewFlags } from "./view-prefs";
 
 import {
   COUNT_LETTERS,
@@ -125,18 +132,55 @@ export interface ObjectsLayerProps {
   interactive: boolean;
   /** Pressing an area's inside or a line: select it (drag moves it once selected). */
   onObjectDown: (id: string, e: ReactPointerEvent<SVGElement>) => void;
-  /** Pressing a corner handle or a count pin: drag that one point. */
+  /** Pressing a corner handle or a penetration pin: drag that one point. */
   onVertexDown: (id: string, index: number, e: ReactPointerEvent<SVGElement>) => void;
+  /** The View menu's flags (everything shown when absent). */
+  view?: ViewFlags;
+  /** Deficiency number by object id (the pin shows it). */
+  deficiencyNumbers?: ReadonlyMap<string, number> | undefined;
+}
+
+/** The small camera on a deficiency pin that has pictures (lucide's Camera, 24-unit box). */
+function CameraBadge(props: { x: number; y: number; zoom: number }) {
+  const r = 5.5 / props.zoom;
+  const s = (r * 1.5) / 24;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <circle
+        cx={props.x}
+        cy={props.y}
+        r={r}
+        fill="#ffffff"
+        stroke="#111827"
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <g
+        transform={`translate(${props.x - 12 * s}, ${props.y - 12 * s}) scale(${s})`}
+        fill="none"
+        stroke="#111827"
+        strokeWidth={2.4}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      >
+        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+        <circle cx="12" cy="13" r="3" />
+      </g>
+    </g>
+  );
 }
 
 export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps) {
   const { zoom, fpp } = props;
+  const view = props.view ?? DEFAULT_VIEW_FLAGS;
   const pe = props.interactive ? "auto" : "none";
+  const shown = props.objects.filter((o) => objectVisible(view, o.id, props.selectedId));
   // Labels are drawn in a second pass, above every shape, so a later outline never crosses an
   // earlier label (owner, Sep 30: "it appears below the lines sometimes"). Side lengths show on
   // the selected area only; the others keep just their name and size, which is far less clutter
   // when areas nest or lines run along an area's sides.
-  const labels = props.objects.map((o) => {
+  const labels = shown.map((o) => {
+    if (!view.labels) return null;
     const color = o.color ?? "#2563eb";
     const sel = o.id === props.selectedId;
     if (o.kind === "area") {
@@ -183,10 +227,13 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
   });
   return (
     <g>
-      {props.objects.map((o) => {
+      {shown.map((o) => {
         const color = o.color ?? "#2563eb";
         const sel = o.id === props.selectedId;
         const sw = sel ? 3.5 : 2;
+        // The View menu: fills off → no fill (the area still takes clicks); lines off → no
+        // outline, and no stroke on a line, unless the object is selected.
+        const outline = view.lines || sel;
         const down = (e: ReactPointerEvent<SVGElement>) => props.onObjectDown(o.id, e);
         if (o.kind === "area") {
           const cut = o.attrs.cutouts ?? [];
@@ -195,9 +242,9 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
               <path
                 d={[ringPath(o.points), ...cut.map(ringPath)].join(" ")}
                 fill={color}
-                fillOpacity={sel ? 0.3 : 0.18}
+                fillOpacity={view.fills ? (sel ? 0.3 : 0.18) : 0}
                 fillRule="evenodd"
-                stroke={color}
+                stroke={outline ? color : "none"}
                 strokeWidth={sw}
                 vectorEffect="non-scaling-stroke"
                 strokeLinejoin="round"
@@ -207,22 +254,24 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                 }}
                 onPointerDown={down}
               />
-              {cut.map((c, i) => (
-                <polygon
-                  key={i}
-                  points={pts(c)}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={1.5}
-                  strokeDasharray="6 4"
-                  vectorEffect="non-scaling-stroke"
-                  style={{ pointerEvents: "none" }}
-                />
-              ))}
+              {outline &&
+                cut.map((c, i) => (
+                  <polygon
+                    key={i}
+                    points={pts(c)}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={1.5}
+                    strokeDasharray="6 4"
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: "none" }}
+                  />
+                ))}
             </g>
           );
         }
         if (o.kind === "linear") {
+          if (!outline) return null;
           return (
             <g key={o.id}>
               {/* A wide transparent twin makes a thin line easy to click. */}
@@ -251,6 +300,15 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
             </g>
           );
         }
+        const deficiency = o.attrs.role === "deficiency";
+        const number = deficiency ? props.deficiencyNumbers?.get(o.id) : undefined;
+        const glyph = deficiency
+          ? number !== undefined
+            ? String(number)
+            : COUNT_LETTERS.deficiency
+          : (COUNT_LETTERS[o.attrs.role] ?? COUNT_LETTERS.other);
+        const pinColor = deficiency ? DEFICIENCY_COLOR : color;
+        const hasPhotos = deficiency && (o.attrs.photos?.length ?? 0) > 0;
         const r = (sel ? 9 : 8) / zoom;
         return (
           <g key={o.id}>
@@ -260,26 +318,36 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                   cx={x}
                   cy={y}
                   r={r}
-                  fill={color}
-                  fillOpacity={0.85}
+                  fill={pinColor}
+                  fillOpacity={deficiency ? 1 : 0.85}
                   stroke={sel ? "#111827" : "#ffffff"}
                   strokeWidth={sel ? 2 : 1.5}
                   vectorEffect="non-scaling-stroke"
-                  style={{ pointerEvents: pe, cursor: props.interactive ? "move" : undefined }}
+                  style={{
+                    pointerEvents: pe,
+                    cursor: props.interactive
+                      ? deficiency && sel
+                        ? "pointer"
+                        : "move"
+                      : undefined,
+                  }}
                   onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
-                />
+                >
+                  {deficiency && <title>{`Deficiency ${number ?? ""} · ${o.attrs.name}`}</title>}
+                </circle>
                 <text
                   x={x}
                   y={y}
-                  fontSize={10 / zoom}
+                  fontSize={(glyph.length > 1 ? 8.5 : 10) / zoom}
                   fill="#ffffff"
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontWeight={700}
                   style={{ pointerEvents: "none", userSelect: "none" }}
                 >
-                  {COUNT_LETTERS[o.attrs.role]}
+                  {glyph}
                 </text>
+                {hasPhotos && <CameraBadge x={x + r * 0.8} y={y - r * 0.8} zoom={zoom} />}
               </g>
             ))}
           </g>
@@ -287,7 +355,7 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
       })}
       {labels}
       {props.interactive &&
-        props.objects
+        shown
           .filter((o) => o.id === props.selectedId && o.kind !== "count")
           .map((o) =>
             o.points.map(([x, y], i) => (

@@ -1,10 +1,12 @@
 /**
  * Quantities tab — what the drawing measures, straight from `takeoffQuantities`: sections,
- * linears, counts, totals, and the objects that cannot be measured yet (no scale on their page).
- * "Export CSV" writes every row into one file named after the takeoff. Areas are the roof surface
- * (plan × the pitch's slope factor); the plan area is shown alongside when they differ.
+ * linears, penetrations, totals, and the objects that cannot be measured yet (no scale on their
+ * page); then the deficiencies apart (number, name, note, pictures — never a quantity, never in
+ * the bid). "Export CSV" writes every row into one file named after the takeoff. Areas are the
+ * roof surface (plan × the pitch's slope factor); the plan area is shown alongside when they
+ * differ.
  */
-import { AlertTriangle, Download } from "lucide-react";
+import { AlertTriangle, Camera, Download } from "lucide-react";
 
 import {
   COUNT_ROLE_LABELS,
@@ -96,7 +98,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
   for (const c of q.counts)
     rows.push(
       csvLine([
-        "Count",
+        "Penetration",
         c.name,
         "",
         COUNT_ROLE_LABELS[c.role],
@@ -146,6 +148,19 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
   for (const u of q.unscaled)
     rows.push(
       csvLine(["Unscaled (no scale on page)", u.name, pageName(u.page), ...blank(14 + DRAIN_COLS)]),
+    );
+  // Deficiencies: the note in the Role column, the picture count as Qty (not a quantity).
+  for (const d of q.deficiencies)
+    rows.push(
+      csvLine([
+        `Deficiency ${d.number}`,
+        d.name,
+        pageName(d.page),
+        d.note ?? "",
+        ...blank(9),
+        d.photoCount,
+        ...blank(3 + DRAIN_COLS),
+      ]),
     );
   return rows.join("\r\n") + "\r\n";
 }
@@ -225,7 +240,15 @@ export function QuantitiesTab(props: {
             }
           />
           <Stat label="Parapet" value={`${fmtNum(q.totals.parapetFt)} ft`} />
-          <Stat label="Counted items" value={String(countTotal)} />
+          <Stat
+            label="Penetrations"
+            value={String(countTotal)}
+            note={
+              q.deficiencies.length
+                ? `+ ${q.deficiencies.length} deficienc${q.deficiencies.length === 1 ? "y" : "ies"} (not counted)`
+                : undefined
+            }
+          />
         </div>
       </section>
 
@@ -324,9 +347,9 @@ export function QuantitiesTab(props: {
       </section>
 
       <section className="space-y-1">
-        <h3 className="text-sm font-semibold">Counts</h3>
+        <h3 className="text-sm font-semibold">Penetrations</h3>
         {q.counts.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Nothing counted yet.</p>
+          <p className="text-xs text-muted-foreground">No penetrations yet.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -379,6 +402,44 @@ export function QuantitiesTab(props: {
           </Table>
         )}
       </section>
+
+      {q.deficiencies.length > 0 && (
+        <section className="space-y-1">
+          <h3 className="text-sm font-semibold">Deficiencies</h3>
+          <p className="text-xs text-muted-foreground">
+            Spots to show the customer. Not counted, and nothing about them goes into the bid.
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <H right>#</H>
+                <H>Name</H>
+                <H>Page</H>
+                <H>Note</H>
+                <H right>Pictures</H>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {q.deficiencies.map((d) => (
+                <TableRow key={d.objectId}>
+                  <C right>{d.number}</C>
+                  <C>{d.name}</C>
+                  <C>{pageName(d.page)}</C>
+                  <C>
+                    <span className="block max-w-[200px] whitespace-pre-wrap">{d.note ?? ""}</span>
+                  </C>
+                  <C right>
+                    <span className="inline-flex items-center gap-1">
+                      {d.photoCount > 0 && <Camera className="h-3 w-3" />}
+                      {d.photoCount}
+                    </span>
+                  </C>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
+      )}
     </div>
   );
 }

@@ -796,6 +796,7 @@ export function planSwiftSeed(
     sections,
     linears,
     counts,
+    deficiencies: [],
     unscaled: [],
     totals: {
       roofAreaSqFt: sections.reduce((s, x) => s + x.areaSqFt, 0),

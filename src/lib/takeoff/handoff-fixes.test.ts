@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildObject, perimeterRunsByRole } from "@/components/takeoff/shapes";
+import { buildObject, perimeterSidesByRole } from "@/components/takeoff/shapes";
 import type { BidSectionInput, CurbInput, ParapetInput } from "@/lib/engine/bid-builder";
 
 import { applyTakeoffToBid, bidSeedFromTakeoff, type TakeoffBidSeed } from "./create-bid";
@@ -50,8 +50,9 @@ function drawn(
       ? { ...area, attrs: { ...area.attrs, pitch: extra.pitch } }
       : area,
   ];
-  perimeterRunsByRole(points, roles).forEach((run, k) => {
-    const l = buildObject("linear", `l${k}`, 0, run.points, objs, setup, page.scale, {
+  // One line per side with a role (owner, Oct 27), ids `l<side>`.
+  perimeterSidesByRole(points, roles).forEach((run) => {
+    const l = buildObject("linear", `l${run.sides[0]}`, 0, run.points, objs, setup, page.scale, {
       linear: run.role,
       fromArea: "a",
     });
@@ -101,16 +102,27 @@ describe("#11 edge lines follow the area they were made from", () => {
     const r = followAreaEdits(objs, edited, () => 1);
     expect(r.stale).toEqual([]);
     const byRole = (role: LinearRole) =>
-      r.objects.find((o) => o.kind === "linear" && o.attrs.role === role)!.points;
+      r.objects.filter((o) => o.kind === "linear" && o.attrs.role === role).map((o) => o.points);
     expect(byRole("gutter")).toEqual([
-      [0, 0],
-      [130, 0],
+      [
+        [0, 0],
+        [130, 0],
+      ],
     ]);
+    // One line per side (owner, Oct 27): each parapet side follows its own corners.
     expect(byRole("parapet")).toEqual([
-      [130, 0],
-      [130, 60],
-      [0, 60],
-      [0, 0],
+      [
+        [130, 0],
+        [130, 60],
+      ],
+      [
+        [130, 60],
+        [0, 60],
+      ],
+      [
+        [0, 60],
+        [0, 0],
+      ],
     ]);
     const area = r.objects.find((o) => o.id === "a")!;
     expect(area.kind === "area" && area.attrs.edges!.map((e) => e.blockingFt)).toEqual([

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  deficiencyNumbers,
   feetPerPx,
   rotatePoints,
   rotateScale,
@@ -183,6 +184,47 @@ describe("takeoffQuantities", () => {
     expect(q.linears).toEqual([]);
     expect(q.unscaled.map((u) => u.objectId)).toEqual(["a1", "l1"]);
     expect(q.counts.map((c) => c.qty)).toEqual([2, 1]);
+    expect(q.deficiencies).toEqual([]);
+  });
+
+  it("deficiencies (owner, Oct 27) are listed apart, numbered in drawing order, never counted", () => {
+    const defs: TakeoffObject[] = [
+      {
+        id: "x1",
+        kind: "count",
+        page: 1,
+        points: [[10, 10]],
+        attrs: { name: "Ponding", role: "deficiency", note: "  2 in of water  " },
+      },
+      {
+        id: "x2",
+        kind: "count",
+        page: 0,
+        points: [[20, 20]],
+        attrs: {
+          name: "Open seam",
+          role: "deficiency",
+          photos: [{ path: "t/photos/a.jpg" }, { path: "t/photos/b.jpg", name: "b.jpg" }],
+        },
+      },
+    ];
+    const q = takeoffQuantities([page(), page({ index: 1 })], [defs[0]!, ...objects, defs[1]!]);
+    // Not a quantity: the counts are the drains and the pipe only.
+    expect(q.counts.map((c) => [c.role, c.qty])).toEqual([
+      ["drain", 2],
+      ["pipe", 1],
+    ]);
+    expect(q.unscaled).toEqual([]);
+    expect(q.deficiencies).toEqual([
+      { objectId: "x1", number: 1, name: "Ponding", page: 1, note: "2 in of water", photoCount: 0 },
+      { objectId: "x2", number: 2, name: "Open seam", page: 0, photoCount: 2 },
+    ]);
+    expect([...deficiencyNumbers([defs[1]!, defs[0]!]).entries()]).toEqual([
+      ["x2", 1],
+      ["x1", 2],
+    ]);
+    // Nothing undefined in the list either (it is shown and exported as is).
+    expect("note" in q.deficiencies[1]!).toBe(false);
   });
 });
 

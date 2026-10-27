@@ -2,17 +2,18 @@
  * Takeoff page helpers — pure (no React, no I/O): object naming, measurements for labels, the
  * ortho snap (level / plumb within ORTHO_DEG), the square-corner lock (a side at 0° / 90° / 180°
  * / 270° to the previous side, for buildings drawn at an angle), the drag-a-box rectangle, the
- * per-side roles of "Edge from this area" (the runs of sides sharing a role, the colours, the
- * panel's summary), "Duplicate and stamp" (the ghost's placement with its corner snap, and the
- * copy with a fresh name), and number formatting.
+ * per-side roles of "Edge from this area" (one line per side, the colours, the panel's summary;
+ * `splitLineAtCorners` breaks an older multi-side line up the same way), "Duplicate and stamp"
+ * (the ghost's placement with its corner snap, and the copy with a fresh name), and number
+ * formatting. The help text lives in ./hints.ts.
  * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
  * helpers only label the drawing.
  */
 import { edgeLengths, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 import {
   COUNT_ROLE_LABELS,
+  DEFICIENCY_COLOR,
   LINEAR_ROLES,
-  LINEAR_ROLE_LABELS,
   feetPerPx,
   nextColor,
   type CountAttrs,
@@ -41,26 +42,6 @@ export const TOOL_KEYS: Record<Tool, string> = {
 export const KEY_TOOLS: Record<string, Tool> = Object.fromEntries(
   (Object.entries(TOOL_KEYS) as Array<[Tool, string]>).map(([tool, k]) => [k.toLowerCase(), tool]),
 );
-
-/** The viewer's hint line per tool. */
-export const HINTS: Record<Tool, string> = {
-  select:
-    "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a count pin to move that pin. Ctrl+D (or Duplicate) stamps copies of it; Delete removes it; Ctrl+Z undoes.",
-  scale:
-    "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
-  area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
-  linear:
-    "Click points along the line, or press and drag a box for a rectangle's perimeter; double-click, right-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
-  count:
-    "Click each item. Clicks add to the same count until you right-click or press Enter or Esc; the next click then starts a new count. Keys 1–6 pick the role.",
-  dimension: "Click two points to measure a distance (not saved).",
-  cutout:
-    "Draw a well or penthouse inside the selected area: click its corners and close it like an area, or drag a box. It is subtracted from that area.",
-};
-
-/** The viewer's hint line while stamping copies ("Duplicate and stamp"). */
-export const STAMP_HINT =
-  "The copy follows the cursor, centred on it (a count on its pin); a corner of it near another corner or a plan line snaps onto it — hold Shift for no snap. Each click stamps a copy (one undo step each); right-click, Esc, another tool or another page stops.";
 
 export const DRAFT_COLOR: Record<Tool, string> = {
   select: "#2563eb",
@@ -427,7 +408,11 @@ export function duplicateObject(
     delete attrs.fromArea;
     return { ...source, id, points, attrs };
   }
-  return { ...source, id, points, attrs: { ...cloneJson(source.attrs), name } };
+  // A deficiency's copy keeps the note but not the pictures (they belong to the original's
+  // storage objects; removing one there would leave the copy pointing at nothing).
+  const attrs: CountAttrs = { ...cloneJson(source.attrs), name };
+  delete attrs.photos;
+  return { ...source, id, points, attrs };
 }
 
 /** Attrs are plain JSON (they are saved as such): a deep copy shares nothing with the source. */
@@ -467,8 +452,9 @@ export const COUNT_BASE_NAMES: Record<CountRole, string> = {
   curb: "Curb",
   scupper: "Scupper",
   other: "Item",
+  deficiency: "Deficiency",
 };
-/** The short letter drawn inside a count marker. */
+/** The short letter drawn inside a penetration marker (a deficiency shows its number instead). */
 export const COUNT_LETTERS: Record<CountRole, string> = {
   drain: "D",
   pipe: "P",
@@ -476,6 +462,7 @@ export const COUNT_LETTERS: Record<CountRole, string> = {
   curb: "C",
   scupper: "S",
   other: "•",
+  deficiency: "!",
 };
 
 /** A role's purpose in a few words, for its hover tooltip ("Parapet wall — …"). */
@@ -493,6 +480,8 @@ export const COUNT_ROLE_HINTS: Record<CountRole, string> = {
   curb: "a curbed unit or hatch, width × length",
   scupper: "an opening through the wall that drains the roof",
   other: "any other item to count",
+  deficiency:
+    "a problem spot to show the customer, with a note and pictures (not counted, never in the bid)",
 };
 /** The "Leave out" choice of "Edge from this area", for its tooltip. */
 export const LEAVE_OUT_HINT = "no line along this side (a side shared with another roof)";
@@ -687,6 +676,8 @@ export interface EdgeSession {
    * missing = not touched yet (takes `current`).
    */
   sides: ReadonlyArray<LinearRole | null | undefined>;
+  /** The wall height (in) every parapet side's line is made with; absent = left blank. */
+  heightIn?: number;
 }
 
 /** A side's colour on the plan while picking roles (and its swatch in the Objects panel). */
@@ -733,7 +724,7 @@ export function cycleEdgeSide(session: EdgeSession, n: number, i: number): EdgeS
   return setEdgeSide(session, n, i, r === session.current ? null : session.current);
 }
 
-/** One linear "Edge from this area" makes: its role, its points and the sides it runs along. */
+/** One linear "Edge from this area" makes: its role, its points and the side it runs along. */
 export interface RoleRun {
   role: LinearRole;
   points: PagePoint[];
@@ -741,55 +732,57 @@ export interface RoleRun {
 }
 
 /**
- * "Edge from this area": the open polylines along an area outline's sides, one per run of
- * contiguous sides that share a role (side i runs points[i] → points[i + 1], the last back to
- * points[0]). A run may continue past the first corner (the last side and the first side are
- * contiguous). A left-out side (null, or no entry) breaks runs. When every side has the same role
- * it is one closed run that returns to its start (n + 1 points, as a rectangle's perimeter line
- * does). Every side left out → no runs. Runs are listed going round from the first side (in
- * side order) that starts one.
+ * "Edge from this area": one two-point line per side that has a role (side i runs points[i] →
+ * points[i + 1], the last back to points[0]), in side order; a left-out side (null, or no
+ * entry) makes none. Owner, Oct 27: "just make each individual line a separate parapet so that
+ * way heights can be easily edited" — sides sharing a role are NOT joined into one run.
  */
-export function perimeterRunsByRole(
+export function perimeterSidesByRole(
   points: readonly PagePoint[],
   roles: ReadonlyArray<LinearRole | null | undefined>,
 ): RoleRun[] {
   const n = points.length;
   const sides = sideCount(n);
-  if (!sides) return [];
-  const roleOf = (i: number): LinearRole | null => roles[((i % n) + n) % n] ?? null;
-  const first = roleOf(0);
-  let same = true;
-  let any = false;
+  const out: RoleRun[] = [];
   for (let i = 0; i < sides; i++) {
-    if (roleOf(i) !== null) any = true;
-    if (roleOf(i) !== first) same = false;
-  }
-  if (!any) return [];
-  if (same && first !== null) {
-    const loop = sides === 1 ? points.slice(0, 2) : [...points, points[0]!];
-    return [
-      { role: first, points: loop.map(copy), sides: Array.from({ length: sides }, (_, i) => i) },
-    ];
-  }
-  // Start on a side whose role differs from the side before it, so no run wraps past the start.
-  let start = 0;
-  while (roleOf(start - 1) === roleOf(start)) start++;
-  const runs: RoleRun[] = [];
-  let cur: RoleRun | null = null;
-  for (let k = 0; k < sides; k++) {
-    const i = (start + k) % n;
-    const role = roleOf(i);
-    if (cur && cur.role !== role) {
-      runs.push(cur);
-      cur = null;
-    }
+    const role = roles[i] ?? null;
     if (role === null) continue;
-    cur ??= { role, points: [copy(points[i]!)], sides: [] };
-    cur.points.push(copy(points[(i + 1) % n]!));
-    cur.sides.push(i);
+    out.push({ role, points: [copy(points[i]!), copy(points[(i + 1) % n]!)], sides: [i] });
   }
-  if (cur) runs.push(cur);
-  return runs;
+  return out;
+}
+
+/**
+ * "Split at corners" (Objects tab, on an edge line with several segments — a drawing from
+ * before lines were made per side): one two-point linear per segment of `line`, each with the
+ * same role, wall height, `fromArea`, page and colour; `ids` gives their ids (one per segment).
+ * Names: a still-default name takes the next defaults ("Parapet 3", "Parapet 4"…); a name the
+ * user gave becomes "<name> 1", "<name> 2"…. A line with one segment comes back as is.
+ */
+export function splitLineAtCorners(
+  line: Extract<TakeoffObject, { kind: "linear" }>,
+  ids: readonly string[],
+  existing: readonly TakeoffObject[],
+): Array<Extract<TakeoffObject, { kind: "linear" }>> {
+  const segs = line.points.length - 1;
+  if (segs < 2) return [line];
+  const base = LINEAR_BASE_NAMES[line.attrs.role] ?? LINEAR_BASE_NAMES.other;
+  const isDefault = isDefaultName(line.attrs.name, base);
+  const others = existing.filter((o) => o.id !== line.id);
+  const out: Array<Extract<TakeoffObject, { kind: "linear" }>> = [];
+  for (let k = 0; k < segs; k++) {
+    const name = isDefault
+      ? uniqueName(base, [...others, ...out])
+      : `${line.attrs.name.trim()} ${k + 1}`;
+    const attrs: LinearAttrs = { ...cloneJson(line.attrs), name };
+    out.push({
+      ...line,
+      id: ids[k] ?? `${line.id}-${k + 1}`,
+      points: [copy(line.points[k]!), copy(line.points[k + 1]!)],
+      attrs,
+    });
+  }
+  return out;
 }
 
 /** What Create would make, per role (in the role chips' order), for the panel and the banner. */
@@ -801,20 +794,29 @@ export interface EdgeSummary {
   leftOut: number;
   /** Lines and total length (page px) per role that has any. */
   byRole: Array<{ role: LinearRole; lines: number; px: number }>;
-  /** "3 parapet wall lines · 160.4 ft, 1 gutter line · 60.4 ft, 1 side left out". */
+  /** "3 parapet walls · 160.4 ft, 1 gutter · 60.4 ft, 1 side left out". */
   text: string;
 }
 
+/** How the summary names a role's lines: "3 parapet walls", "1 gutter", "2 walkway pads". */
+export const LINEAR_ROLE_NOUNS: Record<LinearRole, [one: string, many: string]> = {
+  parapet: ["parapet wall", "parapet walls"],
+  gutter: ["gutter", "gutters"],
+  expansion_joint: ["expansion joint", "expansion joints"],
+  walkway: ["walkway pad", "walkway pads"],
+  other: ["other line", "other lines"],
+};
+
 /**
- * The runs Create would make for `roles` (see `perimeterRunsByRole`) and the panel's live
- * summary: lines and length per role, then how many sides are left out.
+ * The lines Create would make for `roles` (see `perimeterSidesByRole`: one per side) and the
+ * panel's live summary: lines and length per role, then how many sides are left out.
  */
 export function edgeSummary(
   points: readonly PagePoint[],
   roles: ReadonlyArray<LinearRole | null | undefined>,
   fpp: number | null,
 ): EdgeSummary {
-  const runs = perimeterRunsByRole(points, roles);
+  const runs = perimeterSidesByRole(points, roles);
   const sides = sideCount(points.length);
   let leftOut = 0;
   for (let i = 0; i < sides; i++) if ((roles[i] ?? null) === null) leftOut++;
@@ -828,7 +830,7 @@ export function edgeSummary(
   }).filter((x) => x.lines > 0);
   const parts = byRole.map(
     (x) =>
-      `${x.lines} ${LINEAR_ROLE_LABELS[x.role].toLowerCase()} line${x.lines === 1 ? "" : "s"} · ${lengthLabel(x.px, fpp)}`,
+      `${x.lines} ${LINEAR_ROLE_NOUNS[x.role][x.lines === 1 ? 0 : 1]} · ${lengthLabel(x.px, fpp)}`,
   );
   if (leftOut && parts.length) parts.push(`${leftOut} side${leftOut === 1 ? "" : "s"} left out`);
   const text = parts.length ? parts.join(", ") : "Every side is left out — nothing to create";
@@ -879,12 +881,14 @@ export interface NewObjectRoles {
   count?: CountRole;
   /** A linear made with "Edge from this area": the area's id, saved as `attrs.fromArea`. */
   fromArea?: string;
+  /** A parapet line's wall height (in), when the "Edge from this area" panel set one. */
+  heightIn?: number;
 }
 
 /**
  * Build a new object of `kind` from drawn points with its default name, colour and attrs. A
  * linear / count takes `roles`' role (default Parapet / Drain) and that role's default name; a
- * drain also takes the setup's drain picks.
+ * drain also takes the setup's drain picks; a deficiency is always red (DEFICIENCY_COLOR).
  */
 export function buildObject(
   kind: ObjectKind,
@@ -913,9 +917,14 @@ export function buildObject(
     };
   }
   if (kind === "linear") {
-    const attrs = { name: uniqueName(LINEAR_BASE_NAMES[linearRole], existing), role: linearRole };
+    const attrs: LinearAttrs = {
+      name: uniqueName(LINEAR_BASE_NAMES[linearRole], existing),
+      role: linearRole,
+    };
     // `fromArea` is kept for traceability (attrs are saved as free-form JSON).
-    if (roles.fromArea) Object.assign(attrs, { fromArea: roles.fromArea });
+    if (roles.fromArea) attrs.fromArea = roles.fromArea;
+    if (linearRole === "parapet" && roles.heightIn && roles.heightIn > 0)
+      attrs.heightIn = roles.heightIn;
     return { id, kind, page, points, color, attrs };
   }
   return {
@@ -923,7 +932,7 @@ export function buildObject(
     kind,
     page,
     points,
-    color,
+    color: countRole === "deficiency" ? DEFICIENCY_COLOR : color,
     attrs: {
       name: uniqueName(COUNT_BASE_NAMES[countRole], existing),
       role: countRole,

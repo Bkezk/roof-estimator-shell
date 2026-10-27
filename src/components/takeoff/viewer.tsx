@@ -51,6 +51,20 @@
  * lines. Each left click stamps a new object (`duplicateObject`: same kind and attrs, a fresh
  * name, one undo step) and the mode stays on with the original as the source. Right-click
  * (`stop()`), Esc, another tool, another page or deleting the source stops it.
+ *
+ * Owner, Oct 27: (1) Snapping is OFF by default ("on an aerial picture it wont let me turn snap
+ * off"): "Square corners" (the ORTHO_DEG lock, typed lengths too) and "Snap to corners" (own
+ * corners, the scale line's ends, a drag-a-box's corners) are toolbar toggles on every underlay
+ * kind, remembered in localStorage `takeoff:snap` (./snap-prefs.ts); Shift INVERTS them for the
+ * moment (toggle off + Shift = on). "Snap to plan" stays its own PDF-only toggle (Shift still
+ * skips it). While Square corners is off the live side's angle from level shows by the cursor.
+ * (2) "Edge from this area" makes ONE line per side (./shapes `perimeterSidesByRole`). (3) The
+ * Count tool reads "Penetrations"; its new Deficiency role is one red, numbered pin per click
+ * with a note and pictures; a click on an already selected deficiency pin (or its card's View)
+ * opens the lightbox (./deficiency-lightbox.tsx, held by the editor). (4) The bottom hint
+ * paragraph is gone: tips live in the toolbar tooltips (./hints.ts) and only a one-line status
+ * chip shows while something is in progress. (5) The View menu (./view-prefs.ts) hides fills,
+ * labels or lines, or shows only the selected object (keys F / Shift+L).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
@@ -97,14 +111,32 @@ import {
   sheetSizeWarning,
   type ScaleNote,
 } from "./sheet-scale";
+import { statusLine, type DrawNoteContext } from "./hints";
+import {
+  effectiveSnap,
+  readSnapPrefs,
+  sideAngleDeg,
+  toggleSnapPref,
+  writeSnapPrefs,
+  type SnapPrefKey,
+  type SnapPrefs,
+  DEFAULT_SNAP_PREFS,
+} from "./snap-prefs";
+import {
+  DEFAULT_VIEW_FLAGS,
+  readViewFlags,
+  toggleViewFlag,
+  viewKeyAction,
+  writeViewFlags,
+  type ViewFlagKey,
+  type ViewFlags,
+} from "./view-prefs";
 import {
   COUNT_ROLE_HINTS,
   DRAFT_COLOR,
-  HINTS,
   KEY_TOOLS,
   LINEAR_ROLE_HINTS,
   ORTHO_DEG,
-  STAMP_HINT,
   cycleEdgeSide,
   dragRect,
   duplicateObject,
@@ -215,6 +247,10 @@ export interface ViewerProps {
    * no drawing tools, no dragging, no delete, no stamping, no scale read off the sheet.
    */
   readOnly?: boolean;
+  /** Deficiency number by object id, across the takeoff (the pin shows it). */
+  deficiencyNumbers?: ReadonlyMap<string, number>;
+  /** A click on an already selected deficiency pin: show its pictures (the lightbox). */
+  onOpenDeficiency?: (id: string) => void;
 }
 
 export function TakeoffViewer(props: ViewerProps) {
@@ -245,6 +281,8 @@ export function TakeoffViewer(props: ViewerProps) {
     index: number;
     points: PagePoint[];
     moved: boolean;
+    /** A press on an already selected deficiency pin: a release without a move opens it. */
+    openOnRelease?: boolean;
   } | null>(null);
   /** Select mode: a whole selected area / line being dragged. */
   const [move, setMove] = useState<{ id: string; start: PagePoint; dx: number; dy: number } | null>(
@@ -271,6 +309,10 @@ export function TakeoffViewer(props: ViewerProps) {
   const [panning, setPanning] = useState(false);
   /** Snap to the plan's own lines (PDF only); read from localStorage after mount. */
   const [snapPlan, setSnapPlan] = useState(true);
+  /** "Square corners" / "Snap to corners" (default off); read from localStorage after mount. */
+  const [snapPrefs, setSnapPrefs] = useState<SnapPrefs>(DEFAULT_SNAP_PREFS);
+  /** The View menu (fills / labels / lines / only selected); read from localStorage after mount. */
+  const [viewFlags, setViewFlags] = useState<ViewFlags>(DEFAULT_VIEW_FLAGS);
   const [plan, setPlan] = useState<{
     key: string;
     index: PlanIndex | null;
@@ -338,14 +380,30 @@ export function TakeoffViewer(props: ViewerProps) {
     if (c) c.width = 0;
   }, [pageKey]);
 
-  // "Snap to plan": remembered per browser.
-  useEffect(() => setSnapPlan(readSnapPlan()), []);
+  // "Snap to plan", the snap toggles and the View menu: remembered per browser.
+  useEffect(() => {
+    setSnapPlan(readSnapPlan());
+    setSnapPrefs(readSnapPrefs());
+    setViewFlags(readViewFlags());
+  }, []);
   const toggleSnapPlan = () => {
     setSnapPlan((on) => {
       writeSnapPlan(!on);
       return !on;
     });
   };
+  const toggleSnap = (k: SnapPrefKey) =>
+    setSnapPrefs((p) => {
+      const next = toggleSnapPref(p, k);
+      writeSnapPrefs(next);
+      return next;
+    });
+  const toggleView = (k: ViewFlagKey) =>
+    setViewFlags((f) => {
+      const next = toggleViewFlag(f, k);
+      writeViewFlags(next);
+      return next;
+    });
 
   // The plan's own lines on this PDF page, read once per page and rotation (cached per file).
   useEffect(() => {
@@ -366,6 +424,15 @@ export function TakeoffViewer(props: ViewerProps) {
   }, [source, page.index, page.rotation, snapPlan]);
   const planHere = isPdf && plan?.key === pageKey ? plan : null;
   const planIndex = snapPlan ? (planHere?.index ?? null) : null;
+  /** What applies right now: each snap toggle XOR Shift; the plan lines unless Shift is held. */
+  const eff = effectiveSnap(snapPrefs, shift, !!planIndex);
+  const tipsCtx: DrawNoteContext = {
+    square: eff.square,
+    corners: eff.corners,
+    plan: eff.plan,
+    orthoDeg: ORTHO_DEG,
+    scaled: fpp !== null,
+  };
   const planStatus = !isPdf
     ? null
     : !planHere
@@ -582,9 +649,17 @@ export function TakeoffViewer(props: ViewerProps) {
     () => snapCandidates(objects, snapExcept, page.scale),
     [objects, snapExcept, page.scale],
   );
-  /** The snap under `p` (own objects, then the plan's own lines), or null; none when `free`. */
-  const snapAt = (p: PagePoint | null, free = shift): SnapHit | null =>
-    p && !free ? pickSnap(p, candidates, planIndex, zoom, SNAP_PX) : null;
+  /**
+   * The snap under `p` (own corners when "Snap to corners" applies, then the plan's own lines
+   * when "Snap to plan" applies), or null. `shiftNow` is Shift as the event saw it (it inverts
+   * the toggles; default: the Shift state).
+   */
+  const snapAt = (p: PagePoint | null, shiftNow = shift): SnapHit | null => {
+    if (!p) return null;
+    const e = effectiveSnap(snapPrefs, shiftNow, !!planIndex);
+    if (!e.corners && !e.plan) return null;
+    return pickSnap(p, e.corners ? candidates : [], e.plan ? planIndex : null, zoom, SNAP_PX);
+  };
 
   // Typed lengths: on a scaled page, with a point placed, for the outline tools.
   const typingTool = tool === "area" || tool === "linear" || tool === "cutout";
@@ -600,12 +675,14 @@ export function TakeoffViewer(props: ViewerProps) {
         : prev
           ? ([2 * last[0] - prev[0], 2 * last[1] - prev[1]] as PagePoint)
           : null;
-    return toward ? typedPoint(last, toward, typedFeet, fpp, shift, ORTHO_DEG, prev ?? null) : null;
+    return toward
+      ? typedPoint(last, toward, typedFeet, fpp, !eff.square, ORTHO_DEG, prev ?? null)
+      : null;
   };
 
   /**
    * The point a click at `raw` places: close, typed, snapped (own objects / plan lines), square
-   * to the previous side, level / plumb, or as is.
+   * to the previous side, level / plumb (when "Square corners" applies), or as is.
    */
   const resolve = (raw: PagePoint): { p: PagePoint; snap: SnapHit | null } => {
     if (nearFirst && draft[0]) return { p: draft[0], snap: null };
@@ -614,27 +691,34 @@ export function TakeoffViewer(props: ViewerProps) {
     const s = snapAt(raw);
     if (s) return { p: s.p, snap: s };
     const prev2 = draft[draft.length - 2];
-    return { p: last && !shift ? lockPoint(prev2, last, raw) : raw, snap: null };
+    return { p: last && eff.square ? lockPoint(prev2, last, raw) : raw, snap: null };
   };
   const drawing = tool !== "select";
-  /** A drag-a-box rectangle's corners: each snaps to a nearby corner unless `free` (Shift). */
-  const rectEnds = (a: PagePoint, b: PagePoint, free: boolean) => {
-    const at = (q: PagePoint) => snapAt(q, free)?.p ?? q;
+  /** A drag-a-box rectangle's corners: each snaps to a nearby corner when the snap applies. */
+  const rectEnds = (a: PagePoint, b: PagePoint, shiftNow: boolean) => {
+    const at = (q: PagePoint) => snapAt(q, shiftNow)?.p ?? q;
     return { a: at(a), b: at(b) };
   };
   const rectLive = press?.active ? rectEnds(press.a, press.b, shift) : null;
   const live = drawing && cursor ? resolve(cursor) : null;
   const snapped: PagePoint | null = live?.p ?? null;
   const dragSnap = drag && cursor ? snapAt(cursor) : null;
+  /** The live side's angle from level (whole degrees) while Square corners is off. */
+  const liveAngle =
+    typingTool && last && snapped && !eff.square && !typed && !press
+      ? sideAngleDeg(last, snapped)
+      : null;
 
   // "Duplicate and stamp": the source, and where its copy would go for the cursor at `raw`
   // (the reference point on the snapped cursor, or a corner of the copy on a snap point).
   const selectedObject = objects.find((o) => o.id === selectedId);
   const stampSource = stamp ? objects.find((o) => o.id === stamp.sourceId) : undefined;
-  const ghostSnap = (q: PagePoint): SnapHit | null =>
-    pickSnap(q, candidates, planIndex, zoom, SNAP_PX);
-  const placeGhost = (source: TakeoffObject, raw: PagePoint, free: boolean) =>
-    ghostPlacement(source, raw, free ? [] : ghostSnap, zoom, SNAP_PX);
+  const placeGhost = (source: TakeoffObject, raw: PagePoint, shiftNow: boolean) => {
+    const e = effectiveSnap(snapPrefs, shiftNow, !!planIndex);
+    const look = (q: PagePoint): SnapHit | null =>
+      pickSnap(q, e.corners ? candidates : [], e.plan ? planIndex : null, zoom, SNAP_PX);
+    return ghostPlacement(source, raw, e.corners || e.plan ? look : [], zoom, SNAP_PX);
+  };
   const ghost = (() => {
     if (!stampSource || !cursor) return null;
     const g = placeGhost(stampSource, cursor, shift);
@@ -729,7 +813,9 @@ export function TakeoffViewer(props: ViewerProps) {
     if (readOnly) return;
     const o = id ? objects.find((x) => x.id === id) : undefined;
     if (!o) {
-      toast.info("Select an area, line or count on this page first, then Duplicate (Ctrl+D).");
+      toast.info(
+        "Select an area, line or penetration on this page first, then Duplicate (Ctrl+D).",
+      );
       return;
     }
     endPress();
@@ -746,9 +832,9 @@ export function TakeoffViewer(props: ViewerProps) {
   const startStampRef = useRef(startStamp);
   startStampRef.current = startStamp;
   /** A left click while stamping: add a copy where the ghost is (one undo step). */
-  const stampAt = (raw: PagePoint, free: boolean) => {
+  const stampAt = (raw: PagePoint, shiftNow: boolean) => {
     if (!stamp || !stampSource) return;
-    const g = placeGhost(stampSource, raw, free);
+    const g = placeGhost(stampSource, raw, shiftNow);
     if (Math.hypot(g.dx, g.dy) * zoom < 1) {
       toast.info(`The copy would sit right on ${stampSource.attrs.name} — move it off first.`);
       return;
@@ -842,6 +928,12 @@ export function TakeoffViewer(props: ViewerProps) {
     const { p } = resolve(raw);
     setTyped("");
     if (tool === "count") {
+      if (countRole === "deficiency") {
+        // One spot per deficiency (its own note and pictures): every click is a new object.
+        setCountSession(null);
+        props.onCreate("count", [p], roles);
+        return;
+      }
       const cur = countSession ? objects.find((o) => o.id === countSession) : undefined;
       if (cur) props.onChangePoints(cur.id, [...cur.points, p]);
       else setCountSession(props.onCreate("count", [p], roles));
@@ -879,8 +971,8 @@ export function TakeoffViewer(props: ViewerProps) {
    * area, a cut-out of the selected area, or a linear around its perimeter); a press that did
    * not move, or a box under RECT_DRAG_PX on either side, places one corner like a click.
    */
-  const releasePress = (pr: NonNullable<typeof press>, b: PagePoint, free: boolean) => {
-    const ends = rectEnds(pr.a, b, free);
+  const releasePress = (pr: NonNullable<typeof press>, b: PagePoint, shiftNow: boolean) => {
+    const ends = rectEnds(pr.a, b, shiftNow);
     const rect = pr.active ? dragRect(ends.a, ends.b, zoom) : null;
     if (!rect) {
       place(pr.a);
@@ -944,6 +1036,12 @@ export function TakeoffViewer(props: ViewerProps) {
       setSpaceDown(true);
       return true;
     }
+    // The View menu's keys (F = fills, Shift+L = labels) come before the tool keys.
+    const vk = viewKeyAction(e, false);
+    if (vk) {
+      toggleView(vk);
+      return true;
+    }
     if (edge) {
       if (k === "Enter") {
         createEdges();
@@ -979,7 +1077,7 @@ export function TakeoffViewer(props: ViewerProps) {
         fit();
         return true;
     }
-    if (/^[1-6]$/.test(k)) {
+    if (/^[1-7]$/.test(k)) {
       const n = Number(k) - 1;
       if (tool === "count" && COUNT_ROLES[n]) {
         pickCountRole(COUNT_ROLES[n]);
@@ -1077,6 +1175,8 @@ export function TakeoffViewer(props: ViewerProps) {
     }
     if (drag) {
       if (drag.moved) props.onChangePoints(drag.id, drag.points);
+      // A click (no move) on an already selected deficiency pin: show it to the customer.
+      else if (drag.openOnRelease) props.onOpenDeficiency?.(drag.id);
       setDrag(null);
     }
     if (move) {
@@ -1106,19 +1206,32 @@ export function TakeoffViewer(props: ViewerProps) {
     },
     [onSelect, selectedId, zoom, readOnly],
   );
-  // A corner handle of the selected area / line, or any count pin: drag that one point.
+  // A corner handle of the selected area / line, or any penetration pin: drag that one point.
+  const onOpenDeficiency = props.onOpenDeficiency;
   const onVertexDown = useCallback(
     (id: string, index: number, e: PointerEvent<SVGElement>) => {
       if (e.button !== 0) return;
       e.stopPropagation();
       const o = objects.find((x) => x.id === id);
       if (!o) return;
-      if (id !== selectedId) onSelect(id);
-      if (readOnly) return;
+      const wasSelected = id === selectedId;
+      if (!wasSelected) onSelect(id);
+      const deficiency = o.kind === "count" && o.attrs.role === "deficiency";
+      if (readOnly) {
+        // Locked: nothing moves, but a selected deficiency still opens.
+        if (wasSelected && deficiency) onOpenDeficiency?.(id);
+        return;
+      }
       e.currentTarget.setPointerCapture(e.pointerId);
-      setDrag({ id, index, points: o.points.map((p) => [p[0], p[1]]), moved: false });
+      setDrag({
+        id,
+        index,
+        points: o.points.map((p) => [p[0], p[1]]),
+        moved: false,
+        openOnRelease: wasSelected && deficiency,
+      });
     },
-    [objects, onSelect, selectedId, readOnly],
+    [objects, onSelect, selectedId, readOnly, onOpenDeficiency],
   );
 
   const shown = useMemo(
@@ -1143,6 +1256,16 @@ export function TakeoffViewer(props: ViewerProps) {
           ? "default"
           : "crosshair";
 
+  /** The one-line status chip (bottom left) while something is in progress; null otherwise. */
+  const status = statusLine({
+    tool,
+    edge: !!edge,
+    stamp: stamp && stampSource ? { name: stampSource.attrs.name, count: stamp.count } : null,
+    draftPoints: draft.length,
+    countSession: !!countSession,
+    typing: !!typed,
+  });
+
   const linearChipOptions = LINEAR_ROLES.map((r) => ({
     value: r,
     label: LINEAR_ROLE_LABELS[r],
@@ -1157,7 +1280,7 @@ export function TakeoffViewer(props: ViewerProps) {
       }
     : tool === "count"
       ? {
-          title: "Count role",
+          title: "Penetration type",
           options: COUNT_ROLES.map((r) => ({
             value: r,
             label: COUNT_ROLE_LABELS[r],
@@ -1186,12 +1309,24 @@ export function TakeoffViewer(props: ViewerProps) {
         onFit={fit}
         readOnly={readOnly}
         roles={roleChips}
+        tips={tipsCtx}
+        snap={
+          readOnly
+            ? null
+            : { square: snapPrefs.square, corners: snapPrefs.corners, shift, onToggle: toggleSnap }
+        }
         planSnap={{
           available: !source || isPdf, // unknown while the file loads
           on: snapPlan,
           status: planStatus,
           onToggle: toggleSnapPlan,
         }}
+        view={{ flags: viewFlags, onToggle: toggleView }}
+        scaleNote={
+          sheetInfo
+            ? `${sheetScaleMessage(sheetInfo.note)}.${sheetInfo.warning ? ` ${sheetInfo.warning}` : ""} Redraw it with Scale (S) to replace it.`
+            : null
+        }
         edgeFromArea={
           readOnly
             ? null
@@ -1299,6 +1434,8 @@ export function TakeoffViewer(props: ViewerProps) {
                 interactive={tool === "select" && !spaceDown && !edge && !stamp}
                 onObjectDown={onObjectDown}
                 onVertexDown={onVertexDown}
+                view={viewFlags}
+                deficiencyNumbers={props.deficiencyNumbers}
               />
               {page.scale && <ScaleLine scale={page.scale} zoom={zoom} />}
               {edge && edgeArea && (
@@ -1364,6 +1501,18 @@ export function TakeoffViewer(props: ViewerProps) {
                 />
               )}
               {snapMark && <SnapMarker at={snapMark.p} kind={snapMark.kind} zoom={zoom} />}
+              {liveAngle !== null && snapped && (
+                <SvgLabel
+                  x={snapped[0] - 14 / zoom}
+                  y={snapped[1] - 14 / zoom}
+                  zoom={zoom}
+                  anchor="end"
+                  size={11}
+                  color={liveAngle === 0 || liveAngle === 90 ? "#15803d" : "#6b7280"}
+                >
+                  {`${liveAngle}°`}
+                </SvgLabel>
+              )}
               {typed && (cursor ?? last) && (
                 <SvgLabel
                   x={(cursor ?? last)![0] + 14 / zoom}
@@ -1441,27 +1590,17 @@ export function TakeoffViewer(props: ViewerProps) {
           </div>
         )}
 
+        {/* Owner, Oct 27: no hint paragraph here any more (the tips are in the toolbar's
+            tooltips and its "?" list); only a one-line status while something is in progress. */}
         <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end gap-2">
-          <div className="max-w-[640px] rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
-            {edge
-              ? "Edge from this area: give each side a role in the Objects panel, or click a side here to cycle it (the current role → left out → back). The role chips / keys 1–5 set the current role, which clicks use and untouched sides take. Create, Enter or right-click makes one line per run of sides with the same role; Esc cancels."
-              : stamp
-                ? STAMP_HINT
-                : HINTS[tool]}
-            {!edge && tool !== "select" && tool !== "count" && (
-              <span className="ml-1">
-                {shift
-                  ? "Square-corner, level / plumb lock and snapping off (Shift held)."
-                  : `A side within ${ORTHO_DEG}° of square to the previous side, or of level / plumb, locks to it; the cursor snaps to corners${planIndex ? " and the plan's own lines (teal)" : ""} — hold Shift for neither.`}
-              </span>
-            )}
-            {typingTool && fpp !== null && (
-              <span className="ml-1">
-                After the first point, type a length (24'6) and press Enter to place the next.
-              </span>
-            )}{" "}
-            Wheel or + / − zooms, 0 fits; middle-drag or Space + drag pans.
-          </div>
+          {status && (
+            <div
+              role="status"
+              className="max-w-[640px] truncate rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow"
+            >
+              {status}
+            </div>
+          )}
           {!page.scale && (
             <div className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 shadow dark:bg-amber-900/60 dark:text-amber-100">
               No scale on this page — use Scale (S) on a known dimension first.
@@ -1476,13 +1615,7 @@ export function TakeoffViewer(props: ViewerProps) {
               )}
             </div>
           )}
-          {sheetInfo && (
-            <div className="max-w-[520px] rounded bg-sky-100 px-2 py-1 text-xs text-sky-900 shadow dark:bg-sky-900/60 dark:text-sky-100">
-              <span className="font-medium">{sheetScaleMessage(sheetInfo.note)}.</span>
-              {sheetInfo.warning && <span className="ml-1">{sheetInfo.warning}</span>} Redraw it
-              with Scale (S) to replace it.
-            </div>
-          )}
+          {/* The "scale set from the sheet / aerial" note is in the Scale button's tooltip. */}
         </div>
       </div>
 

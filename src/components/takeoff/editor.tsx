@@ -56,6 +56,7 @@ import {
 } from "@/lib/takeoff/lock";
 import { settleEdit, syncSideTags } from "@/lib/takeoff/side-tags";
 import {
+  deficiencyNumbers,
   feetPerPx,
   rotatePoints,
   rotateScale,
@@ -94,6 +95,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 
 import { pointerCloseAutoFocus } from "./focus";
 import { BidStatusBadge } from "./bid-status-badge";
+import { DeficiencyLightbox } from "./deficiency-lightbox";
 import { ExportMarkupButton, TakeoffCustomerChip } from "./editor-extras";
 import { ObjectsTab } from "./objects-tab";
 import { QuantitiesTab } from "./quantities-tab";
@@ -105,6 +107,7 @@ import {
   edgeSummary,
   isTypingTarget,
   newId,
+  splitLineAtCorners,
   translateObject,
   type EdgeSession,
   type NewObjectRoles,
@@ -562,6 +565,30 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     commit((os) => os.filter((o) => o.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
+  // "Split at corners" (Objects tab): an older multi-side edge line becomes one line per
+  // segment (same role, height and area), in one undo step; the first piece is selected.
+  const splitLine = (id: string) => {
+    let firstId: string | null = null;
+    commit((os) => {
+      const line = os.find((o) => o.id === id);
+      if (!line || line.kind !== "linear" || line.points.length < 3) return os;
+      const ids = Array.from({ length: line.points.length - 1 }, () => newId());
+      const pieces = splitLineAtCorners(line, ids, os);
+      firstId = ids[0]!;
+      const at = os.indexOf(line);
+      return [...os.slice(0, at), ...pieces, ...os.slice(at + 1)];
+    });
+    if (firstId) {
+      select(firstId);
+      toast.success("Split into one line per side — each has its own height now.");
+    }
+  };
+  // Deficiencies (owner, Oct 27): numbered across the takeoff; the lightbox shows one's pictures.
+  const defNumbers = useMemo(() => deficiencyNumbers(objects), [objects]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  useEffect(() => {
+    if (lightbox && !objects.some((o) => o.id === lightbox)) setLightbox(null);
+  }, [objects, lightbox]);
 
   // An undo that removes the selected object clears the selection.
   useEffect(() => {
@@ -629,7 +656,9 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     }
     setEdge(next);
   };
-  // Create: one linear per run of sides sharing a role, all in one undo step; the last is selected.
+  // Create: ONE linear per side with a role (owner, Oct 27: "make each individual line a separate
+  // parapet so that way heights can be easily edited"), each parapet with the panel's height (or
+  // blank), all in one undo step; the last is selected.
   const createEdges = () => {
     if (!edge) return;
     const area = objectsRef.current.find((o) => o.id === edge.areaId && o.kind === "area");
@@ -651,6 +680,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           buildObject("linear", ids[k]!, area.page, run.points, acc, setup, scale, {
             linear: run.role,
             fromArea: area.id,
+            ...(edge.heightIn ? { heightIn: edge.heightIn } : {}),
           }),
         ],
         prev,
@@ -767,6 +797,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         <TakeoffCustomerChip row={row} customer={customer} onChange={setCustomer} />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <ExportMarkupButton
+            takeoffId={row.id}
             name={name}
             customer={customer}
             pages={pages}
@@ -869,7 +900,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
               <TooltipContent className="max-w-xs">
                 <span className="font-semibold">Create bid</span> —{" "}
                 {canCreateBid
-                  ? "start a new bid with these sections, edges, parapets and counts filled in"
+                  ? "start a new bid with these sections, edges, parapets and penetrations filled in (deficiencies stay here)"
                   : NO_AREA_TIP}
               </TooltipContent>
             </Tooltip>
@@ -1048,6 +1079,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             onDuplicate={duplicate}
             stampRequest={stampRequest}
             readOnly={locked}
+            deficiencyNumbers={defNumbers}
+            onOpenDeficiency={setLightbox}
           />
         </div>
 
@@ -1073,6 +1106,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                 </TabsContent>
                 <TabsContent value="objects" className="mt-0">
                   <ObjectsTab
+                    takeoffId={row.id}
                     objects={objects}
                     pages={pages}
                     quantities={quantities}
@@ -1081,6 +1115,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onSelect={selectFromList}
                     onUpdate={updateObject}
                     onDelete={deleteObject}
+                    onSplit={splitLine}
+                    onViewDeficiency={setLightbox}
                     onEdgeFromArea={(areaId) => setEdgeRequest({ areaId })}
                     edge={edge}
                     onEdgeChange={changeEdge}
@@ -1097,6 +1133,18 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           </Card>
         )}
       </div>
+
+      <DeficiencyLightbox
+        takeoffId={row.id}
+        deficiencies={quantities.deficiencies}
+        objects={objects}
+        openId={lightbox}
+        onClose={() => setLightbox(null)}
+        onWalk={(id) => {
+          selectFromList(id);
+          setLightbox(id);
+        }}
+      />
     </div>
   );
 }

@@ -23,9 +23,11 @@ import {
   buildMarkupPdf,
   canvasToJpeg,
   downloadPdf,
+  fetchPhotoBytes,
   markupFileName,
 } from "@/lib/takeoff/markup-pdf";
 import type { TakeoffObject, TakeoffPage } from "@/lib/takeoff/model";
+import { signTakeoffPhotos } from "@/lib/takeoff-photos.functions";
 import { Button } from "@/components/ui/button";
 
 import { Tip } from "./toolbar";
@@ -90,6 +92,8 @@ export function TakeoffCustomerChip(props: {
 }
 
 export function ExportMarkupButton(props: {
+  /** The takeoff (its deficiency pictures are signed through the server for the PDF). */
+  takeoffId: string;
   name: string;
   customer: LinkedAccount | null;
   pages: readonly TakeoffPage[];
@@ -97,6 +101,7 @@ export function ExportMarkupButton(props: {
   source: UnderlaySource | null;
 }) {
   const { profile } = useAuth();
+  const signFn = useServerFn(signTakeoffPhotos);
   const [busy, setBusy] = useState(false);
   const run = async () => {
     const source = props.source;
@@ -107,7 +112,17 @@ export function ExportMarkupButton(props: {
     setBusy(true);
     try {
       const takeoffName = props.name.trim() || "Untitled takeoff";
-      const { bytes, sheetCount } = await buildMarkupPdf({
+      // Deficiency pictures: one signing call for every path, then each fetched as bytes. A
+      // picture that cannot be had is named on its page ("n pictures could not be loaded").
+      const paths = props.objects.flatMap((o) =>
+        o.kind === "count" && o.attrs.role === "deficiency"
+          ? (o.attrs.photos ?? []).map((p) => p.path)
+          : [],
+      );
+      const urls = paths.length
+        ? await signFn({ data: { takeoff_id: props.takeoffId, paths } })
+        : {};
+      const { bytes, sheetCount, deficiencyCount } = await buildMarkupPdf({
         takeoffName,
         customer: props.customer?.name || null,
         exportedBy: (profile?.full_name ?? "").trim() || profile?.email || null,
@@ -119,11 +134,24 @@ export function ExportMarkupButton(props: {
         objects: props.objects,
         render: (p, scale) => renderUnderlayPage(source, p.index, p.rotation, scale).promise,
         encode: (canvas) => canvasToJpeg(canvas),
+        photo: async (path) => {
+          const url = urls[path];
+          if (!url) return null;
+          try {
+            return await fetchPhotoBytes(url);
+          } catch {
+            return null;
+          }
+        },
       });
       const fileName = markupFileName(takeoffName);
       downloadPdf(fileName, bytes);
       toast.success(
-        `Exported “${fileName}”: ${sheetCount} marked-up sheet${sheetCount === 1 ? "" : "s"} and the summary.`,
+        `Exported “${fileName}”: ${sheetCount} marked-up sheet${sheetCount === 1 ? "" : "s"}${
+          deficiencyCount
+            ? `, ${deficiencyCount} deficienc${deficiencyCount === 1 ? "y" : "ies"} with pictures`
+            : ""
+        } and the summary.`,
       );
     } catch (e) {
       toast.error(`Could not export the marked-up PDF: ${errText(e)}`);

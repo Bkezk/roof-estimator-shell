@@ -449,9 +449,10 @@ describe("the editor opens an aerial takeoff calibrated", () => {
     );
     const viewer = read("src/components/takeoff/viewer.tsx");
     expect(viewer).toContain("{!page.scale && (");
-    expect(viewer).toContain(
-      '<span className="font-medium">{sheetScaleMessage(sheetInfo.note)}.</span>',
-    );
+    // Owner, Oct 27: the "scale set from the sheet / imagery" note lives in the Scale button's
+    // tooltip (toolbar `scaleNote`), not in a strip at the bottom of the drawing.
+    expect(viewer).toContain("scaleNote={");
+    expect(viewer).toContain("`${sheetScaleMessage(sheetInfo.note)}.${");
     const overlay = read("src/components/takeoff/overlay.tsx");
     expect(overlay).toContain(
       'origin?.source === "sheet" ? scaleOriginLabel(origin.note) : `Scale ${feetInches(feet)}`',

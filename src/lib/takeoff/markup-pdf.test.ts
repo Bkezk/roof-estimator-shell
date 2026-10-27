@@ -1,16 +1,18 @@
 import { deflateSync } from "node:zlib";
 
 import { describe, it, expect } from "vitest";
-import { PDFDocument } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 import {
   assembleMarkupPdf,
   buildMarkupPdf,
+  layoutDeficiencyPages,
   layoutLabels,
   markupFileName,
   markupRenderScale,
   markupSummary,
   objectLabelText,
+  wrapText,
   type RenderedSheet,
 } from "./markup-pdf";
 import { takeoffQuantities, type TakeoffObject, type TakeoffPage } from "./model";
@@ -94,6 +96,26 @@ const objects: TakeoffObject[] = [
     ],
     attrs: { name: "Unscaled roof" },
   },
+  // Deficiencies (owner, Oct 27): red numbered pins, their own pages; never a quantity.
+  {
+    id: "x1",
+    kind: "count",
+    page: 0,
+    points: [[900, 150]],
+    attrs: {
+      name: "Ponding water",
+      role: "deficiency",
+      note: "About 2 in deep after rain.\nDrain strainer clogged.",
+      photos: [{ path: "t/photos/a.png" }, { path: "t/photos/b.png" }],
+    },
+  },
+  {
+    id: "x2",
+    kind: "count",
+    page: 1,
+    points: [[100, 100]],
+    attrs: { name: "Open seam", role: "deficiency" },
+  },
 ];
 const pages = [page(0), page(1), page(2, { scale: null })];
 const q = takeoffQuantities(pages, objects);
@@ -115,6 +137,85 @@ describe("objectLabelText", () => {
     expect(objectLabelText(objects[1]!, q)).toBe("Wall 1: 100 LF");
     expect(objectLabelText(objects[3]!, q)).toBe("Drain 1 × 3");
     expect(objectLabelText(objects[4]!, q)).toBe("Unscaled roof: no scale");
+    // A deficiency is named with its number across the takeoff, never "× n".
+    expect(objectLabelText(objects[5]!, q)).toBe("Deficiency 1: Ponding water");
+    expect(objectLabelText(objects[6]!, q)).toBe("Deficiency 2: Open seam");
+  });
+});
+
+describe("wrapText", () => {
+  const measure = (s: string) => s.length * 10; // 10 units per character
+  it("breaks between words to the width, keeps the text's own line breaks, cuts a long word", () => {
+    expect(wrapText("About 2 in deep after rain.\nDrain clogged.", 120, measure)).toEqual([
+      "About 2 in",
+      "deep after",
+      "rain.",
+      "Drain",
+      "clogged.",
+    ]);
+    expect(wrapText("supercalifragilistic", 50, measure)).toEqual([
+      "super",
+      "calif",
+      "ragil",
+      "istic",
+    ]);
+    expect(wrapText("   ", 100, measure)).toEqual([]);
+    expect(wrapText("a\n\n\nb", 100, measure)).toEqual(["a", "", "", "b"]);
+  });
+});
+
+describe("layoutDeficiencyPages", () => {
+  const opts = {
+    width: 1000,
+    height: 500,
+    cellW: 240,
+    cellH: 180,
+    gap: 10,
+    headH: 20,
+    lineH: 12,
+    pad: 10,
+    wrap: (t: string) => t.split("\n"),
+  };
+  const item = (number: number, photoCount: number, note = "") => ({
+    number,
+    name: `D${number}`,
+    note,
+    pageName: "A1",
+    photoCount,
+  });
+  it("entries stack; four cells per row; an entry that does not fit starts a new page", () => {
+    // Width 1000: (1000 + 10) / 250 = 4 cells per row.
+    const pages = layoutDeficiencyPages([item(1, 5, "one\ntwo"), item(2, 0), item(3, 4)], opts);
+    expect(pages).toHaveLength(2);
+    const [first, second] = pages;
+    expect(first!.map((p) => p.index)).toEqual([0, 1]);
+    const a = first![0]!;
+    // Heading 20 + 2 note lines 24 → the pictures start at 44; 5 pictures = 2 rows.
+    expect(a.noteLines).toEqual(["one", "two"]);
+    expect(a.photos.map((c) => [c.x, c.y])).toEqual([
+      [0, 44],
+      [250, 44],
+      [500, 44],
+      [750, 44],
+      [0, 234],
+    ]);
+    expect(a.height).toBe(234 + 180 - 0 + 10); // last row's bottom + pad
+    const b = first![1]!;
+    expect(b.y).toBe(a.height);
+    expect(b.photos).toEqual([]);
+    expect(b.height).toBe(20 + 10);
+    // Entry 3 (20 + 180 + 10 = 210 tall) does not fit under 424 + 30 = 454 on a 500 pt page.
+    expect(second!.map((p) => [p.index, p.y])).toEqual([[2, 0]]);
+    expect(second![0]!.photos).toHaveLength(4);
+  });
+  it("an entry taller than a page stands alone and keeps only the picture rows that fit", () => {
+    const pages = layoutDeficiencyPages([item(1, 0), item(2, 12), item(3, 1)], opts);
+    expect(pages.map((p) => p.map((x) => x.index))).toEqual([[0], [1], [2]]);
+    const big = pages[1]![0]!;
+    // Rows at 20, 210, 400 (+180 = 580 > 500): two rows of four fit.
+    expect(big.photos).toHaveLength(8);
+    expect(big.photos.every((c) => c.y + c.h <= opts.height)).toBe(true);
+    expect(layoutDeficiencyPages([], opts)).toEqual([]);
   });
 });
 
@@ -151,8 +252,14 @@ describe("markupSummary", () => {
       "Areas",
       "Linears: Parapet wall",
       "Linears: Gutter",
-      "Counts: Drain",
+      "Penetrations: Drain",
+      "Deficiencies (see the Deficiencies pages for the pictures)",
     ]);
+    expect(s.groups[4]!.rows).toEqual([
+      ["1", "Ponding water", "A1", "About 2 in deep after rain.\nDrain strainer clogged.", "2"],
+      ["2", "Open seam", "A2", "", "0"],
+    ]);
+    expect(s.groups[4]!.total).toBeNull();
     const areas = s.groups[0]!;
     expect(areas.rows[0]).toEqual(["Gable", "A1", "6:12 (×1.118)", "950", "1,062", "220", "4"]);
     expect(areas.total).toEqual(["Total", "", "", "950", "1,062", "220", ""]);
@@ -165,7 +272,8 @@ describe("markupSummary", () => {
       ["Plan area", "950 sq ft"],
       ["Perimeter", "220 ft"],
       ["Parapet", "100 ft"],
-      ["Counted items", "3"],
+      ["Penetrations", "3"],
+      ["Deficiencies", "2"],
     ]);
     expect(s.unscaled).toEqual(["Unscaled roof (A3)"]);
   });
@@ -217,22 +325,54 @@ function tinyPng(w = 4, h = 3): Uint8Array {
 }
 
 describe("assembleMarkupPdf", () => {
+  const input = {
+    takeoffName: "Acme – Bldg 2",
+    customer: "Acme Corp",
+    exportedBy: "Pat Estimator",
+    exportedAt: "Sep 30, 2026",
+    sheets: [
+      {
+        pageName: "A1",
+        scaleText: "Scale line: 100'",
+        image: tinyPng(),
+        imageKind: "png" as const,
+      },
+      { pageName: "A2", scaleText: "No scale", image: tinyPng(3, 5), imageKind: "png" as const },
+    ],
+    summary: markupSummary(q, pageName),
+  };
   it("one landscape page per sheet plus the summary page", async () => {
-    const bytes = await assembleMarkupPdf({
-      takeoffName: "Acme – Bldg 2",
-      customer: "Acme Corp",
-      exportedBy: "Pat Estimator",
-      exportedAt: "Sep 30, 2026",
-      sheets: [
-        { pageName: "A1", scaleText: "Scale line: 100'", image: tinyPng(), imageKind: "png" },
-        { pageName: "A2", scaleText: "No scale", image: tinyPng(3, 5), imageKind: "png" },
-      ],
-      summary: markupSummary(q, pageName),
-    });
+    const bytes = await assembleMarkupPdf(input);
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBe(3);
     for (const p of doc.getPages()) expect(p.getWidth()).toBeGreaterThan(p.getHeight());
     expect(doc.getTitle()).toBe("Acme – Bldg 2 – takeoff");
+  });
+  it("deficiencies get their own page(s) after the sheets, pictures embedded", async () => {
+    const bytes = await assembleMarkupPdf({
+      ...input,
+      deficiencies: [
+        {
+          number: 1,
+          name: "Ponding water",
+          note: "About 2 in deep after rain.",
+          pageName: "A1",
+          photos: [
+            { bytes: tinyPng(), kind: "png" },
+            { bytes: tinyPng(5, 4), kind: "png" },
+          ],
+          missing: 1,
+        },
+        { number: 2, name: "Open seam", note: "", pageName: "A2", photos: [], missing: 0 },
+      ],
+    });
+    const doc = await PDFDocument.load(bytes);
+    // 2 sheets + 1 deficiencies page + 1 summary.
+    expect(doc.getPageCount()).toBe(4);
+    // Two pictures embedded as XObjects on the deficiencies page.
+    const defPage = doc.getPage(2);
+    const xobjects = defPage.node.Resources()?.lookup(PDFName.of("XObject"));
+    expect(xobjects instanceof PDFDict ? xobjects.keys().length : 0).toBe(2);
   });
 });
 
@@ -281,12 +421,14 @@ describe("buildMarkupPdf (canvas smoke test)", async () => {
           kind: "png",
         }),
       });
-      // Page A2 has nothing drawn: no sheet for it.
-      expect(rendered.map((r) => r.index)).toEqual([0, 2]);
+      // Every page has something drawn (A2 only the "Open seam" deficiency pin).
+      expect(rendered.map((r) => r.index)).toEqual([0, 1, 2]);
       expect(rendered[0]!.scale).toBe(markupRenderScale(1200, 800));
-      expect(out.sheetCount).toBe(2);
+      expect(out.sheetCount).toBe(3);
+      expect(out.deficiencyCount).toBe(2);
       const doc = await PDFDocument.load(out.bytes);
-      expect(doc.getPageCount()).toBe(3);
+      // 3 sheets, the Deficiencies page (no `photo` fetcher: its pictures read as missing), summary.
+      expect(doc.getPageCount()).toBe(5);
     },
   );
 });

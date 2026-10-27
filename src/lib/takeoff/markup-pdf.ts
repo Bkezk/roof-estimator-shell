@@ -3,12 +3,15 @@
  * per takeoff page that has objects: the underlay rendered to a canvas, the drawing on top (areas
  * filled at low opacity with their outline, cut-outs hatched red, linears in their colour, count
  * pins numbered), every object labelled with its name and quantity, and the page's scale line;
- * then a summary page (takeoff, customer, date, who exported, the quantities grouped like the
- * Quantities tab, with totals). Built in the browser with pdf-lib, imported lazily.
+ * then (owner, Oct 27) a "Deficiencies" page or pages — each deficiency's number, name, note and
+ * its pictures embedded — and a summary page (takeoff, customer, date, who exported, the
+ * quantities grouped like the Quantities tab, with totals). Built in the browser with pdf-lib,
+ * imported lazily. Deficiency pins are red and carry their number; the pictures are fetched by
+ * signed URL in the browser (editor-extras.tsx) and passed in as bytes.
  *
  * Split so the parts can be tested without a browser:
  *  - pure: `markupRenderScale`, `objectLabelText`, `layoutLabels`, `markupSummary`,
- *    `markupFileName`;
+ *    `wrapText`, `layoutDeficiencyPages`, `markupFileName`;
  *  - canvas 2D: `drawMarkup` (any CanvasRenderingContext2D, e.g. @napi-rs/canvas in a test);
  *  - pdf-lib: `assembleMarkupPdf` (encoded sheet images + the summary → PDF bytes);
  *  - `buildMarkupPdf` runs them all with an injected page renderer and image encoder (the
@@ -20,6 +23,7 @@ import { clean } from "@/lib/bid-summary-pdf";
 import {
   COUNT_ROLES,
   COUNT_ROLE_LABELS,
+  DEFICIENCY_COLOR,
   LINEAR_ROLES,
   LINEAR_ROLE_LABELS,
   feetPerPx,
@@ -70,6 +74,10 @@ export function markupRenderScale(
  * counts as "× n". Objects on a page with no scale say so.
  */
 export function objectLabelText(o: TakeoffObject, q: TakeoffQuantities): string {
+  if (o.kind === "count" && o.attrs.role === "deficiency") {
+    const d = q.deficiencies.find((x) => x.objectId === o.id);
+    return `Deficiency ${d ? `${d.number}: ` : ""}${o.attrs.name}`;
+  }
   if (o.kind === "count") return `${o.attrs.name} × ${Math.max(1, o.points.length)}`;
   if (q.unscaled.some((u) => u.objectId === o.id)) return `${o.attrs.name}: no scale`;
   if (o.kind === "linear") {
@@ -226,7 +234,7 @@ export function markupSummary(
     if (!cs.length) continue;
     const n = cs.reduce((s, c) => s + c.qty, 0);
     groups.push({
-      title: `Counts: ${COUNT_ROLE_LABELS[role]}`,
+      title: `Penetrations: ${COUNT_ROLE_LABELS[role]}`,
       columns: ["Name", "Qty", "Size", "Detail"],
       numeric: [1],
       rows: cs.map((c) => [
@@ -249,6 +257,20 @@ export function markupSummary(
       total: [`Total ${COUNT_ROLE_LABELS[role].toLowerCase()}`, String(n), "", ""],
     });
   }
+  if (q.deficiencies.length)
+    groups.push({
+      title: "Deficiencies (see the Deficiencies pages for the pictures)",
+      columns: ["#", "Name", "Page", "Note", "Pictures"],
+      numeric: [0, 4],
+      rows: q.deficiencies.map((d) => [
+        String(d.number),
+        d.name,
+        pageName(d.page),
+        d.note ?? "",
+        String(d.photoCount),
+      ]),
+      total: null,
+    });
   const t = q.totals;
   const totals: Array<[string, string]> = [["Roof area", `${fmtNum(t.roofAreaSqFt, 0)} sq ft`]];
   if (Math.abs(t.roofAreaSqFt - t.planAreaSqFt) > 0.005)
@@ -256,13 +278,134 @@ export function markupSummary(
   totals.push(
     ["Perimeter", `${fmtNum(t.perimeterFt)} ft`],
     ["Parapet", `${fmtNum(t.parapetFt)} ft`],
-    ["Counted items", String(q.counts.reduce((s, c) => s + c.qty, 0))],
+    ["Penetrations", String(q.counts.reduce((s, c) => s + c.qty, 0))],
   );
+  if (q.deficiencies.length) totals.push(["Deficiencies", String(q.deficiencies.length)]);
   return {
     groups,
     totals,
     unscaled: q.unscaled.map((u) => `${u.name} (${pageName(u.page)})`),
   };
+}
+
+/**
+ * Break `text` into lines no wider than `maxWidth` (by `measure`): on its own newlines, then
+ * between words; a single word wider than the line is cut by characters. Blank input → [].
+ */
+export function wrapText(text: string, maxWidth: number, measure: (s: string) => number): string[] {
+  const out: string[] = [];
+  for (const para of text.replace(/\r\n?/g, "\n").split("\n")) {
+    const words = para.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      if (out.length) out.push("");
+      continue;
+    }
+    let line = "";
+    for (const w of words) {
+      const cand = line ? `${line} ${w}` : w;
+      if (measure(cand) <= maxWidth) {
+        line = cand;
+        continue;
+      }
+      if (line) out.push(line);
+      line = "";
+      // A word too wide on its own: cut it by characters.
+      let piece = "";
+      for (const ch of w) {
+        if (measure(piece + ch) > maxWidth && piece) {
+          out.push(piece);
+          piece = "";
+        }
+        piece += ch;
+      }
+      line = piece;
+    }
+    if (line) out.push(line);
+  }
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+/** One deficiency as the Deficiencies pages lay it out (pure; the pictures are counted only). */
+export interface DeficiencyLayoutItem {
+  number: number;
+  name: string;
+  note: string;
+  pageName: string;
+  photoCount: number;
+}
+export interface DeficiencyLayoutOptions {
+  /** The content box (pt): pictures and text stay inside its width; entries break by height. */
+  width: number;
+  height: number;
+  /** A picture cell and the gap between cells. */
+  cellW: number;
+  cellH: number;
+  gap: number;
+  /** The heading line's height and a note line's height (pt). */
+  headH: number;
+  lineH: number;
+  /** Space under an entry. */
+  pad: number;
+  /** Note text → lines that fit the width (`wrapText` with the font). */
+  wrap: (text: string, maxWidth: number) => string[];
+}
+export interface PlacedDeficiency {
+  /** Index into the items. */
+  index: number;
+  /** Top of the entry, from the top of the content box (pt). */
+  y: number;
+  height: number;
+  noteLines: string[];
+  /** Picture cells (top-left, from the box's top-left), in picture order; fewer than photoCount
+   * when the rest did not fit the page (the assembler says "+ n more"). */
+  photos: Array<{ x: number; y: number; w: number; h: number }>;
+}
+
+/**
+ * The Deficiencies pages: entries one under another, each its heading, the note's lines and its
+ * pictures in rows of cells; an entry that does not fit what is left of the page starts a new
+ * page; one taller than a whole page stands alone and keeps only the picture rows that fit.
+ * Returns one array of placed entries per page (none when there are no items).
+ */
+export function layoutDeficiencyPages(
+  items: readonly DeficiencyLayoutItem[],
+  o: DeficiencyLayoutOptions,
+): PlacedDeficiency[][] {
+  const perRow = Math.max(1, Math.floor((o.width + o.gap) / (o.cellW + o.gap)));
+  const pages: PlacedDeficiency[][] = [];
+  let page: PlacedDeficiency[] = [];
+  let y = 0;
+  const build = (i: number, top: number, maxBottom: number): PlacedDeficiency => {
+    const it = items[i]!;
+    const noteLines = it.note.trim() ? o.wrap(it.note, o.width) : [];
+    let cy = top + o.headH + noteLines.length * o.lineH;
+    const photos: PlacedDeficiency["photos"] = [];
+    for (let k = 0; k < it.photoCount; k++) {
+      const col = k % perRow;
+      if (col === 0 && k > 0) cy += o.cellH + o.gap;
+      if (cy + o.cellH > maxBottom) break;
+      photos.push({ x: col * (o.cellW + o.gap), y: cy, w: o.cellW, h: o.cellH });
+    }
+    const bottom = photos.length
+      ? photos[photos.length - 1]!.y + o.cellH
+      : top + o.headH + noteLines.length * o.lineH;
+    return { index: i, y: top, height: bottom - top + o.pad, noteLines, photos };
+  };
+  for (let i = 0; i < items.length; i++) {
+    // Measure it whole (every picture row); break the page when that does not fit what is left.
+    const whole = build(i, 0, Infinity);
+    if (y > 0 && y + whole.height > o.height) {
+      pages.push(page);
+      page = [];
+      y = 0;
+    }
+    const placed = build(i, y, o.height);
+    page.push(placed);
+    y += placed.height;
+  }
+  if (page.length) pages.push(page);
+  return pages;
 }
 
 /**
@@ -314,6 +457,7 @@ export function drawMarkup(
     quantities: TakeoffQuantities;
   },
 ): void {
+  const defNumber = new Map(opts.quantities.deficiencies.map((d) => [d.objectId, d.number]));
   const { s, page, objects } = opts;
   const k = Math.max(0.6, Math.max(opts.canvasWidth, opts.canvasHeight) / 1600);
   const P = (p: PagePoint): [number, number] => [p[0] * s, p[1] * s];
@@ -395,11 +539,14 @@ export function drawMarkup(
   const pinR = 9 * k;
   for (const o of objects) {
     if (o.kind !== "count") continue;
+    // A deficiency pin is red and carries its number across the takeoff; any other pin its
+    // click number within its penetration.
+    const deficiency = o.attrs.role === "deficiency";
     o.points.forEach((p, i) => {
       const [x, y] = P(p);
       ctx.beginPath();
       ctx.arc(x, y, pinR, 0, Math.PI * 2);
-      ctx.fillStyle = o.color ?? "#db2777";
+      ctx.fillStyle = deficiency ? DEFICIENCY_COLOR : (o.color ?? "#db2777");
       ctx.fill();
       ctx.lineWidth = 1.5 * k;
       ctx.strokeStyle = "#ffffff";
@@ -408,7 +555,7 @@ export function drawMarkup(
       ctx.font = `bold ${Math.round(10 * k)}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(String(i + 1), x, y);
+      ctx.fillText(deficiency ? String(defNumber.get(o.id) ?? "!") : String(i + 1), x, y);
     });
   }
 
@@ -518,6 +665,16 @@ export interface MarkupSheet {
   image: Uint8Array;
   imageKind: "jpeg" | "png";
 }
+/** A deficiency for its page: number, name, note, the sheet it is on, its pictures as bytes. */
+export interface MarkupDeficiency {
+  number: number;
+  name: string;
+  note: string;
+  pageName: string;
+  photos: Array<{ bytes: Uint8Array; kind: "jpeg" | "png" }>;
+  /** Pictures that could not be fetched (named on the page, not silently dropped). */
+  missing: number;
+}
 export interface MarkupPdfInput {
   takeoffName: string;
   customer: string | null;
@@ -525,8 +682,15 @@ export interface MarkupPdfInput {
   /** Display date, e.g. "Sep 30, 2026, 3:12 PM". */
   exportedAt: string;
   sheets: MarkupSheet[];
+  /** The Deficiencies pages come after the sheets (none when empty). */
+  deficiencies?: MarkupDeficiency[];
   summary: MarkupSummary;
 }
+
+/** The Deficiencies pages' picture cell (pt), 4 across the ledger sheet's content width. */
+export const DEF_CELL_W = 282;
+export const DEF_CELL_H = 212;
+export const DEF_GAP = 12;
 
 interface PdfCtx {
   pdf: PDFDocument;
@@ -537,12 +701,14 @@ interface PdfCtx {
   y: number;
 }
 const colr = (c: PdfCtx, t: Rgb) => c.rgb(t[0], t[1], t[2]);
+/** One line of text as the standard fonts take it (no line breaks: a note's go to spaces). */
+const oneLine = (s: string) => clean(s).replace(/\n+/g, " ");
 function txt(c: PdfCtx, s: string, x: number, y: number, size: number, bold = false, color = INK) {
-  const t = clean(s);
+  const t = oneLine(s);
   if (t) c.page.drawText(t, { x, y, size, font: bold ? c.bold : c.font, color: colr(c, color) });
 }
 function fit(f: PDFFont, s: string, size: number, w: number): string {
-  let t = clean(s);
+  let t = oneLine(s);
   if (f.widthOfTextAtSize(t, size) <= w) return t;
   while (t.length > 1 && f.widthOfTextAtSize(`${t}…`, size) > w) t = t.slice(0, -1);
   return `${t.trimEnd()}…`;
@@ -583,6 +749,15 @@ export async function assembleMarkupPdf(input: MarkupPdfInput): Promise<Uint8Arr
   pdf.setSubject(clean(`Marked-up takeoff sheets for ${input.takeoffName}`));
   pdf.setCreator("JBK Portal");
   pdf.setProducer("JBK Portal");
+  /** Deficiency pictures to embed once their cells are laid out. */
+  const placedImages: Array<{
+    photo: MarkupDeficiency["photos"][number];
+    cx: number;
+    cyTop: number;
+    w: number;
+    h: number;
+    page: PDFPage;
+  }> = [];
 
   for (const sh of input.sheets) {
     c.page = pdf.addPage([PW, PH]);
@@ -605,6 +780,109 @@ export async function assembleMarkupPdf(input: MarkupPdfInput): Promise<Uint8Arr
       borderWidth: 0.5,
     });
     txt(c, sh.scaleText, M, FOOT_Y, 8, false, MUTED);
+  }
+
+  // ── Deficiencies (owner, Oct 27): number, name, note, pictures; after the sheets ──
+  const defs = input.deficiencies ?? [];
+  if (defs.length) {
+    const TOP = HEAD_Y - 24;
+    const HEAD_H = 18;
+    const LINE_H = 12;
+    const layout = layoutDeficiencyPages(
+      defs.map((d) => ({
+        number: d.number,
+        name: d.name,
+        note: d.note,
+        pageName: d.pageName,
+        photoCount: d.photos.length + (d.missing > 0 ? 1 : 0),
+      })),
+      {
+        width: CW,
+        height: TOP - IMG_BOTTOM,
+        cellW: DEF_CELL_W,
+        cellH: DEF_CELL_H,
+        gap: DEF_GAP,
+        headH: HEAD_H,
+        lineH: LINE_H,
+        pad: 16,
+        wrap: (text, w) => wrapText(clean(text), w, (s) => c.font.widthOfTextAtSize(s, 9)),
+      },
+    );
+    for (const [pi, page] of layout.entries()) {
+      c.page = pdf.addPage([PW, PH]);
+      header(
+        c,
+        input,
+        layout.length > 1 ? `Deficiencies (${pi + 1} of ${layout.length})` : "Deficiencies",
+      );
+      for (const placed of page) {
+        const d = defs[placed.index]!;
+        const top = TOP - placed.y; // PDF y of the entry's top edge
+        // The red numbered badge and the name, then the sheet it is on.
+        c.page.drawCircle({ x: M + 8, y: top - 8, size: 8, color: c.rgb(0.86, 0.15, 0.15) });
+        const num = String(d.number);
+        txt(c, num, M + 8 - c.bold.widthOfTextAtSize(num, 9) / 2, top - 11.2, 9, true, [1, 1, 1]);
+        txt(c, fit(c.bold, d.name, 12, CW * 0.6), M + 22, top - 12, 12, true);
+        const where = `Sheet ${d.pageName}`;
+        txt(c, where, PW - M - c.font.widthOfTextAtSize(where, 8), top - 11, 8, false, MUTED);
+        placed.noteLines.forEach((line, li) => {
+          txt(c, line, M + 22, top - HEAD_H - (li + 1) * LINE_H + 3, 9);
+        });
+        placed.photos.forEach((cell, k) => {
+          const photo = d.photos[k];
+          const cx = M + cell.x;
+          const cyTop = TOP - cell.y;
+          if (!photo) {
+            // The "missing" cell: pictures that could not be fetched.
+            c.page.drawRectangle({
+              x: cx,
+              y: cyTop - cell.h,
+              width: cell.w,
+              height: cell.h,
+              borderColor: colr(c, RULE),
+              borderWidth: 0.6,
+            });
+            txt(
+              c,
+              `${d.missing} picture${d.missing === 1 ? "" : "s"} could not be loaded`,
+              cx + 8,
+              cyTop - cell.h / 2,
+              9,
+              false,
+              MUTED,
+            );
+            return;
+          }
+          placedImages.push({ photo, cx, cyTop, w: cell.w, h: cell.h, page: c.page });
+        });
+        const extra = Math.max(0, d.photos.length - placed.photos.length);
+        if (extra > 0) {
+          const line = `+ ${extra} more picture${extra === 1 ? "" : "s"} (did not fit this page)`;
+          txt(c, line, M + 22, top - placed.height + 6, 8, false, MUTED);
+        }
+      }
+    }
+    // Embed and draw the pictures (async, so outside the layout loop), fitted in their cells.
+    for (const im of placedImages) {
+      const img =
+        im.photo.kind === "png"
+          ? await pdf.embedPng(im.photo.bytes)
+          : await pdf.embedJpg(im.photo.bytes);
+      const sc = Math.min(im.w / img.width, im.h / img.height);
+      const w = img.width * sc;
+      const h = img.height * sc;
+      const x = im.cx + (im.w - w) / 2;
+      const y = im.cyTop - im.h + (im.h - h) / 2;
+      im.page.drawImage(img, { x, y, width: w, height: h });
+      im.page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        borderColor: colr(c, RULE),
+        borderWidth: 0.5,
+      });
+    }
   }
 
   // ── Summary ──
@@ -751,9 +1029,34 @@ export async function buildMarkupPdf(args: {
   objects: readonly TakeoffObject[];
   render: (page: TakeoffPage, scale: number) => Promise<RenderedSheet>;
   encode: (canvas: RenderedSheet["canvas"]) => Promise<{ bytes: Uint8Array; kind: "jpeg" | "png" }>;
-}): Promise<{ bytes: Uint8Array; sheetCount: number }> {
+  /**
+   * A deficiency picture's bytes by its storage path (the browser fetches it by signed URL);
+   * null when it cannot be had — the page then says so. Absent: no pictures are embedded.
+   */
+  photo?: (path: string) => Promise<{ bytes: Uint8Array; kind: "jpeg" | "png" } | null>;
+}): Promise<{ bytes: Uint8Array; sheetCount: number; deficiencyCount: number }> {
   const q = takeoffQuantities(args.pages, args.objects);
   const pageName = (i: number) => args.pages.find((p) => p.index === i)?.name ?? `Page ${i + 1}`;
+  const deficiencies: MarkupDeficiency[] = [];
+  for (const d of q.deficiencies) {
+    const o = args.objects.find((x) => x.id === d.objectId);
+    const paths = o?.kind === "count" ? (o.attrs.photos ?? []).map((p) => p.path) : [];
+    const photos: MarkupDeficiency["photos"] = [];
+    let missing = 0;
+    for (const path of paths) {
+      const got = args.photo ? await args.photo(path) : null;
+      if (got) photos.push(got);
+      else missing += 1;
+    }
+    deficiencies.push({
+      number: d.number,
+      name: d.name,
+      note: d.note ?? "",
+      pageName: pageName(d.page),
+      photos,
+      missing,
+    });
+  }
   const sheets: MarkupSheet[] = [];
   for (const page of args.pages) {
     const objs = args.objects.filter((o) => o.page === page.index);
@@ -785,9 +1088,23 @@ export async function buildMarkupPdf(args: {
     exportedBy: args.exportedBy,
     exportedAt: args.exportedAt,
     sheets,
+    deficiencies,
     summary: markupSummary(q, pageName),
   });
-  return { bytes, sheetCount: sheets.length };
+  return { bytes, sheetCount: sheets.length, deficiencyCount: deficiencies.length };
+}
+
+/** A deficiency picture fetched by its signed URL, as bytes pdf-lib can embed. */
+export async function fetchPhotoBytes(
+  url: string,
+): Promise<{ bytes: Uint8Array; kind: "jpeg" | "png" } | null> {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // Sniff the kind from the bytes (the bucket holds JPEG and PNG only).
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return { bytes, kind: "png" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return { bytes, kind: "jpeg" };
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
