@@ -9,6 +9,13 @@
 
 import { createServerFn } from "@tanstack/react-start";
 
+import {
+  buildFamilyAccessoryData,
+  FAMILY_BRANCH,
+  type AdminSnapshot,
+  type CatalogRow,
+} from "@/lib/accessory-families";
+
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import { assertPricingRead } from "@/lib/auth.functions";
 import type { MechFastenerRow } from "@/lib/engine/fastener-spacing";
@@ -70,7 +77,7 @@ const UNDERLAYMENT_SCREEN_ID = "duro_last:underlayment";
 
 export const getEngineAdminData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<EngineAdminData> => {
+  .handler(async ({ context }): Promise<AdminSnapshot> => {
     // Estimate Pricing or Estimate (Oct 20): the twin of the catalog and labor tables' SELECT
     // policies; a technician reads no price. Takeoff's Setup and drains read this too — with
     // Estimate access, as every estimator has.
@@ -113,6 +120,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       accCatalogRes,
       accLaborRes,
       nonDlScreensRes,
+      familyScreensRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -175,6 +183,11 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("accessory_labor").select("id, category, data"),
       // §14 Non-Duro-Last Items: every non_dl pricing screen.
       sb.from("pricing_catalog").select("id, category, data").eq("branch", "non_dl"),
+      // Accessory families (owner, Oct 26–27): the Non-DL TPO and EPDM accessory branches.
+      sb
+        .from("pricing_catalog")
+        .select("id, category, data")
+        .in("branch", [FAMILY_BRANCH.nonDlTpo, FAMILY_BRANCH.epdm]),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -209,6 +222,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (uBoardGroupRes.error) throw new Error(uBoardGroupRes.error.message);
     if (accCatalogRes.error) throw accCatalogRes.error;
     if (accLaborRes.error) throw accLaborRes.error;
+    if (familyScreensRes.error) throw familyScreensRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -251,7 +265,11 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const adheredSheetMultiRows = (adheredSheetRes.data ?? null) as unknown as
       RawAdheredSheetMultiRow[] | null;
 
-    return assembleEngineAdminData({
+    const accessoryCatalogRows = (accCatalogRes.data ?? null) as unknown as CatalogRow[] | null;
+    const accessoryLaborRows = (accLaborRes.data ?? null) as unknown as CatalogRow[] | null;
+    const familyRows = (familyScreensRes.data ?? null) as unknown as CatalogRow[] | null;
+
+    const admin = assembleEngineAdminData({
       membraneScreen,
       combos,
       settings,
@@ -286,22 +304,27 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         RawUnderlaymentGroupRow[] | null,
       underlaymentBoardGroupRows: (uBoardGroupRes.data ?? null) as unknown as
         RawUnderlaymentBoardGroupRow[] | null,
-      accessoryCatalogRows: (accCatalogRes.data ?? null) as unknown as Array<{
-        id: string;
-        category: string;
-        data: MembraneScreen;
-      }> | null,
-      accessoryLaborRows: (accLaborRes.data ?? null) as unknown as Array<{
-        id: string;
-        category: string;
-        data: MembraneScreen;
-      }> | null,
+      accessoryCatalogRows,
+      accessoryLaborRows,
       nonDlScreens: (nonDlScreensRes.data ?? null) as unknown as Array<{
         id: string;
         category: string;
         data: MembraneScreen;
       }> | null,
     });
+    // The three bid accessory groups' refs (lib/accessory-families.ts): the Duro-Last screens
+    // split into plain / Duro-Tech, the two family branches, and each family's Other items.
+    // Absent until the family branches are loaded, so the bid shows the "predates" notice
+    // instead of three empty groups.
+    if (!familyRows?.length) return admin;
+    return {
+      ...admin,
+      accessoryFamilies: buildFamilyAccessoryData({
+        duroLastRows: accessoryCatalogRows ?? [],
+        familyRows,
+        laborRows: accessoryLaborRows ?? [],
+      }),
+    };
   });
 
 /** Pickable accessory catalog (flattened single-Price Duro-Last screens). Authenticated read. */

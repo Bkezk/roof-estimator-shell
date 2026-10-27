@@ -15,6 +15,7 @@ import { getWarrantyData, importBids } from "@/lib/bids.functions";
 import { STATUS_LABELS } from "@/lib/bid-status";
 import { buildBidInput, type SavedBidState } from "@/lib/proposal-bid";
 import { buildEstimateInputs } from "@/lib/engine/bid-builder";
+import { adminForBid } from "@/lib/accessory-families";
 import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { readBaxXml } from "@/lib/bax/zip";
@@ -121,7 +122,7 @@ export function ImportBaxDialog(props: { open: boolean; onClose: () => void }) {
         const run = runEstimateWithChartPerDiem(
           bidInput,
           payload,
-          (b) => buildEstimateInputs(b, pricing.admin),
+          (b) => buildEstimateInputs(b, adminForBid(pricing.admin, b.roofSystem)),
           (b) => computeEstimate(b.inputs),
         );
         const r = run.r;

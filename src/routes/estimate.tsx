@@ -124,6 +124,23 @@ import { defaultEdges, resolveSectionZones, TERMINATION_OPTIONS } from "@/lib/en
 import { underlaymentLayerFasteners } from "@/lib/engine/underlayment-fasteners";
 import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
+import { CatalogPicker } from "@/components/catalog-picker";
+import {
+  adminForBid,
+  composeAccessoryLines,
+  computeFamilyResults,
+  duroLastRefForBid,
+  emptyOtherAccessories,
+  EXTRA_FAMILIES,
+  FAMILIES_MISSING_MESSAGE,
+  FAMILY_LABEL,
+  familyReviewLines,
+  linesTotals,
+  normalizeOtherAccessories,
+  type AccessoryFamily,
+  type AdminSnapshot,
+  type OtherAccessoryLines,
+} from "@/lib/accessory-families";
 import { AccessorySummaryCard } from "@/components/accessory-summary-card";
 import { MetalsScreens } from "@/components/metals-screens";
 import { CurbsScreen } from "@/components/curbs-screen";
@@ -492,7 +509,7 @@ function EstimatePage() {
   // + warranty data, captured at first save. All compute/options below resolve through it — admin
   // changes never touch this bid until the estimator explicitly updates the snapshot.
   const [snapshot, setSnapshot] = useState<{
-    admin: EngineAdminData;
+    admin: AdminSnapshot;
     warranty: WarrantyData | null;
     asOf: string;
   } | null>(null);
@@ -515,7 +532,7 @@ function EstimatePage() {
   // What the "Update Pricing & Labor" button compares the frozen snapshot against: the admin
   // data as last fetched (refreshed by the button itself so it disappears once applied).
   const [liveCheck, setLiveCheck] = useState<{
-    admin: EngineAdminData;
+    admin: AdminSnapshot;
     warranty: WarrantyData | null;
   } | null>(null);
 
@@ -551,6 +568,24 @@ function EstimatePage() {
   const [accessoriesCalc, setAccessoriesCalc] = useState<AccessoriesState>(() =>
     emptyAccessoriesState(),
   );
+  // The Non-DL TPO and EPDM accessory groups (owner, Oct 26–27): the same calculated screens
+  // with their own state and pricing ref, plus every group's Other accessories picks.
+  const [accessoriesCalcTpo, setAccessoriesCalcTpo] = useState<AccessoriesState>(() =>
+    emptyAccessoriesState(),
+  );
+  const [accessoriesCalcEpdm, setAccessoriesCalcEpdm] = useState<AccessoriesState>(() =>
+    emptyAccessoriesState(),
+  );
+  const [otherAccessories, setOtherAccessories] = useState<OtherAccessoryLines>(() =>
+    emptyOtherAccessories(),
+  );
+  // Each group folds under its label; the DL group starts minimized (owner: "minimized under a
+  // label DL accessories").
+  const [accGroupOpen, setAccGroupOpen] = useState<Record<AccessoryFamily, boolean>>({
+    duroLast: false,
+    nonDlTpo: false,
+    epdm: false,
+  });
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [metals, setMetals] = useState<MetalLine[]>([]);
   const [metalsCalc, setMetalsCalc] = useState<MetalsState>(() => emptyMetalsState());
@@ -1113,6 +1148,9 @@ function EstimatePage() {
     setCustomSpacing(d.customSpacing ?? {});
     setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
     setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
+    setAccessoriesCalcTpo(normalizeAccessoriesState(d.accessoriesCalcTpo));
+    setAccessoriesCalcEpdm(normalizeAccessoriesState(d.accessoriesCalcEpdm));
+    setOtherAccessories(normalizeOtherAccessories(d.otherAccessories));
     setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
     setMetals(Array.isArray(d.metals) ? d.metals : []);
     setMetalsCalc(normalizeMetalsState(d.metalsCalc));
@@ -1898,6 +1936,9 @@ function EstimatePage() {
     ...(Object.keys(customSpacing).length ? { customSpacing } : {}),
     accessories,
     accessoriesCalc,
+    accessoriesCalcTpo,
+    accessoriesCalcEpdm,
+    otherAccessories,
     nonDlLines,
     metals,
     metalsCalc,
@@ -2035,8 +2076,28 @@ function EstimatePage() {
       !window.confirm("This bid has unsaved changes. Leave without saving them?"),
     enableBeforeUnload: () => dirtyRef.current,
   });
+  // The Non-DL TPO and EPDM accessory groups, computed from their own state against their own
+  // pricing ref (lib/accessory-families.ts); absent on a snapshot that predates the families.
+  const familyInputs = {
+    sections,
+    parapets,
+    curbs,
+    roofSystem,
+    attachment,
+    accessoriesCalcTpo,
+    accessoriesCalcEpdm,
+  };
+  const familyInputsJson = JSON.stringify(familyInputs);
+  const familyResults = useMemo(
+    () => computeFamilyResults(familyInputs, admin),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [admin, familyInputsJson],
+  );
   const bid: BidInput = {
     ...buildBidInput(saved, warrantyData),
+    // The two family groups' computed lines and every group's Other picks join the flat accessory
+    // lines the engine bills (the proposal composes the same way — lib/accessory-families.ts).
+    accessories: composeAccessoryLines(accessories, familyResults, otherAccessories),
     // Legacy MechFastenerLookup rows: the Duro-Tuff mechanical perimeter tiers key their
     // spacing by row width (docs §22.15).
     ...(fastenerLookup?.length ? { fastenerLookup } : {}),
@@ -2078,7 +2139,9 @@ function EstimatePage() {
     const run = runEstimateWithChartPerDiem(
       bid,
       saved,
-      (b) => buildEstimateInputs(b, admin),
+      // A Duro-Tech TPO bid prices the DL accessories with the Duro-Tech ref (vents and pipe
+      // stacks replaced, the TPO corners / boots / sealants beside the Duro-Last ones).
+      (b) => buildEstimateInputs(b, adminForBid(admin, b.roofSystem)),
       (b) => computeEstimate(b.inputs),
     );
     const build = run.build;
@@ -2220,11 +2283,25 @@ function EstimatePage() {
     parapetWallSqFt: parapetWallStats.total,
   };
 
-  const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
-  const accessoryLaborHours = accessories.reduce(
+  // Every flat accessory line the engine bills: the old picker lines, the Non-DL TPO / EPDM
+  // groups' computed lines and every group's Other picks (bid.accessories).
+  const accessoryTotal = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+  const accessoryLaborHours = bid.accessories.reduce(
     (sum, a) => sum + (a.laborHoursPerUnit ?? 0) * a.quantity,
     0,
   );
+  // Per-group header figures: the DL group carries the old flat lines and its Other picks.
+  const dlExtraTotals = linesTotals([...accessories, ...otherAccessories.duroLast]);
+  const familyOtherTotals = {
+    nonDlTpo: linesTotals(otherAccessories.nonDlTpo),
+    epdm: linesTotals(otherAccessories.epdm),
+  };
+  const accessorySections = sections.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    roofSystem: s.roofSystem ?? roofSystem,
+  }));
   const nonDlMaterialTotal = nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const nonDlLaborTotal = nonDlLines.reduce(
     (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
@@ -5248,52 +5325,143 @@ function EstimatePage() {
         </div>
 
         <div className={step === 5 ? "space-y-6" : "hidden"} data-bid-step="accessories" {...ro}>
-          <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Accessories</CardTitle>
-              {result?.accessories && (
-                <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
-                  <span>
-                    Material Cost:{" "}
-                    <span className="font-semibold">
-                      {money(
-                        result.accessories.totalCost + accessoryTotal + result.adhesiveMaterial,
+          {/* Three accessory groups (owner, Oct 26–27): the Duro-Last screens minimized under
+              "DL accessories", then Non-DL TPO and EPDM — the same calculated screens with each
+              family's own pricing ref, all three always available (lib/accessory-families.ts). */}
+          <Collapsible
+            open={accGroupOpen.duroLast}
+            onOpenChange={(o) => setAccGroupOpen((p) => ({ ...p, duroLast: o }))}
+            asChild
+          >
+            <Card data-accessory-group="duroLast">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex items-center gap-2 text-left">
+                    <ChevronRight
+                      className={`h-4 w-4 shrink-0 transition-transform ${accGroupOpen.duroLast ? "rotate-90" : ""}`}
+                    />
+                    <span className="text-base leading-none font-semibold">
+                      {FAMILY_LABEL.duroLast}
+                    </span>
+                  </button>
+                </CollapsibleTrigger>
+                {result?.accessories && (
+                  <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
+                    <span>
+                      Material Cost:{" "}
+                      <span className="font-semibold">
+                        {money(
+                          result.accessories.totalCost +
+                            dlExtraTotals.material +
+                            result.adhesiveMaterial,
+                        )}
+                      </span>
+                    </span>
+                    <span>
+                      Total Labor:{" "}
+                      <span className="font-semibold">
+                        {(result.accessories.manHours + dlExtraTotals.hours).toFixed(2)} h
+                      </span>
+                    </span>
+                    <span>
+                      Labor Cost:{" "}
+                      <span className="font-semibold">
+                        {money((result.accessories.manHours + dlExtraTotals.hours) * laborRate)}
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent>
+                  <AccessoriesScreens
+                    family="duroLast"
+                    state={accessoriesCalc}
+                    onChange={setAccessoriesCalc}
+                    refData={duroLastRefForBid(admin, roofSystem)}
+                    result={result?.accessories}
+                    sections={accessorySections}
+                    adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
+                    adhesiveCalc={result?.adhesiveWholeUnits}
+                    arpCalcQty={result?.accessories?.membraneAccs.arpCalc ?? 0}
+                    otherItems={admin?.accessoryFamilies?.other.duroLast}
+                    otherLines={otherAccessories.duroLast}
+                    onOtherChange={(next) => setOtherAccessories((p) => ({ ...p, duroLast: next }))}
+                  />
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+          {EXTRA_FAMILIES.map((family) => {
+            const famResult = familyResults[family];
+            const other = familyOtherTotals[family];
+            const famMaterial = (famResult?.totalCost ?? 0) + other.material;
+            const famHours = (famResult?.manHours ?? 0) + other.hours;
+            const famState = family === "nonDlTpo" ? accessoriesCalcTpo : accessoriesCalcEpdm;
+            const setFamState =
+              family === "nonDlTpo" ? setAccessoriesCalcTpo : setAccessoriesCalcEpdm;
+            return (
+              <Collapsible
+                key={family}
+                open={accGroupOpen[family]}
+                onOpenChange={(o) => setAccGroupOpen((p) => ({ ...p, [family]: o }))}
+                asChild
+              >
+                <Card data-accessory-group={family}>
+                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                    <CollapsibleTrigger asChild>
+                      <button type="button" className="flex items-center gap-2 text-left">
+                        <ChevronRight
+                          className={`h-4 w-4 shrink-0 transition-transform ${accGroupOpen[family] ? "rotate-90" : ""}`}
+                        />
+                        <span className="text-base leading-none font-semibold">
+                          {FAMILY_LABEL[family]}
+                        </span>
+                      </button>
+                    </CollapsibleTrigger>
+                    <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
+                      <span>
+                        Material Cost: <span className="font-semibold">{money(famMaterial)}</span>
+                      </span>
+                      <span>
+                        Total Labor: <span className="font-semibold">{famHours.toFixed(2)} h</span>
+                      </span>
+                      <span>
+                        Labor Cost:{" "}
+                        <span className="font-semibold">{money(famHours * laborRate)}</span>
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CollapsibleContent>
+                    <CardContent>
+                      {admin && !admin.accessoryFamilies ? (
+                        <p className="text-sm text-muted-foreground">
+                          {FAMILIES_MISSING_MESSAGE} (Update Pricing &amp; Labor).
+                        </p>
+                      ) : (
+                        <AccessoriesScreens
+                          family={family}
+                          state={famState}
+                          onChange={setFamState}
+                          refData={admin?.accessoryFamilies?.refs[family]}
+                          result={famResult}
+                          sections={accessorySections}
+                          adhesiveNames={[]}
+                          adhesiveCalc={undefined}
+                          arpCalcQty={0}
+                          otherItems={admin?.accessoryFamilies?.other[family] ?? []}
+                          otherLines={otherAccessories[family]}
+                          onOtherChange={(next) =>
+                            setOtherAccessories((p) => ({ ...p, [family]: next }))
+                          }
+                        />
                       )}
-                    </span>
-                  </span>
-                  <span>
-                    Total Labor:{" "}
-                    <span className="font-semibold">
-                      {(result.accessories.manHours + accessoryLaborHours).toFixed(2)} h
-                    </span>
-                  </span>
-                  <span>
-                    Labor Cost:{" "}
-                    <span className="font-semibold">
-                      {money((result.accessories.manHours + accessoryLaborHours) * laborRate)}
-                    </span>
-                  </span>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              <AccessoriesScreens
-                state={accessoriesCalc}
-                onChange={setAccessoriesCalc}
-                refData={admin?.accessories}
-                result={result?.accessories}
-                sections={sections.map((s) => ({
-                  id: s.id,
-                  name: s.name,
-                  color: s.color,
-                  roofSystem: s.roofSystem ?? roofSystem,
-                }))}
-                adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
-                adhesiveCalc={result?.adhesiveWholeUnits}
-                arpCalcQty={result?.accessories?.membraneAccs.arpCalc ?? 0}
-              />
-            </CardContent>
-          </Card>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
+            );
+          })}
           {/* Old flat-picker lines: only rendered when a bid already carries them (pre-§12
               saved bids) — the calculated screens above are the legacy money path. */}
           {accessories.length > 0 && (
@@ -6985,7 +7153,12 @@ function EstimatePage() {
         {step === 5 && (
           <AccessorySummaryCard
             result={result?.accessories}
-            extraLines={result?.adhesiveLines}
+            // Adhesives, then the Non-DL TPO / EPDM groups' rows and every group's Other picks,
+            // grouped under their family label.
+            extraLines={[
+              ...(result?.adhesiveLines ?? []),
+              ...familyReviewLines(familyResults, otherAccessories),
+            ]}
             laborRate={laborRate}
           />
         )}
@@ -7033,92 +7206,6 @@ function LegacyGroup({ title, children }: { title: string; children: React.React
  * Legacy-style catalog picker (mirrors the legacy Accessories screen): category tree on the
  * left, searchable item list on the right, one click to add a line.
  */
-function CatalogPicker({
-  items,
-  onAdd,
-}: {
-  items: Array<{ key: string; category: string; description: string; price: number }>;
-  onAdd: (key: string) => void;
-}) {
-  const [cat, setCat] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const cats = useMemo(() => [...new Set(items.map((i) => i.category))], [items]);
-  const query = q.trim().toLowerCase();
-  const searching = query.length > 0;
-  const shown = searching
-    ? items.filter((i) => `${i.category} ${i.description}`.toLowerCase().includes(query))
-    : cat !== null
-      ? items.filter((i) => i.category === cat)
-      : [];
-  return (
-    <div className="mb-4 grid gap-3 rounded-md border p-3 md:grid-cols-[230px_minmax(0,1fr)]">
-      <div className="space-y-2">
-        <Input
-          className="h-8"
-          placeholder="Search all items…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <div className="max-h-72 overflow-y-auto rounded-md border">
-          {cats.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => {
-                setCat(cat === c ? null : c);
-                setQ("");
-              }}
-              className={`flex w-full items-center justify-between gap-2 border-b px-2.5 py-1.5 text-left text-xs last:border-b-0 ${
-                cat === c && !searching
-                  ? "bg-primary/10 font-medium text-primary"
-                  : "hover:bg-muted"
-              }`}
-            >
-              <span>{c}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {items.filter((i) => i.category === c).length}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="max-h-80 overflow-y-auto rounded-md border">
-        {shown.length === 0 ? (
-          <p className="p-3 text-xs text-muted-foreground">
-            {searching ? "No items match." : "Pick a category on the left, or search."}
-          </p>
-        ) : (
-          <table className="w-full text-sm">
-            <tbody>
-              {shown.map((i) => (
-                <tr key={i.key} className="border-b last:border-b-0 hover:bg-muted/50">
-                  <td className="px-2.5 py-1.5">
-                    {searching && (
-                      <span className="block text-[11px] text-muted-foreground">{i.category}</span>
-                    )}
-                    {i.description}
-                  </td>
-                  <td className="w-24 px-2.5 py-1.5 text-right tabular-nums">{money(i.price)}</td>
-                  <td className="w-16 px-2 py-1 text-right">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7"
-                      onClick={() => onAdd(i.key)}
-                    >
-                      Add
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /**
  * Number input that keeps its raw text while focused — a default 0 can be backspaced or is
  * replaced by select-on-focus (legacy field behavior) — and commits the parsed number.

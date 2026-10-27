@@ -9,6 +9,7 @@ import { Printer, ArrowLeft } from "lucide-react";
 import { getEngineAdminData } from "@/lib/engine.functions";
 import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
 import { buildEstimateInputs, NON_DL_LS2_CATEGORIES } from "@/lib/engine/bid-builder";
+import { adminForBid, withFamilyAccessories } from "@/lib/accessory-families";
 import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { buildProposalPricing } from "@/lib/engine/proposal";
@@ -107,18 +108,22 @@ function ProposalPage() {
     const cd = resolveBidComputeData(saved, admin, warrantyData);
     if (!cd.admin) return null;
     // The Setup per-diem chart's total joins the Per-Diem Charge here as on Review (owner, Oct 7).
+    // The Non-DL TPO / EPDM accessory groups and every group's Other picks fold into the flat
+    // accessory lines, and the DL group prices with the ref for the bid's roof system — the same
+    // composition as the estimator (lib/accessory-families.ts), so the proposal cannot drift.
+    const bidInput = withFamilyAccessories(buildBidInput(saved, cd.warranty), saved, cd.admin);
     const run = runEstimateWithChartPerDiem(
-      buildBidInput(saved, cd.warranty),
+      bidInput,
       saved,
-      (b) => buildEstimateInputs(b, cd.admin!),
+      (b) => buildEstimateInputs(b, adminForBid(cd.admin!, b.roofSystem)),
       (b) => computeEstimate(b.inputs),
     );
     const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial, slipSheetMaterial } =
       run.build;
     const r = run.r;
 
-    const accessoryMaterial = saved.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
-    const accessoryLaborHours = saved.accessories.reduce(
+    const accessoryMaterial = bidInput.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
+    const accessoryLaborHours = bidInput.accessories.reduce(
       (s, a) => s + (a.laborHoursPerUnit ?? 0) * a.quantity,
       0,
     );

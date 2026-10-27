@@ -76,7 +76,8 @@ export function AccessorySummaryCard({
   const lines = [...(result?.lines ?? []), ...extra];
   const groups = groupByScreen(lines);
   const material = (result?.totalCost ?? 0) + extra.reduce((s, l) => s + l.totalCost, 0);
-  const hours = result?.manHours ?? 0;
+  // Extra rows carry their own hours (the Non-DL TPO / EPDM groups, Other picks); adhesives are 0.
+  const hours = (result?.manHours ?? 0) + extra.reduce((s, l) => s + l.hours, 0);
   return (
     <Card className="mt-3">
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">

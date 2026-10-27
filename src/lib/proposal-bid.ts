@@ -24,6 +24,7 @@ import type { MetalsState } from "@/lib/engine/metals";
 import type { NonDlState } from "@/lib/engine/nondl";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
+import type { AdminSnapshot, OtherAccessoryLines } from "@/lib/accessory-families";
 
 /** Customer / project header, persisted with the bid and printed on the proposal. */
 export interface CustomerInfo {
@@ -112,6 +113,14 @@ export interface SavedBidState {
   accessories: AccessoryLine[];
   /** §12 Accessories calculated-screen state (optional so older saved bids stay valid). */
   accessoriesCalc?: Partial<AccessoriesState>;
+  /**
+   * The Non-DL TPO and EPDM accessory groups' calculated-screen state and every group's Other
+   * accessories picks (owner, Oct 26–27; lib/accessory-families.ts). Optional so older saved
+   * bids stay valid; the estimator normalises them on load.
+   */
+  accessoriesCalcTpo?: Partial<AccessoriesState>;
+  accessoriesCalcEpdm?: Partial<AccessoriesState>;
+  otherAccessories?: OtherAccessoryLines;
   /** §13 EXCEPTIONAL Metals screen state (optional so older saved bids stay valid). */
   metalsCalc?: Partial<MetalsState>;
   /** §14 Non-Duro-Last Items screen state (optional so older saved bids stay valid). */
@@ -205,7 +214,7 @@ export interface SavedBidState {
   highWindBand?: string;
   // Frozen pricing (legacy "Update Pricing & Labor" semantics): captured at first save; admin
   // changes never reprice this bid until the estimator explicitly updates the snapshot.
-  adminSnapshot?: EngineAdminData;
+  adminSnapshot?: AdminSnapshot;
   warrantySnapshot?: WarrantyData;
   /** ISO timestamp of when the snapshot was captured. */
   pricingAsOf?: string;
@@ -322,7 +331,8 @@ export function buildBidInput(s: SavedBidState, warrantyData?: WarrantyData | nu
 }
 
 export interface BidComputeData {
-  admin: EngineAdminData | null;
+  /** The engine's admin data, plus the accessory-family refs when the snapshot carries them. */
+  admin: AdminSnapshot | null;
   warranty: WarrantyData | null;
   /** ISO timestamp the bid's pricing was frozen at; null = computing from live admin data. */
   frozenAsOf: string | null;
@@ -336,13 +346,14 @@ export interface BidComputeData {
  */
 export function resolveBidComputeData(
   s: Pick<SavedBidState, "adminSnapshot" | "warrantySnapshot" | "pricingAsOf">,
-  liveAdmin: EngineAdminData | null | undefined,
+  liveAdmin: AdminSnapshot | null | undefined,
   liveWarranty: WarrantyData | null | undefined,
 ): BidComputeData {
   if (s.adminSnapshot) {
     return {
-      // Older snapshots predate later-added fields; normalize so newer builds never crash.
-      admin: normalizeAdminSnapshot(s.adminSnapshot),
+      // Older snapshots predate later-added fields; normalize so newer builds never crash. The
+      // normaliser spreads the snapshot, so its accessoryFamilies (when present) come through.
+      admin: normalizeAdminSnapshot(s.adminSnapshot) as AdminSnapshot,
       // Snapshots from before warranty freezing fall back to live rather than dropping warranty $.
       warranty: s.warrantySnapshot ?? liveWarranty ?? null,
       frozenAsOf: s.pricingAsOf ?? "",

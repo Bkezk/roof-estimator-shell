@@ -6,8 +6,16 @@
  * white (read-only) values.
  */
 
+import { Trash2 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 
+import {
+  otherAccessoryLine,
+  type AccessoryFamily,
+  type OtherAccessoryItem,
+} from "@/lib/accessory-families";
+import type { AccessoryLine } from "@/lib/engine/bid-builder";
+import { CatalogPicker } from "@/components/catalog-picker";
 import {
   EDGE_FASTENER_GROUPS,
   PLATE_ROWS,
@@ -71,6 +79,7 @@ type ScreenId =
   | "membraneAccs"
   | "vents"
   | "parapetTabs"
+  | "other"
   | DeckBucket;
 
 const TREE: Array<{ label: string; items: Array<{ id: ScreenId; label: string }> }> = [
@@ -117,6 +126,12 @@ const TREE: Array<{ label: string; items: Array<{ id: ScreenId; label: string }>
       { id: "lwSteel", label: "LW Over Steel" },
     ],
   },
+  {
+    // The family's items with no automatic count (owner, Oct 27): typed quantity × price, hours
+    // per unit from the catalog row. Shown only when the group is given its Other items.
+    label: "Other",
+    items: [{ id: "other", label: "Other Accessories" }],
+  },
 ];
 
 export interface AccessoriesScreensProps {
@@ -124,6 +139,17 @@ export interface AccessoriesScreensProps {
   onChange: (next: AccessoriesState) => void;
   refData: AccessoryRefData | undefined;
   result: AccessoriesResult | undefined;
+  /**
+   * Which accessory family this group is (lib/accessory-families.ts). Absent / "duroLast" shows
+   * every screen; the Non-DL TPO and EPDM groups hide the screens their ref carries no rows
+   * for (EPDM has no vents, neither has fascia, …).
+   */
+  family?: AccessoryFamily | undefined;
+  /** The family's Other accessories items; absent = no Other Accessories screen. */
+  otherItems?: OtherAccessoryItem[] | undefined;
+  /** The picked Other accessories lines (saved on the bid) and their setter. */
+  otherLines?: AccessoryLine[] | undefined;
+  onOtherChange?: ((next: AccessoryLine[]) => void) | undefined;
   /** Sections for the derived stripping rows + colour columns. */
   sections: Array<{ id: string; name: string; color: string; roofSystem?: string }>;
   /** Adhesive names + the engine's §2.4 whole-unit Calc Qty per adhesive. */
@@ -689,10 +715,63 @@ function inchKey(desc: string): number {
   return Number(m[1]) + (m[2] ? Number(m[2]) / Number(m[3]) : 0);
 }
 
+/**
+ * Screens a family group hides because its ref carries nothing for them. The DL group (no
+ * family / "duroLast") shows every screen as before; every group hides Other Accessories when
+ * it was given no Other items.
+ */
+function hiddenAccessoryScreens(
+  refData: AccessoryRefData | undefined,
+  props: Pick<AccessoriesScreensProps, "family" | "otherItems" | "adhesiveNames">,
+): Set<ScreenId> {
+  const out = new Set<ScreenId>();
+  if (props.otherItems === undefined) out.add("other");
+  if (!refData || !props.family || props.family === "duroLast") return out;
+  const anyPrice = (m: Record<string, number>) => Object.values(m).some((v) => (v || 0) > 0);
+  if (refData.corners.length === 0) out.add("corners");
+  if (refData.pipeStackSizes.length === 0) out.add("pipeStacks");
+  if (refData.washers.length === 0) out.add("washers");
+  if (
+    refData.drainBoots.length === 0 &&
+    refData.drainRings.length === 0 &&
+    refData.strainers.length === 0
+  )
+    out.add("drains");
+  if (refData.walkPads.length === 0) out.add("walkPads");
+  if (!Object.values(refData.termBars).some((t) => t.pricePerFt > 0)) out.add("termBar");
+  if (refData.fascia["3"].barPricePerFt <= 0) out.add("fascia3");
+  if (refData.fascia["4"].barPricePerFt <= 0) out.add("fascia4");
+  if (!Object.values(refData.gravelStop).some((s) => anyPrice(s.bar.priceByColor)))
+    out.add("gravelStop");
+  if (!Object.values(refData.dripEdge).some((s) => anyPrice(s.bar.priceByColor)))
+    out.add("dripEdge");
+  if (!Object.values(refData.twoPiece).some((s) => s.priced)) out.add("snapCover");
+  if (refData.panduit.length === 0) out.add("panduit");
+  if (refData.sealants.length === 0) out.add("sealants");
+  if (props.adhesiveNames.length === 0) out.add("adhesives");
+  if (!refData.membraneAccs.tPatch && !refData.membraneAccs.arp) out.add("membraneAccs");
+  if (refData.vents.length === 0) out.add("vents");
+  if (refData.fasteners.length === 0) {
+    out.add("parapetTabs");
+    for (const b of ["wood", "metal", "gypsum", "concrete", "lwConcrete", "lwSteel"] as const)
+      out.add(b);
+  }
+  return out;
+}
+
 export function AccessoriesScreens(props: AccessoriesScreensProps) {
   const { state, onChange, refData, result } = props;
-  const [screenId, setScreenId] = useState<ScreenId>("termBar");
+  const [chosenScreen, setScreenId] = useState<ScreenId>("termBar");
   const [snapSize, setSnapSize] = useState<SnapSize>("3");
+  const hidden = hiddenAccessoryScreens(refData, props);
+  const visibleTree = TREE.map((g) => ({
+    ...g,
+    items: g.items.filter((it) => !hidden.has(it.id)),
+  })).filter((g) => g.items.length > 0);
+  // A hidden choice (the default Term Bar on a family without one) falls to the first screen.
+  const screenId: ScreenId = hidden.has(chosenScreen)
+    ? (visibleTree[0]?.items[0]?.id ?? chosenScreen)
+    : chosenScreen;
 
   const upd = (fn: (draft: AccessoriesState) => void) => {
     const next = structuredClone(state);
@@ -1861,6 +1940,102 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
           </div>
         );
       }
+      case "other": {
+        const items = props.otherItems ?? [];
+        const lines = props.otherLines ?? [];
+        const setLines = (next: AccessoryLine[]) => props.onOtherChange?.(next);
+        const material = lines.reduce((s, l) => s + l.price * l.quantity, 0);
+        const hours = lines.reduce((s, l) => s + (l.laborHoursPerUnit ?? 0) * l.quantity, 0);
+        return (
+          <div className="space-y-3" data-accessory-screen="other">
+            <div className="flex flex-wrap items-center gap-4">
+              <h3 className="text-sm font-semibold">Other Accessories</h3>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                Material: {usd(material)} · Labor: {hrs2(hours)}
+              </span>
+            </div>
+            {items.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No Other Accessories items in this bid's pricing.
+              </p>
+            ) : (
+              <CatalogPicker
+                items={items.map((it) => ({
+                  key: `${it.description}|${it.part}`,
+                  category: "Other Accessories",
+                  description: it.part ? `${it.description} (${it.part})` : it.description,
+                  price: it.price,
+                }))}
+                onAdd={(key) => {
+                  const it = items.find((x) => `${x.description}|${x.part}` === key);
+                  // Quantity blank until typed (owner: number boxes start empty, never 0).
+                  if (it) setLines([...lines, otherAccessoryLine(it)]);
+                }}
+              />
+            )}
+            {lines.length > 0 && (
+              <table className="text-xs">
+                <thead>
+                  <tr>
+                    {["Item", "Unit", "Labor h/ea", "Qty", "Total", ""].map((h) => (
+                      <th key={h} className="border bg-muted px-2 py-1 text-left">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((a, i) => (
+                    <tr key={i}>
+                      <td className="border px-2 py-0.5">{a.description}</td>
+                      <td className="border px-2 py-0.5 text-right tabular-nums">{usd(a.price)}</td>
+                      <td className="border px-1 py-0.5">
+                        <NumberField
+                          step="0.0001"
+                          inputMode="decimal"
+                          className="h-7 w-20 px-1 text-right text-xs"
+                          aria-label="Labor hours per unit"
+                          value={a.laborHoursPerUnit ?? 0}
+                          onChange={(v) =>
+                            setLines(
+                              lines.map((x, j) => (j === i ? { ...x, laborHoursPerUnit: v } : x)),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="border px-1 py-0.5">
+                        <NumberField
+                          inputMode="decimal"
+                          className="h-7 w-16 px-1 text-right text-xs"
+                          aria-label="Quantity"
+                          value={a.quantity}
+                          onChange={(v) =>
+                            setLines(lines.map((x, j) => (j === i ? { ...x, quantity: v } : x)))
+                          }
+                        />
+                      </td>
+                      <td className="border px-2 py-0.5 text-right tabular-nums">
+                        {usd(a.price * a.quantity)}
+                      </td>
+                      <td className="border px-1 py-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive"
+                          aria-label="Remove"
+                          onClick={() => setLines(lines.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      }
       case "wood":
       case "metal":
       case "gypsum":
@@ -1971,9 +2146,12 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   })();
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
+    <div
+      className="grid gap-4 lg:grid-cols-[240px_1fr]"
+      data-accessory-family={props.family ?? "duroLast"}
+    >
       <div className="space-y-2 rounded border p-2 text-xs">
-        {TREE.map((group) => (
+        {visibleTree.map((group) => (
           <div key={group.label}>
             <p className="font-semibold">{group.label}</p>
             <ul className="ml-3 space-y-0.5">
