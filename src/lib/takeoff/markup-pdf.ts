@@ -82,7 +82,8 @@ export function objectLabelText(o: TakeoffObject, q: TakeoffQuantities): string 
   if (q.unscaled.some((u) => u.objectId === o.id)) return `${o.attrs.name}: no scale`;
   if (o.kind === "linear") {
     const l = q.linears.find((x) => x.objectId === o.id);
-    return `${o.attrs.name}: ${l ? fmtNum(l.lengthFt) : "0"} LF`;
+    const material = l?.material ? ` · ${l.material.description}` : "";
+    return `${o.attrs.name}: ${l ? fmtNum(l.lengthFt) : "0"} LF${material}`;
   }
   const s = q.sections.find((x) => x.objectId === o.id);
   if (!s) return o.attrs.name;
@@ -218,15 +219,16 @@ export function markupSummary(
     const len = ls.reduce((s, l) => s + l.lengthFt, 0);
     groups.push({
       title: `Linears: ${LINEAR_ROLE_LABELS[role]}`,
-      columns: ["Name", "Page", "Length (LF)", "Height (in)"],
+      columns: ["Name", "Page", "Length (LF)", "Height (in)", "Material"],
       numeric: [2, 3],
       rows: ls.map((l) => [
         l.name,
         pageName(l.page),
         fmtNum(l.lengthFt),
         l.heightIn !== undefined ? fmtNum(l.heightIn) : "",
+        l.material?.description ?? "",
       ]),
-      total: [`Total ${LINEAR_ROLE_LABELS[role].toLowerCase()}`, "", fmtNum(len), ""],
+      total: [`Total ${LINEAR_ROLE_LABELS[role].toLowerCase()}`, "", fmtNum(len), "", ""],
     });
   }
   for (const role of COUNT_ROLES) {

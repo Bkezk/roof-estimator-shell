@@ -263,8 +263,8 @@ describe("markupSummary", () => {
     const areas = s.groups[0]!;
     expect(areas.rows[0]).toEqual(["Gable", "A1", "6:12 (×1.118)", "950", "1,062", "220", "4"]);
     expect(areas.total).toEqual(["Total", "", "", "950", "1,062", "220", ""]);
-    expect(s.groups[1]!.rows).toEqual([["Wall 1", "A1", "100", "24"]]);
-    expect(s.groups[1]!.total).toEqual(["Total parapet wall", "", "100", ""]);
+    expect(s.groups[1]!.rows).toEqual([["Wall 1", "A1", "100", "24", ""]]);
+    expect(s.groups[1]!.total).toEqual(["Total parapet wall", "", "100", "", ""]);
     expect(s.groups[3]!.rows[0]).toEqual(["Drain 1", "3", "4 in", "4in · 12in"]);
     expect(s.groups[3]!.total).toEqual(["Total drain", "3", "", ""]);
     expect(s.totals).toEqual([

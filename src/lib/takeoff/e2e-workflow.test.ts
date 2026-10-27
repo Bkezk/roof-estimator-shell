@@ -11,8 +11,21 @@
  * model.ts, edge-lines.ts — the estimating engine is untouched) and its assertion flipped to the
  * expected behaviour, marked "FIXED (#n):" with the finding's number.
  */
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { AccessoriesScreens } from "@/components/accessories-screens";
+import {
+  buildFamilyAccessoryData,
+  familyReviewLines,
+  withFamilyAccessories,
+  type CatalogRow,
+} from "@/lib/accessory-families";
+import { buildBidSummary } from "@/lib/bid-summary";
+import { summaryInput } from "@/lib/bid-summary.fixture";
+import { emptyAccessoriesState } from "@/lib/engine/accessories";
+import { FAMILY_SCREENS, type SeedScreen } from "@/lib/pricing-seed/accessory-families";
 import {
   buildObject,
   perimeterSidesByRole,
@@ -36,10 +49,12 @@ import { buildBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal
 import { applyTakeoffToBid, bidAccountFromTakeoff, bidSeedFromTakeoff } from "./create-bid";
 import { followAreaEdits } from "./edge-lines";
 import { syncSideTags } from "./side-tags";
+import { markupSummary, objectLabelText } from "./markup-pdf";
 import { newBidFromSeed as seedToBid } from "./seed-to-bid";
 import {
   sectionSideRolesText,
   takeoffQuantities,
+  type LinearMaterial,
   type ObjectKind,
   type PagePoint,
   type TakeoffObject,
@@ -1096,5 +1111,256 @@ describe("5. Names", () => {
     expect(r.changes.some((c) => c.startsWith("Removed section"))).toBe(false);
     expect(r.sections.find((x) => x.name === "Main roof")!.deckType).toBe("Concrete");
     expect(r.sections).toHaveLength(3);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("6. A material on a linear (owner, Oct 27) — priced on the bid, by the frozen engine", () => {
+  // The three branches, one per non-parapet line of the fixture: an Other Accessories item on the
+  // 12 ft "Line 1" (Other), a Non-DL row on the 25 ft walkway, a metals row on the 60 ft
+  // expansion joint. The snapshots are what the Objects card's picker leaves (./material.ts).
+  const FLASHING: LinearMaterial = {
+    key: "duro_last:other_accessories::Test flashing roll",
+    description: "Test flashing roll (TF1)",
+    price: 5.5,
+    laborHoursPerUnit: 0.1,
+    screen: "DL accessories · Other Accessories",
+    branch: "other",
+  };
+  const COUNTERFLASH: LinearMaterial = {
+    key: 'non_dl:sheet_metal_work::Counterflashing 6"',
+    description: 'Counterflashing 6"',
+    price: 4,
+    laborHoursPerUnit: 0.05,
+    laborRate: 40,
+    screen: "Sheet Metal Work",
+    branch: "non_dl",
+  };
+  const GUTTER_METAL: LinearMaterial = {
+    key: 'metals::Gutters::6" K-style gutter',
+    description: '6" K-style gutter',
+    price: 2,
+    laborHoursPerUnit: 0.1,
+    laborRate: 50,
+    screen: "Gutters",
+    branch: "metals",
+  };
+  type Which = "other" | "walkway" | "expansion_joint";
+  const withMaterials = (os: TakeoffObject[], which: Which[]) =>
+    os.map((o) => {
+      if (o.kind !== "linear" || !which.includes(o.attrs.role as Which)) return o;
+      const material =
+        o.attrs.role === "other"
+          ? FLASHING
+          : o.attrs.role === "walkway"
+            ? COUNTERFLASH
+            : GUTTER_METAL;
+      return { ...o, attrs: { ...o.attrs, material } };
+    });
+  /** The engine on a saved bid exactly as the estimator (estimate.tsx) and proposal (proposal.tsx:114) run it. */
+  const run = (s: SavedBidState) => {
+    const bidInput = withFamilyAccessories(buildBidInput(s), s, admin);
+    const build = buildEstimateInputs(bidInput, admin);
+    const est = computeEstimate(build.inputs);
+    const ledger = buildReviewLedger({
+      bid: bidInput,
+      result: build,
+      est,
+      crewRate: bidInput.crewLaborRatePerHour,
+    });
+    return { bidInput, build, est, ledger };
+  };
+  const row = (rows: Array<{ label: string; cost: number; hours?: number }>, label: string) =>
+    rows.find((r) => r.label === label)!;
+  /** Markup 0 and tax exempt, so the grand total moves by exactly the lines' material + labor. */
+  const flat = (): SavedBidState => ({ ...blankSaved(), markup: 0, taxExempt: true });
+  const seedOf = (os: TakeoffObject[]) =>
+    bidSeedFromTakeoff(setup, takeoffQuantities([page], os), {
+      takeoffName: "Maple St. warehouse",
+    });
+
+  const base = run(newBidFromSeed(flat(), seedOf(objects)));
+
+  it("an Other Accessories item on the 12 ft line: +price × feet material, +hours × feet × rate labor, exactly", () => {
+    const seed = seedOf(withMaterials(objects, ["other"]));
+    const s = newBidFromSeed(flat(), seed);
+    expect(seed.otherAccessories).toEqual([
+      {
+        description: "Line 1 · 12 ft — Test flashing roll (TF1)",
+        price: 5.5,
+        quantity: 12,
+        laborHoursPerUnit: 0.1,
+        takeoffObjectId: "o10",
+      },
+    ]);
+    // It left the notice; the other lines are still there.
+    expect(seed.unmapped.map((u) => u.label)).not.toContain("Line 1: 12 ft");
+    expect(seed.unmapped.map((u) => u.label)).toContain("Walkway 1: 25 ft");
+    // The bid's ACTIVE family group (Duro-Last) holds it; the flat picker lines are untouched.
+    expect(s.otherAccessories!.duroLast).toEqual(seed.otherAccessories);
+    expect(s.accessories).toEqual([]);
+    const r = run(s);
+    // The engine input the estimator and the proposal both compose carries the line.
+    expect(r.bidInput.accessories).toEqual(seed.otherAccessories);
+    expect(r.build.warnings).toEqual([]);
+    // Review ledger: Accessories purchases +$66.00 (5.5 × 12); labor +1.2 h = $54 at $45/h.
+    const pur = row(r.ledger.purchases.duroLast, "Accessories");
+    const pur0 = row(base.ledger.purchases.duroLast, "Accessories");
+    expect(pur.cost - pur0.cost).toBeCloseTo(66, 6);
+    const lab = row(r.ledger.labor.duroLast, "Accessories");
+    const lab0 = row(base.ledger.labor.duroLast, "Accessories");
+    expect(lab.hours! - lab0.hours!).toBeCloseTo(1.2, 6);
+    expect(lab.cost - lab0.cost).toBeCloseTo(54, 6);
+    // The total: exactly 66 + 54.
+    expect(r.est.money.grandTotal - base.est.money.grandTotal).toBeCloseTo(120, 6);
+  });
+
+  it("the estimator's Review-side Accessories summary and the Bid summary list the line", () => {
+    const s = newBidFromSeed(flat(), seedOf(withMaterials(objects, ["other"])));
+    // AccessorySummaryCard's extraLines (estimate.tsx) = familyReviewLines(familyResults, otherAccessories).
+    const lines = familyReviewLines({}, s.otherAccessories);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      screen: "DL accessories · Other accessories",
+      qty: 12,
+      name: "Line 1 · 12 ft — Test flashing roll (TF1)",
+      unitCost: 5.5,
+      totalCost: 66,
+    });
+    expect(lines[0]!.hours).toBeCloseTo(1.2, 9);
+    // bid-summary.ts (the Bid summary PDF model), given the same rows: the Accessories step shows it.
+    const model = buildBidSummary({
+      ...summaryInput,
+      computed: {
+        ...summaryInput.computed,
+        adhesiveLines: [...(summaryInput.computed.adhesiveLines ?? []), ...lines],
+      },
+    });
+    const acc = model.steps.find((x) => x.key === "accessories")!;
+    const table = acc.tables.find((t) => t.title === "Accessories summary")!;
+    expect(
+      table.rows.some(
+        (r) => r.includes("Line 1 · 12 ft — Test flashing roll (TF1)") && r.includes("12"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the estimator's Accessories › Other Accessories screen lists it (renderToString)", () => {
+    const s = newBidFromSeed(flat(), seedOf(withMaterials(objects, ["other"])));
+    const toRow = (x: SeedScreen): CatalogRow => ({
+      id: x.id,
+      category: x.category,
+      data: { columns: x.columns, rows: x.rows },
+    });
+    const fam = buildFamilyAccessoryData({
+      duroLastRows: [],
+      familyRows: FAMILY_SCREENS.map(toRow),
+      laborRows: [],
+    });
+    const html = renderToString(
+      createElement(AccessoriesScreens, {
+        family: "duroLast",
+        initialScreen: "other",
+        state: emptyAccessoriesState(),
+        onChange: () => {},
+        refData: fam.refs.nonDlTpo,
+        result: undefined,
+        sections: [],
+        adhesiveNames: [],
+        adhesiveCalc: undefined,
+        arpCalcQty: 0,
+        otherItems: fam.other.nonDlTpo,
+        otherLines: s.otherAccessories!.duroLast,
+        onOtherChange: () => {},
+      }),
+    );
+    expect(html).toContain('data-accessory-screen="other"');
+    expect(html).toContain("Line 1 · 12 ft — Test flashing roll (TF1)");
+    expect(html).toContain("$5.50");
+    // The quantity box holds the feet; the screen's header totals the line.
+    expect(html).toMatch(/step="1" inputMode="decimal" value="12"\/>/);
+    expect(html).toContain("Labor: <!-- -->1.20 h");
+    expect(html).toContain("Material: <!-- -->$66.00");
+  });
+
+  it("a Non-DL row and a metals row bill in THEIR homes at their own labor rates (not as accessories)", () => {
+    const s = newBidFromSeed(
+      flat(),
+      seedOf(withMaterials(objects, ["walkway", "expansion_joint"])),
+    );
+    expect(s.nonDlLines).toEqual([
+      {
+        description: 'Walkway 1 · 25 ft — Counterflashing 6"',
+        category: "Sheet Metal Work",
+        price: 4,
+        laborPerUnit: 0.05,
+        laborRate: 40,
+        quantity: 25,
+        takeoffObjectId: "o9",
+      },
+    ]);
+    expect(s.metals).toEqual([
+      {
+        description: 'Expansion joint 1 · 60 ft — 6" K-style gutter',
+        price: 2,
+        laborPerUnit: 0.1,
+        laborRate: 50,
+        quantity: 60,
+        takeoffObjectId: "o8",
+      },
+    ]);
+    expect(s.otherAccessories).toBeUndefined();
+    const r = run(s);
+    expect(r.build.warnings).toEqual([]);
+    // Accessories rows untouched.
+    expect(row(r.ledger.purchases.duroLast, "Accessories").cost).toBe(
+      row(base.ledger.purchases.duroLast, "Accessories").cost,
+    );
+    expect(row(r.ledger.labor.duroLast, "Accessories").hours).toBe(
+      row(base.ledger.labor.duroLast, "Accessories").hours,
+    );
+    // Metals: +$120 material (2 × 60), +6 h at the row's OWN $50 = $300.
+    expect(
+      row(r.ledger.purchases.duroLast, "Metals").cost -
+        row(base.ledger.purchases.duroLast, "Metals").cost,
+    ).toBeCloseTo(120, 6);
+    const ml = row(r.ledger.labor.duroLast, "Metals");
+    const ml0 = row(base.ledger.labor.duroLast, "Metals");
+    expect(ml.hours! - ml0.hours!).toBeCloseTo(6, 6);
+    expect(ml.cost - ml0.cost).toBeCloseTo(300, 6);
+    // Non-DL: +$100 material (4 × 25) into Other Material, +1.25 h at its own $40 = $50.
+    expect(r.build.inputs.otherMaterial - base.build.inputs.otherMaterial).toBeCloseTo(100, 6);
+    expect(
+      (r.build.inputs.ownRateDirectLaborHours ?? 0) -
+        (base.build.inputs.ownRateDirectLaborHours ?? 0),
+    ).toBeCloseTo(1.25 + 6, 6);
+    expect(
+      (r.build.inputs.ownRateDirectLaborCost ?? 0) -
+        (base.build.inputs.ownRateDirectLaborCost ?? 0),
+    ).toBeCloseTo(50 + 300, 6);
+    // The total: exactly (120 + 300) + (100 + 50).
+    expect(r.est.money.grandTotal - base.est.money.grandTotal).toBeCloseTo(570, 6);
+  });
+
+  it("the drawing's own outputs carry the material: quantities, the markup PDF label and table", () => {
+    const os = withMaterials(objects, ["other"]);
+    const q6 = takeoffQuantities([page], os);
+    expect(q6.linears.find((l) => l.name === "Line 1")!.material).toEqual(FLASHING);
+    expect(q6.linears.find((l) => l.name === "Walkway 1")!.material).toBeUndefined();
+    const l1 = os.find((o) => o.kind === "linear" && o.attrs.name === "Line 1")!;
+    expect(objectLabelText(l1, q6)).toBe("Line 1: 12 LF · Test flashing roll (TF1)");
+    const other = markupSummary(q6, () => "A1").groups.find((g) => g.title === "Linears: Other")!;
+    expect(other.rows).toEqual([["Line 1", "A1", "12", "", "Test flashing roll (TF1)"]]);
+  });
+
+  it("with the default markup (35 %) the ledger rows move the same; the total by more", () => {
+    const b0 = run(newBidFromSeed(blankSaved(), seedOf(objects)));
+    const b1 = run(newBidFromSeed(blankSaved(), seedOf(withMaterials(objects, ["other"]))));
+    expect(
+      row(b1.ledger.purchases.duroLast, "Accessories").cost -
+        row(b0.ledger.purchases.duroLast, "Accessories").cost,
+    ).toBeCloseTo(66, 6);
+    expect(b1.est.money.grandTotal - b0.est.money.grandTotal).toBeGreaterThan(120);
+    expect(b0.est.money.grandTotal).toBeCloseTo(GRAND_TOTAL, 0);
   });
 });

@@ -50,10 +50,15 @@ describe("tool tips (owner, Oct 27: tips only on hover)", () => {
     };
     expect(statusLine(idle)).toBeNull();
     expect(statusLine({ ...idle, tool: "select" })).toBeNull();
+    // Owner, Oct 27: right-click places the point and closes / finishes.
     expect(statusLine({ ...idle, draftPoints: 2 })).toBe(
-      "Click the next corner · Enter closes · Esc cancels",
+      "Click the next corner · Enter closes · right-click places it and closes · Esc cancels",
     );
-    expect(statusLine({ ...idle, tool: "linear", draftPoints: 1 })).toContain("finishes");
+    expect(statusLine({ ...idle, tool: "linear", draftPoints: 1 })).toContain(
+      "right-click places it and finishes",
+    );
+    for (const t of ["area", "linear", "cutout"] as const)
+      expect(HINTS[t]).toMatch(/right-click places the last (corner|point) and (closes|finishes)/);
     expect(statusLine({ ...idle, edge: true })).toBe(
       "Click a side to change its role · Enter creates · Esc cancels",
     );

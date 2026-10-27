@@ -21,6 +21,12 @@
  * Remove drops it from the object and deletes the file best-effort; View opens the lightbox.
  * An edge line with several segments (from before lines were made per side) has "Split at
  * corners": one line per segment, one undo step.
+ *
+ * Owner, Oct 27 (later): a linear that is not a parapet has "Material (optional)" — a search box
+ * over the whole price list (./material-picker.tsx); the pick is kept on the line
+ * (`attrs.material`, a snapshot) and the bid import makes a priced line of it × the length in
+ * feet (src/lib/takeoff/material.ts). Switching the role to Parapet drops it (a wall's material
+ * is the bid's parapet system).
  */
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
@@ -93,6 +99,7 @@ import {
   withNote,
 } from "./deficiency-photos";
 import { DrainFields } from "./drain-fields";
+import { MaterialPicker } from "./material-picker";
 import { Tip } from "./toolbar";
 import {
   COUNT_BASE_NAMES,
@@ -451,6 +458,7 @@ function SelectedEditor(props: {
                   let attrs = { ...x.attrs, role };
                   if (rename) attrs.name = uniqueName(LINEAR_BASE_NAMES[role], others);
                   if (role !== "parapet") attrs = withAttr(attrs, "heightIn", undefined);
+                  else attrs = withAttr(attrs, "material", undefined);
                   return { ...x, attrs };
                 })
               }
@@ -475,7 +483,7 @@ function SelectedEditor(props: {
               {fpp === null ? "—" : fmtFt(polylineLengthPx(o.points) * fpp)}
             </p>
           </div>
-          {o.attrs.role === "parapet" && (
+          {o.attrs.role === "parapet" ? (
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Height (in)</Label>
               <Num
@@ -487,6 +495,16 @@ function SelectedEditor(props: {
                 }
               />
             </div>
+          ) : (
+            <MaterialPicker
+              id={`material-${o.id}`}
+              value={o.attrs.material}
+              onChange={(m) =>
+                update((x) =>
+                  x.kind === "linear" ? { ...x, attrs: withAttr(x.attrs, "material", m) } : x,
+                )
+              }
+            />
           )}
         </div>
       )}

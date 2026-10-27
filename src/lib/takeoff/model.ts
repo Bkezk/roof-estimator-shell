@@ -126,6 +126,37 @@ export interface AreaAttrs {
    */
   pitch?: number;
 }
+/**
+ * A price-list item assigned to a linear that is not a parapet (owner, Oct 27: "on the linear
+ * other allow a search bar … to search and assign material so that way it can be imported into a
+ * bid"). A SNAPSHOT of the item as picked, so the drawing still reads if pricing changes; the bid
+ * import re-reads the live price by `key` when the item still exists (./create-bid.ts), else uses
+ * this and says so. Built only by ./material.ts `materialFromItem` (no undefined keys).
+ */
+export interface LinearMaterial {
+  /**
+   * The item's key as the estimator's own pickers know it: `<screen id>::<description>[::<colour>]`
+   * for the accessories catalog, `metals::<category>::<description>` for Exceptional Metals,
+   * `non_dl:<screen>::<description>` for the Non-DL catalog, and
+   * `<family branch>:other_accessories::<description>` for a family's Other Accessories item.
+   */
+  key: string;
+  description: string;
+  /** $ per unit as picked. */
+  price: number;
+  /** Install labor per unit (hours), when the price list carries one. */
+  laborHoursPerUnit?: number;
+  /** $/h for own-rate labor (Non-DL and metals rows; 0 or absent = the bid's crew rate). */
+  laborRate?: number;
+  /** The screen / category it was picked from (shown as the search result's category). */
+  screen: string;
+  /**
+   * Where the bid bills it (./material.ts): "accessories" and "other" → an Other Accessories line
+   * in the bid's active family group; "non_dl" → a Non-DL catalog line; "metals" → a metals line.
+   */
+  branch: LinearMaterialBranch;
+}
+export type LinearMaterialBranch = "accessories" | "other" | "non_dl" | "metals";
 export interface LinearAttrs {
   name: string;
   role: LinearRole;
@@ -136,6 +167,8 @@ export interface LinearAttrs {
    * still coincides with take the line's role in the bid (./edge-lines.ts).
    */
   fromArea?: string;
+  /** A price-list item the bid gets as a line, × the length in feet (never on a parapet). */
+  material?: LinearMaterial;
 }
 export interface CountAttrs {
   name: string;
@@ -343,6 +376,8 @@ export interface LinearQuantity {
    * Lets the bid recognise a wall re-made along the same sides.
    */
   edgeOf?: { areaId: string; sides: number[] };
+  /** The price-list item assigned on the Objects card (the bid gets it × `lengthFt`). */
+  material?: LinearMaterial;
 }
 export interface CountQuantity {
   name: string;
@@ -497,6 +532,7 @@ export function takeoffQuantities(
         lengthFt: len,
       };
       if (o.attrs.heightIn !== undefined) q.heightIn = o.attrs.heightIn;
+      if (o.attrs.material) q.material = o.attrs.material;
       const edgeOf = edgeLineSides(o, objects);
       if (edgeOf) q.edgeOf = edgeOf;
       out.linears.push(q);

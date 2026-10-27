@@ -13,14 +13,14 @@ export const HINTS: Record<Tool, string> = {
     "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a penetration pin to move that pin. Click a selected deficiency pin to show its pictures. Ctrl+D (or Duplicate) stamps copies of it; Delete removes it; Ctrl+Z undoes.",
   scale:
     "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
-  area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
+  area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click or press Enter to close; right-click places the last corner and closes. Backspace removes the last point, Esc cancels.",
   linear:
-    "Click points along the line, or press and drag a box for a rectangle's perimeter; double-click, right-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
+    "Click points along the line, or press and drag a box for a rectangle's perimeter; double-click or press Enter to finish; right-click places the last point and finishes. Backspace removes the last point, Esc cancels.",
   count:
     "Click each item. Clicks add to the same penetration until you right-click or press Enter or Esc; the next click then starts a new one. Keys 1–7 pick the type; a Deficiency is one pin per click, with a note and pictures to show the customer.",
   dimension: "Click two points to measure a distance (not saved).",
   cutout:
-    "Draw a well or penthouse inside the selected area: click its corners and close it like an area, or drag a box. It is subtracted from that area.",
+    "Draw a well or penthouse inside the selected area: click its corners and close it like an area (right-click places the last corner and closes), or drag a box. It is subtracted from that area.",
 };
 
 /** The tip while stamping copies ("Duplicate and stamp"). */
@@ -124,8 +124,8 @@ export function statusLine(s: StatusContext): string | null {
     if (s.tool === "scale") return "Click the other end of the known dimension · Esc cancels";
     if (s.tool === "dimension") return "Click the other end · Esc cancels";
     if (s.tool === "linear")
-      return "Click the next point · Enter or right-click finishes · Esc cancels";
-    return "Click the next corner · Enter closes · Esc cancels";
+      return "Click the next point · Enter finishes · right-click places it and finishes · Esc cancels";
+    return "Click the next corner · Enter closes · right-click places it and closes · Esc cancels";
   }
   if (s.countSession) return "Click the next item · Enter or right-click ends this penetration";
   return null;

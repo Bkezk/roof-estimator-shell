@@ -4,11 +4,6 @@
  * Objects tab's per-drain editor. The option lists are the same reference data the estimator's
  * Drains screen offers (`admin.accessories`). Nothing is preselected.
  */
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-
-import { useAuth } from "@/lib/auth-store";
-import { getEngineAdminData } from "@/lib/engine.functions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,18 +16,7 @@ import {
 
 import { pointerCloseAutoFocus } from "./focus";
 import type { DrainKey, DrainPicks } from "./shapes";
-
-/** The admin data query (same key as the Setup tab and the estimator, so it is shared). */
-function useEngineAdmin() {
-  const { session } = useAuth();
-  const getAdminFn = useServerFn(getEngineAdminData);
-  return useQuery({
-    queryKey: ["engine-admin"],
-    queryFn: () => getAdminFn(),
-    enabled: !!session,
-    staleTime: 5 * 60_000,
-  });
-}
+import { useEngineAdmin } from "./use-engine-admin";
 
 const NONE = "__none__";
 

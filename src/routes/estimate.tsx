@@ -74,6 +74,7 @@ import { warrantiesForSystem } from "@/lib/warranty-systems";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
+import { catalogSearchItems } from "@/lib/takeoff/material";
 import { lockedToast } from "@/lib/takeoff/lock";
 import {
   applyTakeoffToBid,
@@ -1407,9 +1408,28 @@ function EstimatePage() {
     try {
       const doc = takeoffDoc(takeoffRow);
       const q = takeoffQuantities(doc.pages, doc.objects);
+      // A linear's material (lib/takeoff/material.ts) is re-priced from the live price list —
+      // the same catalogs the pickers above read; the takeoff's snapshot (with a notice) when a
+      // catalog has not loaded or the item is gone.
+      const catalogsLoaded = !!(
+        liveAdmin &&
+        accCatalog &&
+        accLaborLookup &&
+        metalsCatalog &&
+        nonDlCatalog
+      );
       const seed = bidSeedFromTakeoff(doc.setup, q, {
         takeoffName: takeoffRow.name,
         accountId: takeoffRow.account_id,
+        catalog: catalogsLoaded
+          ? catalogSearchItems({
+              admin: liveAdmin,
+              accessories: accCatalog,
+              accessoryLabor: accLaborLookup,
+              metals: metalsCatalog,
+              nonDl: nonDlCatalog,
+            })
+          : null,
       });
       const takeoffCustomer = takeoffRow.account?.name ?? "";
       if (updating) {
@@ -1420,6 +1440,10 @@ function EstimatePage() {
             curbs,
             pipeStacks: accessoriesCalc.pipeStacks,
             drains: accessoriesCalc.drains,
+            roofSystem,
+            otherAccessories,
+            metals,
+            nonDlLines,
             notes: customer.notes,
             parapetDefaults,
             sectionDefaults,
@@ -1431,6 +1455,10 @@ function EstimatePage() {
         setParapets(r.parapets);
         setCurbs(r.curbs);
         setAccessoriesCalc((prev) => ({ ...prev, pipeStacks: r.pipeStacks, drains: r.drains }));
+        // The linears' material lines (Other Accessories by group, metals, Non-DL).
+        setOtherAccessories(r.otherAccessories);
+        setMetals(r.metals);
+        setNonDlLines(r.nonDlLines);
         // The takeoff Setup's notes, carried once into the bid's notes.
         if (r.notes !== customer.notes) setCustomer((c) => ({ ...c, notes: r.notes }));
         setTakeoffInfo({

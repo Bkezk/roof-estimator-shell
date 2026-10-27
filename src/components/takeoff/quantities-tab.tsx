@@ -50,6 +50,7 @@ const CSV_HEADER = [
   "Reuse rings",
   "Drain boot",
   "Drain ring",
+  "Material",
 ];
 const DRAIN_COLS = 4;
 
@@ -80,6 +81,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         s.section.length,
         s.section.width,
         ...blank(6 + DRAIN_COLS),
+        "",
       ]),
     );
   for (const l of q.linears)
@@ -93,6 +95,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         l.lengthFt,
         l.heightIn,
         ...blank(4 + DRAIN_COLS),
+        l.material?.description ?? "",
       ]),
     );
   for (const c of q.counts)
@@ -110,6 +113,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         ...(c.role === "drain"
           ? [c.roofType, c.reuseRings ? "Yes" : "", c.bootSize, c.ringSize]
           : blank(DRAIN_COLS)),
+        "",
       ]),
     );
   rows.push(
@@ -330,6 +334,7 @@ export function QuantitiesTab(props: {
                 <H>Role</H>
                 <H right>Ft</H>
                 <H right>Height in</H>
+                <H>Material</H>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -339,6 +344,7 @@ export function QuantitiesTab(props: {
                   <C>{LINEAR_ROLE_LABELS[l.role]}</C>
                   <C right>{fmtNum(l.lengthFt)}</C>
                   <C right>{l.heightIn ?? ""}</C>
+                  <C>{l.material?.description ?? ""}</C>
                 </TableRow>
               ))}
             </TableBody>

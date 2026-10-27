@@ -3,12 +3,15 @@
  * `?takeoff=` handler so the PlanSwift import (src/lib/planswift) starts its bid the same way: the
  * seed's material answers over the bid's current defaults, one section / parapet / curb per seed
  * entry through the route's own factories (a wall with the bid's parapet defaults, exactly as the
- * Parapets screen's "Add parapet" builds one), the seeded pipe stacks and drains, and the
- * takeoff Setup's notes in the bid's notes.
+ * Parapets screen's "Add parapet" builds one), the seeded pipe stacks and drains, the linears'
+ * material lines (owner, Oct 27; ./material.ts: Other Accessories lines into the bid's ACTIVE
+ * family group — `activeFamily` of the seeded roof system, else the bid's — and the flat metals /
+ * Non-DL catalog lines), and the takeoff Setup's notes in the bid's notes.
  */
 
 import type { BidSectionInput, CurbInput, ParapetInput } from "@/lib/engine/bid-builder";
 import type { SavedBidState } from "@/lib/proposal-bid";
+import { activeFamily, normalizeOtherAccessories } from "@/lib/accessory-families";
 import { withTakeoffNotes, type TakeoffBidSeed } from "./create-bid";
 
 /** The estimate route's `newSection` / `newParapet` / `newCurb` factories. */
@@ -41,7 +44,9 @@ export function parapetFromDefaults(
 
 /**
  * `saved` is the fresh bid as the estimator holds it (its Home defaults already applied); the
- * result replaces its sections, parapets, curbs, pipe stacks and drains with the seed's.
+ * result replaces its sections, parapets, curbs, pipe stacks and drains with the seed's, and
+ * appends the seed's material lines (a fresh bid has none) to the active family's Other
+ * Accessories, the metals lines and the Non-DL lines.
  */
 export function newBidFromSeed(
   saved: SavedBidState & { sectionDefaults: NonNullable<SavedBidState["sectionDefaults"]> },
@@ -52,8 +57,18 @@ export function newBidFromSeed(
   const parapetDefaults = { ...saved.parapetDefaults, ...seed.parapetDefaults };
   const wallDefaults = parapetFromDefaults(parapetDefaults, secDefaults.deckType);
   const notes = withTakeoffNotes(saved.customer.notes, seed.setupNotes);
+  const family = activeFamily(seed.roofSystem ?? saved.roofSystem);
+  const other = normalizeOtherAccessories(saved.otherAccessories);
+  const materialLines = {
+    ...(seed.otherAccessories?.length
+      ? { otherAccessories: { ...other, [family]: [...other[family], ...seed.otherAccessories] } }
+      : {}),
+    ...(seed.metals?.length ? { metals: [...(saved.metals ?? []), ...seed.metals] } : {}),
+    ...(seed.nonDlLines?.length ? { nonDlLines: [...saved.nonDlLines, ...seed.nonDlLines] } : {}),
+  };
   return {
     ...saved,
+    ...materialLines,
     ...(seed.roofSystem ? { roofSystem: seed.roofSystem } : {}),
     ...(seed.attachment ? { attachment: seed.attachment } : {}),
     ...(seed.membraneAdhesiveName ? { membraneAdhesiveName: seed.membraneAdhesiveName } : {}),

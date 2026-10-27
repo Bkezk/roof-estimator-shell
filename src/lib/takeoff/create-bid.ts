@@ -9,7 +9,10 @@
  * the count has none), pipe stacks from sized pipe counts, drains with their boot / ring, and a
  * list of what could not be placed automatically (unsized pipes and curbs, drains without picks,
  * gutters, expansion joints, walkway pads, vents, scuppers, cut-out walls and "other" objects) so
- * the estimator can add them by hand with the measured numbers in front of them.
+ * the estimator can add them by hand with the measured numbers in front of them. A non-parapet
+ * linear with a MATERIAL (owner, Oct 27; ./material.ts) becomes a priced line instead — an Other
+ * Accessories line in the bid's active family group, or a metals / Non-DL catalog line by its
+ * branch — × its length in feet, at the live price when the item is still in the price list.
  *
  * `applyTakeoffToBid` re-applies a re-measured takeoff to an existing bid: it matches what it
  * seeded by the takeoff object id it stored on each item (falling back to the wall's area sides,
@@ -18,11 +21,24 @@
  * The estimating engine (src/lib/engine) is not touched: this only fills its inputs.
  */
 
-import type { BidSectionInput, CurbInput, ParapetInput } from "@/lib/engine/bid-builder";
+import type {
+  AccessoryLine,
+  BidSectionInput,
+  CurbInput,
+  MetalLine,
+  NonDlLine,
+  ParapetInput,
+} from "@/lib/engine/bid-builder";
 import type { DrainEntry, PipeStackEntry } from "@/lib/engine/accessories";
 import type { EdgeInput } from "@/lib/engine/edges";
 import type { Attachment } from "@/lib/engine/estimate";
 import type { SavedBidState } from "@/lib/proposal-bid";
+import {
+  activeFamily,
+  FAMILIES,
+  normalizeOtherAccessories,
+  type OtherAccessoryLines,
+} from "@/lib/accessory-families";
 import {
   COUNT_ROLE_LABELS,
   LINEAR_ROLE_LABELS,
@@ -32,6 +48,7 @@ import {
   type TakeoffQuantities,
   type TakeoffSetup,
 } from "./model";
+import { liveMaterial, materialHomeLabel, materialLine, type CatalogSearchItem } from "./material";
 import { parapetFromDefaults } from "./seed-to-bid";
 
 /**
@@ -65,6 +82,10 @@ export type SeededParapet = Partial<ParapetInput> & TakeoffLink & { takeoffEdgeK
 export type SeededCurb = Partial<CurbInput> & TakeoffLink;
 export type SeededPipeStack = PipeStackEntry & TakeoffLink;
 export type SeededDrain = DrainEntry & TakeoffLink;
+/** A linear's material as a bid line; the link lets an update find it again (extra JSON). */
+export type SeededAccessoryLine = AccessoryLine & TakeoffLink;
+export type SeededMetalLine = MetalLine & TakeoffLink;
+export type SeededNonDlLine = NonDlLine & TakeoffLink;
 
 export interface TakeoffBidSeed {
   roofSystem?: string;
@@ -93,6 +114,14 @@ export interface TakeoffBidSeed {
   pipeStacks: SeededPipeStack[];
   /** Drain rows for AccessoriesState.drains — only drains with a boot AND ring picked. */
   drains: SeededDrain[];
+  /**
+   * Linears with a material (./material.ts): Other Accessories lines for the bid's ACTIVE family
+   * group (`otherAccessories[activeFamily(roofSystem)]`), flat metals lines and flat Non-DL
+   * catalog lines — quantity = feet. Absent on seeds built before materials existed.
+   */
+  otherAccessories?: SeededAccessoryLine[];
+  metals?: SeededMetalLine[];
+  nonDlLines?: SeededNonDlLine[];
   /** Measured things the estimator must place by hand, with their numbers. */
   unmapped: Array<{ label: string; detail: string }>;
   /** Free-text summary of the drawing for the bid's notes. */
@@ -205,10 +234,21 @@ function measuredNote(s: SectionQuantity): string {
   }.`;
 }
 
+export interface BidSeedOptions {
+  takeoffName?: string;
+  accountId?: string | null;
+  /**
+   * The live price list (./material.ts `catalogSearchItems`) to re-read each linear material's
+   * price by key. Absent: the takeoff's snapshot prices are used as they are (a pure caller);
+   * null: the list could not be loaded, so the snapshot is used AND the notice says so.
+   */
+  catalog?: readonly CatalogSearchItem[] | null;
+}
+
 export function bidSeedFromTakeoff(
   setup: TakeoffSetup,
   q: TakeoffQuantities,
-  opts: { takeoffName?: string; accountId?: string | null } = {},
+  opts: BidSeedOptions = {},
 ): TakeoffBidSeed {
   const sectionDefaults: TakeoffBidSeed["sectionDefaults"] = {};
   if (setup.deckType) sectionDefaults.deckType = setup.deckType;
@@ -310,6 +350,30 @@ export function bidSeedFromTakeoff(
     ...link(c),
   }));
 
+  // Linears with a material: a priced line each, at the live price when the item still exists.
+  const otherAccessories: SeededAccessoryLine[] = [];
+  const metals: SeededMetalLine[] = [];
+  const nonDlLines: SeededNonDlLine[] = [];
+  const materialNotes: TakeoffBidSeed["unmapped"] = [];
+  for (const l of q.linears) {
+    if (l.role === "parapet" || !l.material) continue;
+    const live = opts.catalog ? liveMaterial(l.material, opts.catalog) : null;
+    const m = live ?? l.material;
+    const ml = materialLine(l.name, l.lengthFt, m);
+    const link: TakeoffLink = { takeoffObjectId: l.objectId };
+    if (ml.home === "otherAccessories") otherAccessories.push({ ...ml.line, ...link });
+    else if (ml.home === "metals") metals.push({ ...ml.line, ...link });
+    else nonDlLines.push({ ...ml.line, ...link });
+    if (opts.catalog !== undefined && !live)
+      materialNotes.push({
+        label: `${l.name}: ${ftIn(l.lengthFt)} of ${m.description}`,
+        detail:
+          opts.catalog === null
+            ? `Priced from the takeoff's snapshot ($${m.price.toFixed(2)} per unit) — the price list could not be loaded; check the line on ${materialHomeLabel(m.branch)}.`
+            : `Priced from the takeoff's snapshot ($${m.price.toFixed(2)} per unit) — the item is no longer in the price list; check the line on ${materialHomeLabel(m.branch)}.`,
+      });
+  }
+
   const unmapped: TakeoffBidSeed["unmapped"] = [];
   for (const c of q.counts) {
     if (c.role === "curb") {
@@ -344,7 +408,7 @@ export function bidSeedFromTakeoff(
     });
   }
   for (const l of q.linears) {
-    if (l.role === "parapet") continue;
+    if (l.role === "parapet" || l.material) continue;
     unmapped.push({
       label: `${l.name}: ${ftIn(l.lengthFt)}`,
       detail: `${LINEAR_ROLE_LABELS[l.role]} — ${
@@ -356,6 +420,7 @@ export function bidSeedFromTakeoff(
       }.`,
     });
   }
+  unmapped.push(...materialNotes);
   for (const s of q.sections) {
     const walls = s.cutoutPerimetersFt.reduce((t, l) => t + l, 0);
     if (walls > 0)
@@ -393,6 +458,9 @@ export function bidSeedFromTakeoff(
     unmapped,
     summary: `${opts.takeoffName ? `From takeoff "${opts.takeoffName}"` : "From a takeoff"}: ${summaryParts.join("; ")}.`,
   };
+  if (otherAccessories.length) seed.otherAccessories = otherAccessories;
+  if (metals.length) seed.metals = metals;
+  if (nonDlLines.length) seed.nonDlLines = nonDlLines;
   if (setup.roofSystem) seed.roofSystem = setup.roofSystem;
   if (setup.attachment) seed.attachment = setup.attachment;
   if (setup.membraneAdhesiveName) seed.membraneAdhesiveName = setup.membraneAdhesiveName;
@@ -533,6 +601,10 @@ const roleWord = (r: LinearRole | null) => (r ? LINEAR_ROLE_LABELS[r].toLowerCas
  *    and drain rows take the new quantity in place (keeping adjust %, reuse rings, picks);
  *  - new drawing items are added (walls with the bid's parapet defaults, like "Add parapet");
  *    takeoff items no longer in the drawing are removed; hand-added items are untouched;
+ *  - a linear's material line (Other Accessories in whichever family group it sits, flat metals
+ *    and Non-DL lines) is matched by its takeoff object id and takes the seed's description,
+ *    quantity (feet), price and labor; a new one joins the bid's ACTIVE family group (or the
+ *    metals / Non-DL lines); one whose line lost its material is removed; hand-added lines stay;
  *  - the takeoff Setup's notes are carried into the bid's notes once (`withTakeoffNotes`).
  * `changes` lists only what actually changed, with old → new numbers.
  */
@@ -543,6 +615,11 @@ export function applyTakeoffToBid(
     curbs?: CurbInput[] | undefined;
     pipeStacks?: PipeStackEntry[] | undefined;
     drains?: DrainEntry[] | undefined;
+    /** The bid's roof system: picks the family group a NEW material line joins (absent: the seed's). */
+    roofSystem?: string | undefined;
+    otherAccessories?: Partial<OtherAccessoryLines> | undefined;
+    metals?: MetalLine[] | undefined;
+    nonDlLines?: NonDlLine[] | undefined;
     /** The bid's notes (Setup › 6. Notes). */
     notes?: string | undefined;
     /** For walls the drawing adds: the bid's parapet defaults, as "Add parapet" uses them. */
@@ -561,6 +638,9 @@ export function applyTakeoffToBid(
   curbs: CurbInput[];
   pipeStacks: PipeStackEntry[];
   drains: DrainEntry[];
+  otherAccessories: OtherAccessoryLines;
+  metals: MetalLine[];
+  nonDlLines: NonDlLine[];
   notes: string;
   changes: string[];
 } {
@@ -814,6 +894,102 @@ export function applyTakeoffToBid(
     (row) => row,
   );
 
+  // ── Material lines (a linear's price-list item): matched by takeoff object id ──
+  type Priced = { description: string; price: number; quantity: number };
+  /**
+   * `current` lines with the takeoff-linked ones updated from `seeded` (description, quantity,
+   * price, labor) or removed; the seeded lines not matched are returned as `added`.
+   */
+  function materialRows<R extends Priced>(
+    current: ReadonlyArray<R>,
+    seeded: ReadonlyArray<R & TakeoffLink>,
+  ): { kept: R[]; added: Array<R & TakeoffLink> } {
+    type Linked = R & TakeoffLink;
+    const mine = (current as Linked[]).filter((r) => linkIds(r).length > 0);
+    const pairs = pairUp(mine, seeded, [(b, s) => sameObject(b, s)]);
+    const used = new Set(pairs.values());
+    const kept: R[] = [];
+    let k = 0;
+    for (const r0 of current as Linked[]) {
+      if (linkIds(r0).length === 0) {
+        kept.push(r0);
+        continue;
+      }
+      const j = pairs.get(k++);
+      if (j === undefined) {
+        changes.push(`Removed line "${r0.description}" (no material on it in the drawing).`);
+        continue;
+      }
+      const o = seeded[j]!;
+      kept.push({ ...r0, ...o });
+      const diffs: string[] = [];
+      if (r0.description !== o.description) diffs.push(`now "${o.description}"`);
+      if (num(r0.quantity) !== num(o.quantity))
+        diffs.push(`${num(r0.quantity)} → ${num(o.quantity)}`);
+      if (r0.price !== o.price) diffs.push(`$${r0.price.toFixed(2)} → $${o.price.toFixed(2)}`);
+      if (diffs.length) changes.push(`${r0.description}: ${diffs.join("; ")}.`);
+    }
+    const added = seeded.filter((_, j) => !used.has(j));
+    for (const a of added) changes.push(`Added line "${a.description}" (×${num(a.quantity)}).`);
+    return { kept, added };
+  }
+  // Other Accessories: the takeoff's lines may sit in any family group (the roof system may have
+  // changed since); new ones join the bid's active group.
+  const other = normalizeOtherAccessories(bid.otherAccessories);
+  const otherSeeded = seed.otherAccessories ?? [];
+  const otherLinked = FAMILIES.flatMap((f) =>
+    other[f].map((line, i) => ({ f, i, line: line as SeededAccessoryLine })),
+  ).filter((x) => linkIds(x.line).length > 0);
+  const oPairs = pairUp(
+    otherLinked.map((x) => x.line),
+    otherSeeded,
+    [(b, s) => sameObject(b, s)],
+  );
+  const oUsed = new Set(oPairs.values());
+  const otherAccessories: OtherAccessoryLines = { duroLast: [], nonDlTpo: [], epdm: [] };
+  let ok = 0;
+  for (const f of FAMILIES)
+    other[f].forEach((line) => {
+      if (linkIds(line as SeededAccessoryLine).length === 0) {
+        otherAccessories[f].push(line);
+        return;
+      }
+      const j = oPairs.get(ok++);
+      if (j === undefined) {
+        changes.push(`Removed line "${line.description}" (no material on it in the drawing).`);
+        return;
+      }
+      const o = otherSeeded[j]!;
+      otherAccessories[f].push({ ...line, ...o });
+      const diffs: string[] = [];
+      if (line.description !== o.description) diffs.push(`now "${o.description}"`);
+      if (num(line.quantity) !== num(o.quantity))
+        diffs.push(`${num(line.quantity)} → ${num(o.quantity)}`);
+      if (line.price !== o.price) diffs.push(`$${line.price.toFixed(2)} → $${o.price.toFixed(2)}`);
+      if (diffs.length) changes.push(`${line.description}: ${diffs.join("; ")}.`);
+    });
+  const activeGroup = activeFamily(bid.roofSystem ?? seed.roofSystem ?? "");
+  otherSeeded.forEach((o, j) => {
+    if (oUsed.has(j)) return;
+    otherAccessories[activeGroup].push(o);
+    changes.push(`Added line "${o.description}" (×${num(o.quantity)}).`);
+  });
+  const metalRows = materialRows(bid.metals ?? [], seed.metals ?? []);
+  const metals: MetalLine[] = [...metalRows.kept, ...metalRows.added];
+  const nonDlRows = materialRows(bid.nonDlLines ?? [], seed.nonDlLines ?? []);
+  const nonDlLines: NonDlLine[] = [...nonDlRows.kept, ...nonDlRows.added];
+
   const notes = withTakeoffNotes(bid.notes, seed.setupNotes);
-  return { sections, parapets, curbs, pipeStacks, drains, notes, changes };
+  return {
+    sections,
+    parapets,
+    curbs,
+    pipeStacks,
+    drains,
+    otherAccessories,
+    metals,
+    nonDlLines,
+    notes,
+    changes,
+  };
 }

@@ -65,6 +65,15 @@
  * paragraph is gone: tips live in the toolbar tooltips (./hints.ts) and only a one-line status
  * chip shows while something is in progress. (5) The View menu (./view-prefs.ts) hides fills,
  * labels or lines, or shows only the selected object (keys F / Shift+L).
+ *
+ * Owner, Oct 27 (later; "right clicking should establish a point and finish a shape at the same
+ * time if it has enough points"): with Area, Linear or Cut-out, a right-click first places a
+ * corner where the cursor is — resolved exactly like a left click (`resolve`: close / typed
+ * length / snap / square-corner lock, Shift included) — and then finishes when the shape has
+ * enough points (./right-click.ts `rightClickOutcome`: area / cut-out ≥ 3, linear ≥ 2). Too few
+ * even then: the point stays and the "needs N points" toast shows. Nothing is added off the page
+ * or on the last point. Scale / Dimension / Penetrations, the edge session and stamping keep the
+ * old right-click ("Stop" / create).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
@@ -112,6 +121,7 @@ import {
   type ScaleNote,
 } from "./sheet-scale";
 import { statusLine, type DrawNoteContext } from "./hints";
+import { isOutlineTool, rightClickOutcome } from "./right-click";
 import {
   effectiveSnap,
   readSnapPrefs,
@@ -851,18 +861,29 @@ export function TakeoffViewer(props: ViewerProps) {
     if (stamp && !stampSource) setStamp(null);
   }, [stamp, stampSource]);
 
-  /** Finish the shape in progress; false when there is nothing (or not enough) to finish. */
-  const finish = (): boolean => {
-    if (tool === "area" && draft.length >= 3) props.onCreate("area", draft, roles);
-    else if (tool === "linear" && draft.length >= 2) props.onCreate("linear", draft, roles);
-    else if (tool === "cutout" && draft.length >= 3 && selectedArea)
-      props.onAddCutout(selectedArea.id, draft);
+  /**
+   * Finish the shape in progress from `points` (the draft, or the draft plus a right-click's
+   * corner); false when there is nothing (or not enough) to finish.
+   */
+  const finish = (points: readonly PagePoint[] = draft): boolean => {
+    const pts = [...points];
+    if (tool === "area" && pts.length >= 3) props.onCreate("area", pts, roles);
+    else if (tool === "linear" && pts.length >= 2) props.onCreate("linear", pts, roles);
+    else if (tool === "cutout" && pts.length >= 3 && selectedArea)
+      props.onAddCutout(selectedArea.id, pts);
     else if (tool === "count" && countSession) setCountSession(null);
     else return false;
     setDraft([]);
     setTyped("");
     return true;
   };
+
+  const tooFewToast = () =>
+    toast.info(
+      tool === "linear"
+        ? "A line needs at least 2 points."
+        : "An area needs at least 3 points — keep clicking corners, or press Esc to cancel.",
+    );
 
   /** Right-click: PlanSwift's "Stop" — finish what is being drawn, or stop stamping copies. */
   const stop = () => {
@@ -875,12 +896,36 @@ export function TakeoffViewer(props: ViewerProps) {
       setDraft([]);
       return;
     }
-    if (draft.length > 0 && typingTool)
-      toast.info(
-        tool === "linear"
-          ? "A line needs at least 2 points."
-          : "An area needs at least 3 points — keep clicking corners, or press Esc to cancel.",
-      );
+    if (draft.length > 0 && typingTool) tooFewToast();
+  };
+
+  /**
+   * Right-click on the page at `raw` (owner, Oct 27): with an outline tool and a shape in
+   * progress, place the corner the cursor resolves to — exactly as a left click would (close,
+   * typed length, snap, square-corner lock) — then finish when the shape has enough points
+   * (./right-click.ts). Off the page, or on the last point, nothing is added. Every other case
+   * (stamping, the other tools, nothing in progress) is "Stop" as before.
+   */
+  const rightClick = (raw: PagePoint) => {
+    if (stamp || !isOutlineTool(tool) || draft.length === 0) {
+      stop();
+      return;
+    }
+    if (tool === "cutout" && !selectedArea) {
+      stop();
+      return;
+    }
+    const onPage = raw[0] >= 0 && raw[1] >= 0 && raw[0] <= sizeW && raw[1] <= sizeH;
+    const out = rightClickOutcome(tool, draft, onPage ? resolve(raw).p : null, zoom, DOUBLE_PX);
+    if (out.finish) {
+      finish(out.draft);
+      return;
+    }
+    if (out.placed) {
+      setDraft(out.draft);
+      setTyped("");
+    }
+    tooFewToast();
   };
 
   /** Drop a press / drag-a-box in progress and let go of the pointer. */
@@ -1401,7 +1446,7 @@ export function TakeoffViewer(props: ViewerProps) {
                 if (e.button === 2) {
                   if (drawing) {
                     e.preventDefault();
-                    stop();
+                    rightClick(toPage(e));
                   }
                   return;
                 }
