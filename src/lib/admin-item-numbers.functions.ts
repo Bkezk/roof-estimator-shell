@@ -1,10 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import {
-  PACK_QTY_COLS,
-  pieceDefFromPack,
-  pieceDefFromUnitType,
-  type PieceDef,
-} from "@/lib/stock-units";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -34,130 +28,35 @@ export const listItemNumbers = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
-/** A price cell an item number can point at. */
-export interface PriceTarget {
-  screen_id: string;
-  category: string;
-  rows: string[];
-  price_cols: string[];
-  /** Current catalog value per row label → price column (null when blank / non-numeric). */
-  values: Record<string, Record<string, number | null>>;
-  /** The screen's pack-quantity column ("Fasteners/Box", "Parts/Bag", "Parts/Package"), if any. */
-  pack_col?: string;
-  /** Pack quantity per row label (units per box / bag / package) when the screen has one. */
-  packs?: Record<string, number | null>;
-  /** Adhesives: the product's own unit ("5-gal. Box Set", "4-Cartridge Case", …) per row. */
-  row_units?: Record<string, string>;
-  /** Pieces one priced pack holds, per row, where the catalog says (stock-units.ts). */
-  pieces?: Record<string, PieceDef>;
-}
+export type { PriceTarget } from "@/lib/price-targets";
 
-const numOrNull = (v: unknown): number | null => {
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-};
-
-import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { labelColOf } from "@/lib/catalog-row-key";
+import { hasItemNumbers, PRICE_TARGET_BRANCHES } from "@/lib/catalog-branches";
+import { NON_PRICE_COLS, priceTargetsOf, type PriceTarget } from "@/lib/price-targets";
 import {
   applyUpdatesToScreen,
   revertChangesOnScreen,
   type AppliedUpdate,
   type ScreenData,
 } from "@/lib/price-import-apply";
-const NON_PRICE_COLS = new Set([
-  "Part #",
-  "Open Part #",
-  "Closed Part #",
-  "Subtype",
-  "Size",
-  "Fasteners/Box",
-  "Parts/Bag",
-  "Parts/Package",
-]);
 
-/** The Duro-Last screens' product rows and price columns, for the mapping pickers. */
+/**
+ * The product rows and price columns of every pricing screen an item number can point at, for
+ * the mapping pickers: the four branches of catalog-branches.ts (Duro-Last, Non Duro-Last,
+ * Non-DL TPO Accessories, EPDM Accessories — owner, Oct 26–27), in that order, then each
+ * branch's screens by sort. Built by lib/price-targets.ts priceTargetsOf.
+ */
 export const listPriceTargets = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<PriceTarget[]> => {
     await assertPricingRead(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("pricing_catalog")
-      .select("id, category, data")
-      .eq("branch", "duro_last")
+      .select("id, branch, category, sort, data")
+      .in("branch", [...PRICE_TARGET_BRANCHES])
       .order("sort");
     if (error) throw new Error(error.message);
-    const out: PriceTarget[] = [];
-    for (const s of data ?? []) {
-      const d = s.data as {
-        kind?: string;
-        columns?: string[];
-        rows?: Record<string, unknown>[];
-        products?: { name: string; price?: unknown; unit_type?: unknown }[];
-      } | null;
-      if (!d) continue;
-      if (d.kind === "adhesives") {
-        const values: PriceTarget["values"] = {};
-        const rowUnits: Record<string, string> = {};
-        const pieces: Record<string, PieceDef> = {};
-        for (const p of d.products ?? []) {
-          values[p.name] = { price: numOrNull(p.price) };
-          if (typeof p.unit_type === "string" && p.unit_type.trim()) {
-            rowUnits[p.name] = p.unit_type.trim();
-            const def = pieceDefFromUnitType(p.unit_type);
-            if (def) pieces[p.name] = def;
-          }
-        }
-        out.push({
-          screen_id: s.id,
-          category: s.category,
-          rows: (d.products ?? []).map((p) => p.name),
-          price_cols: ["price"],
-          values,
-          row_units: rowUnits,
-          pieces,
-        });
-        continue;
-      }
-      if (d.kind) continue; // Exceptional Metals: no Duro-Last item numbers.
-      const cols = d.columns ?? [];
-      const labelCol = labelColOf(cols);
-      const priceCols = cols.filter((c) => c !== labelCol && !NON_PRICE_COLS.has(c));
-      const values: PriceTarget["values"] = {};
-      const rows: string[] = [];
-      const packCol = PACK_QTY_COLS.find((c) => cols.includes(c));
-      const packs: Record<string, number | null> = {};
-      // Rows are addressed by their KEY: the label, or "label [Subtype|Part #]" where the label
-      // repeats on the screen (catalog-row-key.ts).
-      const keys = rowKeys(cols, d.rows ?? []);
-      for (const [i, r] of (d.rows ?? []).entries()) {
-        const label = keys[i]!;
-        if (label === "") continue;
-        rows.push(label);
-        const v: Record<string, number | null> = {};
-        for (const c of priceCols) v[c] = numOrNull(r[c]);
-        values[label] = v;
-        if (packCol) packs[label] = numOrNull(r[packCol]);
-      }
-      const pieces: Record<string, PieceDef> = {};
-      if (packCol)
-        for (const [label, q] of Object.entries(packs)) {
-          const def = pieceDefFromPack(packCol, q);
-          if (def) pieces[label] = def;
-        }
-      out.push({
-        screen_id: s.id,
-        category: s.category,
-        rows,
-        price_cols: priceCols,
-        values,
-        ...(packCol ? { pack_col: packCol, packs, pieces } : {}),
-      });
-    }
-    return out;
+    return priceTargetsOf(data ?? []);
   });
 
 const mappingKey = z.object({
@@ -228,7 +127,7 @@ const addProductSchema = z.object({
 
 /**
  * Add a product the catalog never had (from a price-sheet line): appends a row to a flat
- * Duro-Last screen — name in the label column, the price in the chosen column, every other
+ * pricing screen (any of the four branches) — name in the label column, the price in the chosen column, every other
  * price/count column 0, the legacy "Part #" column(s) set to the item number — and maps the item
  * number to that cell so later imports keep it current. Master-detail screens (Adhesives,
  * Exceptional Metals) keep their own editors.
@@ -246,8 +145,8 @@ export const addCatalogProduct = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error(`Screen ${data.screen_id} not found`);
-    if (row.branch !== "duro_last")
-      throw new Error("Only Duro-Last screens take imported products");
+    if (!hasItemNumbers(row.branch))
+      throw new Error("Only the Estimate Pricing screens take imported products");
     const d = row.data as {
       kind?: string;
       columns?: string[];

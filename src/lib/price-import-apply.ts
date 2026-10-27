@@ -9,7 +9,19 @@ export interface ScreenData {
   columns?: string[];
   rows?: Record<string, unknown>[];
   products?: { name: string; price?: number }[];
+  /** Exceptional Metals (kind "metals"): the Pitch Pans rows take an item number on Unit Cost. */
+  subscreens?: {
+    pitch_pans?: { rows?: { description?: string | null; unit_cost?: unknown }[] };
+  };
 }
+
+/** The one Exceptional Metals cell per pitch pan an item number may point at (price-targets.ts). */
+const METALS_PITCH_PAN_COL = "Unit Cost";
+
+const pitchPanRow = (d: ScreenData, label: string) =>
+  (d.subscreens?.pitch_pans?.rows ?? []).find(
+    (r) => String(r.description ?? "").trim() === label.trim(),
+  );
 
 export interface CellUpdate {
   item_no: string;
@@ -55,6 +67,25 @@ export function applyUpdatesToScreen(
       }
       const old = typeof p.price === "number" ? p.price : null;
       p.price = u.price;
+      changed = true;
+      applied.push({ ...u, old, new: u.price });
+      continue;
+    }
+    if (d.kind === "metals") {
+      if (u.price_col !== METALS_PITCH_PAN_COL) {
+        missing.push({
+          item_no: u.item_no,
+          reason: `column "${u.price_col}" not on ${screenId} (pitch pans price by ${METALS_PITCH_PAN_COL})`,
+        });
+        continue;
+      }
+      const p = pitchPanRow(d, u.row_label);
+      if (!p) {
+        missing.push({ item_no: u.item_no, reason: `pitch pan "${u.row_label}" not found` });
+        continue;
+      }
+      const old = numOrNull(p.unit_cost);
+      p.unit_cost = u.price;
       changed = true;
       applied.push({ ...u, old, new: u.price });
       continue;
@@ -113,6 +144,18 @@ export function revertChangesOnScreen(
         continue;
       }
       p.price = oldP ?? 0;
+    } else if (d.kind === "metals") {
+      const p = c.price_col === METALS_PITCH_PAN_COL ? pitchPanRow(d, c.row_label) : undefined;
+      if (!p) {
+        skipped.push({ cell, reason: "pitch pan gone" });
+        continue;
+      }
+      const cur = numOrNull(p.unit_cost);
+      if (cur !== newP) {
+        skipped.push({ cell, reason: `edited since (now ${cur ?? "blank"})` });
+        continue;
+      }
+      p.unit_cost = oldP ?? 0;
     } else {
       const target = findRowByKey(d.columns ?? [], d.rows ?? [], c.row_label);
       if (!target) {

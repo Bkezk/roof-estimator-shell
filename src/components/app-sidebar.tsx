@@ -237,6 +237,8 @@ const adminItems: {
       { title: "Gravel Stops", cat: "Gravel Stops" },
       { title: "Walk Pads & Wall Vents", cat: "Walk Pads & Wall Vents" },
       { title: "Membrane Accs", cat: "Membrane Accs" },
+      // The Duro-Tech TPO items with no automatic count (owner, Oct 26–27).
+      { title: "Other Accessories", cat: "Other Accessories" },
       { title: "EXCEPTIONAL Metals", tab: "metals" },
       { title: "Item Numbers", tab: "items" },
     ],
@@ -248,6 +250,10 @@ const adminItems: {
     sub: [
       // Its own page (owner, Oct 22): the two families from the Duro-Last Membrane screen.
       { title: "Non-DL TPO and EPDM", url: "/admin/non-dl-membrane" },
+      // The accessory families' own pages (owner, Oct 26–27): the `non_dl_tpo` and `epdm`
+      // branches, each with a category picker like Duro-Last Pricing (catalog-branches.ts).
+      { title: "Non-DL TPO Accessories", url: "/admin/non-dl-tpo" },
+      { title: "EPDM Accessories", url: "/admin/epdm" },
       { title: "Roof Edge Blocking", cat: "Roof Edge Blocking" },
       { title: "Parapet Wall Blocking", cat: "Parapet Wall Blocking" },
       { title: "Structural Deck Materials", cat: "Structural Deck Materials" },

@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Trash2, Save } from "lucide-react";
 
+import { ADHESIVE_COVERAGE_GROUPS, ADHESIVE_GROUPS_LIST_ID } from "@/lib/adhesive-groups";
 import { getPricingScreen, savePricingScreen } from "@/lib/admin-pricing.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -239,12 +240,19 @@ export function AdhesivesTab() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                This grid IS the estimator&apos;s adhesive coverage (legacy AdhesiveCoverage): the
-                Duro-Last / Duro-Tuff / Duro-Fleece groups drive membrane and Walls units for that
-                system, the Insulations group drives insulation-layer units. A blank cell keeps the
-                installer-seeded value; 0 means &quot;needs a quote&quot;. Labor hours stay on Labor
-                &rsaquo; Adhesive Times.
+                This grid IS the estimator&apos;s adhesive coverage (legacy AdhesiveCoverage): a
+                roof-system group — Duro-Last / Duro-Bond / Duro-Tuff / Duro-Roof / Duro-Fleece, and
+                Duro-Tech TPO, Non-DL TPO and EPDM Rubber for the accessory families — drives the
+                membrane and Walls units for that system; the Insulations group drives
+                insulation-layer units. The Group cell offers those names; a bid only finds a group
+                spelled exactly that way. A blank cell keeps the installer-seeded value; 0 means
+                &quot;needs a quote&quot;. Labor hours stay on Labor &rsaquo; Adhesive Times.
               </p>
+              <datalist id={ADHESIVE_GROUPS_LIST_ID}>
+                {ADHESIVE_COVERAGE_GROUPS.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
               <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
@@ -260,6 +268,7 @@ export function AdhesivesTab() {
                       <TableRow key={ci}>
                         <TableCell>
                           <Input
+                            list={ADHESIVE_GROUPS_LIST_ID}
                             value={c.group}
                             onChange={(e) =>
                               mutate((d) => (d.products[idx]!.coverage[ci]!.group = e.target.value))

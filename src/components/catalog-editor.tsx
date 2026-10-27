@@ -9,6 +9,7 @@ import {
   listItemNumbers,
   upsertItemNumber,
 } from "@/lib/admin-item-numbers.functions";
+import { hasItemNumbers } from "@/lib/catalog-branches";
 import { rowKeys } from "@/lib/catalog-row-key";
 import { mergeRows, type CatalogRow } from "@/lib/non-dl-membrane";
 import {
@@ -92,11 +93,15 @@ export function CatalogEditor({
     queryKey: ["pricing-catalog", branch],
     queryFn: () => getFn({ data: { branch } }),
   });
+  // Item numbers on the rows: every pricing branch since the accessory families (owner, Oct
+  // 26–27) — the Duro-Last screens, Non Duro-Last (Preset Custom Applications), Non-DL TPO
+  // Accessories and EPDM Accessories (catalog-branches.ts hasItemNumbers).
+  const showItemNumbers = hasItemNumbers(branch);
   const itemNosFn = useServerFn(listItemNumbers);
   const { data: itemNumbers } = useQuery({
     queryKey: ["item-numbers"],
     queryFn: () => itemNosFn(),
-    enabled: branch === "duro_last",
+    enabled: showItemNumbers,
   });
   // Inline item-number entry on the row (the Item Numbers tab does the same with more room).
   const upsertItemFn = useServerFn(upsertItemNumber);
@@ -176,6 +181,8 @@ export function CatalogEditor({
   const cols = draft.columns;
   // Legacy part-number columns hold text ("1225B", "1312 BF"): never a number input.
   const isPartCol = (c: string) => /part\s*#/i.test(c);
+  // So does a fastener's Subtype ("Auger", "Spade" — the Duro-Last and the family screens).
+  const isTextCol = (c: string) => isPartCol(c) || c === "Subtype";
   // Mappings address a row by its key (label, or "label [Subtype|Part #]" where the label
   // repeats on the screen — catalog-row-key.ts), the same key the server resolves on apply.
   const keyByIndex = rowKeys(cols, draft.rows);
@@ -326,10 +333,10 @@ export function CatalogEditor({
                     {c}
                   </TableHead>
                 ))}
-                {branch === "duro_last" && (
+                {showItemNumbers && (
                   <TableHead
                     className="whitespace-nowrap"
-                    title="Duro-Last item numbers mapped to this product (Item Numbers & Price Import tab)"
+                    title="Item numbers mapped to this product — a price-list import updates the row by them (Duro-Last Pricing › Item Numbers)"
                   >
                     Item #
                   </TableHead>
@@ -356,7 +363,7 @@ export function CatalogEditor({
                   </TableCell>
                   {valueCols.map((c) => (
                     <TableCell key={c}>
-                      {isPartCol(c) ? (
+                      {isTextCol(c) ? (
                         <Input
                           value={String(row[c] ?? "")}
                           onChange={(e) => setCell(ri, c, e.target.value)}
@@ -373,10 +380,10 @@ export function CatalogEditor({
                       )}
                     </TableCell>
                   ))}
-                  {branch === "duro_last" &&
+                  {showItemNumbers &&
                     (() => {
                       const rowLabel = rowKeyOf(row);
-                      const priceCols = valueCols.filter((c) => !isPartCol(c));
+                      const priceCols = valueCols.filter((c) => !isTextCol(c));
                       const entry = itemEntry?.row === rowLabel ? itemEntry : null;
                       return (
                         <TableCell className="max-w-[340px] text-xs">
@@ -462,7 +469,7 @@ export function CatalogEditor({
                             <button
                               type="button"
                               className="inline-flex items-center rounded border border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-foreground"
-                              title="Add a Duro-Last item number to this product"
+                              title="Add an item number to this product (a price-list import updates it by that number)"
                               onClick={() =>
                                 setItemEntry({
                                   row: rowLabel,

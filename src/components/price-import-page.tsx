@@ -33,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TargetPicker } from "@/components/item-number-target-picker";
+import { screenTitle } from "@/lib/catalog-branches";
 import { firstTarget, type TargetRef } from "@/lib/item-number-targets";
 import {
   addCatalogProduct,
@@ -555,10 +556,9 @@ export function PriceImportPage() {
     price: number;
   } | null>(null);
   const [addingProduct, setAddingProduct] = useState(false);
-  const flatTargets = useMemo(
-    () => targets.filter((t) => t.screen_id !== "duro_last:adhesives"),
-    [targets],
-  );
+  // A new product lands on a flat screen (any branch); Adhesives and Exceptional Metals keep
+  // their own editors.
+  const flatTargets = useMemo(() => targets.filter((t) => !t.kind), [targets]);
   const openNewProduct = (it: SheetItem) => {
     const t = flatTargets[0];
     if (!t) return;
@@ -1728,9 +1728,7 @@ function ImportHistory() {
                           {(changesQ.data ?? []).map((c: PriceImportChange) => (
                             <TableRow key={c.id}>
                               <TableCell className="font-mono text-xs">{c.item_no}</TableCell>
-                              <TableCell className="text-xs">
-                                {c.screen_id.replace(/^duro_last:/, "")}
-                              </TableCell>
+                              <TableCell className="text-xs">{screenTitle(c.screen_id)}</TableCell>
                               <TableCell className="text-xs">
                                 {c.row_label} · {c.price_col}
                               </TableCell>

@@ -25,6 +25,7 @@ import {
   type ItemNumberRow,
 } from "@/lib/admin-item-numbers.functions";
 import { TargetPicker } from "@/components/item-number-target-picker";
+import { branchLabel, branchOfScreen, groupByBranch } from "@/lib/catalog-branches";
 import { firstTarget, type TargetRef } from "@/lib/item-number-targets";
 
 const money = (v: number | null | undefined) =>
@@ -32,7 +33,12 @@ const money = (v: number | null | undefined) =>
     ? "—"
     : v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
 
-/** Admin › Duro-Last Pricing › Item Numbers: the item number → price cell map. */
+/**
+ * Admin › Duro-Last Pricing › Item Numbers: the item number → price cell map. Since the accessory
+ * families (owner, Oct 26–27) the cells come from four branches — Duro-Last Pricing, Non Duro-Last
+ * Pricing, Non-DL TPO Accessories, EPDM Accessories (catalog-branches.ts) — and the list and the
+ * gaps are grouped by branch, then by screen.
+ */
 export function ItemNumbersTab() {
   const qc = useQueryClient();
   const listFn = useServerFn(listItemNumbers);
@@ -93,30 +99,40 @@ export function ItemNumbersTab() {
             m.item_no.toLowerCase().includes(f) ||
             m.row_label.toLowerCase().includes(f) ||
             (m.dl_description ?? "").toLowerCase().includes(f) ||
-            catOf(m.screen_id).toLowerCase().includes(f),
+            catOf(m.screen_id).toLowerCase().includes(f) ||
+            branchLabel(branchOfScreen(m.screen_id)).toLowerCase().includes(f),
         )
       : mappings;
-    const g = new Map<string, ItemNumberRow[]>();
-    for (const m of rows) {
-      const arr = g.get(m.screen_id);
-      if (arr) arr.push(m);
-      else g.set(m.screen_id, [m]);
-    }
-    return [...g.entries()];
+    // Branch (menu order) → screen (the mappings' order, which is by screen id) → rows.
+    return groupByBranch(rows).map((b) => {
+      const g = new Map<string, ItemNumberRow[]>();
+      for (const m of b.items) {
+        const arr = g.get(m.screen_id);
+        if (arr) arr.push(m);
+        else g.set(m.screen_id, [m]);
+      }
+      return { ...b, screens: [...g.entries()] };
+    });
   }, [mappings, filter, targets]);
 
   // Products with no item number at all (per screen) — the gaps to fill by hand.
   const unmappedProducts = useMemo(() => {
     const has = new Set(mappings.map((m) => `${m.screen_id}\u0000${m.row_label}`));
-    return targets
-      .map((t) => ({
-        screen_id: t.screen_id,
-        category: t.category,
-        price_col: t.price_cols[0] ?? "",
-        rows: t.rows.filter((r) => !has.has(`${t.screen_id}\u0000${r}`)),
-      }))
-      .filter((t) => t.rows.length > 0);
+    return groupByBranch(
+      targets
+        .map((t) => ({
+          screen_id: t.screen_id,
+          category: t.category,
+          price_col: t.price_cols[0] ?? "",
+          rows: t.rows.filter((r) => !has.has(`${t.screen_id}\u0000${r}`)),
+        }))
+        .filter((t) => t.rows.length > 0),
+    );
   }, [mappings, targets]);
+  const unmappedCount = unmappedProducts.reduce(
+    (n, b) => n + b.items.reduce((k, t) => k + t.rows.length, 0),
+    0,
+  );
   const [gapDrafts, setGapDrafts] = useState<Record<string, string>>({});
 
   if (mappingsQ.isLoading || targetsQ.isLoading)
@@ -127,10 +143,12 @@ export function ItemNumbersTab() {
       <CardHeader>
         <CardTitle className="text-base">Item numbers → products</CardTitle>
         <CardDescription>
-          Each Duro-Last item number points at one price cell (screen · product · price column). An
-          item number may feed several cells; a colour variant with its own item number gets its own
-          row. Seeded from the legacy part numbers — fix or add as Duro-Last&apos;s list differs.
-          Price sheets are loaded on{" "}
+          Each item number — Duro-Last, Duro-Tech or Firestone — points at one price cell (screen ·
+          product · price column) on Duro-Last Pricing, Non Duro-Last Pricing, Non-DL TPO
+          Accessories or EPDM Accessories. An item number may feed several cells; a colour variant
+          with its own item number gets its own row. Seeded from the legacy part numbers and the
+          owner&apos;s price sheets — fix or add as the vendors&apos; lists differ. Price sheets are
+          loaded on{" "}
           <Link to="/admin/price-import" className="text-primary underline underline-offset-2">
             Price List Import
           </Link>
@@ -163,47 +181,55 @@ export function ItemNumbersTab() {
           </Button>
         </div>
 
-        {unmappedProducts.length > 0 && (
+        {unmappedCount > 0 && (
           <details className="rounded-md border p-3">
             <summary className="cursor-pointer text-sm font-semibold">
-              Products without an item number (
-              {unmappedProducts.reduce((n, t) => n + t.rows.length, 0)})
+              Products without an item number ({unmappedCount})
             </summary>
-            <div className="mt-2 space-y-3">
-              {unmappedProducts.map((t) => (
-                <div key={t.screen_id}>
-                  <p className="text-xs font-semibold">{t.category}</p>
-                  <ul className="mt-1 space-y-1">
-                    {t.rows.map((r) => {
-                      const k = `${t.screen_id}\u0000${r}`;
-                      return (
-                        <li key={k} className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="min-w-[220px]">{r}</span>
-                          <Input
-                            className="h-7 w-[120px] text-xs"
-                            placeholder="Item #"
-                            value={gapDrafts[k] ?? ""}
-                            onChange={(e) => setGapDrafts((d) => ({ ...d, [k]: e.target.value }))}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7"
-                            disabled={!(gapDrafts[k] ?? "").trim() || !t.price_col}
-                            onClick={() =>
-                              void saveMapping(gapDrafts[k] ?? "", {
-                                screen_id: t.screen_id,
-                                row_label: r,
-                                price_col: t.price_col,
-                              })
-                            }
-                          >
-                            Assign → {t.price_col || "?"}
-                          </Button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+            <div className="mt-2 space-y-4">
+              {unmappedProducts.map((b) => (
+                <div key={b.branch} className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {b.label}
+                  </p>
+                  {b.items.map((t) => (
+                    <div key={t.screen_id}>
+                      <p className="text-xs font-semibold">{t.category}</p>
+                      <ul className="mt-1 space-y-1">
+                        {t.rows.map((r) => {
+                          const k = `${t.screen_id}\u0000${r}`;
+                          return (
+                            <li key={k} className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="min-w-[220px]">{r}</span>
+                              <Input
+                                className="h-7 w-[120px] text-xs"
+                                placeholder="Item #"
+                                value={gapDrafts[k] ?? ""}
+                                onChange={(e) =>
+                                  setGapDrafts((d) => ({ ...d, [k]: e.target.value }))
+                                }
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7"
+                                disabled={!(gapDrafts[k] ?? "").trim() || !t.price_col}
+                                onClick={() =>
+                                  void saveMapping(gapDrafts[k] ?? "", {
+                                    screen_id: t.screen_id,
+                                    row_label: r,
+                                    price_col: t.price_col,
+                                  })
+                                }
+                              >
+                                Assign → {t.price_col || "?"}
+                              </Button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -233,38 +259,52 @@ export function ItemNumbersTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {grouped.map(([screenId, rows]) => (
-                <Fragment key={screenId}>
-                  <TableRow className="bg-muted/50">
-                    <TableCell colSpan={7} className="text-xs font-semibold">
-                      {categoryOf(screenId)}
+              {grouped.map((b) => (
+                <Fragment key={b.branch}>
+                  <TableRow className="bg-muted">
+                    <TableCell
+                      colSpan={7}
+                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                    >
+                      {b.label}
                     </TableCell>
                   </TableRow>
-                  {rows.map((m) => (
-                    <TableRow key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}>
-                      <TableCell className="font-mono text-xs">{m.item_no}</TableCell>
-                      <TableCell className="text-xs">{m.row_label}</TableCell>
-                      <TableCell className="text-xs">{m.price_col}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {m.dl_description ?? ""}
-                      </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums">
-                        {money(m.last_price)}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {m.last_import_at ? new Date(m.last_import_at).toLocaleDateString() : ""}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Remove this mapping"
-                          onClick={() => void removeMapping(m)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                  {b.screens.map(([screenId, rows]) => (
+                    <Fragment key={screenId}>
+                      <TableRow className="bg-muted/50">
+                        <TableCell colSpan={7} className="text-xs font-semibold">
+                          {categoryOf(screenId)}
+                        </TableCell>
+                      </TableRow>
+                      {rows.map((m) => (
+                        <TableRow key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}>
+                          <TableCell className="font-mono text-xs">{m.item_no}</TableCell>
+                          <TableCell className="text-xs">{m.row_label}</TableCell>
+                          <TableCell className="text-xs">{m.price_col}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {m.dl_description ?? ""}
+                          </TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">
+                            {money(m.last_price)}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {m.last_import_at
+                              ? new Date(m.last_import_at).toLocaleDateString()
+                              : ""}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Remove this mapping"
+                              onClick={() => void removeMapping(m)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </Fragment>
                   ))}
                 </Fragment>
               ))}

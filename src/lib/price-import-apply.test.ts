@@ -115,6 +115,133 @@ describe("price import — apply and revert on a screen", () => {
     expect(JSON.stringify(d)).toBe(before);
   });
 
+  it("a family screen (epdm:sealants) is written like a Duro-Last one: by row label and column, old → new", () => {
+    // The seeded family rows are plain rows — no `_locked`, no branch in the data — so the apply
+    // needs nothing but the screen id the mapping names (owner, Oct 27: an upload updates the
+    // new accessories by item number).
+    const d: ScreenData = {
+      columns: ["Description", "Part #", "Price"],
+      rows: [
+        { Description: "Lap Sealant (10.3 oz tube)", "Part #": "W56RAC4180", Price: 12.5 },
+        { Description: "Water Block (10.3 oz tube)", "Part #": "W56RAC4190", Price: 9 },
+      ],
+    };
+    const r = applyUpdatesToScreen("epdm:sealants", d, [
+      {
+        item_no: "W56RAC4180",
+        screen_id: "epdm:sealants",
+        row_label: "Lap Sealant (10.3 oz tube)",
+        price_col: "Price",
+        price: 13.75,
+      },
+      {
+        item_no: "W56RAC9999",
+        screen_id: "epdm:sealants",
+        row_label: "Not here",
+        price_col: "Price",
+        price: 1,
+      },
+    ]);
+    expect(r.applied).toEqual([
+      {
+        item_no: "W56RAC4180",
+        screen_id: "epdm:sealants",
+        row_label: "Lap Sealant (10.3 oz tube)",
+        price_col: "Price",
+        price: 13.75,
+        old: 12.5,
+        new: 13.75,
+      },
+    ]);
+    expect(r.missing).toEqual([
+      { item_no: "W56RAC9999", reason: 'row "Not here" not on epdm:sealants' },
+    ]);
+    expect(d.rows![0]!["Price"]).toBe(13.75);
+    expect(d.rows![1]!["Price"]).toBe(9);
+    expect(d.rows![0]!["Part #"]).toBe("W56RAC4180");
+  });
+
+  it("Exceptional Metals: a pitch pan's Unit Cost by description (the Firestone penetration pockets), and back", () => {
+    const d: ScreenData = {
+      kind: "metals",
+      subscreens: {
+        pitch_pans: {
+          rows: [
+            { description: "Pitch Pan 4x4", unit_cost: 20 },
+            {
+              description: "QuickSeam QS6 Penetration Pocket Kit (6 kits/ctn, $273)",
+              unit_cost: 45.5,
+            },
+          ],
+        },
+      },
+    };
+    const label = "QuickSeam QS6 Penetration Pocket Kit (6 kits/ctn, $273)";
+    const r = applyUpdatesToScreen("duro_last:exceptional_metals", d, [
+      {
+        item_no: "W56RACQS06",
+        screen_id: "duro_last:exceptional_metals",
+        row_label: label,
+        price_col: "Unit Cost",
+        price: 50,
+      },
+      {
+        item_no: "W56RACQS06",
+        screen_id: "duro_last:exceptional_metals",
+        row_label: label,
+        price_col: "Price",
+        price: 1,
+      },
+      {
+        item_no: "W56RACQS10",
+        screen_id: "duro_last:exceptional_metals",
+        row_label: "QS10",
+        price_col: "Unit Cost",
+        price: 1,
+      },
+    ]);
+    expect(r.applied).toEqual([
+      {
+        item_no: "W56RACQS06",
+        screen_id: "duro_last:exceptional_metals",
+        row_label: label,
+        price_col: "Unit Cost",
+        price: 50,
+        old: 45.5,
+        new: 50,
+      },
+    ]);
+    expect(r.missing.map((m) => m.item_no)).toEqual(["W56RACQS06", "W56RACQS10"]);
+    expect(d.subscreens!.pitch_pans!.rows![1]!.unit_cost).toBe(50);
+    expect(d.subscreens!.pitch_pans!.rows![0]!.unit_cost).toBe(20);
+    const rv = revertChangesOnScreen("duro_last:exceptional_metals", d, [
+      {
+        id: 1,
+        screen_id: "duro_last:exceptional_metals",
+        row_label: label,
+        price_col: "Unit Cost",
+        old_price: 45.5,
+        new_price: 50,
+      },
+      {
+        id: 2,
+        screen_id: "duro_last:exceptional_metals",
+        row_label: "Pitch Pan 4x4",
+        price_col: "Unit Cost",
+        old_price: 1,
+        new_price: 99,
+      },
+    ]);
+    expect(rv.revertedIds).toEqual([1]);
+    expect(rv.skipped).toEqual([
+      {
+        cell: "duro_last:exceptional_metals › Pitch Pan 4x4 · Unit Cost",
+        reason: "edited since (now 20)",
+      },
+    ]);
+    expect(d.subscreens!.pitch_pans!.rows![1]!.unit_cost).toBe(45.5);
+  });
+
   it("adhesives screens go by product name", () => {
     const d: ScreenData = {
       kind: "adhesives",

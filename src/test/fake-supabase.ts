@@ -1,8 +1,8 @@
 /**
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
- * the server functions under test (select / insert / update / delete with eq, neq, in, is, not
- * is / not in / not like, ilike, or(ilike… / like / not.like / is.null / not.is.null / in /
- * not.in / eq), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
+ * the server functions under test (select / insert / upsert with onConflict / update / delete
+ * with eq, neq, in, is, not is / not in / not like, ilike, or(ilike… / like / not.like / is.null /
+ * not.is.null / in / not.in / eq), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
  * single; rpc technician_options, crm_user_options, the follow-up functions as missing, any
  * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
  * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
@@ -256,8 +256,10 @@ export function fakeSupabase(
       }
       return (tables[table] ??= []);
     };
-    let op: "select" | FakeWrite["op"] = "select";
+    let op: "select" | "upsert" | FakeWrite["op"] = "select";
     let payload: Row | Row[] | null = null;
+    // upsert: the columns of `onConflict` — a row matching them all is updated, else inserted.
+    let conflictCols: string[] = [];
     let wantCount = false;
     let max = Infinity;
     let offset = 0;
@@ -265,6 +267,45 @@ export function fakeSupabase(
     const preds: Array<(r: Row) => boolean> = [];
     const filters: string[] = [];
     const run = (): Result => {
+      if (op === "upsert") {
+        const list = Array.isArray(payload) ? payload : [payload ?? {}];
+        const out: Row[] = [];
+        let inserted = 0;
+        let updated = 0;
+        const label = `upsert on ${conflictCols.join(",")}`;
+        for (const p of list) {
+          const hit = conflictCols.length
+            ? rows().find((r) => conflictCols.every((c) => r[c] === p[c]))
+            : undefined;
+          if (hit) {
+            Object.assign(hit, p);
+            updated++;
+            out.push(hit);
+          } else {
+            const made = { id: `new-${++seq}`, ...p };
+            rows().push(made);
+            inserted++;
+            out.push(made);
+          }
+        }
+        if (updated)
+          writes.push({
+            table,
+            op: "update",
+            payload: list[0] ?? null,
+            filters: [label],
+            rows: updated,
+          });
+        if (inserted)
+          writes.push({
+            table,
+            op: "insert",
+            payload: list[0] ?? null,
+            filters: [label],
+            rows: inserted,
+          });
+        return { data: out.map((r) => project(r, cols)), error: null, count: out.length };
+      }
       if (op === "insert") {
         const list = Array.isArray(payload) ? payload : [payload ?? {}];
         const made = list.map((p) => ({ id: `new-${++seq}`, ...p }));
@@ -345,6 +386,15 @@ export function fakeSupabase(
       insert: (p: Row | Row[]) => {
         op = "insert";
         payload = p;
+        return b;
+      },
+      upsert: (p: Row | Row[], o?: { onConflict?: string }) => {
+        op = "upsert";
+        payload = p;
+        conflictCols = (o?.onConflict ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         return b;
       },
       delete: () => {

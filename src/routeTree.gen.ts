@@ -30,9 +30,11 @@ import { Route as TakeoffRouteImport } from './routes/takeoff'
 import { Route as AdminCenterpointImportRouteImport } from './routes/admin.centerpoint-import'
 import { Route as AdminDocumentsRouteImport } from './routes/admin.documents'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
+import { Route as AdminEpdmRouteImport } from './routes/admin.epdm'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
 import { Route as AdminNonDlMembraneRouteImport } from './routes/admin.non-dl-membrane'
+import { Route as AdminNonDlTpoRouteImport } from './routes/admin.non-dl-tpo'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
 import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
@@ -158,6 +160,11 @@ const AdminDuroLastRoute = AdminDuroLastRouteImport.update({
   path: '/admin/duro-last',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminEpdmRoute = AdminEpdmRouteImport.update({
+  id: '/admin/epdm',
+  path: '/admin/epdm',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminLaborRoute = AdminLaborRouteImport.update({
   id: '/admin/labor',
   path: '/admin/labor',
@@ -171,6 +178,11 @@ const AdminNonDlRoute = AdminNonDlRouteImport.update({
 const AdminNonDlMembraneRoute = AdminNonDlMembraneRouteImport.update({
   id: '/admin/non-dl-membrane',
   path: '/admin/non-dl-membrane',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminNonDlTpoRoute = AdminNonDlTpoRouteImport.update({
+  id: '/admin/non-dl-tpo',
+  path: '/admin/non-dl-tpo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminPriceImportRoute = AdminPriceImportRouteImport.update({
@@ -291,9 +303,11 @@ export interface FileRoutesByFullPath {
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
+  '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
+  '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -336,9 +350,11 @@ export interface FileRoutesByTo {
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
+  '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
+  '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -382,9 +398,11 @@ export interface FileRoutesById {
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
+  '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
+  '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
@@ -429,9 +447,11 @@ export interface FileRouteTypes {
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
+    | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/non-dl-membrane'
+    | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -474,9 +494,11 @@ export interface FileRouteTypes {
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
+    | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/non-dl-membrane'
+    | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -519,9 +541,11 @@ export interface FileRouteTypes {
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
+    | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/non-dl-membrane'
+    | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
     | '/admin/service-rates'
@@ -565,9 +589,11 @@ export interface RootRouteChildren {
   AdminCenterpointImportRoute: typeof AdminCenterpointImportRoute
   AdminDocumentsRoute: typeof AdminDocumentsRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
+  AdminEpdmRoute: typeof AdminEpdmRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
   AdminNonDlMembraneRoute: typeof AdminNonDlMembraneRoute
+  AdminNonDlTpoRoute: typeof AdminNonDlTpoRoute
   AdminPriceImportRoute: typeof AdminPriceImportRoute
   AdminRemindersRoute: typeof AdminRemindersRoute
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
@@ -735,6 +761,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDuroLastRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/epdm': {
+      id: '/admin/epdm'
+      path: '/admin/epdm'
+      fullPath: '/admin/epdm'
+      preLoaderRoute: typeof AdminEpdmRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/labor': {
       id: '/admin/labor'
       path: '/admin/labor'
@@ -754,6 +787,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/non-dl-membrane'
       fullPath: '/admin/non-dl-membrane'
       preLoaderRoute: typeof AdminNonDlMembraneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/non-dl-tpo': {
+      id: '/admin/non-dl-tpo'
+      path: '/admin/non-dl-tpo'
+      fullPath: '/admin/non-dl-tpo'
+      preLoaderRoute: typeof AdminNonDlTpoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/price-import': {
@@ -929,9 +969,11 @@ const rootRouteChildren: RootRouteChildren = {
   AdminCenterpointImportRoute: AdminCenterpointImportRoute,
   AdminDocumentsRoute: AdminDocumentsRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
+  AdminEpdmRoute: AdminEpdmRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
   AdminNonDlMembraneRoute: AdminNonDlMembraneRoute,
+  AdminNonDlTpoRoute: AdminNonDlTpoRoute,
   AdminPriceImportRoute: AdminPriceImportRoute,
   AdminRemindersRoute: AdminRemindersRoute,
   AdminServiceRatesRoute: AdminServiceRatesRoute,

@@ -2,20 +2,29 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import type { PriceTarget } from "@/lib/admin-item-numbers.functions";
+import { groupByBranch } from "@/lib/catalog-branches";
 import type { TargetRef } from "@/lib/item-number-targets";
 
-/** Pick a screen → product row → price column (the cell an item number points at). */
+/**
+ * Pick a screen → product row → price column (the cell an item number points at). The screens
+ * are listed under their branch — Duro-Last Pricing, Non Duro-Last Pricing, Non-DL TPO
+ * Accessories, EPDM Accessories (catalog-branches.ts) — since the accessory families (owner, Oct
+ * 26–27) gave the same category name ("Sealants") to a screen on each.
+ */
 export function TargetPicker(props: {
   targets: PriceTarget[];
   value: TargetRef;
   onChange: (v: TargetRef) => void;
 }) {
   const screen = props.targets.find((t) => t.screen_id === props.value.screen_id);
+  const byBranch = groupByBranch(props.targets);
   return (
     <div className="flex flex-wrap items-end gap-2">
       <div className="space-y-1">
@@ -35,10 +44,15 @@ export function TargetPicker(props: {
             <SelectValue placeholder="Screen" />
           </SelectTrigger>
           <SelectContent>
-            {props.targets.map((t) => (
-              <SelectItem key={t.screen_id} value={t.screen_id}>
-                {t.category}
-              </SelectItem>
+            {byBranch.map((b) => (
+              <SelectGroup key={b.branch}>
+                <SelectLabel>{b.label}</SelectLabel>
+                {b.items.map((t) => (
+                  <SelectItem key={t.screen_id} value={t.screen_id}>
+                    {t.category}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             ))}
           </SelectContent>
         </Select>
