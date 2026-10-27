@@ -18,10 +18,20 @@
  * extra Duro-Last options). On a Duro-Tech bid a prefixed vent (by colour) or pipe stack (by
  * size) REPLACES the Duro-Last row of the same key, so the automatic counts land on the TPO
  * part; every other prefixed row is ADDED beside the Duro-Last rows.
+ *
+ * ONE family counts the roof (owner, Oct 27: the three groups each counted the roof's term bar,
+ * so a bid showed the same $134.30 / 22.29 h in the Non-DL TPO and EPDM groups on top of the DL
+ * group — triple counting). The bid's roof system picks its ACTIVE family (`activeFamily`): only
+ * that family's group counts from the roof (sections, parapets, curbs, fastener needs, term bar
+ * footage, vents, T-joints, stripping, ARP); the other two groups stay available but bill the
+ * quantities typed into them only — they are computed with no geometry. On a Non-DL TPO or EPDM
+ * bid the engine's own §12 pass is switched off (`adminForBid` hands it no accessories ref) and
+ * the DL group is computed out here, typed-only, like the two families.
  */
 
 import {
   computeAccessories,
+  EDGE_FASTENER_GROUPS,
   normalizeAccessoriesState,
   parapetEdgeFastenersCount,
   type AccessoriesResult,
@@ -61,9 +71,35 @@ export const FAMILY_BRANCH: Record<AccessoryFamily, string> = {
   epdm: "epdm",
 };
 
-/** The two families computed outside the engine's own accessories pass. */
+/** The two families always computed outside the engine's own accessories pass. */
 export const EXTRA_FAMILIES = ["nonDlTpo", "epdm"] as const;
 export type ExtraFamily = (typeof EXTRA_FAMILIES)[number];
+
+/** The two roof systems whose bids are not Duro-Last family (engine/adapters LEGACY_RS_ID_BY_NAME). */
+export const NON_DL_TPO_SYSTEM = "Non-DL TPO";
+export const EPDM_SYSTEM = "EPDM Rubber";
+
+/**
+ * The family whose group counts from the roof on a bid: "Non-DL TPO" → nonDlTpo, "EPDM Rubber" →
+ * epdm, every other system (Duro-Last, Duro-Bond, Duro-Tuff, Duro-Roof, Duro-Fleece, Duro-Tech
+ * TPO) → duroLast.
+ */
+export function activeFamily(roofSystem: string): AccessoryFamily {
+  if (roofSystem === NON_DL_TPO_SYSTEM) return "nonDlTpo";
+  if (roofSystem === EPDM_SYSTEM) return "epdm";
+  return "duroLast";
+}
+
+/**
+ * The one-line note under a group that is not the bid's active family: its roof counts are in
+ * the active group, it bills typed quantities only. Null for the active group.
+ */
+export function inactiveFamilyNote(family: AccessoryFamily, roofSystem: string): string | null {
+  const active = activeFamily(roofSystem);
+  if (active === family) return null;
+  const article = /^[aeiou]/i.test(roofSystem) ? "an" : "a";
+  return `Counts from the roof go to the ${FAMILY_LABEL[active]} group on ${article} ${roofSystem} bid; this group bills the quantities you type.`;
+}
 
 /**
  * Seed conventions (src/lib/pricing-seed/accessory-families.ts), repeated here so the estimator
@@ -282,27 +318,45 @@ export function buildFamilyAccessoryData(args: {
   };
 }
 
+/** The Duro-Last screens' ref for a bid: the Duro-Tech merge on a "Duro-Tech TPO" bid, else plain. */
+const duroLastRef = (fam: FamilyAccessoryData, roofSystem: string): AccessoryRefData =>
+  roofSystem === DURO_TECH_SYSTEM ? fam.refs.duroTech : fam.refs.plain;
+
 /**
- * The admin data the engine runs a bid with: the DL accessories ref is the Duro-Tech merge on a
- * "Duro-Tech TPO" bid and the plain Duro-Last screens otherwise. A snapshot without families
- * (frozen before they existed) is returned unchanged.
+ * The admin data the engine runs a bid with. On a Duro-Last-family bid the DL accessories ref is
+ * the Duro-Tech merge on a "Duro-Tech TPO" bid and the plain Duro-Last screens otherwise. On a
+ * Non-DL TPO or EPDM bid the engine must NOT run its §12 pass with the roof (the active family's
+ * group counts it; the DL group is computed typed-only by computeFamilyResults), so the ref is
+ * withheld — and the engine's legacy no-ref fallback, which would auto-price the roof's ARP sq ft
+ * from `autoRates.arpPricePerSqFt` (a Duro-Last "ARP (SqFt)" row) or warn that it could not, is
+ * neutralised with a zero ARP rate: no Duro-Last charge, no misleading warning. A snapshot without
+ * families (frozen before they existed) is returned unchanged, so the engine runs DL with the roof
+ * exactly as before.
  */
 export function adminForBid<A extends AdminSnapshot>(admin: A, roofSystem: string): A {
   const fam = admin.accessoryFamilies;
   if (!fam) return admin;
-  return {
-    ...admin,
-    accessories: roofSystem === DURO_TECH_SYSTEM ? fam.refs.duroTech : fam.refs.plain,
-  };
+  if (activeFamily(roofSystem) !== "duroLast") {
+    return {
+      ...admin,
+      accessories: undefined,
+      autoRates: { ...(admin.autoRates ?? {}), arpPricePerSqFt: 0 },
+    };
+  }
+  return { ...admin, accessories: duroLastRef(fam, roofSystem) };
 }
 
-/** The ref the DL group's screens read on this bid (undefined on a snapshot without any). */
+/**
+ * The ref the DL group's screens read on this bid (undefined on a snapshot without any). Present
+ * on every roof system: on a Non-DL TPO / EPDM bid the DL screens still show, typed-only.
+ */
 export function duroLastRefForBid(
   admin: AdminSnapshot | null | undefined,
   roofSystem: string,
 ): AccessoryRefData | undefined {
   if (!admin) return undefined;
-  return adminForBid(admin, roofSystem).accessories;
+  const fam = admin.accessoryFamilies;
+  return fam ? duroLastRef(fam, roofSystem) : admin.accessories;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -320,54 +374,73 @@ export interface FamilyGeometry {
 
 /** The saved per-family state (optional so older saved bids stay valid). */
 export interface FamilyBidState {
+  /** The DL group's state — read here only on a Non-DL TPO / EPDM bid (typed-only DL group). */
+  accessoriesCalc?: Partial<AccessoriesState> | undefined;
   accessoriesCalcTpo?: Partial<AccessoriesState> | undefined;
   accessoriesCalcEpdm?: Partial<AccessoriesState> | undefined;
   otherAccessories?: Partial<OtherAccessoryLines> | undefined;
 }
 
-export const FAMILY_STATE_KEY: Record<ExtraFamily, "accessoriesCalcTpo" | "accessoriesCalcEpdm"> = {
+export const FAMILY_STATE_KEY: Record<
+  AccessoryFamily,
+  "accessoriesCalc" | "accessoriesCalcTpo" | "accessoriesCalcEpdm"
+> = {
+  duroLast: "accessoriesCalc",
   nonDlTpo: "accessoriesCalcTpo",
   epdm: "accessoriesCalcEpdm",
 };
 
 /**
- * The engine args for one extra family: the bid-builder's shape minus stripping and ARP, which
- * are Duro-Last-only rows. Null when the snapshot carries no family refs.
+ * The engine args for one family: the bid-builder's shape minus stripping, which is a Duro-Last
+ * engine row. The bid's ACTIVE family gets the roof (sections, parapets, curbs, the parapet
+ * wall-tab fastener count); any other family is computed with no geometry, so only the quantities
+ * typed into its screens bill. Null when the snapshot carries no family refs.
  */
 export function familyComputeArgs(
-  family: ExtraFamily,
+  family: AccessoryFamily,
   state: AccessoriesState,
   admin: AdminSnapshot,
   geo: FamilyGeometry,
 ): ComputeAccessoriesArgs | null {
-  const ref = admin.accessoryFamilies?.refs[family];
-  if (!ref) return null;
-  const parapets = geo.parapets ?? [];
+  const fam = admin.accessoryFamilies;
+  if (!fam) return null;
+  const ref = family === "duroLast" ? duroLastRef(fam, geo.roofSystem) : fam.refs[family];
+  const countsRoof = activeFamily(geo.roofSystem) === family;
+  const parapets = countsRoof ? (geo.parapets ?? []) : [];
   const byBoard = admin.underlaymentGroups?.groupIdByBoard;
   return {
     state,
     ref,
-    sections: geo.sections,
+    sections: countsRoof ? geo.sections : [],
     parapets,
-    curbs: geo.curbs ?? [],
+    curbs: countsRoof ? (geo.curbs ?? []) : [],
     roofSystem: geo.roofSystem,
     attachment: geo.attachment,
     arpCalcSqFt: 0,
-    parapetEdgeFasteners: parapetEdgeFastenersCount(parapets, geo.roofSystem, geo.attachment),
+    parapetEdgeFasteners: countsRoof
+      ? parapetEdgeFastenersCount(parapets, geo.roofSystem, geo.attachment)
+      : 0,
     ...(byBoard ? { underlaymentSubtypeByBoard: byBoard } : {}),
   };
 }
 
-export type FamilyResults = Partial<Record<ExtraFamily, AccessoriesResult>>;
+export type FamilyResults = Partial<Record<AccessoryFamily, AccessoriesResult>>;
 
-/** Run the engine for the Non-DL TPO and EPDM groups (absent when the snapshot has no families). */
+/**
+ * Run the engine for the Non-DL TPO and EPDM groups — the active one with the roof, the other
+ * typed-only — and, on a Non-DL TPO / EPDM bid, for the DL group too (typed-only, with the
+ * Duro-Last ref), since the engine's own pass is switched off there (adminForBid). Absent when
+ * the snapshot has no families.
+ */
 export function computeFamilyResults(
   saved: FamilyBidState & FamilyGeometry,
   admin: AdminSnapshot | null | undefined,
 ): FamilyResults {
   const out: FamilyResults = {};
   if (!admin?.accessoryFamilies) return out;
-  for (const family of EXTRA_FAMILIES) {
+  const families: readonly AccessoryFamily[] =
+    activeFamily(saved.roofSystem) === "duroLast" ? EXTRA_FAMILIES : FAMILIES;
+  for (const family of families) {
     const args = familyComputeArgs(
       family,
       normalizeAccessoriesState(saved[FAMILY_STATE_KEY[family]]),
@@ -417,9 +490,10 @@ export function familyAccessoryLines(
 }
 
 /**
- * The bid's engine-input `accessories`: the old flat picker lines, then each extra family's
- * computed lines, then every family's Other-accessories picks. Estimator and proposal both
- * compose through here so their totals cannot drift.
+ * The bid's engine-input `accessories`: the old flat picker lines, then each family's computed
+ * lines (the DL group's only on a Non-DL TPO / EPDM bid, where the engine does not run them),
+ * then every family's Other-accessories picks. Estimator and proposal both compose through here
+ * so their totals cannot drift.
  */
 export function composeAccessoryLines(
   flat: AccessoryLine[],
@@ -429,6 +503,7 @@ export function composeAccessoryLines(
   const o = normalizeOtherAccessories(other);
   return [
     ...flat,
+    ...(results.duroLast ? familyAccessoryLines(results.duroLast, "duroLast") : []),
     ...(results.nonDlTpo ? familyAccessoryLines(results.nonDlTpo, "nonDlTpo") : []),
     ...(results.epdm ? familyAccessoryLines(results.epdm, "epdm") : []),
     ...o.duroLast,
@@ -451,19 +526,92 @@ export function withFamilyAccessories<B extends { accessories: AccessoryLine[] }
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * The family groups' fastener screens (owner's screenshot, Oct 27: Non-DL TPO › Parapet Wall-Tabs
+ * showed "Fasteners Needed: 632 / Steel Plates Needed: 632" and no rows)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The two families whose fastener screens list rows by subtype (the DL group keeps its catalog keys). */
+export const isNonDlFamily = (family: AccessoryFamily | undefined): family is ExtraFamily =>
+  family === "nonDlTpo" || family === "epdm";
+
+/**
+ * Natural inch-size sort key for a fastener description: `1 1/2" Spade` → 1.5, `1-1/4" All-Purpose`
+ * → 1.25, `10" Pre-Assembled` → 10; descriptions without a leading size sort last.
+ */
+export function fastenerInchKey(description: string): number {
+  const m = /^(\d+)(?:[\s-]+(\d+)\/(\d+))?"/.exec(description.trim());
+  if (!m) return 999;
+  return Number(m[1]) + (m[2] ? Number(m[2]) / Number(m[3]) : 0);
+}
+
+/**
+ * The fastener catalog keys of a family ref's rows of the given subtypes, size-sorted — what a
+ * family group's edge / parapet / plate grid lists instead of the engine's fixed Duro-Last keys
+ * (EDGE_FASTENER_GROUPS / PLATE_ROWS: '3" Square Steel|DL-Plates', 'Metal Anchors|' …), which the
+ * Firestone catalogs do not carry. Edge screens → Spade + XHD; Parapet Wall-Tabs → XHD; Steel
+ * Plates → DL-Plates; Masonry Bits → Bit-*.
+ */
+export function familyFastenerKeys(
+  ref: Pick<AccessoryRefData, "fasteners"> | undefined,
+  subtypes: readonly string[],
+): string[] {
+  return (ref?.fasteners ?? [])
+    .filter((f) => subtypes.includes(f.subtype))
+    .sort((a, b) => fastenerInchKey(a.description) - fastenerInchKey(b.description))
+    .map((f) => f.key);
+}
+
+export const FAMILY_EDGE_SUBTYPES: readonly string[] = ["Spade", "XHD"];
+export const FAMILY_PARAPET_SUBTYPES: readonly string[] = ["XHD"];
+export const FAMILY_PLATE_SUBTYPES: readonly string[] = ["DL-Plates"];
+
+/**
+ * The parapet screen's Needed figures for a family group. The frozen engine nets the parapet
+ * entries against its Duro-Last group keys only (EDGE_FASTENER_GROUPS.parapet / PLATE_ROWS.steel),
+ * so a family's typed XHD and plate rows would leave its counters red for ever; this nets them
+ * for display exactly as the engine nets its own rows: fasteners = needed − Σ typed non-plate
+ * rows, steel plates = max(needed, typed fasteners) − Σ typed plate rows. Rows the engine already
+ * netted (its own group keys) are not counted twice. The money is untouched: the engine bills
+ * every typed box whatever its key.
+ */
+export function familyParapetNeeds(
+  result: Pick<AccessoriesResult, "parapetTabs"> | undefined,
+  state: Pick<AccessoriesState, "fastenerQty">,
+  ref: Pick<AccessoryRefData, "fasteners"> | undefined,
+): { fastenersNeeded: number; steelPlatesNeeded: number } {
+  const needed = result?.parapetTabs.fastenersNeeded ?? 0;
+  const plates = result?.parapetTabs.steelPlatesNeeded ?? 0;
+  const subtypeOf = new Map((ref?.fasteners ?? []).map((f) => [f.key, f.subtype] as const));
+  let typedFasteners = 0;
+  let typedPlates = 0;
+  for (const [key, qty] of Object.entries(state.fastenerQty.parapet ?? {})) {
+    if (!qty || EDGE_FASTENER_GROUPS.parapet.includes(key)) continue;
+    const subtype = subtypeOf.get(key);
+    if (subtype === undefined) continue;
+    if (subtype === "DL-Plates") typedPlates += qty;
+    else typedFasteners += qty;
+  }
+  return {
+    fastenersNeeded: needed - typedFasteners,
+    steelPlatesNeeded: Math.max(plates, typedFasteners) - typedPlates,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Review / Accessories Summary rows
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * Accessories Summary rows for the two extra families' results and every family's Other picks,
- * grouped by `<Family label> · <screen>` so the card lists them under their family.
+ * Accessories Summary rows for the family results (the DL group's only when computed out here,
+ * on a Non-DL TPO / EPDM bid) and every family's Other picks, grouped by `<Family label> ·
+ * <screen>` so the card lists them under their family.
  */
 export function familyReviewLines(
   results: FamilyResults,
   other: Partial<OtherAccessoryLines> | null | undefined,
 ): AccessoryReviewLine[] {
   const out: AccessoryReviewLine[] = [];
-  for (const family of EXTRA_FAMILIES) {
+  for (const family of FAMILIES) {
     const r = results[family];
     if (!r) continue;
     for (const l of r.lines) out.push({ ...l, screen: `${FAMILY_LABEL[family]} · ${l.screen}` });

@@ -5,6 +5,7 @@ import { AdhesivesTab } from "@/components/adhesives-editor";
 import { ExceptionalMetalsTab } from "@/components/exceptional-metals-editor";
 import { ItemNumbersTab } from "@/components/item-numbers-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { isDuroLastAdhesive } from "@/lib/non-dl-adhesives";
 import { isNonDlMembraneRow, MEMBRANE_CATEGORY } from "@/lib/non-dl-membrane";
 
 const DL_TABS = ["catalog", "adhesives", "metals", "items"] as const;
@@ -61,7 +62,10 @@ function DuroLastPage() {
           />
         </TabsContent>
         <TabsContent value="adhesives">
-          <AdhesivesTab />
+          {/* The Firestone / I.S.O. products show on Non-DL TPO and EPDM Adhesives (owner,
+              Oct 27); the engine keeps reading them from this one screen — lib/non-dl-adhesives.ts.
+              TECH-Bond (Duro-Tech, a Duro-Last family) stays here. */}
+          <AdhesivesTab productFilter={isDuroLastAdhesive} />
         </TabsContent>
         <TabsContent value="metals">
           <ExceptionalMetalsTab />

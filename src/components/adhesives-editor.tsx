@@ -6,6 +6,11 @@ import { Plus, Trash2, Save } from "lucide-react";
 
 import { ADHESIVE_COVERAGE_GROUPS, ADHESIVE_GROUPS_LIST_ID } from "@/lib/adhesive-groups";
 import { getPricingScreen, savePricingScreen } from "@/lib/admin-pricing.functions";
+import {
+  ADHESIVES_SCREEN_ID,
+  mergeAdhesiveProducts,
+  type AdhesiveProduct,
+} from "@/lib/non-dl-adhesives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const SCREEN_ID = "duro_last:adhesives";
+const SCREEN_ID = ADHESIVES_SCREEN_ID;
 
 const numOrNull = (v: string): number | null => {
   if (v.trim() === "") return null;
@@ -35,20 +40,6 @@ const numOrNull = (v: string): number | null => {
 };
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
-interface CoverageRow {
-  group: string;
-  substrate: string;
-  field_coverage: number | null;
-}
-interface AdhesiveProduct {
-  name: string;
-  price: number;
-  unit_type: string;
-  part_no: string;
-  field_spacing: string;
-  perim_spacing: string;
-  coverage: CoverageRow[];
-}
 interface AdhesivesData {
   kind: "adhesives";
   master_label?: string;
@@ -58,17 +49,31 @@ interface AdhesivesData {
   gaps?: string[];
 }
 
-const emptyProduct = (): AdhesiveProduct => ({
+/** A new product; with a group, its first coverage row starts in that group (the non-DL page). */
+const emptyProduct = (group?: string): AdhesiveProduct => ({
   name: "New Adhesive",
   price: 0,
   unit_type: "",
   part_no: "",
   field_spacing: "",
   perim_spacing: "",
-  coverage: [],
+  coverage: group ? [{ group, substrate: "", field_coverage: 0 }] : [],
 });
 
-export function AdhesivesTab() {
+export interface AdhesivesTabProps {
+  /**
+   * A view of part of the one adhesives screen (owner, Oct 27: the Firestone / I.S.O. products on
+   * their own Non-DL TPO and EPDM Adhesives page while the engine keeps reading the one screen;
+   * lib/non-dl-adhesives.ts): only the products passing the filter are listed and edited, and the
+   * save merges them back into the whole product list (mergeAdhesiveProducts), the rest untouched.
+   * Absent = every product.
+   */
+  productFilter?: ((product: AdhesiveProduct) => boolean) | undefined;
+  /** The coverage group a product added here starts with (so it belongs to this view). */
+  newProductGroup?: string | undefined;
+}
+
+export function AdhesivesTab({ productFilter, newProductGroup }: AdhesivesTabProps = {}) {
   const qc = useQueryClient();
   const getFn = useServerFn(getPricingScreen);
   const saveFn = useServerFn(savePricingScreen);
@@ -81,11 +86,17 @@ export function AdhesivesTab() {
   const [selIdx, setSelIdx] = useState(0);
   const [saving, setSaving] = useState(false);
 
+  // The screen as stored, and the view of it this editor works on (the filtered products).
+  const stored = useMemo<AdhesivesData | null>(
+    () => (row ? (row.data as unknown as AdhesivesData) : null),
+    [row],
+  );
   const data = useMemo<AdhesivesData | null>(() => {
     if (draft) return draft;
-    if (!row) return null;
-    return row.data as unknown as AdhesivesData;
-  }, [draft, row]);
+    if (!stored) return null;
+    if (!productFilter) return stored;
+    return { ...stored, products: (stored.products ?? []).filter(productFilter) };
+  }, [draft, stored, productFilter]);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading adhesives…</p>;
@@ -107,8 +118,17 @@ export function AdhesivesTab() {
   const save = async () => {
     setSaving(true);
     try {
-      await saveFn({ data: { id: SCREEN_ID, data: data as unknown as Record<string, unknown> } });
-      qc.setQueryData(["pricing-screen", SCREEN_ID], { ...row, data });
+      // A filtered view saves the WHOLE screen: its edited products merged back among the ones
+      // it never showed (lib/non-dl-adhesives.ts).
+      const whole: AdhesivesData =
+        productFilter && stored
+          ? {
+              ...data,
+              products: mergeAdhesiveProducts(stored.products ?? [], productFilter, data.products),
+            }
+          : data;
+      await saveFn({ data: { id: SCREEN_ID, data: whole as unknown as Record<string, unknown> } });
+      qc.setQueryData(["pricing-screen", SCREEN_ID], { ...row, data: whole });
       setDraft(null);
       toast.success("Adhesives saved");
     } catch (e) {
@@ -140,7 +160,7 @@ export function AdhesivesTab() {
               variant="outline"
               size="sm"
               onClick={() => {
-                mutate((d) => d.products.push(emptyProduct()));
+                mutate((d) => d.products.push(emptyProduct(newProductGroup)));
                 setSelIdx(products.length);
               }}
             >

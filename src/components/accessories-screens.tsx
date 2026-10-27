@@ -10,6 +10,13 @@ import { Trash2 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 
 import {
+  FAMILY_EDGE_SUBTYPES,
+  FAMILY_PARAPET_SUBTYPES,
+  FAMILY_PLATE_SUBTYPES,
+  familyFastenerKeys,
+  familyParapetNeeds,
+  fastenerInchKey,
+  isNonDlFamily,
   otherAccessoryLine,
   type AccessoryFamily,
   type OtherAccessoryItem,
@@ -61,7 +68,7 @@ const usd = (v: number) =>
 const hrs2 = (v: number) => v.toFixed(2).replace(/\.00$/, "") + " h";
 
 /** Screen ids in tree order. */
-type ScreenId =
+export type ScreenId =
   | "corners"
   | "pipeStacks"
   | "washers"
@@ -145,6 +152,15 @@ export interface AccessoriesScreensProps {
    * for (EPDM has no vents, neither has fascia, …).
    */
   family?: AccessoryFamily | undefined;
+  /**
+   * Whether this group counts from the roof on this bid (lib/accessory-families.ts activeFamily;
+   * default true). False = the group bills typed quantities only: its "Fasteners Needed" /
+   * "Items Required" / "Steel Plates Needed" lines are hidden (they would read 0) and no tree
+   * name shows red.
+   */
+  countsFromRoof?: boolean | undefined;
+  /** The screen open at first (default Term Bar). */
+  initialScreen?: ScreenId | undefined;
   /** The family's Other accessories items; absent = no Other Accessories screen. */
   otherItems?: OtherAccessoryItem[] | undefined;
   /** The picked Other accessories lines (saved on the bid) and their setter. */
@@ -708,13 +724,6 @@ function DrainsScreen(
   );
 }
 
-/** Natural inch-size sort key for fastener descriptions (`1 1/2"` → 1.5, `10"` → 10). */
-function inchKey(desc: string): number {
-  const m = /^(\d+)(?:\s+(\d+)\/(\d+))?"/.exec(desc.trim());
-  if (!m) return 999;
-  return Number(m[1]) + (m[2] ? Number(m[2]) / Number(m[3]) : 0);
-}
-
 /**
  * Screens a family group hides because its ref carries nothing for them. The DL group (no
  * family / "duroLast") shows every screen as before; every group hides Other Accessories when
@@ -761,8 +770,19 @@ function hiddenAccessoryScreens(
 
 export function AccessoriesScreens(props: AccessoriesScreensProps) {
   const { state, onChange, refData, result } = props;
-  const [chosenScreen, setScreenId] = useState<ScreenId>("termBar");
+  const [chosenScreen, setScreenId] = useState<ScreenId>(props.initialScreen ?? "termBar");
   const [snapSize, setSnapSize] = useState<SnapSize>("3");
+  // A Non-DL TPO / EPDM group lists its fastener rows by subtype (its catalog has none of the
+  // engine's fixed Duro-Last keys); a group that does not count from the roof on this bid hides
+  // its Needed lines (lib/accessory-families.ts).
+  const nonDl = isNonDlFamily(props.family);
+  const countsFromRoof = props.countsFromRoof ?? true;
+  const parapetNeeds = nonDl
+    ? familyParapetNeeds(result, state, refData)
+    : {
+        fastenersNeeded: result?.parapetTabs.fastenersNeeded ?? 0,
+        steelPlatesNeeded: result?.parapetTabs.steelPlatesNeeded ?? 0,
+      };
   const hidden = hiddenAccessoryScreens(refData, props);
   const visibleTree = TREE.map((g) => ({
     ...g,
@@ -794,21 +814,22 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   /** Screens with an unmet need (red counters) — their tree names show red until covered. */
   const screenNeedsAttention = useMemo(() => {
     const out = new Set<ScreenId>();
-    if (!result) return out;
+    // A typed-only group has no needs from the roof: nothing to show red.
+    if (!result || !countsFromRoof) return out;
     if (result.termBar.fastenersNeeded > 0) out.add("termBar");
     if (result.fascia["3"].fastenersNeeded > 0) out.add("fascia3");
     if (result.fascia["4"].fastenersNeeded > 0) out.add("fascia4");
     if (result.dripEdge.fastenersNeeded > 0) out.add("dripEdge");
     if (result.gravelStop.fastenersNeeded > 0) out.add("gravelStop");
     if (result.snapCover.fastenersNeeded > 0) out.add("snapCover");
-    if (result.parapetTabs.fastenersNeeded > 0 || result.parapetTabs.steelPlatesNeeded > 0)
+    if (parapetNeeds.fastenersNeeded > 0 || parapetNeeds.steelPlatesNeeded > 0)
       out.add("parapetTabs");
     for (const [bucket, n] of Object.entries(result.deckNeeds)) {
       if (n.fasteners > 0 || n.polyPlates > 0 || n.insulPlates > 0 || n.inductionPlates > 0)
         out.add(bucket as ScreenId);
     }
     return out;
-  }, [result]);
+  }, [result, countsFromRoof, parapetNeeds.fastenersNeeded, parapetNeeds.steelPlatesNeeded]);
 
   /** Screens that already carry a value (footage, a cost, a quantity or a typed count) — green. */
   const screenHasValues = useMemo(() => {
@@ -890,6 +911,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   }) => (
     <div className="space-y-1">
       {needed !== undefined &&
+        countsFromRoof &&
         (() => {
           // Legacy: Needed = calculated − Σ entered on this screen (steel plates excluded), red
           // while > 0. Showing the entered count makes a netted 0 readable.
@@ -939,7 +961,14 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     </div>
   );
 
-  /** All catalog rows of the given subtypes, size-sorted, bound to a slot (deck screens). */
+  /** The grid keys an edge screen lists: the family's Spade + XHD rows, or the DL catalog group. */
+  const edgeKeys = (slot: keyof typeof EDGE_FASTENER_GROUPS): string[] =>
+    nonDl ? familyFastenerKeys(refData, FAMILY_EDGE_SUBTYPES) : EDGE_FASTENER_GROUPS[slot];
+
+  /**
+   * All catalog rows of the given subtypes, size-sorted, bound to a slot (deck screens, masonry
+   * bits). A family group drops a column its catalog has no rows for (no Driver Tips, no bits).
+   */
   const subtypeColumn = ({
     slot,
     subtypes,
@@ -951,7 +980,8 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   }) => {
     const rows = (refData.fasteners ?? [])
       .filter((f) => subtypes.includes(f.subtype))
-      .sort((a, b) => inchKey(a.description) - inchKey(b.description));
+      .sort((a, b) => fastenerInchKey(a.description) - fastenerInchKey(b.description));
+    if (nonDl && rows.length === 0) return null;
     return (
       <div>
         <p className="mb-1 text-xs font-semibold">{title}</p>
@@ -1274,7 +1304,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             </div>
             {fastenerGrid({
               slot: "termBar",
-              keys: EDGE_FASTENER_GROUPS.termBar,
+              keys: edgeKeys("termBar"),
               needed: r?.fastenersNeeded ?? 0,
             })}
           </div>
@@ -1412,7 +1442,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             </div>
             {fastenerGrid({
               slot: slot,
-              keys: EDGE_FASTENER_GROUPS[slot],
+              keys: edgeKeys(slot),
               needed: r?.fastenersNeeded ?? 0,
             })}
           </div>
@@ -1518,7 +1548,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             </div>
             {fastenerGrid({
               slot: group,
-              keys: EDGE_FASTENER_GROUPS[group],
+              keys: edgeKeys(group),
               needed: gr?.fastenersNeeded ?? 0,
             })}
           </div>
@@ -1610,7 +1640,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             </div>
             {fastenerGrid({
               slot: "snapCover",
-              keys: EDGE_FASTENER_GROUPS.snapCover,
+              keys: edgeKeys("snapCover"),
               title: "Compression or Snap Cover",
               needed: result?.snapCover.fastenersNeeded ?? 0,
             })}
@@ -1910,17 +1940,28 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
 
       /* ---------------- Fasteners & Related ---------------- */
       case "parapetTabs": {
+        // A family group lists its own XHD rows as wall-tab fasteners and its DL-Plates rows as
+        // the steel plates (lib/accessory-families.ts familyFastenerKeys); the DL group keeps the
+        // engine's captured group.
+        const tabKeys = nonDl
+          ? familyFastenerKeys(refData, FAMILY_PARAPET_SUBTYPES)
+          : EDGE_FASTENER_GROUPS.parapet.filter((k) => k !== PLATE_ROWS.steel);
+        const plateKeys = nonDl
+          ? familyFastenerKeys(refData, FAMILY_PLATE_SUBTYPES)
+          : [PLATE_ROWS.steel];
         return (
           <div className="space-y-3">
-            <p
-              className={`text-xs font-medium ${(result?.parapetTabs.fastenersNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
-            >
-              Fasteners Needed: {result?.parapetTabs.fastenersNeeded ?? 0}
-            </p>
+            {countsFromRoof && (
+              <p
+                className={`text-xs font-medium ${parapetNeeds.fastenersNeeded > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
+              >
+                Fasteners Needed: {parapetNeeds.fastenersNeeded}
+              </p>
+            )}
             <div className="flex flex-wrap gap-8">
               {fastenerGrid({
                 slot: "parapet",
-                keys: EDGE_FASTENER_GROUPS.parapet.filter((k) => k !== PLATE_ROWS.steel),
+                keys: tabKeys,
                 title: "Parapet Wall-Tab Fasteners",
               })}
               {subtypeColumn({
@@ -1929,12 +1970,14 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                 title: "Masonry Bits",
               })}
               <div className="space-y-2">
-                <p
-                  className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
-                >
-                  Steel Plates Needed: {result?.parapetTabs.steelPlatesNeeded ?? 0}
-                </p>
-                {fastenerGrid({ slot: "parapet", keys: [PLATE_ROWS.steel], title: "Steel Plates" })}
+                {countsFromRoof && (
+                  <p
+                    className={`text-xs font-medium ${parapetNeeds.steelPlatesNeeded > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
+                  >
+                    Steel Plates Needed: {parapetNeeds.steelPlatesNeeded}
+                  </p>
+                )}
+                {fastenerGrid({ slot: "parapet", keys: plateKeys, title: "Steel Plates" })}
               </div>
             </div>
           </div>
@@ -2091,45 +2134,47 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
         })();
         return (
           <div className="space-y-3">
-            <p className="text-center text-xs font-semibold">Items Required</p>
-            <div className="flex flex-wrap justify-center gap-6 text-xs font-medium">
-              <span
-                className={
-                  (needs?.fasteners ?? 0) > 0
-                    ? "text-red-600"
-                    : "text-green-700 dark:text-green-400"
-                }
-              >
-                Fasteners: {needs?.fasteners ?? 0}
-              </span>
-              <span
-                className={
-                  (needs?.polyPlates ?? 0) > 0
-                    ? "text-red-600"
-                    : "text-green-700 dark:text-green-400"
-                }
-              >
-                Poly Plates: {needs?.polyPlates ?? 0}
-              </span>
-              <span
-                className={
-                  (needs?.insulPlates ?? 0) > 0
-                    ? "text-red-600"
-                    : "text-green-700 dark:text-green-400"
-                }
-              >
-                Insul. Plates: {needs?.insulPlates ?? 0}
-              </span>
-              <span
-                className={
-                  (needs?.inductionPlates ?? 0) > 0
-                    ? "text-red-600"
-                    : "text-green-700 dark:text-green-400"
-                }
-              >
-                Induction Plates: {needs?.inductionPlates ?? 0}
-              </span>
-            </div>
+            {countsFromRoof && <p className="text-center text-xs font-semibold">Items Required</p>}
+            {countsFromRoof && (
+              <div className="flex flex-wrap justify-center gap-6 text-xs font-medium">
+                <span
+                  className={
+                    (needs?.fasteners ?? 0) > 0
+                      ? "text-red-600"
+                      : "text-green-700 dark:text-green-400"
+                  }
+                >
+                  Fasteners: {needs?.fasteners ?? 0}
+                </span>
+                <span
+                  className={
+                    (needs?.polyPlates ?? 0) > 0
+                      ? "text-red-600"
+                      : "text-green-700 dark:text-green-400"
+                  }
+                >
+                  Poly Plates: {needs?.polyPlates ?? 0}
+                </span>
+                <span
+                  className={
+                    (needs?.insulPlates ?? 0) > 0
+                      ? "text-red-600"
+                      : "text-green-700 dark:text-green-400"
+                  }
+                >
+                  Insul. Plates: {needs?.insulPlates ?? 0}
+                </span>
+                <span
+                  className={
+                    (needs?.inductionPlates ?? 0) > 0
+                      ? "text-red-600"
+                      : "text-green-700 dark:text-green-400"
+                  }
+                >
+                  Induction Plates: {needs?.inductionPlates ?? 0}
+                </span>
+              </div>
+            )}
             <div className="flex flex-wrap gap-6">
               {cols.map((c) => (
                 <Fragment key={c.title}>

@@ -33,6 +33,7 @@ import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminEpdmRouteImport } from './routes/admin.epdm'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
+import { Route as AdminNonDlAdhesivesRouteImport } from './routes/admin.non-dl-adhesives'
 import { Route as AdminNonDlMembraneRouteImport } from './routes/admin.non-dl-membrane'
 import { Route as AdminNonDlTpoRouteImport } from './routes/admin.non-dl-tpo'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
@@ -175,6 +176,11 @@ const AdminNonDlRoute = AdminNonDlRouteImport.update({
   path: '/admin/non-dl',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminNonDlAdhesivesRoute = AdminNonDlAdhesivesRouteImport.update({
+  id: '/admin/non-dl-adhesives',
+  path: '/admin/non-dl-adhesives',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminNonDlMembraneRoute = AdminNonDlMembraneRouteImport.update({
   id: '/admin/non-dl-membrane',
   path: '/admin/non-dl-membrane',
@@ -306,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-adhesives': typeof AdminNonDlAdhesivesRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
@@ -353,6 +360,7 @@ export interface FileRoutesByTo {
   '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-adhesives': typeof AdminNonDlAdhesivesRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
@@ -401,6 +409,7 @@ export interface FileRoutesById {
   '/admin/epdm': typeof AdminEpdmRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/non-dl-adhesives': typeof AdminNonDlAdhesivesRoute
   '/admin/non-dl-membrane': typeof AdminNonDlMembraneRoute
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
@@ -450,6 +459,7 @@ export interface FileRouteTypes {
     | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-adhesives'
     | '/admin/non-dl-membrane'
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
@@ -497,6 +507,7 @@ export interface FileRouteTypes {
     | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-adhesives'
     | '/admin/non-dl-membrane'
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
@@ -544,6 +555,7 @@ export interface FileRouteTypes {
     | '/admin/epdm'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/non-dl-adhesives'
     | '/admin/non-dl-membrane'
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
@@ -592,6 +604,7 @@ export interface RootRouteChildren {
   AdminEpdmRoute: typeof AdminEpdmRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
+  AdminNonDlAdhesivesRoute: typeof AdminNonDlAdhesivesRoute
   AdminNonDlMembraneRoute: typeof AdminNonDlMembraneRoute
   AdminNonDlTpoRoute: typeof AdminNonDlTpoRoute
   AdminPriceImportRoute: typeof AdminPriceImportRoute
@@ -780,6 +793,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/non-dl'
       fullPath: '/admin/non-dl'
       preLoaderRoute: typeof AdminNonDlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/non-dl-adhesives': {
+      id: '/admin/non-dl-adhesives'
+      path: '/admin/non-dl-adhesives'
+      fullPath: '/admin/non-dl-adhesives'
+      preLoaderRoute: typeof AdminNonDlAdhesivesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/non-dl-membrane': {
@@ -972,6 +992,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminEpdmRoute: AdminEpdmRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
+  AdminNonDlAdhesivesRoute: AdminNonDlAdhesivesRoute,
   AdminNonDlMembraneRoute: AdminNonDlMembraneRoute,
   AdminNonDlTpoRoute: AdminNonDlTpoRoute,
   AdminPriceImportRoute: AdminPriceImportRoute,

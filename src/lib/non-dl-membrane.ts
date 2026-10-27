@@ -41,12 +41,12 @@ export function isNonDlMembraneRow(row: CatalogRow, labelCol: string): boolean {
  * deletion); the rows the view never showed stay where they were; edited rows beyond the stored
  * count (additions) go in after the last kept row, or at the end when there was none.
  */
-export function mergeRows(
-  full: readonly CatalogRow[],
-  keep: (row: CatalogRow) => boolean,
-  edited: readonly CatalogRow[],
-): CatalogRow[] {
-  const out: CatalogRow[] = [];
+export function mergeRows<T = CatalogRow>(
+  full: readonly T[],
+  keep: (row: T) => boolean,
+  edited: readonly T[],
+): T[] {
+  const out: T[] = [];
   let j = 0;
   let lastKeptAt = -1;
   for (const row of full) {

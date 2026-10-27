@@ -250,6 +250,9 @@ const adminItems: {
     sub: [
       // Its own page (owner, Oct 22): the two families from the Duro-Last Membrane screen.
       { title: "Non-DL TPO and EPDM", url: "/admin/non-dl-membrane" },
+      // The non-DL adhesives (owner, Oct 27): a view of the one adhesives screen
+      // (lib/non-dl-adhesives.ts), beside the membranes.
+      { title: "Non-DL TPO and EPDM Adhesives", url: "/admin/non-dl-adhesives" },
       // The accessory families' own pages (owner, Oct 26–27): the `non_dl_tpo` and `epdm`
       // branches, each with a category picker like Duro-Last Pricing (catalog-branches.ts).
       { title: "Non-DL TPO Accessories", url: "/admin/non-dl-tpo" },

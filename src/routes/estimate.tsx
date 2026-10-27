@@ -126,6 +126,7 @@ import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { CatalogPicker } from "@/components/catalog-picker";
 import {
+  activeFamily,
   adminForBid,
   composeAccessoryLines,
   computeFamilyResults,
@@ -135,6 +136,7 @@ import {
   FAMILIES_MISSING_MESSAGE,
   FAMILY_LABEL,
   familyReviewLines,
+  inactiveFamilyNote,
   linesTotals,
   normalizeOtherAccessories,
   type AccessoryFamily,
@@ -2078,12 +2080,16 @@ function EstimatePage() {
   });
   // The Non-DL TPO and EPDM accessory groups, computed from their own state against their own
   // pricing ref (lib/accessory-families.ts); absent on a snapshot that predates the families.
+  // Only the bid's ACTIVE family (by roof system) counts from the roof; the others bill typed
+  // quantities. On a Non-DL TPO / EPDM bid the DL group is computed here too (typed-only), as
+  // the engine's own pass is switched off for it (adminForBid).
   const familyInputs = {
     sections,
     parapets,
     curbs,
     roofSystem,
     attachment,
+    accessoriesCalc,
     accessoriesCalcTpo,
     accessoriesCalcEpdm,
   };
@@ -2292,6 +2298,10 @@ function EstimatePage() {
   );
   // Per-group header figures: the DL group carries the old flat lines and its Other picks.
   const dlExtraTotals = linesTotals([...accessories, ...otherAccessories.duroLast]);
+  // The DL group's computed result: the engine's on a Duro-Last-family bid, the typed-only run
+  // from computeFamilyResults on a Non-DL TPO / EPDM bid (the engine does not run it there).
+  const dlResult = familyResults.duroLast ?? result?.accessories;
+  const activeAccessoryFamily = activeFamily(roofSystem);
   const familyOtherTotals = {
     nonDlTpo: linesTotals(otherAccessories.nonDlTpo),
     epdm: linesTotals(otherAccessories.epdm),
@@ -5345,45 +5355,51 @@ function EstimatePage() {
                     </span>
                   </button>
                 </CollapsibleTrigger>
-                {result?.accessories && (
+                {result && dlResult && (
                   <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
                     <span>
                       Material Cost:{" "}
                       <span className="font-semibold">
                         {money(
-                          result.accessories.totalCost +
-                            dlExtraTotals.material +
-                            result.adhesiveMaterial,
+                          dlResult.totalCost + dlExtraTotals.material + result.adhesiveMaterial,
                         )}
                       </span>
                     </span>
                     <span>
                       Total Labor:{" "}
                       <span className="font-semibold">
-                        {(result.accessories.manHours + dlExtraTotals.hours).toFixed(2)} h
+                        {(dlResult.manHours + dlExtraTotals.hours).toFixed(2)} h
                       </span>
                     </span>
                     <span>
                       Labor Cost:{" "}
                       <span className="font-semibold">
-                        {money((result.accessories.manHours + dlExtraTotals.hours) * laborRate)}
+                        {money((dlResult.manHours + dlExtraTotals.hours) * laborRate)}
                       </span>
                     </span>
                   </div>
                 )}
               </CardHeader>
               <CollapsibleContent>
-                <CardContent>
+                <CardContent className="space-y-3">
+                  {/* Not this bid's active family (a Non-DL TPO / EPDM bid): the roof is counted
+                      in the active group; this one bills what is typed. */}
+                  {inactiveFamilyNote("duroLast", roofSystem) && (
+                    <p className="text-xs text-muted-foreground" data-accessory-group-note>
+                      {inactiveFamilyNote("duroLast", roofSystem)}
+                    </p>
+                  )}
                   <AccessoriesScreens
                     family="duroLast"
+                    countsFromRoof={activeAccessoryFamily === "duroLast"}
                     state={accessoriesCalc}
                     onChange={setAccessoriesCalc}
                     refData={duroLastRefForBid(admin, roofSystem)}
-                    result={result?.accessories}
+                    result={dlResult}
                     sections={accessorySections}
                     adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
                     adhesiveCalc={result?.adhesiveWholeUnits}
-                    arpCalcQty={result?.accessories?.membraneAccs.arpCalc ?? 0}
+                    arpCalcQty={dlResult?.membraneAccs.arpCalc ?? 0}
                     otherItems={admin?.accessoryFamilies?.other.duroLast}
                     otherLines={otherAccessories.duroLast}
                     onOtherChange={(next) => setOtherAccessories((p) => ({ ...p, duroLast: next }))}
@@ -5433,28 +5449,36 @@ function EstimatePage() {
                     </div>
                   </CardHeader>
                   <CollapsibleContent>
-                    <CardContent>
+                    <CardContent className="space-y-3">
                       {admin && !admin.accessoryFamilies ? (
                         <p className="text-sm text-muted-foreground">
                           {FAMILIES_MISSING_MESSAGE} (Update Pricing &amp; Labor).
                         </p>
                       ) : (
-                        <AccessoriesScreens
-                          family={family}
-                          state={famState}
-                          onChange={setFamState}
-                          refData={admin?.accessoryFamilies?.refs[family]}
-                          result={famResult}
-                          sections={accessorySections}
-                          adhesiveNames={[]}
-                          adhesiveCalc={undefined}
-                          arpCalcQty={0}
-                          otherItems={admin?.accessoryFamilies?.other[family] ?? []}
-                          otherLines={otherAccessories[family]}
-                          onOtherChange={(next) =>
-                            setOtherAccessories((p) => ({ ...p, [family]: next }))
-                          }
-                        />
+                        <>
+                          {inactiveFamilyNote(family, roofSystem) && (
+                            <p className="text-xs text-muted-foreground" data-accessory-group-note>
+                              {inactiveFamilyNote(family, roofSystem)}
+                            </p>
+                          )}
+                          <AccessoriesScreens
+                            family={family}
+                            countsFromRoof={activeAccessoryFamily === family}
+                            state={famState}
+                            onChange={setFamState}
+                            refData={admin?.accessoryFamilies?.refs[family]}
+                            result={famResult}
+                            sections={accessorySections}
+                            adhesiveNames={[]}
+                            adhesiveCalc={undefined}
+                            arpCalcQty={0}
+                            otherItems={admin?.accessoryFamilies?.other[family] ?? []}
+                            otherLines={otherAccessories[family]}
+                            onOtherChange={(next) =>
+                              setOtherAccessories((p) => ({ ...p, [family]: next }))
+                            }
+                          />
+                        </>
                       )}
                     </CardContent>
                   </CollapsibleContent>
