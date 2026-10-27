@@ -345,8 +345,10 @@ describe("every gate switched to dispatchesTickets; every money gate kept", () =
       /\.\.\.\(manager \? \{ labor_rate_kind: draft\.labor_rate_kind \} : \{\}\)/,
     );
     expect(page).toContain("onDelete={manager ? () => setToDelete(j) : undefined}");
-    expect(page).toMatch(
-      /\{manager && \(\s*<Button\s+variant="outline"\s+className="text-destructive/,
+    // Oct 27: the header's Delete is an icon button (ticket-header-actions.tsx), still the manager's.
+    expect(page).toMatch(/onDelete=\{manager \? \(\) => setConfirmDelete\(true\) : null\}/);
+    expect(read("src/components/service/ticket-header-actions.tsx")).toMatch(
+      /aria-label="Delete ticket"/,
     );
   });
   it("the Board's dispatch flag", () => {
@@ -449,8 +451,9 @@ describe("the logging the owner asked for already exists (verified by reading th
     expect(latest).not.toContain("'office'");
   });
   it("the ticket's History fold shows it to admins and managers; a date move also lands on the Timeline", () => {
-    expect(read("src/components/service/ticket-field-sections.tsx")).toContain(
-      '<AuditHistory entity="ticket" entityId={job.id}',
+    // Oct 27: the change log sits under the column's History heading (service-page.tsx).
+    expect(read("src/components/service-page.tsx")).toMatch(
+      /<AuditHistory\s+entity="ticket"\s+entityId=\{job\.id\}/,
     );
     expect(read("src/components/audit-history.tsx")).toContain(
       "if (!seesEveryone(profile)) return null;",

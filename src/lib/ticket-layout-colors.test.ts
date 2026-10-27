@@ -13,7 +13,8 @@ const page = readFileSync("src/components/service-page.tsx", "utf8");
 
 describe("the ticket's layout toggle", () => {
   it("sits right after Delete in the header, on wide screens, for the office's two panes", () => {
-    const del = page.indexOf('<Trash2 className="mr-1 h-4 w-4" /> Delete');
+    // Oct 27: Delete is the trash icon in TicketHeaderActions (ticket-header-actions.tsx).
+    const del = page.indexOf("<TicketHeaderActions");
     const toggle = page.indexOf('onClick={() => setLayout(stacked ? "side" : "stacked")}');
     expect(del).toBeGreaterThan(0);
     expect(toggle).toBeGreaterThan(del);

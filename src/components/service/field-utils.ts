@@ -268,3 +268,15 @@ export function imageFiles(list: ArrayLike<File> | null | undefined): File[] {
     (f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name),
   );
 }
+
+/**
+ * The files picked in a file input, copied out BEFORE the input is cleared (so the same picture
+ * can be picked again). A `FileList` is live: clearing `input.value` empties it, so reading it
+ * after the reset sees no files (owner, Oct 27, the takeoff deficiencies: "it said to pick a
+ * image file png jpeg etc but i was picking a png"). Shared with takeoff/deficiency-photos.ts.
+ */
+export function takePickedFiles(input: { files: ArrayLike<File> | null; value: string }): File[] {
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  return files;
+}

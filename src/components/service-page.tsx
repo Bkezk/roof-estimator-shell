@@ -55,6 +55,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ServiceTabs } from "@/components/service/service-tabs";
+import { AuditHistory } from "@/components/audit-history";
 import { MaterialsSection } from "@/components/service/materials-section";
 import { toast } from "sonner";
 import {
@@ -67,7 +68,6 @@ import {
   CheckCheck,
   ClipboardCheck,
   CopyPlus,
-  FileText,
   Loader2,
   Lock,
   MapPin,
@@ -93,6 +93,7 @@ import {
   isFieldOnly,
   isOffice,
   managesTickets,
+  seesEveryone,
   seesInvoices,
 } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
@@ -159,13 +160,14 @@ import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { FoldAllContext } from "@/components/service/field-shared";
 // The Documents fold (Oct 26) folds like the other sections; its own line keeps the pin above.
-import { Box } from "@/components/service/field-shared";
 import { HISTORY_FOLD_ID, HistoryFold, HistoryStrip } from "@/components/service/site-history";
 import { HISTORY_OPEN_PARAM } from "@/lib/service-history";
 import { InvoiceBlock } from "@/components/service/invoice-block";
-import { DocumentsList } from "@/components/documents/documents-panel";
-import { InspectionReportButton } from "@/components/documents/inspection-report-button";
-import { NewDocumentDialog } from "@/components/documents/new-document-dialog";
+import { useDocumentsQuery } from "@/components/documents/use-documents";
+import {
+  TicketDocumentsDialog,
+  TicketHeaderActions,
+} from "@/components/service/ticket-header-actions";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -1520,6 +1522,13 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Documents (owner, Oct 27: the header's icon, not a fold): the dialog's open state, and the
+  // count on the icon — the same query the dialog's list reads (use-documents.ts).
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const documents = useDocumentsQuery(
+    { serviceJobId: job?.id },
+    { enabled: officeOrAdmin && !!job },
+  );
   const [layout, setLayout] = useTicketLayout();
   // History at this property (owner, Oct 21): the fold starts closed; the strip under the
   // property opens it and scrolls to it, as does arriving with ?open=history.
@@ -2563,14 +2572,26 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                       </Link>
                     </Button>
                   )}
-                  {manager && (
-                    <Button
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => setConfirmDelete(true)}
-                    >
-                      <Trash2 className="mr-1 h-4 w-4" /> Delete
-                    </Button>
+                  {/* Owner, Oct 27: Documents (the icon, a count) to the left of Delete (the
+                      trash icon alone). Documents where its fold was (the office's page);
+                      Delete the manager's, the confirm dialog below. */}
+                  <TicketHeaderActions
+                    documents={
+                      officeOrAdmin
+                        ? {
+                            count: documents.data?.length ?? null,
+                            onOpen: () => setDocumentsOpen(true),
+                          }
+                        : null
+                    }
+                    onDelete={manager ? () => setConfirmDelete(true) : null}
+                  />
+                  {officeOrAdmin && (
+                    <TicketDocumentsDialog
+                      job={job}
+                      open={documentsOpen}
+                      onOpenChange={setDocumentsOpen}
+                    />
                   )}
                   {twoPane && (
                     // Only where the two layouts differ (xl and up; narrower screens always stack).
@@ -2685,17 +2706,32 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {materials}
               {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
               <PurchaseOrdersSection jobId={job.id} />
+              {/* Owner, Oct 27 (a shorter column): Close-out, Time and the Activity log are the
+                  three tabs of one "Work" fold (ticket-field-sections.tsx WorkFold), then the
+                  Invoice. Documents (Oct 26) moved to the header's icon the same day
+                  (ticket-header-actions.tsx) — "instead of it being a whole new row menu". */}
               <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
-              {/* What happened at this property before (owner, Oct 21): starts closed; the strip
-                under the property opens it. */}
-              {job.site_id && (
-                <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
-              )}
               {jobStage !== "done" && <InvoiceBlock job={job} />}
-              {/* Documents (owner, Oct 26): reports and letters made from this ticket, each by a
-                  click. The office's column only, like the Invoice fold — a technician's
-                  one-column page below never shows it. */}
-              <TicketDocumentsFold job={job} />
+              {/* History, at the very bottom under a thin heading: what happened at this property
+                  before (owner, Oct 21: starts closed; the strip under the property opens it, and
+                  ?open=history centres it — the same element id), and for admins and managers
+                  the ticket's own change log (M6, Oct 5; AuditHistory renders nothing for anyone
+                  else). */}
+              {(job.site_id || seesEveryone(profile)) && (
+                <div className="space-y-3 pt-2" aria-label="History" data-column="history">
+                  <h2 className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground dark:text-muted-foreground">
+                    History
+                  </h2>
+                  {job.site_id && (
+                    <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
+                  )}
+                  <AuditHistory
+                    entity="ticket"
+                    entityId={job.id}
+                    className="rounded-lg border px-4 py-3"
+                  />
+                </div>
+              )}
             </aside>
           </div>
         ) : (
@@ -3108,40 +3144,5 @@ function FromOpportunityNote({ id }: { id: string }) {
         <span className="text-muted-foreground">From an opportunity</span>
       )}
     </p>
-  );
-}
-
-/**
- * Documents (owner, Oct 26: the CenterPoint-style document generator): the reports and letters
- * made from this ticket, folded like the other sections, with New document (a template, the
- * checkboxes, then the editor — the list's own button; the fold adds no second one). An
- * inspection ticket gets "Inspection report" first: one tap makes the report from the shipped
- * template and opens it (phase 2). Nothing is generated on its own — every document is a click.
- * Shown in the office's column only (where the Invoice fold is); a technician never sees it.
- */
-function TicketDocumentsFold({ job }: { job: ServiceJobWithTech }) {
-  const [newOpen, setNewOpen] = useState(false);
-  const recordLabel = `Ticket ${job.number}`;
-  return (
-    <Box
-      title="Documents"
-      icon={FileText}
-      collapsible
-      defaultOpen={false}
-      storageKey="documents"
-      summary="Reports and letters made from this ticket"
-    >
-      {job.service_type === "inspection" && (
-        <InspectionReportButton serviceJobId={job.id} ticketNumber={job.number} />
-      )}
-      <DocumentsList serviceJobId={job.id} compact onNew={() => setNewOpen(true)} />
-      <NewDocumentDialog
-        kind="ticket"
-        serviceJobId={job.id}
-        recordLabel={recordLabel}
-        open={newOpen}
-        onOpenChange={setNewOpen}
-      />
-    </Box>
   );
 }

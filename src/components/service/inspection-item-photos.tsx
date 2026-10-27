@@ -15,8 +15,8 @@
  * item-photo-mutations.ts) and refresh the ticket's photo list (fieldKeys.photos) so the Photos
  * fold and the other screen agree.
  */
-import { useState } from "react";
-import { Check, Images, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, ImagePlus, Images, Loader2 } from "lucide-react";
 
 import { parsePhotoMarks } from "@/lib/photo-annotations";
 import { unattachedTicketPhotos } from "@/lib/inspection";
@@ -32,12 +32,13 @@ import {
 } from "@/components/ui/dialog";
 import { PhotoThumb } from "@/components/service/field-shared";
 import { MarksOverlay } from "@/components/service/photo-markup";
-import { useSignedUrl } from "@/components/service/field-utils";
+import { takePickedFiles, useSignedUrl } from "@/components/service/field-utils";
 import {
   photosOnItem,
   useDeleteJobPhoto,
   useSetPhotoItem,
 } from "@/components/service/item-photo-mutations";
+import { useTicketPictureUpload } from "@/components/service/ticket-picture-upload";
 
 /** One picture in the picker: the photo with its marks, pressed = picked. */
 function PickTile({
@@ -269,7 +270,73 @@ export function ItemPhotoThumbs({
   );
 }
 
-/** The office fold's row extra: the item's pictures and the From ticket photos button. */
+/**
+ * "Add pictures" — new pictures straight onto one checklist item from the web (owner, Oct 27:
+ * "can pictures be added to inspections from the web view like the leaks"). A plain file input
+ * (accept="image/*", multiple, no `capture`: a phone offers the camera or the camera roll), the
+ * ticket photos' pipeline (ticket-picture-upload.ts) registering each with item_key = the item,
+ * so the row's thumbnails show them when the batch lands. The picked files are copied out before
+ * the input is cleared (takePickedFiles — a FileList is live).
+ */
+export function AddItemPicturesButton({
+  jobId,
+  itemKey,
+  itemLabel,
+  compact,
+}: {
+  jobId: string;
+  itemKey: string;
+  itemLabel: string;
+  compact?: boolean | undefined;
+}) {
+  const upload = useTicketPictureUpload(jobId, { itemKey });
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden
+        data-item-pictures={itemKey}
+        onChange={(e) => upload.add(takePickedFiles(e.target))}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+        disabled={upload.uploading}
+        aria-label={`${itemLabel}: add pictures`}
+        title="Add new pictures to this item — on a phone, the camera or the camera roll"
+        onClick={() => fileRef.current?.click()}
+      >
+        {upload.uploading ? (
+          <Loader2 className={`${compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} animate-spin`} />
+        ) : (
+          <ImagePlus className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
+        )}
+        Add pictures
+      </Button>
+      {upload.progressText && (
+        <span
+          className="text-xs text-muted-foreground dark:text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          {upload.progressText}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * The office fold's row extra: the item's pictures, then Add pictures (new ones) beside From
+ * ticket photos (the ticket's loose ones), for whoever may edit the ticket.
+ */
 export function ItemPhotoTools(props: {
   jobId: string;
   itemKey: string;
@@ -281,7 +348,17 @@ export function ItemPhotoTools(props: {
   return (
     <div className="space-y-2">
       <ItemPhotoThumbs {...props} compact />
-      {props.canEdit && <FromTicketPhotosButton {...props} compact />}
+      {props.canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <AddItemPicturesButton
+            jobId={props.jobId}
+            itemKey={props.itemKey}
+            itemLabel={props.itemLabel}
+            compact
+          />
+          <FromTicketPhotosButton {...props} compact />
+        </div>
+      )}
     </div>
   );
 }

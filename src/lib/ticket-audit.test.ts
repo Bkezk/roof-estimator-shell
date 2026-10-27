@@ -77,8 +77,9 @@ describe("reading it", () => {
     expect(fns).toContain('.in("entity", ["ticket", "ticket_time"])');
   });
   it("the ticket page has the History fold (AuditHistory hides itself from non-managers)", () => {
-    const src = read("src/components/service/ticket-field-sections.tsx");
-    expect(src).toContain('<AuditHistory entity="ticket" entityId={job.id}');
+    // Oct 27: under the column's History heading, at the bottom (service-page.tsx).
+    const src = read("src/components/service-page.tsx");
+    expect(src).toMatch(/<AuditHistory\s+entity="ticket"\s+entityId=\{job\.id\}/);
     expect(read("src/components/audit-history.tsx")).toContain(
       "if (!seesEveryone(profile)) return null;",
     );

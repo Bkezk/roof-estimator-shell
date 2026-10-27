@@ -12,6 +12,7 @@ import {
   Camera,
   CheckCircle2,
   Clock,
+  Hammer,
   History,
   ImagePlus,
   Loader2,
@@ -29,7 +30,6 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import { listContacts } from "@/lib/crm.functions";
 import { STAGE_LABELS, type ServiceJobWithTech, type ServiceStage } from "@/lib/service.functions";
-import { AuditHistory } from "@/components/audit-history";
 import { toldSuffix } from "@/lib/mentions";
 import {
   addJobNote,
@@ -39,7 +39,6 @@ import {
   listJobPhotos,
   listJobRepairs,
   listTimeEntries,
-  registerJobPhoto,
   type JobEventRow,
   type JobPhotoRow,
 } from "@/lib/service-field.functions";
@@ -52,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { photoOrdinals } from "@/lib/photo-annotations";
 import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
@@ -60,16 +60,20 @@ import {
   dragHasFiles,
   errText,
   fieldKeys,
-  imageFiles,
   loudError,
-  removeFromServiceBucket,
-  shrinkPhoto,
-  uploadPlan,
-  uploadToServiceBucket,
-  uploadingLabel,
+  takePickedFiles,
   useSignedUrl,
   whenShort,
 } from "@/components/service/field-utils";
+import { useTicketPictureUpload } from "@/components/service/ticket-picture-upload";
+import {
+  closeoutInfo,
+  hoursText,
+  readWorkTab,
+  WORK_TAB_KEY,
+  workSummary,
+  type WorkTab,
+} from "@/components/service/ticket-work";
 
 // ---------------------------------------------------------------------------------------------
 // Contact select (in the ticket's customer block, under the site)
@@ -165,8 +169,6 @@ export function ContactSelect({
 // Read-only field sections. Each is collapsible with a one-line summary (owner, Sep 28: the
 // ticket page had too much open at once); the open state is remembered per section.
 
-const hoursText = (h: number) => `${Number(h.toFixed(2))} h`;
-
 /**
  * Repairs, close-out, time and timeline of a ticket, below its Materials used. The office's
  * right-hand column (owner, Oct 1) puts Repairs (with the ticket's photos) above Materials, so
@@ -192,17 +194,126 @@ export function TicketFieldSections({
   return (
     <>
       {repairs && <RepairsReadOnly jobId={job.id} ticketNumber={job.number} canEdit={markup} />}
-      <CloseoutSummary job={job} />
-      <TimeSection
+      {/* Owner, Oct 27 (a shorter column): Close-out, Time and the Activity log are three tabs
+          of ONE fold, "Work". The managers' change log (AuditHistory) moved to the page's
+          History heading at the bottom of the column. */}
+      <WorkFold
         job={job}
         officeOrAdmin={officeOrAdmin}
         review={managesTickets(profile) && (job.stage === "done" || job.stage === "authorized")}
       />
-      <Timeline jobId={job.id} />
-      {/* M6 (owner, Oct 5): every change to the ticket and its time, old → new, who, when.
-          Admins and managers only (AuditHistory renders nothing for anyone else). */}
-      <AuditHistory entity="ticket" entityId={job.id} className="rounded-lg border px-4 py-3" />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Work: Close-out · Time · Activity log, one fold with three tabs (owner, Oct 27)
+
+function initialWorkTab(): WorkTab {
+  try {
+    return readWorkTab(window.localStorage.getItem(WORK_TAB_KEY));
+  } catch {
+    return "closeout"; // no window (SSR), or storage blocked
+  }
+}
+function rememberWorkTab(tab: WorkTab) {
+  try {
+    window.localStorage.setItem(WORK_TAB_KEY, tab);
+  } catch {
+    // Storage blocked (private mode, blocked site data): the tab still switches this visit.
+  }
+}
+
+/** The time entries (the same key TimeEntries reads, so the list shares the cache). */
+function useTimeRows(jobId: string) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listTimeEntries);
+  return useQuery({
+    queryKey: fieldKeys.time(jobId),
+    queryFn: () => listFn({ data: { id: jobId } }),
+    enabled: !!session,
+  });
+}
+
+/** The ticket's events, newest first (the Activity log's list; the Work summary's count). */
+function useJobEvents(jobId: string) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listJobEvents);
+  return useQuery({
+    queryKey: fieldKeys.events(jobId),
+    queryFn: () => listFn({ data: { id: jobId } }),
+    enabled: !!session,
+  });
+}
+
+/**
+ * "Work": one collapsible fold (remembered as "work"; a manager reviewing a Done / Authorized
+ * ticket, or a ticket with a close-out, finds it open the first time) with three tabs —
+ * Close-out, Time, Activity log — each the body its own fold had until Oct 27. The last tab is
+ * remembered per device. Arriving for the History (FoldAllContext) folds it like every other
+ * self-managed Box.
+ */
+function WorkFold({
+  job,
+  officeOrAdmin,
+  review,
+}: {
+  job: ServiceJobWithTech;
+  officeOrAdmin: boolean;
+  /** A manager reviewing a Done / Authorized ticket (Time's review mode: open by default). */
+  review: boolean;
+}) {
+  const time = useTimeRows(job.id);
+  const events = useJobEvents(job.id);
+  const closeout = closeoutInfo(job);
+  const [tab, setTab] = useState<WorkTab>(initialWorkTab);
+  const hours = (time.data ?? []).reduce((s, r) => s + Number(r.hours), 0);
+  const summary =
+    time.error || events.error ? (
+      <span className="text-destructive">could not load</span>
+    ) : time.isLoading || events.isLoading ? null : (
+      workSummary({ closeout: closeout.line, hours, entries: (events.data ?? []).length })
+    );
+  const tabIcon = "mr-1 h-4 w-4";
+  return (
+    <Box
+      title="Work"
+      icon={Hammer}
+      collapsible
+      defaultOpen={review || closeout.any}
+      storageKey="work"
+      summary={summary}
+    >
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          const t = readWorkTab(v);
+          setTab(t);
+          rememberWorkTab(t);
+        }}
+      >
+        <TabsList className="grid h-auto w-full grid-cols-3" aria-label="Work">
+          <TabsTrigger value="closeout" className="min-h-9">
+            <CheckCircle2 className={tabIcon} aria-hidden /> Close-out
+          </TabsTrigger>
+          <TabsTrigger value="time" className="min-h-9">
+            <Clock className={tabIcon} aria-hidden /> Time
+          </TabsTrigger>
+          <TabsTrigger value="timeline" className="min-h-9">
+            <History className={tabIcon} aria-hidden /> Activity log
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="closeout" className="mt-3">
+          <CloseoutBody job={job} />
+        </TabsContent>
+        <TabsContent value="time" className="mt-3">
+          <TimeBody job={job} officeOrAdmin={officeOrAdmin} rows={time} />
+        </TabsContent>
+        <TabsContent value="timeline" className="mt-3">
+          <TimelineBody jobId={job.id} events={events} />
+        </TabsContent>
+      </Tabs>
+    </Box>
   );
 }
 
@@ -241,51 +352,35 @@ export function JobClockLine({ jobId }: { jobId: string }) {
   );
 }
 
-/** Time, collapsed by default; the header shows travel + labor hours. */
-function TimeSection({
+/** The Work fold's Time tab: travel + labor hours on one line, then the entries (editable for the office). */
+function TimeBody({
   job,
   officeOrAdmin,
-  review,
+  rows: q,
 }: {
   job: ServiceJobWithTech;
   officeOrAdmin: boolean;
-  /** A manager reviewing a Done / Authorized ticket: open, remembered apart (follow-up 6). */
-  review: boolean;
+  rows: ReturnType<typeof useTimeRows>;
 }) {
-  const { session } = useAuth();
-  const listFn = useServerFn(listTimeEntries);
-  // The same query (and key) TimeEntries reads, so the list below shares the cache.
-  const q = useQuery({
-    queryKey: fieldKeys.time(job.id),
-    queryFn: () => listFn({ data: { id: job.id } }),
-    enabled: !!session,
-  });
   const rows = q.data ?? [];
   const hoursOf = (kind: string) =>
     rows.filter((r) => r.kind === kind).reduce((s, r) => s + Number(r.hours), 0);
-  const summary = q.error ? (
-    <span className="text-destructive">could not load</span>
-  ) : q.isLoading ? null : rows.length === 0 ? (
-    "no time yet"
-  ) : (
-    `Travel ${hoursText(hoursOf("travel"))} · Labor ${hoursText(hoursOf("labor"))}`
-  );
   return (
-    <Box
-      title="Time"
-      icon={Clock}
-      collapsible
-      defaultOpen={review}
-      storageKey={review ? "time-review" : "time"}
-      summary={summary}
-    >
+    <div className="space-y-3">
+      {q.error ? (
+        <p className="text-sm text-destructive">Could not load the time: {errText(q.error)}</p>
+      ) : !q.isLoading && rows.length > 0 ? (
+        <p className="text-sm text-muted-foreground" data-line="time-hours">
+          Travel {hoursText(hoursOf("travel"))} · Labor {hoursText(hoursOf("labor"))}
+        </p>
+      ) : null}
       <TimeEntries
         jobId={job.id}
         editable={officeOrAdmin}
         defaultHelpers={job.helper_count}
         compact
       />
-    </Box>
+    </div>
   );
 }
 
@@ -303,80 +398,6 @@ export function TicketRepairs({
   canEdit?: boolean;
 }) {
   return <RepairsReadOnly jobId={jobId} ticketNumber={ticketNumber} canEdit={canEdit} />;
-}
-
-/**
- * Owner, Oct 26: the office adds pictures to a ticket from its page, not only through the
- * technician's close-out. Each picked (or dropped) file is shrunk, uploaded under the ticket's
- * folder (field-utils uploadPlan) and recorded as an "other" photo — no repair, no checklist
- * item — one at a time with an "Uploading 2 of 5…" line; a file that fails is named in a toast
- * and the rest still go up. The photos list refreshes when the batch is done.
- */
-function useOfficePictures(jobId: string) {
-  const qc = useQueryClient();
-  const registerFn = useServerFn(registerJobPhoto);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const batch = useMutation({
-    mutationFn: async (picked: File[]) => {
-      const files = imageFiles(picked);
-      if (files.length === 0) {
-        toast.error("Pick picture files (JPG, PNG, HEIC…)");
-        return { landed: 0, total: 0 };
-      }
-      setProgress({ done: 0, total: files.length });
-      let landed = 0;
-      for (const [i, file] of files.entries()) {
-        setProgress({ done: i, total: files.length });
-        try {
-          const shrunk = await shrinkPhoto(file);
-          const [plan] = uploadPlan([shrunk], jobId);
-          const path = plan!.path;
-          await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
-          try {
-            const row = await registerFn({
-              data: {
-                service_job_id: jobId,
-                repair_id: null,
-                item_key: null,
-                role: "other",
-                storage_path: path,
-                file_name: shrunk.name || file.name || null,
-                file_size: shrunk.blob.size,
-                taken_at: new Date(file.lastModified || Date.now()).toISOString(),
-              },
-            });
-            qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) =>
-              old ? [...old, row] : old,
-            );
-            landed += 1;
-          } catch (e) {
-            await removeFromServiceBucket(path);
-            throw e;
-          }
-        } catch (e) {
-          loudError(`${file.name || "A picture"} did not upload`, e);
-        }
-      }
-      return { landed, total: files.length };
-    },
-    onSuccess: ({ landed, total }) => {
-      if (total === 0) return;
-      if (landed > 0) toast.success(landed === 1 ? "Picture added" : `${landed} pictures added`);
-    },
-    onSettled: () => {
-      setProgress(null);
-      void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-    },
-  });
-  return {
-    add: (files: ArrayLike<File> | null | undefined) => {
-      const list = Array.from(files ?? []);
-      if (list.length > 0 && !batch.isPending) batch.mutate(list);
-    },
-    uploading: batch.isPending,
-    progressText: progress ? uploadingLabel(progress.done, progress.total) : null,
-  };
 }
 
 function RepairsReadOnly({
@@ -403,7 +424,10 @@ function RepairsReadOnly({
     queryFn: () => photosFn({ data: { id: jobId } }),
     enabled: !!session,
   });
-  const pictures = useOfficePictures(jobId);
+  // Owner, Oct 26: the office adds pictures to a ticket from its page, not only through the
+  // technician's close-out — loose "other" photos (ticket-picture-upload.ts; the Inspection
+  // fold's rows use the same hook with an item_key).
+  const pictures = useTicketPictureUpload(jobId);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
   // The office removes a picture it added by mistake (the thumb's X asks first; the field flow's
@@ -464,10 +488,7 @@ function RepairsReadOnly({
         multiple
         className="hidden"
         aria-label="Add pictures"
-        onChange={(e) => {
-          pictures.add(e.target.files);
-          e.target.value = "";
-        }}
+        onChange={(e) => pictures.add(takePickedFiles(e.target))}
       />
       <Button
         type="button"
@@ -590,34 +611,12 @@ function RepairsReadOnly({
   );
 }
 
-function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
+/** The Work fold's Close-out tab: what the technician recorded at the end, or why there is nothing. */
+function CloseoutBody({ job }: { job: ServiceJobWithTech }) {
   const sig = useSignedUrl(job.signature_path);
-  const any =
-    job.closing_notes ||
-    job.checked_in_with ||
-    job.checked_out_with ||
-    job.recommend_new_roof ||
-    job.signature_path ||
-    job.completed_at;
-  // Owner, Oct 5: a ticket the office set Invoiced / Closed from the stage picker, with no
-  // close-out behind it, says so instead of "not closed out yet".
-  const officeStage = ["authorized", "invoiced", "closed"].includes(job.stage);
-  const summary = job.completed_at
-    ? `Done ${whenShort(job.completed_at)}`
-    : any
-      ? "in progress"
-      : officeStage
-        ? `${STAGE_LABELS[job.stage as ServiceStage]} by the office — no close-out`
-        : "not closed out yet";
+  const { any, officeStage } = closeoutInfo(job);
   return (
-    <Box
-      title="Close-out"
-      icon={CheckCircle2}
-      collapsible
-      defaultOpen={!!any}
-      storageKey="closeout"
-      summary={summary}
-    >
+    <div className="space-y-3" data-tab="closeout">
       {!any ? (
         <p className="text-sm text-muted-foreground">
           {officeStage
@@ -681,7 +680,7 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
           )}
         </div>
       )}
-    </Box>
+    </div>
   );
 }
 
@@ -742,16 +741,16 @@ function eventSummary(e: JobEventRow) {
   return eventText(e).text.split("\n")[0] || "Note";
 }
 
-function Timeline({ jobId }: { jobId: string }) {
-  const { session } = useAuth();
+/** The Work fold's Activity log tab: the Add note box, then the ticket's events, newest first. */
+function TimelineBody({
+  jobId,
+  events: q,
+}: {
+  jobId: string;
+  events: ReturnType<typeof useJobEvents>;
+}) {
   const qc = useQueryClient();
-  const listFn = useServerFn(listJobEvents);
   const noteFn = useServerFn(addJobNote);
-  const q = useQuery({
-    queryKey: fieldKeys.events(jobId),
-    queryFn: () => listFn({ data: { id: jobId } }),
-    enabled: !!session,
-  });
   const [note, setNote] = useState("");
   const add = useMutation({
     mutationFn: () => noteFn({ data: { id: jobId, note: note.trim() } }),
@@ -772,22 +771,13 @@ function Timeline({ jobId }: { jobId: string }) {
   const rows = q.data ?? [];
   // The server returns newest first.
   const latest = rows[0];
-  const summary = q.error ? (
-    <span className="text-destructive">could not load</span>
-  ) : latest ? (
-    `${eventSummary(latest)} · ${whenShort(latest.at)}`
-  ) : q.isLoading ? null : (
-    "nothing yet"
-  );
   return (
-    <Box
-      title="Activity log"
-      icon={History}
-      collapsible
-      defaultOpen={false}
-      storageKey="timeline"
-      summary={summary}
-    >
+    <div className="space-y-3">
+      {latest && (
+        <p className="text-sm text-muted-foreground" data-line="latest-event">
+          Latest: {eventSummary(latest)} · {whenShort(latest.at)}
+        </p>
+      )}
       <form
         className="space-y-2"
         onSubmit={(e) => {
@@ -838,6 +828,6 @@ function Timeline({ jobId }: { jobId: string }) {
           })}
         </ol>
       )}
-    </Box>
+    </div>
   );
 }

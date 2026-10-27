@@ -155,6 +155,7 @@ describe("the boxes", () => {
     expect(svc).not.toContain("<LatestContact");
     expect(svc).not.toContain("Customer contact");
     const sections = read("src/components/service/ticket-field-sections.tsx");
-    expect(sections).toContain('title="Activity log"');
+    // Oct 27: the Activity log is a tab of the Work fold.
+    expect(sections).toMatch(/<TabsTrigger value="timeline"[^>]*>[\s\S]*?Activity log/);
   });
 });

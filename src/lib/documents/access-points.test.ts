@@ -91,52 +91,61 @@ describe("the Project Bids row button", () => {
   });
 });
 
-describe("the ticket page's Documents fold", () => {
-  it("is in the office's column next to the Invoice fold, never on a technician's page", () => {
+describe("the ticket page's Documents icon (Oct 27: the header, not a fold)", () => {
+  const actions = read("src/components/service/ticket-header-actions.tsx");
+  it("sits in the header to the left of Delete, for the office only (where the fold was); the column has no fold", () => {
+    const header = service.slice(
+      service.indexOf("{showCloseOut && ("),
+      service.indexOf('data-line="tags"'),
+    );
+    expect(header).toContain("<TicketHeaderActions");
+    expect(header).toMatch(
+      /documents=\{\s*officeOrAdmin\s*\?\s*\{\s*count: documents\.data\?\.length \?\? null,/,
+    );
+    expect(header).toMatch(/onOpen: \(\) => setDocumentsOpen\(true\)/);
+    expect(header).toMatch(/\{officeOrAdmin && \(\s*<TicketDocumentsDialog\s+job=\{job\}/);
+    // The count: the same query the dialog's list reads, only for the office with a saved ticket.
+    expect(service).toMatch(
+      /const documents = useDocumentsQuery\(\s*\{ serviceJobId: job\?\.id \},\s*\{ enabled: officeOrAdmin && !!job \},?\s*\);/,
+    );
+    // Documents (FileText) renders before Delete (Trash2) in the component.
+    expect(actions.indexOf('aria-label="Documents"')).toBeLessThan(
+      actions.indexOf('aria-label="Delete ticket"'),
+    );
     const aside = service.slice(
       service.indexOf("<aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE}"),
       service.indexOf("</aside>"),
     );
     expect(aside).toContain('{jobStage !== "done" && <InvoiceBlock job={job} />}');
-    expect(aside).toContain("<TicketDocumentsFold job={job} />");
-    // The aside is the two-pane layout, which is the office's (officeOrAdmin = !isTech).
+    expect(aside).not.toMatch(/<TicketDocumentsFold|<DocumentsList|storageKey="documents"/);
+    expect(service).not.toContain("TicketDocumentsFold");
     expect(service).toContain("const officeOrAdmin = !isTech;");
     expect(service).toContain("const twoPane = officeOrAdmin && !!job;");
-    expect(service).toMatch(/\{twoPane && job \? \(/);
-    // The one-column branch (a technician) has no fold.
-    const oneColumn = service.slice(
-      service.indexOf("</aside>"),
-      service.indexOf("</FoldAllContext.Provider>"),
-    );
-    expect(oneColumn).not.toContain("TicketDocumentsFold");
   });
-  it("lists the ticket's documents compactly and opens New document for the ticket", () => {
-    const fold = service.slice(service.indexOf("function TicketDocumentsFold("));
-    expect(fold).toContain(
-      "<DocumentsList serviceJobId={job.id} compact onNew={() => setNewOpen(true)} />",
+  it("opens a dialog listing the ticket's documents with New document for the ticket", () => {
+    const dialog = actions.slice(actions.indexOf("export function TicketDocumentsDialog("));
+    expect(dialog).toContain("<DialogTitle>Documents · Ticket #{job.number}</DialogTitle>");
+    expect(dialog).toContain(
+      "<DocumentsList serviceJobId={job.id} onNew={() => setNewOpen(true)} />",
     );
-    // Phase 2: the list's own "New document" button is the only one — the fold's duplicate is gone.
-    expect(fold).not.toMatch(/<Plus className="mr-1 h-4 w-4" \/> New document/);
-    expect((fold.match(/New document/g) ?? []).length).toBe(0);
-    expect(fold).toContain('kind="ticket"');
-    expect(fold).toContain("serviceJobId={job.id}");
-    expect(fold).toContain("recordLabel={recordLabel}");
-    expect(fold).toContain("const recordLabel = `Ticket ${job.number}`;");
-    expect(fold).toContain('title="Documents"');
-    expect(service).toContain('import { Box } from "@/components/service/field-shared";');
-    expect(service).toContain(
+    // The list's own "New document" button is the only one — no duplicate in the dialog.
+    expect((dialog.match(/New document/g) ?? []).length).toBe(0);
+    expect(dialog).toContain('kind="ticket"');
+    expect(dialog).toContain("serviceJobId={job.id}");
+    expect(dialog).toContain("recordLabel={`Ticket ${job.number}`}");
+    expect(actions).toContain(
       'import { DocumentsList } from "@/components/documents/documents-panel";',
     );
-    expect(service).toContain(
+    expect(actions).toContain(
       'import { NewDocumentDialog } from "@/components/documents/new-document-dialog";',
     );
   });
-  it("an inspection ticket gets the one-tap Inspection report button, on the ticket page and the field close-out (documents access only)", () => {
-    const fold = service.slice(service.indexOf("function TicketDocumentsFold("));
-    expect(fold).toMatch(
-      /\{job\.service_type === "inspection" && \(\s*<InspectionReportButton serviceJobId=\{job\.id\} ticketNumber=\{job\.number\} \/>/,
+  it("an inspection ticket gets the one-tap Inspection report button, in the dialog and the field close-out (documents access only)", () => {
+    const dialog = actions.slice(actions.indexOf("export function TicketDocumentsDialog("));
+    expect(dialog).toMatch(
+      /\{job\.service_type === "inspection" && \(\s*<InspectionReportButton\s+serviceJobId=\{job\.id\}\s+ticketNumber=\{job\.number\}/,
     );
-    expect(service).toContain(
+    expect(actions).toContain(
       'import { InspectionReportButton } from "@/components/documents/inspection-report-button";',
     );
     const closeout = read("src/components/service/closeout.tsx");

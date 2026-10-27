@@ -153,16 +153,21 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
       expect(linesWith(read(file), "isOffice(")).toEqual(lines);
     });
 
-  it("the ticket editor keeps officeOrAdmin for canEdit, Job #, layout and Time only", () => {
+  it("the ticket editor keeps officeOrAdmin for canEdit, Job #, layout, Documents (Oct 27) and Time only", () => {
     const src = read("src/components/service-page.tsx");
     expect(
       linesWith(src, "officeOrAdmin").filter((l) => !l.startsWith("*") && !l.startsWith("//")),
     ).toEqual([
       "const officeOrAdmin = !isTech;",
       "const canEdit = !job || officeOrAdmin || (job.technician_id === profile?.id && !officeStage);",
+      // The Documents count on the header's icon (visibility: where the fold was shown).
+      "{ enabled: officeOrAdmin && !!job },",
       "...(officeOrAdmin ? { job_number: draft.job_number.trim() || null } : {}),",
       "{officeOrAdmin && (",
       "const twoPane = officeOrAdmin && !!job;",
+      // The header's Documents icon and its dialog.
+      "officeOrAdmin",
+      "{officeOrAdmin && (",
       "<InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />",
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />",
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />",
@@ -189,9 +194,8 @@ describe("creating tickets is the office's and a manager's (dispatchesTickets si
   });
   it("Repeat (New ticket for this site) is a dispatcher's; Delete a manager's", () => {
     expect(page).toMatch(/\{dispatcher && repeatable && \(/);
-    expect(page).toMatch(
-      /\{manager && \(\s*<Button\s+variant="outline"\s+className="text-destructive/,
-    );
+    // Oct 27: Delete is the trash icon in TicketHeaderActions; the gate stays the manager's.
+    expect(page).toMatch(/onDelete=\{manager \? \(\) => setConfirmDelete\(true\) : null\}/);
     expect(page).toMatch(/onDelete=\{manager \? \(\) => setToDelete\(j\) : undefined\}/);
   });
   it("the Customers page's New ticket buttons too", () => {

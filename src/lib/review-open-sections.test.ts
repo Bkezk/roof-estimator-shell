@@ -26,10 +26,12 @@ describe("a manager reviewing a Done / Authorized ticket", () => {
     expect(sections).toContain(
       'managesTickets(profile) && (job.stage === "done" || job.stage === "authorized")',
     );
-    expect(sections).toContain("defaultOpen={review}");
-    expect(sections).toContain('storageKey={review ? "time-review" : "time"}');
+    // Oct 27: Time is a tab of the Work fold; the review opens that fold (remembered as "work"),
+    // and the travel / labor split heads the tab.
+    expect(sections).toContain("defaultOpen={review || closeout.any}");
+    expect(sections).toContain('storageKey="work"');
     expect(sections).toContain(
-      '`Travel ${hoursText(hoursOf("travel"))} · Labor ${hoursText(hoursOf("labor"))}`',
+      'Travel {hoursText(hoursOf("travel"))} · Labor {hoursText(hoursOf("labor"))}',
     );
   });
 });

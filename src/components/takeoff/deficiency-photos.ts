@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { supabase } from "@/integrations/supabase/client";
-import { shrinkPhoto } from "@/components/service/field-utils";
+import { shrinkPhoto, takePickedFiles } from "@/components/service/field-utils";
 import { TAKEOFF_BUCKET } from "@/lib/takeoff.functions";
 import { signTakeoffPhotos, type PhotoKind } from "@/lib/takeoff-photos.functions";
 import type { CountAttrs, DeficiencyPhoto } from "@/lib/takeoff/model";
@@ -106,16 +106,11 @@ export async function uploadTakeoffPhoto(path: string, blob: Blob, kind: PhotoKi
 }
 
 /**
- * The files picked in a file input, copied out BEFORE the input is cleared (so the same picture
- * can be picked again). A `FileList` is live: clearing `input.value` empties it, so reading it
- * after the reset sees no files (owner, Oct 27: "it said to pick a image file png jpeg etc but
- * i was picking a png").
+ * The files picked in a file input, copied out BEFORE the input is cleared (a `FileList` is
+ * live; owner, Oct 27). The helper lives with the ticket photos' (service/field-utils.ts) so the
+ * inspection rows share it; re-exported here for the Objects card.
  */
-export function takePickedFiles(input: { files: ArrayLike<File> | null; value: string }): File[] {
-  const files = Array.from(input.files ?? []);
-  input.value = "";
-  return files;
-}
+export { takePickedFiles };
 
 /** The image files among what was picked (anything else is left out). */
 export function imageFilesOf(list: ArrayLike<File> | null | undefined): File[] {

@@ -7,8 +7,7 @@
  * fold or tab; with an accountId it lists every document of the customer with a "For" column.
  */
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   FileText,
@@ -24,7 +23,6 @@ import {
 
 import { versionLine } from "@/lib/documents/editor-helpers";
 import type { DocKind } from "@/lib/documents/model";
-import { listDocuments } from "@/lib/documents.functions";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +44,7 @@ import {
 import { useDocumentActions } from "./document-actions";
 import { type DocumentListRow, documentsKey, errText } from "./document-types";
 import { NewDocumentDialog } from "./new-document-dialog";
+import { useDocumentsQuery } from "./use-documents";
 
 export function DocumentsPanel(props: {
   kind: DocKind;
@@ -97,23 +96,12 @@ export function DocumentsList(props: {
   /** Shown as the "New document" button when given. */
   onNew?: (() => void) | undefined;
 }) {
-  const listFn = useServerFn(listDocuments);
   const scope = {
     bidId: props.bidId,
     serviceJobId: props.serviceJobId,
     accountId: props.accountId,
   };
-  const q = useQuery({
-    queryKey: documentsKey(scope),
-    queryFn: () =>
-      listFn({
-        data: {
-          ...(props.bidId ? { bidId: props.bidId } : {}),
-          ...(props.serviceJobId ? { serviceJobId: props.serviceJobId } : {}),
-          ...(props.accountId ? { accountId: props.accountId } : {}),
-        },
-      }),
-  });
+  const q = useDocumentsQuery(scope);
   const rows = q.data ?? [];
   return (
     <div className={cn("space-y-2", props.compact && "space-y-1")}>

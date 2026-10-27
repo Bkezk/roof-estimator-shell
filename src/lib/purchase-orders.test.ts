@@ -629,8 +629,9 @@ describe("mounted on the ticket page and the close-out", () => {
     expect(page).toContain(
       'import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";',
     );
+    // (Oct 27: a comment about the Work fold may sit between the two.)
     expect(page).toMatch(
-      /\{materials\}\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>/,
+      /\{materials\}\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*(\{\/\*[^*]*\*\/\}\s*)?<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>/,
     );
     expect(page).toMatch(
       /\{materials\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>/,

@@ -134,7 +134,8 @@ describe("the ticket page (components/service-page.tsx)", () => {
     expect(officeSide).toMatch(
       /<Select\s+value=\{asStage\(job\.stage\)\}\s+disabled=\{ro \|\| lockedStage \|\| stageMut\.isPending\}/,
     );
-    expect(officeSide).toContain('<Trash2 className="mr-1 h-4 w-4" /> Delete');
+    // Oct 27: Delete is the trash icon alone, with Documents to its left (ticket-header-actions.tsx).
+    expect(officeSide).toMatch(/onDelete=\{manager \? \(\) => setConfirmDelete\(true\) : null\}/);
     expect(officeSide).toContain('onClick={() => setLayout(stacked ? "side" : "stacked")}');
   });
   it("the form: the read-only details block, the Timeline and the editable Notes — no inputs for the office's fields", () => {

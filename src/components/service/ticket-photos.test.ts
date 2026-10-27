@@ -98,9 +98,12 @@ describe("imageFiles", () => {
 describe("the ticket page's Photos & repairs fold (ticket-field-sections.tsx)", () => {
   const src = readFileSync("src/components/service/ticket-field-sections.tsx", "utf8");
   const fold = src.slice(
-    src.indexOf("function useOfficePictures"),
+    src.indexOf("function RepairsReadOnly"),
     src.indexOf("function CloseoutSummary"),
   );
+  // The upload itself moved to ticket-picture-upload.ts on Oct 27 (the Inspection fold's rows
+  // share it, with an item_key); the fold calls the hook with no item.
+  const upload = readFileSync("src/components/service/ticket-picture-upload.ts", "utf8");
 
   it("offers Add pictures (ImagePlus) over a hidden multi-file image input, to the ticket's editors", () => {
     expect(fold).toContain("Add pictures");
@@ -118,19 +121,26 @@ describe("the ticket page's Photos & repairs fold (ticket-field-sections.tsx)", 
     expect(fold).toMatch(/pictures\.add\(e\.dataTransfer\.files\)/);
   });
   it("uploads with the field flow's path (shrinkPhoto → uploadPlan → the service bucket → registerJobPhoto as a loose 'other' photo)", () => {
-    expect(fold).toMatch(/await shrinkPhoto\(file\)/);
-    expect(fold).toMatch(/uploadPlan\(\[shrunk\], jobId\)/);
-    expect(fold).toMatch(/await uploadToServiceBucket\(path, shrunk\.blob, shrunk\.type\)/);
-    expect(fold).toMatch(
-      /service_job_id: jobId,\s+repair_id: null,\s+item_key: null,\s+role: "other",\s+storage_path: path,/,
+    expect(fold).toMatch(/const pictures = useTicketPictureUpload\(jobId\);/); // no item_key
+    expect(upload).toMatch(/await shrinkPhoto\(file\)/);
+    expect(upload).toMatch(/uploadPlan\(\[shrunk\], jobId\)/);
+    expect(upload).toMatch(/await uploadToServiceBucket\(path, shrunk\.blob, shrunk\.type\)/);
+    expect(upload).toMatch(
+      /data: jobPhotoRegistration\(\{ jobId, path, shrunk, file, itemKey \}\)/,
+    );
+    expect(upload).toMatch(
+      /service_job_id: args\.jobId,\s+repair_id: null,\s+item_key: args\.itemKey \?\? null,\s+role: "other" as const,\s+storage_path: args\.path,/,
     );
     // A row that could not be recorded leaves no orphan in the bucket.
-    expect(fold).toMatch(/await removeFromServiceBucket\(path\)/);
+    expect(upload).toMatch(/await removeFromServiceBucket\(path\)/);
+  });
+  it("copies the picked files out before the input is cleared (a FileList is live)", () => {
+    expect(fold).toMatch(/onChange=\{\(e\) => pictures\.add\(takePickedFiles\(e\.target\)\)\}/);
   });
   it("shows 'Uploading n of m…', names a failed file in a toast, and refreshes the photos when done", () => {
-    expect(fold).toMatch(/uploadingLabel\(progress\.done, progress\.total\)/);
-    expect(fold).toMatch(/loudError\(`\$\{file\.name \|\| "A picture"\} did not upload`, e\)/);
-    expect(fold).toMatch(
+    expect(upload).toMatch(/uploadingLabel\(progress\.done, progress\.total\)/);
+    expect(upload).toMatch(/loudError\(`\$\{file\.name \|\| "A picture"\} did not upload`, e\)/);
+    expect(upload).toMatch(
       /onSettled: \(\) => \{[\s\S]*?invalidateQueries\(\{ queryKey: fieldKeys\.photos\(jobId\) \}\)/,
     );
   });
