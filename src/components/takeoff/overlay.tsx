@@ -32,7 +32,7 @@ import {
   rectSizeLabel,
 } from "./shapes";
 import type { SnapKind } from "./plan-lines";
-import { scaleOrigin } from "./sheet-scale";
+import { scaleOrigin, scaleOriginLabel } from "./sheet-scale";
 
 const pts = (p: readonly PagePoint[]) => p.map(([x, y]) => `${x},${y}`).join(" ");
 
@@ -496,9 +496,7 @@ export function ScaleLine(props: { scale: PageScale; zoom: number }) {
         />
       ))}
       <SvgLabel x={(ax + bx) / 2} y={(ay + by) / 2 - 12 / z} zoom={z} color="#c2410c" bold>
-        {origin?.source === "sheet"
-          ? `Scale read from the sheet: ${origin.note}`
-          : `Scale ${feetInches(feet)}`}
+        {origin?.source === "sheet" ? scaleOriginLabel(origin.note) : `Scale ${feetInches(feet)}`}
       </SvgLabel>
     </g>
   );

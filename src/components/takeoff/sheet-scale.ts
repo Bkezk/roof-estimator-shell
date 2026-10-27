@@ -14,6 +14,7 @@
  * `source: "sheet"` with the note text, so the viewer and the Scale dialog can say where it came
  * from; drawing a scale replaces it (`source: "drawn"`).
  */
+import { AERIAL_SCALE_NOTE_PREFIX } from "@/lib/takeoff/aerial-scale";
 import type { PageScale } from "@/lib/takeoff/model";
 
 /** Page units per paper inch (pdf.js viewport at scale 1). */
@@ -205,7 +206,25 @@ export function sheetScaleLine(
 
 /** The words shown wherever a scale read from the sheet is shown (owner: make it known). */
 export const sheetScaleMessage = (note: string): string =>
-  `Scale read from the sheet: ${note} — check it against a printed dimension`;
+  isAerialScaleNote(note)
+    ? `Scale set from the aerial imagery (${aerialScaleDetail(note)}) — check it against a known dimension`
+    : `Scale read from the sheet: ${note} — check it against a printed dimension`;
+
+/**
+ * A takeoff made from an address (owner, Oct 27; src/lib/takeoff/aerial-scale.ts) carries its
+ * scale as `source: "sheet"` with an "Aerial imagery, zoom <z>" note: the viewer says so in
+ * those words rather than "read from the sheet".
+ */
+export const isAerialScaleNote = (note: string): boolean =>
+  note.startsWith(AERIAL_SCALE_NOTE_PREFIX);
+/** "zoom 19" out of "Aerial imagery, zoom 19" (the whole note when it has no detail). */
+export const aerialScaleDetail = (note: string): string =>
+  note.slice(AERIAL_SCALE_NOTE_PREFIX.length).replace(/^[,\s]+/, "") || note;
+/** The scale line's label on the drawing for a sheet-read or imagery-set scale. */
+export const scaleOriginLabel = (note: string): string =>
+  isAerialScaleNote(note)
+    ? `Scale from the aerial imagery (${aerialScaleDetail(note)})`
+    : `Scale read from the sheet: ${note}`;
 
 /** Full-size drawing sheets (in): ANSI C / D / E and ARCH C / D / E1 / E. */
 const FULL_SIZE_SHEETS: ReadonlyArray<[number, number]> = [

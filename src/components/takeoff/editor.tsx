@@ -21,6 +21,7 @@ import {
   FilePlus2,
   Loader2,
   Lock,
+  MapPin,
   Maximize2,
   Minimize2,
   PanelLeftClose,
@@ -682,6 +683,15 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         {row.file_name && (
           <span className="max-w-[240px] truncate text-xs text-muted-foreground">
             {row.file_name}
+          </span>
+        )}
+        {row.source_address && (
+          <span
+            className="flex max-w-[320px] items-center gap-1 text-xs text-muted-foreground"
+            title="The address this aerial was looked up by"
+          >
+            <MapPin className="h-3 w-3 shrink-0" aria-hidden />
+            <span className="truncate">{row.source_address}</span>
           </span>
         )}
         {locked ? (

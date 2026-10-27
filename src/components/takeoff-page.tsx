@@ -2,8 +2,10 @@
  * Takeoff — PlanSwift's drawing half (docs/planswift-research.md §4). Without an id the page
  * lists takeoffs (grouped Draft → Done, filterable, with a Recently deleted bin, like the Bids
  * page); `/takeoff?id=<uuid>` opens one in the editor (./takeoff/editor.tsx). A new takeoff is a
- * plan-set PDF or an aerial screenshot: the row is created first, then the browser uploads the
- * file straight into the private "takeoffs" bucket at the row's file_path.
+ * plan-set PDF, an aerial screenshot, or (owner, Oct 27) the aerial of an address — the ticket
+ * aerial's imagery rendered to a PNG, its page scaled from the imagery at once
+ * (./takeoff/aerial-pick.tsx, src/lib/takeoff/aerial-takeoff.ts): the row is created first, then
+ * the browser uploads the file straight into the private "takeoffs" bucket at the row's file_path.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +19,7 @@ import {
   FileText,
   Loader2,
   Lock,
+  MapPin,
   Plus,
   RotateCcw,
   Ruler,
@@ -70,15 +73,37 @@ import {
 
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import type { AccountHit } from "@/lib/crm.functions";
+import { renderAerialImageryPng } from "@/lib/aerial-png";
 import { cardOpenProps } from "@/lib/card-open";
+import { takeoffFromAerial } from "@/lib/takeoff/aerial-takeoff";
 import { isTakeoffLocked } from "@/lib/takeoff/lock";
 import { suggestTakeoffName } from "@/lib/takeoff/naming";
+import { AerialAddressPicker, type AerialSelection } from "@/components/takeoff/aerial-pick";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const ACCEPT = ["application/pdf", "image/png", "image/jpeg"];
+
+/** Where a new takeoff's underlay comes from (the New takeoff dialog's three options). */
+const TAKEOFF_SOURCES = ["pdf", "image", "address"] as const;
+type TakeoffSource = (typeof TAKEOFF_SOURCES)[number];
+const SOURCE_LABELS: Record<TakeoffSource, string> = {
+  pdf: "Plan-set PDF",
+  image: "Aerial screenshot",
+  address: "From an address",
+};
+const SOURCE_HELP: Record<TakeoffSource, string> = {
+  pdf: "A plan-set PDF (every sheet becomes a page), up to 100 MB. Set the scale from a known dimension.",
+  image: "An aerial screenshot (PNG or JPEG), up to 100 MB. Set the scale from a known dimension.",
+  address:
+    "Type the address, find it on our aerial imagery (Kentucky and Tennessee), frame the roof, and use the picture: it opens scaled, ready to measure.",
+};
+const SOURCE_ACCEPT: Record<Exclude<TakeoffSource, "address">, string> = {
+  pdf: "application/pdf",
+  image: "image/png,image/jpeg",
+};
 
 export function TakeoffPage({ id }: { id?: string | undefined }) {
   return id ? <TakeoffEditor id={id} /> : <TakeoffList />;
@@ -223,8 +248,9 @@ function TakeoffList() {
             <Ruler className="h-6 w-6" /> Takeoffs
           </h1>
           <p className="text-sm text-muted-foreground">
-            Open a plan-sheet PDF or an aerial screenshot, set the scale from a known dimension,
-            then draw the roof areas, walls and counts.
+            Open a plan-sheet PDF or an aerial screenshot and set the scale from a known dimension,
+            or search an address for its aerial (scaled for you), then draw the roof areas, walls
+            and counts.
           </p>
         </div>
         <Button size="lg" className="text-base font-semibold" onClick={() => setCreating(true)}>
@@ -524,6 +550,15 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
           {pageCount} page{pageCount === 1 ? "" : "s"} · Last updated {when(t.updated_at)}
           {t.updated_by_name ? ` by ${t.updated_by_name}` : ""}
         </p>
+        {t.source_address && (
+          <p
+            className="flex items-center gap-1 text-sm text-muted-foreground"
+            title="The address this aerial was looked up by"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{t.source_address}</span>
+          </p>
+        )}
         {t.account_id && (
           <p className="flex flex-wrap items-center gap-1.5 text-sm">
             <span className="text-muted-foreground">Customer:</span>
@@ -601,6 +636,11 @@ function NewTakeoffDialog(props: {
   const deleteFn = useServerFn(deleteTakeoff);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // Which of the three options is open: a plan-set PDF, an aerial screenshot, or the aerial of
+  // an address (owner, Oct 27).
+  const [source, setSource] = useState<TakeoffSource>("pdf");
+  // The address option's picture as it stands (null until an address is found or picked).
+  const [aerial, setAerial] = useState<AerialSelection | null>(null);
   // The customer profile the takeoff belongs to. Owner (Sep 30): "the purpose was to require
   // they associate it with a customer if that customer exists in the system, so Customer should
   // be the required box and name should prefill". Required whenever the user can search
@@ -616,8 +656,15 @@ function NewTakeoffDialog(props: {
     setName("");
     setNameTouched(false);
     setFile(null);
+    setSource("pdf");
+    setAerial(null);
     setAccount(null);
     setBusy(null);
+  };
+  const pickSource = (s: TakeoffSource) => {
+    setSource(s);
+    setFile(null);
+    if (s !== "address") setAerial(null);
   };
 
   /** The customer pick names the takeoff ("Acme Foods — Plant 2") unless the user typed a name. */
@@ -648,10 +695,76 @@ function NewTakeoffDialog(props: {
     setFile(f);
   };
 
+  /** The row is made, the file is in the bucket: list it and open it. */
+  const finish = (row: TakeoffRow) => {
+    void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+    reset();
+    props.onOpenChange(false);
+    void navigate({ to: "/takeoff", search: { id: row.id } });
+  };
+
+  /** Upload the underlay to the row's path; a failed upload takes the row with it. */
+  const upload = async (row: TakeoffRow, body: Blob, contentType: string): Promise<boolean> => {
+    setBusy(source === "address" ? "Uploading the picture…" : "Uploading the file…");
+    const path = row.file_path;
+    const { error } = path
+      ? await supabase.storage
+          .from(TAKEOFF_BUCKET)
+          .upload(path, body, { contentType, upsert: true })
+      : { error: new Error("the takeoff has no file path") };
+    if (error) {
+      await deleteFn({ data: { id: row.id } }).catch(() => {});
+      setBusy(null);
+      toast.error(`Upload failed: ${error.message}`);
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * "Use this picture": the view as shown rendered to a PNG (the imagery alone), the takeoff
+   * created as an image underlay named after the address with its page scaled from the imagery
+   * (takeoffFromAerial), the PNG uploaded exactly as a screenshot would be.
+   */
+  const submitAerial = async (sel: AerialSelection) => {
+    let blob: Blob;
+    try {
+      setBusy("Making the picture…");
+      blob = await renderAerialImageryPng(sel.view, sel.sources);
+    } catch (e) {
+      setBusy(null);
+      toast.error(`Could not make the picture: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const { input } = takeoffFromAerial(sel.view, sel.address, {
+      fileSize: blob.size,
+      name,
+      accountId: account?.account_id ?? null,
+    });
+    let row: TakeoffRow;
+    try {
+      setBusy("Creating the takeoff…");
+      row = await createFn({ data: input });
+    } catch (e) {
+      setBusy(null);
+      toast.error(`Could not create the takeoff: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    if (await upload(row, blob, "image/png")) finish(row);
+  };
+
   const submit = async () => {
     if (busy) return;
     if (canPickCustomer && !account) {
       toast.error("Pick the customer this takeoff is for (or add them) before creating it.");
+      return;
+    }
+    if (source === "address") {
+      if (!aerial) {
+        toast.error("Find the address (or pick the building on the map) first.");
+        return;
+      }
+      await submitAerial(aerial);
       return;
     }
     const finalName = (
@@ -702,25 +815,13 @@ function NewTakeoffDialog(props: {
       return;
     }
 
-    setBusy("Uploading the file…");
-    const path = row.file_path;
-    const { error } = path
-      ? await supabase.storage
-          .from(TAKEOFF_BUCKET)
-          .upload(path, file, { contentType: file.type, upsert: true })
-      : { error: new Error("the takeoff has no file path") };
-    if (error) {
-      await deleteFn({ data: { id: row.id } }).catch(() => {});
-      setBusy(null);
-      toast.error(`Upload failed: ${error.message}`);
-      return;
-    }
-
-    void qc.invalidateQueries({ queryKey: ["takeoffs"] });
-    reset();
-    props.onOpenChange(false);
-    void navigate({ to: "/takeoff", search: { id: row.id } });
+    if (await upload(row, file, file.type)) finish(row);
   };
+
+  const ready =
+    source === "address"
+      ? !!aerial && (canPickCustomer ? !!account : true)
+      : !!file && (canPickCustomer ? !!account : !!name.trim());
 
   return (
     <Dialog
@@ -731,13 +832,14 @@ function NewTakeoffDialog(props: {
         props.onOpenChange(o);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className={
+          source === "address" ? "max-h-[92vh] overflow-y-auto sm:max-w-3xl" : "sm:max-w-md"
+        }
+      >
         <DialogHeader>
           <DialogTitle>New takeoff</DialogTitle>
-          <DialogDescription>
-            A plan-set PDF (every sheet becomes a page) or an aerial screenshot (PNG or JPEG), up to
-            100 MB.
-          </DialogDescription>
+          <DialogDescription>{SOURCE_HELP[source]}</DialogDescription>
         </DialogHeader>
         <form
           className="space-y-3"
@@ -746,6 +848,29 @@ function NewTakeoffDialog(props: {
             void submit();
           }}
         >
+          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Start from">
+            {TAKEOFF_SOURCES.map((s) => (
+              <Button
+                key={s}
+                type="button"
+                size="sm"
+                role="radio"
+                aria-checked={source === s}
+                variant={source === s ? "default" : "outline"}
+                disabled={!!busy}
+                onClick={() => pickSource(s)}
+              >
+                {s === "pdf" ? (
+                  <FileText className="mr-1 h-4 w-4" />
+                ) : s === "image" ? (
+                  <FileImage className="mr-1 h-4 w-4" />
+                ) : (
+                  <MapPin className="mr-1 h-4 w-4" />
+                )}
+                {SOURCE_LABELS[s]}
+              </Button>
+            ))}
+          </div>
           {canPickCustomer && (
             <div className="space-y-1">
               <Label htmlFor="takeoff-customer">
@@ -767,17 +892,24 @@ function NewTakeoffDialog(props: {
           )}
           <div className="space-y-1">
             <Label htmlFor="takeoff-name">
-              Name{canPickCustomer ? "" : <span className="text-destructive"> *</span>}
+              Name
+              {canPickCustomer || source === "address" ? (
+                ""
+              ) : (
+                <span className="text-destructive"> *</span>
+              )}
             </Label>
             <Input
               id="takeoff-name"
               value={name}
               disabled={!!busy}
-              required={!canPickCustomer}
+              required={!canPickCustomer && source !== "address"}
               placeholder={
-                canPickCustomer
-                  ? "Filled from the customer; change it if you like"
-                  : "The job or building, e.g. Smith Warehouse roof"
+                source === "address"
+                  ? "Named after the address; change it if you like"
+                  : canPickCustomer
+                    ? "Filled from the customer; change it if you like"
+                    : "The job or building, e.g. Smith Warehouse roof"
               }
               onChange={(e) => {
                 setNameTouched(e.target.value.trim().length > 0);
@@ -785,28 +917,36 @@ function NewTakeoffDialog(props: {
               }}
             />
             <p className="text-xs text-muted-foreground">
-              {canPickCustomer
-                ? "Optional. Starts as the customer (and property) you picked plus today's date; change it to the job if you like."
-                : "Required. Name the job, not the plan file."}
+              {source === "address"
+                ? "Optional. The takeoff is named after the address unless you type a name here."
+                : canPickCustomer
+                  ? "Optional. Starts as the customer (and property) you picked plus today's date; change it to the job if you like."
+                  : "Required. Name the job, not the plan file."}
             </p>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="takeoff-file">
-              Plan file <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="takeoff-file"
-              type="file"
-              accept={ACCEPT.join(",")}
-              disabled={!!busy}
-              onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-            />
-            {file && (
-              <p className="text-xs text-muted-foreground">
-                {file.name} · {fileSize(file.size)}
-              </p>
-            )}
-          </div>
+          {source === "address" ? (
+            <AerialAddressPicker disabled={!!busy} onChange={setAerial} />
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor="takeoff-file">
+                {source === "pdf" ? "Plan file" : "Screenshot"}{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="takeoff-file"
+                key={source}
+                type="file"
+                accept={SOURCE_ACCEPT[source]}
+                disabled={!!busy}
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+              />
+              {file && (
+                <p className="text-xs text-muted-foreground">
+                  {file.name} · {fileSize(file.size)}
+                </p>
+              )}
+            </div>
+          )}
           <DialogFooter>
             <Button
               type="button"
@@ -819,14 +959,13 @@ function NewTakeoffDialog(props: {
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={!file || !!busy || (canPickCustomer ? !account : !name.trim())}
-            >
+            <Button type="submit" disabled={!ready || !!busy}>
               {busy ? (
                 <>
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" /> {busy}
                 </>
+              ) : source === "address" ? (
+                "Use this picture"
               ) : (
                 "Create"
               )}

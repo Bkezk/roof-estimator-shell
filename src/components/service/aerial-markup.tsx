@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { aerialImageryCanvas, canvasToPng } from "@/lib/aerial-png";
 import { placePercent, popoverSide, textBoxWidthCh } from "@/lib/aerial-place";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import type { ServiceJobRow } from "@/lib/service.functions";
@@ -1454,52 +1455,21 @@ function PlaceForm({
   );
 }
 
-/** One imagery tile for the canvas, or null when it cannot be loaded (off the cache, offline). */
-function loadTile(url: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
-/** The saved picture: the imagery, then the outline, marks, caption and the legend. */
+/**
+ * The saved picture: the imagery (src/lib/aerial-png.ts, shared with the takeoff's "From an
+ * address"), then the outline, marks, caption and the legend.
+ */
 async function renderAerialPng(
   view: AerialView,
   sources: ImagerySource[],
   markup: AerialMarkup,
   caption: string,
 ): Promise<Blob> {
-  const canvas = document.createElement("canvas");
-  canvas.width = view.width;
-  canvas.height = view.height + legendHeight(markup.annotations);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("This browser cannot draw the picture");
-  ctx.fillStyle = "#262626";
-  ctx.fillRect(0, 0, view.width, view.height);
-  for (const src of sources) {
-    const tiles = tilesForView(view, src);
-    const imgs = await Promise.all(tiles.map((t) => loadTile(t.url)));
-    tiles.forEach((t, i) => {
-      const img = imgs[i];
-      if (img) ctx.drawImage(img, t.left, t.top, t.size, t.size);
-    });
-  }
+  const { canvas, ctx } = await aerialImageryCanvas(
+    view,
+    sources,
+    legendHeight(markup.annotations),
+  );
   paintOverlay(ctx, view, markup, { caption: caption || null });
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("The picture could not be made"))),
-        "image/png",
-      );
-    } catch (e) {
-      reject(
-        new Error(
-          `The imagery could not be copied into the picture (${e instanceof Error ? e.message : String(e)})`,
-        ),
-      );
-    }
-  });
+  return canvasToPng(canvas);
 }

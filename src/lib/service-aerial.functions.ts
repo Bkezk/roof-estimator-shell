@@ -142,8 +142,13 @@ const toFound = (
   };
 };
 
-async function buildingsNear(ctx: Ctx, lat: number, lng: number, radiusM: number) {
-  const { data, error } = await ctx.supabase.rpc("service_aerial_buildings_near", {
+async function buildingsNear(
+  sb: SupabaseClient<Database>,
+  lat: number,
+  lng: number,
+  radiusM: number,
+) {
+  const { data, error } = await sb.rpc("service_aerial_buildings_near", {
     p_lat: lat,
     p_lng: lng,
     p_radius_m: radiusM,
@@ -234,6 +239,96 @@ export async function geocodeAddressCached(
 /** Test-only: forget the cached hits. */
 export const clearGeocodeCache = () => geocodeHits.clear();
 
+/**
+ * Where an address line is on our map — the address part of the ticket aerial, for any line:
+ * the ticket's (getTicketAerial) or one typed into New takeoff › From an address (owner, Oct 27;
+ * src/lib/takeoff-aerial.functions.ts). `found` is the building (or the bare point, with a note
+ * saying to pick the building); null with `note` saying why, and `near` where Pick the building
+ * should open when the street is on the map but not the number.
+ */
+export interface AddressAerial {
+  /** The address the lookup used. */
+  address: string;
+  /** The address's state (the hint when known, else the line's). */
+  addressState: "KY" | "TN" | null;
+  found: FoundBuilding | null;
+  note: string | null;
+  near: { lat: number; lng: number } | null;
+}
+
+export const NO_ADDRESS_NOTE = "The ticket has no address.";
+export const UNREADABLE_ADDRESS_NOTE = "The address has no house number and street to match.";
+export const STORED_NO_OUTLINE_NOTE =
+  "The address is on the map but no building outline is stored there; pick the building.";
+export const NO_MATCH_NOTE =
+  "No building or 911 address point in our map data matches this address.";
+
+export async function aerialForAddress(
+  sb: SupabaseClient<Database>,
+  address: string,
+  opts: {
+    /** The site's state column when known (the line's own state otherwise). */
+    stateHint?: string | null | undefined;
+    /** The property's name, for the by-name fallback (owner, Oct 26). */
+    propertyName?: string | null | undefined;
+  } = {},
+): Promise<AddressAerial> {
+  const parsed = parseStreetAddress(address);
+  const st = stateCode(opts.stateHint) ?? parsed?.state ?? null;
+  const addressState = st === "KY" || st === "TN" ? st : null;
+  const miss = (note: string, near: { lat: number; lng: number } | null = null): AddressAerial => ({
+    address,
+    addressState,
+    found: null,
+    note,
+    near,
+  });
+  const word = parsed ? streetFilterWord(parsed) : null;
+  const propertyName = opts.propertyName ?? null;
+  if (!address.trim()) return miss(NO_ADDRESS_NOTE);
+  if (!parsed || !word) return miss(UNREADABLE_ADDRESS_NOTE);
+  const where = await locateAddress(sb, parsed, word, addressState, propertyName);
+  if (where.kind === "stored") {
+    const { at, candidate } = where;
+    const near = await buildingsNear(sb, at.lat, at.lng, 350);
+    const hit = buildingForPoint(at, near, candidate.building_id);
+    if (hit)
+      return {
+        address,
+        addressState,
+        found: toFound(hit.building, "address", at),
+        note: null,
+        near: null,
+      };
+    return {
+      address,
+      addressState,
+      found: {
+        id: null,
+        footprint: null,
+        address: candidate.address,
+        state: addressState,
+        how: "address",
+        lat: at.lat,
+        lng: at.lng,
+        areaSqFt: null,
+      },
+      note: STORED_NO_OUTLINE_NOTE,
+      near: null,
+    };
+  }
+  if (where.kind === "ambiguous")
+    return miss(
+      `The address matches ${where.count} places in our map data; pick the building on the map.`,
+    );
+  if (where.kind === "live")
+    return { address, addressState, found: where.live.found, note: where.live.note, near: null };
+  // Owner, Oct 26: nothing at that number, but the street is on the map — Pick the building
+  // opens there.
+  if (where.kind === "near") return miss(where.note, where.near);
+  return miss(NO_MATCH_NOTE);
+}
+
 /** The ticket's saved aerial, or where its address is on our map. */
 export const getTicketAerial = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -274,55 +369,14 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     if (last && markup)
       return { address, addressState, saved: { photo: last, markup }, found: null, note: null };
 
-    // 1. The address.
-    let note: string | null = null;
-    let near: { lat: number; lng: number } | null = null;
-    const word = parsed ? streetFilterWord(parsed) : null;
-    if (!address.trim()) note = "The ticket has no address.";
-    else if (!parsed || !word) note = "The address has no house number and street to match.";
-    else {
-      const where = await locateAddress(sb, parsed, word, addressState, propertyName);
-      if (where.kind === "stored") {
-        const { at, candidate } = where;
-        const near = await buildingsNear(context, at.lat, at.lng, 350);
-        const hit = buildingForPoint(at, near, candidate.building_id);
-        if (hit)
-          return {
-            address,
-            addressState,
-            saved: null,
-            found: toFound(hit.building, "address", at),
-            note: null,
-          };
-        return {
-          address,
-          addressState,
-          saved: null,
-          found: {
-            id: null,
-            footprint: null,
-            address: candidate.address,
-            state: addressState,
-            how: "address",
-            lat: at.lat,
-            lng: at.lng,
-            areaSqFt: null,
-          },
-          note: "The address is on the map but no building outline is stored there; pick the building.",
-        };
-      }
-      if (where.kind === "ambiguous")
-        note = `The address matches ${where.count} places in our map data; pick the building on the map.`;
-      else if (where.kind === "live") {
-        const { live } = where;
-        return { address, addressState, saved: null, found: live.found, note: live.note };
-      } else if (where.kind === "near") {
-        // Owner, Oct 26: nothing at that number, but the street is on the map — Pick the
-        // building opens there (unless the ticket's own photos say where, below).
-        note = where.note;
-        near = where.near;
-      } else note = "No building or 911 address point in our map data matches this address.";
-    }
+    // 1. The address (shared with the takeoff's From an address).
+    const byAddress = await aerialForAddress(sb, address, {
+      stateHint: siteState,
+      propertyName,
+    });
+    if (byAddress.found)
+      return { address, addressState, saved: null, found: byAddress.found, note: byAddress.note };
+    const { note, near } = byAddress;
 
     // 2. Where the ticket's photos were taken (the tech on the roof).
     const { data: gps } = await sb
@@ -336,7 +390,7 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     const g = gps?.[0];
     if (g && g.lat != null && g.lng != null) {
       const at = { lat: g.lat, lng: g.lng };
-      const near = await buildingsNear(context, at.lat, at.lng, 200);
+      const near = await buildingsNear(sb, at.lat, at.lng, 200);
       const hit = buildingForPoint(at, near);
       if (hit)
         return {
@@ -562,55 +616,60 @@ async function liveAddressLookup(
   return null;
 }
 
+/** The point and (lat, lng) shape every "pick the building" call takes. */
+export const buildingAtInput = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
 /**
  * "Pick the building on the map": the stored outline under the tapped point, else the state
  * layer's (Kentucky's own export, or the national layer in Tennessee), read but not stored.
+ * Shared by the ticket (aerialBuildingAt) and the takeoff's From an address (owner, Oct 27).
  */
+export async function buildingAtImpl(
+  sb: SupabaseClient<Database>,
+  at: { lat: number; lng: number },
+): Promise<FoundBuilding> {
+  const near = await buildingsNear(sb, at.lat, at.lng, 250);
+  const stored = near.find((b) =>
+    pointInFootprint(at.lng, at.lat, b.footprint as { type: string; coordinates: unknown } | null),
+  );
+  if (stored) return toFound(stored, "picked", at);
+  // Near the line both layers are asked, the point's own side first.
+  const side = stateForPoint(at.lat, at.lng);
+  const layers =
+    side === "TN"
+      ? [USA_STRUCTURES_LAYER, ...(nearKyTnLine(at.lat, at.lng) ? [KY_FOOTPRINTS_LAYER] : [])]
+      : [KY_FOOTPRINTS_LAYER, ...(nearKyTnLine(at.lat, at.lng) ? [USA_STRUCTURES_LAYER] : [])];
+  for (const layer of layers) {
+    const page = (await fetchJson(footprintAtPointUrl(layer, at.lng, at.lat))) as ArcGisFeatureSet;
+    const hit = (page.features ?? [])
+      .map(footprintFromFeature)
+      .find((c) => c !== null && pointInFootprint(at.lng, at.lat, c.geometry?.footprint));
+    if (hit?.geometry) {
+      const polys = footprintPolygons(hit.geometry.footprint);
+      return {
+        id: null,
+        footprint: hit.geometry.footprint as AerialBuilding["footprint"],
+        address: [hit.address, hit.city].filter(Boolean).join(", ") || null,
+        state: layer === USA_STRUCTURES_LAYER ? "TN" : "KY",
+        how: "picked",
+        lat: hit.lat ?? at.lat,
+        lng: hit.lng ?? at.lng,
+        areaSqFt: footprintAreaSqFt(polys),
+      };
+    }
+  }
+  throw new Error("No building outline at that spot — zoom in and tap inside the roof");
+}
+
 export const aerialBuildingAt = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) =>
-    z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d),
-  )
+  .validator((d: unknown) => buildingAtInput.parse(d))
   .handler(async ({ data, context }): Promise<FoundBuilding> => {
     await me(context);
-    const at = { lat: data.lat, lng: data.lng };
-    const near = await buildingsNear(context, at.lat, at.lng, 250);
-    const stored = near.find((b) =>
-      pointInFootprint(
-        at.lng,
-        at.lat,
-        b.footprint as { type: string; coordinates: unknown } | null,
-      ),
-    );
-    if (stored) return toFound(stored, "picked", at);
-    // Near the line both layers are asked, the point's own side first.
-    const side = stateForPoint(at.lat, at.lng);
-    const layers =
-      side === "TN"
-        ? [USA_STRUCTURES_LAYER, ...(nearKyTnLine(at.lat, at.lng) ? [KY_FOOTPRINTS_LAYER] : [])]
-        : [KY_FOOTPRINTS_LAYER, ...(nearKyTnLine(at.lat, at.lng) ? [USA_STRUCTURES_LAYER] : [])];
-    for (const layer of layers) {
-      const page = (await fetchJson(
-        footprintAtPointUrl(layer, at.lng, at.lat),
-      )) as ArcGisFeatureSet;
-      const hit = (page.features ?? [])
-        .map(footprintFromFeature)
-        .find((c) => c !== null && pointInFootprint(at.lng, at.lat, c.geometry?.footprint));
-      if (hit?.geometry) {
-        const polys = footprintPolygons(hit.geometry.footprint);
-        return {
-          id: null,
-          footprint: hit.geometry.footprint as AerialBuilding["footprint"],
-          address: [hit.address, hit.city].filter(Boolean).join(", ") || null,
-          state: layer === USA_STRUCTURES_LAYER ? "TN" : "KY",
-          how: "picked",
-          lat: hit.lat ?? at.lat,
-          lng: hit.lng ?? at.lng,
-          areaSqFt: footprintAreaSqFt(polys),
-        };
-      }
-    }
-    throw new Error("No building outline at that spot — zoom in and tap inside the roof");
+    return buildingAtImpl(context.supabase, { lat: data.lat, lng: data.lng });
   });
 
 const saveSchema = z.object({

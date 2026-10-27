@@ -148,6 +148,8 @@ export interface CopySource {
   building_id: string | null;
   account_id: string | null;
   bid_id: string | null;
+  /** The address an aerial underlay was looked up by (rows from before Oct 27 have none). */
+  source_address?: string | null;
 }
 
 /**
@@ -176,6 +178,8 @@ export function copyTakeoffRow(
     setup: { ...structuredClone(setup), copiedFrom },
     building_id: src.building_id,
     account_id: src.account_id,
+    // The same picture, so the same address (an aerial underlay's; null for a file).
+    source_address: src.source_address ?? null,
     bid_id: null,
     created_by: opts.userId,
     updated_by_name: opts.updatedByName,

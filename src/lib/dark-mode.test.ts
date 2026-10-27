@@ -184,6 +184,11 @@ const ALLOW: { file: string; has: string; why: string }[] = [
     why: "the aerial imagery stage: a dark letterbox around the tiles in both themes",
   },
   {
+    file: "src/components/takeoff/aerial-pick.tsx",
+    has: "rounded-md border bg-neutral-800",
+    why: "New takeoff › From an address: the same aerial imagery stage, the dark ground under the tiles in both themes",
+  },
+  {
     file: "src/components/documents/editor/page-canvas.tsx",
     has: "document-sheet",
     why: "the Documents editor's US-Letter page: white paper with dark ink in both themes, like the PDF it becomes",

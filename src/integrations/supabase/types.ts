@@ -4175,6 +4175,7 @@ export type Database = {
           objects: Json;
           pages: Json;
           setup: Json;
+          source_address: string | null;
           status: string;
           underlay_kind: string;
           updated_at: string;
@@ -4195,6 +4196,7 @@ export type Database = {
           objects?: Json;
           pages?: Json;
           setup?: Json;
+          source_address?: string | null;
           status?: string;
           underlay_kind: string;
           updated_at?: string;
@@ -4215,6 +4217,7 @@ export type Database = {
           objects?: Json;
           pages?: Json;
           setup?: Json;
+          source_address?: string | null;
           status?: string;
           underlay_kind?: string;
           updated_at?: string;
