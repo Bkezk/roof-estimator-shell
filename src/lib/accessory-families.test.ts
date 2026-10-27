@@ -556,7 +556,8 @@ describe("buildFamilyAccessoryData / adminForBid", () => {
   it("builds the four refs and the three Other lists", () => {
     expect(Object.keys(fam.refs).sort()).toEqual(["duroTech", "epdm", "nonDlTpo", "plain"]);
     expect(fam.refs.nonDlTpo.pipeStackSizes).toHaveLength(2);
-    expect(fam.refs.epdm.corners[0]!.priceByColor).toEqual({ White: 7.35 });
+    // Black is a copy of White for the EPDM pickers (withEpdmBlackPrices).
+    expect(fam.refs.epdm.corners[0]!.priceByColor).toEqual({ White: 7.35, Black: 7.35 });
     expect(fam.refs.epdm.pipeStackSizes).toEqual([]);
     expect(fam.other.duroLast.map((i) => i.part)).toEqual(["1242-200TW"]);
     expect(fam.other.nonDlTpo.map((i) => i.description)).toEqual(["Metal Batten Strips"]);

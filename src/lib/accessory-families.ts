@@ -31,14 +31,20 @@
 
 import {
   computeAccessories,
+  DECK_BUCKETS,
   EDGE_FASTENER_GROUPS,
   normalizeAccessoriesState,
   parapetEdgeFastenersCount,
+  PLATE_ROWS,
+  TERM_COLORS,
   type AccessoriesResult,
   type AccessoriesState,
   type AccessoryRefData,
   type AccessoryReviewLine,
   type ComputeAccessoriesArgs,
+  type DeckBucket,
+  type DeckBucketNeeds,
+  type TermColor,
 } from "@/lib/engine/accessories";
 import {
   buildAccessoryRefData,
@@ -307,7 +313,7 @@ export function buildFamilyAccessoryData(args: {
       plain: buildAccessoryRefData(plain, args.laborRows),
       duroTech: buildAccessoryRefData(duroTech, args.laborRows),
       nonDlTpo: buildAccessoryRefData(tpo, args.laborRows),
-      epdm: buildAccessoryRefData(epdm, args.laborRows),
+      epdm: withEpdmBlackPrices(buildAccessoryRefData(epdm, args.laborRows)),
     },
     other: {
       duroLast: otherOf(args.duroLastRows, FAMILY_BRANCH.duroLast),
@@ -424,13 +430,14 @@ export function familyComputeArgs(
   };
 }
 
-export type FamilyResults = Partial<Record<AccessoryFamily, AccessoriesResult>>;
+export type FamilyResults = Partial<Record<AccessoryFamily, FamilyResult>>;
 
 /**
  * Run the engine for the Non-DL TPO and EPDM groups — the active one with the roof, the other
  * typed-only — and, on a Non-DL TPO / EPDM bid, for the DL group too (typed-only, with the
- * Duro-Last ref), since the engine's own pass is switched off there (adminForBid). Absent when
- * the snapshot has no families.
+ * Duro-Last ref), since the engine's own pass is switched off there (adminForBid). The active
+ * Non-DL TPO / EPDM family's result carries its term bar caulk count (withFamilyCaulk). Absent
+ * when the snapshot has no families.
  */
 export function computeFamilyResults(
   saved: FamilyBidState & FamilyGeometry,
@@ -438,8 +445,8 @@ export function computeFamilyResults(
 ): FamilyResults {
   const out: FamilyResults = {};
   if (!admin?.accessoryFamilies) return out;
-  const families: readonly AccessoryFamily[] =
-    activeFamily(saved.roofSystem) === "duroLast" ? EXTRA_FAMILIES : FAMILIES;
+  const active = activeFamily(saved.roofSystem);
+  const families: readonly AccessoryFamily[] = active === "duroLast" ? EXTRA_FAMILIES : FAMILIES;
   for (const family of families) {
     const args = familyComputeArgs(
       family,
@@ -447,7 +454,12 @@ export function computeFamilyResults(
       admin,
       saved,
     );
-    if (args) out[family] = computeAccessories(args);
+    if (!args) continue;
+    const result = computeAccessories(args);
+    out[family] =
+      active === family && isNonDlFamily(family)
+        ? withFamilyCaulk(result, family, args.ref)
+        : result;
   }
   return out;
 }
@@ -462,10 +474,14 @@ const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol;
  * family bills as ONE aggregate line instead, so the bid never drifts from the engine's figure.
  */
 export function familyAccessoryLines(
-  result: AccessoriesResult,
+  result: FamilyResult,
   family: AccessoryFamily,
 ): AccessoryLine[] {
   const label = FAMILY_LABEL[family];
+  // The term bar caulk counted outside the engine (familyCaulkLine) joins after the engine's
+  // own lines, whichever shape they take: it is not part of the engine's totalCost.
+  const caulk = familyCaulkLine(result, family);
+  const tail = caulk ? [caulk] : [];
   const lines: AccessoryLine[] = result.lines.map((l) => {
     const quantity = l.qty > 0 ? l.qty : 1;
     return {
@@ -477,8 +493,9 @@ export function familyAccessoryLines(
   });
   const cost = lines.reduce((s, l) => s + l.price * l.quantity, 0);
   const hours = lines.reduce((s, l) => s + (l.laborHoursPerUnit ?? 0) * l.quantity, 0);
-  if (near(cost, result.totalCost, 0.005) && near(hours, result.manHours, 1e-6)) return lines;
-  if (result.totalCost === 0 && result.manHours === 0) return [];
+  if (near(cost, result.totalCost, 0.005) && near(hours, result.manHours, 1e-6))
+    return [...lines, ...tail];
+  if (result.totalCost === 0 && result.manHours === 0) return tail;
   return [
     {
       description: `${label} accessories`,
@@ -486,6 +503,7 @@ export function familyAccessoryLines(
       quantity: 1,
       laborHoursPerUnit: result.manHours,
     },
+    ...tail,
   ];
 }
 
@@ -615,6 +633,8 @@ export function familyReviewLines(
     const r = results[family];
     if (!r) continue;
     for (const l of r.lines) out.push({ ...l, screen: `${FAMILY_LABEL[family]} · ${l.screen}` });
+    const caulk = familyCaulkReviewLine(r, family);
+    if (caulk) out.push(caulk);
   }
   const o = normalizeOtherAccessories(other);
   for (const family of FAMILIES) {
@@ -644,3 +664,260 @@ export function linesTotals(lines: AccessoryLine[]): { material: number; hours: 
 /** The message the two family groups show on a frozen snapshot that predates them. */
 export const FAMILIES_MISSING_MESSAGE =
   "This bid's frozen pricing predates the Non-DL TPO and EPDM accessories; refresh its pricing to use them";
+
+/* ------------------------------------------------------------------------------------------------
+ * The family groups' colours (owner, Oct 27: EPDM accessories are black or white, black first and
+ * by default — lib/membrane-colors.ts EPDM_COLORS; Firestone TPO has no Dark Gray / Terra Cotta)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The Duro-Last colour columns the DL group's pipe stack and corners pickers offer. */
+export const DL_ACCESSORY_COLORS: readonly string[] = [
+  "White",
+  "Tan",
+  "Gray",
+  "Dark Gray",
+  "Terra Cotta",
+];
+
+/** The pipe stack / corners colours per family, in picker order (the default first). */
+export const FAMILY_ACCESSORY_COLORS: Record<AccessoryFamily, readonly string[]> = {
+  duroLast: DL_ACCESSORY_COLORS,
+  nonDlTpo: ["White", "Tan", "Gray"],
+  epdm: ["Black", "White"],
+};
+
+/** The pipe stack and corners colours a group offers; no family = the DL group. */
+export function familyAccessoryColors(family: AccessoryFamily | undefined): string[] {
+  return [...FAMILY_ACCESSORY_COLORS[family ?? "duroLast"]];
+}
+
+/**
+ * The EPDM ref with a `Black` price equal to the `White` price on every corner row and pipe stack
+ * size. The frozen engine prices corners strictly by colour name (`priceByColor[color] ?? 0`) and
+ * pipe stacks with a White fallback, while the Firestone EPDM parts are black and priced under
+ * White (the seed's note); an EPDM pick of "Black" prices like White. Rows without a White price
+ * stay without a Black one (the corners grid shows "—" for both).
+ */
+export function withEpdmBlackPrices(ref: AccessoryRefData): AccessoryRefData {
+  const black = (p: Record<string, number>): Record<string, number> =>
+    p["White"] === undefined ? p : { ...p, Black: p["White"] };
+  return {
+    ...ref,
+    corners: ref.corners.map((r) => ({ ...r, priceByColor: black(r.priceByColor) })),
+    pipeStackSizes: ref.pipeStackSizes.map((s) => ({
+      ...s,
+      priceByColor: black(s.priceByColor),
+    })),
+  };
+}
+
+/**
+ * One term bar colour row as a group shows it: `label` on the screen, `key` the engine's
+ * TermColor the footage is stored under (AccessoriesState.termBar.additional* / result.*ByColor).
+ */
+export interface TermBarColorOption {
+  label: string;
+  key: TermColor;
+}
+
+/**
+ * The term bar screen's colour rows per family. The engine knows White / Tan / Gray bars only and
+ * folds any other colour to Gray (`foldColor`: an EPDM section coloured "Black" counts its roof
+ * footage under Gray); the family term bar rows are priced the same for every colour. So the EPDM
+ * group shows **Black ↔ engine key `Gray`** and White ↔ `White` — a display mapping only, the
+ * state keeps the engine's keys — and its term bar caulk therefore counts on the Gray index
+ * (sealant part "1134"; familyCaulkTubes sums every index). The Non-DL TPO group shows White /
+ * Tan / Gray under their own keys; the DL group is unchanged.
+ */
+export function familyTermBarColors(family: AccessoryFamily | undefined): TermBarColorOption[] {
+  if (family === "epdm")
+    return [
+      { label: "Black", key: "Gray" },
+      { label: "White", key: "White" },
+    ];
+  return TERM_COLORS.map((c) => ({ label: c, key: c }));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Term bar caulk for the families (owner approved: Non-DL TPO → "UltraPly TPO General Purpose
+ * Sealant - White", EPDM → "Lap Sealant-HS Tubes")
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * The family's caulk row, matched by description prefix on its `sealants` rows. The frozen engine
+ * counts caulk tubes from the term bar footage (plus pipe stacks, drains, washers and capstones)
+ * but writes them against the Duro-Caulk part keys only, so a Firestone row gets no count of its
+ * own; the count is folded onto this row outside the engine (withFamilyCaulk).
+ */
+export const FAMILY_TERM_BAR_CAULK: Record<ExtraFamily, RegExp> = {
+  nonDlTpo: /^UltraPly TPO General Purpose Sealant/,
+  epdm: /^Lap Sealant-HS Tubes/,
+};
+
+/**
+ * The engine's Duro-Caulk part keys, one per colour index: "1136" White, "1138" Tan, "1134" Gray
+ * (+ Dark Gray + Rock Ply), "1135" Terra Cotta. A family caulk product has one colour, so every
+ * index counts toward it.
+ */
+export const CAULK_TUBE_PARTS: readonly string[] = ["1136", "1138", "1134", "1135"];
+
+/** The caulk tubes the engine counted on a result, every colour summed. */
+export function familyCaulkTubes(result: Pick<AccessoriesResult, "sealants">): number {
+  return CAULK_TUBE_PARTS.reduce((s, part) => s + (result.sealants.calcByPart[part] ?? 0), 0);
+}
+
+/** The family's caulk row on its ref (the first `sealants` row matching the family's prefix). */
+export function familyCaulkRow(
+  family: AccessoryFamily,
+  ref: Pick<AccessoryRefData, "sealants"> | undefined,
+): { description: string; part: string; price: number } | null {
+  if (!isNonDlFamily(family)) return null;
+  const re = FAMILY_TERM_BAR_CAULK[family];
+  return ref?.sealants.find((s) => re.test(s.description)) ?? null;
+}
+
+/** The counted caulk on a family's result: the row and the tubes the engine counted. */
+export interface FamilyCaulk {
+  description: string;
+  part: string;
+  /** The row's price as the catalog carries it (per tube). */
+  price: number;
+  tubes: number;
+}
+
+/** An engine result plus the family's counted term bar caulk (the active family's only). */
+export type FamilyResult = AccessoriesResult & { caulk?: FamilyCaulk | undefined };
+
+/**
+ * `result` with the family's caulk row counted: the engine's tubes (every colour) land on the
+ * row's part in `sealants.calcByPart`, so the group's Sealants screen shows the count in the
+ * row's Calc Qty column like Duro-Caulk on the DL screen, and `caulk` carries the row for the
+ * bid's lines. Typed extras on the row still bill through the engine as today; the count bills
+ * through familyCaulkLine. Unchanged when the ref has no matching row.
+ */
+export function withFamilyCaulk(
+  result: AccessoriesResult,
+  family: AccessoryFamily,
+  ref: Pick<AccessoryRefData, "sealants"> | undefined,
+): FamilyResult {
+  const row = familyCaulkRow(family, ref);
+  if (!row) return result;
+  const tubes = familyCaulkTubes(result);
+  return {
+    ...result,
+    sealants: {
+      ...result.sealants,
+      calcByPart: { ...result.sealants.calcByPart, [row.part]: tubes },
+    },
+    caulk: { description: row.description, part: row.part, price: row.price, tubes },
+  };
+}
+
+/** The caulk line's description: `<Family label> · Sealants — <row description> (counted)`. */
+export const familyCaulkDescription = (family: AccessoryFamily, rowDescription: string): string =>
+  `${FAMILY_LABEL[family]} · Sealants — ${rowDescription} (counted)`;
+
+/**
+ * The bid line for a family's counted caulk: the row's price × the tubes, no labor (sealants carry
+ * none in the engine). Null when the result carries no caulk or counted nothing.
+ */
+export function familyCaulkLine(
+  result: FamilyResult,
+  family: AccessoryFamily,
+): AccessoryLine | null {
+  const c = result.caulk;
+  if (!c || c.tubes <= 0) return null;
+  return {
+    description: familyCaulkDescription(family, c.description),
+    price: c.price,
+    quantity: c.tubes,
+    laborHoursPerUnit: 0,
+  };
+}
+
+/** The Accessories Summary row for a family's counted caulk (familyCaulkLine's figures). */
+export function familyCaulkReviewLine(
+  result: FamilyResult,
+  family: AccessoryFamily,
+): AccessoryReviewLine | null {
+  const c = result.caulk;
+  if (!c || c.tubes <= 0) return null;
+  return {
+    screen: `${FAMILY_LABEL[family]} · Sealants`,
+    qty: c.tubes,
+    name: `${c.description} (counted)`,
+    unitCost: c.price,
+    totalCost: c.price * c.tubes,
+    hours: 0,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The family groups' deck screens: seam / insulation / induction plates (owner approved the
+ * classification). The engine nets Items Required against three exact Duro-Last rows only
+ * (PLATE_ROWS.poly / insulation / induction), so a typed Firestone or Duro-Tech plate never
+ * reduced a family's need.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type FamilyPlateKind = "seam" | "insulation" | "induction";
+
+/**
+ * Which Items Required bucket a plate row covers, by description keyword (case-insensitive):
+ * induction — InvisiWeld, Induction Plate; insulation — 3" Insulation Fastening Plate (Round),
+ * Polymer Fastener Insulation Plate; seam — HD Seam Plate, HD Plus Seam Plate, 2" Metal Plates,
+ * Polymer Fastener Seam Plate, V-Plate. Null for anything else.
+ */
+export function familyPlateKind(description: string): FamilyPlateKind | null {
+  const d = description.toLowerCase();
+  if (/invisiweld|induction/.test(d)) return "induction";
+  if (/insulation/.test(d)) return "insulation";
+  if (/seam plate|metal plate|v-plate/.test(d)) return "seam";
+  return null;
+}
+
+const DECK_NEED_FIELD: Record<FamilyPlateKind, keyof DeckBucketNeeds> = {
+  seam: "polyPlates",
+  insulation: "insulPlates",
+  induction: "inductionPlates",
+};
+
+/**
+ * The deck screens' Items Required per bucket for a family group: the engine's figures with the
+ * family's typed plate rows (subtype DL-Plates, classified by familyPlateKind) netted off their
+ * bucket — seam plates off `polyPlates` (shown as "Seam Plates"), insulation off `insulPlates`,
+ * induction off `inductionPlates` — the way the engine nets its own three rows. Rows the engine
+ * already netted (PLATE_ROWS) are not counted twice; the Gypsum bucket keeps the engine's forced
+ * zero Poly / Insul. plates. The money is untouched: typed boxes bill as typed. Zeros without a
+ * result.
+ */
+export function familyDeckNeeds(
+  result: Pick<AccessoriesResult, "deckNeeds"> | undefined,
+  state: Pick<AccessoriesState, "fastenerQty">,
+  ref: Pick<AccessoryRefData, "fasteners"> | undefined,
+): Record<DeckBucket, DeckBucketNeeds> {
+  const rowByKey = new Map((ref?.fasteners ?? []).map((f) => [f.key, f] as const));
+  const engineKeys: readonly string[] = Object.values(PLATE_ROWS);
+  const out = {} as Record<DeckBucket, DeckBucketNeeds>;
+  for (const bucket of DECK_BUCKETS) {
+    const need: DeckBucketNeeds = {
+      ...(result?.deckNeeds[bucket] ?? {
+        fasteners: 0,
+        polyPlates: 0,
+        insulPlates: 0,
+        inductionPlates: 0,
+      }),
+    };
+    for (const [key, qty] of Object.entries(state.fastenerQty[bucket] ?? {})) {
+      if (!qty || engineKeys.includes(key)) continue;
+      const row = rowByKey.get(key);
+      if (!row || row.subtype !== "DL-Plates") continue;
+      const kind = familyPlateKind(row.description);
+      if (!kind) continue;
+      const field = DECK_NEED_FIELD[kind];
+      if (bucket === "gypsum" && field !== "inductionPlates") continue;
+      need[field] -= qty;
+    }
+    out[bucket] = need;
+  }
+  return out;
+}

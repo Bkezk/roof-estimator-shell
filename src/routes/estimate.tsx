@@ -135,6 +135,7 @@ import {
   EXTRA_FAMILIES,
   FAMILIES_MISSING_MESSAGE,
   FAMILY_LABEL,
+  familyCaulkLine,
   familyReviewLines,
   inactiveFamilyNote,
   linesTotals,
@@ -5411,7 +5412,13 @@ function EstimatePage() {
           {EXTRA_FAMILIES.map((family) => {
             const famResult = familyResults[family];
             const other = familyOtherTotals[family];
-            const famMaterial = (famResult?.totalCost ?? 0) + other.material;
+            // The term bar caulk counted outside the engine (lib/accessory-families.ts) bills
+            // with the group, so the header carries it too.
+            const caulk = famResult ? familyCaulkLine(famResult, family) : null;
+            const famMaterial =
+              (famResult?.totalCost ?? 0) +
+              other.material +
+              (caulk ? caulk.price * caulk.quantity : 0);
             const famHours = (famResult?.manHours ?? 0) + other.hours;
             const famState = family === "nonDlTpo" ? accessoriesCalcTpo : accessoriesCalcEpdm;
             const setFamState =

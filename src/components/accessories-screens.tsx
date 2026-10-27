@@ -13,8 +13,11 @@ import {
   FAMILY_EDGE_SUBTYPES,
   FAMILY_PARAPET_SUBTYPES,
   FAMILY_PLATE_SUBTYPES,
+  familyAccessoryColors,
+  familyDeckNeeds,
   familyFastenerKeys,
   familyParapetNeeds,
+  familyTermBarColors,
   fastenerInchKey,
   isNonDlFamily,
   otherAccessoryLine,
@@ -253,21 +256,23 @@ function LaborLink(props: {
   );
 }
 
-const PIPE_COLORS = ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta"];
-
 /**
  * Pipe Stacks (§12.3): entry form (Qty / Usage / Color / Open-Closed / Size) → Save → list. Each
  * saved row has Edit (owner, Oct 6: Open / Closed, size, quantity, colour change in place; the
- * row keeps its id, labor % and usage — lib/pipe-stack-edit.ts) and Remove.
+ * row keeps its id, labor % and usage — lib/pipe-stack-edit.ts) and Remove. The colours offered
+ * are the group's (lib/accessory-families.ts familyAccessoryColors: DL White … Terra Cotta — no
+ * Rock Ply pipe stacks exist in the legacy catalog, confirmed 2026-09-21; Non-DL TPO White / Tan /
+ * Gray; EPDM Black / White, Black first and by default).
  */
 function PipeStacksScreen(
   props: AccessoriesScreensProps & { upd: (fn: (d: AccessoriesState) => void) => void },
 ) {
   const { state, refData, result, upd } = props;
+  const colors = familyAccessoryColors(props.family);
   // Blank until typed (owner, Sep 24: no prefilled quantities — a 0 placeholder that goes away).
   const [qty, setQty] = useState(0);
   const [usage, setUsage] = useState("Plumbing");
-  const [color, setColor] = useState("White");
+  const [color, setColor] = useState(colors[0] ?? "White");
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState<number | null>(null);
   const sizes = refData?.pipeStackSizes ?? [];
@@ -317,12 +322,17 @@ function PipeStacksScreen(
         <label className="space-y-1">
           <span>Color:</span>
           <Select value={color} onValueChange={setColor}>
-            <SelectTrigger className="h-7 w-32 text-xs">
-              <SelectValue />
+            {/* The offered colours and the chosen one are written into the trigger so the form
+                carries them without the popover open (the popover items render on open only). */}
+            <SelectTrigger
+              className="h-7 w-32 text-xs"
+              aria-label="Color"
+              data-colors={colors.join(",")}
+            >
+              <SelectValue>{color}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {/* No Rock Ply pipe stacks exist in the legacy catalog (confirmed 2026-09-21). */}
-              {PIPE_COLORS.map((c) => (
+              {colors.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -410,11 +420,15 @@ function PipeStacksScreen(
                     value={editing.color}
                     onValueChange={(v) => setEditing({ ...editing, color: v })}
                   >
-                    <SelectTrigger className="h-6 w-28 text-xs" aria-label="Color">
-                      <SelectValue />
+                    <SelectTrigger
+                      className="h-6 w-28 text-xs"
+                      aria-label="Color"
+                      data-colors={colors.join(",")}
+                    >
+                      <SelectValue>{editing.color}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {PIPE_COLORS.map((c) => (
+                      {colors.map((c) => (
                         <SelectItem key={c} value={c}>
                           {c}
                         </SelectItem>
@@ -783,6 +797,10 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
         fastenersNeeded: result?.parapetTabs.fastenersNeeded ?? 0,
         steelPlatesNeeded: result?.parapetTabs.steelPlatesNeeded ?? 0,
       };
+  // The deck screens' Items Required: a family group nets its typed seam / insulation / induction
+  // plate rows for display (lib/accessory-families.ts familyDeckNeeds); the DL group reads the
+  // engine's figures, netted against its own three Duro-Last rows.
+  const deckNeeds = nonDl ? familyDeckNeeds(result, state, refData) : result?.deckNeeds;
   const hidden = hiddenAccessoryScreens(refData, props);
   const visibleTree = TREE.map((g) => ({
     ...g,
@@ -824,12 +842,18 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     if (result.snapCover.fastenersNeeded > 0) out.add("snapCover");
     if (parapetNeeds.fastenersNeeded > 0 || parapetNeeds.steelPlatesNeeded > 0)
       out.add("parapetTabs");
-    for (const [bucket, n] of Object.entries(result.deckNeeds)) {
+    for (const [bucket, n] of Object.entries(deckNeeds ?? result.deckNeeds)) {
       if (n.fasteners > 0 || n.polyPlates > 0 || n.insulPlates > 0 || n.inductionPlates > 0)
         out.add(bucket as ScreenId);
     }
     return out;
-  }, [result, countsFromRoof, parapetNeeds.fastenersNeeded, parapetNeeds.steelPlatesNeeded]);
+  }, [
+    result,
+    countsFromRoof,
+    parapetNeeds.fastenersNeeded,
+    parapetNeeds.steelPlatesNeeded,
+    deckNeeds,
+  ]);
 
   /** Screens that already carry a value (footage, a cost, a quantity or a typed count) — green. */
   const screenHasValues = useMemo(() => {
@@ -1009,7 +1033,8 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     switch (screenId) {
       /* ---------------- Flashing & Other Accessories ---------------- */
       case "corners": {
-        const colors = ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta"];
+        // The group's colour columns (lib/accessory-families.ts familyAccessoryColors).
+        const colors = familyAccessoryColors(props.family);
         return (
           <div className="space-y-3">
             <div className="flex items-center gap-4">
@@ -1144,6 +1169,10 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
       case "termBar": {
         const r = result?.termBar;
         const tb = state.termBar;
+        // The colour rows as the group shows them: label on screen, key in the engine's state
+        // (EPDM shows "Black" stored under the engine's Gray key — lib/accessory-families.ts
+        // familyTermBarColors). The Dark Gray / Terra Cotta "other" rows are Duro-Last only.
+        const tbColors = familyTermBarColors(props.family);
         return (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-4 text-xs font-medium">
@@ -1166,9 +1195,9 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {TERM_COLORS.map((c) => (
-                        <tr key={c}>
-                          <td className="border px-2 py-0.5">{c}</td>
+                      {tbColors.map(({ label, key: c }) => (
+                        <tr key={c} data-term-color={label}>
+                          <td className="border px-2 py-0.5">{label}</td>
                           <td className="border px-1 py-0.5 text-right">
                             <RO
                               v={
@@ -1248,7 +1277,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                           />
                         </td>
                       </tr>
-                      {(["Dark Gray", "Terra Cotta"] as const).map((c) => (
+                      {(nonDl ? [] : (["Dark Gray", "Terra Cotta"] as const)).map((c) => (
                         <tr key={c}>
                           <td className="border px-2 py-0.5">
                             {c}{" "}
@@ -2086,7 +2115,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
       case "lwConcrete":
       case "lwSteel": {
         const bucket = screenId;
-        const needs = result?.deckNeeds[bucket];
+        const needs = deckNeeds?.[bucket];
         const cols: Array<{ subtypes: string[]; title: string }> = (() => {
           switch (bucket) {
             case "wood":
@@ -2153,7 +2182,9 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                       : "text-green-700 dark:text-green-400"
                   }
                 >
-                  Poly Plates: {needs?.polyPlates ?? 0}
+                  {/* The Duro-Last part is a Poly Plate; the Firestone families call theirs
+                      seam plates (owner approved the classification — familyPlateKind). */}
+                  {`${nonDl ? "Seam Plates" : "Poly Plates"}: ${needs?.polyPlates ?? 0}`}
                 </span>
                 <span
                   className={

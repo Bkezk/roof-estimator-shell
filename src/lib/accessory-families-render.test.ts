@@ -121,8 +121,8 @@ describe("the family groups render the seed's refs", () => {
     expect(all).not.toContain("Other Accessories");
     expect(treeLabels(render("duroLast", true))).toContain("Other Accessories");
   });
-  it("the seed's EPDM corners price under White and the T-Patch rows are the one t-joint row per family", () => {
-    expect(fam.refs.epdm.corners[0]!.priceByColor).toEqual({ White: 7.35 });
+  it("the seed's EPDM corners price under White (and Black, a copy for the EPDM pickers) and the T-Patch rows are the one t-joint row per family", () => {
+    expect(fam.refs.epdm.corners[0]!.priceByColor).toEqual({ White: 7.35, Black: 7.35 });
     expect(fam.refs.epdm.corners[0]!.hours).toBe(0.1667);
     expect(fam.refs.nonDlTpo.membraneAccs.tPatch).toEqual({ pricePerPack: 63, partsPerPack: 100 });
     expect(fam.refs.epdm.membraneAccs.tPatch).toEqual({ pricePerPack: 446, partsPerPack: 100 });
