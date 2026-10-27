@@ -880,8 +880,12 @@ describe("the markup", () => {
     expect(src).toContain(
       "`Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`",
     );
+    // Oct 27: the ticket's buttons sit in its Activity block (service/ticket-activity.tsx).
+    expect(read("src/components/service/ticket-activity.tsx")).toContain(
+      '<LogContactButtons kind="ticket" itemId={jobId} />',
+    );
     expect(read("src/components/service-page.tsx")).toContain(
-      '<LogContactButtons kind="ticket" itemId={job.id} />',
+      "const customerContact = job && <TicketActivity jobId={job.id} />;",
     );
     expect(read("src/components/opportunities-page.tsx")).toMatch(
       /<LogContactButtons\s+kind="opportunity"/,

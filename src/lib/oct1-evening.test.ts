@@ -31,26 +31,27 @@ describe("Invoice: Preview shows the PDF in the page", () => {
   });
 });
 
-describe("Ticket: purchase orders sit under Materials", () => {
+describe("Ticket: purchase orders sit with Materials (since Oct 27 the second tab of the Materials & POs fold)", () => {
   it("in the office right column and the technician's one-column view", () => {
     const src = read("src/components/service-page.tsx");
+    const fold = read("src/components/service/materials-pos-fold.tsx");
+    expect(fold.indexOf('<TabsTrigger value="pos"')).toBeGreaterThan(
+      fold.indexOf('<TabsTrigger value="materials"'),
+    );
+    expect(fold).toContain("<PurchaseOrdersSection jobId={jobId} embedded />");
     const col = src.slice(src.indexOf("<aside"), src.indexOf("</aside>"));
     expect(col.indexOf("{materials}")).toBeGreaterThan(-1);
-    expect(col.indexOf("<PurchaseOrdersSection jobId={job.id} />")).toBeGreaterThan(
-      col.indexOf("{materials}"),
-    );
-    expect(col.indexOf("<PurchaseOrdersSection jobId={job.id} />")).toBeLessThan(
+    expect(col.indexOf("{materials}")).toBeLessThan(
       col.indexOf(
         "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />",
       ),
     );
     const tech = src.slice(src.indexOf("</aside>"));
-    expect(tech.indexOf("<PurchaseOrdersSection jobId={job.id} />")).toBeGreaterThan(
-      tech.indexOf("{materials}"),
-    );
-    expect(tech.indexOf("<PurchaseOrdersSection jobId={job.id} />")).toBeLessThan(
+    expect(tech.indexOf("{materials}")).toBeGreaterThan(-1);
+    expect(tech.indexOf("{materials}")).toBeLessThan(
       tech.indexOf("<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />"),
     );
+    expect(src).not.toMatch(/<PurchaseOrdersSection\b/);
   });
 });
 

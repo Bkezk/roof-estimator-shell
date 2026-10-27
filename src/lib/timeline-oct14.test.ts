@@ -130,7 +130,9 @@ describe("the close-out writes Service done on the ticket and its opportunity", 
 
 describe("the boxes", () => {
   const log = read("src/components/crm/contact-log.tsx");
-  it("a Comment button beside Called / Texted / Emailed / Visited; its note is required; no hold for a comment", () => {
+  it("a Comment button beside Called / Texted / Emailed / Visited (the opportunity's since Oct 27: a ticket's Activity block has its own note box); its note is required; no hold for a comment", () => {
+    expect(log).toContain('const commentButton = kind !== "ticket";');
+    expect(log).toContain("{commentButton && (");
     expect(log).toContain('aria-label={isComment ? "Comment (picked)" : "Comment"}');
     expect(log).toContain("onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}");
     expect(log).toContain("if (isComment && !note.trim()) return;");
@@ -144,18 +146,24 @@ describe("the boxes", () => {
     expect(log).toContain("Nothing on the timeline yet");
     expect(log).not.toContain("No contact logged yet");
   });
-  it("Timeline on the opportunity and on the ticket (the ticket shows the whole list, not one line); the events box is the Activity log", () => {
+  it('Timeline on the opportunity; on the ticket the block is "Activity" since Oct 27 — the whole merged stream, not one line, and no separate Activity log', () => {
     const opp = read("src/components/opportunities-page.tsx");
     expect(opp).toContain('aria-label="Timeline"');
     expect(opp).toContain('<History className="h-3.5 w-3.5 text-muted-foreground" /> Timeline');
     expect(opp).not.toContain('aria-label="Contact"');
     const svc = read("src/components/service-page.tsx");
-    expect(svc).toContain('aria-label="Timeline"');
-    expect(svc).toContain('<ContactLogList kind="ticket" itemId={job.id} />');
+    expect(svc).toContain("const customerContact = job && <TicketActivity jobId={job.id} />;");
     expect(svc).not.toContain("<LatestContact");
     expect(svc).not.toContain("Customer contact");
+    const activity = read("src/components/service/ticket-activity.tsx");
+    expect(activity).toContain('aria-label="Activity"');
+    expect(activity).toContain(
+      '<History className="h-3.5 w-3.5 text-muted-foreground" /> Activity',
+    );
+    expect(activity).toContain('<LogContactButtons kind="ticket" itemId={jobId} />');
+    expect(activity).toContain("mergeTimeline(contacts.data, events.data)");
     const sections = read("src/components/service/ticket-field-sections.tsx");
-    // Oct 27: the Activity log is a tab of the Work fold.
-    expect(sections).toMatch(/<TabsTrigger value="timeline"[^>]*>[\s\S]*?Activity log/);
+    expect(sections).not.toMatch(/<TabsTrigger value="timeline"/);
+    expect(sections).not.toContain("TimelineBody");
   });
 });

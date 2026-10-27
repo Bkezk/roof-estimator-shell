@@ -18,7 +18,9 @@ describe("a manager reviewing a Done / Authorized ticket", () => {
     expect(page).toContain(
       'defaultOpen={review || (isTech && (jobStage === "open" || jobStage === "scheduled"))}',
     );
-    expect(page).toContain('storageKey={review ? "materials-review" : undefined}');
+    // Oct 27: Materials is the first tab of the "Materials & POs" fold (materials-pos-fold.tsx).
+    expect(page).toContain('storageKey={review ? "materials-pos-review" : "materials-pos"}');
+    expect(page).toContain("<MaterialsPosFold");
     expect(materials).toContain("storageKey={storageKey}");
     expect(materials).toContain('storageKey = "materials",');
   });

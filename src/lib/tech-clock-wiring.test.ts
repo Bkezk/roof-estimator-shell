@@ -641,8 +641,10 @@ describe("the server's shape", () => {
     );
     const sections = read("src/components/service/ticket-field-sections.tsx");
     expect(sections).toContain("export function JobClockLine({ jobId }: { jobId: string })");
-    expect(sections).toContain('"left site": "Left the site",');
-    expect(sections).toContain('"stopped travelling": "Stopped travelling",');
+    // Oct 27: the stream's wording lives in lib/ticket-timeline.ts (the form's Activity block).
+    const timeline = read("src/lib/ticket-timeline.ts");
+    expect(timeline).toContain('"left site": "Left the site",');
+    expect(timeline).toContain('"stopped travelling": "Stopped travelling",');
   });
   it("the Tech Board colours a Scheduled card by the clock again and its legend names the two colours", () => {
     const board = read("src/components/service/board-page.tsx");

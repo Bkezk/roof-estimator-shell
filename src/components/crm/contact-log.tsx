@@ -9,8 +9,10 @@
  *   Open opportunity to Contacted and writes the ticket timeline entry, so every list that shows
  *   the item is refreshed after it. "They asked to try again on" (owner, Oct 9): with a date,
  *   the same save puts the item's follow-up on hold until that day, the note as the reason —
- *   the assignee may, as well as a manager (lib/followup-holds.ts).
- * - ContactLogList: the item's past contacts, newest first.
+ *   the assignee may, as well as a manager (lib/followup-holds.ts). The Comment button (Oct 14)
+ *   is the opportunity's: a ticket's Activity block has its own note box (Oct 27,
+ *   service/ticket-activity.tsx) and merges this log with the ticket's events.
+ * - ContactLogList: the item's past contacts, newest first (the opportunity's Timeline).
  * - LatestContact: only the most recent contact on one line, with "Show all (N)" for the list.
  * - UntouchedBadge: muted before the admin limit, red at or past it.
  * - NeedsActionStrip: what has sat past the admin limit with no contact and not started (owner,
@@ -129,6 +131,9 @@ export function LogContactButtons({
   // not a contact: nothing is stamped or moved; @mentions tell people).
   const [picked, setPicked] = useState<ContactMethod | typeof COMMENT_METHOD | null>(null);
   const isComment = picked === COMMENT_METHOD;
+  // Owner, Oct 27: a ticket's Activity block has one note box of its own (ticket-activity.tsx),
+  // so the Comment button is the opportunity's (and the follow-ups') alone; `kind` decides.
+  const commentButton = kind !== "ticket";
   const [note, setNote] = useState("");
   // Owner, Oct 9: "They asked to try again on" — optional; with it, the note is the hold's reason.
   const [tryAgain, setTryAgain] = useState("");
@@ -214,20 +219,22 @@ export function LogContactButtons({
             </Button>
           );
         })}
-        <Button
-          type="button"
-          size="sm"
-          variant={isComment ? "default" : "outline"}
-          className={compact ? "h-8 w-8 p-0" : "h-8"}
-          disabled={log.isPending}
-          aria-pressed={isComment}
-          title="Comment: write a note on the timeline (type @ to tell someone)"
-          aria-label={isComment ? "Comment (picked)" : "Comment"}
-          onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}
-        >
-          <MessageSquarePlus className={`h-4 w-4${compact ? "" : " mr-1"}`} />
-          {!compact && "Comment"}
-        </Button>
+        {commentButton && (
+          <Button
+            type="button"
+            size="sm"
+            variant={isComment ? "default" : "outline"}
+            className={compact ? "h-8 w-8 p-0" : "h-8"}
+            disabled={log.isPending}
+            aria-pressed={isComment}
+            title="Comment: write a note on the timeline (type @ to tell someone)"
+            aria-label={isComment ? "Comment (picked)" : "Comment"}
+            onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}
+          >
+            <MessageSquarePlus className={`h-4 w-4${compact ? "" : " mr-1"}`} />
+            {!compact && "Comment"}
+          </Button>
+        )}
       </div>
       {picked && (
         <div className="space-y-1.5">

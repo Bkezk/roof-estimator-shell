@@ -70,6 +70,7 @@ import {
   type MaterialSource,
 } from "@/lib/material-search";
 import { onTicketRows } from "@/lib/materials-on-ticket";
+import { ticketLineCount } from "@/components/service/materials-pos";
 import { removeLabel, removedToast } from "@/lib/materials-remove";
 import { plural, type PieceDef } from "@/lib/stock-units";
 import {
@@ -637,12 +638,9 @@ export function MaterialsSection({
   const truckHasCount = rows.some((r) => usedUnits(r) > EPS);
   const truckShown = truckOpen ?? truckHasCount;
 
-  // Lines on the ticket: the cells with something used (or returned) net of take-backs.
-  const lineCount = useMemo(() => {
-    const byCell = new Map<string, number>();
-    for (const m of ledger) byCell.set(cellKey(m), (byCell.get(cellKey(m)) ?? 0) + Number(m.qty));
-    return [...byCell.values()].filter((v) => Math.abs(v) > EPS).length;
-  }, [ledger]);
+  // Lines on the ticket: the cells with something used (or returned) net of take-backs (the same
+  // count the "Materials & POs" fold's line shows; materials-pos.ts).
+  const lineCount = useMemo(() => ticketLineCount(ledger), [ledger]);
 
   const body = (
     <>

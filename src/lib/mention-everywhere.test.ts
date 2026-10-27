@@ -169,8 +169,8 @@ describe("the shared box", () => {
     expect(box).toContain("const Box = grow ? AutoTextarea : Textarea;");
     expect(box).toContain('export const MENTION_HINT = "type @ to tell someone";');
   });
-  it("the ticket note uses it (the inline picker is gone)", () => {
-    const t = read("src/components/service/ticket-field-sections.tsx");
+  it("the ticket note uses it (the inline picker is gone; since Oct 27 the box is the Activity block's)", () => {
+    const t = read("src/components/service/ticket-activity.tsx");
     expect(t).toContain("<MentionTextarea");
     expect(t).toContain("onValueChange={setNote}");
     expect(t).not.toContain("useServerFn(listMentionPeople)");

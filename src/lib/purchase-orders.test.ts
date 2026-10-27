@@ -624,17 +624,23 @@ describe("the section (purchase-orders-section.tsx)", () => {
 });
 
 describe("mounted on the ticket page and the close-out", () => {
-  it("ticket page: right column under Materials (owner, Oct 1), before the field sections; and for a technician", () => {
+  it("ticket page: the Purchase orders tab of the Materials & POs fold (owner, Oct 27), which sits before the field sections — office column and technician alike", () => {
     const page = read("src/components/service-page.tsx");
-    expect(page).toContain(
+    const fold = read("src/components/service/materials-pos-fold.tsx");
+    expect(fold).toContain(
       'import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";',
     );
-    // (Oct 27: a comment about the Work fold may sit between the two.)
+    expect(fold).toContain("<PurchaseOrdersSection jobId={jobId} embedded />");
+    expect(page).toContain(
+      'import { MaterialsPosFold } from "@/components/service/materials-pos-fold";',
+    );
+    expect(page).not.toMatch(/<PurchaseOrdersSection\b/);
+    // (A comment about the Work fold may sit between the two.)
     expect(page).toMatch(
-      /\{materials\}\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*(\{\/\*[^*]*\*\/\}\s*)?<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>/,
+      /\{materials\}\s*(\{\/\*[^*]*\*\/\}\s*)?<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>/,
     );
     expect(page).toMatch(
-      /\{materials\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>/,
+      /\{materials\}\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>/,
     );
   });
   it("close-out: right after Materials, in field mode (no Approved toggle)", () => {

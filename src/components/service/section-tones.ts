@@ -35,6 +35,12 @@ export const SECTION_TONES: Record<string, SectionTone> = {
     head: "bg-amber-50 dark:bg-amber-950/40",
     icon: "text-amber-600 dark:text-amber-400",
   },
+  /** The merged "Materials & POs" fold (owner, Oct 27): Materials' green. */
+  "materials-pos": {
+    edge: "border-l-4 border-l-emerald-500",
+    head: "bg-emerald-50 dark:bg-emerald-950/40",
+    icon: "text-emerald-600 dark:text-emerald-400",
+  },
   time: {
     edge: "border-l-4 border-l-blue-500",
     head: "bg-blue-50 dark:bg-blue-950/40",

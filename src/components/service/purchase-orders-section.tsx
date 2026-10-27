@@ -12,7 +12,9 @@
  * Approval is a manager's: the Approved toggle shows only to admins and managers
  * (`managesTickets`) and never on the technician's close-out (`field`); everyone else sees a
  * read-only badge. The approved total is an internal cost on the invoice (invoice-editor.tsx).
- * Mounted on the ticket page (service-page.tsx) and the close-out (closeout.tsx).
+ * Mounted on the ticket page as the Purchase orders tab of the "Materials & POs" fold (owner,
+ * Oct 27; materials-pos-fold.tsx, `embedded`: the body alone, no Box) and on the close-out
+ * (closeout.tsx, its own plain fold).
  */
 import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,10 +66,13 @@ import {
 export function PurchaseOrdersSection({
   jobId,
   field = false,
+  embedded = false,
 }: {
   jobId: string;
   /** The technician's close-out: never the Approved toggle there. */
   field?: boolean | undefined;
+  /** Inside the "Materials & POs" fold's tab (Oct 27): the body alone, no Box of its own. */
+  embedded?: boolean | undefined;
 }) {
   const { session, profile } = useAuth();
   const listFn = useServerFn(listPurchaseOrders);
@@ -81,17 +86,8 @@ export function PurchaseOrdersSection({
   const pos = q.data?.pos ?? [];
   const approver = !field && managesTickets(profile) && !!q.data?.canApprove;
 
-  return (
-    <Box
-      title="Purchase orders"
-      icon={Receipt}
-      collapsible
-      storageKey="purchase-orders"
-      defaultOpen={false}
-      summary={q.data ? poSummary(pos) : undefined}
-      // On the close-out the fold sits inside the step card (owner, Oct 9: no box in a box).
-      plain={field}
-    >
+  const body = (
+    <>
       {q.error ? (
         <p className="text-sm text-destructive">
           Could not load the purchase orders: {errText(q.error)}
@@ -155,6 +151,27 @@ export function PurchaseOrdersSection({
           )}
         </div>
       )}
+    </>
+  );
+
+  if (embedded)
+    return (
+      <section className="space-y-3" aria-label="Purchase orders">
+        {body}
+      </section>
+    );
+  return (
+    <Box
+      title="Purchase orders"
+      icon={Receipt}
+      collapsible
+      storageKey="purchase-orders"
+      defaultOpen={false}
+      summary={q.data ? poSummary(pos) : undefined}
+      // On the close-out the fold sits inside the step card (owner, Oct 9: no box in a box).
+      plain={field}
+    >
+      {body}
     </Box>
   );
 }

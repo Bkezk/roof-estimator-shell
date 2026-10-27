@@ -72,7 +72,6 @@ import {
   Lock,
   MapPin,
   Package,
-  History,
   Phone,
   Plus,
   Receipt,
@@ -168,7 +167,6 @@ import {
   TicketDocumentsDialog,
   TicketHeaderActions,
 } from "@/components/service/ticket-header-actions";
-import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   ContactSelect,
@@ -179,13 +177,9 @@ import {
 import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-extras";
 import { AerialSection } from "@/components/service/aerial-markup";
 import { InspectionSection } from "@/components/service/inspection-section";
-import {
-  ContactLogList,
-  LogContactButtons,
-  NeedsActionStrip,
-  UntouchedBadge,
-  untouchedKey,
-} from "@/components/crm/contact-log";
+import { NeedsActionStrip, UntouchedBadge, untouchedKey } from "@/components/crm/contact-log";
+import { TicketActivity } from "@/components/service/ticket-activity";
+import { MaterialsPosFold } from "@/components/service/materials-pos-fold";
 import { listUntouched, type UntouchedRow } from "@/lib/contact-log.functions";
 import {
   AlertDialog,
@@ -1652,7 +1646,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   // Owner, Oct 1: "Opened <date> by <name>" under the title and the stage strip, each stage with
   // the date it was last entered — from the timeline's 'stage' rows, which the database writes
-  // on every change (lib/stage-dates.ts). The same query (and cache) as the Timeline section.
+  // on every change (lib/stage-dates.ts). The same query (and cache) as the Activity block.
   const eventsFn = useServerFn(listJobEvents);
   const eventsQ = useQuery({
     queryKey: fieldKeys.events(job?.id ?? "new"),
@@ -2055,19 +2049,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     </div>
   );
   // Owner, Sep 28: log each call / text / email / visit so the office sees the customer has been
-  // reached (and the ticket leaves the untouched list).
-  const customerContact = job && (
-    // Owner, Sep 28: log each call / text / email / visit so the office sees the
-    // customer has been reached (and the ticket leaves the untouched list).
-    // Owner, Oct 14: the box is the timeline — contacts, comments and "Service done".
-    <section className="space-y-2 rounded-lg border p-3 text-sm" aria-label="Timeline">
-      <p className="flex items-center gap-1.5 font-medium">
-        <History className="h-3.5 w-3.5 text-muted-foreground" /> Timeline
-      </p>
-      <LogContactButtons kind="ticket" itemId={job.id} />
-      <ContactLogList kind="ticket" itemId={job.id} />
-    </section>
-  );
+  // reached (and the ticket leaves the untouched list). Owner, Oct 14: the box is the timeline —
+  // contacts, comments and "Service done". Owner, Oct 27: "Activity" — the one full stream, the
+  // contact log merged with the ticket's events, one note box, about eight rows then scrolling
+  // (service/ticket-activity.tsx). The same block for the office and a technician.
+  const customerContact = job && <TicketActivity jobId={job.id} />;
   // Description, then PO # and Job #.
   const descriptionAndNumbers = (
     <>
@@ -2424,7 +2410,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       }}
     >
       {fieldPage ? (
-        // A technician-only user (Oct 21): what the office set as text, the Timeline, their notes.
+        // A technician-only user (Oct 21): what the office set as text, the Activity, their notes.
         <>
           {fieldDetails}
           {customerContact}
@@ -2488,19 +2474,24 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
   // Open for a technician on an Open / Scheduled ticket (they log here), else folded. Open for a
   // manager reviewing a Done / Authorized ticket (owner, Oct 5, follow-up 6), remembered apart.
+  // Owner, Oct 27: Materials and Purchase orders are the two tabs of ONE "Materials & POs" fold
+  // (materials-pos-fold.tsx); the Materials body is the logging screen, or the read-only list for
+  // a login that may not log material.
   const review = manager && (jobStage === "done" || jobStage === "authorized");
-  const materials =
-    job &&
-    (can("service") || can("inventory") || can("estimate") ? (
-      <MaterialsSection
-        jobId={job.id}
-        collapsible
-        defaultOpen={review || (isTech && (jobStage === "open" || jobStage === "scheduled"))}
-        storageKey={review ? "materials-review" : undefined}
-      />
-    ) : (
-      <MaterialsUsed jobId={job.id} canLog={false} />
-    ));
+  const materials = job && (
+    <MaterialsPosFold
+      jobId={job.id}
+      defaultOpen={review || (isTech && (jobStage === "open" || jobStage === "scheduled"))}
+      storageKey={review ? "materials-pos-review" : "materials-pos"}
+      materials={
+        can("service") || can("inventory") || can("estimate") ? (
+          <MaterialsSection jobId={job.id} />
+        ) : (
+          <MaterialsUsed jobId={job.id} canLog={false} plain />
+        )
+      }
+    />
+  );
 
   return (
     // Stacked (owner, Oct 6): the whole ticket is one centred column.
@@ -2703,13 +2694,13 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               <AerialSection job={job} canEdit={canEdit} />
               <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
               <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
+              {/* Owner (Oct 1): purchase orders sit with Materials — material bought for the job;
+                  since Oct 27 the two are the tabs of one fold (materials-pos-fold.tsx). */}
               {materials}
-              {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
-              <PurchaseOrdersSection jobId={job.id} />
-              {/* Owner, Oct 27 (a shorter column): Close-out, Time and the Activity log are the
-                  three tabs of one "Work" fold (ticket-field-sections.tsx WorkFold), then the
-                  Invoice. Documents (Oct 26) moved to the header's icon the same day
-                  (ticket-header-actions.tsx) — "instead of it being a whole new row menu". */}
+              {/* Owner, Oct 27 (a shorter column): Close-out and Time are the two tabs of one
+                  "Work" fold (ticket-field-sections.tsx WorkFold), then the Invoice. Documents
+                  (Oct 26) moved to the header's icon the same day (ticket-header-actions.tsx) —
+                  "instead of it being a whole new row menu". */}
               <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
               {jobStage !== "done" && <InvoiceBlock job={job} />}
               {/* History, at the very bottom under a thin heading: what happened at this property
@@ -2743,7 +2734,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               <div className="space-y-4">
                 <TicketExtras job={job} canEdit={canEdit} />
                 {materials}
-                <PurchaseOrdersSection jobId={job.id} />
                 <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
                 {job.site_id && (
                   <HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />
@@ -3036,8 +3026,19 @@ function FieldContactLine({
   );
 }
 
-/** Inventory ledger rows logged against this ticket, and the way to log more. */
-function MaterialsUsed({ jobId, canLog }: { jobId: string; canLog: boolean }) {
+/**
+ * Inventory ledger rows logged against this ticket, and the way to log more. `plain` (Oct 27):
+ * inside the "Materials & POs" fold's tab, no border of its own.
+ */
+function MaterialsUsed({
+  jobId,
+  canLog,
+  plain,
+}: {
+  jobId: string;
+  canLog: boolean;
+  plain?: boolean | undefined;
+}) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listServiceJobMaterials);
@@ -3047,7 +3048,10 @@ function MaterialsUsed({ jobId, canLog }: { jobId: string; canLog: boolean }) {
     enabled: !!session,
   });
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Materials used">
+    <section
+      className={plain ? "space-y-3" : "space-y-3 rounded-lg border p-4"}
+      aria-label="Materials used"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 font-semibold">
           <Package className="h-4 w-4" /> Materials used

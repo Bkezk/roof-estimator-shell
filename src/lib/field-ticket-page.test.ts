@@ -138,7 +138,7 @@ describe("the ticket page (components/service-page.tsx)", () => {
     expect(officeSide).toMatch(/onDelete=\{manager \? \(\) => setConfirmDelete\(true\) : null\}/);
     expect(officeSide).toContain('onClick={() => setLayout(stacked ? "side" : "stacked")}');
   });
-  it("the form: the read-only details block, the Timeline and the editable Notes — no inputs for the office's fields", () => {
+  it("the form: the read-only details block, the Activity block and the editable Notes — no inputs for the office's fields", () => {
     const form = editor.slice(editor.indexOf("<form"), editor.indexOf("</form>"));
     const at = form.indexOf("{fieldPage ? (");
     expect(at).toBeGreaterThan(0);
@@ -184,11 +184,13 @@ describe("the ticket page (components/service-page.tsx)", () => {
   it("the customer is the office's: no change / add until the profile is known", () => {
     expect(editor).toContain("const ownsCustomer = !!profile && !isFieldOnly(profile);");
   });
-  it("the field sections stay: clock line, Timeline, extras, materials, purchase orders, field sections, History fold", () => {
+  it("the field sections stay: clock line, Activity, extras, Materials & POs, field sections, History fold", () => {
     for (const piece of [
       "{job && <JobClockLine jobId={job.id} />}",
+      "<TicketActivity jobId={job.id} />",
       "<TicketExtras job={job} canEdit={canEdit} />",
-      "<PurchaseOrdersSection jobId={job.id} />",
+      "<MaterialsPosFold",
+      "{materials}",
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />",
       "<HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />",
     ])

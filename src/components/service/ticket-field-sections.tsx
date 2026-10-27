@@ -1,27 +1,22 @@
 /**
  * The field side of a ticket on the office ticket page (docs/service-module-design.md §5.3):
  * the site contact select, and read-only sections for what the technician recorded (repairs
- * with photos, close-out notes and signature, time; time is editable for the office) plus the
- * ticket's timeline with an "Add note" box. The office adds pictures to the ticket from the
- * Photos & repairs fold too (owner, Oct 26), not only through the technician's workflow.
+ * with photos, close-out notes and signature, time; time is editable for the office). The
+ * ticket's activity stream (events, contacts, notes) is the form's Activity block since Oct 27
+ * (ticket-activity.tsx). The office adds pictures to the ticket from the Photos & repairs fold
+ * too (owner, Oct 26), not only through the technician's workflow.
  */
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
-  Camera,
   CheckCircle2,
   Clock,
   Hammer,
-  History,
   ImagePlus,
   Loader2,
-  MessageSquare,
   PenLine,
   Phone,
-  PhoneCall,
-  Truck,
-  Users,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,16 +25,12 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import { listContacts } from "@/lib/crm.functions";
 import { STAGE_LABELS, type ServiceJobWithTech, type ServiceStage } from "@/lib/service.functions";
-import { toldSuffix } from "@/lib/mentions";
 import {
-  addJobNote,
   clockOnJob,
   deleteJobPhoto,
-  listJobEvents,
   listJobPhotos,
   listJobRepairs,
   listTimeEntries,
-  type JobEventRow,
   type JobPhotoRow,
 } from "@/lib/service-field.functions";
 import { elapsedLabel } from "@/lib/tech-clock";
@@ -52,7 +43,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { photoOrdinals } from "@/lib/photo-annotations";
 import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
 import { DownloadAllPhotos } from "@/components/service/photo-markup";
@@ -207,7 +197,7 @@ export function TicketFieldSections({
 }
 
 // ---------------------------------------------------------------------------------------------
-// Work: Close-out · Time · Activity log, one fold with three tabs (owner, Oct 27)
+// Work: Close-out · Time, one fold with two tabs (owner, Oct 27)
 
 function initialWorkTab(): WorkTab {
   try {
@@ -235,23 +225,12 @@ function useTimeRows(jobId: string) {
   });
 }
 
-/** The ticket's events, newest first (the Activity log's list; the Work summary's count). */
-function useJobEvents(jobId: string) {
-  const { session } = useAuth();
-  const listFn = useServerFn(listJobEvents);
-  return useQuery({
-    queryKey: fieldKeys.events(jobId),
-    queryFn: () => listFn({ data: { id: jobId } }),
-    enabled: !!session,
-  });
-}
-
 /**
  * "Work": one collapsible fold (remembered as "work"; a manager reviewing a Done / Authorized
- * ticket, or a ticket with a close-out, finds it open the first time) with three tabs —
- * Close-out, Time, Activity log — each the body its own fold had until Oct 27. The last tab is
- * remembered per device. Arriving for the History (FoldAllContext) folds it like every other
- * self-managed Box.
+ * ticket, or a ticket with a close-out, finds it open the first time) with two tabs — Close-out
+ * and Time — each the body its own fold had until Oct 27. The Activity log tab it had that
+ * morning is the form's Activity block now (ticket-activity.tsx). The last tab is remembered per
+ * device. Arriving for the History (FoldAllContext) folds it like every other self-managed Box.
  */
 function WorkFold({
   job,
@@ -264,16 +243,14 @@ function WorkFold({
   review: boolean;
 }) {
   const time = useTimeRows(job.id);
-  const events = useJobEvents(job.id);
   const closeout = closeoutInfo(job);
   const [tab, setTab] = useState<WorkTab>(initialWorkTab);
   const hours = (time.data ?? []).reduce((s, r) => s + Number(r.hours), 0);
-  const summary =
-    time.error || events.error ? (
-      <span className="text-destructive">could not load</span>
-    ) : time.isLoading || events.isLoading ? null : (
-      workSummary({ closeout: closeout.line, hours, entries: (events.data ?? []).length })
-    );
+  const summary = time.error ? (
+    <span className="text-destructive">could not load</span>
+  ) : time.isLoading ? null : (
+    workSummary({ closeout: closeout.line, hours })
+  );
   const tabIcon = "mr-1 h-4 w-4";
   return (
     <Box
@@ -292,15 +269,12 @@ function WorkFold({
           rememberWorkTab(t);
         }}
       >
-        <TabsList className="grid h-auto w-full grid-cols-3" aria-label="Work">
+        <TabsList className="grid h-auto w-full grid-cols-2" aria-label="Work">
           <TabsTrigger value="closeout" className="min-h-9">
             <CheckCircle2 className={tabIcon} aria-hidden /> Close-out
           </TabsTrigger>
           <TabsTrigger value="time" className="min-h-9">
             <Clock className={tabIcon} aria-hidden /> Time
-          </TabsTrigger>
-          <TabsTrigger value="timeline" className="min-h-9">
-            <History className={tabIcon} aria-hidden /> Activity log
           </TabsTrigger>
         </TabsList>
         <TabsContent value="closeout" className="mt-3">
@@ -308,9 +282,6 @@ function WorkFold({
         </TabsContent>
         <TabsContent value="time" className="mt-3">
           <TimeBody job={job} officeOrAdmin={officeOrAdmin} rows={time} />
-        </TabsContent>
-        <TabsContent value="timeline" className="mt-3">
-          <TimelineBody jobId={job.id} events={events} />
         </TabsContent>
       </Tabs>
     </Box>
@@ -679,154 +650,6 @@ function CloseoutBody({ job }: { job: ServiceJobWithTech }) {
             </div>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-const FIELD_LABEL: Record<string, string> = { en_route: "En route", on_site: "On site" };
-const FIELD_NOTE: Record<string, string> = {
-  "left site": "Left the site",
-  "stopped travelling": "Stopped travelling",
-};
-/** A logged contact (crm_contact_log → timeline, meta.method). */
-const CONTACT_TEXT: Record<string, string> = {
-  called: "Called the customer",
-  texted: "Texted the customer",
-  emailed: "Emailed the customer",
-  visited: "Visited the customer",
-  other: "Contacted the customer",
-};
-
-function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
-  const meta = (e.meta ?? {}) as { role?: string; method?: string };
-  switch (e.kind) {
-    case "stage":
-      return {
-        icon: CheckCircle2,
-        text: `Stage: ${STAGE_LABELS[e.stage as ServiceStage] ?? e.stage ?? "changed"}`,
-      };
-    case "field":
-      if (e.note === "undo") return { icon: Truck, text: "Undid the last step" };
-      // The clock's leaving rows (owner, Oct 15): "left site", "stopped travelling".
-      if (e.note && !e.field_status) return { icon: Truck, text: FIELD_NOTE[e.note] ?? e.note };
-      return {
-        icon: Truck,
-        text: FIELD_LABEL[e.field_status ?? ""] ?? `Field: ${e.field_status ?? "changed"}`,
-      };
-    case "note":
-      return { icon: MessageSquare, text: e.note ?? "" };
-    case "contact": {
-      const what = CONTACT_TEXT[meta.method ?? ""] ?? "Contacted the customer";
-      // The note (if any) reads on its own line (the row renders pre-line).
-      return { icon: PhoneCall, text: e.note ? `${what}\n${e.note}` : what };
-    }
-    case "photo":
-      return {
-        icon: Camera,
-        text: `${meta.role === "before" ? "Before photo" : meta.role === "after" ? "After photo" : "Photo"} added`,
-      };
-    case "signature":
-      return { icon: PenLine, text: "Customer signed" };
-    case "edit":
-      // "Who is on this job" answers (setJobCrew) and other recorded edits.
-      return { icon: /^Crew:/.test(e.note ?? "") ? Users : History, text: e.note ?? "Edited" };
-    default:
-      return { icon: History, text: [e.kind, e.note].filter(Boolean).join(": ") };
-  }
-}
-
-/** An event as one line (the first line of its text), for the Timeline header. */
-function eventSummary(e: JobEventRow) {
-  return eventText(e).text.split("\n")[0] || "Note";
-}
-
-/** The Work fold's Activity log tab: the Add note box, then the ticket's events, newest first. */
-function TimelineBody({
-  jobId,
-  events: q,
-}: {
-  jobId: string;
-  events: ReturnType<typeof useJobEvents>;
-}) {
-  const qc = useQueryClient();
-  const noteFn = useServerFn(addJobNote);
-  const [note, setNote] = useState("");
-  const add = useMutation({
-    mutationFn: () => noteFn({ data: { id: jobId, note: note.trim() } }),
-    onSuccess: (r) => {
-      setNote("");
-      toast.success(`Note added${toldSuffix(r.mentioned)}`);
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-    },
-    onError: (e) => {
-      // "Note added, but the mentions were not sent: …": the note is in, so it leaves the box.
-      if (errText(e).startsWith("Note added")) {
-        setNote("");
-        void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-        toast.error(errText(e), { duration: 12_000 });
-      } else loudError("Could not add the note", e);
-    },
-  });
-  const rows = q.data ?? [];
-  // The server returns newest first.
-  const latest = rows[0];
-  return (
-    <div className="space-y-3">
-      {latest && (
-        <p className="text-sm text-muted-foreground" data-line="latest-event">
-          Latest: {eventSummary(latest)} · {whenShort(latest.at)}
-        </p>
-      )}
-      <form
-        className="space-y-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (note.trim()) add.mutate();
-        }}
-      >
-        <MentionTextarea
-          rows={2}
-          placeholder={`Add a note to this ticket… ${MENTION_HINT}`}
-          value={note}
-          maxLength={5000}
-          onValueChange={setNote}
-        />
-        <Button type="submit" size="sm" disabled={!note.trim() || add.isPending}>
-          {add.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          Add note
-        </Button>
-      </form>
-      {q.error ? (
-        <p className="text-sm text-destructive">Could not load the timeline: {errText(q.error)}</p>
-      ) : q.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing yet.</p>
-      ) : (
-        <ol className="space-y-2">
-          {rows.map((e) => {
-            const { icon: Icon, text } = eventText(e);
-            return (
-              <li key={e.id} className="flex gap-2 text-sm">
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p
-                    className={
-                      e.kind === "note" || e.kind === "contact" ? "whitespace-pre-line" : ""
-                    }
-                  >
-                    {text}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {whenShort(e.at)}
-                    {e.by_name ? ` · ${e.by_name}` : ""}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
       )}
     </div>
   );

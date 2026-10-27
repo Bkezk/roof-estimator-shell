@@ -1,9 +1,10 @@
 /**
- * The ticket page's shorter right column (owner, Oct 27): Close-out, Time and the Activity log
- * are three tabs of ONE "Work" fold; the column runs Aerial → Inspection → Photos & repairs →
- * Materials → Purchase orders → Work → Invoice → a thin "History" heading with the property's
- * History fold and the managers' change log under it. The fold's one line is pure (workSummary);
- * the order is pinned to the sources.
+ * The ticket page's shorter right column (owner, Oct 27): Close-out and Time are two tabs of ONE
+ * "Work" fold (the Activity log tab it had that morning moved into the form's Activity block,
+ * ticket-activity.tsx); the column runs Aerial → Inspection → Photos & repairs → Materials & POs
+ * → Work → Invoice → a thin "History" heading with the property's History fold and the managers'
+ * change log under it. The fold's one line is pure (workSummary); the order is pinned to the
+ * sources.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -13,20 +14,24 @@ import { closeoutInfo, readWorkTab, workSummary } from "./ticket-work";
 const read = (p: string) => readFileSync(p, "utf8");
 
 describe("workSummary", () => {
-  it('reads "Closed out … · 3.5 h · 12 entries" from what the three tabs know', () => {
-    expect(workSummary({ closeout: "Closed out Oct 12, 3:04 PM", hours: 3.5, entries: 12 })).toBe(
-      "Closed out Oct 12, 3:04 PM · 3.5 h · 12 entries",
+  it('reads "Closed out … · 3.5 h" from what the two tabs know', () => {
+    expect(workSummary({ closeout: "Closed out Oct 12, 3:04 PM", hours: 3.5 })).toBe(
+      "Closed out Oct 12, 3:04 PM · 3.5 h",
     );
   });
   it("leaves out what there is none of, and says 'none yet' for nothing", () => {
-    expect(workSummary({ closeout: null, hours: 2, entries: 1 })).toBe("2 h · 1 entry");
-    expect(workSummary({ closeout: "Close-out in progress", hours: 0, entries: 0 })).toBe(
+    expect(workSummary({ closeout: null, hours: 2 })).toBe("2 h");
+    expect(workSummary({ closeout: "Close-out in progress", hours: 0 })).toBe(
       "Close-out in progress",
     );
-    expect(workSummary({ closeout: null, hours: 0, entries: 0 })).toBe("none yet");
+    expect(workSummary({ closeout: null, hours: 0 })).toBe("none yet");
   });
   it("rounds the hours like the Time line (two decimals, no trailing zeros)", () => {
-    expect(workSummary({ closeout: null, hours: 1.3333, entries: 0 })).toBe("1.33 h");
+    expect(workSummary({ closeout: null, hours: 1.3333 })).toBe("1.33 h");
+  });
+  it("no activity count any more: the Activity block says 'N entries' itself", () => {
+    expect(workSummary({ closeout: null, hours: 0 })).not.toMatch(/entr/);
+    expect(read("src/components/service/ticket-work.ts")).not.toContain("entries");
   });
 });
 
@@ -62,12 +67,12 @@ describe("closeoutInfo", () => {
 });
 
 describe("readWorkTab", () => {
-  it("takes a remembered tab and falls back to Close-out", () => {
+  it("takes a remembered tab and falls back to Close-out — a stored 'timeline' (Oct 27 morning) included", () => {
     expect(readWorkTab("time")).toBe("time");
-    expect(readWorkTab("timeline")).toBe("timeline");
     expect(readWorkTab("closeout")).toBe("closeout");
     expect(readWorkTab(null)).toBe("closeout");
     expect(readWorkTab("audit")).toBe("closeout");
+    expect(readWorkTab("timeline")).toBe("closeout");
   });
 });
 
@@ -77,18 +82,30 @@ describe("the Work fold (ticket-field-sections.tsx)", () => {
     src.indexOf("function WorkFold("),
     src.indexOf("/** The Work fold's Time tab"),
   );
-  it("is one collapsible Box, remembered as 'work', with the three tabs", () => {
+  it("is one collapsible Box, remembered as 'work', with the two tabs", () => {
     expect(fold).toMatch(/<Box\s+title="Work"\s+icon=\{Hammer\}\s+collapsible/);
     expect(fold).toContain('storageKey="work"');
+    expect(fold).toContain(
+      '<TabsList className="grid h-auto w-full grid-cols-2" aria-label="Work">',
+    );
     expect(fold).toMatch(/<TabsTrigger value="closeout"[^>]*>[\s\S]*?Close-out/);
     expect(fold).toMatch(/<TabsTrigger value="time"[^>]*>[\s\S]*?Time/);
-    expect(fold).toMatch(/<TabsTrigger value="timeline"[^>]*>[\s\S]*?Activity log/);
     expect(fold).toContain('<TabsContent value="closeout"');
     expect(fold).toContain('<TabsContent value="time"');
-    expect(fold).toContain('<TabsContent value="timeline"');
     expect(fold).toContain("<CloseoutBody job={job} />");
     expect(fold).toContain("<TimeBody job={job} officeOrAdmin={officeOrAdmin} rows={time} />");
-    expect(fold).toContain("<TimelineBody jobId={job.id} events={events} />");
+    expect(fold).toContain("workSummary({ closeout: closeout.line, hours })");
+  });
+  it("has no Activity log tab, no events query and no note box any more (the form's Activity block)", () => {
+    expect(src).not.toContain('value="timeline"');
+    expect(fold).not.toContain("Activity log");
+    expect(src).not.toMatch(/Activity log\s*<\/TabsTrigger>/);
+    expect(src).not.toContain("TimelineBody");
+    expect(src).not.toContain("useJobEvents");
+    expect(src).not.toContain("listJobEvents");
+    expect(src).not.toContain("addJobNote");
+    expect(src).not.toContain("<MentionTextarea");
+    expect(src).not.toContain("Add note");
   });
   it("remembers the last tab per device (localStorage, guarded)", () => {
     expect(read("src/components/service/ticket-work.ts")).toContain(
@@ -119,7 +136,6 @@ describe("the Work fold (ticket-field-sections.tsx)", () => {
     expect(src).toMatch(
       /function TimeBody\([\s\S]*?<TimeEntries\s+jobId=\{job\.id\}\s+editable=\{officeOrAdmin\}\s+defaultHelpers=\{job\.helper_count\}\s+compact/,
     );
-    expect(src).toMatch(/function TimelineBody\([\s\S]*?<MentionTextarea[\s\S]*?Add note/);
   });
 });
 
@@ -134,14 +150,13 @@ describe("the office column's order (service-page.tsx)", () => {
     expect(i, s).toBeGreaterThan(-1);
     return i;
   };
-  it("runs Needs authorization → Aerial → Inspection → Photos & repairs → Materials → Purchase orders → Work → Invoice → History", () => {
+  it("runs Needs authorization → Aerial → Inspection → Photos & repairs → Materials & POs → Work → Invoice → History", () => {
     const order = [
       '{jobStage === "done" && <InvoiceBlock job={job} />}',
       "<AerialSection job={job} canEdit={canEdit} />",
       "<InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />",
       "<TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />",
-      "{materials}",
-      "<PurchaseOrdersSection jobId={job.id} />",
+      "{materials}", // Materials & POs (materials-pos-fold.tsx)
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />", // Work
       '{jobStage !== "done" && <InvoiceBlock job={job} />}',
       'aria-label="History"',
@@ -149,6 +164,7 @@ describe("the office column's order (service-page.tsx)", () => {
       '<AuditHistory\n                    entity="ticket"',
     ].map(at);
     for (let i = 1; i < order.length; i++) expect(order[i]).toBeGreaterThan(order[i - 1]!);
+    expect(aside).not.toContain("<PurchaseOrdersSection");
   });
   it("ends with a thin History heading (small muted uppercase, no box) over the history folds", () => {
     const heading = aside.slice(aside.indexOf('aria-label="History"'));
