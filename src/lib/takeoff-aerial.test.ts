@@ -20,7 +20,7 @@ import {
   lookupAddressAerial,
   lookupAddressInput,
   takeoffBuildingAt,
-  type AddressAerial,
+  type FindAerial,
   type FoundBuilding,
 } from "@/lib/takeoff-aerial.functions";
 import { fakeSupabase } from "@/test/fake-supabase";
@@ -94,7 +94,10 @@ const json = (body: unknown) =>
 
 let env: ReturnType<typeof fakeSupabase>;
 let urls: string[];
-let answers: Record<"Address_Points" | "Building_Footprints" | "USA_Structures", () => Response>;
+let answers: Record<
+  "Address_Points" | "Building_Footprints" | "USA_Structures" | "geocoding.geo.census.gov",
+  () => Response
+>;
 
 function setup(profile: Row, rpcs: Record<string, () => unknown> = {}) {
   env = fakeSupabase(
@@ -123,13 +126,14 @@ beforeEach(() => {
     Address_Points: () => json({ features: [] }),
     Building_Footprints: () => json({ features: [] }),
     USA_Structures: () => json({ features: [] }),
+    "geocoding.geo.census.gov": () => json({ result: { addressMatches: [] } }),
   };
 });
 afterEach(() => vi.unstubAllGlobals());
 
 type Call<T> = (a: { data: Row; context: unknown }) => Promise<T>;
 const lookup = (address: string) =>
-  (lookupAddressAerial as unknown as Call<AddressAerial>)({
+  (lookupAddressAerial as unknown as Call<FindAerial>)({
     data: { address },
     context: { supabase: env.db, userId: ME },
   });
@@ -146,7 +150,18 @@ describe("lookupAddressAerial", () => {
     answers.Address_Points = () => json({ features: [kyPoint()] });
     answers.Building_Footprints = () => json({ features: [footprint(KY_AT, 12000)] });
     const r = await lookup("412 Main St, Murray, KY 42071");
-    expect(Object.keys(r).sort()).toEqual(["address", "addressState", "found", "near", "note"]);
+    // The ticket aerial's shape plus the finder's step and the choice list (owner, Oct 27).
+    expect(Object.keys(r).sort()).toEqual([
+      "address",
+      "addressState",
+      "candidates",
+      "found",
+      "how",
+      "near",
+      "note",
+    ]);
+    expect(r.how).toBe("ky-points");
+    expect(r.candidates).toEqual([]);
     expect(r.address).toBe("412 Main St, Murray, KY 42071");
     expect(r.addressState).toBe("KY");
     expect(r.note).toBeNull();
@@ -217,13 +232,19 @@ describe("lookupAddressAerial", () => {
   it("not found: nothing stored and nothing on the state layers → found null and the note", async () => {
     setup(TAKEOFF_USER);
     const r = await lookup("412 Main St, Murray, KY 42071");
+    // Owner, Oct 27: the finder went on to the town's street names (no closer spelling), the
+    // street's own numbers (none) and the Census geocoder (no match) before giving up.
     expect(r).toEqual({
       address: "412 Main St, Murray, KY 42071",
       addressState: "KY",
       found: null,
-      note: "No building or 911 address point in our map data matches this address.",
+      note: "No building or 911 address point in our map data matches this address. The Census geocoder has no match for it either.",
       near: null,
+      how: null,
+      candidates: [],
     });
+    expect(urls.some((u) => u.includes("geocoding.geo.census.gov"))).toBe(true);
+    expect(urls.some((u) => u.includes("USA_Structures"))).toBe(false);
   });
 
   it("near (owner, Oct 26): the number is not on the street but the street is → where Pick the building opens", async () => {
@@ -247,12 +268,20 @@ describe("lookupAddressAerial", () => {
     );
   });
 
-  it("an address with no house number is a miss with its note, no server asked", async () => {
+  it("a line with no house number is searched as a place name (owner, Oct 27), then the Census geocoder", async () => {
     setup(TAKEOFF_USER);
     const r = await lookup("Main Street, Murray, KY");
     expect(r.found).toBeNull();
-    expect(r.note).toBe("The address has no house number and street to match.");
-    expect(urls).toEqual([]);
+    expect(r.note).toBe(
+      'No landmark named like "Main Street" in Murray on Kentucky\'s address points. The Census geocoder has no match for it either.',
+    );
+    expect(urls.map((u) => new URL(u).hostname)).toEqual([
+      "kygisserver.ky.gov",
+      "geocoding.geo.census.gov",
+    ]);
+    expect(new URL(urls[0]!).searchParams.get("where")).toBe(
+      "LandmkName LIKE '%MAIN%' AND LandmkName LIKE '%STREE%' AND Post_Comm IN ('Murray','MURRAY')",
+    );
     expect(env.rpcCalls).toEqual([]);
   });
 
@@ -307,7 +336,11 @@ describe("the ticket aerial shares the lookup", () => {
     expect(handler).not.toContain("await locateAddress(");
     expect(src).toContain("export async function buildingAtImpl(");
     const fn = read("src/lib/takeoff-aerial.functions.ts");
-    expect(fn).toContain("return aerialForAddress(context.supabase, data.address);");
+    // Owner, Oct 27: the takeoff's lookup is the tolerant finder; the ticket keeps aerialForAddress.
+    expect(fn).toContain("return findAddressAerial(context.supabase, data.address);");
+    expect(fn).toContain(
+      'if (data.point) return pointAerial(context.supabase, data.point, "picked", data.address);',
+    );
     expect(fn).toContain(
       "return buildingAtImpl(context.supabase, { lat: data.lat, lng: data.lng });",
     );
@@ -343,7 +376,15 @@ describe("the New takeoff dialog's third option", () => {
     const panel = read("src/components/takeoff/aerial-pick.tsx");
     expect(panel).toContain("const hint = addressStateHint(address);");
     expect(panel).toContain("{hint.hint}");
-    expect(panel).toContain("lookupFn({ data: { address: line } })");
+    expect(panel).toContain("lookup.mutate({ address: line });");
+    // Owner, Oct 27: the accepted forms in the placeholder, the step that matched, the choice list.
+    expect(panel).toContain(
+      'placeholder="412 Main St, Murray, KY 42071 · Advance Auto Parts, Corbin KY · 36.9757, -84.1091 · a Google Maps link"',
+    );
+    expect(panel).toContain("FIND_HOW_LABELS[looked.result.how]");
+    expect(panel).toContain("{candidates.map((c, i) => (");
+    expect(panel).toContain("onClick={() => choose(c)}");
+    expect(panel).toContain("lookup.mutate({ address: line, point: { lat: c.lat, lng: c.lng } });");
     expect(panel).toContain("<p>{NO_IMAGERY_MESSAGE}</p>");
     // Outside the imagery: no lookup; the line shows and the dialog stays open.
     expect(panel).toContain("if (hint.outside) {\n      setOutside(true);\n      return;\n    }");

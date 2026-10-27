@@ -33,14 +33,37 @@ import {
   pickByName,
 } from "@/lib/aerial-fallbacks";
 import {
+  SAME_PLACE_M,
   buildingForPoint,
   parseStreetAddress,
   pickAddressMatch,
   streetFilterWord,
+  tiedPlaces,
   type AddressCandidate,
   type NearBuilding,
   type ParsedAddress,
 } from "@/lib/aerial-address";
+import {
+  CENSUS_DOWN_NOTE,
+  CENSUS_FOUND_NOTE,
+  CENSUS_NO_MATCH_NOTE,
+  CENSUS_OUTSIDE_NOTE,
+  CENSUS_TIMEOUT_MS,
+  censusGeocoderUrl,
+  imageryStateForPoint,
+  parseCensusResponse,
+} from "@/lib/address-census";
+import {
+  candidatesNote,
+  closestStreetName,
+  correctedStreetNote,
+  parseAddressQuery,
+  searchedStatesNote,
+  type FindCandidate,
+  type FindHow,
+  type SearchState,
+} from "@/lib/address-query";
+import { metres } from "@/lib/gis/approx-address";
 import { footprintAreaSqFt, footprintPolygons } from "@/lib/aerial-geo";
 import {
   markupSchema,
@@ -60,8 +83,15 @@ import {
   type FootprintCandidate,
   addressPointsOnStreetUrl,
   landmarksByNameUrl,
+  streetNamesFromFeatures,
+  streetNamesInTownUrl,
 } from "@/lib/gis/ky-layers";
-import { USA_STRUCTURES_LAYER, structuresByAddressUrl } from "@/lib/gis/tn-layers";
+import {
+  USA_STRUCTURES_LAYER,
+  structureStreetNamesFromFeatures,
+  structureStreetNamesInTownUrl,
+  structuresByAddressUrl,
+} from "@/lib/gis/tn-layers";
 import type { ArcGisFeatureSet } from "@/lib/gis/arcgis";
 import { nearKyTnLine, stateCode, stateForPoint } from "@/lib/prospect";
 
@@ -170,6 +200,25 @@ type AddressLocation =
   | { kind: "near"; near: { lat: number; lng: number }; note: string }
   | { kind: "none" };
 
+/**
+ * Our stored buildings and 911 points that share the house number and street word (the
+ * read-only rpc): the one place the database is asked, for the ticket's lookup and the takeoff's
+ * finder alike.
+ */
+async function storedCandidates(
+  sb: SupabaseClient<Database>,
+  parsed: ParsedAddress,
+  word: string,
+): Promise<AddressCandidate[]> {
+  const { data, error } = await sb.rpc("service_aerial_address_candidates", {
+    p_house: parsed.house,
+    p_street_word: word,
+    p_limit: 80,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as AddressCandidate[];
+}
+
 async function locateAddress(
   sb: SupabaseClient<Database>,
   parsed: ParsedAddress,
@@ -178,13 +227,7 @@ async function locateAddress(
   /** The property's name, for the by-name fallback (owner, Oct 26). */
   propertyName: string | null = null,
 ): Promise<AddressLocation> {
-  const { data: cands, error } = await sb.rpc("service_aerial_address_candidates", {
-    p_house: parsed.house,
-    p_street_word: word,
-    p_limit: 80,
-  });
-  if (error) throw new Error(error.message);
-  const m = pickAddressMatch(parsed, (cands ?? []) as AddressCandidate[]);
+  const m = pickAddressMatch(parsed, await storedCandidates(sb, parsed, word));
   if (m.outcome === "match")
     return {
       kind: "stored",
@@ -614,6 +657,477 @@ async function liveAddressLookup(
     }
   }
   return null;
+}
+
+// ── The takeoff's finder (owner, Oct 27: "as robust as possible") ───────────────────────────
+
+/**
+ * Where a free-typed line is, by the tolerant chain (src/lib/address-query.ts reads the line):
+ *
+ *   coordinates / a map link → the footprint at that point ("point");
+ *   a place name              → the landmark by name in the town ("by-name");
+ *   a street address          → our stored data ("stored"), the states' layers in order
+ *                               ("ky-points", "tn-structures"), the property's name ("by-name"),
+ *                               the closest street name in the town ("corrected-street"), the
+ *                               nearest numbers on the street ("nearest");
+ *   then, whatever was typed  → the Census geocoder ("census"): the footprint at its point when
+ *                               that is in Kentucky / Tennessee, else the point with a note.
+ *
+ * Two or more places tying at a step are returned as `candidates` for the picker to offer.
+ * Never throws for a miss: every layer and the geocoder are best effort and their failure is a
+ * note. The ticket's own lookup (aerialForAddress) is unchanged.
+ */
+export interface FindAerial extends AddressAerial {
+  how: FindHow | null;
+  candidates: FindCandidate[];
+}
+
+const fetchCensus = async (url: string): Promise<unknown> => {
+  const res = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(CENSUS_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return parseLooseJson(await res.text());
+};
+
+/** The imagery state the picker should frame for a point, as FoundBuilding carries it. */
+const pointState = (at: { lat: number; lng: number }) => imageryStateForPoint(at.lat, at.lng);
+
+const POINT_NO_OUTLINE_NOTE =
+  "No building outline at that spot; drag the picture onto the roof, or pick the building on the map.";
+
+/** The footprint at a point (buildingAtImpl), or the bare point with a note — never a throw. */
+export async function pointAerial(
+  sb: SupabaseClient<Database>,
+  at: { lat: number; lng: number },
+  how: FindHow,
+  address: string,
+  note: string | null = null,
+): Promise<FindAerial> {
+  const addressState = pointState(at);
+  let found: FoundBuilding;
+  let outlineNote: string | null = null;
+  try {
+    found = await buildingAtImpl(sb, at);
+  } catch {
+    found = {
+      id: null,
+      footprint: null,
+      address: null,
+      state: addressState,
+      how: "picked",
+      lat: at.lat,
+      lng: at.lng,
+      areaSqFt: null,
+    };
+    outlineNote = POINT_NO_OUTLINE_NOTE;
+  }
+  return {
+    address,
+    addressState,
+    found,
+    note: [note, outlineNote].filter(Boolean).join(" ") || null,
+    near: null,
+    how,
+    candidates: [],
+  };
+}
+
+/** Points within SAME_PLACE_M of each other are one place; the first stands for it. */
+function distinctPlaces<P extends { lat: number | null; lng: number | null }>(
+  points: readonly P[],
+): P[] {
+  const out: P[] = [];
+  for (const p of points) {
+    if (p.lat == null || p.lng == null) continue;
+    if (!out.some((o) => metres(o.lat!, o.lng!, p.lat!, p.lng!) <= SAME_PLACE_M)) out.push(p);
+  }
+  return out;
+}
+
+const toCandidate = (
+  c: AddressCandidate,
+  how: FindHow,
+  state: SearchState | null,
+  label?: string | null,
+): FindCandidate => ({
+  address: label ?? c.address,
+  city: c.city,
+  state: state ?? pointState({ lat: c.lat!, lng: c.lng! }),
+  lat: c.lat!,
+  lng: c.lng!,
+  how,
+});
+
+/** The Tennessee structures that carry an address matching the number and street word. */
+async function tnStructures(
+  house: string,
+  word: string,
+): Promise<{ rows: FootprintCandidate[]; cands: AddressCandidate[] } | null> {
+  const url = structuresByAddressUrl(house, word);
+  if (!url) return null;
+  const set = (await fetchJson(url)) as ArcGisFeatureSet;
+  const rows = (set.features ?? []).flatMap((f) => {
+    const c = footprintFromFeature(f);
+    return c && c.address ? [c] : [];
+  });
+  const cands: AddressCandidate[] = rows.map((c, i) => ({
+    source: "building",
+    id: String(i),
+    address: c.address!,
+    city: c.city,
+    zip: c.zip,
+    lat: c.lat,
+    lng: c.lng,
+    building_id: null,
+  }));
+  return { rows, cands };
+}
+
+export async function findAddressAerial(
+  sb: SupabaseClient<Database>,
+  line: string,
+  opts: { propertyName?: string | null | undefined } = {},
+): Promise<FindAerial> {
+  const q = parseAddressQuery(line);
+  const address = q.line;
+  const miss = (note: string, over: Partial<FindAerial> = {}): FindAerial => ({
+    address,
+    addressState: null,
+    found: null,
+    note,
+    near: null,
+    how: null,
+    candidates: [],
+    ...over,
+  });
+  if (q.kind === "empty" || q.kind === "intersection" || q.kind === "link-without-point")
+    return miss(q.message);
+  if (q.kind === "point") return pointAerial(sb, q.at, "point", address);
+
+  const states = q.states;
+  const addressState: SearchState | null = states.length === 1 ? states[0]! : null;
+  /** What went wrong along the way, for the miss note. */
+  const trouble: string[] = [];
+  const guard = async <T>(step: () => Promise<T>, what: string): Promise<T | null> => {
+    try {
+      return await step();
+    } catch (e) {
+      trouble.push(`${what}: ${e instanceof Error ? e.message : String(e)}.`);
+      return null;
+    }
+  };
+  const choice = (cands: FindCandidate[], how: FindHow, extra?: string | null): FindAerial =>
+    miss([candidatesNote(cands.length), extra].filter(Boolean).join(" "), {
+      how,
+      addressState,
+      candidates: cands,
+    });
+
+  // A found outline, with the step's note.
+  const done = (
+    live: LiveFound,
+    how: FindHow,
+    st: SearchState | null,
+    extra: string | null = null,
+  ): FindAerial => ({
+    address,
+    addressState: st ?? addressState,
+    found: live.found,
+    note: [extra, live.note].filter(Boolean).join(" ") || null,
+    near: null,
+    how,
+    candidates: [],
+  });
+
+  /** Kentucky's point(s) for a parsed address: a match, a choice, or nothing. */
+  const kentuckyPoints = async (
+    parsed: ParsedAddress,
+    word: string,
+    how: FindHow,
+    extra: string | null = null,
+  ): Promise<FindAerial | null> => {
+    const url = addressPointsByAddressUrl(parsed.house, word);
+    if (!url) return null;
+    const pts = await guard(() => kyPoints(url), "Kentucky's address points");
+    if (!pts) return null;
+    const places = tiedPlaces(parsed, pts);
+    if (places.length === 1) {
+      const c = places[0]!;
+      const live = await guard(
+        () => kyFoundAt({ lat: c.lat!, lng: c.lng! }, c.address),
+        "Kentucky's building outlines",
+      );
+      return done(
+        live ?? liveFound(null, { address: c.address, state: "KY", lat: c.lat!, lng: c.lng! }),
+        how,
+        "KY",
+        extra,
+      );
+    }
+    if (places.length > 1)
+      return choice(
+        places.map((c) => toCandidate(c, how, "KY")),
+        how,
+        extra,
+      );
+    return null;
+  };
+
+  /** Tennessee's structure(s) for a parsed address. */
+  const tennesseeStructures = async (
+    parsed: ParsedAddress,
+    word: string,
+    how: FindHow,
+    extra: string | null = null,
+  ): Promise<FindAerial | null> => {
+    const r = await guard(() => tnStructures(parsed.house, word), "Tennessee's structures");
+    if (!r) return null;
+    const places = tiedPlaces(parsed, r.cands);
+    if (places.length === 1) {
+      const hit = r.rows[Number(places[0]!.id)]!;
+      return done(
+        liveFound(hit, {
+          address: [hit.address, hit.city].filter(Boolean).join(", ") || null,
+          state: "TN",
+          lat: places[0]!.lat!,
+          lng: places[0]!.lng!,
+        }),
+        how,
+        "TN",
+        extra,
+      );
+    }
+    if (places.length > 1)
+      return choice(
+        places.map((c) => toCandidate(c, how, "TN")),
+        how,
+        extra,
+      );
+    return null;
+  };
+
+  /** The landmark(s) in Kentucky whose name carries every stem. */
+  const kentuckyByName = async (
+    stems: string[],
+    towns: string[],
+    onStreet: ParsedAddress | null,
+    label: string,
+  ): Promise<FindAerial | null> => {
+    const url = landmarksByNameUrl(stems, towns, 40, towns.length === 0);
+    if (!url) return null;
+    const pts = await guard(() => kyPoints(url), "Kentucky's landmarks");
+    if (!pts) return null;
+    let hits = pts.filter((p) => {
+      const lm = (p.landmark ?? "").toUpperCase();
+      return lm && stems.every((s) => lm.includes(s));
+    });
+    if (onStreet) {
+      const same = hits.filter((p) => {
+        const core = parseStreetAddress(p.address)?.core ?? null;
+        return (
+          core !== null &&
+          core.length === onStreet.core.length &&
+          core.every((w) => onStreet.core.includes(w))
+        );
+      });
+      if (same.length) hits = same;
+    }
+    const places = distinctPlaces(hits);
+    if (places.length === 1) {
+      const p = places[0]!;
+      const live = await guard(
+        () => kyFoundAt({ lat: p.lat!, lng: p.lng! }, p.address),
+        "Kentucky's building outlines",
+      );
+      return done(
+        live ?? liveFound(null, { address: p.address, state: "KY", lat: p.lat!, lng: p.lng! }),
+        "by-name",
+        "KY",
+        foundByNameNote(p.landmark ?? label, p.address),
+      );
+    }
+    if (places.length > 1)
+      return choice(
+        places.map((p) =>
+          toCandidate(p, "by-name", "KY", p.landmark ? `${p.landmark}, ${p.address}` : null),
+        ),
+        "by-name",
+      );
+    return null;
+  };
+
+  /** The Census geocoder, last: the footprint at its point in KY / TN, else the point and a note. */
+  const census = async (reason: string): Promise<FindAerial> => {
+    const notes = (...more: (string | null)[]) =>
+      [reason, ...more, ...trouble].filter(Boolean).join(" ");
+    let body: unknown;
+    try {
+      body = await fetchCensus(censusGeocoderUrl(address));
+    } catch {
+      return miss(notes(CENSUS_DOWN_NOTE), { addressState });
+    }
+    const hit = parseCensusResponse(body);
+    if (!hit) return miss(notes(CENSUS_NO_MATCH_NOTE), { addressState });
+    const st = imageryStateForPoint(hit.lat, hit.lng);
+    if (!st)
+      return miss(notes(CENSUS_OUTSIDE_NOTE(hit.matchedAddress)), {
+        how: "census",
+        near: { lat: hit.lat, lng: hit.lng },
+      });
+    const r = await pointAerial(
+      sb,
+      { lat: hit.lat, lng: hit.lng },
+      "census",
+      address,
+      CENSUS_FOUND_NOTE(hit.matchedAddress),
+    );
+    return { ...r, note: notes(r.note) || null };
+  };
+
+  const searched = searchedStatesNote(states);
+
+  if (q.kind === "place") {
+    const stems = nameSearchStems(q.name);
+    const towns = cityVariants(q.city);
+    if (states.includes("KY") && stems.length) {
+      const r = await kentuckyByName(stems, towns, null, q.name);
+      if (r) return r;
+    }
+    const where = q.city ? ` in ${cityVariants(q.city)[0]}` : "";
+    const why = states.includes("KY")
+      ? `No landmark named like "${q.name}"${where} on Kentucky's address points${states.includes("TN") ? " (Tennessee's structures carry no names)" : ""}.`
+      : states.includes("TN")
+        ? `Tennessee's structures carry no names, so "${q.name}" cannot be searched by name there.`
+        : `${q.outsideState} is outside the Kentucky / Tennessee imagery.`;
+    return census([why, searched].filter(Boolean).join(" "));
+  }
+
+  // A street address.
+  const { parsed, word } = q;
+  if (!word) return miss(UNREADABLE_ADDRESS_NOTE);
+  if (states.length) {
+    // 1. Our stored buildings and 911 points.
+    const stored = await guard(() => storedCandidates(sb, parsed, word), "Our map data");
+    const places = stored ? tiedPlaces(parsed, stored) : [];
+    if (places.length === 1) {
+      const c = places[0]!;
+      const at = { lat: c.lat!, lng: c.lng! };
+      const near = await buildingsNear(sb, at.lat, at.lng, 350);
+      const hit = buildingForPoint(at, near, c.building_id);
+      const st = pointState(at);
+      return {
+        address,
+        addressState: st ?? addressState,
+        found: hit
+          ? toFound(hit.building, "address", at)
+          : {
+              id: null,
+              footprint: null,
+              address: c.address,
+              state: st,
+              how: "address",
+              lat: at.lat,
+              lng: at.lng,
+              areaSqFt: null,
+            },
+        note: hit ? null : STORED_NO_OUTLINE_NOTE,
+        near: null,
+        how: "stored",
+        candidates: [],
+      };
+    }
+    if (places.length > 1)
+      return choice(
+        places.map((c) => toCandidate(c, "stored", null)),
+        "stored",
+      );
+
+    // 2. The states' layers, in order.
+    for (const st of states) {
+      const r =
+        st === "KY"
+          ? await kentuckyPoints(parsed, word, "ky-points")
+          : await tennesseeStructures(parsed, word, "tn-structures");
+      if (r) return r;
+    }
+
+    // 3. The property's name (owner, Oct 26), Kentucky's landmarks.
+    const stems = nameSearchStems(opts.propertyName);
+    const towns = cityVariants(parsed.city);
+    if (states.includes("KY") && stems.length && towns.length) {
+      const r = await kentuckyByName(stems, towns, parsed, opts.propertyName ?? "");
+      if (r) return r;
+    }
+
+    // 4. A typo in the street: the closest street name the layer has in the town.
+    if (towns.length) {
+      for (const st of states) {
+        if (st === "KY") {
+          const url = streetNamesInTownUrl(towns);
+          if (!url) continue;
+          const set = await guard(() => fetchJson(url), "Kentucky's street names");
+          if (!set) continue;
+          const names = streetNamesFromFeatures(set as ArcGisFeatureSet);
+          const typed = parsed.core.join(" ");
+          const close = closestStreetName(typed, names);
+          if (!close) continue;
+          const fixed = parseStreetAddress(
+            `${parsed.house} ${[...parsed.directions.slice(0, 1), close.name, parsed.suffix ?? ""].filter(Boolean).join(" ")}, ${parsed.city}, KY`,
+          );
+          const fixedWord = fixed ? streetFilterWord(fixed) : null;
+          if (!fixed || !fixedWord) continue;
+          const r = await kentuckyPoints(
+            fixed,
+            fixedWord,
+            "corrected-street",
+            correctedStreetNote(close.name, typed),
+          );
+          if (r) return r;
+        } else {
+          const url = structureStreetNamesInTownUrl(towns);
+          if (!url) continue;
+          const set = await guard(() => fetchJson(url), "Tennessee's street names");
+          if (!set) continue;
+          const names = structureStreetNamesFromFeatures(set as ArcGisFeatureSet);
+          const close = closestStreetName(parsed.street, names);
+          if (!close) continue;
+          const fixed = parseStreetAddress(`${parsed.house} ${close.name}, ${parsed.city}, TN`);
+          const fixedWord = fixed ? streetFilterWord(fixed) : null;
+          if (!fixed || !fixedWord) continue;
+          const r = await tennesseeStructures(
+            fixed,
+            fixedWord,
+            "corrected-street",
+            correctedStreetNote(close.name, parsed.street),
+          );
+          if (r) return r;
+        }
+      }
+    }
+
+    // 5. The nearest numbers on that street (Kentucky's points), where Pick the building opens.
+    if (states.includes("KY") && towns.length) {
+      const url = addressPointsOnStreetUrl(word, towns);
+      if (url) {
+        const pts = await guard(() => kyPoints(url), "Kentucky's address points");
+        const near = pts ? nearestOnStreet(parsed, pts) : null;
+        if (near)
+          return miss([nearNote(parsed, near), searched].filter(Boolean).join(" "), {
+            addressState: "KY",
+            near: near.centre,
+            how: "nearest",
+          });
+      }
+    }
+  }
+
+  // 6. Nationwide: the Census geocoder.
+  const why = states.length
+    ? [NO_MATCH_NOTE, searched].filter(Boolean).join(" ")
+    : `${q.outsideState} is outside the Kentucky / Tennessee imagery.`;
+  return census(why);
 }
 
 /** The point and (lat, lng) shape every "pick the building" call takes. */

@@ -63,7 +63,80 @@ const SUFFIX: Record<string, string> = {
   BYP: "BYP",
   CROSSING: "XING",
   XING: "XING",
+  // Owner, Oct 27 (the finder's tolerance): the rest of the common street types, both ways.
+  ALLEY: "ALY",
+  ALY: "ALY",
+  TURNPIKE: "TPKE",
+  TPKE: "TPKE",
+  TRACE: "TRCE",
+  TRCE: "TRCE",
+  COVE: "CV",
+  CV: "CV",
+  BEND: "BND",
+  BND: "BND",
+  RIDGE: "RDG",
+  RDG: "RDG",
+  HOLLOW: "HOLW",
+  HOLW: "HOLW",
+  POINT: "PT",
+  PT: "PT",
+  EXTENSION: "EXT",
+  EXT: "EXT",
+  RUN: "RUN",
+  PATH: "PATH",
+  PASS: "PASS",
+  ROW: "ROW",
+  WALK: "WALK",
+  MALL: "MALL",
+  FORK: "FRK",
+  FRK: "FRK",
+  BRANCH: "BR",
+  BR: "BR",
+  CREEK: "CRK",
+  CRK: "CRK",
+  HILL: "HL",
+  HL: "HL",
+  HILLS: "HLS",
+  HLS: "HLS",
+  HEIGHTS: "HTS",
+  HTS: "HTS",
+  ESTATES: "ESTS",
+  ESTS: "ESTS",
+  GARDENS: "GDNS",
+  GDNS: "GDNS",
+  GROVE: "GRV",
+  GRV: "GRV",
+  LANDING: "LNDG",
+  LNDG: "LNDG",
+  MEADOWS: "MDWS",
+  MDWS: "MDWS",
+  STATION: "STA",
+  STA: "STA",
+  VIEW: "VW",
+  VW: "VW",
+  VILLAGE: "VLG",
+  VLG: "VLG",
+  VALLEY: "VLY",
+  VLY: "VLY",
+  FREEWAY: "FWY",
+  FWY: "FWY",
+  BRIDGE: "BRG",
+  BRG: "BRG",
+  CENTER: "CTR",
+  CENTRE: "CTR",
+  CTR: "CTR",
+  CAMP: "CP",
+  CP: "CP",
+  JUNCTION: "JCT",
+  JCT: "JCT",
+  SPUR: "SPUR",
+  CROSSROAD: "XRD",
+  XRD: "XRD",
 };
+
+/** A recognised street type word, either spelling ("STREET" and "ST"). */
+export const isStreetSuffixWord = (w: string): boolean => Object.hasOwn(SUFFIX, w.toUpperCase());
+
 const DIRECTION: Record<string, string> = {
   NORTH: "N",
   N: "N",
@@ -246,15 +319,45 @@ export const SAME_PLACE_M = 150;
 /** Below this the street words agree only loosely and nothing corroborates it. */
 const MIN_SCORE = 1.5;
 
-export function pickAddressMatch(
+/** The candidates that fit, best first (score, then a building before a point). */
+export function rankAddressCandidates(
   target: ParsedAddress,
   candidates: readonly AddressCandidate[],
-): AddressMatch {
-  const scored = candidates
+): { c: AddressCandidate; s: number }[] {
+  return candidates
     .filter((c) => c.lat != null && c.lng != null)
     .map((c) => ({ c, s: scoreAddress(target, c) }))
     .filter((x): x is { c: AddressCandidate; s: number } => x.s !== null && x.s >= MIN_SCORE)
     .sort((a, b) => b.s - a.s || (a.c.source === "building" ? -1 : 1));
+}
+
+/**
+ * The distinct places among the best-scoring candidates (two within SAME_PLACE_M are one place;
+ * the one naming its building stands for it). One entry = a match; several = the choice the
+ * picker offers (owner, Oct 27: a choice, not a failure).
+ */
+export function tiedPlaces(
+  target: ParsedAddress,
+  candidates: readonly AddressCandidate[],
+): AddressCandidate[] {
+  const scored = rankAddressCandidates(target, candidates);
+  const best = scored[0];
+  if (!best) return [];
+  const ties = scored.filter((x) => best.s - x.s < 0.01);
+  const places: AddressCandidate[] = [];
+  for (const t of ties) {
+    const i = places.findIndex((p) => metres(p.lat!, p.lng!, t.c.lat!, t.c.lng!) <= SAME_PLACE_M);
+    if (i < 0) places.push(t.c);
+    else if (!places[i]!.building_id && t.c.building_id) places[i] = t.c;
+  }
+  return places;
+}
+
+export function pickAddressMatch(
+  target: ParsedAddress,
+  candidates: readonly AddressCandidate[],
+): AddressMatch {
+  const scored = rankAddressCandidates(target, candidates);
   const best = scored[0];
   if (!best) return { outcome: "none" };
   const ties = scored.filter((x) => best.s - x.s < 0.01);

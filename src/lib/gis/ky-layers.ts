@@ -799,8 +799,14 @@ export function landmarksByNameUrl(
   stems: readonly string[],
   towns: readonly string[],
   limit = 40,
+  /**
+   * Owner, Oct 27 (a place name typed with no town: "Corbin High School"): allow the search
+   * across the state when it has two or more stems to go on.
+   */
+  statewide = false,
 ): string | null {
-  if (!stems.length || !towns.length) return null;
+  if (!stems.length) return null;
+  if (!towns.length && !(statewide && stems.length >= 2)) return null;
   if (
     !stems.every((w) => LOOKUP_WORD_RX.test(w)) ||
     !towns.every((t) => /^[A-Za-z .'-]{2,60}$/.test(t))
@@ -808,9 +814,12 @@ export function landmarksByNameUrl(
     return null;
   const p = new URLSearchParams();
   p.set("f", "pjson");
+  const byName = stems
+    .map((w) => `LandmkName LIKE ${sqlLit(`%${w.toUpperCase()}%`)}`)
+    .join(" AND ");
   p.set(
     "where",
-    `${stems.map((w) => `LandmkName LIKE ${sqlLit(`%${w.toUpperCase()}%`)}`).join(" AND ")} AND Post_Comm IN (${towns.map(sqlLit).join(",")})`,
+    towns.length ? `${byName} AND Post_Comm IN (${towns.map(sqlLit).join(",")})` : byName,
   );
   p.set("outFields", KY_ADDRESS_POINT_OUT_FIELDS);
   p.set("returnGeometry", "true");
@@ -846,6 +855,36 @@ export function addressPointsOnStreetUrl(
 
 export const KY_ADDRESS_POINT_OUT_FIELDS =
   "OBJECTID,Site_NGUID,AddNum_Pre,Add_Number,AddNum_Suf,LSt_PreDir,LSt_Name,LSt_Type,LSt_PosDir,Post_Comm,Post_Code,Inc_Muni,County,LandmkName,Place_Type,Lat,Long";
+
+/**
+ * The distinct street names (`LSt_Name`) the 911 layer has in a town (owner, Oct 27: the
+ * finder's typo tolerance — when the typed street finds nothing, the closest name in the town is
+ * tried). One query, no geometry. Null without a town.
+ */
+export function streetNamesInTownUrl(towns: readonly string[], limit = 2000): string | null {
+  if (!towns.length || !towns.every((t) => /^[A-Za-z .'-]{2,60}$/.test(t))) return null;
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set("where", `Post_Comm IN (${towns.map(sqlLit).join(",")})`);
+  p.set("outFields", "LSt_Name");
+  p.set("returnGeometry", "false");
+  p.set("returnDistinctValues", "true");
+  p.set("orderByFields", "LSt_Name");
+  p.set("resultRecordCount", String(limit));
+  return `${KY_ADDRESS_POINTS_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+/** The `LSt_Name` values out of a streetNamesInTownUrl answer, distinct, blanks dropped. */
+export function streetNamesFromFeatures(set: {
+  features?: Array<{ attributes: Record<string, unknown> }>;
+}): string[] {
+  const out = new Set<string>();
+  for (const f of set.features ?? []) {
+    const v = str(f.attributes["LSt_Name"]);
+    if (v) out.add(v.toUpperCase());
+  }
+  return [...out];
+}
 
 /**
  * The 911 points that share a ticket's house number and a street word, asked of the state

@@ -8,6 +8,7 @@
  */
 import type { AerialView } from "@/lib/aerial-geo";
 import { parseStreetAddress } from "@/lib/aerial-address";
+import { parseAddressQuery } from "@/lib/address-query";
 import { stateCode } from "@/lib/prospect";
 import type { PageScale, TakeoffPage } from "@/lib/takeoff/model";
 
@@ -34,6 +35,14 @@ export function addressStateHint(address: string): {
   outside: boolean;
   hint: string;
 } {
+  // Owner, Oct 27: the finder reads the line (with or without commas, a place name, a point).
+  const q = parseAddressQuery(address);
+  if (q.kind === "point")
+    return {
+      state: null,
+      outside: false,
+      hint: "Coordinates: the building at that point will be looked up.",
+    };
   const parsed = parseStreetAddress(address);
   // A line with no house number still tells its state ("Murray, KY"): read the tail directly.
   const tail = address
@@ -42,7 +51,11 @@ export function addressStateHint(address: string): {
     .filter(Boolean)
     .pop();
   const fromTail = tail ? stateCode(tail.replace(/\s*\d{5}(?:-\d{4})?$/, "")) : null;
-  const code = parsed?.state ?? fromTail ?? null;
+  const fromQuery =
+    q.kind === "street" || q.kind === "place"
+      ? ((q.states.length === 1 ? q.states[0]! : null) ?? q.outsideState)
+      : null;
+  const code = fromQuery ?? parsed?.state ?? fromTail ?? null;
   if (code === "KY" || code === "TN")
     return {
       state: code,

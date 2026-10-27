@@ -31,10 +31,11 @@ import {
   type LngLat,
 } from "@/lib/aerial-geo";
 import { FOOTPRINT_STROKE, pathD } from "@/lib/aerial-markup";
+import { FIND_HOW_LABELS, type FindCandidate } from "@/lib/address-query";
 import {
   lookupAddressAerial,
   takeoffBuildingAt,
-  type AddressAerial,
+  type FindAerial,
   type FoundBuilding,
 } from "@/lib/takeoff-aerial.functions";
 import { NO_IMAGERY_MESSAGE, addressStateHint } from "@/lib/takeoff/aerial-takeoff";
@@ -73,7 +74,7 @@ export function AerialAddressPicker({
   const pickFn = useServerFn(takeoffBuildingAt);
   const [address, setAddress] = useState("");
   /** The address the last lookup ran on (the picture belongs to it, not to what is typed now). */
-  const [looked, setLooked] = useState<{ address: string; result: AddressAerial } | null>(null);
+  const [looked, setLooked] = useState<{ address: string; result: FindAerial } | null>(null);
   /** The typed address is outside the imagery (Find refused without a lookup). */
   const [outside, setOutside] = useState(false);
   const [found, setFound] = useState<FoundBuilding | null>(null);
@@ -82,9 +83,10 @@ export function AerialAddressPicker({
   const hint = addressStateHint(address);
 
   const lookup = useMutation({
-    mutationFn: (line: string) => lookupFn({ data: { address: line } }),
-    onSuccess: (r, line) => {
-      setLooked({ address: line, result: r });
+    mutationFn: (input: { address: string; point?: { lat: number; lng: number } }) =>
+      lookupFn({ data: input }),
+    onSuccess: (r, input) => {
+      setLooked({ address: input.address, result: r });
       setFound(r.found);
       setView(
         r.found ? viewFor(footprintPolygons(r.found.footprint), [r.found.lng, r.found.lat]) : null,
@@ -92,6 +94,14 @@ export function AerialAddressPicker({
     },
     onError: (e) => toast.error(`Could not look the address up: ${errText(e)}`),
   });
+  /** Owner, Oct 27: several places tie — one clicked is looked up at its point. */
+  const choose = (c: FindCandidate) => {
+    if (lookup.isPending) return;
+    const line = [c.address, c.city, c.state].filter(Boolean).join(", ");
+    setFound(null);
+    setView(null);
+    lookup.mutate({ address: line, point: { lat: c.lat, lng: c.lng } });
+  };
   const pick = useMutation({
     mutationFn: (p: { lat: number; lng: number }) => pickFn({ data: p }),
     onSuccess: (f) => {
@@ -116,7 +126,7 @@ export function AerialAddressPicker({
       return;
     }
     setOutside(false);
-    lookup.mutate(line);
+    lookup.mutate({ address: line });
   };
 
   // The address the picture is for: the one looked up, else what is typed (a picked building).
@@ -142,6 +152,10 @@ export function AerialAddressPicker({
 
   const polys = useMemo(() => footprintPolygons(found?.footprint ?? null), [found]);
   const note = looked?.result.note ?? null;
+  /** The step that matched ("Found on Kentucky's address points"), for the note line. */
+  const howLabel = looked?.result.how ? FIND_HOW_LABELS[looked.result.how] : null;
+  const candidates = looked?.result.candidates ?? [];
+  const noteLine = [howLabel, note].filter(Boolean).join(" — ") || null;
   const nothing = outside || (looked !== null && !view);
 
   const pickDialog = (
@@ -202,7 +216,7 @@ export function AerialAddressPicker({
             value={address}
             disabled={disabled}
             autoComplete="street-address"
-            placeholder="412 Main St, Murray, KY 42071"
+            placeholder="412 Main St, Murray, KY 42071 · Advance Auto Parts, Corbin KY · 36.9757, -84.1091 · a Google Maps link"
             onChange={(e) => setAddress(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -230,8 +244,36 @@ export function AerialAddressPicker({
 
       {nothing && (
         <div className="space-y-2 text-sm">
-          <p>{NO_IMAGERY_MESSAGE}</p>
-          {note && !outside && <p className="text-xs text-muted-foreground">{note}</p>}
+          {candidates.length ? (
+            // Owner, Oct 27: several places tie — a choice, not a failure.
+            <>
+              <p className="text-xs text-muted-foreground">{noteLine}</p>
+              <ul className="space-y-1" aria-label="Places that match">
+                {candidates.map((c, i) => (
+                  <li key={`${c.lat},${c.lng},${i}`}>
+                    <button
+                      type="button"
+                      disabled={disabled || lookup.isPending}
+                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded-md border px-3 py-2 text-left hover:bg-accent disabled:opacity-60"
+                      onClick={() => choose(c)}
+                    >
+                      <span className="font-medium">{c.address}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {[c.city, c.state].filter(Boolean).join(", ")}
+                        {" · "}
+                        {FIND_HOW_LABELS[c.how]}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <>
+              <p>{NO_IMAGERY_MESSAGE}</p>
+              {noteLine && !outside && <p className="text-xs text-muted-foreground">{noteLine}</p>}
+            </>
+          )}
           {!outside && (
             <Button
               type="button"
@@ -248,7 +290,7 @@ export function AerialAddressPicker({
 
       {view && imagery && (
         <div className="space-y-2">
-          {note && <p className="text-xs text-muted-foreground">{note}</p>}
+          {noteLine && <p className="text-xs text-muted-foreground">{noteLine}</p>}
           <AerialPreview view={view} sources={imagery.sources} polys={polys} onView={setView} />
           <div className="flex flex-wrap items-center gap-2">
             <Button

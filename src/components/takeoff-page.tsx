@@ -78,6 +78,7 @@ import { cardOpenProps } from "@/lib/card-open";
 import { takeoffFromAerial } from "@/lib/takeoff/aerial-takeoff";
 import { isTakeoffLocked } from "@/lib/takeoff/lock";
 import { suggestTakeoffName } from "@/lib/takeoff/naming";
+import { canCreateTakeoff, newTakeoffBlocker } from "@/lib/takeoff/new-takeoff-rules";
 import { AerialAddressPicker, type AerialSelection } from "@/components/takeoff/aerial-pick";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
@@ -641,11 +642,10 @@ function NewTakeoffDialog(props: {
   const [source, setSource] = useState<TakeoffSource>("pdf");
   // The address option's picture as it stands (null until an address is found or picked).
   const [aerial, setAerial] = useState<AerialSelection | null>(null);
-  // The customer profile the takeoff belongs to. Owner (Sep 30): "the purpose was to require
-  // they associate it with a customer if that customer exists in the system, so Customer should
-  // be the required box and name should prefill". Required whenever the user can search
-  // customers; a takeoff-only user cannot read customer records, so for them the name is
-  // required instead and the Setup tab links the customer later.
+  // The customer profile the takeoff belongs to — optional for everyone (owner, Oct 27:
+  // "customer shouldn't be required on takeoff please remove that, just make it the name and
+  // plan file or aerial screenshot or address"). Picking one still prefills the name, and the
+  // Setup tab can link the customer later. Shown only to users who can search customers.
   const [account, setAccount] = useState<AccountPickerValue | null>(null);
   // True once the user has typed a name of their own; a customer pick then leaves it alone.
   const [nameTouched, setNameTouched] = useState(false);
@@ -755,25 +755,21 @@ function NewTakeoffDialog(props: {
 
   const submit = async () => {
     if (busy) return;
-    if (canPickCustomer && !account) {
-      toast.error("Pick the customer this takeoff is for (or add them) before creating it.");
+    // The customer is optional (owner, Oct 27): a name and the file, or the address picture.
+    const blocker = newTakeoffBlocker({ mode: source, name, file, aerial });
+    if (blocker) {
+      toast.error(blocker);
       return;
     }
     if (source === "address") {
-      if (!aerial) {
-        toast.error("Find the address (or pick the building on the map) first.");
-        return;
-      }
+      if (!aerial) return;
       await submitAerial(aerial);
       return;
     }
     const finalName = (
       name.trim() || (account ? suggestTakeoffName(account.label, props.existingNames) : "")
     ).trim();
-    if (!finalName) {
-      toast.error("Give the takeoff a name — the job or building, not the file.");
-      return;
-    }
+    if (!finalName) return;
     if (!file) return;
     const isPdf = file.type === "application/pdf";
     let pages: TakeoffSheet[];
@@ -818,10 +814,7 @@ function NewTakeoffDialog(props: {
     if (await upload(row, file, file.type)) finish(row);
   };
 
-  const ready =
-    source === "address"
-      ? !!aerial && (canPickCustomer ? !!account : true)
-      : !!file && (canPickCustomer ? !!account : !!name.trim());
+  const ready = canCreateTakeoff({ mode: source, name, file, aerial });
 
   return (
     <Dialog
@@ -873,9 +866,7 @@ function NewTakeoffDialog(props: {
           </div>
           {canPickCustomer && (
             <div className="space-y-1">
-              <Label htmlFor="takeoff-customer">
-                Customer <span className="text-destructive">*</span>
-              </Label>
+              <Label htmlFor="takeoff-customer">Customer (optional)</Label>
               <AccountPicker
                 id="takeoff-customer"
                 value={account}
@@ -885,30 +876,26 @@ function NewTakeoffDialog(props: {
                 onChange={pickAccount}
               />
               <p className="text-xs text-muted-foreground">
-                Required. The takeoff and any bid made from it are filed under this customer. Not in
-                the system yet? Add them from the list.
+                Optional. Picking one files the takeoff (and any bid made from it) under that
+                customer and fills the name; it can be linked later from the Setup tab.
               </p>
             </div>
           )}
           <div className="space-y-1">
             <Label htmlFor="takeoff-name">
               Name
-              {canPickCustomer || source === "address" ? (
-                ""
-              ) : (
-                <span className="text-destructive"> *</span>
-              )}
+              {source === "address" ? "" : <span className="text-destructive"> *</span>}
             </Label>
             <Input
               id="takeoff-name"
               value={name}
               disabled={!!busy}
-              required={!canPickCustomer && source !== "address"}
+              required={source !== "address"}
               placeholder={
                 source === "address"
                   ? "Named after the address; change it if you like"
                   : canPickCustomer
-                    ? "Filled from the customer; change it if you like"
+                    ? "The job or building, e.g. Smith Warehouse roof (filled from a customer pick)"
                     : "The job or building, e.g. Smith Warehouse roof"
               }
               onChange={(e) => {
@@ -919,9 +906,7 @@ function NewTakeoffDialog(props: {
             <p className="text-xs text-muted-foreground">
               {source === "address"
                 ? "Optional. The takeoff is named after the address unless you type a name here."
-                : canPickCustomer
-                  ? "Optional. Starts as the customer (and property) you picked plus today's date; change it to the job if you like."
-                  : "Required. Name the job, not the plan file."}
+                : "Required. Name the job, not the plan file."}
             </p>
           </div>
           {source === "address" ? (

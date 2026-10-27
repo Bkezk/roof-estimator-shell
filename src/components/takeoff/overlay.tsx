@@ -32,7 +32,7 @@ import {
   rectSizeLabel,
 } from "./shapes";
 import type { SnapKind } from "./plan-lines";
-import { scaleOrigin, scaleOriginLabel } from "./sheet-scale";
+import { isScaleLineDrawn, scaleOrigin, scaleOriginLabel } from "./sheet-scale";
 
 const pts = (p: readonly PagePoint[]) => p.map(([x, y]) => `${x},${y}`).join(" ");
 
@@ -459,8 +459,13 @@ export function EdgePicker(props: {
   );
 }
 
-/** The page's calibration line with its real length (and the sheet note it was read from). */
+/**
+ * The page's calibration line with its real length (and the sheet note it was read from).
+ * Nothing for a scale set from the aerial imagery (owner, Oct 27: the line across the middle of
+ * the picture was in the way); the viewer shows that one as a corner chip instead.
+ */
 export function ScaleLine(props: { scale: PageScale; zoom: number }) {
+  if (!isScaleLineDrawn(props.scale)) return null;
   const { ax, ay, bx, by, feet } = props.scale;
   const origin = scaleOrigin(props.scale);
   const z = props.zoom;

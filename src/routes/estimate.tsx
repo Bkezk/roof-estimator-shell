@@ -191,6 +191,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { EngineAdminData } from "@/lib/engine/adapters";
+import { adhesiveNamesForGroup } from "@/lib/accessory-adhesives";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import {
   asBidStatus,
@@ -5398,7 +5399,13 @@ function EstimatePage() {
                     refData={duroLastRefForBid(admin, roofSystem)}
                     result={dlResult}
                     sections={accessorySections}
-                    adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
+                    adhesiveNames={adhesiveNamesForGroup(
+                      "duroLast",
+                      admin,
+                      roofSystem,
+                      result?.adhesiveWholeUnits,
+                      accessoriesCalc.adhesivesExtra,
+                    )}
                     adhesiveCalc={result?.adhesiveWholeUnits}
                     arpCalcQty={dlResult?.membraneAccs.arpCalc ?? 0}
                     otherItems={admin?.accessoryFamilies?.other.duroLast}
@@ -5476,8 +5483,25 @@ function EstimatePage() {
                             refData={admin?.accessoryFamilies?.refs[family]}
                             result={famResult}
                             sections={accessorySections}
-                            adhesiveNames={[]}
-                            adhesiveCalc={undefined}
+                            // Owner, Oct 27: the Adhesives screen sits in the bid's active
+                            // family's group; its Calc Qty is the engine's whole units and its
+                            // EXTRA boxes are the DL state the engine bills (bid-builder.ts).
+                            adhesiveNames={adhesiveNamesForGroup(
+                              family,
+                              admin,
+                              roofSystem,
+                              result?.adhesiveWholeUnits,
+                              accessoriesCalc.adhesivesExtra,
+                            )}
+                            adhesiveCalc={result?.adhesiveWholeUnits}
+                            adhesivesExtra={accessoriesCalc.adhesivesExtra}
+                            onAdhesiveExtraChange={(name, units) =>
+                              setAccessoriesCalc((prev) => {
+                                const next = structuredClone(prev);
+                                next.adhesivesExtra[name] = units;
+                                return next;
+                              })
+                            }
                             arpCalcQty={0}
                             otherItems={admin?.accessoryFamilies?.other[family] ?? []}
                             otherLines={otherAccessories[family]}

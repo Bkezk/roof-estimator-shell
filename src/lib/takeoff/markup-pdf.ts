@@ -23,6 +23,7 @@ import {
   LINEAR_ROLES,
   LINEAR_ROLE_LABELS,
   feetPerPx,
+  type PageScale,
   takeoffQuantities,
   type PagePoint,
   type TakeoffObject,
@@ -36,6 +37,11 @@ import {
   fmtSqFt,
   polylineMidpoint,
 } from "@/components/takeoff/shapes";
+import {
+  aerialScaleChipText,
+  isScaleLineDrawn,
+  scaleOrigin,
+} from "@/components/takeoff/sheet-scale";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure parts
@@ -259,6 +265,19 @@ export function markupSummary(
   };
 }
 
+/**
+ * The sheet's footer line about its scale: the drawn line's length; for a scale set from the
+ * aerial imagery (no line on the picture) the imagery note and feet per pixel; or "no scale".
+ */
+export function markupScaleText(scale: PageScale | null | undefined): string {
+  const fpp = feetPerPx(scale);
+  if (!scale || fpp === null) return "No scale on this page: its areas and lines are not measured.";
+  const origin = scaleOrigin(scale);
+  if (!isScaleLineDrawn(scale) && origin?.source === "sheet")
+    return `${aerialScaleChipText(origin.note, fpp)}. Areas are roof surface: plan × pitch factor.`;
+  return `Scale line: ${feetInches(scale.feet)} (shown dashed orange). Areas are roof surface: plan × pitch factor.`;
+}
+
 /** "<takeoff name> – takeoff.pdf", without characters a file system refuses. */
 export function markupFileName(name: string): string {
   const base = [...name]
@@ -393,9 +412,11 @@ export function drawMarkup(
     });
   }
 
-  // The scale line (the page's calibration), dashed orange with end ticks.
+  // The scale line (the page's calibration), dashed orange with end ticks. Not for a scale set
+  // from the aerial imagery (owner, Oct 27): that one is a record, not a line on the picture.
   const sc = page.scale;
-  if (sc && feetPerPx(sc) !== null) {
+  const scaleDrawn = !!sc && feetPerPx(sc) !== null && isScaleLineDrawn(sc);
+  if (sc && scaleDrawn) {
     const [ax, ay] = P([sc.ax, sc.ay]);
     const [bx, by] = P([sc.bx, sc.by]);
     const len = Math.hypot(bx - ax, by - ay) || 1;
@@ -433,7 +454,7 @@ export function drawMarkup(
     texts.set(id, { text, color });
     reqs.push({ id, x: at[0], y: at[1], w: ctx.measureText(text).width + 2 * padX, h: boxH });
   };
-  if (sc && feetPerPx(sc) !== null) {
+  if (sc && scaleDrawn) {
     const [mx, my] = P([(sc.ax + sc.bx) / 2, (sc.ay + sc.by) / 2]);
     addLabel("__scale", `Scale ${feetInches(sc.feet)}`, "#c2410c", [mx, my - boxH]);
   }
@@ -752,10 +773,7 @@ export async function buildMarkupPdf(args: {
     const img = await args.encode(r.canvas);
     sheets.push({
       pageName: pageName(page.index),
-      scaleText:
-        page.scale && feetPerPx(page.scale) !== null
-          ? `Scale line: ${feetInches(page.scale.feet)} (shown dashed orange). Areas are roof surface: plan × pitch factor.`
-          : "No scale on this page: its areas and lines are not measured.",
+      scaleText: markupScaleText(page.scale),
       image: img.bytes,
       imageKind: img.kind,
     });

@@ -263,3 +263,28 @@ export function scaleOrigin(
   const t = scale as TaggedScale;
   return t.source === "sheet" && t.note ? { source: "sheet", note: t.note } : { source: "drawn" };
 }
+
+/**
+ * Whether a page scale is drawn on the picture (owner, Oct 27: the aerial scale line "sits in
+ * the middle of the picture" and is in the way). A scale set from the aerial imagery is the
+ * page's calibration record only — its two points stay at the centre but nothing is drawn; the
+ * viewer shows the ruler chip (`aerialScaleChipText`) in a corner instead. A drawn scale, or
+ * one read off a plan sheet, is drawn as today.
+ */
+export const isScaleLineDrawn = (scale: PageScale | null | undefined): boolean => {
+  const origin = scaleOrigin(scale);
+  return !!origin && !(origin.source === "sheet" && isAerialScaleNote(origin.note));
+};
+
+/**
+ * The corner chip for a scale set from the aerial imagery:
+ * "Scale: aerial imagery, zoom 19 · 0.52 ft/px" (`fpp` = feet per picture pixel, 2 decimals,
+ * 3 when it would otherwise read 0.00).
+ */
+export function aerialScaleChipText(note: string, fpp: number | null): string {
+  const detail = aerialScaleDetail(note);
+  const head = `Scale: aerial imagery${detail && detail !== note ? `, ${detail}` : ""}`;
+  if (fpp === null || !Number.isFinite(fpp)) return head;
+  const two = fpp.toFixed(2);
+  return `${head} · ${two === "0.00" ? fpp.toFixed(3) : two} ft/px`;
+}

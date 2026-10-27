@@ -171,9 +171,20 @@ export interface AccessoriesScreensProps {
   onOtherChange?: ((next: AccessoryLine[]) => void) | undefined;
   /** Sections for the derived stripping rows + colour columns. */
   sections: Array<{ id: string; name: string; color: string; roofSystem?: string }>;
-  /** Adhesive names + the engine's §2.4 whole-unit Calc Qty per adhesive. */
+  /**
+   * Adhesive names + the engine's §2.4 whole-unit Calc Qty per adhesive. The Adhesives screen
+   * shows only when names are given: the bid's active family's group gets them (owner, Oct 27;
+   * lib/accessory-adhesives.ts), the other two groups pass none and hide it.
+   */
   adhesiveNames: string[];
   adhesiveCalc: Record<string, number> | undefined;
+  /**
+   * The EXTRA units the engine bills (`accessoriesCalc.adhesivesExtra`, the DL group's state) and
+   * their setter, for a family group whose own state the engine does not read for adhesives.
+   * Absent: this group's own `state.adhesivesExtra` (the DL group).
+   */
+  adhesivesExtra?: Record<string, number> | undefined;
+  onAdhesiveExtraChange?: ((name: string, units: number) => void) | undefined;
   /** The §8.6 ARP calc (Ceil section + Ceil parapet sq ft) for the Membrane Accs row. */
   arpCalcQty: number;
 }
@@ -749,6 +760,9 @@ function hiddenAccessoryScreens(
 ): Set<ScreenId> {
   const out = new Set<ScreenId>();
   if (props.otherItems === undefined) out.add("other");
+  // Adhesives belong to the bid's active family's group (owner, Oct 27): a group given no
+  // adhesive names — the DL group on a Non-DL TPO / EPDM bid included — hides the screen.
+  if (props.adhesiveNames.length === 0) out.add("adhesives");
   if (!refData || !props.family || props.family === "duroLast") return out;
   const anyPrice = (m: Record<string, number>) => Object.values(m).some((v) => (v || 0) > 0);
   if (refData.corners.length === 0) out.add("corners");
@@ -771,7 +785,6 @@ function hiddenAccessoryScreens(
   if (!Object.values(refData.twoPiece).some((s) => s.priced)) out.add("snapCover");
   if (refData.panduit.length === 0) out.add("panduit");
   if (refData.sealants.length === 0) out.add("sealants");
-  if (props.adhesiveNames.length === 0) out.add("adhesives");
   if (!refData.membraneAccs.tPatch && !refData.membraneAccs.arp) out.add("membraneAccs");
   if (refData.vents.length === 0) out.add("vents");
   if (refData.fasteners.length === 0) {
@@ -802,6 +815,13 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
   // engine's figures, netted against its own three Duro-Last rows.
   const deckNeeds = nonDl ? familyDeckNeeds(result, state, refData) : result?.deckNeeds;
   const hidden = hiddenAccessoryScreens(refData, props);
+  // The adhesive EXTRA units the engine bills: the DL state handed in (a family group that is
+  // the bid's active family; owner, Oct 27), else this group's own.
+  const adhesivesExtra = props.adhesivesExtra ?? state.adhesivesExtra;
+  const setAdhesiveExtra = (name: string, units: number) => {
+    if (props.onAdhesiveExtraChange) props.onAdhesiveExtraChange(name, units);
+    else upd((d) => (d.adhesivesExtra[name] = units));
+  };
   const visibleTree = TREE.map((g) => ({
     ...g,
     items: g.items.filter((it) => !hidden.has(it.id)),
@@ -901,9 +921,9 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
         if (slotTyped(bucket)) out.add(bucket);
       }
     }
-    if (anyQty(props.adhesiveCalc) || anyQty(state.adhesivesExtra)) out.add("adhesives");
+    if (anyQty(props.adhesiveCalc) || anyQty(adhesivesExtra)) out.add("adhesives");
     return out;
-  }, [state, result, props.adhesiveCalc]);
+  }, [state, result, props.adhesiveCalc, adhesivesExtra]);
 
   if (!refData) {
     return (
@@ -1808,8 +1828,8 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                     <td className="border px-1 py-0.5">
                       <Num
                         w="w-14"
-                        value={state.adhesivesExtra[name] ?? 0}
-                        onCommit={(v) => upd((d) => (d.adhesivesExtra[name] = v))}
+                        value={adhesivesExtra[name] ?? 0}
+                        onCommit={(v) => setAdhesiveExtra(name, v)}
                       />
                     </td>
                   </tr>

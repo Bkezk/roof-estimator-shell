@@ -54,7 +54,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
-import { Loader2, SquareDashed } from "lucide-react";
+import { Loader2, Ruler, SquareDashed } from "lucide-react";
 
 import { toolAllowed } from "@/lib/takeoff/lock";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,8 @@ import {
 import { pickSnap, type PlanIndex, type SnapHit } from "./plan-lines";
 import { ScaleDialog } from "./scale-dialog";
 import {
+  aerialScaleChipText,
+  isAerialScaleNote,
   scaleOrigin,
   sheetScaleLine,
   sheetScaleMessage,
@@ -1416,11 +1418,23 @@ export function TakeoffViewer(props: ViewerProps) {
           </div>
         )}
 
-        {(!source || rendering) && !props.loadError && !renderError && (
-          <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
-            <Loader2 className="h-3 w-3 animate-spin" /> {source ? "Rendering…" : "Loading plan…"}
-          </div>
-        )}
+        <div className="pointer-events-none absolute right-3 top-3 flex flex-col items-end gap-1">
+          {(!source || rendering) && !props.loadError && !renderError && (
+            <div className="flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
+              <Loader2 className="h-3 w-3 animate-spin" /> {source ? "Rendering…" : "Loading plan…"}
+            </div>
+          )}
+          {/* A scale set from the aerial imagery is not drawn across the picture (owner, Oct 27:
+              it was in the way); this ruler chip says what it is instead. */}
+          {sheetInfo && isAerialScaleNote(sheetInfo.note) && (
+            <div
+              className="flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow"
+              title="The page's scale, set from the aerial imagery; redraw it with Scale (S) to replace it"
+            >
+              <Ruler className="h-3 w-3" /> {aerialScaleChipText(sheetInfo.note, fpp)}
+            </div>
+          )}
+        </div>
         {(props.loadError || renderError) && (
           <div className="absolute inset-x-6 top-6 rounded-md border border-destructive/40 bg-card p-3 text-sm text-destructive shadow">
             Could not show this plan: {props.loadError ?? renderError}

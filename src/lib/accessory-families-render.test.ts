@@ -117,7 +117,9 @@ describe("the family groups render the seed's refs", () => {
     expect(all).toContain("Vents");
     // renderToString escapes the inch mark.
     expect(all).toContain("1-3/4&quot; Fascia");
-    expect(all).toContain("Adhesives");
+    // Adhesives follow the bid's active family (owner, Oct 27; accessory-adhesives.test.ts): a
+    // group given no adhesive names hides the screen, the DL group included.
+    expect(all).not.toContain("Adhesives");
     expect(all).not.toContain("Other Accessories");
     expect(treeLabels(render("duroLast", true))).toContain("Other Accessories");
   });

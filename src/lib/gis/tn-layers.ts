@@ -245,6 +245,51 @@ export function structuresByAddressUrl(
   return `${USA_STRUCTURES_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
 }
 
+/**
+ * The distinct street addresses (`PROP_ADDR`) the national layer has in a Tennessee town (owner,
+ * Oct 27: the finder's typo tolerance). The layer carries no street-name column, so the street
+ * is read out of each address by `structureStreetNamesFromFeatures`. One query, no geometry.
+ * Null without a town.
+ */
+export function structureStreetNamesInTownUrl(
+  towns: readonly string[],
+  limit = 2000,
+): string | null {
+  if (!towns.length || !towns.every((t) => /^[A-Za-z .'-]{2,60}$/.test(t))) return null;
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set(
+    "where",
+    `UPPER(PROP_CITY) IN (${[...new Set(towns.map((t) => t.toUpperCase()))].map(sqlLit).join(",")}) AND FIPS LIKE '${TN_STATE_FIPS}%' AND PROP_ADDR IS NOT NULL`,
+  );
+  p.set("outFields", "PROP_ADDR");
+  p.set("returnGeometry", "false");
+  p.set("returnDistinctValues", "true");
+  p.set("resultRecordCount", String(limit));
+  return `${USA_STRUCTURES_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+/**
+ * The distinct street names out of a structureStreetNamesInTownUrl answer: each address less its
+ * leading house number ("412 MAIN ST" → "MAIN ST"), upper-case.
+ */
+export function structureStreetNamesFromFeatures(set: {
+  features?: Array<{ attributes: Record<string, unknown> }>;
+}): string[] {
+  const out = new Set<string>();
+  for (const f of set.features ?? []) {
+    const v = str(f.attributes["PROP_ADDR"]);
+    if (!v) continue;
+    const street = v
+      .toUpperCase()
+      .replace(/^\s*\d+[A-Z]?(?:-\d+[A-Z]?)?\s+/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (street) out.add(street);
+  }
+  return [...out];
+}
+
 /** "usa:5702572": distinct from Kentucky's "ornl:<id>" keys (the state's own copy). */
 export const tnSourceKey = (buildId: string): string => `usa:${buildId}`;
 

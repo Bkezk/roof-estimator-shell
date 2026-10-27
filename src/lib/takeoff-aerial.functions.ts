@@ -14,30 +14,39 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import { assertPageAccess } from "@/lib/auth.functions";
 import {
-  aerialForAddress,
   buildingAtImpl,
   buildingAtInput,
+  findAddressAerial,
+  pointAerial,
   type AddressAerial,
+  type FindAerial,
   type FoundBuilding,
 } from "@/lib/service-aerial.functions";
 
-export type { AddressAerial, FoundBuilding };
+export type { AddressAerial, FindAerial, FoundBuilding };
 
-/** lookupAddressAerial's input (exported for its tests). */
+/**
+ * lookupAddressAerial's input (exported for its tests): the typed line — or, when the picker
+ * offers several places and one is clicked, that place's point with its address line.
+ */
 export const lookupAddressInput = z.object({
   address: z.string().trim().min(1).max(300),
+  point: buildingAtInput.optional(),
 });
 
 /**
- * Where a free-typed address is on our map: `{ address, addressState, found, note, near }`, the
- * shape the ticket aerial answers for its address. Takeoff access (the same as creating one).
+ * Where a free-typed line is on our map (owner, Oct 27: the tolerant finder,
+ * service-aerial.functions.ts findAddressAerial): `{ address, addressState, found, note, near,
+ * how, candidates }`. With `point`, the footprint at that point (a clicked candidate). Takeoff
+ * access (the same as creating one).
  */
 export const lookupAddressAerial = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => lookupAddressInput.parse(d))
-  .handler(async ({ data, context }): Promise<AddressAerial> => {
+  .handler(async ({ data, context }): Promise<FindAerial> => {
     await assertPageAccess(context.supabase, context.userId, "takeoff");
-    return aerialForAddress(context.supabase, data.address);
+    if (data.point) return pointAerial(context.supabase, data.point, "picked", data.address);
+    return findAddressAerial(context.supabase, data.address);
   });
 
 /** "Pick the building on the map" for a takeoff: the outline under the tapped point. */
