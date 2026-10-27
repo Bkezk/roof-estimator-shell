@@ -579,10 +579,11 @@ export const NON_DL_TPO_SCREENS: SeedScreen[] = [
         "W56TPOG001C",
         210.0,
       ),
+      // Per tube (owner, Oct 27): the family's term bar caulk, counted by the tube like Duro-Caulk.
       row(
-        "UltraPly TPO General Purpose Sealant - White (25 tubes/ctn, 50 ft/tube)",
+        "UltraPly TPO General Purpose Sealant - White (per tube; 25 tubes/ctn at $206, 50 ft/tube; the term bar caulk)",
         "W56TPO3002",
-        206.0,
+        8.24,
       ),
       row("Single-Ply QuickPrime Primer (3 gal pail, 200–225 sq ft/gal)", "W56358704A", 121.0),
       row(
@@ -797,7 +798,12 @@ export const EPDM_SCREENS: SeedScreen[] = [
     columns: PRICE_COLUMNS,
     help: `${EPDM_HELP} Quantities are typed. Splice adhesives and seam primers are here (seam products, like the Duro-Last tab sealer), not on Adhesives.`,
     rows: [
-      row("Lap Sealant-HS Tubes (28 cartridges/pail, 560 lin ft)", "W563587031", 241.0),
+      // Per tube (owner, Oct 27): the family's term bar caulk, counted by the tube like Duro-Caulk.
+      row(
+        "Lap Sealant-HS Tubes (per tube; 28 cartridges/pail at $241, 560 lin ft/pail; the term bar caulk)",
+        "W563587031",
+        8.61,
+      ),
       row("Lap Sealant-HS Pails (per gal; 5 gal pail)", "W563587032", 50.0),
       row("Lap Sealant-HS Qt. (10 quart tubes/ctn, 640 lin ft; direct ship)", "W563587034", 184.0),
       row("Lap Sealant-HS Sausage Chubs (20 × 20 oz/ctn, 800 lin ft)", "W563587030", 247.0),
