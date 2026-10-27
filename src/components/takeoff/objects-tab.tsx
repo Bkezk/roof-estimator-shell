@@ -87,6 +87,7 @@ import {
   imageFilesOf,
   preparePhoto,
   removePhoto,
+  takePickedFiles,
   uploadTakeoffPhoto,
   useDeficiencyPhotoUrls,
   withNote,
@@ -757,11 +758,7 @@ function DeficiencyFields(props: {
             multiple
             className="hidden"
             aria-label="Add pictures"
-            onChange={(e) => {
-              const list = e.target.files;
-              e.target.value = "";
-              void add(list);
-            }}
+            onChange={(e) => void add(takePickedFiles(e.target))}
           />
           <Button
             size="sm"

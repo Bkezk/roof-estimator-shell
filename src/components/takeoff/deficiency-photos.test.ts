@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { CountAttrs } from "@/lib/takeoff/model";
 
-import { addPhotos, photoKindOf, removePhoto, withNote, withPhotos } from "./deficiency-photos";
+import {
+  addPhotos,
+  imageFilesOf,
+  photoKindOf,
+  removePhoto,
+  takePickedFiles,
+  withNote,
+  withPhotos,
+} from "./deficiency-photos";
 
 const base: CountAttrs = { name: "Deficiency 1", role: "deficiency" };
 
@@ -36,5 +44,38 @@ describe("deficiency attrs (owner, Oct 27): note and pictures, never an undefine
     ) as Record<string, unknown>;
     expect(Object.values(roundTrip).every((v) => v !== undefined)).toBe(true);
     expect(Object.keys(roundTrip).sort()).toEqual(["name", "note", "photos", "role"]);
+  });
+});
+
+describe("the file input's picked files (owner, Oct 27: a picked PNG was refused)", () => {
+  /** A browser file input: its FileList is live — clearing `value` empties it. */
+  function liveInput(names: string[]) {
+    const picked = names.map((n) => new File(["x"], n, { type: "image/png" }));
+    const input = {
+      value: "C:\\fakepath\\" + names[0],
+      get files(): File[] {
+        return this.value === "" ? [] : picked;
+      },
+    };
+    return input;
+  }
+
+  it("copies the files out before the input is cleared, so the pick is kept", () => {
+    const input = liveInput(["roof.png", "drain.png"]);
+    const files = takePickedFiles(input);
+    expect(files.map((f) => f.name)).toEqual(["roof.png", "drain.png"]);
+    expect(input.value).toBe("");
+    expect(imageFilesOf(files).length).toBe(2);
+  });
+
+  it("the old order (clear, then read) would have seen nothing — pinned as the bug", () => {
+    const input = liveInput(["roof.png"]);
+    input.value = "";
+    expect(Array.from(input.files)).toEqual([]);
+  });
+
+  it("no files picked → an empty list, and the input is still cleared", () => {
+    const input = { files: null, value: "" };
+    expect(takePickedFiles(input)).toEqual([]);
   });
 });
