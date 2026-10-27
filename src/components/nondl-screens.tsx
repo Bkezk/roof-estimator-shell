@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { customBoxAdds } from "./nondl-custom-box";
 
 const usd = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -478,7 +479,7 @@ function GroupGrid(props: {
       return last ? (last.laborRate !== 0 ? last.laborRate : crewRate) : crewRate;
     })();
 
-  // After Enter on a new item's name the cursor lands in its Quantity box (owner request).
+  // After Enter / Tab on a new item's name the cursor lands in its Quantity box (owner request).
   const [focusQtyRow, setFocusQtyRow] = useState<number | null>(null);
   const addCustom = (focusQty = false) => {
     const d = draft.trim();
@@ -684,7 +685,10 @@ function GroupGrid(props: {
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => addCustom(false)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  // Enter or Tab (owner, Oct 27: "hitting tab should take you directly into the
+                  // quantity form") adds the item and lands in its Quantity box. Tab on an empty
+                  // box keeps its usual meaning (and Shift+Tab always does).
+                  if (customBoxAdds(e.key, e.shiftKey, draft)) {
                     e.preventDefault();
                     addCustom(true);
                   }
