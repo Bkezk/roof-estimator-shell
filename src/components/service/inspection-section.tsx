@@ -27,6 +27,8 @@ import {
   Calculator,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
   Flag,
   Loader2,
@@ -45,6 +47,7 @@ import {
   type TicketInspection,
 } from "@/lib/service-inspection.functions";
 import {
+  pressStatus,
   INSPECTION_GRADES,
   ITEM_NOTE_MAX,
   bidPrefillFromInspection,
@@ -195,6 +198,17 @@ export function ChecklistRows({
   /** The ticket, for the "Last time" line under each item. */
   jobId?: string | undefined;
 }) {
+  // Flagged rows folded by a press on Issue or the label (owner, Oct 28): the flag, the red and
+  // the note's first line stay; the note box and the pictures hide until pressed again. Screen
+  // state only — a row opens again on the next visit.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = (id: string) =>
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   if (items.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
@@ -207,8 +221,12 @@ export function ChecklistRows({
         const flagged = isFlagged(item);
         const ok = item.status === "ok";
         const na = item.status === "na";
-        const set = (status: InspectionItem["status"]) =>
-          onChange(item.id, { status: item.status === status ? null : status });
+        const closed = flagged && folded.has(item.id);
+        const set = (pressed: NonNullable<InspectionItem["status"]>) => {
+          const r = pressStatus(item.status, pressed);
+          if (r.fold) toggleFold(item.id);
+          else if (r.status !== item.status) onChange(item.id, { status: r.status });
+        };
         return (
           <li
             key={item.id}
@@ -220,7 +238,12 @@ export function ChecklistRows({
                 type="button"
                 className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
                 aria-pressed={flagged}
-                aria-label={`${item.label}: flag an issue`}
+                aria-label={
+                  flagged
+                    ? `${item.label}: ${closed ? "open" : "fold"}`
+                    : `${item.label}: flag an issue`
+                }
+                aria-expanded={flagged ? !closed : undefined}
                 disabled={readOnly}
                 onClick={() => set("issue")}
               >
@@ -238,6 +261,12 @@ export function ChecklistRows({
                   <span className="h-4 w-4 shrink-0" aria-hidden />
                 )}
                 <span className={na ? "text-muted-foreground line-through" : ""}>{item.label}</span>
+                {flagged &&
+                  (closed ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  ) : (
+                    <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  ))}
               </button>
               <div
                 className="flex shrink-0 items-center gap-0.5"
@@ -283,7 +312,7 @@ export function ChecklistRows({
                 </Button>
               </div>
             </div>
-            {flagged ? (
+            {flagged && !closed ? (
               <div className="space-y-2 pb-1">
                 <Input
                   aria-label={`${item.label}: note`}
@@ -298,7 +327,9 @@ export function ChecklistRows({
               </div>
             ) : (
               item.note && (
-                <p className="whitespace-pre-line px-1 pb-1 text-sm text-muted-foreground">
+                <p
+                  className={`px-1 pb-1 text-sm text-muted-foreground ${closed ? "truncate" : "whitespace-pre-line"}`}
+                >
                   {item.note}
                 </p>
               )

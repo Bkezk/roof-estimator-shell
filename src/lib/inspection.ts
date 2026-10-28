@@ -144,6 +144,20 @@ export function visibleChecklist<T extends { label: string }>(items: readonly T[
 /** A row with a problem (owner, Oct 26): status "issue". Every other row reads as OK or N/A. */
 export const isFlagged = (item: { status: InspectionStatus | null }): boolean =>
   item.status === "issue";
+/**
+ * What a press on a row's status button does (owner, Oct 28: "if you minimize a category … it
+ * gets rid of the red issue and the flag"). Pressing Issue (or the label) on a flagged row used to
+ * clear its status — the row then counted as OK in the report while its note and pictures stayed,
+ * so it looked like a fold. Now that press FOLDS the row and keeps the flag; only OK or N/A take
+ * the flag off. OK and N/A still clear themselves when pressed again.
+ */
+export function pressStatus(
+  current: InspectionStatus | null,
+  pressed: InspectionStatus,
+): { status: InspectionStatus | null; fold: boolean } {
+  if (pressed === "issue" && current === "issue") return { status: "issue", fold: true };
+  return { status: current === pressed ? null : pressed, fold: false };
+}
 /** "No issues" / "1 issue" / "3 issues" (the close-out's step aside). */
 export const issueCountText = (n: number): string =>
   n === 0 ? "No issues" : `${n} ${n === 1 ? "issue" : "issues"}`;

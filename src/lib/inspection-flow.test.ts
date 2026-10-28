@@ -1311,16 +1311,16 @@ describe("6f. the screens: compact rows, pictures from the ticket, Property insp
   const itemPhotos = read("src/components/service/inspection-item-photos.tsx");
   const mutations = read("src/components/service/item-photo-mutations.ts");
   it("each row is one line — the label and the flag toggle Issue; OK is a subtle tick; N/A a small toggle; only a flagged row opens", () => {
-    expect(section).toContain("aria-label={`${item.label}: flag an issue`}");
+    expect(section).toContain("`${item.label}: flag an issue`");
     expect(section).toContain("aria-label={`${item.label}: issue`}");
     expect(section).toContain("aria-label={`${item.label}: OK`}");
     expect(section).toContain("aria-label={`${item.label}: not applicable`}");
     expect(section).toMatch(/aria-pressed=\{flagged\}/);
-    expect(section).toContain(
-      "onChange(item.id, { status: item.status === status ? null : status })",
-    );
-    // The note and the pictures (`extra`) only under a flagged row.
-    expect(section).toMatch(/\{flagged \? \(\s*<div[^>]*>\s*<Input/);
+    // Oct 28: a press goes through pressStatus — Issue on a flagged row folds it, keeping the
+    // flag (checklist-fold-keeps-flag.test.ts).
+    expect(section).toContain("const r = pressStatus(item.status, pressed);");
+    // The note and the pictures (`extra`) only under a flagged, open row.
+    expect(section).toMatch(/\{flagged && !closed \? \(\s*<div[^>]*>\s*<Input/);
     expect(section).toMatch(/\{extra\?\.\(item\)\}\s*<\/div>\s*\) : \(/);
     expect(section).not.toContain("StatusButton");
     expect(section).not.toContain("INSPECTION_STATUSES.map");
