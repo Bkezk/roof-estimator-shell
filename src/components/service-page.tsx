@@ -120,7 +120,6 @@ import {
   type ServiceStage,
   type ServiceType,
   claimServiceJob,
-  listPoWaitingTicketIds,
 } from "@/lib/service.functions";
 import { getAccount, listContacts, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.functions";
@@ -280,7 +279,6 @@ export function ServicePage({
   opportunity,
   stage,
   overdue,
-  po,
   q,
   tech,
   type,
@@ -299,8 +297,6 @@ export function ServicePage({
   stage?: Exclude<StageFilter, "all"> | undefined;
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
   overdue?: boolean | undefined;
-  /** The list: only tickets with a purchase order waiting for approval (`?po=waiting`, the Owner page's tile). */
-  po?: "waiting" | undefined;
   /** The list: the search box, the Technician select and the Type select (`?q=&tech=&type=`). */
   q?: string | undefined;
   tech?: string | undefined;
@@ -326,7 +322,6 @@ export function ServicePage({
       filters={{
         ...(stage ? { stage } : {}),
         ...(overdue ? { overdue: 1 as const } : {}),
-        ...(po ? { po } : {}),
         ...(q ? { q } : {}),
         ...(tech ? { tech } : {}),
         ...(type ? { type } : {}),
@@ -387,7 +382,7 @@ const writeCollapsed = (stages: ServiceStage[]) => {
 
 type TypeFilter = "all" | ServiceType;
 /** The list's filters as the URL carries them (parseServiceSearch, the list branch). */
-type ListFilters = Pick<ServiceSearch, "stage" | "overdue" | "po" | "q" | "tech" | "type">;
+type ListFilters = Pick<ServiceSearch, "stage" | "overdue" | "q" | "tech" | "type">;
 
 /** How long the search box waits before writing what was typed into the URL. */
 const SEARCH_URL_DELAY_MS = 300;
@@ -444,20 +439,6 @@ function ServiceList({ filters }: { filters: ListFilters }) {
   // Overdue: open tickets whose day has passed (lib/work-counts.ts isOverdueTicket); ?overdue=1
   // from the Customers page counts strip, or the Overdue chip (a toggle since Oct 9).
   const overdueOnly = filters.overdue === 1;
-  // PO waiting: only the tickets with a purchase order still waiting for approval (owner, Oct
-  // 21: the Owner page's tile links here with ?po=waiting; the chip toggles it too). The ids
-  // come from the server (listPoWaitingTicketIds), read only while the chip is on.
-  const poWaitingOnly = filters.po === "waiting";
-  const poWaitingFn = useServerFn(listPoWaitingTicketIds);
-  const poWaitingQ = useQuery({
-    queryKey: ["po-waiting"],
-    queryFn: () => poWaitingFn(),
-    enabled: !!session && poWaitingOnly,
-  });
-  const poWaiting = useMemo(
-    () => (poWaitingOnly ? new Set(poWaitingQ.data ?? []) : null),
-    [poWaitingOnly, poWaitingQ.data],
-  );
   const writeFilters = (next: ListFilters) =>
     void navigate({ to: "/service", search: next, replace: true });
   const patchFilters = (patch: Partial<Record<keyof ListFilters, unknown>>) => {
@@ -472,7 +453,6 @@ function ServiceList({ filters }: { filters: ListFilters }) {
   const setTypeFilter = (v: TypeFilter) => patchFilters({ type: v });
   const setTechFilter = (v: TechFilter) => patchFilters({ tech: v });
   const setOverdueOnly = (v: boolean) => patchFilters({ overdue: v ? 1 : undefined });
-  const setPoWaitingOnly = (v: boolean) => patchFilters({ po: v ? "waiting" : undefined });
   // The search box types locally and lands in the URL a moment later (a URL write per keystroke
   // would fight the caret); a q arriving from the URL (Back) refills the box.
   const [search, setSearch] = useState(filters.q ?? "");
@@ -540,8 +520,6 @@ function ServiceList({ filters }: { filters: ListFilters }) {
       mineId: mine ? (profile?.id ?? null) : null,
       stage: stageFilter,
       overdueOnly,
-      // Until the ids arrive the chip shows nothing rather than everything.
-      poWaiting: poWaitingOnly && poWaitingQ.data === undefined ? new Set<string>() : poWaiting,
       type: typeFilter,
       tech: isTech ? TECH_ALL : techFilter,
       search,
@@ -569,8 +547,7 @@ function ServiceList({ filters }: { filters: ListFilters }) {
     typeFilter !== "all" ||
     techFilter !== TECH_ALL ||
     mine ||
-    overdueOnly ||
-    poWaitingOnly;
+    overdueOnly;
   const clearFilters = () => {
     setSearch("");
     sentQ.current = "";
@@ -718,29 +695,6 @@ function ServiceList({ filters }: { filters: ListFilters }) {
                     </>
                   )}
                 </Button>
-                {!isTech && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={poWaitingOnly ? "default" : "outline"}
-                    className="h-7 rounded-full px-3 text-xs"
-                    aria-pressed={poWaitingOnly}
-                    title={
-                      poWaitingOnly
-                        ? "Only tickets with a purchase order waiting for approval. Click to show all."
-                        : "Show only tickets with a purchase order waiting for approval."
-                    }
-                    onClick={() => setPoWaitingOnly(!poWaitingOnly)}
-                  >
-                    PO waiting
-                    {poWaitingOnly && (
-                      <>
-                        <X className="ml-1 h-3 w-3" aria-hidden />
-                        <span className="sr-only">(clear)</span>
-                      </>
-                    )}
-                  </Button>
-                )}
                 {!isTech && (
                   <>
                     <span className="mx-1 h-5 w-px bg-border" aria-hidden />

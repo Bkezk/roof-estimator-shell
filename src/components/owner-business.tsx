@@ -1,9 +1,10 @@
 /**
  * The Owner view's Business tab (owner, Oct 8): the money in flight — Authorized, not invoiced
  * (the Awaiting invoice queue, with the Done tickets still to be authorized as its second line;
- * owner, Oct 12, item 6), Unpaid, Pipeline, purchase orders waiting, Won / Lost — and a "Going
- * stale" strip. "Invoiced this month" left on Oct 21 (owner: redundant — the margin report under
- * these tiles has the month, before tax, with its cost). Every tile is a link to the list already
+ * owner, Oct 12, item 6), Unpaid, Pipeline, Won / Lost — and a "Going stale" strip. "Invoiced
+ * this month" left on Oct 21 (owner: redundant — the margin report under these tiles has the
+ * month, before tax, with its cost); "Purchase orders waiting for approval" left on Oct 28
+ * (owner: approval is gone, every PO is a cost). Every tile is a link to the list already
  * filtered to what it counts. Blank until the numbers arrive (never a placeholder 0); an empty
  * queue reads "—".
  */
@@ -168,13 +169,6 @@ export function OwnerBusiness() {
                 }`
               : ""
           }
-        />
-        <Tile
-          title="Purchase orders waiting for approval"
-          href={BUSINESS_HREFS.pos}
-          value={d ? money(d.pos.total, d.pos.count) : ""}
-          sub={d ? (d.pos.count ? count(d.pos.count, "purchase order") : "None waiting") : ""}
-          tone={d && d.pos.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
         />
         <Tile
           title="Won / Lost this month"

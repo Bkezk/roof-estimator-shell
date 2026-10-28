@@ -131,27 +131,36 @@ describe("lineCosts: material / labor & travel / other from the lines' cost_tota
   });
 });
 
-describe("poCostCarried: each approved PO counts toward exactly one invoice of the ticket", () => {
+describe("poCostCarried: each PO counts toward exactly one invoice of the ticket (approved or not, Oct 28)", () => {
   const ticketInvoices = [
     { id: "i1", label: "6000", status: "paid", created_at: "2026-10-01T00:00:00Z" },
     { id: "i2", label: "6000.2", status: "final", created_at: "2026-10-03T00:00:00Z" },
   ];
   const pos = [
-    { id: "p1", approved: true, price: 500 },
-    { id: "p2", approved: false, price: 999 },
+    { id: "p1", price: 500 },
+    { id: "p2", price: 999 },
   ];
-  it("the earliest live invoice carries the approved total; the others carry 0", () => {
-    expect(poCostCarried("i1", ticketInvoices, pos, [])).toBe(500);
+  it("the earliest live invoice carries the whole PO total; the others carry 0", () => {
+    expect(poCostCarried("i1", ticketInvoices, pos, [])).toBe(1499);
     expect(poCostCarried("i2", ticketInvoices, pos, [])).toBe(0);
   });
   it("a PO that is already a po:<id> line on the invoice is in the lines' cost — never added again", () => {
-    expect(poCostCarried("i1", ticketInvoices, pos, [{ source: "po:p1" }])).toBe(0);
-    expect(poCostCarried("i1", ticketInvoices, pos, [{ source: "materials" }])).toBe(500);
+    expect(poCostCarried("i1", ticketInvoices, pos, [{ source: "po:p1" }])).toBe(999);
+    expect(poCostCarried("i1", ticketInvoices, pos, [{ source: "materials" }])).toBe(1499);
   });
   it("a void invoice never carries; the next live one does", () => {
     const withVoid = [{ ...ticketInvoices[0]!, status: "void" }, ticketInvoices[1]!];
     expect(poCostCarried("i1", withVoid, pos, [])).toBe(0);
-    expect(poCostCarried("i2", withVoid, pos, [])).toBe(500);
+    expect(poCostCarried("i2", withVoid, pos, [])).toBe(1499);
+  });
+  it("an `approved` flag on a row changes nothing (the column stays in the table, unread)", () => {
+    const flagged = [
+      { id: "p1", price: 500, approved: false },
+      { id: "p2", price: 999, approved: true },
+    ];
+    expect(poCostCarried("i1", ticketInvoices, flagged, [])).toBe(1499);
+    expect(read("src/lib/margin-report.ts")).not.toContain("approvedPoTotal");
+    expect(read("src/lib/margin-report.ts")).not.toContain(".approved");
   });
 });
 
@@ -876,9 +885,9 @@ function world(opts: { maxRows?: number } = {}) {
         { id: 9, invoice_id: "i6", kind: "labor", cost_total: 150, qty: 3, source: null },
         { id: 10, invoice_id: "i7", kind: "labor", cost_total: 100, qty: 2, source: null },
       ],
+      // Every PO counts (owner, Oct 28); the `approved` column is never read.
       service_job_purchase_orders: [
         { id: "po-1", service_job_id: T1, approved: true, price: 300 },
-        { id: "po-2", service_job_id: T1, approved: false, price: 5000 },
         { id: "po-3", service_job_id: T3, approved: true, price: 250 },
       ],
     },
@@ -959,6 +968,23 @@ describe("listMarginReport", () => {
       cost: 1280,
       margin: 1120,
     });
+  });
+  it("a PO that was never approved counts like any other (owner, Oct 28); the query has no approved filter", async () => {
+    const env = world();
+    env.tables["service_job_purchase_orders"]!.push({
+      id: "po-2",
+      service_job_id: T1,
+      approved: false,
+      price: 5000,
+    });
+    const r = await call(env, ANN, { ...range, groupBy: "month" });
+    const oct = r.rows[0]!;
+    expect(oct.purchaseOrders).toBe(5300);
+    expect(oct.cost).toBe(6160);
+    expect(oct.margin).toBe(-3960);
+    const src = read("src/lib/margin-report.functions.ts");
+    expect(src).not.toContain('.eq("approved"');
+    expect(src).not.toContain("approved");
   });
   it("the per-invoice rows: one per counted invoice, lean (names, day, status, the money) — no tax, no lines", async () => {
     const r = await call(world(), ANN, { ...range, groupBy: "month" });

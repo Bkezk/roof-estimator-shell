@@ -1,18 +1,17 @@
 /**
  * Purchase orders on a ticket (owner, Oct 1: CenterPoint's close-out "PO Information"): what a
  * crew bought for the job on the way (Lowe's, a supply house). A folding section with a summary
- * ("2 · $412.00 · 1 awaiting approval"); each PO shows its date, PO #, title, price, whether it
- * is approved and a link to its receipt (a signed URL, opened in a new tab), with Edit and
- * Delete for whoever may change it. "+ Add PO" opens the form: Date (today), PO #, Title,
- * Price (the box starts blank — owner rule: never a placeholder 0), Notes, Upload Receipt
- * (a photo or a PDF, straight to the private "service" bucket like the photos), Approved? and
- * Submit / Back. The fields stack on a phone. An optional Vendor (the supplier it was bought from,
- * typed free text, saved vendors' names suggested) shows on the row after the title.
+ * ("2 · $412.00"); each PO shows its date, PO #, title, price and a link to its receipt (a
+ * signed URL, opened in a new tab), with Edit and Delete for whoever may change it. "+ Add PO"
+ * opens the form: Date (today), PO #, Title, Price (the box starts blank — owner rule: never a
+ * placeholder 0), Notes, Upload Receipt (a photo or a PDF, straight to the private "service"
+ * bucket like the photos) and Submit / Back. The fields stack on a phone. An optional Vendor
+ * (the supplier it was bought from, typed free text, saved vendors' names suggested) shows on the
+ * row after the title.
  *
- * Approval is a manager's: the Approved toggle shows only to admins and managers
- * (`managesTickets`) and never on the technician's close-out (`field`); everyone else sees a
- * read-only badge. The approved total is an internal cost on the invoice (invoice-editor.tsx).
- * Mounted on the ticket page as the Purchase orders tab of the "Materials & POs" fold (owner,
+ * No approval (owner, Oct 28: "PO's should count to internal cost regardless as they happened
+ * whether approved or not, and drop the switch entirely"): every PO's price is an internal cost
+ * on the invoice (invoice-editor.tsx). Mounted on the ticket page as the Purchase orders tab of the "Materials & POs" fold (owner,
  * Oct 27; materials-pos-fold.tsx, `embedded`: the body alone, no Box) and on the close-out
  * (closeout.tsx, its own plain fold).
  */
@@ -23,7 +22,6 @@ import { toast } from "sonner";
 import { Loader2, Paperclip, Pencil, Plus, Receipt, Trash2, Upload, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
 import {
   PO_NUMBER_MAX,
   nextPoNumber,
@@ -41,14 +39,11 @@ import {
   listPurchaseOrders,
   receiptObjectName,
   savePurchaseOrder,
-  setPurchaseOrderApproved,
   type PurchaseOrderView,
 } from "@/lib/service-pos.functions";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Box } from "@/components/service/field-shared";
 import { useVendors } from "@/components/crm/use-vendors";
@@ -69,12 +64,12 @@ export function PurchaseOrdersSection({
   embedded = false,
 }: {
   jobId: string;
-  /** The technician's close-out: never the Approved toggle there. */
+  /** The technician's close-out: the fold sits plain inside the step card. */
   field?: boolean | undefined;
   /** Inside the "Materials & POs" fold's tab (Oct 27): the body alone, no Box of its own. */
   embedded?: boolean | undefined;
 }) {
-  const { session, profile } = useAuth();
+  const { session } = useAuth();
   const listFn = useServerFn(listPurchaseOrders);
   const q = useQuery({
     queryKey: fieldKeys.pos(jobId),
@@ -84,7 +79,6 @@ export function PurchaseOrdersSection({
   // null = no form open; "new" = adding; an id = editing that PO.
   const [editing, setEditing] = useState<string | null>(null);
   const pos = q.data?.pos ?? [];
-  const approver = !field && managesTickets(profile) && !!q.data?.canApprove;
 
   const body = (
     <>
@@ -108,21 +102,10 @@ export function PurchaseOrdersSection({
               {pos.map((po) =>
                 editing === po.id ? (
                   <li key={po.id} className="p-2">
-                    <PoForm
-                      jobId={jobId}
-                      po={po}
-                      approver={approver}
-                      onClose={() => setEditing(null)}
-                    />
+                    <PoForm jobId={jobId} po={po} onClose={() => setEditing(null)} />
                   </li>
                 ) : (
-                  <PoRow
-                    key={po.id}
-                    jobId={jobId}
-                    po={po}
-                    approver={approver}
-                    onEdit={() => setEditing(po.id)}
-                  />
+                  <PoRow key={po.id} jobId={jobId} po={po} onEdit={() => setEditing(po.id)} />
                 ),
               )}
             </ul>
@@ -130,7 +113,6 @@ export function PurchaseOrdersSection({
           {editing === "new" ? (
             <PoForm
               jobId={jobId}
-              approver={approver}
               suggestedNumber={nextPoNumber(
                 q.data.ticketNumber,
                 q.data.pos.map((p) => p.po_number),
@@ -176,18 +158,6 @@ export function PurchaseOrdersSection({
   );
 }
 
-function ApprovedBadge({ approved }: { approved: boolean }) {
-  return approved ? (
-    <Badge className="border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-      Approved
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="text-amber-700 dark:text-amber-300">
-      Awaiting approval
-    </Badge>
-  );
-}
-
 /** The receipt as a link (a one-hour signed URL), opened in a new tab. */
 function ReceiptLink({ path, name }: { path: string; name: string | null }) {
   const url = useSignedUrl(path);
@@ -223,25 +193,14 @@ function usePoMutations(jobId: string) {
 function PoRow({
   jobId,
   po,
-  approver,
   onEdit,
 }: {
   jobId: string;
   po: PurchaseOrderView;
-  approver: boolean;
   onEdit: () => void;
 }) {
   const { refresh } = usePoMutations(jobId);
-  const approveFn = useServerFn(setPurchaseOrderApproved);
   const deleteFn = useServerFn(deletePurchaseOrder);
-  const approve = useMutation({
-    mutationFn: (approved: boolean) => approveFn({ data: { id: po.id, approved } }),
-    onSuccess: (r) => {
-      refresh();
-      toast.success(r.approved ? `PO ${r.po_number} approved` : `PO ${r.po_number} not approved`);
-    },
-    onError: (e) => loudError("Could not change the approval", e),
-  });
   const remove = useMutation({
     mutationFn: () => deleteFn({ data: { id: po.id } }),
     onSuccess: () => {
@@ -268,19 +227,6 @@ function PoRow({
         <span className="font-medium tabular-nums">{poMoney(Number(po.price))}</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {approver ? (
-          <label className="flex items-center gap-2 text-xs">
-            <Switch
-              checked={po.approved}
-              disabled={approve.isPending}
-              aria-label={`Approve PO ${po.po_number}`}
-              onCheckedChange={(v) => approve.mutate(v)}
-            />
-            Approved
-          </label>
-        ) : (
-          <ApprovedBadge approved={po.approved} />
-        )}
         {po.receipt_path && <ReceiptLink path={po.receipt_path} name={po.receipt_name} />}
         {po.can_edit && (
           <span className="ml-auto flex gap-1">
@@ -321,12 +267,8 @@ function PoRow({
         )}
       </div>
       {po.notes && <p className="whitespace-pre-line text-xs text-muted-foreground">{po.notes}</p>}
-      {(po.created_by_name || po.approved_by_name) && (
-        <p className="text-[11px] text-muted-foreground">
-          {po.created_by_name ? `Added by ${po.created_by_name}` : ""}
-          {po.created_by_name && po.approved_by_name ? " · " : ""}
-          {po.approved_by_name ? `approved by ${po.approved_by_name}` : ""}
-        </p>
+      {po.created_by_name && (
+        <p className="text-[11px] text-muted-foreground">Added by {po.created_by_name}</p>
       )}
     </li>
   );
@@ -344,27 +286,23 @@ const draftOf = (po?: PurchaseOrderView, suggested = ""): PoDraft => ({
 
 /**
  * Add or edit a PO, in CenterPoint's order: Date *, PO # *, Title, Price *, Notes, Upload
- * Receipt, Approved? (managers only), Submit / Back.
+ * Receipt, Submit / Back.
  */
 function PoForm({
   jobId,
   po,
-  approver,
   suggestedNumber = "",
   onClose,
 }: {
   jobId: string;
   po?: PurchaseOrderView;
-  approver: boolean;
   /** The PO # a new PO starts with (nextPoNumber); ignored when editing. */
   suggestedNumber?: string;
   onClose: () => void;
 }) {
   const { refresh } = usePoMutations(jobId);
   const saveFn = useServerFn(savePurchaseOrder);
-  const approveFn = useServerFn(setPurchaseOrderApproved);
   const [draft, setDraft] = useState<PoDraft>(() => draftOf(po, suggestedNumber));
-  const [approved, setApproved] = useState(po?.approved ?? false);
   // The supplier as typed (owner, Oct 2: free text — "Lowes" just saves; a saved vendor's
   // name links its id too; nothing is ever added to the Vendors list). Saved names suggest.
   const [vendorText, setVendorText] = useState(po?.vendor_name ?? "");
@@ -393,9 +331,8 @@ function PoForm({
       } else if (dropReceipt) {
         receipt = { receipt_path: null };
       }
-      let row: PurchaseOrderView;
       try {
-        row = await saveFn({
+        return await saveFn({
           data: {
             ...(po ? { id: po.id } : {}),
             jobId,
@@ -412,9 +349,6 @@ function PoForm({
         if (uploaded) await removeFromServiceBucket(uploaded);
         throw e;
       }
-      if (approver && row.approved !== approved)
-        row = await approveFn({ data: { id: row.id, approved } });
-      return row;
     },
     onSuccess: (row) => {
       refresh();
@@ -596,12 +530,6 @@ function PoForm({
           )}
         </div>
       </div>
-      {approver && (
-        <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm">
-          <span className="font-medium">Approved?</span>
-          <Switch checked={approved} disabled={busy} onCheckedChange={setApproved} />
-        </label>
-      )}
       <div className="flex gap-2">
         <Button type="submit" className="h-11 flex-1 sm:h-9 sm:flex-none" disabled={busy}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

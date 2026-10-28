@@ -20,8 +20,8 @@
  *  - Material cost = the material lines' cost_total; Labor & travel = the labor and travel lines'
  *    (their cost_rate comes from the rate table, invoice-labor.ts); Other = the other lines'.
  *  - Hours = the labor and travel lines' qty, summed (what computeTotals calls `hours`).
- *  - Purchase orders = the ticket's APPROVED purchase orders, counted toward exactly ONE invoice
- *    of the ticket, its earliest live one (invoice-totals.ts poCostForInvoice), and never when
+ *  - Purchase orders = the ticket's purchase orders (every one; owner, Oct 28), counted toward
+ *    exactly ONE invoice of the ticket, its earliest live one (invoice-totals.ts poCostForInvoice), and never when
  *    the PO is already a "po:<id>" line on the invoice — then it is in the material cost
  *    (splitPosByLines). Stored invoices.cost_total is the lines' cost only, so the POs are added
  *    here, live, as the invoice page does.
@@ -58,7 +58,7 @@
  *    rows are groups, and a group mixes invoices and bids; Include says what the file covers.
  */
 import type { BidFigures } from "@/lib/bid-figures";
-import { approvedPoTotal, type PoLike } from "@/lib/purchase-orders";
+import { poTotal, type PoLike } from "@/lib/purchase-orders";
 import { poCostForInvoice, splitPosByLines, type TicketInvoiceRef } from "@/lib/invoice-totals";
 import { TASK_TZ, localYmd } from "@/lib/tasks";
 
@@ -185,9 +185,10 @@ export function lineCosts(
 }
 
 /**
- * The approved purchase-order cost this invoice carries: the POs not already a "po:<id>" line on
- * it (splitPosByLines), summed when approved (approvedPoTotal), on the ticket's earliest live
- * invoice only (poCostForInvoice) — exactly what the invoice page's Internal fold shows.
+ * The purchase-order cost this invoice carries: the POs not already a "po:<id>" line on it
+ * (splitPosByLines), summed (poTotal — every PO, approved or not; owner, Oct 28), on the
+ * ticket's earliest live invoice only (poCostForInvoice) — exactly what the invoice page's
+ * Internal fold shows.
  */
 export function poCostCarried(
   invoiceId: string,
@@ -196,7 +197,7 @@ export function poCostCarried(
   lines: readonly { source?: string | null }[],
 ): number {
   const { offInvoice } = splitPosByLines(pos, lines);
-  return poCostForInvoice(invoiceId, ticketInvoices, approvedPoTotal(offInvoice)).cost;
+  return poCostForInvoice(invoiceId, ticketInvoices, poTotal(offInvoice)).cost;
 }
 
 // ---- the invoices -------------------------------------------------------------------------

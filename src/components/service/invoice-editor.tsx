@@ -10,7 +10,7 @@
  * them) or the final invoice (facts, lines, totals; Download, Send, Mark paid, Void); the History
  * fold under it. On a phone everything stacks to one column and each line becomes a small card.
  *
- * A draft is made from the ticket's time, materials and approved purchase orders
+ * A draft is made from the ticket's time, materials and purchase orders
  * (getOrCreateInvoice, §4 rules; invoice-po-lines.ts), edited here and then finalised, or
  * deleted; a final invoice is read-only and can be downloaded, sent, marked paid or voided
  * (docs/service-module-design.md §5.4). Numbering is invoice-numbering.ts ("<ticket>",
@@ -74,7 +74,7 @@ import {
   storedTotals,
   type InvoiceTotals,
 } from "@/lib/invoice-totals";
-import { approvedPoTotal } from "@/lib/purchase-orders";
+import { poTotal } from "@/lib/purchase-orders";
 import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
 import { sendToEdited, sendToOf, type SendTo } from "@/lib/invoice-send-to";
 import { useVendors } from "@/components/crm/use-vendors";
@@ -694,7 +694,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const dateUntouched = (ymd: string) =>
     ymd === toYmd(new Date(inv.created_at)) || ymd === inv.created_at.slice(0, 10);
   const taxExempt = !!account?.tax_exempt;
-  const po = useApprovedPoCost(job.id, inv.id, lines);
+  const po = usePoCost(job.id, inv.id, lines);
   const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
   // Bill to changed here and not saved yet: show whom it will be billed to.
   const vendors = useVendors();
@@ -1371,7 +1371,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "rebuild"
-                ? "The lines are built again from the ticket's time entries, materials and approved purchase orders at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
+                ? "The lines are built again from the ticket's time entries, materials and purchase orders at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
                 : confirm === "delete"
                   ? deleteDraftNote(job.number, no)
                   : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}
@@ -1658,15 +1658,15 @@ function PreviewPane({ invoiceId, version }: { invoiceId: string; version: strin
 const INTERNAL_OPEN_KEY = "invoiceInternalOpen";
 
 /**
- * This invoice's share of the ticket's approved purchase-order total (purchase-orders.ts): an
- * internal cost, read for admins and managers only (the Internal fold is theirs). Each approved
- * PO counts on one invoice of the ticket, its earliest live one (invoice-totals.ts
- * poCostForInvoice); the others carry $0 and name it (`countedOn`). A PO that is a line on this
- * invoice ("po:<id>"; owner, Oct 14) is left out here — its cost is in the lines already — and
- * counted in `onInvoice`. The ticket's invoices come from the same cache as the ticket's invoice
- * block and this page.
+ * This invoice's share of the ticket's purchase-order total (purchase-orders.ts poTotal — every
+ * PO, approved or not; owner, Oct 28): an internal cost, read for admins and managers only (the
+ * Internal fold is theirs). Each PO counts on one invoice of the ticket, its earliest live one
+ * (invoice-totals.ts poCostForInvoice); the others carry $0 and name it (`countedOn`). A PO
+ * that is a line on this invoice ("po:<id>"; owner, Oct 14) is left out here — its cost is in
+ * the lines already — and counted in `onInvoice`. The ticket's invoices come from the same cache
+ * as the ticket's invoice block and this page.
  */
-function useApprovedPoCost(
+function usePoCost(
   jobId: string,
   invoiceId: string,
   lines: readonly { source: string | null }[],
@@ -1690,8 +1690,8 @@ function useApprovedPoCost(
     return { cost: 0, countedOn: null, onInvoice: 0, error: q.error ?? invoices.error };
   const { onInvoice, offInvoice } = splitPosByLines(q.data.pos, lines);
   return {
-    ...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice)),
-    onInvoice: onInvoice.filter((p) => p.approved).length,
+    ...poCostForInvoice(invoiceId, invoices.data, poTotal(offInvoice)),
+    onInvoice: onInvoice.length,
     error: null,
   };
 }
@@ -1707,9 +1707,9 @@ function Totals({
   taxPct: number;
   /** The purchase orders could not be read: Cost and Margin leave them out, and say so. */
   poError?: unknown;
-  /** The ticket's approved POs are counted on that other invoice ("6000"); $0 here. */
+  /** The ticket's POs are counted on that other invoice ("6000"); $0 here. */
   poCountedOn?: string | null;
-  /** How many approved POs are lines on this invoice (their cost is in the lines; Oct 14). */
+  /** How many POs are lines on this invoice (their cost is in the lines; Oct 14). */
   poOnInvoice?: number;
 }) {
   const { profile } = useAuth();
@@ -1768,7 +1768,7 @@ function Totals({
             <dl id="invoice-internal" className="mt-1.5 space-y-1">
               <div className="flex justify-between gap-2">
                 <dt>
-                  Purchase orders (approved)
+                  Purchase orders
                   {poCountedOn ? ` — counted on #${poCountedOn}` : ""}
                   {poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}
                 </dt>
@@ -1833,7 +1833,7 @@ function FinalInvoice({
     onSendClosed?.();
   };
 
-  const po = useApprovedPoCost(job.id, inv.id, data.lines);
+  const po = usePoCost(job.id, inv.id, data.lines);
   const t = computeTotals(
     data.lines.map((l) => ({
       kind: l.kind,
@@ -1846,7 +1846,7 @@ function FinalInvoice({
     po.cost,
   );
   // The stored totals are the record; the live figures above feed the margin per hour, and the
-  // ticket's approved purchase orders are added to the cost (internal only).
+  // ticket's purchase orders are added to the cost (internal only).
   const stored = storedTotals(inv, t);
 
   const download = useMutation({

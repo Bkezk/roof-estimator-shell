@@ -2,8 +2,8 @@
  * Purchase orders as invoice lines (owner, Oct 14: "I'd like the mark up to be able to be
  * toggled to applied to the PO or not — material markup that is").
  *
- * A draft built or rebuilt from the ticket carries one material line per APPROVED purchase
- * order of the ticket (invoices.server.ts buildLinesFromJob): "PO <number> — <title> (<vendor>)",
+ * A draft built or rebuilt from the ticket carries one material line per purchase order of the
+ * ticket (every one, approved or not — owner, Oct 28; invoices.server.ts buildLinesFromJob): "PO <number> — <title> (<vendor>)",
  * quantity 1, cost = the PO's price, rate = price × (1 + the invoice's material markup) while
  * invoices.po_markup is on (the default) or the price itself when it is off. Its source is
  * "po:<po id>", so Rebuild from ticket treats it like a ticket material (a typed price is kept;
@@ -73,7 +73,7 @@ export interface PoLineInsert {
 }
 
 /**
- * One invoice line for an approved PO at `markup` (0.75 = 75 %). `poMarkup` false bills it at
+ * One invoice line for a PO at `markup` (0.75 = 75 %). `poMarkup` false bills it at
  * cost. Quantity 1 "ea"; the PO's price is the line's cost, so Cost and Margin stay truthful.
  */
 export function poLineFor(

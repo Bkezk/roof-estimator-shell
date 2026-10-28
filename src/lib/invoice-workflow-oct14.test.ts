@@ -7,7 +7,7 @@
  *      its rule and a pencil to override it; red outlines only after a Finalise was tried;
  *   3. one primary Finalise (then "Send it now?"), Preview as a collapsible pane remembered in
  *      localStorage, Rebuild / Delete in a "…" menu; the PdfPreviewDialog is gone;
- *   4. the ticket's approved purchase orders become lines ("po:<id>"), marked up or at cost
+ *   4. the ticket's purchase orders become lines ("po:<id>"), marked up or at cost
  *      (invoices.po_markup), and the Internal fold does not count them twice.
  * Pure rules first (no database), then source-scan pins on the wiring (the house style).
  */
@@ -27,7 +27,7 @@ import {
 } from "@/lib/invoice-po-lines";
 import { mergeRebuild, type RebuildLine } from "@/lib/invoice-rebuild";
 import { computeTotals, poCostForInvoice, splitPosByLines } from "@/lib/invoice-totals";
-import { approvedPoTotal } from "@/lib/purchase-orders";
+import { poTotal } from "@/lib/purchase-orders";
 
 const read = (p: string) => readFileSync(p, "utf8");
 const EDITOR = "src/components/service/invoice-editor.tsx";
@@ -150,17 +150,18 @@ describe("Rebuild from ticket treats a po: line like a cell: line (mergeRebuild)
     const [fresh] = mergeRebuild([built({ rate_overridden: false })], [built({ rate: 700 })]);
     expect(fresh!.rate).toBe(700);
   });
-  it("a PO no longer approved is gone after the rebuild; a hand-added line stays", () => {
+  it("a PO deleted from the ticket is gone after the rebuild; a hand-added line stays", () => {
     const fee = built({ sort: 1, source: null, description: "Lift rental", rate: 50, total: 50 });
     expect(mergeRebuild([built(), fee], []).map((l) => l.description)).toEqual(["Lift rental"]);
   });
 });
 
 describe("the Internal fold counts a PO once (invoice-totals.ts)", () => {
+  // Every PO counts, approved or not (owner, Oct 28) — the rows carry no approval.
   const pos = [
-    { id: PO.id, price: 412.5, approved: true },
-    { id: "other-po", price: 100, approved: true },
-    { id: "waiting", price: 999, approved: false },
+    { id: PO.id, price: 412.5 },
+    { id: "other-po", price: 100 },
+    { id: "later-po", price: 999 },
   ];
   const poLine = {
     kind: "material",
@@ -181,21 +182,21 @@ describe("the Internal fold counts a PO once (invoice-totals.ts)", () => {
   it("splitPosByLines: the POs with a po: line here, and the rest", () => {
     const { onInvoice, offInvoice } = splitPosByLines(pos, [labor, poLine]);
     expect(onInvoice.map((p) => p.id)).toEqual([PO.id]);
-    expect(offInvoice.map((p) => p.id)).toEqual(["other-po", "waiting"]);
+    expect(offInvoice.map((p) => p.id)).toEqual(["other-po", "later-po"]);
     expect(splitPosByLines(pos, [labor]).onInvoice).toEqual([]);
   });
   it("computeTotals' po_cost leaves out the PO whose line carries its cost; cost_total has it once", () => {
     const lines = [labor, poLine];
     const invoices = [{ id: "inv", label: "6012", status: "draft", created_at: "2026-10-14" }];
     const { offInvoice } = splitPosByLines(pos, lines);
-    const share = poCostForInvoice("inv", invoices, approvedPoTotal(offInvoice));
+    const share = poCostForInvoice("inv", invoices, poTotal(offInvoice));
     const t = computeTotals(lines, 0, share.cost);
-    expect(t.po_cost).toBe(100); // the other approved PO only; the waiting one never
-    expect(t.cost_total).toBe(80 + 412.5 + 100); // the line's cost once, not again as a PO
+    expect(t.po_cost).toBe(100 + 999); // the two POs that are not lines, every one of them
+    expect(t.cost_total).toBe(80 + 412.5 + 100 + 999); // the line's cost once, not again as a PO
     expect(t.subtotal).toBe(190 + 721.88);
     // Before Oct 14 the same PO was in the lines' cost AND the PO row.
-    const twice = computeTotals(lines, 0, approvedPoTotal(pos));
-    expect(twice.cost_total).toBe(80 + 412.5 + 412.5 + 100);
+    const twice = computeTotals(lines, 0, poTotal(pos));
+    expect(twice.cost_total).toBe(80 + 412.5 + 412.5 + 100 + 999);
   });
 });
 
@@ -206,11 +207,12 @@ describe("the server builds and saves PO lines (source scan)", () => {
     server.indexOf("export async function buildLinesFromJob("),
     server.indexOf("export function totals("),
   );
-  it("buildLinesFromJob reads the ticket's APPROVED purchase orders and makes a line each", () => {
+  it("buildLinesFromJob reads EVERY purchase order of the ticket and makes a line each (owner, Oct 28: approved or not)", () => {
     expect(build).toContain("opts: { markup?: number | null; poMarkup?: boolean | null } = {},");
     expect(build).toMatch(
-      /\.from\("service_job_purchase_orders"\)\s*\.select\("id, po_number, title, price, po_date, vendor_id, vendor_text"\)\s*\.eq\("service_job_id", jobId\)\s*\.eq\("approved", true\)/,
+      /\.from\("service_job_purchase_orders"\)\s*\.select\("id, po_number, title, price, po_date, vendor_id, vendor_text"\)\s*\.eq\("service_job_id", jobId\)\s*\.order\("po_date"\)/,
     );
+    expect(build).not.toContain('.eq("approved"');
     expect(build).toContain("if (poErr) throw new Error(");
     expect(build).toMatch(
       /poLineFor\(\s*\{[\s\S]*?\},\s*markup,\s*opts\.poMarkup !== false,\s*sort\+\+,\s*\)/,
@@ -497,15 +499,13 @@ describe("4. purchase orders in the editor (invoice-editor.tsx)", () => {
     );
   });
   it("the Internal fold leaves out the POs that are lines and says how many are on the invoice", () => {
-    const hook = ed.slice(
-      ed.indexOf("function useApprovedPoCost("),
-      ed.indexOf("function Totals("),
-    );
+    const hook = ed.slice(ed.indexOf("function usePoCost("), ed.indexOf("function Totals("));
     expect(hook).toContain("lines: readonly { source: string | null }[],");
     expect(hook).toContain("const { onInvoice, offInvoice } = splitPosByLines(q.data.pos, lines);");
-    expect(hook).toContain("onInvoice: onInvoice.filter((p) => p.approved).length,");
-    expect(draft).toContain("const po = useApprovedPoCost(job.id, inv.id, lines);");
-    expect(final).toContain("const po = useApprovedPoCost(job.id, inv.id, data.lines);");
+    // Every PO that is a line counts (owner, Oct 28: no approval).
+    expect(hook).toContain("onInvoice: onInvoice.length,");
+    expect(draft).toContain("const po = usePoCost(job.id, inv.id, lines);");
+    expect(final).toContain("const po = usePoCost(job.id, inv.id, data.lines);");
     const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
     expect(totals).toContain("poOnInvoice?: number;");
     expect(totals).toContain('{poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}');

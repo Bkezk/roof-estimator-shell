@@ -26,12 +26,6 @@ export interface BizInvoice {
   total: number | string | null;
   invoice_date: string | null;
 }
-export interface BizPo {
-  approved: boolean | null;
-  price: number | string | null;
-  /** The ticket (the server leaves out orders on deleted tickets before these arrive). */
-  service_job_id?: string;
-}
 /** A won or lost bid (bids; owner, Oct 21: the Won / Lost tile counts bids, not opportunities). */
 export interface BizBid {
   status: string;
@@ -53,7 +47,6 @@ export interface BusinessIn {
   now: string;
   tickets: readonly BizTicket[];
   invoices: readonly BizInvoice[];
-  pos: readonly BizPo[];
   opps: readonly BizOpp[];
   /** The live won / lost bids (absent in older callers: nothing won or lost). */
   bids?: readonly BizBid[];
@@ -88,8 +81,7 @@ export interface BusinessNumbers {
   toAuthorize: { count: number; oldestDays: number | null };
   /** Final or sent invoices not marked paid. */
   unpaid: MoneyTile;
-  /** Purchase orders waiting for approval, on live tickets only. */
-  pos: { count: number; total: number };
+  // No purchase-order tile since Oct 28 (owner: approval is gone; every PO is a cost already).
   pipeline: {
     open: { count: number; value: number };
     closingThisMonth: { count: number; value: number };
@@ -156,7 +148,6 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));
   const sumBy = <T>(rows: readonly T[], f: (r: T) => number) =>
     round2(rows.reduce((s, r) => s + f(r), 0));
-  const pos = i.pos.filter((p) => !p.approved);
   const openOpps = i.opps.filter((o) =>
     (OPEN_OPP_STATUSES as readonly string[]).includes(o.status),
   );
@@ -205,7 +196,6 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
         i.now,
       ),
     },
-    pos: { count: pos.length, total: sumBy(pos, (p) => num(p.price)) },
     pipeline: {
       open: { count: openOpps.length, value: sumBy(openOpps, (o) => num(o.est_value)) },
       closingThisMonth: { count: closing.length, value: sumBy(closing, (o) => num(o.est_value)) },
@@ -229,8 +219,6 @@ export const BUSINESS_HREFS = {
   pipeline: "/opportunities?status=allopen",
   // Won / Lost this month: the bids (owner, Oct 21).
   bids: "/bids",
-  // The Tickets list filtered to the tickets carrying an order still waiting (owner, Oct 21).
-  pos: "/service?po=waiting",
   pastDue: "/service?overdue=1",
   // The untouched items have no list page of their own: each page's "Needs action" strip
   // (components/crm/contact-log.tsx NeedsActionStrip) lists them at the top, and the Service

@@ -10,7 +10,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { readInChunks } from "@/lib/chunk-ids";
 import { businessNumbers, type BusinessNumbers } from "@/lib/owner-business";
 import { visibleToOwner } from "@/lib/owner-view";
 import { heldTicketIds, parseTodayInput, viewerToday } from "@/lib/work-counts";
@@ -55,7 +54,7 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
     const now = new Date();
     const today = viewerToday(data.today, now);
 
-    const [tickets, invoices, pos, opps, bids, snoozed, untouched] = await Promise.all([
+    const [tickets, invoices, opps, bids, snoozed, untouched] = await Promise.all([
       // Open / Scheduled for Past due, Done for the "awaiting authorization" line, Authorized for
       // the Waiting to invoice tile (owner, Oct 12, item 6: the Authorized queue, as Work
       // Overview and the Invoices badge count it).
@@ -66,11 +65,6 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         .in("stage", ["open", "scheduled", "done", "authorized"])
         .limit(LIMIT),
       sb.from("invoices").select("status, total, invoice_date").limit(LIMIT),
-      sb
-        .from("service_job_purchase_orders")
-        .select("approved, price, service_job_id")
-        .eq("approved", false)
-        .limit(LIMIT),
       sb
         .from("crm_opportunities")
         .select("status, est_value, expected_close, updated_at")
@@ -94,16 +88,6 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
       untouchedCounts(sb),
     ]);
     const nowIso = now.toISOString();
-    // An order on a deleted ticket is nobody's to approve (owner, Oct 21: the one waiting order
-    // sat on a deleted ticket, so the tile showed $36 the list could not find).
-    const waiting = must("purchase orders", pos);
-    const liveIds = new Set(
-      (
-        await readInChunks([...new Set(waiting.map((p) => p.service_job_id))], (chunk) =>
-          sb.from("service_jobs").select("id").is("deleted_at", null).in("id", chunk),
-        )
-      ).map((t) => t.id),
-    );
     const holds = must<
       { kind: string; item_id: string; status: string; snoozed_until: string | null }[]
     >("follow-ups", snoozed);
@@ -112,7 +96,6 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
       now: nowIso,
       tickets: must("tickets", tickets),
       invoices: must("invoices", invoices),
-      pos: waiting.filter((p) => liveIds.has(p.service_job_id)),
       opps: must("opportunities", opps),
       bids: must("bids", bids),
       snoozed: holds.filter((f) => !!f.snoozed_until && f.snoozed_until > nowIso).length,

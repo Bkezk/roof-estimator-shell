@@ -12,8 +12,9 @@
  *    invoice_date is never null, so filtering on it loses nothing; invoiceDay still applies the
  *    finalized / created fallbacks for the grouping.
  *  - their tickets (technician, account, customer name), their lines (the cost split, the hours
- *    from the labor and travel lines' qty, and the "po:<id>" sources), the tickets' APPROVED
- *    purchase orders, and — for tickets that have one — every invoice of the ticket whatever its
+ *    from the labor and travel lines' qty, and the "po:<id>" sources), the tickets' purchase
+ *    orders (every one; owner, Oct 28), and — for tickets that have one — every invoice of the
+ *    ticket whatever its
  *    status, because the PO counts toward the ticket's earliest LIVE invoice (a draft included;
  *    invoice-totals.ts poCostInvoice). Id lists go 100 at a time (chunk-ids.ts), each chunk read
  *    to the end (readAll) so a chunk with over 1,000 lines is not cut short.
@@ -158,8 +159,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       afterId(
         sb
           .from("service_job_purchase_orders")
-          .select("id, service_job_id, approved, price")
-          .eq("approved", true)
+          .select("id, service_job_id, price")
           .in("service_job_id", chunk)
           .order("id")
           .limit(PAGE),

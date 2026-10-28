@@ -79,7 +79,7 @@ describe("poCostForInvoice: one invoice per ticket carries the approved PO total
 
 describe("the editor counts the POs once (invoice-editor.tsx)", () => {
   const ed = readFileSync("src/components/service/invoice-editor.tsx", "utf8");
-  const hook = ed.slice(ed.indexOf("function useApprovedPoCost("), ed.indexOf("function Totals("));
+  const hook = ed.slice(ed.indexOf("function usePoCost("), ed.indexOf("function Totals("));
   const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
   it("the hook reads the ticket's invoices (the ticket page's cache) and asks the helper", () => {
     expect(ed).toMatch(/import \{[^}]*\bpoCostForInvoice\b[^}]*\} from "@\/lib\/invoice-totals";/);
@@ -88,22 +88,22 @@ describe("the editor counts the POs once (invoice-editor.tsx)", () => {
     // (owner, Oct 14: a PO that is a line on this invoice is left out — its cost is in the
     // lines; splitPosByLines in invoice-totals.ts, invoice-workflow-oct14.test.ts)
     expect(hook).toContain("splitPosByLines(q.data.pos, lines)");
-    expect(hook).toContain(
-      "poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice))",
-    );
-    expect(hook).not.toContain("approvedPoTotal(q.data.pos)");
+    // (owner, Oct 28: every PO counts, approved or not — poTotal, never approvedPoTotal)
+    expect(hook).toContain("poCostForInvoice(invoiceId, invoices.data, poTotal(offInvoice))");
+    expect(hook).not.toContain("poTotal(q.data.pos)");
+    expect(hook).not.toContain("approved");
     // Until both lists are in, nothing is added (never the whole total "for now").
     expect(hook).toContain("if (!q.data || !invoices.data)");
-    expect(hook).not.toContain("approvedPoTotal(q.data?.pos ?? [])");
+    expect(hook).not.toContain("poTotal(q.data?.pos ?? [])");
   });
   it("the draft and the final invoice both pass their own id", () => {
-    const calls = ed.match(/useApprovedPoCost\([^)]*\)/g) ?? [];
+    const calls = ed.match(/usePoCost\([^)]*\)/g) ?? [];
     // (owner, Oct 14: the hook also takes the lines, to leave out the POs that are lines.)
     expect(calls.filter((c) => !c.includes("jobId: string"))).toEqual([
-      "useApprovedPoCost(job.id, inv.id, lines)",
-      "useApprovedPoCost(job.id, inv.id, data.lines)",
+      "usePoCost(job.id, inv.id, lines)",
+      "usePoCost(job.id, inv.id, data.lines)",
     ]);
-    expect(ed).not.toContain("useApprovedPoCost(job.id)");
+    expect(ed).not.toContain("usePoCost(job.id)");
     expect(ed).toMatch(
       /<Totals\s+t=\{t\}\s+taxPct=\{head\.tax_pct\}\s+poError=\{po\.error\}\s+poCountedOn=\{po\.countedOn\}\s+poOnInvoice=\{po\.onInvoice\}\s+\/>/,
     );
@@ -112,8 +112,10 @@ describe("the editor counts the POs once (invoice-editor.tsx)", () => {
     );
   });
   it('the Internal fold says "— counted on #6000" on the other invoices', () => {
-    const line = totals.indexOf("Purchase orders (approved)");
+    // The row reads "Purchase orders" — no "(approved)" since Oct 28.
+    const line = totals.indexOf("Purchase orders\n");
     expect(line).toBeGreaterThan(totals.indexOf("{open && ("));
+    expect(totals).not.toContain("Purchase orders (approved)");
     expect(totals).toContain('{poCountedOn ? ` — counted on #${poCountedOn}` : ""}');
     expect(totals).toContain("money(t.po_cost)");
     // Above the fold (what a sales / PM sees): no PO, no "counted on".

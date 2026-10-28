@@ -5,8 +5,9 @@
  * a contact's site links) — by anyone, through the app or straight to the database — leaves a
  * row in `public.audit_log`, written by the database itself: the row trigger `public.audit_row()`
  * (migration 20261001080000_audit_triggers_stage_rule.sql). A ticket's purchase orders too
- * (entity 'purchase_order', entity_id = the PO's id: "PO 'Jbk24-0255' approved no → yes";
- * 20261001100000_ticket_purchase_orders.sql), and vendors (entity 'vendor': "Vendor 'ABC Supply'
+ * (entity 'purchase_order', entity_id = the PO's id: "PO 'Jbk24-0255' price 412 → 450";
+ * 20261001100000_ticket_purchase_orders.sql — its trigger still words an `approved` change, but
+ * approval is gone since Oct 28, so no screen changes that column), and vendors (entity 'vendor': "Vendor 'ABC Supply'
  * terms 'Net 30' → 'Net 45'"; 20261001110000_vendors.sql), tickets and tasks, and since Oct 12
  * opportunities and bids (entity 'opportunity' / 'bid': "Opportunity 'Reroof gym' status open →
  * quoted", "Bid 'Gym reroof' status draft → submitted"; 20261012100000_bid_drives_opportunity.sql).

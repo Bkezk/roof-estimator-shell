@@ -1,10 +1,12 @@
 /**
  * Purchase orders on a service ticket (owner, Oct 1: replacing CenterPoint, whose close-out
  * page has "PO Information"): material a crew bought for the job on the way (Lowe's, a supply
- * house). Date, PO # (typed, e.g. "Jbk24-0255"; never generated), Title, Price, Notes, the
- * receipt (an image or a PDF) and Approved? — approval is a manager's. The approved total is an
- * internal cost on one invoice of the ticket, its earliest live one (invoice-totals.ts
- * poCostForInvoice: cost and margin), never on the customer's invoice.
+ * house). Date, PO # (typed, e.g. "Jbk24-0255"; never generated), Title, Price, Notes and the
+ * receipt (an image or a PDF). Every PO counts as an internal cost — the purchase happened,
+ * approved or not (owner, Oct 28: "PO's should count to internal cost regardless as they
+ * happened whether approved or not", and the Approved switch is gone) — on one invoice of the
+ * ticket, its earliest live one (invoice-totals.ts poCostForInvoice: cost and margin), never on
+ * the customer's invoice.
  *
  * Table: public.service_job_purchase_orders (migration 20261001100000_ticket_purchase_orders.sql).
  * Server functions: service-pos.functions.ts. UI: components/service/purchase-orders-section.tsx.
@@ -16,7 +18,6 @@ import { canAccess, isOffice, managesTickets, type AccessLike } from "@/lib/acce
 /** The fields every view of a PO needs (a subset of the table's Row). */
 export interface PoLike {
   price: number | string;
-  approved: boolean;
 }
 
 /** PO # length (the table's check: 1..60 after trim). */
@@ -93,21 +94,14 @@ export function receiptFileProblem(file: {
   return null;
 }
 
-/** Every PO of the ticket, approved or not. */
+/** Every PO of the ticket: the cost the invoice's Internal fold carries. */
 export const poTotal = (rows: readonly PoLike[]): number =>
   cents(rows.reduce((s, r) => s + num(r.price), 0));
 
-/** Only the approved POs: the cost the invoice's Internal fold carries. */
-export const approvedPoTotal = (rows: readonly PoLike[]): number =>
-  cents(rows.filter((r) => r.approved).reduce((s, r) => s + num(r.price), 0));
-
-/** The section's header: "2 · $412.00 · 1 awaiting approval" ("None" when there are none). */
+/** The section's header: "2 · $412.00" ("None" when there are none). */
 export function poSummary(rows: readonly PoLike[]): string {
   if (!rows.length) return "None";
-  const waiting = rows.filter((r) => !r.approved).length;
-  const parts = [String(rows.length), poMoney(poTotal(rows))];
-  if (waiting) parts.push(`${waiting} awaiting approval`);
-  return parts.join(" · ");
+  return `${rows.length} · ${poMoney(poTotal(rows))}`;
 }
 
 /**
@@ -156,23 +150,19 @@ export function canAddPo(
 
 /**
  * May this user edit or delete this PO? Admins and managers any; anyone else who may add one,
- * only their own and only while it is not approved (an approved PO is locked — the migration's
- * guard trigger refuses the same). The twin of RLS service_job_purchase_orders_update / _delete.
+ * only their own. The twin of RLS service_job_purchase_orders_update / _delete.
  */
 export function canEditPo(
   p: AccessLike | null | undefined,
   userId: string | null | undefined,
-  po: { created_by: string | null; approved: boolean },
+  po: { created_by: string | null },
   works: { lead: boolean; crew: boolean },
 ): boolean {
   if (!p) return false;
   if (managesTickets(p)) return true;
   if (!canAddPo(p, works)) return false;
-  return !!userId && po.created_by === userId && !po.approved;
+  return !!userId && po.created_by === userId;
 }
-
-/** Who may approve (the Approved toggle): admins and managers. */
-export const canApprovePo = (p: AccessLike | null | undefined): boolean => managesTickets(p);
 
 /**
  * The PO # a new purchase order on a ticket starts with (owner, Oct 2): the ticket number, a

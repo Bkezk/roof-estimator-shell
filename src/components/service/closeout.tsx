@@ -7,7 +7,7 @@
  * time — owner, Oct 9; the Inspection checklist and Aerial markup sit here), 3 the work — what
  * was done and the After photos, 4 materials off the truck (one tap per piece, or any material
  * found by search, from the truck or the shop; materials-section.tsx) and purchase orders for
- * material bought for the job (purchase-orders-section.tsx; no Approved toggle here), 5 time
+ * material bought for the job (purchase-orders-section.tsx, as a plain fold), 5 time
  * (typed to the quarter hour), 6 closing notes, 7 the customer's signature, then Complete. Each
  * step is one card (StepCard; owner, Oct 9: "a box in a box … awkward and cramped"): a done step
  * that is not the current one folds to its header and a one-line summary with Edit; a locked
@@ -1167,9 +1167,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             </>
           )}
 
-          {/* Step 4 · Materials, the purchase orders (material bought for the job; never the
-              Approved toggle here) and, with nothing logged, the "Nothing used" mark. Not on an
-              inspection (owner, Oct 28): its flow has no materials step. */}
+          {/* Step 4 · Materials, the purchase orders (material bought for the job) and, with
+              nothing logged, the "Nothing used" mark. Not on an inspection (owner, Oct 28): its
+              flow has no materials step. */}
           {!inspection && (
             <StepCard
               {...card("materials")}
@@ -1183,7 +1183,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               }
             >
               <MaterialsSection jobId={job.id} />
-              {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
+              {/* (c2) Purchase orders: material bought for the job (a plain fold in the step card) */}
               <PurchaseOrdersSection jobId={job.id} field />
               {(materialsQ.data ?? []).length === 0 &&
                 (nothingUsed ? (

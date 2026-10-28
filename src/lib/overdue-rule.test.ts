@@ -88,7 +88,6 @@ describe("where it applies", () => {
         { stage: "scheduled", stage_changed_at: null, scheduled_date: TODAY },
       ],
       invoices: [],
-      pos: [],
       opps: [],
       snoozed: 0,
       untouched: null,

@@ -90,11 +90,6 @@ describe("businessNumbers", () => {
       { status: "draft", total: 999, invoice_date: "2026-10-06" },
       { status: "void", total: 999, invoice_date: "2026-10-06" },
     ],
-    pos: [
-      { approved: false, price: 150 },
-      { approved: false, price: "49.99" },
-      { approved: true, price: 1000 },
-    ],
     opps: [
       {
         status: "open",
@@ -142,8 +137,9 @@ describe("businessNumbers", () => {
   it("Invoiced this month is no longer a tile (owner, Oct 21: the margin report has the month)", () => {
     expect(n).not.toHaveProperty("invoiced");
   });
-  it("Purchase orders waiting: the unapproved ones", () => {
-    expect(n.pos).toEqual({ count: 2, total: 199.99 });
+  it("Purchase orders waiting is no longer a tile (owner, Oct 28: approval is gone; every PO is a cost already)", () => {
+    expect(n).not.toHaveProperty("pos");
+    expect(read("src/lib/owner-business.ts")).not.toContain("approved");
   });
   it("Pipeline: open statuses and their value; closing this month", () => {
     expect(n.pipeline.open).toEqual({ count: 3, value: 12500 });
@@ -215,7 +211,6 @@ describe("businessNumbers", () => {
       ...input,
       tickets: [],
       invoices: [],
-      pos: [],
       opps: [],
       snoozed: 0,
     });
@@ -265,10 +260,10 @@ describe("listOwnerBusiness (server)", () => {
           { id: "i1", status: "final", total: 100, invoice_date: "2026-10-01" },
           { id: "i2", status: "paid", total: 50, invoice_date: "2026-10-01" },
         ],
+        // Purchase orders are not read by the Business tab since Oct 28 (po-waiting.test.ts).
         service_job_purchase_orders: [
           { id: "p1", service_job_id: "j1", approved: false, price: 10 },
           { id: "p2", service_job_id: "j1", approved: true, price: 20 },
-          // On a deleted ticket: never counted (owner, Oct 21; po-waiting.test.ts).
           { id: "p3", service_job_id: "j2", approved: false, price: 36 },
         ],
         bids: [
@@ -342,14 +337,17 @@ describe("listOwnerBusiness (server)", () => {
       data: { today: "2026-10-08" },
       context: { supabase: env.db, userId: ME },
     });
-  it("an admin gets the numbers: deleted rows and approved orders left out, the rpc's untouched counts, snoozed = still snoozed", async () => {
+  it("an admin gets the numbers: deleted rows left out, the rpc's untouched counts, snoozed = still snoozed; no purchase orders read", async () => {
     const r = await call(world("admin"));
     expect(r.today).toBe("2026-10-08");
     // j1 is Done (the second line); nothing Authorized in this world.
     expect(r.toInvoice.count).toBe(0);
     expect(r.toAuthorize.count).toBe(1);
     expect(r.unpaid).toMatchObject({ count: 1, total: 100 });
-    expect(r.pos).toEqual({ count: 1, total: 10 });
+    expect(r).not.toHaveProperty("pos");
+    expect(read("src/lib/owner-business.functions.ts")).not.toContain(
+      "service_job_purchase_orders",
+    );
     expect(r.pipeline.open).toEqual({ count: 1, value: 300 });
     expect(r.pipeline.wonThisMonth).toBe(1);
     expect(r.pipeline.lostThisMonth).toBe(1);
@@ -389,8 +387,7 @@ describe("the click-throughs", () => {
       pipeline: "/opportunities?status=allopen",
       // Won / Lost this month: the bids (owner, Oct 21).
       bids: "/bids",
-      // The tickets carrying an order still waiting (owner, Oct 21; po-waiting.test.ts).
-      pos: "/service?po=waiting",
+      // (No purchase-order tile since Oct 28; po-waiting.test.ts pins its absence.)
       pastDue: "/service?overdue=1",
       // The untouched items sit in each page's Needs action strip; neither page takes a filter.
       untouchedTickets: "/service",

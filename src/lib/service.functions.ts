@@ -19,7 +19,6 @@ import { shiftYmd } from "@/lib/tech-clock";
 import { stopClocksForOffice } from "@/lib/clock-close.server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { readInChunks } from "@/lib/chunk-ids";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import {
@@ -163,33 +162,6 @@ export const listServiceJobs = createServerFn({ method: "GET" })
       .limit(1000);
     if (error) throw new Error(error.message);
     return withPlaces(context.supabase, await withTechNames(context.supabase, data ?? []));
-  });
-
-/**
- * The ids of the live tickets that carry a purchase order still waiting for approval — the
- * Tickets list's "PO waiting" chip and the Owner page's tile link (owner, Oct 21: "when you
- * click on purchase orders awaiting approval it just takes you to the service list so its
- * unclear which ones need approval"). A deleted ticket's orders do not count (the list never
- * shows the ticket). RLS scopes the orders a technician can see to their own tickets.
- */
-export const PO_WAITING_LIMIT = 1000;
-export const listPoWaitingTicketIds = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<string[]> => {
-    await serviceAccess(context);
-    const sb = context.supabase;
-    const { data: pos, error } = await sb
-      .from("service_job_purchase_orders")
-      .select("service_job_id")
-      .eq("approved", false)
-      .limit(PO_WAITING_LIMIT);
-    if (error) throw new Error(error.message);
-    const ids = [...new Set((pos ?? []).map((p) => p.service_job_id))];
-    if (!ids.length) return [];
-    const live = await readInChunks(ids, (chunk) =>
-      sb.from("service_jobs").select("id").is("deleted_at", null).in("id", chunk),
-    );
-    return live.map((t) => t.id);
   });
 
 /**

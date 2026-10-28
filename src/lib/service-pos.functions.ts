@@ -4,11 +4,12 @@
  * into the private "service" bucket at <job id>/po-<time>-<random>.<ext> (receiptObjectName,
  * like the photos); these functions record the rows.
  *
- * Who (RLS on service_job_purchase_orders says the same; the guard trigger enforces approval):
+ * Who (RLS on service_job_purchase_orders says the same):
  * - read: whoever reads the ticket;
  * - add: Service access and working the ticket (the office, its lead technician, a crew member);
- * - edit / delete: admins and managers any PO; anyone else their own while it is not approved;
- * - approve: admins and managers only.
+ * - edit / delete: admins and managers any PO; anyone else their own.
+ * There is no approval (owner, Oct 28: every PO counts as an internal cost, approved or not, and
+ * the Approved switch is gone); the table's `approved` column stays as it is, unread.
  * A PO names the supplier it was bought from as typed (vendor_text, free text — owner, Oct 2:
  * "type Lowes and it just saves"); vendor_id is set too only when the text matches a saved,
  * unarchived vendor (vendorLink). Nothing here adds to public.vendors.
@@ -24,7 +25,6 @@ import { canAccess } from "@/lib/access";
 import {
   PO_NUMBER_MAX,
   canAddPo,
-  canApprovePo,
   canEditPo,
   isReceiptPathFor,
   receiptObjectName,
@@ -33,12 +33,11 @@ import {
 export { receiptObjectName };
 
 export type PurchaseOrderRow = Database["public"]["Tables"]["service_job_purchase_orders"]["Row"];
-/** A PO as the screens show it: the row, who made / approved it, and whether I may change it. */
+/** A PO as the screens show it: the row, who made it, and whether I may change it. */
 export interface PurchaseOrderView extends PurchaseOrderRow {
   /** The vendor's name (vendor_id), archived or not; null when none is picked. */
   vendor_name: string | null;
   created_by_name: string | null;
-  approved_by_name: string | null;
   can_edit: boolean;
 }
 export interface PurchaseOrderList {
@@ -47,8 +46,6 @@ export interface PurchaseOrderList {
   ticketNumber: number | null;
   /** May I add a PO to this ticket? */
   canAdd: boolean;
-  /** May I approve (admins and managers)? */
-  canApprove: boolean;
 }
 
 const BUCKET = "service";
@@ -118,9 +115,7 @@ async function viewsOf(
   rows: PurchaseOrderRow[],
   works: { lead: boolean; crew: boolean },
 ): Promise<PurchaseOrderView[]> {
-  const ids = [
-    ...new Set(rows.flatMap((r) => [r.created_by, r.approved_by]).filter((x): x is string => !!x)),
-  ];
+  const ids = [...new Set(rows.map((r) => r.created_by).filter((x): x is string => !!x))];
   const names = new Map<string, string>();
   if (ids.length) {
     const { data: people } = await ctx.supabase
@@ -145,7 +140,6 @@ async function viewsOf(
     // What was typed wins for display; a linked vendor's current name backs it up.
     vendor_name: r.vendor_text ?? (r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null),
     created_by_name: r.created_by ? (names.get(r.created_by) ?? null) : null,
-    approved_by_name: r.approved_by ? (names.get(r.approved_by) ?? null) : null,
     can_edit: canEditPo(p, ctx.userId, r, works),
   }));
 }
@@ -168,7 +162,6 @@ export const listPurchaseOrders = createServerFn({ method: "GET" })
       pos: await viewsOf(context, p, rows ?? [], works),
       ticketNumber: job.number ?? null,
       canAdd: canAddPo(p, works),
-      canApprove: canApprovePo(p),
     };
   });
 
@@ -258,11 +251,7 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
       if (data.vendor_id && data.vendor_id !== prev.vendor_id)
         await pickableVendor(context, data.vendor_id);
       if (!canEditPo(p, context.userId, prev, works))
-        throw new Error(
-          prev.approved
-            ? "An approved PO is locked; ask a manager"
-            : "Only the person who added this PO or a manager changes it",
-        );
+        throw new Error("Only the person who added this PO or a manager changes it");
       const { data: row, error } = await sb
         .from("service_job_purchase_orders")
         .update({ ...fields, ...receipt })
@@ -280,27 +269,6 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
     return view!;
   });
 
-/** Approve or un-approve a PO: admins and managers (the guard trigger refuses anyone else). */
-export const setPurchaseOrderApproved = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid(), approved: z.boolean() }).parse(d))
-  .handler(async ({ data, context }): Promise<PurchaseOrderView> => {
-    const p = await me(context);
-    if (!canApprovePo(p)) throw new Error("Only a manager approves a PO");
-    const prev = await poRow(context, data.id);
-    const { works } = await ticketFor(context, prev.service_job_id);
-    const { data: row, error } = await context.supabase
-      .from("service_job_purchase_orders")
-      .update({ approved: data.approved })
-      .eq("id", prev.id)
-      .select("*")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!row) throw new Error("The PO was not saved (no permission to change it)");
-    const [view] = await viewsOf(context, p, [row], works);
-    return view!;
-  });
-
 /** Delete a PO and its receipt (like deleteJobPhoto removes the photo's object). */
 export const deletePurchaseOrder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -310,11 +278,7 @@ export const deletePurchaseOrder = createServerFn({ method: "POST" })
     const prev = await poRow(context, data.id);
     const { works } = await ticketFor(context, prev.service_job_id);
     if (!canEditPo(p, context.userId, prev, works))
-      throw new Error(
-        prev.approved
-          ? "An approved PO is locked; ask a manager"
-          : "Only the person who added this PO or a manager deletes it",
-      );
+      throw new Error("Only the person who added this PO or a manager deletes it");
     const { data: gone, error } = await context.supabase
       .from("service_job_purchase_orders")
       .delete()

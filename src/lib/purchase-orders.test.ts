@@ -1,7 +1,8 @@
 /**
  * Purchase orders on service tickets (owner, Oct 1: replacing CenterPoint, whose close-out page
- * has "PO Information": Date, PO #, Title, Price, Notes, Upload Receipt, Approved?, Submit /
- * Back). The pure rules (purchase-orders.ts), the invoice's internal cost (invoice-totals.ts),
+ * has "PO Information": Date, PO #, Title, Price, Notes, Upload Receipt, Submit / Back; the
+ * Approved? switch left on Oct 28 — every PO counts as cost, see po-no-approval.test.ts). The
+ * pure rules (purchase-orders.ts), the invoice's internal cost (invoice-totals.ts),
  * the migration 20261001100000_ticket_purchase_orders.sql, the generated types, the server
  * functions (service-pos.functions.ts), the section (purchase-orders-section.tsx) and where it
  * is mounted (the ticket page, the close-out), the invoice's Internal fold, and the customer's
@@ -15,9 +16,7 @@ import { describe, expect, it } from "vitest";
 import { AUDIT_ENTITIES } from "@/lib/audit";
 import { computeTotals, storedTotals } from "@/lib/invoice-totals";
 import {
-  approvedPoTotal,
   canAddPo,
-  canApprovePo,
   canEditPo,
   isReceiptPathFor,
   parsePrice,
@@ -105,33 +104,17 @@ describe("receipt files: a photo or a PDF, up to the bucket's 25 MB", () => {
 });
 
 describe("totals and the summary", () => {
-  const rows = [
-    { price: 312.5, approved: true },
-    { price: "99.50", approved: false },
-    { price: 0.01, approved: true },
-  ];
-  it("poTotal sums every PO; approvedPoTotal only the approved ones", () => {
+  const rows = [{ price: 312.5 }, { price: "99.50" }, { price: 0.01 }];
+  it("poTotal sums every PO (owner, Oct 28: approved or not — there is no approval)", () => {
     expect(poTotal(rows)).toBe(412.01);
-    expect(approvedPoTotal(rows)).toBe(312.51);
-    expect(approvedPoTotal(rows.map((r) => ({ ...r, approved: false })))).toBe(0);
     expect(poTotal([])).toBe(0);
   });
   it("adds to the cent (no float drift)", () => {
-    expect(
-      poTotal([
-        { price: 0.1, approved: true },
-        { price: 0.2, approved: true },
-      ]),
-    ).toBe(0.3);
+    expect(poTotal([{ price: 0.1 }, { price: 0.2 }])).toBe(0.3);
   });
-  it("the header: count · total · awaiting approval", () => {
-    expect(
-      poSummary([
-        { price: 312.5, approved: true },
-        { price: 99.5, approved: false },
-      ]),
-    ).toBe("2 · $412.00 · 1 awaiting approval");
-    expect(poSummary([{ price: 1234.5, approved: true }])).toBe("1 · $1,234.50");
+  it("the header: count · total", () => {
+    expect(poSummary([{ price: 312.5 }, { price: 99.5 }])).toBe("2 · $412.00");
+    expect(poSummary([{ price: 1234.5 }])).toBe("1 · $1,234.50");
     expect(poSummary([])).toBe("None");
     expect(poMoney(5)).toBe("$5.00");
   });
@@ -160,7 +143,7 @@ describe("the form: Date, PO # and Price required; Price starts blank", () => {
   });
 });
 
-describe("who: add, edit / delete, approve (twins of the RLS and the guard trigger)", () => {
+describe("who: add, edit / delete (twins of the RLS)", () => {
   it("adding: the office, the ticket's lead or crew; not a technician off the job", () => {
     expect(canAddPo(admin, nobody)).toBe(true);
     expect(canAddPo(manager, nobody)).toBe(true);
@@ -172,30 +155,22 @@ describe("who: add, edit / delete, approve (twins of the RLS and the guard trigg
     expect(canAddPo(salesPm, nobody)).toBe(false);
     expect(canAddPo(null, { lead: true, crew: true })).toBe(false);
   });
-  it("editing / deleting: managers any PO; others their own, not approved", () => {
-    const mine = { created_by: ME, approved: false };
-    const theirs = { created_by: SOMEONE, approved: false };
-    const approvedMine = { created_by: ME, approved: true };
+  it("editing / deleting: managers any PO; others their own (no approval lock since Oct 28)", () => {
+    const mine = { created_by: ME };
+    const theirs = { created_by: SOMEONE };
     expect(canEditPo(manager, ME, theirs, nobody)).toBe(true);
-    expect(canEditPo(admin, ME, approvedMine, nobody)).toBe(true);
+    expect(canEditPo(admin, ME, mine, nobody)).toBe(true);
     expect(canEditPo(tech, ME, mine, { lead: false, crew: true })).toBe(true);
     expect(canEditPo(tech, ME, theirs, { lead: true, crew: false })).toBe(false);
-    expect(canEditPo(tech, ME, approvedMine, { lead: true, crew: false })).toBe(false);
     expect(canEditPo(tech, ME, mine, nobody)).toBe(false); // taken off the job
     expect(canEditPo(office, ME, mine, nobody)).toBe(true);
     expect(canEditPo(office, null, mine, nobody)).toBe(false);
-  });
-  it("approving: admins and managers only", () => {
-    expect(canApprovePo(admin)).toBe(true);
-    expect(canApprovePo(manager)).toBe(true);
-    for (const p of [office, tech, customersOnly, salesPm, null])
-      expect(canApprovePo(p)).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------------------------
 
-describe("the invoice's Internal fold: approved POs are cost, never the customer's total", () => {
+describe("the invoice's Internal fold: POs are cost, never the customer's total", () => {
   const lines = [
     { kind: "labor", qty: 3, rate: 95, cost_rate: 40, taxable: false },
     { kind: "material", qty: 2, rate: 50, cost_rate: 30, taxable: true },
@@ -223,12 +198,9 @@ describe("the invoice's Internal fold: approved POs are cost, never the customer
     });
     expect(after).toMatchObject({ cost_total: 492.51, margin: -101.51 });
   });
-  it("only the approved ones: approvedPoTotal feeds it", () => {
-    const pos = [
-      { price: 300, approved: true },
-      { price: 999, approved: false },
-    ];
-    expect(computeTotals(lines, 0, approvedPoTotal(pos)).cost_total).toBe(480);
+  it("every PO: poTotal feeds it (owner, Oct 28)", () => {
+    const pos = [{ price: 300 }, { price: 999 }];
+    expect(computeTotals(lines, 0, poTotal(pos)).cost_total).toBe(1479);
   });
   it("a final invoice: its stored figures plus the POs' cost", () => {
     const live = computeTotals(lines, 0.06, 100);
@@ -243,24 +215,22 @@ describe("the invoice's Internal fold: approved POs are cost, never the customer
 
   const ed = read("src/components/service/invoice-editor.tsx");
   const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
-  it("the editor uses the pure helper with this invoice's share of the approved PO total", () => {
+  it("the editor uses the pure helper with this invoice's share of the PO total", () => {
     expect(ed).not.toMatch(/\nfunction computeTotals\(/);
     // (owner, Oct 14: splitPosByLines joins the import — a PO that is a line is left out.)
     expect(ed).toMatch(
       /import \{\s*computeTotals,\s*poCostForInvoice,\s*splitPosByLines,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
     );
-    // Each approved PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts); one
-    // that is a line on the invoice is left out (owner, Oct 14; invoice-workflow-oct14.test.ts).
-    expect(ed).toContain(
-      "...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(offInvoice)),",
-    );
+    // Each PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts); one that is a
+    // line on the invoice is left out (owner, Oct 14; invoice-workflow-oct14.test.ts).
+    expect(ed).toContain("...poCostForInvoice(invoiceId, invoices.data, poTotal(offInvoice)),");
     expect(ed).toContain("const enabled = !!session && managesTickets(profile);");
     expect(ed).toContain("computeTotals(lines, fromPct(head.tax_pct), po.cost)");
     expect(ed).toContain("const stored = storedTotals(inv, t);");
     expect(ed).toMatch(/Number\(inv\.tax_rate\),\s*po\.cost,\s*\)/);
   });
-  it('"Purchase orders (approved)" is its own line inside the closed Internal fold', () => {
-    const line = totals.indexOf("<dt>\n                  Purchase orders (approved)\n");
+  it('"Purchase orders" is its own line inside the closed Internal fold', () => {
+    const line = totals.indexOf("<dt>\n                  Purchase orders\n");
     expect(line).toBeGreaterThan(totals.indexOf("{internal && ("));
     expect(line).toBeGreaterThan(totals.indexOf("{open && ("));
     expect(line).toBeLessThan(totals.indexOf("<dt>Cost</dt>"));
@@ -309,7 +279,7 @@ describe("the customer's invoice PDF: no purchase orders, no cost, no margin", (
     );
     for (const part of [bundle, pdf]) {
       expect(part.length).toBeGreaterThan(500);
-      expect(part).not.toMatch(/purchase_order|purchase order|approvedPoTotal|po_cost/i);
+      expect(part).not.toMatch(/purchase_order|purchase order|poTotal|po_cost/i);
     }
     expect(pdf).not.toMatch(/cost_rate|cost_total|margin/i);
     expect(read("src/lib/invoices.functions.ts")).not.toMatch(/purchase_order|po_cost/i);
@@ -506,13 +476,8 @@ describe("generated types: service_job_purchase_orders", () => {
 
 describe("server functions (service-pos.functions.ts)", () => {
   const src = read("src/lib/service-pos.functions.ts");
-  it("list, save, approve and delete, each signed in and validated with zod", () => {
-    for (const name of [
-      "listPurchaseOrders",
-      "savePurchaseOrder",
-      "setPurchaseOrderApproved",
-      "deletePurchaseOrder",
-    ]) {
+  it("list, save and delete, each signed in and validated with zod", () => {
+    for (const name of ["listPurchaseOrders", "savePurchaseOrder", "deletePurchaseOrder"]) {
       const fn = serverFn(src, name);
       expect(fn).toContain(".middleware([requireSupabaseAuth])");
       expect(fn).toMatch(/\.validator\(\(d: unknown\) =>/);
@@ -524,13 +489,14 @@ describe("server functions (service-pos.functions.ts)", () => {
     expect(fn).toContain("if (data.receipt_path && !isReceiptPathFor(job.id, data.receipt_path))");
     expect(fn).toContain("if (!canAddPo(p, works))");
     expect(fn).toContain("if (!canEditPo(p, context.userId, prev, works))");
-    expect(fn).toContain('"An approved PO is locked; ask a manager"');
-    expect(fn).not.toMatch(/approved:/); // save never sets approval
+    expect(fn).toContain('"Only the person who added this PO or a manager changes it"');
+    expect(fn).not.toContain("approved"); // no approval, no lock (owner, Oct 28)
   });
-  it("approve: managers only, through its own call", () => {
-    const fn = serverFn(src, "setPurchaseOrderApproved");
-    expect(fn).toContain('if (!canApprovePo(p)) throw new Error("Only a manager approves a PO");');
-    expect(fn).toContain(".update({ approved: data.approved })");
+  it("no approve call: approval is gone (owner, Oct 28)", () => {
+    expect(src).not.toContain("setPurchaseOrderApproved");
+    expect(src).not.toContain("canApprovePo");
+    expect(src).not.toContain("approved_by_name");
+    expect(src).not.toContain("ask a manager");
   });
   it("delete: removes the row, then its receipt from the bucket (loudly if that fails)", () => {
     const fn = serverFn(src, "deletePurchaseOrder");
@@ -542,7 +508,7 @@ describe("server functions (service-pos.functions.ts)", () => {
   });
   it("errors are plain messages (the screens toast them)", () => {
     expect(src).not.toMatch(/console\.(log|error)/);
-    expect(src.match(/throw new Error\(/g)!.length).toBeGreaterThan(8);
+    expect(src.match(/throw new Error\(/g)!.length).toBeGreaterThan(6);
   });
 });
 
@@ -555,19 +521,19 @@ describe("the section (purchase-orders-section.tsx)", () => {
     );
     expect(src).toContain("summary={q.data ? poSummary(pos) : undefined}");
   });
-  it("each row: date, PO #, title, price, approval, receipt link (new tab), Edit, Delete (confirm)", () => {
+  it("each row: date, PO #, title, price, receipt link (new tab), Edit, Delete (confirm) — no approval", () => {
     const row = src.slice(src.indexOf("function PoRow("), src.indexOf("const draftOf"));
     for (const bit of [
       "shortDay(po.po_date)",
       "PO {po.po_number}",
       "{po.title ?",
       "poMoney(Number(po.price))",
-      "<ApprovedBadge approved={po.approved} />",
       "<ReceiptLink path={po.receipt_path} name={po.receipt_name} />",
       "{po.can_edit && (",
       "window.confirm(",
     ])
       expect(row, bit).toContain(bit);
+    expect(row).not.toMatch(/approv/i);
     const link = src.slice(
       src.indexOf("function ReceiptLink("),
       src.indexOf("function usePoMutations"),
@@ -576,7 +542,7 @@ describe("the section (purchase-orders-section.tsx)", () => {
     expect(link).toContain('target="_blank"');
     expect(link).toContain('rel="noreferrer"');
   });
-  it("the form, in CenterPoint's order: Date *, PO # *, Title, Price *, Notes, Upload Receipt, Approved?, Submit / Back", () => {
+  it("the form, in CenterPoint's order: Date *, PO # *, Title, Price *, Notes, Upload Receipt, Submit / Back (no Approved?)", () => {
     const form = src.slice(src.indexOf("function PoForm("));
     const order = [
       ">Date *</Label>",
@@ -585,12 +551,12 @@ describe("the section (purchase-orders-section.tsx)", () => {
       ">Price *</Label>",
       ">Notes</Label>",
       /"Upload Receipt"/,
-      />Approved\?</,
       /\n\s*Submit\n/,
       /\n\s*Back\n/,
     ].map((s) => (typeof s === "string" ? form.indexOf(s) : form.search(s)));
     for (const i of order) expect(i).toBeGreaterThan(-1);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(form).not.toMatch(/Approved\?/);
     expect(src).toMatch(/q\.data\.canAdd && \(\s*<Button[\s\S]*?<Plus [^>]*\/> Add PO/); // "+ Add PO"
   });
   it("Date defaults to today; Price starts blank with no placeholder 0; Notes auto-grow", () => {
@@ -608,17 +574,19 @@ describe("the section (purchase-orders-section.tsx)", () => {
     expect(src).toContain("if (uploaded) await removeFromServiceBucket(uploaded);");
     expect(src).toContain('accept="image/*,application/pdf"');
   });
-  it("the Approved toggle: managers only, never on the close-out (field); a badge otherwise", () => {
-    expect(src).toContain(
-      "const approver = !field && managesTickets(profile) && !!q.data?.canApprove;",
-    );
-    expect(src).toMatch(/\{approver \? \(\s*<label[\s\S]*?<Switch[\s\S]*?\) : \(\s*<ApprovedBadge/);
-    expect(src).toMatch(/\{approver && \(\s*<label[\s\S]*?Approved\?/);
+  it("no Approved toggle, badge or approver anywhere (owner, Oct 28); `field` only makes the close-out's fold plain", () => {
+    expect(src).not.toContain("approver");
+    expect(src).not.toContain("ApprovedBadge");
+    expect(src).not.toContain("<Switch");
+    expect(src).not.toContain("setPurchaseOrderApproved");
+    expect(src).not.toContain("approved_by_name");
+    expect(src).not.toContain("managesTickets");
+    expect(src).toContain("plain={field}");
   });
   it("errors are loud toasts with the server's message; fields stack on a phone", () => {
     expect(src).toContain('loudError(po ? "Could not save the PO" : "Could not add the PO", e)');
     expect(src).toContain('loudError("Could not delete the PO", e)');
-    expect(src).toContain('loudError("Could not change the approval", e)');
+    expect(src).not.toContain("Could not change the approval");
     expect(src).toContain('<div className="grid gap-3 sm:grid-cols-2">');
   });
 });
@@ -643,7 +611,7 @@ describe("mounted on the ticket page and the close-out", () => {
       /\{materials\}\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>/,
     );
   });
-  it("close-out: right after Materials, in field mode (no Approved toggle)", () => {
+  it("close-out: right after Materials, in field mode (a plain fold inside the step card)", () => {
     const co = read("src/components/service/closeout.tsx");
     expect(co).toMatch(
       /<MaterialsSection jobId=\{job\.id\} \/>\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} field \/>/,

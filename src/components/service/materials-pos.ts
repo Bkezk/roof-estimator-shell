@@ -27,17 +27,15 @@ export function ticketLineCount(ledger: readonly (LocatedCell & { qty: number | 
   return [...byCell.values()].filter((v) => Math.abs(v) > EPS).length;
 }
 
-/** "1 PO, 1 awaiting approval" / "3 POs" / "no POs". */
+/** "1 PO" / "3 POs" / "no POs" (no approval count: approval is gone since Oct 28). */
 export function posPart(pos: readonly PoLike[]): string {
   if (!pos.length) return "no POs";
-  const waiting = pos.filter((p) => !p.approved).length;
-  const head = `${pos.length} PO${pos.length === 1 ? "" : "s"}`;
-  return waiting ? `${head}, ${waiting} awaiting approval` : head;
+  return `${pos.length} PO${pos.length === 1 ? "" : "s"}`;
 }
 
 /**
- * The fold's one line from both tabs: "3 items · 1 PO, 1 awaiting approval", "nothing logged ·
- * no POs". A part still loading (null) is left out; nothing known yet reads as nothing.
+ * The fold's one line from both tabs: "3 items · 1 PO", "nothing logged · no POs". A part still
+ * loading (null) is left out; nothing known yet reads as nothing.
  */
 export function materialsPosSummary(parts: {
   lines: number | null;

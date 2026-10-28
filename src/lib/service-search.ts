@@ -13,14 +13,13 @@
  *                             a blank ticket, optionally prefilled (Tech Board "+", "New ticket
  *                             for this site", the Customers page, an opportunity's "Start a
  *                             ticket")
- *   ?stage=<filter>[&overdue=1][&po=waiting][&q=…][&tech=<id|unassigned>][&type=<service type>]
+ *   ?stage=<filter>[&overdue=1][&q=…][&tech=<id|unassigned>][&type=<service type>]
  *                             the list with its filters — the stage chip (a single stage or
  *                             `openwork` = open + scheduled + done), overdue=1 (only open tickets
- *                             whose day has passed; the Customers page counts strip), po=waiting
- *                             (only tickets with a purchase order still waiting for approval; the
- *                             Owner page's tile, owner Oct 21), the search text, the Technician
- *                             select and the Type select (owner, Oct 9: the list keeps its
- *                             filters and Back returns to them)
+ *                             whose day has passed; the Customers page counts strip), the search
+ *                             text, the Technician select and the Type select (owner, Oct 9: the
+ *                             list keeps its filters and Back returns to them). An old
+ *                             `po=waiting` link (the Owner page's tile until Oct 28) is ignored.
  */
 import { SERVICE_OPEN_WORK } from "@/lib/work-counts";
 
@@ -71,8 +70,6 @@ export interface ServiceSearch {
   stage?: Exclude<StageFilter, "all">;
   /** List only: show only overdue open tickets. */
   overdue?: 1;
-  /** List only: show only tickets with a purchase order waiting for approval (the PO waiting chip). */
-  po?: "waiting";
   /** List only: the search box. */
   q?: string;
   /** List only: the Type select (one service type). */
@@ -129,7 +126,6 @@ export function parseServiceSearch(s: Record<string, unknown>): ServiceSearch {
     return {
       ...(stage ? { stage } : {}),
       ...(isOne(s["overdue"]) ? { overdue: 1 as const } : {}),
-      ...(s["po"] === "waiting" ? { po: "waiting" as const } : {}),
       ...(q ? { q } : {}),
       ...(typeof tech === "string" && tech && tech !== "all" ? { tech } : {}),
       ...(type ? { type } : {}),

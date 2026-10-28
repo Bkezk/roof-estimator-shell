@@ -161,7 +161,7 @@ export async function cellPiece(
 }
 
 /**
- * Build the lines a ticket's time entries, materials and approved purchase orders produce today.
+ * Build the lines a ticket's time entries, materials and purchase orders produce today.
  * `markup` is the invoice's own material markup (owner, Oct 6: per invoice); without it, Setup ›
  * Material pricing's. `poMarkup` (owner, Oct 14; invoices.po_markup) prices the PO lines at
  * cost plus that markup (true, the default) or at cost (false).
@@ -210,12 +210,12 @@ export async function buildLinesFromJob(
       .eq("service_job_id", jobId)
       .order("sort"),
     sb.rpc("technician_bill_rates"),
-    // The ticket's APPROVED purchase orders become lines too (owner, Oct 14).
+    // The ticket's purchase orders become lines too (owner, Oct 14) — every one of them, approved
+    // or not (owner, Oct 28: the purchase happened either way).
     sb
       .from("service_job_purchase_orders")
       .select("id, po_number, title, price, po_date, vendor_id, vendor_text")
       .eq("service_job_id", jobId)
-      .eq("approved", true)
       .order("po_date")
       .order("created_at"),
   ]);
@@ -303,13 +303,13 @@ export async function buildLinesFromJob(
       taxable: true,
     });
   }
-  // Approved purchase orders (owner, Oct 14: "the mark up … toggled to applied to the PO or
-  // not"): one material line each at the PO's price plus the markup, or at the price when the
-  // invoice's switch is off. The supplier is named as typed on the PO, else by its linked vendor.
-  const approved = pos ?? [];
+  // Purchase orders (owner, Oct 14: "the mark up … toggled to applied to the PO or not"): one
+  // material line each at the PO's price plus the markup, or at the price when the invoice's
+  // switch is off. The supplier is named as typed on the PO, else by its linked vendor.
+  const orders = pos ?? [];
   const vendorIds = [
     ...new Set(
-      approved.filter((p) => !p.vendor_text && p.vendor_id).map((p) => p.vendor_id as string),
+      orders.filter((p) => !p.vendor_text && p.vendor_id).map((p) => p.vendor_id as string),
     ),
   ];
   const vendorName = new Map<string, string>();
@@ -321,7 +321,7 @@ export async function buildLinesFromJob(
     if (vErr) throw new Error(`The purchase orders' vendors: ${vErr.message}`);
     for (const v of vs ?? []) vendorName.set(v.id, v.name);
   }
-  for (const p of approved)
+  for (const p of orders)
     lines.push(
       poLineFor(
         {

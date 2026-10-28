@@ -19,34 +19,22 @@ import {
 const read = (p: string) => readFileSync(p, "utf8");
 
 describe("materialsPosSummary", () => {
-  it('"3 items · 1 PO, 1 awaiting approval" / "nothing logged · no POs"', () => {
-    expect(materialsPosSummary({ lines: 3, pos: [{ price: 10, approved: false }] })).toBe(
-      "3 items · 1 PO, 1 awaiting approval",
-    );
+  it('"3 items · 1 PO" / "nothing logged · no POs" (no approval count since Oct 28)', () => {
+    expect(materialsPosSummary({ lines: 3, pos: [{ price: 10 }] })).toBe("3 items · 1 PO");
     expect(materialsPosSummary({ lines: 0, pos: [] })).toBe("nothing logged · no POs");
-    expect(
-      materialsPosSummary({
-        lines: 1,
-        pos: [
-          { price: 10, approved: true },
-          { price: 5, approved: true },
-        ],
-      }),
-    ).toBe("1 item · 2 POs");
+    expect(materialsPosSummary({ lines: 1, pos: [{ price: 10 }, { price: 5 }] })).toBe(
+      "1 item · 2 POs",
+    );
   });
   it("a part still loading is left out; nothing known reads as nothing", () => {
     expect(materialsPosSummary({ lines: 2, pos: null })).toBe("2 items");
     expect(materialsPosSummary({ lines: null, pos: [] })).toBe("no POs");
     expect(materialsPosSummary({ lines: null, pos: null })).toBe("");
   });
-  it("posPart counts the POs and those awaiting approval", () => {
+  it("posPart counts the POs, never an approval (owner, Oct 28: approval is gone)", () => {
     expect(posPart([])).toBe("no POs");
-    expect(
-      posPart([
-        { price: 1, approved: false },
-        { price: 1, approved: false },
-      ]),
-    ).toBe("2 POs, 2 awaiting approval");
+    expect(posPart([{ price: 1 }, { price: 1 }])).toBe("2 POs");
+    expect(read("src/components/service/materials-pos.ts")).not.toContain("awaiting approval");
   });
 });
 
@@ -124,9 +112,9 @@ describe("the fold (materials-pos-fold.tsx)", () => {
     expect(pos).toMatch(
       /<Box\s+title="Purchase orders"\s+icon=\{Receipt\}\s+collapsible\s+storageKey="purchase-orders"/,
     );
-    expect(pos).toContain(
-      "const approver = !field && managesTickets(profile) && !!q.data?.canApprove;",
-    );
+    // The Approved switch left on Oct 28; `field` only makes the close-out's fold plain.
+    expect(pos).not.toContain("approver");
+    expect(pos).toContain("plain={field}");
     expect(read("src/components/service/closeout.tsx")).toMatch(
       /<MaterialsSection jobId=\{job\.id\} \/>\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} field \/>/,
     );
