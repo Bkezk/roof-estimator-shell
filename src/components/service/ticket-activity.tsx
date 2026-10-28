@@ -35,6 +35,9 @@ import { listJobEvents } from "@/lib/service-field.functions";
 import {
   ACTIVITY_EMPTY,
   entriesLine,
+  groupLabel,
+  groupTimeline,
+  groupWhen,
   mergeTimeline,
   TIMELINE_LIST_CLASS,
   type TimelineEntry,
@@ -125,12 +128,13 @@ export function ActivityList({
         {entriesLine(entries.length)}
       </p>
       <ol className={`space-y-1 text-xs ${TIMELINE_LIST_CLASS}`} data-list="activity">
-        {entries.map((r) => {
+        {groupTimeline(entries).map((r) => {
           const Icon = ICONS[r.icon];
           return (
             <li
               key={r.key}
               data-source={r.source}
+              data-count={r.count > 1 ? r.count : undefined}
               className={`flex gap-1.5 ${r.done ? "rounded-sm bg-emerald-50 px-1.5 py-1 dark:bg-emerald-950/40" : ""}`}
             >
               <Icon
@@ -138,10 +142,10 @@ export function ActivityList({
                 aria-hidden
               />
               <div className="min-w-0">
-                <span className="font-medium">{r.label}</span>
+                <span className="font-medium">{groupLabel(r.label, r.count)}</span>
                 <span className="text-muted-foreground">
                   {" "}
-                  · {whenShort(r.at)}
+                  · {groupWhen(r, whenShort)}
                   {r.byName ? ` · ${r.byName}` : ""}
                 </span>
                 {r.text ? <span className="whitespace-pre-line"> — {r.text}</span> : null}

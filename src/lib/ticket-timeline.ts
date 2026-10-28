@@ -72,6 +72,88 @@ export const ACTIVITY_EMPTY = "No activity yet";
 /** "1 entry" / "12 entries". */
 export const entriesLine = (n: number) => `${n} ${n === 1 ? "entry" : "entries"}`;
 
+/**
+ * A row on the Activity after grouping (owner, Oct 28: "if there are multiples of the same thing
+ * like the photo uploads group them and put a range of the times so it doesn't take up all the
+ * visible space"): a run of entries that read the same — same label, icon and person, no text —
+ * collapses into one row with a count and the span of their times. `at` is the newest (the
+ * list's order), `from` the oldest of the run.
+ */
+export interface TimelineGroup extends TimelineEntry {
+  /** How many entries the row stands for (1 = not grouped). */
+  count: number;
+  /** The oldest entry's time when count > 1, else `at`. */
+  from: string;
+}
+
+/** Labels that read as a count ("7 photos added"); anything else reads "<label> ×7". */
+const GROUP_LABELS: Record<string, (n: number) => string> = {
+  "Photo added": (n) => `${n} photos added`,
+  "Before photo added": (n) => `${n} before photos added`,
+  "After photo added": (n) => `${n} after photos added`,
+};
+
+/** The grouped row's label: "7 photos added", else "Called ×3". */
+export const groupLabel = (label: string, count: number): string =>
+  count <= 1 ? label : (GROUP_LABELS[label]?.(count) ?? `${label} ×${count}`);
+
+/** Entries that collapse together: same wording, same icon, same person, nothing typed. */
+const sameKind = (a: TimelineEntry, b: TimelineEntry) =>
+  a.label === b.label &&
+  a.icon === b.icon &&
+  a.byName === b.byName &&
+  a.text === null &&
+  b.text === null &&
+  !a.done &&
+  !b.done;
+
+/**
+ * Collapse consecutive look-alike entries (newest first in, newest first out). A row with text
+ * (a note, a contact with what was said) or a "Service done" row never joins a group.
+ */
+export function groupTimeline(entries: readonly TimelineEntry[]): TimelineGroup[] {
+  const out: TimelineGroup[] = [];
+  for (const e of entries) {
+    const last = out[out.length - 1];
+    if (last && sameKind(last, e)) {
+      last.count += 1;
+      last.from = e.at;
+      continue;
+    }
+    out.push({ ...e, count: 1, from: e.at });
+  }
+  return out;
+}
+
+const DAY: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+const CLOCK: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+
+/**
+ * A grouped row's time: one time for a single entry; "Oct 27, 4:01–4:07 PM" when the run is on
+ * one day; "Oct 27, 4:01 PM – Oct 28, 9:02 AM" across days. `when` renders one instant the way
+ * the list does (field-utils whenShort); the span is built from the same parts.
+ */
+export function groupWhen(
+  g: Pick<TimelineGroup, "at" | "from" | "count">,
+  when: (iso: string) => string,
+): string {
+  if (g.count <= 1 || g.from === g.at) return when(g.at);
+  const newest = new Date(g.at);
+  const oldest = new Date(g.from);
+  const day = (d: Date) => d.toLocaleDateString("en-US", DAY);
+  const clock = (d: Date) => d.toLocaleTimeString("en-US", CLOCK);
+  if (day(newest) === day(oldest)) {
+    const a = clock(oldest);
+    const b = clock(newest);
+    const [ta, pa] = a.split(" ");
+    const [tb, pb] = b.split(" ");
+    // Same half of the day: "4:01–4:07 PM"; else "11:58 AM–12:02 PM".
+    const span = pa === pb ? `${ta}–${tb} ${pb}` : `${ta} ${pa}–${tb} ${pb}`;
+    return `${day(newest)}, ${span}`;
+  }
+  return `${when(g.from)} – ${when(g.at)}`;
+}
+
 const FIELD_LABEL: Record<string, string> = { en_route: "En route", on_site: "On site" };
 const FIELD_NOTE: Record<string, string> = {
   "left site": "Left the site",

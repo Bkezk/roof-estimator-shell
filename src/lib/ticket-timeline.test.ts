@@ -12,12 +12,16 @@ import type { ContactLogRow } from "@/lib/contact-log.functions";
 import type { JobEventRow } from "@/lib/service-field.functions";
 import {
   ACTIVITY_EMPTY,
+  TIMELINE_LIST_CLASS,
+  TIMELINE_ROWS_SHOWN,
+  type TimelineEntry,
   contactEntry,
   entriesLine,
   eventEntry,
+  groupLabel,
+  groupTimeline,
+  groupWhen,
   mergeTimeline,
-  TIMELINE_LIST_CLASS,
-  TIMELINE_ROWS_SHOWN,
 } from "@/lib/ticket-timeline";
 
 const JOB = "11111111-1111-4111-8111-111111111111";
@@ -265,6 +269,78 @@ describe("the migrations the dedupe is built on", () => {
     );
     expect(log).toContain(
       "(kind = 'ticket' and exists (select 1 from public.service_jobs j where j.id = item_id))",
+    );
+  });
+});
+
+describe("grouping look-alike rows (owner, Oct 28: photo uploads took the whole box)", () => {
+  const e = (
+    key: string,
+    at: string,
+    label: string,
+    extra: Partial<TimelineEntry> = {},
+  ): TimelineEntry => ({
+    key,
+    source: "event",
+    at,
+    label,
+    text: null,
+    byName: "Brandon Keck",
+    icon: "photo",
+    done: false,
+    ...extra,
+  });
+  it("a run of 'Photo added' by one person becomes one row with a count and the oldest time", () => {
+    const rows = [
+      e("s", "2026-10-28T13:02:00Z", "Service done", {
+        icon: "service",
+        done: true,
+        byName: "Braden Keck",
+      }),
+      e("p7", "2026-10-27T20:07:00Z", "Photo added"),
+      e("p6", "2026-10-27T20:05:00Z", "Photo added"),
+      e("p5", "2026-10-27T20:02:00Z", "Photo added"),
+      e("p4", "2026-10-27T20:01:00Z", "Photo added"),
+    ];
+    const g = groupTimeline(rows);
+    // Old code: five rows. Now two.
+    expect(g.map((r) => [r.key, r.count, r.from])).toEqual([
+      ["s", 1, "2026-10-28T13:02:00Z"],
+      ["p7", 4, "2026-10-27T20:01:00Z"],
+    ]);
+    expect(groupLabel("Photo added", 4)).toBe("4 photos added");
+    expect(groupLabel("Photo added", 1)).toBe("Photo added");
+    expect(groupLabel("Called", 3)).toBe("Called ×3");
+  });
+  it("a different person, a note with text, or a Service done row breaks the run", () => {
+    const rows = [
+      e("a", "2026-10-27T20:07:00Z", "Photo added"),
+      e("b", "2026-10-27T20:05:00Z", "Photo added", { byName: "Braden Keck" }),
+      e("c", "2026-10-27T20:04:00Z", "Photo added", { byName: "Braden Keck" }),
+      e("d", "2026-10-27T20:03:00Z", "Note", { icon: "note", text: "hi" }),
+      e("f", "2026-10-27T20:02:00Z", "Note", { icon: "note", text: "hi" }),
+    ];
+    expect(groupTimeline(rows).map((r) => [r.key, r.count])).toEqual([
+      ["a", 1],
+      ["b", 2],
+      ["d", 1],
+      ["f", 1],
+    ]);
+  });
+  it("the time reads as a span on one day, or two full times across days; a single row as before", () => {
+    const when = (iso: string) => `W(${iso})`;
+    expect(groupWhen({ at: "x", from: "x", count: 1 }, when)).toBe("W(x)");
+    // Dates are rendered in the test runner's zone; pick instants well inside one local day.
+    const noon = new Date(2026, 9, 27, 12, 1).toISOString();
+    const later = new Date(2026, 9, 27, 12, 7).toISOString();
+    const morning = new Date(2026, 9, 27, 11, 58).toISOString();
+    expect(groupWhen({ at: later, from: noon, count: 2 }, when)).toBe("Oct 27, 12:01–12:07 PM");
+    expect(groupWhen({ at: later, from: morning, count: 3 }, when)).toBe(
+      "Oct 27, 11:58 AM–12:07 PM",
+    );
+    const nextDay = new Date(2026, 9, 28, 9, 2).toISOString();
+    expect(groupWhen({ at: nextDay, from: noon, count: 2 }, when)).toBe(
+      `W(${noon}) – W(${nextDay})`,
     );
   });
 });
