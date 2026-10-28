@@ -13,16 +13,26 @@
  * - PhotoLightbox: the photo with its marks and the list of marks under it; Mark up (on the
  *   office ticket page and the technician's close-out, phone and desktop), Download, the
  *   original.
- * - PhotoMarkupEditor: the tools Move, Circle, Arrow, Box, Text and Tag (the Aerial's numbered
- *   tag and text, src/components/service/aerial-markup.tsx), red / yellow / white, Undo, Delete
- *   (the selected mark), Clear, Rotate left / right (the picture and its marks turn as one; a
- *   mark drawn afterwards is mapped back into the picture's own space), zoom in / out / fit with
- *   a drag to pan, and the marks listed under the picture as on the Aerial (a row selects its
- *   mark; × removes it). Pointer events, so a finger and a mouse both draw. Every change — a
- *   mark or a turn — auto-saves (debounced, useAutosave) through savePhotoAnnotations; a failure
- *   is a loud toast with the server's message. Undo is the marks reducer (photoMarksReducer),
- *   so it takes a turn back too. The photo itself is never altered: the marks and the rotation
- *   are JSON on its row (src/lib/photo-annotations.ts).
+ * - PhotoMarkupEditor: two rows of tools around the picture (owner, Oct 28). Above it: Move,
+ *   Circle, Arrow, Box, Text and Tag (the Aerial's numbered tag and text,
+ *   src/components/service/aerial-markup.tsx; icons only on a phone), a divider, one colour
+ *   button (a swatch of the current colour; a popover with red / yellow / white), Undo and Clear.
+ *   Below it, one line: Zoom in / out / Fit (a drag pans when zoomed in) and Rotate left / right
+ *   (the picture and its marks turn as one; a mark drawn afterwards is mapped back into the
+ *   picture's own space). The selected mark carries its own handles — a grip to drag it and a ×
+ *   to remove it — and the marks are listed under the picture as on the Aerial (a row selects its
+ *   mark; × removes it). On a phone (coarsePointer) picking Text or Tag opens a bottom sheet at
+ *   once (the keyboard with it, the preset chips and the last five labels used on this device,
+ *   lib/markup-memory.ts); Done puts the label in the middle of what is on screen
+ *   (lib/markup-touch.ts centreOfView) and selects it with Move, so a finger drags it into place
+ *   ("Drag the label where it belongs"); a tap on the picture places it there instead. On a
+ *   computer Text / Tag still wait for a click and the form shows inline. Handles are finger-sized
+ *   and labels draw one size up on a phone (markup-touch.ts). Pointer events, so a finger and a
+ *   mouse both draw. Every change — a mark or a turn — auto-saves (debounced, useAutosave) through
+ *   savePhotoAnnotations; a failure is a loud toast with the server's message. Undo is the marks
+ *   reducer (photoMarksReducer), so it takes a turn back too. Done (and the caller's buttons
+ *   beside it) stay pinned to the bottom of the dialog. The photo itself is never altered: the
+ *   marks and the rotation are JSON on its row (src/lib/photo-annotations.ts).
  * - Download / DownloadAllPhotos: the marks flattened onto the photo, turned as shown, in the
  *   browser (a canvas at the picture's natural size, sides swapped at 90 / 270 → PNG;
  *   photo-export.ts) as "<ticket>-<role>-<n>.png"; a photo without marks that is not turned is
@@ -40,6 +50,7 @@ import {
   Download,
   Eraser,
   ExternalLink,
+  GripHorizontal,
   Hand,
   Loader2,
   MapPin,
@@ -49,7 +60,6 @@ import {
   RotateCw,
   Scan,
   Square,
-  Trash2,
   Type,
   Undo2,
   X,
@@ -92,7 +102,6 @@ import {
   shapeFromDrag,
   strokeFor,
   tagGeom,
-  textBox,
   textSizeFor,
   toNorm,
   unrotatePoint,
@@ -105,7 +114,21 @@ import {
   type Pt,
   type Rotation,
 } from "@/lib/photo-annotations";
-import { deviceStorage, readMarkupMemory, writeMarkupMemory } from "@/lib/markup-memory";
+import {
+  deviceStorage,
+  readMarkupMemory,
+  readRecentLabels,
+  rememberLabel,
+  writeMarkupMemory,
+} from "@/lib/markup-memory";
+import {
+  centreOfView,
+  grabTolerance,
+  handlePlaces,
+  handleSizes,
+  selectionBounds,
+  textScaleFor,
+} from "@/lib/markup-touch";
 import { savePhotoAnnotations, type JobPhotoRow } from "@/lib/service-field.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -118,8 +141,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { errText, fieldKeys, loudError, useAutosave } from "@/components/service/field-utils";
+import {
+  coarsePointer,
+  errText,
+  fieldKeys,
+  loudError,
+  useAutosave,
+} from "@/components/service/field-utils";
 import { downloadPhoto, useNaturalSize } from "@/components/service/photo-export";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -138,15 +175,18 @@ export function MarkShapes({
   w,
   h,
   selected,
+  textScale = 1,
 }: {
   marks: PhotoMark[];
   w: number;
   h: number;
   /** The mark with a dashed box around it (the editor's selection). */
   selected?: string | null | undefined;
+  /** Text and tag labels this much larger (the editor on a phone: textScaleFor; 1 elsewhere). */
+  textScale?: number | undefined;
 }) {
   const sw = strokeFor(w, h);
-  const size = textSizeFor(w, h);
+  const size = textSizeFor(w, h) * textScale;
   const tags = photoTagNumbers(marks);
   const twice = (key: string, el: (stroke: string, width: number) => React.ReactElement) => (
     <g key={key}>
@@ -255,11 +295,11 @@ export function MarkShapes({
                   x={g.label.x}
                   y={g.y}
                   dominantBaseline="middle"
-                  fontSize={g.labelSize}
+                  fontSize={g.labelSize * textScale}
                   fontWeight={700}
                   fontFamily="sans-serif"
                   fill="#fff"
-                  style={{ ...words, strokeWidth: g.labelSize * 0.18 }}
+                  style={{ ...words, strokeWidth: g.labelSize * textScale * 0.18 }}
                 >
                   {m.label}
                 </text>
@@ -268,32 +308,33 @@ export function MarkShapes({
           }
         }
       })}
-      {selected && <SelectionBox mark={marks.find((m) => m.id === selected)} w={w} h={h} />}
+      {selected && (
+        <SelectionBox
+          mark={marks.find((m) => m.id === selected)}
+          w={w}
+          h={h}
+          textScale={textScale}
+        />
+      )}
     </>
   );
 }
 
-/** A dashed box around the selected mark. */
-function SelectionBox({ mark, w, h }: { mark: PhotoMark | undefined; w: number; h: number }) {
+/** A dashed box around the selected mark (its bounds: lib/markup-touch.ts selectionBounds). */
+function SelectionBox({
+  mark,
+  w,
+  h,
+  textScale,
+}: {
+  mark: PhotoMark | undefined;
+  w: number;
+  h: number;
+  textScale: number;
+}) {
   if (!mark) return null;
   const sw = strokeFor(w, h);
-  let b: { x: number; y: number; w: number; h: number };
-  if (mark.kind === "ellipse" || mark.kind === "rect") b = rectGeom(mark, w, h);
-  else if (mark.kind === "arrow") {
-    const g = arrowGeom(mark, w, h, sw);
-    const xs = [g.tail[0], g.tip[0], g.left[0], g.right[0]];
-    const ys = [g.tail[1], g.tip[1], g.left[1], g.right[1]];
-    b = {
-      x: Math.min(...xs),
-      y: Math.min(...ys),
-      w: Math.max(...xs) - Math.min(...xs),
-      h: Math.max(...ys) - Math.min(...ys),
-    };
-  } else if (mark.kind === "text") b = textBox(mark, w, h);
-  else {
-    const g = tagGeom(mark, w, h);
-    b = { x: g.x - g.r, y: g.y - g.r, w: g.r * 2.3 + g.label.w, h: g.r * 2 };
-  }
+  const b = selectionBounds(mark, w, h, textScale);
   const pad = sw * 2;
   return (
     <rect
@@ -488,7 +529,7 @@ function MarkList({
           {onRemove && (
             <button
               type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-muted"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-muted sm:h-7 sm:w-7"
               aria-label={`Remove ${r.text}`}
               onClick={() => onRemove(r.mark.id)}
             >
@@ -939,8 +980,19 @@ export function PhotoMarkupSurface({
   }, [rotation, RW, RH]);
   const [draft, setDraft] = useState<{ kind: ShapeKind; a: Pt; b: Pt } | null>(null);
   const [moving, setMoving] = useState<{ id: string; du: number; dv: number } | null>(null);
-  const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt } | null>(null);
+  // A text / tag being written: `at` is where it was tapped, or null for the middle of the view
+  // (the phone's sheet, opened by picking the tool).
+  const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt | null } | null>(null);
+  // "Drag the label where it belongs", after a sheet-placed label, until the next touch or tool.
+  const [hint, setHint] = useState<string | null>(null);
+  const [colorOpen, setColorOpen] = useState(false);
+  // A phone (a finger): the sheet for Text / Tag, finger-sized handles, labels one size up.
+  const coarse = useMemo(() => coarsePointer(), []);
+  const textScale = textScaleFor(coarse);
+  const handle = handleSizes(coarse);
   const svg = useRef<SVGSVGElement>(null);
+  // The sheet's text box: focused as the sheet opens, so the keyboard comes up with it.
+  const labelInput = useRef<HTMLInputElement>(null);
   const gesture = useRef<
     | { type: "draw"; kind: ShapeKind; a: Pt }
     | { type: "move"; id: string; from: Pt }
@@ -999,28 +1051,36 @@ export function PhotoMarkupSurface({
   };
   const norm = (p: Pt) => toNorm(p, W, H);
 
+  /** Start dragging a mark (a press on it with Move, or on its grip handle). */
+  const grab = (e: React.PointerEvent, id: string) => {
+    svg.current?.setPointerCapture(e.pointerId);
+    setSelected(id);
+    gesture.current = { type: "move", id, from: toImg(e) };
+    setMoving({ id, du: 0, dv: 0 });
+  };
   const down = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button !== 0 || gesture.current) return;
     e.preventDefault();
+    setHint(null);
     const p = toImg(e);
     if (tool === "text" || tool === "tag") {
       setPending({ kind: tool, at: norm(p) });
       return;
     }
-    svg.current?.setPointerCapture(e.pointerId);
     if (tool === "move") {
-      const touch = e.pointerType === "touch";
-      const hit = hitTest(history.marks, p, W, H, (touch ? 16 : 8) * perScreen());
+      // A finger may miss the outline by half a handle (markup-touch.ts), a mouse by 8 px.
+      const touch = e.pointerType === "touch" || coarse;
+      const hit = hitTest(history.marks, p, W, H, (touch ? grabTolerance(true) : 8) * perScreen());
       if (hit) {
-        setSelected(hit);
-        gesture.current = { type: "move", id: hit, from: p };
-        setMoving({ id: hit, du: 0, dv: 0 });
+        grab(e, hit);
       } else {
+        svg.current?.setPointerCapture(e.pointerId);
         setSelected(null);
         gesture.current = { type: "pan", sx: e.clientX, sy: e.clientY, view, k: perScreen() };
       }
       return;
     }
+    svg.current?.setPointerCapture(e.pointerId);
     gesture.current = { type: "draw", kind: tool, a: norm(p) };
     setDraft({ kind: tool, a: norm(p), b: norm(p) });
   };
@@ -1076,12 +1136,55 @@ export function PhotoMarkupSurface({
         : "crosshair";
   const pick = (t: Tool) => {
     setTool(t);
-    setPending(null);
+    setHint(null);
     if (t !== "move") setSelected(null);
+    // A phone does not wait for a tap: Text / Tag open the sheet at once, for the middle of the view.
+    setPending((t === "text" || t === "tag") && coarse ? { kind: t, at: null } : null);
   };
+  /** The written text / tag goes on the picture: where it was tapped, or the middle of the view. */
+  const place = (f: { label: string; note: string }) => {
+    if (!pending) return;
+    const fromSheet = pending.at === null;
+    const at = pending.at ?? norm(unrotatePoint(centreOfView(view), W, H, rotation));
+    const id = newMarkId();
+    const base = { id, color, at };
+    dispatch({
+      type: "add",
+      mark:
+        pending.kind === "tag"
+          ? { ...base, kind: "tag", label: f.label, note: f.note }
+          : { ...base, kind: "text", text: f.label },
+    });
+    rememberLabel(deviceStorage(), pending.kind, f.label);
+    setPending(null);
+    if (fromSheet) {
+      // Selected under the Move tool, so a finger drags it into place at once.
+      setTool("move");
+      setSelected(id);
+      setHint("Drag the label where it belongs");
+    }
+  };
+  const recent = pending ? readRecentLabels(deviceStorage(), pending.kind) : [];
+  const current = PHOTO_COLORS.find((c) => c.id === color) ?? PHOTO_COLORS[0]!;
+  const selectedMark = selected ? shown.find((m) => m.id === selected) : undefined;
+  const handles = selectedMark ? handlePlaces(selectedMark, W, H, rotation, view, textScale) : null;
+  const selectedText = selectedMark
+    ? (markRows([selectedMark])[0]?.text ?? markKindLabel(selectedMark.kind))
+    : "";
+  const instructions =
+    tool === "move"
+      ? "Drag a mark to move it; tap one to select it. Drag the picture to pan when zoomed in."
+      : tool === "text" || tool === "tag"
+        ? coarse
+          ? `Tap ${tool === "tag" ? "Tag" : "Text"} above to write one, or tap the picture where it goes.`
+          : "Tap where it goes."
+        : tool === "arrow"
+          ? "Drag from the tail to the tip."
+          : "Drag across the problem, or tap for a quick one.";
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Row 1: the tools (icons only on a phone), a divider, the colour, Undo and Clear. */}
+      <div data-row="tools" className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Tool">
           {TOOLS.map((t) => (
             <Button
@@ -1090,66 +1193,215 @@ export function PhotoMarkupSurface({
               size="sm"
               variant={tool === t.id ? "default" : "outline"}
               aria-pressed={tool === t.id}
-              className="h-10 px-3"
+              aria-label={t.label}
+              title={t.label}
+              className="h-10 w-10 px-0 sm:w-auto sm:px-3"
               onClick={() => pick(t.id)}
             >
-              <t.icon className="mr-1 h-4 w-4" /> {t.label}
+              <t.icon className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">{t.label}</span>
             </Button>
           ))}
         </div>
-        <div className="flex gap-1" role="group" aria-label="Colour">
-          {PHOTO_COLORS.map((c) => (
+        <span
+          aria-hidden
+          data-divider
+          className="h-7 border-l border-border dark:border-neutral-700"
+        />
+        <Popover open={colorOpen} onOpenChange={setColorOpen}>
+          <PopoverTrigger asChild>
             <button
-              key={c.id}
               type="button"
-              title={c.label}
-              aria-label={c.label}
-              aria-pressed={color === c.id}
-              className={`h-9 w-9 rounded-full border-2 ${color === c.id ? "border-foreground ring-2 ring-ring ring-offset-2" : "border-muted-foreground/40"}`}
-              style={{ background: c.hex }}
-              onClick={() => setColor(c.id as PhotoColor)}
-            />
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-1">
+              aria-label={`Colour: ${current.label}`}
+              title={`Colour: ${current.label} — tap to change`}
+              data-colour={color}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-muted-foreground/40 bg-background hover:border-foreground dark:bg-neutral-900"
+            >
+              <span
+                className="h-6 w-6 rounded-full border border-black/40"
+                style={{ background: current.hex }}
+              />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-auto p-2 dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            <div className="flex gap-2" role="group" aria-label="Colour">
+              {PHOTO_COLORS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  title={c.label}
+                  aria-label={c.label}
+                  aria-pressed={color === c.id}
+                  className={`h-11 w-11 rounded-full border-2 ${color === c.id ? "border-foreground ring-2 ring-ring ring-offset-2 ring-offset-background" : "border-muted-foreground/40"}`}
+                  style={{ background: c.hex }}
+                  onClick={() => {
+                    setColor(c.id as PhotoColor);
+                    setColorOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+        <div className="flex gap-1">
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-10"
+            className="h-10 w-10 px-0 sm:w-auto sm:px-3"
+            aria-label="Undo"
+            title="Undo the last change (a mark, a move, a turn)"
             disabled={!history.past.length}
             onClick={() => dispatch({ type: "undo" })}
           >
-            <Undo2 className="mr-1 h-4 w-4" /> Undo
+            <Undo2 className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Undo</span>
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-10"
-            disabled={!selected}
-            title="Delete the selected mark (pick it with Move, or in the list)"
-            onClick={() => selected && dispatch({ type: "remove", id: selected })}
-          >
-            <Trash2 className="mr-1 h-4 w-4" /> Delete
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-10"
+            className="h-10 w-10 px-0 sm:w-auto sm:px-3"
+            aria-label="Clear"
+            title="Clear every mark (Undo brings them back)"
             disabled={!history.marks.length}
             onClick={() => {
               if (window.confirm("Clear every mark on this photo? (Undo brings them back.)"))
                 dispatch({ type: "clear" });
             }}
           >
-            <Eraser className="mr-1 h-4 w-4" /> Clear
+            <Eraser className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Clear</span>
           </Button>
         </div>
+      </div>
+
+      <div className="max-h-[min(65vh,640px)] overflow-hidden rounded-md border bg-neutral-900">
+        {/* The handles sit over the picture in css px (a finger's size), placed in % of the view. */}
+        <div
+          className="relative mx-auto max-h-full"
+          style={{
+            aspectRatio: `${RW} / ${RH}`,
+            maxWidth: `min(100%, calc((min(65vh, 640px) - 2px) * ${RW / RH}))`,
+          }}
+        >
+          <svg
+            ref={svg}
+            viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+            className="block h-auto max-h-full w-full touch-none select-none"
+            style={{ cursor, aspectRatio: `${RW} / ${RH}` }}
+            role="img"
+            aria-label="The photo, to mark up"
+            data-rotation={rotation}
+            onPointerDown={down}
+            onPointerMove={move}
+            onPointerUp={up}
+            onPointerCancel={up}
+          >
+            {/* The picture and its marks turn as one; the marks keep the picture's own px. */}
+            <g transform={rotationTransform(W, H, rotation) || undefined}>
+              <image href={url} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
+              <MarkShapes marks={shown} w={W} h={H} selected={selected} textScale={textScale} />
+            </g>
+          </svg>
+          {selectedMark && handles?.shown && (
+            <>
+              <button
+                type="button"
+                data-handle="grip"
+                aria-label={`Drag to move ${selectedText}`}
+                title="Drag to move it"
+                className="absolute flex -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none items-center justify-center rounded-full bg-transparent active:cursor-grabbing"
+                style={{
+                  left: `${handles.grip.left}%`,
+                  top: `${handles.grip.top}%`,
+                  width: handle.hit,
+                  height: handle.hit,
+                }}
+                onPointerDown={(e) => {
+                  if (e.button !== 0 || gesture.current) return;
+                  e.preventDefault();
+                  setHint(null);
+                  grab(e, selectedMark.id);
+                }}
+              >
+                <span
+                  className="flex items-center justify-center rounded-full border-2 border-white bg-black/70 text-white shadow"
+                  style={{ width: handle.drawn, height: handle.drawn }}
+                >
+                  <GripHorizontal className="h-3 w-3" aria-hidden />
+                </span>
+              </button>
+              <button
+                type="button"
+                data-handle="remove"
+                aria-label={`Remove ${selectedText}`}
+                title="Remove this mark (Undo brings it back)"
+                className="absolute flex -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full bg-transparent"
+                style={{
+                  left: `${handles.remove.left}%`,
+                  top: `${handles.remove.top}%`,
+                  width: handle.hit,
+                  height: handle.hit,
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => dispatch({ type: "remove", id: selectedMark.id })}
+              >
+                <span
+                  className="flex items-center justify-center rounded-full border-2 border-white bg-red-600 text-white shadow"
+                  style={{ width: handle.drawn, height: handle.drawn }}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </span>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Row 2, under the picture: Zoom in / out / Fit, then Rotate left / right. */}
+      <div data-row="view" className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-11 w-11 shrink-0 sm:h-10 sm:w-10"
+          aria-label="Zoom in"
+          title="Zoom in"
+          disabled={zoom >= 5.99}
+          onClick={() => setView(zoomPhotoView(view, RW, RH, 2))}
+        >
+          <ZoomIn className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-11 w-11 shrink-0 sm:h-10 sm:w-10"
+          aria-label="Zoom out"
+          title="Zoom out"
+          disabled={zoom <= 1.001}
+          onClick={() => setView(zoomPhotoView(view, RW, RH, 0.5))}
+        >
+          <ZoomOut className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-11 px-3 sm:h-10"
+          title="The whole photo"
+          disabled={zoom <= 1.001}
+          onClick={() => setView(fullView(RW, RH))}
+        >
+          <Scan className="mr-1 h-4 w-4" /> Fit
+        </Button>
         {rotatable && (
-          // 44 px on a phone (a thumb), the toolbar's 40 px from sm up; the row wraps, never overflows.
-          <div className="flex gap-1" role="group" aria-label="Rotate">
+          // 44 px on a phone (a thumb), 40 px from sm up, like the zoom beside it.
+          <div className="flex gap-1.5 sm:gap-2" role="group" aria-label="Rotate">
             <Button
               type="button"
               size="sm"
@@ -1174,98 +1426,56 @@ export function PhotoMarkupSurface({
             </Button>
           </div>
         )}
+        {status?.trim() && (
+          <span className="ml-auto text-xs text-muted-foreground" role="status">
+            {status.replace(/^\s*·\s*/, "")}
+          </span>
+        )}
       </div>
-      <p className="text-xs text-muted-foreground">
-        {tool === "move"
-          ? "Drag a mark to move it; tap one to select it. Drag the picture to pan when zoomed in."
-          : tool === "text" || tool === "tag"
-            ? "Tap where it goes."
-            : tool === "arrow"
-              ? "Drag from the tail to the tip."
-              : "Drag across the problem, or tap for a quick one."}
+      <p className="text-xs text-muted-foreground" data-line={hint ? "hint" : "how"}>
+        {hint ?? instructions}
       </p>
 
-      <div className="max-h-[min(65vh,640px)] overflow-hidden rounded-md border bg-neutral-900">
-        <svg
-          ref={svg}
-          viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
-          className="mx-auto block h-auto max-h-full w-full touch-none select-none"
-          style={{
-            cursor,
-            aspectRatio: `${RW} / ${RH}`,
-            maxWidth: `min(100%, calc((min(65vh, 640px) - 2px) * ${RW / RH}))`,
-          }}
-          role="img"
-          aria-label="The photo, to mark up"
-          data-rotation={rotation}
-          onPointerDown={down}
-          onPointerMove={move}
-          onPointerUp={up}
-          onPointerCancel={up}
-        >
-          {/* The picture and its marks turn as one; the marks keep the picture's own px. */}
-          <g transform={rotationTransform(W, H, rotation) || undefined}>
-            <image href={url} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
-            <MarkShapes marks={shown} w={W} h={H} selected={selected} />
-          </g>
-        </svg>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="Zoom out"
-          disabled={zoom <= 1.001}
-          onClick={() => setView(zoomPhotoView(view, RW, RH, 0.5))}
-        >
-          <ZoomOut className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="Zoom in"
-          disabled={zoom >= 5.99}
-          onClick={() => setView(zoomPhotoView(view, RW, RH, 2))}
-        >
-          <ZoomIn className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          title="The whole photo"
-          disabled={zoom <= 1.001}
-          onClick={() => setView(fullView(RW, RH))}
-        >
-          <Scan className="mr-1 h-4 w-4" /> Fit
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          {marksSummary(history.marks)}
-          {rotation ? ` · turned ${rotation}°` : ""}
-          {status ?? ""}
-        </span>
-      </div>
-
-      {pending && (
+      {pending && coarse ? (
+        // A phone: the bottom sheet, the keyboard with it; Done puts the label mid-view.
+        <Sheet open onOpenChange={(o) => !o && setPending(null)}>
+          <SheetContent
+            side="bottom"
+            className="max-h-[85vh] overflow-y-auto rounded-t-xl pb-[max(1.5rem,env(safe-area-inset-bottom))] dark:border-neutral-700"
+            data-sheet="place-label"
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              labelInput.current?.focus();
+            }}
+          >
+            <SheetHeader className="text-left">
+              <SheetTitle>{pending.kind === "tag" ? "New tag" : "New text"}</SheetTitle>
+              <SheetDescription>
+                {pending.at
+                  ? "It goes where you tapped."
+                  : "It lands in the middle of the picture; drag it where it belongs after."}
+              </SheetDescription>
+            </SheetHeader>
+            <PlaceForm
+              kind={pending.kind}
+              recent={recent}
+              submitLabel="Done"
+              inputRef={labelInput}
+              onCancel={() => setPending(null)}
+              onAdd={place}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : pending ? (
         <PlaceForm
           kind={pending.kind}
+          recent={recent}
+          framed
+          autoFocus
           onCancel={() => setPending(null)}
-          onAdd={(f) => {
-            const base = { id: newMarkId(), color, at: pending.at };
-            dispatch({
-              type: "add",
-              mark:
-                pending.kind === "tag"
-                  ? { ...base, kind: "tag", label: f.label, note: f.note }
-                  : { ...base, kind: "text", text: f.label },
-            });
-            setPending(null);
-          }}
+          onAdd={place}
         />
-      )}
+      ) : null}
 
       <MarkList
         marks={history.marks}
@@ -1277,7 +1487,11 @@ export function PhotoMarkupSurface({
         onRemove={(id) => dispatch({ type: "remove", id })}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Done (and the caller's buttons) a thumb away: pinned to the dialog's bottom as it scrolls. */}
+      <div
+        data-row="done"
+        className="sticky bottom-0 z-10 -mx-3 grid grid-cols-1 gap-2 border-t bg-card px-3 py-2 sm:-mx-6 sm:flex sm:flex-wrap sm:items-center sm:px-6 sm:py-3 dark:border-neutral-700"
+      >
         <Button
           type="button"
           className="h-11 sm:h-9"
@@ -1291,43 +1505,59 @@ export function PhotoMarkupSurface({
   );
 }
 
-/** A text mark's words, or a tag's label (preset chips or free text) and note. */
+/**
+ * A text mark's words, or a tag's label (preset chips or free text) and note; the last labels
+ * used on this device as chips. Inline under the picture on a computer (`framed`), inside the
+ * bottom sheet on a phone (the sheet focuses `inputRef` as it opens, so the keyboard comes up).
+ */
 function PlaceForm({
   kind,
+  recent,
+  submitLabel,
+  framed = false,
+  autoFocus = false,
+  inputRef,
   onAdd,
   onCancel,
 }: {
   kind: "text" | "tag";
+  /** The last labels of this kind on this device, newest first (lib/markup-memory.ts). */
+  recent: readonly string[];
+  submitLabel?: string | undefined;
+  framed?: boolean | undefined;
+  autoFocus?: boolean | undefined;
+  inputRef?: React.RefObject<HTMLInputElement | null> | undefined;
   onAdd: (f: { label: string; note: string }) => void;
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
   const ok = label.trim().length > 0;
+  const presets: readonly string[] = kind === "tag" ? TAG_PRESETS : [];
+  const recents = recent.filter((r) => !presets.includes(r));
+  const chip = (t: string) => (
+    <Button
+      key={t}
+      type="button"
+      size="sm"
+      variant={label === t ? "default" : "outline"}
+      className="h-9 sm:h-8"
+      onClick={() => setLabel(t)}
+    >
+      {t}
+    </Button>
+  );
   return (
     <form
-      className="space-y-2 rounded-md border bg-muted/30 p-3"
+      className={cn("space-y-2", framed && "rounded-md border bg-muted/30 p-3")}
+      data-form="place-label"
       onSubmit={(e) => {
         e.preventDefault();
         if (ok) onAdd({ label: label.trim(), note: note.trim() });
       }}
     >
-      <p className="text-sm font-medium">{kind === "tag" ? "New tag here" : "Text here"}</p>
-      {kind === "tag" && (
-        <div className="flex flex-wrap gap-1">
-          {TAG_PRESETS.map((t) => (
-            <Button
-              key={t}
-              type="button"
-              size="sm"
-              variant={label === t ? "default" : "outline"}
-              className="h-8"
-              onClick={() => setLabel(t)}
-            >
-              {t}
-            </Button>
-          ))}
-        </div>
+      {framed && (
+        <p className="text-sm font-medium">{kind === "tag" ? "New tag here" : "Text here"}</p>
       )}
       <div className="space-y-1">
         <Label htmlFor="photo-mark-label" className="text-xs">
@@ -1335,14 +1565,22 @@ function PlaceForm({
         </Label>
         <Input
           id="photo-mark-label"
-          autoFocus
-          className="h-10 text-base"
+          ref={inputRef}
+          autoFocus={autoFocus}
+          className="h-11 text-base sm:h-10"
           maxLength={kind === "tag" ? TAG_LABEL_MAX : TEXT_MAX}
           value={label}
           placeholder={kind === "tag" ? "e.g. Open seam" : "e.g. Leak here"}
           onChange={(e) => setLabel(e.target.value)}
         />
       </div>
+      {presets.length > 0 && <div className="flex flex-wrap gap-1">{presets.map(chip)}</div>}
+      {recents.length > 0 && (
+        <div className="space-y-1" data-chips="recent">
+          <p className="text-xs text-muted-foreground">Recent</p>
+          <div className="flex flex-wrap gap-1">{recents.map(chip)}</div>
+        </div>
+      )}
       {kind === "tag" && (
         <div className="space-y-1">
           <Label htmlFor="photo-mark-note" className="text-xs">
@@ -1359,10 +1597,10 @@ function PlaceForm({
         </div>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={!ok}>
-          {kind === "tag" ? "Add tag" : "Add text"}
+        <Button type="submit" size="sm" className="h-11 flex-1 sm:h-9 sm:flex-none" disabled={!ok}>
+          {submitLabel ?? (kind === "tag" ? "Add tag" : "Add text")}
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+        <Button type="button" size="sm" variant="ghost" className="h-11 sm:h-9" onClick={onCancel}>
           Cancel
         </Button>
       </div>

@@ -875,16 +875,18 @@ describe("rotation (owner, Oct 28: 'allow rotation of photos on markup')", () =>
     });
     expect("rotation" in stored.annotations!).toBe(false);
   });
-  it("the editor: Rotate left / right in the toolbar row that wraps, 44 px on a phone; the picture and marks in one turned group; the pointer turned back", () => {
+  it("the editor: Rotate left / right in the row under the picture (with the zoom), 44 px on a phone; the picture and marks in one turned group; the pointer turned back", () => {
     const ui = read("src/components/service/photo-markup.tsx");
     const surface = ui.slice(ui.indexOf("export function PhotoMarkupSurface("));
+    // Oct 28 (owner's layout): row 1 above the picture is the tools, the colour, Undo and Clear;
+    // row 2 under it is Zoom in / out / Fit and Rotate left / right (photo-markup.test.tsx).
     const toolbar = surface.slice(
-      surface.indexOf('<div className="flex flex-wrap items-center gap-2">'),
-      surface.indexOf('<p className="text-xs text-muted-foreground">'),
+      surface.indexOf('data-row="tools"'),
+      surface.indexOf('<p className="text-xs text-muted-foreground"'),
     );
-    // In the same wrapping row as the tools, the colours and Undo / Delete / Clear.
     expect(toolbar).toContain('role="group" aria-label="Tool"');
     expect(toolbar).toContain('role="group" aria-label="Rotate"');
+    expect(toolbar.indexOf('data-row="view"')).toBeLessThan(toolbar.indexOf('aria-label="Rotate"'));
     expect(toolbar).toMatch(
       /aria-label="Rotate left"[\s\S]*?onClick=\{\(\) => dispatch\(\{ type: "rotate", by: -1 \}\)\}[\s\S]*?<RotateCcw/,
     );
@@ -901,7 +903,7 @@ describe("rotation (owner, Oct 28: 'allow rotation of photos on markup')", () =>
     // The picture and the marks turn as one; the viewBox is the turned box.
     expect(surface).toContain("<g transform={rotationTransform(W, H, rotation) || undefined}>");
     expect(surface).toMatch(
-      /<g transform=\{rotationTransform\(W, H, rotation\) \|\| undefined\}>\s*<image href=\{url\}[^>]*\/>\s*<MarkShapes marks=\{shown\} w=\{W\} h=\{H\} selected=\{selected\} \/>\s*<\/g>/,
+      /<g transform=\{rotationTransform\(W, H, rotation\) \|\| undefined\}>\s*<image href=\{url\}[^>]*\/>\s*<MarkShapes\s+marks=\{shown\}\s+w=\{W\}\s+h=\{H\}\s+selected=\{selected\}\s+textScale=\{textScale\}\s+\/>\s*<\/g>/,
     );
     expect(surface).toContain("aspectRatio: `${RW} / ${RH}`");
     expect(surface).toContain("const { w: RW, h: RH } = rotatedBox(W, H, rotation);");
