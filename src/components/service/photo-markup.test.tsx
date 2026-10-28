@@ -5,6 +5,7 @@
  * with the marks overlay as before; turned, an SVG whose viewBox is the turned box with the
  * picture and the marks in one group carrying the rotation transform.
  */
+import { readFileSync } from "node:fs";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -242,5 +243,21 @@ describe("RotatedPhoto turns a photo and its marks as one, everywhere a photo sh
     expect(plain).toMatch(/<img[^>]*class="object-contain"/);
     expect(plain).not.toContain("invisible");
     expect(plain).not.toContain("<svg");
+  });
+});
+
+describe("the phone's label sheet, compact (owner, Oct 28: it was too tall and a stray tap placed another mark)", () => {
+  it("is capped at 70vh with the box and Done on one line, the note behind 'Add a note', and a tap guard after it closes", () => {
+    const src = readFileSync("src/components/service/photo-markup.tsx", "utf8");
+    expect(src).toContain('className="max-h-[70vh] overflow-y-auto rounded-t-xl');
+    expect(src).toContain("export const TAP_GUARD_MS = 600;");
+    expect(src).toContain("if (Date.now() < tapGuardUntil.current) return;");
+    expect(src).toContain("onOpenChange={(o) => !o && closeSheet(true)}");
+    expect(src).toContain("onCancel={() => closeSheet(true)}");
+    expect(src).toContain('data-action="done"');
+    expect(src).toContain('data-action="add-note"');
+    expect(src).toContain("              compact\n");
+    const root = readFileSync("src/routes/__root.tsx", "utf8");
+    expect(root).toContain("interactive-widget=resizes-content");
   });
 });

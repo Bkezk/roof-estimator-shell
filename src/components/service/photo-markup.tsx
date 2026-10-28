@@ -929,6 +929,9 @@ export function PhotoMarkupEditor({
  * (unrotatePoint) before it draws, moves or hit-tests — so a new mark lands where the finger is
  * and is stored, like every other, in the picture's own space.
  */
+/** After the phone's label sheet closes, taps on the picture are ignored this long (ms). */
+export const TAP_GUARD_MS = 600;
+
 export function PhotoMarkupSurface({
   url,
   size,
@@ -1058,8 +1061,17 @@ export function PhotoMarkupSurface({
     gesture.current = { type: "move", id, from: toImg(e) };
     setMoving({ id, du: 0, dv: 0 });
   };
+  // Owner, Oct 28: after the phone's label sheet closes, the tap that dismissed it (or the one
+  // that zoomed the page back out) must not land on the picture as another mark.
+  const tapGuardUntil = useRef(0);
+  const closeSheet = (toMove: boolean) => {
+    setPending(null);
+    tapGuardUntil.current = Date.now() + TAP_GUARD_MS;
+    if (toMove) setTool("move");
+  };
   const down = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button !== 0 || gesture.current) return;
+    if (Date.now() < tapGuardUntil.current) return;
     e.preventDefault();
     setHint(null);
     const p = toImg(e);
@@ -1157,6 +1169,7 @@ export function PhotoMarkupSurface({
     });
     rememberLabel(deviceStorage(), pending.kind, f.label);
     setPending(null);
+    tapGuardUntil.current = Date.now() + TAP_GUARD_MS;
     if (fromSheet) {
       // Selected under the Move tool, so a finger drags it into place at once.
       setTool("move");
@@ -1438,30 +1451,31 @@ export function PhotoMarkupSurface({
 
       {pending && coarse ? (
         // A phone: the bottom sheet, the keyboard with it; Done puts the label mid-view.
-        <Sheet open onOpenChange={(o) => !o && setPending(null)}>
+        <Sheet open onOpenChange={(o) => !o && closeSheet(true)}>
           <SheetContent
             side="bottom"
-            className="max-h-[85vh] overflow-y-auto rounded-t-xl pb-[max(1.5rem,env(safe-area-inset-bottom))] dark:border-neutral-700"
+            className="max-h-[70vh] overflow-y-auto rounded-t-xl px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700"
             data-sheet="place-label"
             onOpenAutoFocus={(e) => {
               e.preventDefault();
               labelInput.current?.focus();
             }}
           >
-            <SheetHeader className="text-left">
-              <SheetTitle>{pending.kind === "tag" ? "New tag" : "New text"}</SheetTitle>
-              <SheetDescription>
-                {pending.at
-                  ? "It goes where you tapped."
-                  : "It lands in the middle of the picture; drag it where it belongs after."}
+            <SheetHeader className="space-y-0 text-left">
+              <SheetTitle className="text-base">
+                {pending.kind === "tag" ? "New tag" : "New text"}
+              </SheetTitle>
+              <SheetDescription className="text-xs">
+                {pending.at ? "Goes where you tapped." : "Lands mid-picture; drag it after."}
               </SheetDescription>
             </SheetHeader>
             <PlaceForm
               kind={pending.kind}
               recent={recent}
               submitLabel="Done"
+              compact
               inputRef={labelInput}
-              onCancel={() => setPending(null)}
+              onCancel={() => closeSheet(true)}
               onAdd={place}
             />
           </SheetContent>
@@ -1516,6 +1530,7 @@ function PlaceForm({
   submitLabel,
   framed = false,
   autoFocus = false,
+  compact = false,
   inputRef,
   onAdd,
   onCancel,
@@ -1526,12 +1541,15 @@ function PlaceForm({
   submitLabel?: string | undefined;
   framed?: boolean | undefined;
   autoFocus?: boolean | undefined;
+  /** The phone's sheet: the box and Done on one line, the note folded behind "Add a note". */
+  compact?: boolean | undefined;
   inputRef?: React.RefObject<HTMLInputElement | null> | undefined;
   onAdd: (f: { label: string; note: string }) => void;
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
   const ok = label.trim().length > 0;
   const presets: readonly string[] = kind === "tag" ? TAG_PRESETS : [];
   const recents = recent.filter((r) => !presets.includes(r));
@@ -1560,19 +1578,29 @@ function PlaceForm({
         <p className="text-sm font-medium">{kind === "tag" ? "New tag here" : "Text here"}</p>
       )}
       <div className="space-y-1">
-        <Label htmlFor="photo-mark-label" className="text-xs">
-          {kind === "tag" ? "Label" : "Text"}
-        </Label>
-        <Input
-          id="photo-mark-label"
-          ref={inputRef}
-          autoFocus={autoFocus}
-          className="h-11 text-base sm:h-10"
-          maxLength={kind === "tag" ? TAG_LABEL_MAX : TEXT_MAX}
-          value={label}
-          placeholder={kind === "tag" ? "e.g. Open seam" : "e.g. Leak here"}
-          onChange={(e) => setLabel(e.target.value)}
-        />
+        {!compact && (
+          <Label htmlFor="photo-mark-label" className="text-xs">
+            {kind === "tag" ? "Label" : "Text"}
+          </Label>
+        )}
+        <div className={compact ? "flex gap-2" : undefined}>
+          <Input
+            id="photo-mark-label"
+            ref={inputRef}
+            autoFocus={autoFocus}
+            aria-label={compact ? (kind === "tag" ? "Label" : "Text") : undefined}
+            className="h-11 text-base sm:h-10"
+            maxLength={kind === "tag" ? TAG_LABEL_MAX : TEXT_MAX}
+            value={label}
+            placeholder={kind === "tag" ? "e.g. Open seam" : "e.g. Leak here"}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+          {compact && (
+            <Button type="submit" className="h-11 shrink-0 px-5" disabled={!ok} data-action="done">
+              {submitLabel ?? "Done"}
+            </Button>
+          )}
+        </div>
       </div>
       {presets.length > 0 && <div className="flex flex-wrap gap-1">{presets.map(chip)}</div>}
       {recents.length > 0 && (
@@ -1581,7 +1609,19 @@ function PlaceForm({
           <div className="flex flex-wrap gap-1">{recents.map(chip)}</div>
         </div>
       )}
-      {kind === "tag" && (
+      {kind === "tag" && compact && !noteOpen && !note && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-9 px-2 text-xs"
+          onClick={() => setNoteOpen(true)}
+          data-action="add-note"
+        >
+          Add a note
+        </Button>
+      )}
+      {kind === "tag" && (!compact || noteOpen || note) && (
         <div className="space-y-1">
           <Label htmlFor="photo-mark-note" className="text-xs">
             Note
@@ -1597,9 +1637,16 @@ function PlaceForm({
         </div>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" className="h-11 flex-1 sm:h-9 sm:flex-none" disabled={!ok}>
-          {submitLabel ?? (kind === "tag" ? "Add tag" : "Add text")}
-        </Button>
+        {!compact && (
+          <Button
+            type="submit"
+            size="sm"
+            className="h-11 flex-1 sm:h-9 sm:flex-none"
+            disabled={!ok}
+          >
+            {submitLabel ?? (kind === "tag" ? "Add tag" : "Add text")}
+          </Button>
+        )}
         <Button type="button" size="sm" variant="ghost" className="h-11 sm:h-9" onClick={onCancel}>
           Cancel
         </Button>
