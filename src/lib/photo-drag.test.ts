@@ -38,7 +38,9 @@ describe("the wiring", () => {
       fileURLToPath(new URL("../components/service/field-shared.tsx", import.meta.url)),
       "utf8",
     );
-    expect(src).toContain("draggable={!!url.data}");
+    // Oct 28: not while a strip is picking several (and not on a phone that can long-press to pick).
+    expect(src).toContain("const draggable = !!url.data && !select?.on && !(select && touch);");
+    expect(src).toContain("draggable={draggable}");
     expect(src).toContain("setPhotoDrag(");
     expect(src).toContain(
       "photoDragData(url.data, ticketNumber, photo.role, n, photo.storage_path)",

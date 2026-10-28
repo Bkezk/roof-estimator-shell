@@ -446,7 +446,10 @@ describe("the editor, lightbox, thumbnail and export", () => {
     for (const t of ['"Move"', '"Circle"', '"Arrow"', '"Box"', '"Text"', '"Tag"'])
       expect(ui).toContain(`label: ${t}`);
     expect(editor).toMatch(/PHOTO_COLORS\.map/);
-    expect(editor).toMatch(/useState<PhotoColor>\(DEFAULT_PHOTO_COLOR\)/);
+    // Oct 28: the colour (and the tool) start from the device's remembered pen (lib/markup-memory.ts).
+    expect(editor).toMatch(
+      /useState<PhotoColor>\(\(\) => readMarkupMemory\(deviceStorage\(\)\)\.color\)/,
+    );
     expect(editor).toMatch(/dispatch\(\{ type: "undo" \}\)/);
     expect(editor).toMatch(/dispatch\(\{ type: "remove", id: selected \}\)/);
     expect(editor).toMatch(/dispatch\(\{ type: "clear" \}\)/);

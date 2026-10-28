@@ -120,28 +120,37 @@ describe("the ticket page's Photos & repairs fold (ticket-field-sections.tsx)", 
     expect(fold).toMatch(/dragHasFiles\(e\.dataTransfer\)/);
     expect(fold).toMatch(/pictures\.add\(e\.dataTransfer\.files\)/);
   });
-  it("uploads with the field flow's path (shrinkPhoto → uploadPlan → the service bucket → registerJobPhoto as a loose 'other' photo)", () => {
+  it("uploads through the portal's one picture queue (Oct 28: shrinkPhoto → uploadPlan → the service bucket → registerJobPhoto as a loose 'other' photo)", () => {
     expect(fold).toMatch(/const pictures = useTicketPictureUpload\(jobId\);/); // no item_key
-    expect(upload).toMatch(/await shrinkPhoto\(file\)/);
-    expect(upload).toMatch(/uploadPlan\(\[shrunk\], jobId\)/);
-    expect(upload).toMatch(/await uploadToServiceBucket\(path, shrunk\.blob, shrunk\.type\)/);
-    expect(upload).toMatch(
-      /data: jobPhotoRegistration\(\{ jobId, path, shrunk, file, itemKey \}\)/,
+    expect(upload).toMatch(/usePictures\(\{ jobId, repairId: null, itemKey, role: "other" \}\)/);
+    // The queue's wiring (picture-queue.ts) is the field flow's path, unchanged.
+    const queue = readFileSync("src/components/service/picture-queue.ts", "utf8");
+    expect(queue).toMatch(/shrink: shrinkPhoto,/);
+    expect(queue).toMatch(
+      /upload: \(path, p\) => uploadToServiceBucket\(path, p\.blob, p\.type\),/,
     );
-    expect(upload).toMatch(
-      /service_job_id: args\.jobId,\s+repair_id: null,\s+item_key: args\.itemKey \?\? null,\s+role: "other" as const,\s+storage_path: args\.path,/,
-    );
-    // A row that could not be recorded leaves no orphan in the bucket.
-    expect(upload).toMatch(/await removeFromServiceBucket\(path\)/);
+    expect(queue).toMatch(/pathFor: \(jobId, p\) => uploadPlan\(\[p\], jobId\)\[0\]!\.path,/);
+    expect(queue).toMatch(/register: \(data\) => registerJobPhoto\(\{ data \}\),/);
+    // A row the server refused leaves no orphan in the bucket.
+    expect(queue).toMatch(/removeUpload: removeFromServiceBucket,/);
+    const core = readFileSync("src/lib/photo-upload-queue.ts", "utf8");
+    expect(core).toMatch(/await this\.deps\.removeUpload\(w\.uploadedPath\)/);
   });
   it("copies the picked files out before the input is cleared (a FileList is live)", () => {
     expect(fold).toMatch(/onChange=\{\(e\) => pictures\.add\(takePickedFiles\(e\.target\)\)\}/);
   });
-  it("shows 'Uploading n of m…', names a failed file in a toast, and refreshes the photos when done", () => {
-    expect(upload).toMatch(/uploadingLabel\(progress\.done, progress\.total\)/);
-    expect(upload).toMatch(/loudError\(`\$\{file\.name \|\| "A picture"\} did not upload`, e\)/);
-    expect(upload).toMatch(
-      /onSettled: \(\) => \{[\s\S]*?invalidateQueries\(\{ queryKey: fieldKeys\.photos\(jobId\) \}\)/,
+  it("never blocks the next pick: a '3 uploading' badge and placeholders instead of 'Uploading n of m…'; a failed file is named in a toast with Retry; the photos refresh as each lands", () => {
+    expect(fold).not.toContain("progressText");
+    expect(fold).not.toMatch(/disabled=\{pictures\.uploading\}/);
+    expect(fold).toMatch(/<UploadBadge n=\{pictures\.uploading\} \/>/);
+    expect(fold).toMatch(/<WaitingForSignalLine n=\{pictures\.waitingForSignal\}/);
+    expect(fold).toMatch(/<PendingThumbs\s+entries=\{pictures\.entries\}/);
+    const queue = readFileSync("src/components/service/picture-queue.ts", "utf8");
+    expect(queue).toMatch(
+      /toast\.error\(`\$\{entry\.fileName \|\| "A picture"\} did not upload: \$\{msg\(e\)\}`, \{[\s\S]*?action: \{ label: "Retry", onClick: \(\) => queue\.retry\(entry\.id\) \}/,
+    );
+    expect(queue).toMatch(
+      /onRegistered: [\s\S]*?invalidateQueries\(\{ queryKey: fieldKeys\.photos\(row\.service_job_id\) \}\)/,
     );
   });
   it("no longer returns null for an editor with no repairs and no photos; a reader with nothing still gets nothing", () => {

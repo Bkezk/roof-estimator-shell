@@ -261,11 +261,15 @@ describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row h
     closeout.indexOf("function RepairRow({"),
     closeout.indexOf("function RepairCard({"),
   );
-  it("one upload mutation and the two hidden inputs live in the form's camera hook, not the card or the section", () => {
-    expect(section).toContain("const upload = useMutation({");
+  it("the one camera (two hidden inputs feeding the portal's one picture queue — Oct 28) lives in the form's camera hook, not the card or the section", () => {
+    // Oct 28: the per-screen upload mutation became the portal's one queue (picture-queue.ts).
+    expect(section).toContain("const pictures = usePictures({ jobId });");
+    expect(section).not.toContain("useMutation(");
     expect(section).toContain("ref={beforeRef}");
     expect(section).toContain("ref={afterRef}");
-    expect(section).toContain("repair_id: repairId,");
+    expect(section).toContain(
+      "pictures.add(files, { jobId, repairId, itemKey: null, role }, { fromCamera });",
+    );
     expect(card).not.toContain("useMutation({\n    mutationFn: async ({ file, role }");
     expect(card).not.toContain('type="file"');
     expect(repairsSection).not.toContain("useMutation({\n    mutationFn: async ({ file, role }");
@@ -273,30 +277,23 @@ describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row h
     expect(closeout).toContain("const camera = useRepairCamera(job.id);");
     expect(closeout).toContain("{camera.inputs}");
   });
-  it("a failed upload keeps { file, role } per repair; success clears it; the toast no longer says take it again", () => {
-    expect(section).toContain("const [failed, setFailed] = useState<Record<string, Shot>>({});");
+  it("a failed upload is kept (the queue holds it, red in the strip) for Retry upload / Discard; the toast no longer says take it again", () => {
     expect(section).toContain(
-      "setFailed((f) => ({ ...f, [v.repairId]: { file: v.file, role: v.role } }));",
+      "pending: pictures.entries.filter((p) => p.target.repairId === r.id),",
     );
-    expect(section).toMatch(
-      /onSuccess: \(row, v\) => \{[\s\S]*?const \{ \[v\.repairId\]: _landed, \.\.\.rest \} = f;/,
-    );
+    expect(section).toContain("onRetry: pictures.retry,");
+    expect(section).toContain("onDiscard: pictures.discard,");
     expect(closeout).not.toContain("take it again");
     expect(closeout).toContain("Retry upload");
   });
-  it("Retry upload resends the kept file; Discard drops it", () => {
-    expect(section).toMatch(
-      /onRetry: \(\) => \{\s*const shot = failed\[r\.id\];\s*if \(shot\) upload\.mutate\(\{ \.\.\.shot, repairId: r\.id \}\);/,
+  it("Retry upload resends the kept picture; Discard drops it — one line per failed picture of the step's roles", () => {
+    // The failed pictures of the step's roles (closeout-steps: Before in step 2, After in
+    // step 3) — the Retry upload / Discard line sits under that step's button.
+    expect(closeout).toContain('const failed = pending.filter((p) => p.status === "failed");');
+    expect(closeout).toMatch(
+      /\{failed\.map\(\(p\) => \([\s\S]*?Retry upload[\s\S]*?onClick=\{\(\) => onDiscard\(p\.id\)\}[\s\S]*?Discard\s*<\/Button>/,
     );
-    expect(section).toMatch(
-      /onDiscard: \(\) =>\s*setFailed\(\(f\) => \{\s*const \{ \[r\.id\]: _dropped, \.\.\.rest \} = f;/,
-    );
-    // `shown`: the failed shot when it is the step's role (closeout-steps: Before in step 2,
-    // After in step 3) — the Retry upload / Discard line sits under that step's button.
-    expect(closeout).toContain(
-      "const shown = failed && roles.includes(failed.role) ? failed : undefined;",
-    );
-    expect(closeout).toMatch(/\{shown && \([\s\S]*?Retry upload[\s\S]*?Discard\s*<\/Button>/);
+    expect(closeout).toContain("onClick={() => onRetry(p.id)}");
   });
   it("the folded row has the step's camera button (Before (n) in step 2, After (n) in step 3) beside the amber needs hint, without opening the card", () => {
     expect(row).toContain(

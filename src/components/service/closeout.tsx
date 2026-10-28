@@ -118,7 +118,6 @@ import {
   listJobRepairs,
   listRepairTemplates,
   myClock,
-  photoObjectPath,
   recentRepairsForJob,
   registerJobPhoto,
   saveCloseout,
@@ -201,18 +200,35 @@ import { officeStageMessage } from "@/lib/office-stage-message";
 import { pressLine, runningLabel } from "@/lib/tech-clock";
 import {
   clock,
+  coarsePointer,
   errText,
   fieldKeys,
-  getPosition,
   localYmd,
   loudError,
   removeFromServiceBucket,
-  shrinkPhoto,
+  takePickedFiles,
   uploadToServiceBucket,
   useAutosave,
   useSignedUrl,
   whenShort,
 } from "@/components/service/field-utils";
+import { shouldMarkUpAfterShot, type QueuedPicture } from "@/lib/photo-upload-queue";
+import {
+  NO_SELECTION,
+  enterSelect,
+  pruneSelect,
+  toggleSelect,
+  type SelectState,
+} from "@/lib/photo-select";
+import { usePictures } from "@/components/service/picture-queue";
+import {
+  AfterShotEditor,
+  PendingThumbs,
+  UploadBadge,
+  WaitingForSignalLine,
+  type FreshShot,
+} from "@/components/service/picture-queue-ui";
+import { PhotoSelectBar } from "@/components/service/photo-select-bar";
 
 // ---------------------------------------------------------------------------------------------
 // The text fields and their local draft.
@@ -1467,11 +1483,7 @@ function TagChip({
 
 /** A before or after photo (the camera buttons; the signature is registered elsewhere). */
 type PhotoRole = "before" | "after";
-/** A photo that did not upload, kept on its repair for Retry upload (owner, Oct 9). */
-interface Shot {
-  file: File;
-  role: PhotoRole;
-}
+const ROLE_WORD: Record<PhotoRole, string> = { before: "Before", after: "After" };
 
 /**
  * The repairs, in one of the two steps they span (owner, Oct 9, closeout-steps.ts): "before" is
@@ -1815,13 +1827,14 @@ const repairVals = (r: JobRepairRow): RepairVals => ({
 
 /** The section's camera, handed to a repair's row and card (see RepairsSection). */
 interface PhotoControls {
-  /** The role uploading for this repair now, else null. */
-  uploading: PhotoRole | null;
-  /** The last photo of this repair that did not upload, until it lands or is discarded. */
-  failed: Shot | undefined;
+  /**
+   * This repair's pictures in flight (the portal's one queue): going up, waiting for signal, or
+   * failed with Retry / Discard — the badge and the placeholders in the strip.
+   */
+  pending: QueuedPicture[];
   onPhoto: (role: PhotoRole) => void;
-  onRetry: () => void;
-  onDiscard: () => void;
+  onRetry: (id: string) => void;
+  onDiscard: (id: string) => void;
 }
 
 /** The one camera both repair steps share (useRepairCamera): its hidden inputs and controls. */
@@ -1831,90 +1844,52 @@ interface RepairCamera {
 }
 
 /**
- * Owner, Oct 9: the camera is ONE mutation with two hidden file inputs, so a folded row's
- * Before / After buttons (RepairRow) and the open card share it — a tech taps a row's camera
- * without opening the card. Held by the form, since the repairs show in step 2 (Before) and
- * step 3 (The work). `aim` is the repair the next picked file goes to. A failed upload keeps
- * its file here (`failed`, one per repair) for "Retry upload": the file used to be thrown away
- * with the error. A success or Discard lets it go.
+ * Owner, Oct 9: the camera is ONE pair of hidden file inputs, so a folded row's Before / After
+ * buttons (RepairRow) and the open card share it — a tech taps a row's camera without opening the
+ * card. Held by the form, since the repairs show in step 2 (Before) and step 3 (The work). `aim`
+ * is the repair the next picked file goes to. Since Oct 28 every shot goes into the portal's one
+ * picture queue (picture-queue.ts; the core lib/photo-upload-queue.ts): it shrinks and uploads in
+ * the background, up to three at a time, while the tech carries on — a badge ("2 uploading") and
+ * a grey placeholder in the strip until the row lands; a shot the signal dropped is kept on the
+ * phone ("1 picture waiting for signal") and goes up on its own; a refused one is red in the
+ * strip with Retry / Discard (owner, Oct 9: the file is never thrown away with the error).
+ *
+ * Mark up as you shoot: the inputs have `capture`, so on a phone (shouldMarkUpAfterShot; never
+ * on a computer) the markup editor opens on the fresh shot (AfterShotEditor) with Skip, Done and
+ * "Take another <role>" for the same repair — one tap per shot.
  */
 function useRepairCamera(jobId: string): RepairCamera {
-  const qc = useQueryClient();
-  const registerFn = useServerFn(registerJobPhoto);
+  const pictures = usePictures({ jobId });
   const beforeRef = useRef<HTMLInputElement | null>(null);
   const afterRef = useRef<HTMLInputElement | null>(null);
   const aim = useRef<string | null>(null);
-  const [failed, setFailed] = useState<Record<string, Shot>>({});
-  const upload = useMutation({
-    mutationFn: async ({ file, role, repairId }: Shot & { repairId: string }) => {
-      // GPS runs beside the upload and gives up after 3 s; a photo never waits on it.
-      const where = getPosition(3000);
-      const shrunk = await shrinkPhoto(file);
-      const path = photoObjectPath(jobId, shrunk.name || "photo.jpg");
-      await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
-      const pos = await where;
-      try {
-        return await registerFn({
-          data: {
-            service_job_id: jobId,
-            repair_id: repairId,
-            role,
-            storage_path: path,
-            file_name: shrunk.name || null,
-            file_size: shrunk.blob.size,
-            taken_at: new Date(file.lastModified || Date.now()).toISOString(),
-            lat: pos?.lat ?? null,
-            lng: pos?.lng ?? null,
-          },
-        });
-      } catch (e) {
-        await removeFromServiceBucket(path);
-        throw e;
-      }
-    },
-    onSuccess: (row, v) => {
-      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) => [...(old ?? []), row]);
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-      setFailed((f) => {
-        if (!(v.repairId in f)) return f;
-        const { [v.repairId]: _landed, ...rest } = f;
-        return rest;
-      });
-      toast.success(`${row.role === "before" ? "Before" : "After"} photo saved`);
-    },
-    onError: (e, v) => {
-      setFailed((f) => ({ ...f, [v.repairId]: { file: v.file, role: v.role } }));
-      loudError(
-        `The ${v.role} photo did not upload (it is kept on the repair — Retry upload with signal)`,
-        e,
-      );
-    },
-  });
+  const [shot, setShot] = useState<(FreshShot & { role: PhotoRole; repairId: string }) | null>(
+    null,
+  );
   const takePhoto = (repairId: string, role: PhotoRole) => {
     aim.current = repairId;
     (role === "before" ? beforeRef : afterRef).current?.click();
   };
   const pick = (role: PhotoRole) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
+    const input = e.target;
+    const files = takePickedFiles(input);
     const repairId = aim.current;
-    if (!repairId) return;
-    for (const file of files) upload.mutate({ file, role, repairId });
+    if (!repairId || files.length === 0) return;
+    const fromCamera = shouldMarkUpAfterShot({
+      capture: input.getAttribute("capture"),
+      coarsePointer: coarsePointer(),
+    });
+    const ids = pictures.add(files, { jobId, repairId, itemKey: null, role }, { fromCamera });
+    const [first] = files;
+    const [id] = ids;
+    if (fromCamera && files.length === 1 && first && id)
+      setShot({ id, file: first, label: ROLE_WORD[role], role, repairId });
   };
   const photoControls = (r: JobRepairRow): PhotoControls => ({
-    uploading:
-      upload.isPending && upload.variables?.repairId === r.id ? upload.variables.role : null,
-    failed: failed[r.id],
+    pending: pictures.entries.filter((p) => p.target.repairId === r.id),
     onPhoto: (role) => takePhoto(r.id, role),
-    onRetry: () => {
-      const shot = failed[r.id];
-      if (shot) upload.mutate({ ...shot, repairId: r.id });
-    },
-    onDiscard: () =>
-      setFailed((f) => {
-        const { [r.id]: _dropped, ...rest } = f;
-        return rest;
-      }),
+    onRetry: pictures.retry,
+    onDiscard: pictures.discard,
   });
 
   const inputs = (
@@ -1935,15 +1910,29 @@ function useRepairCamera(jobId: string): RepairCamera {
         className="hidden"
         onChange={pick("after")}
       />
+      {shot && (
+        <AfterShotEditor
+          shot={shot}
+          onClose={() => setShot(null)}
+          onTakeAnother={() => takePhoto(shot.repairId, shot.role)}
+          attachMarks={pictures.attachMarks}
+        />
+      )}
     </>
   );
   return { inputs, controls: photoControls };
 }
 
+/** This repair's pictures in flight for the step's roles (the strip's placeholders, the badge). */
+const pendingFor = (camera: PhotoControls, roles: readonly PhotoRole[]) =>
+  camera.pending.filter((p) => (roles as readonly string[]).includes(p.target.role));
+
 /**
  * The Before (n) / After (n) camera buttons — `roles`: the step's (step 2 Before, step 3 After;
- * closeout-repairs.ts PHASE_PHOTO_ROLES) — and, under them, that role's failed photo with
- * "Retry upload" / "Discard". `compact`: the folded row's size; else the card's wide buttons.
+ * closeout-repairs.ts PHASE_PHOTO_ROLES) — never disabled: the queue takes the next shot while
+ * the last one goes up (a "2 uploading" badge beside them; the placeholders sit in the card's
+ * strip). Under them, that role's pictures waiting for signal and the failed ones with "Retry
+ * upload" / "Discard". `compact`: the folded row's size; else the card's wide buttons.
  */
 function PhotoButtons({
   photos,
@@ -1956,52 +1945,51 @@ function PhotoButtons({
   roles: readonly PhotoRole[];
   compact?: boolean | undefined;
 }) {
-  const { uploading, failed, onPhoto, onRetry, onDiscard } = camera;
+  const { onPhoto, onRetry, onDiscard } = camera;
   const count = (role: PhotoRole) => photos.filter((p) => p.role === role).length;
-  const shown = failed && roles.includes(failed.role) ? failed : undefined;
+  const pending = pendingFor(camera, roles);
+  const uploading = pending.filter((p) => p.status !== "held" && p.status !== "failed").length;
+  const waiting = pending.filter((p) => p.status === "held").length;
+  const failed = pending.filter((p) => p.status === "failed");
   return (
     <>
-      <div className={compact ? "flex gap-2" : "grid grid-cols-2 gap-2"}>
+      <div
+        className={`flex flex-wrap items-center gap-2 ${compact ? "" : "sm:grid sm:grid-cols-2"}`}
+      >
         {roles.map((role) => (
           <Button
             key={role}
             type="button"
             variant="outline"
             className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
-            disabled={uploading === role}
             onClick={() => onPhoto(role)}
           >
-            {uploading === role ? (
-              <Loader2
-                className={compact ? "mr-1 h-4 w-4 animate-spin" : "mr-2 h-5 w-5 animate-spin"}
-              />
-            ) : (
-              <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-            )}
-            {role === "before" ? "Before" : "After"}
+            <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
+            {ROLE_WORD[role]}
             {count(role) ? ` (${count(role)})` : ""}
           </Button>
         ))}
+        <UploadBadge n={uploading} />
       </div>
-      {shown && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+      <WaitingForSignalLine n={waiting} />
+      {failed.map((p) => (
+        <div
+          key={p.id}
+          className="flex flex-wrap items-center gap-2 text-sm"
+          data-line="photo-failed"
+        >
           <span className="text-destructive">
-            The {shown.role === "before" ? "Before" : "After"} photo did not upload
+            The {ROLE_WORD[p.target.role as PhotoRole] ?? "photo"} photo did not upload
+            {p.error ? `: ${p.error}` : ""}
           </span>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10"
-            disabled={uploading !== null}
-            onClick={onRetry}
-          >
+          <Button type="button" variant="outline" className="h-10" onClick={() => onRetry(p.id)}>
             <RefreshCw className="mr-1 h-4 w-4" /> Retry upload
           </Button>
-          <Button type="button" variant="ghost" className="h-10" onClick={onDiscard}>
+          <Button type="button" variant="ghost" className="h-10" onClick={() => onDiscard(p.id)}>
             Discard
           </Button>
         </div>
-      )}
+      ))}
     </>
   );
 }
@@ -2084,6 +2072,9 @@ function RepairCard({
   const deletePhotoFn = useServerFn(deleteJobPhoto);
   const [vals, setVals] = useState<RepairVals>(() => repairVals(repair));
   const [confirmRemove, setConfirmRemove] = useState(false);
+  // Owner, Oct 28 (fewer taps): hold a thumbnail (or Shift+click) to pick several, then Remove /
+  // Download them at once (lib/photo-select.ts; the bar is photo-select-bar.tsx).
+  const [sel, setSel] = useState<SelectState>(NO_SELECTION);
 
   const payload = (v: RepairVals) => ({
     id: repair.id,
@@ -2155,6 +2146,14 @@ function RepairCard({
   const before = phase === "before";
   const roles = PHASE_PHOTO_ROLES[phase];
   const shown = photos.filter((p) => (roles as readonly string[]).includes(p.role));
+  const pending = pendingFor(camera, roles);
+  const selection = pruneSelect(
+    sel,
+    shown.map((p) => p.id),
+  );
+  const picked = selection.ids
+    .map((id) => shown.find((p) => p.id === id))
+    .filter((p): p is JobPhotoRow => !!p);
 
   return (
     <article className="space-y-3 rounded-lg border bg-muted/20 p-3">
@@ -2278,8 +2277,8 @@ function RepairCard({
         </>
       )}
 
-      {shown.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+      {(shown.length > 0 || pending.length > 0) && (
+        <div className="flex flex-wrap gap-2" data-strip={phase}>
           {shown.map((p) => (
             <PhotoThumb
               key={p.id}
@@ -2289,9 +2288,26 @@ function RepairCard({
               // Tap a photo to circle the problem, add an arrow or words (owner, Oct 1).
               canAnnotate
               ticketNumber={ticketNumber}
+              select={{
+                on: selection.on,
+                selected: selection.ids.includes(p.id),
+                onPress: (how) =>
+                  setSel(how === "enter" ? enterSelect(p.id) : toggleSelect(selection, p.id)),
+              }}
             />
           ))}
+          {/* The pictures still going up (grey, a spinner) become real thumbnails as they land. */}
+          <PendingThumbs entries={pending} onRetry={camera.onRetry} onDiscard={camera.onDiscard} />
         </div>
+      )}
+      {selection.on && picked.length > 0 && (
+        <PhotoSelectBar
+          jobId={jobId}
+          ticketNumber={ticketNumber}
+          photos={photos}
+          selected={picked}
+          onClear={() => setSel(NO_SELECTION)}
+        />
       )}
 
       <PhotoButtons photos={photos} camera={camera} roles={roles} />

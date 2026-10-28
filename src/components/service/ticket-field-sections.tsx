@@ -44,8 +44,21 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { photoOrdinals } from "@/lib/photo-annotations";
+import {
+  NO_SELECTION,
+  enterSelect,
+  pruneSelect,
+  toggleSelect,
+  type SelectState,
+} from "@/lib/photo-select";
 import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
 import { DownloadAllPhotos } from "@/components/service/photo-markup";
+import { PhotoSelectBar } from "@/components/service/photo-select-bar";
+import {
+  PendingThumbs,
+  UploadBadge,
+  WaitingForSignalLine,
+} from "@/components/service/picture-queue-ui";
 import {
   dragHasFiles,
   errText,
@@ -401,6 +414,9 @@ function RepairsReadOnly({
   const pictures = useTicketPictureUpload(jobId);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // Owner, Oct 28 (fewer taps): hold a thumbnail (or Shift / Ctrl+click) to pick several, then
+  // Remove / Attach to inspection item / Download them at once (lib/photo-select.ts).
+  const [sel, setSel] = useState<SelectState>(NO_SELECTION);
   // The office removes a picture it added by mistake (the thumb's X asks first; the field flow's
   // own delete). The server fn checks the ticket is theirs to touch.
   const delPhoto = useMutation({
@@ -417,6 +433,13 @@ function RepairsReadOnly({
   const pics = (photos.data ?? []).filter((p) => p.role !== "signature");
   const loose = pics.filter((p) => !p.repair_id || !rows.some((r) => r.id === p.repair_id));
   const ord = photoOrdinals(pics);
+  const selection = pruneSelect(
+    sel,
+    pics.map((p) => p.id),
+  );
+  const picked = selection.ids
+    .map((id) => pics.find((p) => p.id === id))
+    .filter((p): p is (typeof pics)[number] => !!p);
   const thumb = (p: (typeof pics)[number]) => (
     <PhotoThumb
       key={p.id}
@@ -427,6 +450,16 @@ function RepairsReadOnly({
       ordinal={ord.get(p.id)}
       onDelete={canEdit ? () => delPhoto.mutate(p.id) : undefined}
       deleting={delPhoto.isPending && delPhoto.variables === p.id}
+      select={
+        canEdit
+          ? {
+              on: selection.on,
+              selected: selection.ids.includes(p.id),
+              onPress: (how) =>
+                setSel(how === "enter" ? enterSelect(p.id) : toggleSelect(selection, p.id)),
+            }
+          : undefined
+      }
     />
   );
   // Nothing recorded (and nothing wrong): no section at all for a reader. Also nothing while
@@ -461,23 +494,14 @@ function RepairsReadOnly({
         aria-label="Add pictures"
         onChange={(e) => pictures.add(takePickedFiles(e.target))}
       />
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={pictures.uploading}
-        onClick={() => fileRef.current?.click()}
-      >
-        {pictures.uploading ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-        ) : (
-          <ImagePlus className="h-4 w-4" aria-hidden />
-        )}
+      <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+        <ImagePlus className="h-4 w-4" aria-hidden />
         Add pictures
       </Button>
-      <span className="text-xs text-muted-foreground">
-        {pictures.progressText ?? "or drop pictures here"}
-      </span>
+      {/* The app's one queue (picture-queue.ts): the next pick never waits for the last. */}
+      <UploadBadge n={pictures.uploading} />
+      <span className="text-xs text-muted-foreground">or drop pictures here</span>
+      <WaitingForSignalLine n={pictures.waitingForSignal} className="basis-full" />
     </div>
   );
   // Drag-and-drop onto the fold's photo area (files only: a thumb dragged OUT to the desktop
@@ -557,16 +581,34 @@ function RepairsReadOnly({
             Could not load the photos: {errText(photos.error)}
           </p>
         )}
-        {loose.length > 0 ? (
+        {loose.length > 0 || pictures.entries.length > 0 ? (
           <div className="space-y-1.5">
             <p className="text-xs text-muted-foreground">Other photos</p>
-            <div className="flex flex-wrap gap-2">{loose.map(thumb)}</div>
+            <div className="flex flex-wrap gap-2">
+              {loose.map(thumb)}
+              {/* The pictures still going up: grey, a spinner, until each row lands. */}
+              <PendingThumbs
+                entries={pictures.entries}
+                size="sm"
+                onRetry={pictures.retry}
+                onDiscard={pictures.discard}
+              />
+            </div>
           </div>
         ) : (
           canEdit &&
           !photos.isLoading &&
           !photos.error &&
           pics.length === 0 && <p className="text-sm text-muted-foreground">No pictures yet</p>
+        )}
+        {canEdit && selection.on && picked.length > 0 && (
+          <PhotoSelectBar
+            jobId={jobId}
+            ticketNumber={ticketNumber}
+            photos={pics}
+            selected={picked}
+            onClear={() => setSel(NO_SELECTION)}
+          />
         )}
         {addPictures}
         {pics.length > 0 && (

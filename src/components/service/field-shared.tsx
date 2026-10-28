@@ -5,7 +5,7 @@
  * box (optionally collapsible, its open state remembered per section).
  */
 import { sectionTone } from "@/components/service/section-tones";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import {
 import type { AutosaveState } from "@/lib/autosave";
 import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
 import { photoDragData, setPhotoDrag } from "@/lib/photo-drag";
+import { LONG_PRESS_MS, thumbPress, type ThumbPress } from "@/lib/photo-select";
 import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
@@ -55,6 +56,7 @@ import {
 } from "@/components/ui/select";
 import {
   clock,
+  coarsePointer,
   errText,
   fieldKeys,
   localYmd,
@@ -255,10 +257,21 @@ const ROLE_LABEL: Record<string, string> = {
   signature: "Signature",
 };
 
+/** A strip that can pick several photos (lib/photo-select.ts): the mode, this photo's state, the press. */
+export interface ThumbSelect {
+  /** The select mode is on for this strip (a tap toggles; the lightbox does not open). */
+  on: boolean;
+  selected: boolean;
+  /** "enter" (a long press / a modifier click starts the mode with this photo) or "toggle". */
+  onPress: (how: Exclude<ThumbPress, "open">) => void;
+}
+
 /**
  * A square thumbnail with the photo's marks drawn over it (and a "Marked" badge); a tap opens
  * the lightbox (photo-markup.tsx): the photo with its marks, Mark up when `canAnnotate`, and
- * Download. Delete asks first.
+ * Download. Delete asks first. With `select` (owner, Oct 28: fewer taps), a long press (a finger)
+ * or Shift / Ctrl / ⌘ + click (a mouse) starts picking several; in the mode a tap toggles this
+ * one, a tick shows it is picked and the delete X steps aside for the strip's action bar.
  */
 export function PhotoThumb({
   photo,
@@ -268,6 +281,7 @@ export function PhotoThumb({
   canAnnotate = false,
   ticketNumber,
   ordinal,
+  select,
 }: {
   photo: JobPhotoRow;
   onDelete?: (() => void) | undefined;
@@ -279,10 +293,37 @@ export function PhotoThumb({
   ticketNumber?: string | number | null | undefined;
   /** The photo's number among the ticket's photos of its role (else read from the list). */
   ordinal?: number | undefined;
+  /** The strip picks several (the Photos & repairs fold, the close-out's strips). */
+  select?: ThumbSelect | undefined;
 }) {
   const url = useSignedUrl(photo.storage_path);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  // A long press (LONG_PRESS_MS) with a finger enters the select mode; the click that follows
+  // the release must not then open the lightbox or toggle the photo back.
+  const pressTimer = useRef<number | null>(null);
+  const pressAt = useRef<{ x: number; y: number } | null>(null);
+  const longPressed = useRef(false);
+  const clearPress = () => {
+    if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    pressAt.current = null;
+  };
+  // A finger never holds perfectly still: only a real move (a scroll) cancels the long press.
+  const pressMoved = (e: React.PointerEvent) => {
+    const from = pressAt.current;
+    if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 10) clearPress();
+  };
+  const press = (e: React.MouseEvent) => {
+    const long = longPressed.current;
+    longPressed.current = false;
+    if (long) return; // the long press already entered the mode
+    const how = thumbPress(!!select?.on, e, false);
+    if (how === "open" || !select) setOpen(true);
+    else select.onPress(how);
+  };
+  // On a phone the drag-to-desktop handle (below) would fight the long press.
+  const touch = useMemo(() => coarsePointer(), []);
   const { marks, rotation } = useMemo(
     () => parsePhotoMarkup(photo.annotations),
     [photo.annotations],
@@ -294,29 +335,59 @@ export function PhotoThumb({
       qc.getQueryData<JobPhotoRow[]>(fieldKeys.photos(photo.service_job_id)) ?? [photo],
     ).get(photo.id) ??
     1;
+  const draggable = !!url.data && !select?.on && !(select && touch);
   return (
     <div
-      className={`relative ${box} shrink-0 overflow-hidden rounded-md border bg-muted ${url.data ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`relative ${box} shrink-0 overflow-hidden rounded-md border bg-muted ${
+        draggable ? "cursor-grab active:cursor-grabbing" : ""
+      } ${select?.selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""} ${
+        select ? "select-none [-webkit-touch-callout:none]" : ""
+      }`}
+      data-selected={select ? select.selected : undefined}
       // Owner, Oct 7: drag a photo out onto the desktop to save it (Chrome / Edge: DownloadURL).
-      draggable={!!url.data}
+      draggable={draggable}
       onDragStart={(e) => {
-        if (!url.data) return;
+        if (!url.data || !draggable) return;
         setPhotoDrag(
           e.dataTransfer,
           photoDragData(url.data, ticketNumber, photo.role, n, photo.storage_path),
           url.data,
         );
       }}
+      // A long press must not open the browser's own image menu while a strip can pick.
+      onContextMenu={(e) => {
+        if (select) e.preventDefault();
+      }}
     >
       {url.data ? (
         <button
           type="button"
           className="block h-full w-full"
+          aria-pressed={select?.on ? select.selected : undefined}
           title={
-            (marks.length ? "Open the photo (marked)" : "Open the photo") +
-            " — or drag it to your desktop to save it"
+            select?.on
+              ? select.selected
+                ? "Picked — tap to let it go"
+                : "Tap to pick this photo too"
+              : (marks.length ? "Open the photo (marked)" : "Open the photo") +
+                (draggable ? " — or drag it to your desktop to save it" : "") +
+                (select ? " · hold (or Shift+click) to pick several" : "")
           }
-          onClick={() => setOpen(true)}
+          onClick={press}
+          onPointerDown={(e) => {
+            if (!select || select.on || e.pointerType !== "touch") return;
+            clearPress();
+            pressAt.current = { x: e.clientX, y: e.clientY };
+            pressTimer.current = window.setTimeout(() => {
+              pressTimer.current = null;
+              longPressed.current = true;
+              select.onPress("enter");
+            }, LONG_PRESS_MS);
+          }}
+          onPointerUp={clearPress}
+          onPointerCancel={clearPress}
+          onPointerMove={pressMoved}
+          onPointerLeave={clearPress}
         >
           <RotatedPhoto
             url={url.data}
@@ -348,6 +419,14 @@ export function PhotoThumb({
           <PenLine className="h-2.5 w-2.5" aria-hidden /> Marked
         </span>
       )}
+      {select?.selected && (
+        <span
+          className="pointer-events-none absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          aria-hidden
+        >
+          <Check className="h-4 w-4" />
+        </span>
+      )}
       {open && url.data && (
         <PhotoLightbox
           photo={photo}
@@ -359,7 +438,7 @@ export function PhotoThumb({
           ordinal={n}
         />
       )}
-      {onDelete && (
+      {onDelete && !select?.on && (
         <button
           type="button"
           className="absolute right-0.5 top-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"

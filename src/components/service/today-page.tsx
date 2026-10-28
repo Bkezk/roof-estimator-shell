@@ -60,6 +60,8 @@ import { seedJobFromToday } from "@/lib/job-cache";
 import { CLOCK_MOVED_LINE, cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
+import { usePictures } from "@/components/service/picture-queue";
+import { UploadBadge, WaitingForSignalLine } from "@/components/service/picture-queue-ui";
 import { HistoryLink } from "@/components/service/site-history";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
 import { WarrantyBadgeList } from "@/components/crm/site-warranties";
@@ -275,6 +277,8 @@ function ClockBanner({ clock, jobs }: { clock: MyClock; jobs: TodayJob[] }) {
     hour: "numeric",
     minute: "2-digit",
   });
+  // This ticket's pictures still going up, or kept on the phone for signal (owner, Oct 28).
+  const pictures = usePictures({ jobId: clock.service_job_id });
   return (
     // Owner, Oct 15: the one control for the running clock, nothing like a ticket card — a
     // coloured panel (amber on the road, green on site) with the state, the elapsed time, what
@@ -322,6 +326,8 @@ function ClockBanner({ clock, jobs }: { clock: MyClock; jobs: TodayJob[] }) {
           ? "Leaving for now? Leave site stops the clock and keeps the ticket open to come back to. Finished? Complete opens the close-out."
           : "When you arrive, tap On site — the travel time is logged and the labor clock starts."}
       </p>
+      <UploadBadge n={pictures.uploading} />
+      <WaitingForSignalLine n={pictures.waitingForSignal} />
       <div className="flex gap-2">
         {!onSite ? (
           <Button
@@ -437,6 +443,8 @@ function JobCard({
   // The clock's buttons for this card (tech-clock.ts cardActions; owner, Oct 15).
   const actions = cardActions(clock, j.id);
   const press_ = useClockPress(j);
+  // This ticket's pictures still going up, or kept on the phone for signal (owner, Oct 28).
+  const pictures = usePictures({ jobId: j.id });
 
   const press = () => {
     // Owner, Oct 9 (S13): this row IS the ticket row — plant it as the close-out's job so the
@@ -558,6 +566,9 @@ function JobCard({
       </div>
 
       {crewOpen && <CrewBox job={j} />}
+
+      <UploadBadge n={pictures.uploading} />
+      <WaitingForSignalLine n={pictures.waitingForSignal} />
 
       {/* The clock's buttons (owner, Oct 15; the Oct 8 one-button card is superseded): Start
           travel / On site while the clock is not on this ticket (a clock on another ticket moves

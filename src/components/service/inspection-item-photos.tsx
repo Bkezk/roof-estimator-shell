@@ -45,6 +45,11 @@ import { PhotoThumb } from "@/components/service/field-shared";
 import { RotatedPhoto } from "@/components/service/photo-markup";
 import { takePickedFiles, useSignedUrl } from "@/components/service/field-utils";
 import { useDeleteJobPhoto, useSetPhotoItem } from "@/components/service/item-photo-mutations";
+import {
+  PendingThumbs,
+  UploadBadge,
+  WaitingForSignalLine,
+} from "@/components/service/picture-queue-ui";
 import { useTicketPictureUpload } from "@/components/service/ticket-picture-upload";
 
 /** A checklist row as the "also on …" labels need it (the ticket's inspection draft items). */
@@ -359,26 +364,27 @@ export function AddItemPicturesButton({
         type="button"
         variant="outline"
         className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
-        disabled={upload.uploading}
         aria-label={`${itemLabel}: add pictures`}
         title="Add new pictures to this item — on a phone, the camera or the camera roll"
         onClick={() => fileRef.current?.click()}
       >
-        {upload.uploading ? (
-          <Loader2 className={`${compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} animate-spin`} />
-        ) : (
-          <ImagePlus className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-        )}
+        <ImagePlus className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
         Add pictures
       </Button>
-      {upload.progressText && (
-        <span
-          className="text-xs text-muted-foreground dark:text-muted-foreground"
-          role="status"
-          aria-live="polite"
-        >
-          {upload.progressText}
-        </span>
+      {/* The portal's one queue (picture-queue.ts): the next pick never waits for the last; a
+          "2 uploading" badge, "1 picture waiting for signal", and a grey placeholder per picture
+          until its row lands in the row's thumbnails. */}
+      <UploadBadge n={upload.uploading} />
+      <WaitingForSignalLine n={upload.waitingForSignal} className="basis-full" />
+      {upload.entries.length > 0 && (
+        <div className="flex basis-full flex-wrap gap-2" data-item-pending={itemKey}>
+          <PendingThumbs
+            entries={upload.entries}
+            size={compact ? "sm" : undefined}
+            onRetry={upload.retry}
+            onDiscard={upload.discard}
+          />
+        </div>
       )}
     </>
   );

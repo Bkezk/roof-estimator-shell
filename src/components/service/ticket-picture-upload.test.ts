@@ -1,29 +1,32 @@
 /**
  * Pictures added to a checklist item from the web (owner, Oct 27: "can pictures be added to
- * inspections from the web view like the leaks"). The registration payload is pure
- * (jobPhotoRegistration): with an item key it lands on the item; without, loose on the ticket as
- * before. The picked files are copied out of the input before it is cleared (takePickedFiles),
- * and the Inspection row's button is pinned to its source.
+ * inspections from the web view like the leaks"). Since Oct 28 the hook is a thin wrapper over
+ * the portal's one picture queue (picture-queue.ts; the core lib/photo-upload-queue.ts, whose
+ * registration payload — item_key on the item, null loose — is tested there): pinned here are
+ * the wrapper's shape, takePickedFiles (the files are copied out of the input before it is
+ * cleared) and the Inspection row's button.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { pictureRegistration } from "@/lib/photo-upload-queue";
 import { takePickedFiles } from "./field-utils";
-import { jobPhotoRegistration } from "./ticket-picture-upload";
 
 const JOB = "0f4a3b1e-7c2d-4e5f-9a8b-1c2d3e4f5a6b";
-const shrunk = { name: "IMG_0001.jpg", blob: { size: 1234 } };
-const file = { name: "IMG_0001.HEIC", lastModified: Date.UTC(2026, 9, 27, 15, 4, 5) };
+const picture = { blob: new Blob(["abc"]), type: "image/jpeg", name: "IMG_0001.jpg" };
 
-describe("jobPhotoRegistration", () => {
-  it("registers a picture on the checklist item when an item key is given", () => {
-    const data = jobPhotoRegistration({
-      jobId: JOB,
-      path: `${JOB}/u1.jpg`,
-      shrunk,
-      file,
-      itemKey: "flashing",
-    });
+describe("the registration of a web-added picture (the queue's pictureRegistration)", () => {
+  it("lands on the checklist item when an item key is given", () => {
+    const data = pictureRegistration(
+      {
+        target: { jobId: JOB, repairId: null, itemKey: "flashing", role: "other" },
+        fileName: "IMG_0001.HEIC",
+        takenAt: "2026-10-27T15:04:05.000Z",
+        picture,
+        where: null,
+      },
+      `${JOB}/u1.jpg`,
+    );
     expect(data).toEqual({
       service_job_id: JOB,
       repair_id: null,
@@ -31,49 +34,66 @@ describe("jobPhotoRegistration", () => {
       role: "other",
       storage_path: `${JOB}/u1.jpg`,
       file_name: "IMG_0001.jpg",
-      file_size: 1234,
+      file_size: 3,
       taken_at: "2026-10-27T15:04:05.000Z",
+      lat: null,
+      lng: null,
     });
   });
-  it("registers a loose ticket photo (item_key null) when no item is given — the Photos fold", () => {
-    expect(jobPhotoRegistration({ jobId: JOB, path: `${JOB}/u2.jpg`, shrunk, file }).item_key).toBe(
-      null,
+  it("is loose on the ticket (item_key null) with no item — the Photos fold", () => {
+    const data = pictureRegistration(
+      {
+        target: { jobId: JOB, repairId: null, itemKey: null, role: "other" },
+        fileName: "a.jpg",
+        takenAt: "2026-10-27T15:04:05.000Z",
+        picture,
+        where: null,
+      },
+      `${JOB}/u2.jpg`,
     );
-    expect(
-      jobPhotoRegistration({ jobId: JOB, path: `${JOB}/u2.jpg`, shrunk, file, itemKey: null })
-        .item_key,
-    ).toBe(null);
-  });
-  it("is always an 'other' photo on no repair (setJobPhotoItem's rule for a photo on an item)", () => {
-    const data = jobPhotoRegistration({
-      jobId: JOB,
-      path: `${JOB}/u3.jpg`,
-      shrunk,
-      file,
-      itemKey: "seams",
-    });
+    expect(data.item_key).toBe(null);
     expect(data.role).toBe("other");
     expect(data.repair_id).toBe(null);
   });
-  it("names the row after the shrunk file, then the picked one; taken now when the file has no date", () => {
+  it("names the row after the shrunk file, then the picked one; null when neither has a name", () => {
+    const base = {
+      target: { jobId: JOB, repairId: null, itemKey: null, role: "other" as const },
+      takenAt: "2026-10-27T12:00:00.000Z",
+      where: null,
+    };
     expect(
-      jobPhotoRegistration({
-        jobId: JOB,
-        path: `${JOB}/u4.jpg`,
-        shrunk: { name: "", blob: { size: 1 } },
-        file: { name: "roof.png", lastModified: 0 },
-        now: () => Date.UTC(2026, 9, 27, 12, 0, 0),
-      }),
-    ).toMatchObject({ file_name: "roof.png", taken_at: "2026-10-27T12:00:00.000Z" });
+      pictureRegistration(
+        { ...base, fileName: "roof.png", picture: { ...picture, name: "" } },
+        `${JOB}/u4.jpg`,
+      ).file_name,
+    ).toBe("roof.png");
     expect(
-      jobPhotoRegistration({
-        jobId: JOB,
-        path: `${JOB}/u5.jpg`,
-        shrunk: { name: "", blob: { size: 1 } },
-        file: { name: "", lastModified: 0 },
-        now: () => 0,
-      }).file_name,
+      pictureRegistration(
+        { ...base, fileName: "", picture: { ...picture, name: "" } },
+        `${JOB}/u5.jpg`,
+      ).file_name,
     ).toBe(null);
+  });
+});
+
+describe("the wrapper (ticket-picture-upload.ts)", () => {
+  const src = readFileSync("src/components/service/ticket-picture-upload.ts", "utf8");
+  it("feeds the one queue as an 'other' photo on no repair, on the item when given", () => {
+    expect(src).toMatch(/usePictures\(\{ jobId, repairId: null, itemKey, role: "other" \}\)/);
+    expect(src).toMatch(
+      /pictures\.add\(list, \{ jobId, repairId: null, itemKey, role: "other" \}\)/,
+    );
+    expect(src).toMatch(/const itemKey = opts\.itemKey \?\? null;/);
+  });
+  it("keeps only image files and says so loudly when none was picked; it never shrinks or uploads itself", () => {
+    expect(src).toMatch(/imageFiles\(picked\)/);
+    expect(src).toContain('toast.error("Pick picture files (JPG, PNG, HEIC…)")');
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/shrinkPhoto|uploadToServiceBucket|registerJobPhoto|useMutation/);
+  });
+  it("has no blocking 'Uploading n of m…' line any more; the counts come from the queue", () => {
+    expect(src).not.toContain("uploadingLabel");
+    expect(src).toMatch(/uploadingAny: pictures\.uploading > 0/);
   });
 });
 
@@ -119,7 +139,13 @@ describe("the Inspection fold's row (inspection-item-photos.tsx)", () => {
   it("uploads through the ticket pipeline with the row's item key, copying the files out first", () => {
     expect(button).toMatch(/useTicketPictureUpload\(jobId, \{ itemKey \}\)/);
     expect(button).toMatch(/onChange=\{\(e\) => upload\.add\(takePickedFiles\(e\.target\)\)\}/);
-    expect(button).toMatch(/\{upload\.progressText\}/);
+  });
+  it("never blocks the next pick: the button is not disabled; a badge, the waiting line and placeholders show the queue", () => {
+    expect(button).not.toMatch(/disabled=/);
+    expect(button).toMatch(/<UploadBadge n=\{upload\.uploading\} \/>/);
+    expect(button).toMatch(/<WaitingForSignalLine n=\{upload\.waitingForSignal\}/);
+    expect(button).toMatch(/<PendingThumbs\s+entries=\{upload\.entries\}/);
+    expect(button).not.toContain("progressText");
   });
   it("sits beside From ticket photos on every flagged row an editor sees", () => {
     const tools = src.slice(src.indexOf("export function ItemPhotoTools"));

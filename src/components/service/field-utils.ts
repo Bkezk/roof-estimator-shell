@@ -156,6 +156,15 @@ export function getPosition(timeoutMs = 3000): Promise<{ lat: number; lng: numbe
   });
 }
 
+/** Is the device's main pointer a finger (a phone or tablet)? false on a computer and when unknown. */
+export function coarsePointer(): boolean {
+  try {
+    return typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  } catch {
+    return false;
+  }
+}
+
 /** Upload a file straight from the browser into the private "service" bucket. */
 export async function uploadToServiceBucket(path: string, body: Blob, contentType: string) {
   const { error } = await supabase.storage

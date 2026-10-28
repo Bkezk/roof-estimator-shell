@@ -1029,10 +1029,14 @@ describe("6c. photos: per checklist item and the findings roll, role 'other', no
     expect(camera).toContain(
       "export function useInspectionCamera(jobId: string): InspectionCamera {",
     );
-    expect(camera).toMatch(/repair_id: null,\s*role: "other",\s*item_key: itemKey,/);
+    // Oct 28: the camera feeds the portal's one picture queue with the item in the target
+    // (lib/photo-upload-queue.ts pictureRegistration puts it in item_key, role "other", no repair).
+    expect(camera).toMatch(
+      /pictures\.add\(\s*files,\s*\{ jobId, repairId: null, itemKey, role: "other" \}/,
+    );
     expect(camera).toContain('"data-camera": "inspection",');
-    expect(cards).toContain("camera={camera.controls(item.id)}");
-    expect(cards).toContain("camera={camera.controls(null)}");
+    expect(cards).toContain("camera={camera.controls(item.id, item.label)}");
+    expect(cards).toContain('camera={camera.controls(null, "Findings")}');
     // Oct 28: an item's roll is every picture whose item_keys include it; the findings roll the
     // pictures on no item (inspection.ts).
     expect(cards).toContain(

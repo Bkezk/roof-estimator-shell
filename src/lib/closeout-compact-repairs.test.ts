@@ -101,11 +101,13 @@ describe("the close-out's Repairs section", () => {
     expect(header).toContain('<ChevronUp className="h-5 w-5" />');
     expect(card).not.toContain("Remove repair");
     expect(card).not.toContain('<div className="flex justify-end">');
-    // The card's camera buttons come from PhotoButtons (the form's one upload mutation), for
-    // the step's role only.
+    // The card's camera buttons come from PhotoButtons (the form's one camera, feeding the portal's
+    // one picture queue since Oct 28), for the step's role only — never disabled: the next shot
+    // goes in line while the last one uploads (a "2 uploading" badge beside them).
     expect(card).toContain("<PhotoButtons photos={photos} camera={camera} roles={roles} />");
     expect(src).toMatch(
-      /className=\{compact \? "h-10 px-3 text-sm" : "h-11 text-base"\}\s*disabled=\{uploading === role\}/,
+      /className=\{compact \? "h-10 px-3 text-sm" : "h-11 text-base"\}\s*onClick=\{\(\) => onPhoto\(role\)\}/,
     );
+    expect(src).not.toMatch(/disabled=\{uploading === role\}/);
   });
 });

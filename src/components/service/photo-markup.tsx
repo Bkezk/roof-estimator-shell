@@ -105,6 +105,7 @@ import {
   type Pt,
   type Rotation,
 } from "@/lib/photo-annotations";
+import { deviceStorage, readMarkupMemory, writeMarkupMemory } from "@/lib/markup-memory";
 import { savePhotoAnnotations, type JobPhotoRow } from "@/lib/service-field.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -920,8 +921,13 @@ export function PhotoMarkupSurface({
   );
   const { rotation } = history;
   const { w: RW, h: RH } = rotatedBox(W, H, rotation);
-  const [tool, setTool] = useState<Tool>("ellipse");
-  const [color, setColor] = useState<PhotoColor>(DEFAULT_PHOTO_COLOR);
+  // The last pen (tool and colour) is this device's (owner, Oct 28: mark up as you shoot — the
+  // next shot opens with the same pen); Move is not a pen and is not remembered.
+  const [tool, setTool] = useState<Tool>(() => readMarkupMemory(deviceStorage()).tool);
+  const [color, setColor] = useState<PhotoColor>(() => readMarkupMemory(deviceStorage()).color);
+  useEffect(() => {
+    if (tool !== "move") writeMarkupMemory(deviceStorage(), { tool, color });
+  }, [tool, color]);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<PhotoView>(() => fullView(RW, RH));
   // A turn (or its undo) shows the whole turned picture again: the view is in the turned box.

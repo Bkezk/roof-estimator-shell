@@ -53,6 +53,11 @@ import type {
   InspectionCamera,
   InspectionPhotoControls,
 } from "@/components/service/inspection-camera";
+import {
+  PendingThumbs,
+  UploadBadge,
+  WaitingForSignalLine,
+} from "@/components/service/picture-queue-ui";
 import { errText } from "@/components/service/field-utils";
 
 /**
@@ -85,21 +90,33 @@ function PhotoRoll({
   compact?: boolean | undefined;
 }) {
   const delPhoto = useDeleteJobPhoto(jobId);
+  // The pictures still going up (the portal's one queue): grey placeholders until each row lands.
+  const placeholders = (
+    <PendingThumbs
+      entries={camera.pending}
+      size={compact ? "sm" : undefined}
+      onRetry={camera.onRetry}
+      onDiscard={camera.onDiscard}
+    />
+  );
   return (
     <div className="space-y-2">
       {itemKey ? (
-        <ItemPhotoThumbs
-          jobId={jobId}
-          itemKey={itemKey}
-          itemLabel={label}
-          photos={allPhotos}
-          items={items}
-          ticketNumber={ticketNumber}
-          canEdit
-          compact={compact}
-        />
+        <>
+          <ItemPhotoThumbs
+            jobId={jobId}
+            itemKey={itemKey}
+            itemLabel={label}
+            photos={allPhotos}
+            items={items}
+            ticketNumber={ticketNumber}
+            canEdit
+            compact={compact}
+          />
+          {camera.pending.length > 0 && <div className="flex flex-wrap gap-2">{placeholders}</div>}
+        </>
       ) : (
-        photos.length > 0 && (
+        (photos.length > 0 || camera.pending.length > 0) && (
           <div className="flex flex-wrap gap-2">
             {photos.map((p) => (
               <PhotoThumb
@@ -112,6 +129,7 @@ function PhotoRoll({
                 ticketNumber={ticketNumber}
               />
             ))}
+            {placeholders}
           </div>
         )
       )}
@@ -120,19 +138,13 @@ function PhotoRoll({
           type="button"
           variant="outline"
           className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
-          disabled={camera.uploading}
           onClick={camera.onPhoto}
           aria-label={`${label}: photo`}
         >
-          {camera.uploading ? (
-            <Loader2
-              className={compact ? "mr-1 h-4 w-4 animate-spin" : "mr-2 h-5 w-5 animate-spin"}
-            />
-          ) : (
-            <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-          )}
+          <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
           Photo{photos.length ? ` (${photos.length})` : ""}
         </Button>
+        <UploadBadge n={camera.uploading} />
         {itemKey && (
           <FromTicketPhotosButton
             jobId={jobId}
@@ -144,24 +156,37 @@ function PhotoRoll({
           />
         )}
         <span className="text-xs text-muted-foreground">Optional</span>
-        {camera.failed && (
-          <>
-            <span className="text-sm text-destructive">The photo did not upload</span>
+      </div>
+      <WaitingForSignalLine n={camera.waitingForSignal} />
+      {camera.pending
+        .filter((p) => p.status === "failed")
+        .map((p) => (
+          <div
+            key={p.id}
+            className="flex flex-wrap items-center gap-2 text-sm"
+            data-line="photo-failed"
+          >
+            <span className="text-destructive">
+              The photo did not upload{p.error ? `: ${p.error}` : ""}
+            </span>
             <Button
               type="button"
               variant="outline"
               className="h-10"
-              disabled={camera.uploading}
-              onClick={camera.onRetry}
+              onClick={() => camera.onRetry(p.id)}
             >
               <RefreshCw className="mr-1 h-4 w-4" /> Retry upload
             </Button>
-            <Button type="button" variant="ghost" className="h-10" onClick={camera.onDiscard}>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-10"
+              onClick={() => camera.onDiscard(p.id)}
+            >
               Discard
             </Button>
-          </>
-        )}
-      </div>
+          </div>
+        ))}
     </div>
   );
 }
@@ -211,7 +236,7 @@ export function InspectionChecklistStep({
                 allPhotos={photos}
                 itemKey={item.id}
                 items={draft.items}
-                camera={camera.controls(item.id)}
+                camera={camera.controls(item.id, item.label)}
                 label={item.label}
                 jobId={job.id}
                 ticketNumber={job.number}
@@ -294,7 +319,7 @@ export function InspectionFindingsStep({
         photos={itemPhotos(photos, null)}
         allPhotos={photos}
         itemKey={null}
-        camera={camera.controls(null)}
+        camera={camera.controls(null, "Findings")}
         label="Findings"
         jobId={job.id}
         ticketNumber={job.number}
