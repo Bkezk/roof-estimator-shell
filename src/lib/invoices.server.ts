@@ -45,8 +45,13 @@ import {
   storedPhotoIds,
 } from "@/lib/invoice-photos";
 import {
+  TEXT_FILL_PAD,
   arrowGeom,
   ellipseGeom,
+  haloPdf,
+  hexRgb,
+  markFill,
+  markRot,
   parsePhotoMarkup,
   pdfImagePlacement,
   photoColorRgb,
@@ -55,6 +60,9 @@ import {
   rotatedBox,
   strokeFor,
   tagGeom,
+  tagNumberColor,
+  textBox,
+  textFillColor,
   textSizeFor,
   type PhotoMark,
   type Rotation,
@@ -857,12 +865,36 @@ export function drawPhoto(
   return n;
 }
 
+/** A rounded box as an SVG path from its top-left corner (y down), the corners cubic curves. */
+function roundedBoxPath(w: number, h: number, radius: number): string {
+  const r = Math.min(radius, w / 2, h / 2);
+  const k = r * 0.5523; // a quarter circle's bezier handle
+  const f = (n: number) => n.toFixed(2);
+  return [
+    `M${f(r)} 0`,
+    `L${f(w - r)} 0`,
+    `C${f(w - r + k)} 0 ${f(w)} ${f(r - k)} ${f(w)} ${f(r)}`,
+    `L${f(w)} ${f(h - r)}`,
+    `C${f(w)} ${f(h - r + k)} ${f(w - r + k)} ${f(h)} ${f(w - r)} ${f(h)}`,
+    `L${f(r)} ${f(h)}`,
+    `C${f(r - k)} ${f(h)} 0 ${f(h - r + k)} 0 ${f(h - r)}`,
+    `L0 ${f(r)}`,
+    `C0 ${f(r - k)} ${f(r - k)} 0 ${f(r)} 0`,
+    "Z",
+  ].join(" ");
+}
+
 /**
  * Draw a photo's marks over it on the PDF: the photo's box is (x, y) its bottom-left corner,
  * w × h points. Marks are 0..1 from the picture's top-left (photo-annotations.ts); the line
  * width and the lettering scale with the box as on screen. Circles are ellipses, arrows a line
- * with a filled triangle head, boxes rectangles, text and tags words on a dark band so they read
- * on any roof. Returns how many marks were drawn.
+ * with a filled triangle head, boxes rectangles — each on its halo (haloPdf: dark, light under a
+ * black mark) — text and tags words on a band of the same halo so they read on any roof, or, for
+ * a text with a background (`fill`), on a solid rounded box (textFillColor). A mark's own turn
+ * (`rot`, clockwise on the picture) is pdf-lib's `rotate: degrees(-rot)` (its page counts
+ * counter-clockwise): drawEllipse turns about its centre already; drawRectangle, drawText and
+ * drawSvgPath turn about their own origin corner, so that corner is first carried round the
+ * mark's centre (pdfTurn) and the shape turns in place. Returns how many marks were drawn.
  */
 export function drawPhotoMarks(
   doc: { page: PDFPage; bold: PDFFont },
@@ -875,59 +907,133 @@ export function drawPhotoMarks(
   // Image px (top-left origin, the box's own size) → PDF points.
   const X = (x: number) => box.x + x;
   const Y = (y: number) => box.y + box.h - y;
-  const halo = rgb(0, 0, 0);
   const tags = photoTagNumbers(marks);
-  const words = (text: string, x: number, yMid: number, size: number, color: RGB) => {
+  const haloOf = (m: PhotoMark) => {
+    const h = haloPdf(m.color);
+    return { color: rgb(...h.rgb), alpha: h.alpha };
+  };
+  /**
+   * A mark's own turn on the page: `deg` for pdf-lib's `rotate`, and `corner(c, dx, dy)`: where
+   * the point dx right and dy up (points) of the centre `c` lands once turned about it — the
+   * origin pdf-lib's drawRectangle / drawText / drawSvgPath then turn about.
+   */
+  const pdfTurn = (rot: number) => {
+    const a = (-rot * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    return {
+      deg: degrees(-rot),
+      corner: (c: [number, number], dx: number, dy: number): [number, number] =>
+        rot ? [c[0] + dx * cos - dy * sin, c[1] + dx * sin + dy * cos] : [c[0] + dx, c[1] + dy],
+    };
+  };
+  const words = (
+    text: string,
+    x: number,
+    yMid: number,
+    size: number,
+    color: RGB,
+    o: {
+      halo: { color: RGB; alpha: number };
+      /** The words' own turn about `cx` (image px; the measured middle when absent). */
+      rot?: number;
+      cx?: number;
+      /** A solid rounded box behind the words instead of the band. */
+      fill?: RGB | null;
+    },
+  ) => {
     const t = clean(text);
-    const w = bold.widthOfTextAtSize(t, size);
-    page.drawRectangle({
-      x: X(x) - 1.5,
-      y: Y(yMid) - size * 0.6,
-      width: w + 3,
-      height: size * 1.2,
-      color: halo,
-      opacity: 0.55,
-    });
-    page.drawText(t, { x: X(x), y: Y(yMid) - size * 0.35, size, font: bold, color });
+    const tw = bold.widthOfTextAtSize(t, size);
+    const { deg, corner } = pdfTurn(o.rot ?? 0);
+    const c: [number, number] = [X(o.cx ?? x + tw / 2), Y(yMid)];
+    const left = X(x) - c[0];
+    if (o.fill) {
+      const pad = size * TEXT_FILL_PAD;
+      const [bx, by] = corner(c, left - pad, size / 2 + pad);
+      page.drawSvgPath(roundedBoxPath(tw + 2 * pad, size + 2 * pad, pad), {
+        x: bx,
+        y: by,
+        rotate: deg,
+        color: o.fill,
+      });
+    } else {
+      const [bx, by] = corner(c, left - 1.5, -size * 0.6);
+      page.drawRectangle({
+        x: bx,
+        y: by,
+        width: tw + 3,
+        height: size * 1.2,
+        color: o.halo.color,
+        opacity: o.halo.alpha,
+        rotate: deg,
+      });
+    }
+    const [tx, ty] = corner(c, left, -size * 0.35);
+    page.drawText(t, { x: tx, y: ty, size, font: bold, color, rotate: deg });
   };
   for (const m of marks) {
     const color = rgb(...photoColorRgb(m.color));
+    const halo = haloOf(m);
     if (m.kind === "ellipse") {
       const g = ellipseGeom(m, box.w, box.h);
-      page.drawEllipse({
+      const rot = markRot(m);
+      const at = {
         x: X(g.cx),
         y: Y(g.cy),
         xScale: Math.max(g.rx, 0.5),
         yScale: Math.max(g.ry, 0.5),
-        borderColor: color,
-        borderWidth: sw,
+        // pdf-lib turns an ellipse about its centre; its default path is kept when not turned.
+        ...(rot ? { rotate: degrees(-rot) } : {}),
+      };
+      page.drawEllipse({
+        ...at,
+        borderColor: halo.color,
+        borderOpacity: halo.alpha,
+        borderWidth: sw * 1.8,
       });
+      page.drawEllipse({ ...at, borderColor: color, borderWidth: sw });
     } else if (m.kind === "rect") {
       const g = rectGeom(m, box.w, box.h);
+      const { deg, corner } = pdfTurn(markRot(m));
+      const [x, y] = corner([X(g.x + g.w / 2), Y(g.y + g.h / 2)], -g.w / 2, -g.h / 2);
+      const at = { x, y, width: g.w, height: g.h, rotate: deg };
       page.drawRectangle({
-        x: X(g.x),
-        y: Y(g.y + g.h),
-        width: g.w,
-        height: g.h,
-        borderColor: color,
-        borderWidth: sw,
+        ...at,
+        borderColor: halo.color,
+        borderOpacity: halo.alpha,
+        borderWidth: sw * 1.8,
       });
+      page.drawRectangle({ ...at, borderColor: color, borderWidth: sw });
     } else if (m.kind === "arrow") {
       const g = arrowGeom(m, box.w, box.h, sw);
-      page.drawLine({
+      const shaft = {
         start: { x: X(g.tail[0]), y: Y(g.tail[1]) },
         end: { x: X(g.base[0]), y: Y(g.base[1]) },
-        thickness: sw,
-        color,
-      });
+      };
+      page.drawLine({ ...shaft, thickness: sw * 1.8, color: halo.color, opacity: halo.alpha });
+      page.drawLine({ ...shaft, thickness: sw, color });
       // drawSvgPath flips y about its origin: a point (px, py) lands at (px, -py).
       const head = [g.tip, g.left, g.right]
         .map(([x, y], i) => `${i ? "L" : "M"}${X(x).toFixed(2)} ${(-Y(y)).toFixed(2)}`)
         .join(" ");
+      // Its halo first (a stroke), then the head filled, as on screen.
+      page.drawSvgPath(`${head} Z`, {
+        x: 0,
+        y: 0,
+        borderColor: halo.color,
+        borderOpacity: halo.alpha,
+        borderWidth: sw * 0.8,
+      });
       page.drawSvgPath(`${head} Z`, { x: 0, y: 0, color });
     } else if (m.kind === "text") {
       const [x, y] = [m.at[0] * box.w, m.at[1] * box.h];
-      words(m.text, x, y, textSizeFor(box.w, box.h), color);
+      const tb = textBox(m, box.w, box.h);
+      words(m.text, x, y, textSizeFor(box.w, box.h), color, {
+        halo,
+        rot: markRot(m),
+        cx: tb.x + tb.w / 2,
+        fill: markFill(m) ? rgb(...hexRgb(textFillColor(m.color))) : null,
+      });
     } else {
       const g = tagGeom(m, box.w, box.h);
       page.drawCircle({
@@ -935,7 +1041,7 @@ export function drawPhotoMarks(
         y: Y(g.y),
         size: g.r,
         color,
-        borderColor: halo,
+        borderColor: halo.color,
         borderWidth: 0.5,
       });
       const n = String(tags.get(m.id) ?? "");
@@ -945,9 +1051,12 @@ export function drawPhotoMarks(
         y: Y(g.y) - ns * 0.35,
         size: ns,
         font: bold,
-        color: m.color === "red" ? rgb(1, 1, 1) : halo,
+        color: rgb(...hexRgb(tagNumberColor(m.color))),
       });
-      words(m.label, g.label.x, g.y, g.labelSize, rgb(1, 1, 1));
+      // The label is always white on the dark band.
+      words(m.label, g.label.x, g.y, g.labelSize, rgb(1, 1, 1), {
+        halo: { color: rgb(0, 0, 0), alpha: 0.6 },
+      });
     }
   }
   return marks.length;

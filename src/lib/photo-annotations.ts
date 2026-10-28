@@ -19,6 +19,13 @@
  * pointer in the turned view back into the picture (unrotatePoint). The file is still never
  * altered; Download flattens the turned picture and its marks.
  *
+ * Owner, Oct 28, later that day: two more colours (blue, black — PHOTO_COLORS, with a light halo
+ * under black: haloFor), a mark's own turn (`rot`, whole clockwise degrees about its centre, on a
+ * circle, a box or a text; markCentre, rotateAbout, rotatedBounds, toMarkFrame; the editor's
+ * rotate handle snaps to 15°: snapRot) and a text's background (`fill`: a solid rounded box,
+ * textFillBox / textFillColor). Both are optional on the JSON and left out when 0 / off, so an
+ * older mark is unchanged and draws as it did.
+ *
  * An aerial row (role "aerial") keeps its own markup in the same column (aerial-markup.ts,
  * lng/lat); it is not a photo markup and parses to no marks here.
  *
@@ -27,7 +34,7 @@
  */
 import { z } from "zod";
 
-import { MARKUP_COLORS, TAG_LABEL_MAX, TAG_NOTE_MAX, TEXT_MAX } from "@/lib/aerial-markup";
+import { TAG_LABEL_MAX, TAG_NOTE_MAX, TEXT_MAX } from "@/lib/aerial-markup";
 
 export { TAG_LABEL_MAX, TAG_NOTE_MAX, TEXT_MAX };
 
@@ -35,20 +42,53 @@ export { TAG_LABEL_MAX, TAG_NOTE_MAX, TEXT_MAX };
 
 export const PHOTO_MARKS_VERSION = 1;
 
-/** Red (the default), yellow and white: they read on a roof in sun or shade. */
-export const PHOTO_COLORS = MARKUP_COLORS.filter(
-  (c) => c.id === "red" || c.id === "yellow" || c.id === "white",
-);
-export type PhotoColor = "red" | "yellow" | "white";
+/**
+ * Red (the default), yellow and white read on a roof in sun or shade; blue and black (owner,
+ * Oct 28: "we need two more colors a blue and a black") joined them. Red, yellow, white and blue
+ * are the Aerial's hexes (aerial-markup.ts MARKUP_COLORS); black is the photo markup's own, so
+ * the Aerial's swatches are untouched.
+ */
+export const PHOTO_COLORS = [
+  { id: "red", hex: "#ef4444", label: "Red" },
+  { id: "yellow", hex: "#facc15", label: "Yellow" },
+  { id: "white", hex: "#ffffff", label: "White" },
+  { id: "blue", hex: "#3b82f6", label: "Blue" },
+  { id: "black", hex: "#000000", label: "Black" },
+] as const;
+export type PhotoColor = (typeof PHOTO_COLORS)[number]["id"];
+const PHOTO_COLOR_IDS = PHOTO_COLORS.map((c) => c.id) as [PhotoColor, ...PhotoColor[]];
 export const DEFAULT_PHOTO_COLOR: PhotoColor = "red";
 export const photoColorHex = (id: string): string =>
-  PHOTO_COLORS.find((c) => c.id === id)?.hex ?? PHOTO_COLORS[0]!.hex;
-/** [r, g, b] in 0..1 (the PDF's colour). */
-export function photoColorRgb(id: string): [number, number, number] {
-  const h = photoColorHex(id);
+  PHOTO_COLORS.find((c) => c.id === id)?.hex ?? PHOTO_COLORS[0].hex;
+/** "#rrggbb" → [r, g, b] in 0..1 (the PDF's colour). */
+export function hexRgb(h: string): [number, number, number] {
   const n = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
   return [n(1), n(3), n(5)];
 }
+/** [r, g, b] in 0..1 (the PDF's colour). */
+export const photoColorRgb = (id: string): [number, number, number] => hexRgb(photoColorHex(id));
+
+// ── Readability: the halo, the tag's number, the text's background ──────────────────────────
+
+/** The dark edge under every line and letter, so red, yellow, white and blue read on any roof. */
+export const HALO = "rgba(0,0,0,0.6)";
+/** The light edge under a black mark (a dark halo would swallow it). */
+export const LIGHT_HALO = "rgba(255,255,255,0.75)";
+/** Does this colour take the light halo (black does; every other colour the dark one)? */
+export const isLightHalo = (color: string): boolean => color === "black";
+/** The halo (CSS rgba) behind a mark of this colour: light under black, dark under the rest. */
+export const haloFor = (color: string): string => (isLightHalo(color) ? LIGHT_HALO : HALO);
+/** The same halo for pdf-lib: its colour in 0..1 and its opacity. */
+export const haloPdf = (color: string): { rgb: [number, number, number]; alpha: number } =>
+  isLightHalo(color) ? { rgb: [1, 1, 1], alpha: 0.75 } : { rgb: [0, 0, 0], alpha: 0.6 };
+/** The number on a tag's pin: white on red, blue and black; black on yellow and white. */
+export const tagNumberColor = (color: string): "#ffffff" | "#000000" =>
+  color === "yellow" || color === "white" ? "#000000" : "#ffffff";
+/** A text's background when it has one: black behind white and yellow words, white behind the rest. */
+export const textFillColor = (color: string): "#ffffff" | "#000000" =>
+  color === "yellow" || color === "white" ? "#000000" : "#ffffff";
+/** The background's padding around the words, and its corner radius, in font sizes. */
+export const TEXT_FILL_PAD = 0.25;
 
 /** The roles that can be marked up (not a signature, not the aerial's own markup). */
 export const ANNOTATABLE_ROLES = ["before", "after", "other"] as const;
@@ -60,22 +100,48 @@ export const PHOTO_MARKS_MAX = 200;
 const unit = z.number().finite().min(0).max(1);
 const pt = z.tuple([unit, unit]);
 const idSchema = z.string().min(1).max(40);
-const colorSchema = z.enum(["red", "yellow", "white"]);
+const colorSchema = z.enum(PHOTO_COLOR_IDS);
+/**
+ * A shape's or a text's own turn (owner, Oct 28: "rotate the shapes/textboxes"): whole degrees
+ * clockwise about the mark's centre; absent (an older mark, or never turned) means 0. Arrows
+ * point any way already and a tag's pin is round, so neither takes one (a `rot` on them is
+ * dropped by the parse).
+ */
+const rotSchema = z.number().int().min(0).max(359).optional();
 
 export const photoMarkSchema = z.discriminatedUnion("kind", [
   /** An ellipse (a circle when drawn square) inside the box from corner a to corner b. */
-  z.object({ kind: z.literal("ellipse"), id: idSchema, color: colorSchema, a: pt, b: pt }),
+  z.object({
+    kind: z.literal("ellipse"),
+    id: idSchema,
+    color: colorSchema,
+    a: pt,
+    b: pt,
+    rot: rotSchema,
+  }),
   /** A box from corner a to corner b. */
-  z.object({ kind: z.literal("rect"), id: idSchema, color: colorSchema, a: pt, b: pt }),
+  z.object({
+    kind: z.literal("rect"),
+    id: idSchema,
+    color: colorSchema,
+    a: pt,
+    b: pt,
+    rot: rotSchema,
+  }),
   /** An arrow from its tail a to its tip b (the head is at b). */
   z.object({ kind: z.literal("arrow"), id: idSchema, color: colorSchema, a: pt, b: pt }),
-  /** Words starting at `at` (left edge, vertically centred). */
+  /**
+   * Words starting at `at` (left edge, vertically centred); `fill` (owner, Oct 28: "fill the
+   * textboxes with a background") puts a solid box behind them (textFillColor), absent = off.
+   */
   z.object({
     kind: z.literal("text"),
     id: idSchema,
     color: colorSchema,
     at: pt,
     text: z.string().trim().min(1).max(TEXT_MAX),
+    rot: rotSchema,
+    fill: z.boolean().optional(),
   }),
   /** A numbered pin with a label (and a note, listed under the picture). */
   z.object({
@@ -90,6 +156,25 @@ export const photoMarkSchema = z.discriminatedUnion("kind", [
 export type PhotoMark = z.output<typeof photoMarkSchema>;
 export type PhotoMarkKind = PhotoMark["kind"];
 export type Pt = [number, number];
+/** The marks that turn about their centre (the rotate handle): a circle, a box, a text. */
+export type TurnableMark = Extract<PhotoMark, { kind: "ellipse" | "rect" | "text" }>;
+export const canTurn = (m: PhotoMark): m is TurnableMark =>
+  m.kind === "ellipse" || m.kind === "rect" || m.kind === "text";
+/** A mark's own turn in clockwise degrees; 0 for an older mark, an arrow or a tag. */
+export const markRot = (m: PhotoMark): number => (canTurn(m) ? (m.rot ?? 0) : 0);
+/** Has this text a background behind its words? (false for an older text, and for anything else). */
+export const markFill = (m: PhotoMark): boolean => m.kind === "text" && m.fill === true;
+/** Any number of degrees → a whole 0..359 (an older mark's absent `rot` is 0). */
+export const normalizeRot = (deg: number): number =>
+  ((Math.round(Number.isFinite(deg) ? deg : 0) % 360) + 360) % 360;
+/** The rotate handle's snap: the nearest multiple of 15° when within 4° of it, else the degree itself. */
+export const ROT_SNAP_STEP = 15;
+export const ROT_SNAP_WITHIN = 4;
+export function snapRot(deg: number): number {
+  const d = normalizeRot(deg);
+  const near = Math.round(d / ROT_SNAP_STEP) * ROT_SNAP_STEP;
+  return normalizeRot(Math.abs(d - near) <= ROT_SNAP_WITHIN ? near : d);
+}
 
 /** Which way the picture is shown: turned clockwise by 0, 90, 180 or 270 degrees. */
 export const ROTATIONS = [0, 90, 180, 270] as const;
@@ -130,10 +215,22 @@ const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const roundPt = (p: Pt): Pt => [r4(clamp01(p[0])), r4(clamp01(p[1]))];
 
-/** One mark with its positions clamped to the picture and rounded (what is stored). */
+/**
+ * One mark with its positions clamped to the picture and rounded (what is stored). A turn of 0
+ * and a background that is off are left out (no key), so a mark that was never turned or filled
+ * is stored exactly as before these existed.
+ */
 export function roundMark(m: PhotoMark): PhotoMark {
-  if (m.kind === "text" || m.kind === "tag") return { ...m, at: roundPt(m.at) };
-  return { ...m, a: roundPt(m.a), b: roundPt(m.b) };
+  if (m.kind === "tag") return { ...m, at: roundPt(m.at) };
+  if (m.kind === "arrow") return { ...m, a: roundPt(m.a), b: roundPt(m.b) };
+  const { rot: rawRot, ...rest } = m;
+  const rot = normalizeRot(rawRot ?? 0);
+  const turned = rot ? { ...rest, rot } : rest;
+  if (turned.kind === "text") {
+    const { fill, ...t } = turned;
+    return { ...(fill ? { ...t, fill: true } : t), at: roundPt(t.at) };
+  }
+  return { ...turned, a: roundPt(turned.a), b: roundPt(turned.b) };
 }
 
 /**
@@ -353,6 +450,96 @@ export function tagGeom(m: TagMark, w: number, h: number) {
   };
 }
 
+/**
+ * A text's background box (image px): textBox padded by TEXT_FILL_PAD of the font size on every
+ * side, its corners rounded by the same; `textScale` draws it for lettering that much larger
+ * (the editor on a phone), growing from the left edge like the words.
+ */
+export function textFillBox(
+  m: Extract<PhotoMark, { kind: "text" }>,
+  w: number,
+  h: number,
+  textScale = 1,
+) {
+  const b = textBox(m, w, h);
+  const size = b.h * textScale;
+  const pad = size * TEXT_FILL_PAD;
+  const grow = b.h * (textScale - 1);
+  return {
+    x: b.x - pad,
+    y: b.y - grow / 2 - pad,
+    w: b.w * textScale + 2 * pad,
+    h: size + 2 * pad,
+    r: pad,
+  };
+}
+
+// ── A mark's own turn: about its centre ──────────────────────────────────────────────────────
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * The point a turnable mark turns about (image px): a circle's or a box's centre, a text's box
+ * centre (the box as drawn, `textScale` larger on a phone). Null for an arrow or a tag.
+ */
+export function markCentre(m: PhotoMark, w: number, h: number, textScale = 1): Pt | null {
+  if (m.kind === "ellipse" || m.kind === "rect") {
+    const g = rectGeom(m, w, h);
+    return [g.x + g.w / 2, g.y + g.h / 2];
+  }
+  if (m.kind === "text") {
+    const b = textBox(m, w, h);
+    return [b.x + (b.w * textScale) / 2, b.y + b.h / 2];
+  }
+  return null;
+}
+
+/** `p` turned by `deg` (clockwise, y down) about `c`. */
+export function rotateAbout(p: Pt, c: Pt, deg: number): Pt {
+  if (!deg) return p;
+  const a = (deg * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const dx = p[0] - c[0];
+  const dy = p[1] - c[1];
+  return [c[0] + dx * cos - dy * sin, c[1] + dx * sin + dy * cos];
+}
+
+/** The box that holds `b` once turned by `deg` about `c` (its four corners' bounds). */
+export function rotatedBounds(b: Box, c: Pt, deg: number): Box {
+  if (!deg) return b;
+  const corners: Pt[] = (
+    [
+      [b.x, b.y],
+      [b.x + b.w, b.y],
+      [b.x + b.w, b.y + b.h],
+      [b.x, b.y + b.h],
+    ] as Pt[]
+  ).map((p) => rotateAbout(p, c, deg));
+  const xs = corners.map((p) => p[0]);
+  const ys = corners.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/**
+ * The pointer `p` carried into the mark's own, unturned frame (turned back about the mark's
+ * centre), so the unturned outline test tells whether it is on the turned mark. `p` itself for
+ * a mark that is not turned.
+ */
+export function toMarkFrame(m: PhotoMark, p: Pt, w: number, h: number): Pt {
+  const rot = markRot(m);
+  if (!rot) return p;
+  const c = markCentre(m, w, h);
+  return c ? rotateAbout(p, c, -rot) : p;
+}
+
 // ── Hit-testing ──────────────────────────────────────────────────────────────────────────────
 
 const inBox = (p: Pt, b: { x: number; y: number; w: number; h: number }, pad: number) =>
@@ -367,9 +554,13 @@ export function distToSegment(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
 
-/** Is p on the mark's line (outline, shaft, words, pin) within `tol` image px? */
-function onOutline(m: PhotoMark, p: Pt, w: number, h: number, tol: number): boolean {
+/**
+ * Is p on the mark's line (outline, shaft, words, pin) within `tol` image px? A turned mark is
+ * tested in its own frame (toMarkFrame), so the hit follows the turned outline.
+ */
+function onOutline(m: PhotoMark, at: Pt, w: number, h: number, tol: number): boolean {
   const sw = strokeFor(w, h);
+  const p = toMarkFrame(m, at, w, h);
   switch (m.kind) {
     case "ellipse": {
       const g = ellipseGeom(m, w, h);
@@ -402,8 +593,9 @@ function onOutline(m: PhotoMark, p: Pt, w: number, h: number, tol: number): bool
   }
 }
 
-/** Is p inside a closed shape (ellipse, box)? */
-function inside(m: PhotoMark, p: Pt, w: number, h: number): boolean {
+/** Is p inside a closed shape (ellipse, box)? A turned one is tested in its own frame. */
+function inside(m: PhotoMark, at: Pt, w: number, h: number): boolean {
+  const p = toMarkFrame(m, at, w, h);
   if (m.kind === "ellipse") {
     const g = ellipseGeom(m, w, h);
     if (g.rx <= 0 || g.ry <= 0) return false;
@@ -436,7 +628,7 @@ export function hitTest(
 const markPoints = (m: PhotoMark): Pt[] =>
   m.kind === "text" || m.kind === "tag" ? [m.at] : [m.a, m.b];
 
-/** The mark moved by (du, dv), held inside the picture (its points never leave 0..1). */
+/** The mark moved by (du, dv), held inside the picture (its points never leave 0..1); its turn and background stay. */
 export function moveMark(m: PhotoMark, du: number, dv: number): PhotoMark {
   const pts = markPoints(m);
   const minU = Math.min(...pts.map((p) => p[0]));
@@ -457,7 +649,10 @@ export interface PhotoMarksHistory {
   marks: PhotoMark[];
   /** Which way the picture is shown turned (the marks stay in its own space). */
   rotation: Rotation;
-  /** Earlier states, newest last; Undo pops one. Clear, moves and turns are undoable too. */
+  /**
+   * Earlier states, newest last; Undo pops one. Clear, moves, a mark's turn or background and
+   * the picture's turns are undoable too.
+   */
   past: PhotoMarkup[];
 }
 export type PhotoMarksAction =
@@ -466,8 +661,12 @@ export type PhotoMarksAction =
   | { type: "remove"; id: string }
   | { type: "undo" }
   | { type: "clear" }
-  /** A quarter turn: by 1 to the right (clockwise), by -1 to the left. */
+  /** A quarter turn of the picture: by 1 to the right (clockwise), by -1 to the left. */
   | { type: "rotate"; by: 1 | -1 }
+  /** One mark's own turn (a circle, a box, a text), to `rot` clockwise degrees about its centre. */
+  | { type: "turn"; id: string; rot: number }
+  /** A text's background on or off. */
+  | { type: "fill"; id: string; fill: boolean }
   | { type: "load"; marks: PhotoMark[]; rotation?: Rotation | undefined };
 
 const PAST_MAX = 100;
@@ -503,6 +702,20 @@ export function photoMarksReducer(s: PhotoMarksHistory, a: PhotoMarksAction): Ph
       return s.marks.length ? push([]) : s;
     case "rotate":
       return push(s.marks, turnRotation(s.rotation, a.by));
+    case "turn": {
+      const i = s.marks.findIndex((m) => m.id === a.id);
+      const m = s.marks[i];
+      if (!m || !canTurn(m)) return s;
+      const rot = normalizeRot(a.rot);
+      if (rot === markRot(m)) return s;
+      return push(s.marks.map((x, k) => (k === i ? roundMark({ ...m, rot }) : x)));
+    }
+    case "fill": {
+      const i = s.marks.findIndex((m) => m.id === a.id);
+      const m = s.marks[i];
+      if (!m || m.kind !== "text" || markFill(m) === a.fill) return s;
+      return push(s.marks.map((x, k) => (k === i ? roundMark({ ...m, fill: a.fill }) : x)));
+    }
     case "undo": {
       if (!s.past.length) return s;
       const last = s.past[s.past.length - 1]!;
@@ -707,80 +920,131 @@ export function paintPhoto(
   ctx.restore();
 }
 
-/** The dark edge under every line and letter, so red, yellow and white read on any roof. */
-export const HALO = "rgba(0,0,0,0.6)";
-
-/** Draw the marks over a picture already on the canvas, which is `w` × `h` px. */
+/**
+ * Draw the marks over a picture already on the canvas, which is `w` × `h` px. Every line and
+ * letter sits on its halo (haloFor: dark, light under black); a turned mark (rot) is drawn
+ * inside a translate / rotate / translate back about its centre; a text with `fill` gets its
+ * solid rounded box (textFillBox) before its words.
+ */
 export function paintPhotoMarks(ctx: PhotoPaint2D, marks: PhotoMark[], w: number, h: number) {
   const sw = strokeFor(w, h);
   const tags = photoTagNumbers(marks);
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  const strokeTwice = (color: string) => {
-    ctx.strokeStyle = HALO;
+  const strokeTwice = (color: string, halo: string) => {
+    ctx.strokeStyle = halo;
     ctx.lineWidth = sw * 1.8;
     ctx.stroke();
     ctx.strokeStyle = color;
     ctx.lineWidth = sw;
     ctx.stroke();
   };
-  const words = (text: string, x: number, y: number, size: number, color: string) => {
+  const words = (
+    text: string,
+    x: number,
+    y: number,
+    size: number,
+    color: string,
+    halo: string | null,
+  ) => {
     ctx.font = `bold ${Math.round(size)}px sans-serif`;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.lineWidth = Math.max(2, size * 0.18);
-    ctx.strokeStyle = HALO;
-    ctx.strokeText(text, x, y);
+    if (halo) {
+      ctx.lineWidth = Math.max(2, size * 0.18);
+      ctx.strokeStyle = halo;
+      ctx.strokeText(text, x, y);
+    }
     ctx.fillStyle = color;
     ctx.fillText(text, x, y);
   };
+  /** A rounded box as a path (moveTo / lineTo / arc: the corners are quarter circles). */
+  const roundedBox = (b: { x: number; y: number; w: number; h: number; r: number }) => {
+    const r = Math.min(b.r, b.w / 2, b.h / 2);
+    ctx.beginPath();
+    ctx.moveTo(b.x + r, b.y);
+    ctx.lineTo(b.x + b.w - r, b.y);
+    ctx.arc(b.x + b.w - r, b.y + r, r, -Math.PI / 2, 0);
+    ctx.lineTo(b.x + b.w, b.y + b.h - r);
+    ctx.arc(b.x + b.w - r, b.y + b.h - r, r, 0, Math.PI / 2);
+    ctx.lineTo(b.x + r, b.y + b.h);
+    ctx.arc(b.x + r, b.y + b.h - r, r, Math.PI / 2, Math.PI);
+    ctx.lineTo(b.x, b.y + r);
+    ctx.arc(b.x + r, b.y + r, r, Math.PI, Math.PI * 1.5);
+    ctx.closePath();
+  };
+  /** Draw `paint` turned by the mark's own rot about its centre (nothing extra when not turned). */
+  const turned = (m: PhotoMark, paint: () => void) => {
+    const rot = markRot(m);
+    const c = rot ? markCentre(m, w, h) : null;
+    if (!rot || !c) return paint();
+    ctx.save();
+    ctx.translate(c[0], c[1]);
+    ctx.rotate((rot * Math.PI) / 180);
+    ctx.translate(-c[0], -c[1]);
+    paint();
+    ctx.restore();
+  };
   for (const m of marks) {
     const color = photoColorHex(m.color);
+    const halo = haloFor(m.color);
     if (m.kind === "ellipse") {
       const g = ellipseGeom(m, w, h);
-      ctx.beginPath();
-      ctx.ellipse(g.cx, g.cy, g.rx, g.ry, 0, 0, Math.PI * 2);
-      strokeTwice(color);
+      turned(m, () => {
+        ctx.beginPath();
+        ctx.ellipse(g.cx, g.cy, g.rx, g.ry, 0, 0, Math.PI * 2);
+        strokeTwice(color, halo);
+      });
     } else if (m.kind === "rect") {
       const g = rectGeom(m, w, h);
-      ctx.beginPath();
-      ctx.rect(g.x, g.y, g.w, g.h);
-      strokeTwice(color);
+      turned(m, () => {
+        ctx.beginPath();
+        ctx.rect(g.x, g.y, g.w, g.h);
+        strokeTwice(color, halo);
+      });
     } else if (m.kind === "arrow") {
       const g = arrowGeom(m, w, h, sw);
       ctx.beginPath();
       ctx.moveTo(g.tail[0], g.tail[1]);
       ctx.lineTo(g.base[0], g.base[1]);
-      strokeTwice(color);
+      strokeTwice(color, halo);
       ctx.beginPath();
       ctx.moveTo(g.tip[0], g.tip[1]);
       ctx.lineTo(g.left[0], g.left[1]);
       ctx.lineTo(g.right[0], g.right[1]);
       ctx.closePath();
-      ctx.strokeStyle = HALO;
+      ctx.strokeStyle = halo;
       ctx.lineWidth = sw * 0.8;
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.fill();
     } else if (m.kind === "text") {
       const [x, y] = fromNorm(m.at, w, h);
-      words(m.text, x, y, textSizeFor(w, h), color);
+      const fill = markFill(m);
+      turned(m, () => {
+        if (fill) {
+          roundedBox(textFillBox(m, w, h));
+          ctx.fillStyle = textFillColor(m.color);
+          ctx.fill();
+        }
+        words(m.text, x, y, textSizeFor(w, h), color, fill ? null : halo);
+      });
     } else {
       const g = tagGeom(m, w, h);
       ctx.beginPath();
       ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.strokeStyle = "#000000";
+      ctx.strokeStyle = isLightHalo(m.color) ? "#ffffff" : "#000000";
       ctx.lineWidth = Math.max(1, sw / 3);
       ctx.stroke();
       ctx.font = `bold ${Math.round(g.r * 1.1)}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = m.color === "red" ? "#ffffff" : "#000000";
+      ctx.fillStyle = tagNumberColor(m.color);
       ctx.fillText(String(tags.get(m.id) ?? ""), g.x, g.y);
-      words(m.label, g.label.x, g.y, g.labelSize, "#ffffff");
+      words(m.label, g.label.x, g.y, g.labelSize, "#ffffff", HALO);
     }
   }
   ctx.restore();

@@ -66,11 +66,12 @@ describe("the two-row toolbar (owner, Oct 28)", () => {
     expect(row1).toMatch(
       /<span aria-hidden="true" data-divider="true" class="[^"]*border-l[^"]*dark:[^"]*"/,
     );
-    // One colour button showing the colour itself (a swatch); the three colours are in its popover.
+    // One colour button showing the colour itself (a swatch); the five colours are in its popover.
     expect(row1).toMatch(
       /<button[^>]*aria-label="Colour: Red"[^>]*data-colour="red"[^>]*aria-haspopup="dialog"[^>]*>\s*<span[^>]*rounded-full[^>]*style="background:#/,
     );
-    for (const c of ["Red", "Yellow", "White"]) expect(html).not.toContain(`aria-label="${c}"`);
+    for (const c of ["Red", "Yellow", "White", "Blue", "Black"])
+      expect(html).not.toContain(`aria-label="${c}"`);
     expect(html).not.toContain('aria-label="Delete"');
     expect(html).not.toContain(">Delete<");
     // The tools are icons only on a phone; their label shows from sm up.
@@ -259,5 +260,50 @@ describe("the phone's label sheet, compact (owner, Oct 28: it was too tall and a
     expect(src).toContain("              compact\n");
     const root = readFileSync("src/routes/__root.tsx", "utf8");
     expect(root).toContain("interactive-widget=resizes-content");
+  });
+});
+
+describe("a mark's own turn and a text's background in the drawn SVG (owner, Oct 28)", () => {
+  it("a turned box's group rotates about its centre; a flat one carries no transform", () => {
+    const box: PhotoMark = { kind: "rect", id: "r", color: "blue", a: [0.3, 0.49], b: [0.7, 0.51] };
+    const flat = renderToString(<MarkShapes marks={[box]} w={2000} h={1000} />);
+    expect(flat).not.toContain("transform=");
+    const turned = renderToString(
+      <MarkShapes marks={[{ ...box, rot: 90 } as PhotoMark]} w={2000} h={1000} />,
+    );
+    expect(turned).toContain('<g transform="rotate(90 1000 500)">');
+    expect(turned).toMatch(/<rect x="600" y="490" width="800" height="20"/);
+  });
+  it("a text with a background draws a rounded box in the opposite tone first, no halo on the words; black marks take the light halo", () => {
+    const text: PhotoMark = { kind: "text", id: "t", color: "red", at: [0.5, 0.5], text: "Leak" };
+    const plain = renderToString(<MarkShapes marks={[text]} w={2000} h={1000} />);
+    expect(plain).not.toContain('data-fill="text"');
+    expect(plain).toMatch(/<text[^>]*style="[^"]*stroke:rgba\(0,0,0,0.6\)/);
+    const filled = renderToString(
+      <MarkShapes marks={[{ ...text, fill: true } as PhotoMark]} w={2000} h={1000} />,
+    );
+    expect(filled).toMatch(/<rect data-fill="text"[^>]*rx="20"[^>]*fill="#ffffff"><\/rect><text/);
+    expect(filled).not.toMatch(/<text[^>]*stroke/);
+    const black = renderToString(
+      <MarkShapes marks={[{ ...text, color: "black" }]} w={2000} h={1000} />,
+    );
+    expect(black).toMatch(/<text[^>]*style="[^"]*stroke:rgba\(255,255,255,0.75\)/);
+    const yellowTag: PhotoMark = {
+      kind: "tag",
+      id: "g",
+      color: "yellow",
+      at: [0.2, 0.2],
+      label: "Seam",
+      note: "",
+    };
+    const tags = renderToString(
+      <MarkShapes
+        marks={[yellowTag, { ...yellowTag, id: "g2", color: "black" }]}
+        w={2000}
+        h={1000}
+      />,
+    );
+    expect(tags).toMatch(/fill="#000000">1<\/text>/);
+    expect(tags).toMatch(/fill="#ffffff">2<\/text>/);
   });
 });

@@ -114,7 +114,7 @@ describe("the stored schema: { v: 1, kind: 'photo', marks }", () => {
       photoMarksSchema.safeParse({ v: 1, kind: "photo", marks: [m] }).success;
     expect(bad({ ...circle, a: [-0.1, 0.2] })).toBe(false);
     expect(bad({ ...circle, b: [0.5, 1.5] })).toBe(false);
-    expect(bad({ ...circle, color: "blue" })).toBe(false);
+    expect(bad({ ...circle, color: "green" })).toBe(false); // the Aerial's green is no photo colour
     expect(bad({ ...text, text: "   " })).toBe(false);
     expect(bad({ ...tag, label: "" })).toBe(false);
     expect(bad({ ...circle, kind: "scribble" })).toBe(false);
@@ -126,8 +126,8 @@ describe("the stored schema: { v: 1, kind: 'photo', marks }", () => {
       }).success,
     ).toBe(false);
   });
-  it("colours: red (default), yellow and white", () => {
-    expect(PHOTO_COLORS.map((c) => c.id)).toEqual(["red", "yellow", "white"]);
+  it("colours: red (default), yellow, white, blue and black (owner, Oct 28)", () => {
+    expect(PHOTO_COLORS.map((c) => c.id)).toEqual(["red", "yellow", "white", "blue", "black"]);
     expect(photoColorHex("red")).toBe("#ef4444");
     expect(photoColorHex("nope")).toBe("#ef4444");
     expect(photoColorRgb("white")).toEqual([1, 1, 1]);

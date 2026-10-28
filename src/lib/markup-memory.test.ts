@@ -37,7 +37,7 @@ describe("readMarkupMemory", () => {
       color: "red",
     });
     expect(
-      readMarkupMemory(storage({ [MARKUP_MEMORY_KEY]: '{"tool":"laser","color":"blue"}' })),
+      readMarkupMemory(storage({ [MARKUP_MEMORY_KEY]: '{"tool":"laser","color":"green"}' })),
     ).toEqual({
       tool: "ellipse",
       color: "red",

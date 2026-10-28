@@ -16,12 +16,17 @@
  * - PhotoMarkupEditor: two rows of tools around the picture (owner, Oct 28). Above it: Move,
  *   Circle, Arrow, Box, Text and Tag (the Aerial's numbered tag and text,
  *   src/components/service/aerial-markup.tsx; icons only on a phone), a divider, one colour
- *   button (a swatch of the current colour; a popover with red / yellow / white), Undo and Clear.
+ *   button (a swatch of the current colour; a popover with red / yellow / white / blue / black —
+ *   owner, Oct 28: "two more colors a blue and a black"), Undo and Clear.
  *   Below it, one line: Zoom in / out / Fit (a drag pans when zoomed in) and Rotate left / right
  *   (the picture and its marks turn as one; a mark drawn afterwards is mapped back into the
- *   picture's own space). The selected mark carries its own handles — a grip to drag it and a ×
- *   to remove it — and the marks are listed under the picture as on the Aerial (a row selects its
- *   mark; × removes it). On a phone (coarsePointer) picking Text or Tag opens a bottom sheet at
+ *   picture's own space). The selected mark carries its own handles — a grip to drag it, a × to
+ *   remove it, over a circle, a box or a text a round arrow above it that turns the mark about
+ *   its centre as the finger goes round (snapping to 15°; owner, Oct 28: "rotate the
+ *   shapes/textboxes"), and on a text a Background toggle at its top-left (a solid box behind the
+ *   words; owner: "fill the textboxes with a background") — and the marks are listed under the
+ *   picture as on the Aerial (a row selects its mark; × removes it). A new text's form has the
+ *   same Background switch. A turn and a background toggle are undoable like a move. On a phone (coarsePointer) picking Text or Tag opens a bottom sheet at
  *   once (the keyboard with it, the preset chips and the last five labels used on this device,
  *   lib/markup-memory.ts); Done puts the label in the middle of what is on screen
  *   (lib/markup-touch.ts centreOfView) and selects it with Move, so a finger drags it into place
@@ -55,6 +60,7 @@ import {
   Loader2,
   MapPin,
   MoveUpRight,
+  PaintBucket,
   PenLine,
   RotateCcw,
   RotateCw,
@@ -78,12 +84,17 @@ import {
   TEXT_MAX,
   arrowGeom,
   arrowHeadPath,
+  canTurn,
   ellipseGeom,
   emptyPhotoHistory,
   fullView,
+  haloFor,
   hitTest,
   isAnnotatableRole,
+  markCentre,
+  markFill,
   markKindLabel,
+  markRot,
   markRows,
   marksSummary,
   moveMark,
@@ -100,8 +111,12 @@ import {
   rotationTransform,
   serializePhotoMarks,
   shapeFromDrag,
+  snapRot,
   strokeFor,
   tagGeom,
+  tagNumberColor,
+  textFillBox,
+  textFillColor,
   textSizeFor,
   toNorm,
   unrotatePoint,
@@ -122,6 +137,7 @@ import {
   writeMarkupMemory,
 } from "@/lib/markup-memory";
 import {
+  angleFrom,
   centreOfView,
   grabTolerance,
   handlePlaces,
@@ -149,6 +165,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   coarsePointer,
@@ -188,22 +205,35 @@ export function MarkShapes({
   const sw = strokeFor(w, h);
   const size = textSizeFor(w, h) * textScale;
   const tags = photoTagNumbers(marks);
-  const twice = (key: string, el: (stroke: string, width: number) => React.ReactElement) => (
-    <g key={key}>
-      {el(HALO, sw * 1.8)}
+  // The halo under a line (haloFor: dark, light under black) and the line itself over it; a
+  // turned mark's group carries its own rotate about its centre (nothing when not turned).
+  const twice = (
+    key: string,
+    halo: string,
+    transform: string | undefined,
+    el: (stroke: string, width: number) => React.ReactElement,
+  ) => (
+    <g key={key} transform={transform}>
+      {el(halo, sw * 1.8)}
       {el("", sw)}
     </g>
   );
+  const turn = (m: PhotoMark): string | undefined => {
+    const rot = markRot(m);
+    const c = rot ? markCentre(m, w, h, textScale) : null;
+    return c ? `rotate(${rot} ${c[0]} ${c[1]})` : undefined;
+  };
   const words = { paintOrder: "stroke" as const, stroke: HALO, strokeWidth: size * 0.18 };
   return (
     <>
       {marks.map((m) => {
         const color = photoColorHex(m.color);
+        const halo = haloFor(m.color);
         const pick = (s: string) => s || color;
         switch (m.kind) {
           case "ellipse": {
             const g = ellipseGeom(m, w, h);
-            return twice(m.id, (s, width) => (
+            return twice(m.id, halo, turn(m), (s, width) => (
               <ellipse
                 cx={g.cx}
                 cy={g.cy}
@@ -217,7 +247,7 @@ export function MarkShapes({
           }
           case "rect": {
             const g = rectGeom(m, w, h);
-            return twice(m.id, (s, width) => (
+            return twice(m.id, halo, turn(m), (s, width) => (
               <rect
                 x={g.x}
                 y={g.y}
@@ -236,7 +266,7 @@ export function MarkShapes({
               <g key={m.id}>
                 <path
                   d={pathD([g.tail, g.base])}
-                  stroke={HALO}
+                  stroke={halo}
                   strokeWidth={sw * 1.8}
                   strokeLinecap="round"
                 />
@@ -249,7 +279,7 @@ export function MarkShapes({
                 <path
                   d={arrowHeadPath(m, w, h)}
                   fill={color}
-                  stroke={HALO}
+                  stroke={halo}
                   strokeWidth={sw * 0.8}
                   strokeLinejoin="round"
                 />
@@ -258,27 +288,49 @@ export function MarkShapes({
           }
           case "text": {
             const [x, y] = [m.at[0] * w, m.at[1] * h];
+            // With a background (fill) the words sit on a solid rounded box and need no halo.
+            const fb = markFill(m) ? textFillBox(m, w, h, textScale) : null;
             return (
-              <text
-                key={m.id}
-                x={x}
-                y={y}
-                fill={color}
-                fontSize={size}
-                fontWeight={700}
-                fontFamily="sans-serif"
-                dominantBaseline="middle"
-                style={words}
-              >
-                {m.text}
-              </text>
+              <g key={m.id} transform={turn(m)}>
+                {fb && (
+                  <rect
+                    data-fill="text"
+                    x={fb.x}
+                    y={fb.y}
+                    width={fb.w}
+                    height={fb.h}
+                    rx={fb.r}
+                    ry={fb.r}
+                    fill={textFillColor(m.color)}
+                  />
+                )}
+                <text
+                  x={x}
+                  y={y}
+                  fill={color}
+                  fontSize={size}
+                  fontWeight={700}
+                  fontFamily="sans-serif"
+                  dominantBaseline="middle"
+                  style={fb ? undefined : { ...words, stroke: halo }}
+                >
+                  {m.text}
+                </text>
+              </g>
             );
           }
           case "tag": {
             const g = tagGeom(m, w, h);
             return (
               <g key={m.id}>
-                <circle cx={g.x} cy={g.y} r={g.r} fill={color} stroke="#000" strokeWidth={sw / 3} />
+                <circle
+                  cx={g.x}
+                  cy={g.y}
+                  r={g.r}
+                  fill={color}
+                  stroke={m.color === "black" ? "#fff" : "#000"}
+                  strokeWidth={sw / 3}
+                />
                 <text
                   x={g.x}
                   y={g.y}
@@ -287,7 +339,7 @@ export function MarkShapes({
                   fontSize={g.r * 1.1}
                   fontWeight={700}
                   fontFamily="sans-serif"
-                  fill={m.color === "red" ? "#fff" : "#000"}
+                  fill={tagNumberColor(m.color)}
                 >
                   {tags.get(m.id)}
                 </text>
@@ -983,6 +1035,8 @@ export function PhotoMarkupSurface({
   }, [rotation, RW, RH]);
   const [draft, setDraft] = useState<{ kind: ShapeKind; a: Pt; b: Pt } | null>(null);
   const [moving, setMoving] = useState<{ id: string; du: number; dv: number } | null>(null);
+  // A mark being turned by its rotate handle: its angle so far (snapRot), shown as it goes.
+  const [spinning, setSpinning] = useState<{ id: string; rot: number } | null>(null);
   // A text / tag being written: `at` is where it was tapped, or null for the middle of the view
   // (the phone's sheet, opened by picking the tool).
   const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt | null } | null>(null);
@@ -999,6 +1053,8 @@ export function PhotoMarkupSurface({
   const gesture = useRef<
     | { type: "draw"; kind: ShapeKind; a: Pt }
     | { type: "move"; id: string; from: Pt }
+    /** Turning a mark: about its centre `c` (picture px), from the pointer's first angle, starting at rot0. */
+    | { type: "spin"; id: string; c: Pt; start: number; rot0: number }
     | { type: "pan"; sx: number; sy: number; view: PhotoView; k: number }
     | null
   >(null);
@@ -1061,6 +1117,19 @@ export function PhotoMarkupSurface({
     gesture.current = { type: "move", id, from: toImg(e) };
     setMoving({ id, du: 0, dv: 0 });
   };
+  /** Start turning a mark (a press on its rotate handle): it follows the finger round its centre. */
+  const spin = (e: React.PointerEvent, m: PhotoMark) => {
+    const c = markCentre(m, W, H, textScale);
+    if (!c) return;
+    svg.current?.setPointerCapture(e.pointerId);
+    setSelected(m.id);
+    const rot0 = markRot(m);
+    gesture.current = { type: "spin", id: m.id, c, start: angleFrom(c, toImg(e)), rot0 };
+    setSpinning({ id: m.id, rot: rot0 });
+  };
+  /** The spin gesture's angle for the pointer at p: where it started plus how far the finger went round. */
+  const spinRot = (g: { c: Pt; start: number; rot0: number }, p: Pt) =>
+    snapRot(g.rot0 + angleFrom(g.c, p) - g.start);
   // Owner, Oct 28: after the phone's label sheet closes, the tap that dismissed it (or the one
   // that zoomed the page back out) must not land on the picture as another mark.
   const tapGuardUntil = useRef(0);
@@ -1105,6 +1174,7 @@ export function PhotoMarkupSurface({
     }
     const p = toImg(e);
     if (g.type === "draw") setDraft({ kind: g.kind, a: g.a, b: norm(p) });
+    else if (g.type === "spin") setSpinning({ id: g.id, rot: spinRot(g, p) });
     else setMoving({ id: g.id, du: (p[0] - g.from[0]) / W, dv: (p[1] - g.from[1]) / H });
   };
   const up = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -1127,15 +1197,24 @@ export function PhotoMarkupSurface({
       if (cancelled) return;
       const p = toImg(e);
       dispatch({ type: "move", id: g.id, du: (p[0] - g.from[0]) / W, dv: (p[1] - g.from[1]) / H });
+    } else if (g.type === "spin") {
+      setSpinning(null);
+      if (cancelled) return;
+      dispatch({ type: "turn", id: g.id, rot: spinRot(g, toImg(e)) });
     }
   };
 
   const shown = useMemo(() => {
-    const base = moving
-      ? history.marks.map((m) => (m.id === moving.id ? moveMark(m, moving.du, moving.dv) : m))
-      : history.marks;
+    const base =
+      moving || spinning
+        ? history.marks.map((m) => {
+            if (moving && m.id === moving.id) return moveMark(m, moving.du, moving.dv);
+            if (spinning && m.id === spinning.id && canTurn(m)) return { ...m, rot: spinning.rot };
+            return m;
+          })
+        : history.marks;
     return draft ? [...base, { id: "draft", color, ...draft } as PhotoMark] : base;
-  }, [history.marks, moving, draft, color]);
+  }, [history.marks, moving, spinning, draft, color]);
 
   const zoom = viewZoom(view, RW);
   const cursor =
@@ -1154,7 +1233,7 @@ export function PhotoMarkupSurface({
     setPending((t === "text" || t === "tag") && coarse ? { kind: t, at: null } : null);
   };
   /** The written text / tag goes on the picture: where it was tapped, or the middle of the view. */
-  const place = (f: { label: string; note: string }) => {
+  const place = (f: { label: string; note: string; fill: boolean }) => {
     if (!pending) return;
     const fromSheet = pending.at === null;
     const at = pending.at ?? norm(unrotatePoint(centreOfView(view), W, H, rotation));
@@ -1165,7 +1244,7 @@ export function PhotoMarkupSurface({
       mark:
         pending.kind === "tag"
           ? { ...base, kind: "tag", label: f.label, note: f.note }
-          : { ...base, kind: "text", text: f.label },
+          : { ...base, kind: "text", text: f.label, ...(f.fill ? { fill: true } : {}) },
     });
     rememberLabel(deviceStorage(), pending.kind, f.label);
     setPending(null);
@@ -1186,7 +1265,7 @@ export function PhotoMarkupSurface({
     : "";
   const instructions =
     tool === "move"
-      ? "Drag a mark to move it; tap one to select it. Drag the picture to pan when zoomed in."
+      ? "Drag a mark to move it; tap one to select it (the round arrow above it turns it). Drag the picture to pan when zoomed in."
       : tool === "text" || tool === "tag"
         ? coarse
           ? `Tap ${tool === "tag" ? "Tag" : "Text"} above to write one, or tap the picture where it goes.`
@@ -1370,6 +1449,72 @@ export function PhotoMarkupSurface({
                   <X className="h-3 w-3" aria-hidden />
                 </span>
               </button>
+              {handles.rotate && (
+                // Above the mark's top centre (its own height up): drag it round to turn the mark.
+                <button
+                  type="button"
+                  data-handle="rotate"
+                  aria-label={`Drag to turn ${selectedText}`}
+                  title="Drag round to turn it (it snaps every 15°; Undo turns it back)"
+                  className="absolute flex -translate-x-1/2 -translate-y-full cursor-grab touch-none items-center justify-center rounded-full bg-transparent active:cursor-grabbing"
+                  style={{
+                    left: `${handles.rotate.left}%`,
+                    top: `${handles.rotate.top}%`,
+                    width: handle.hit,
+                    height: handle.hit,
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0 || gesture.current) return;
+                    e.preventDefault();
+                    setHint(null);
+                    spin(e, selectedMark);
+                  }}
+                >
+                  <span
+                    className="flex items-center justify-center rounded-full border-2 border-white bg-black/70 text-white shadow"
+                    style={{ width: handle.drawn, height: handle.drawn }}
+                  >
+                    <RotateCw className="h-3 w-3" aria-hidden />
+                  </span>
+                </button>
+              )}
+              {handles.fill && selectedMark.kind === "text" && (
+                // A text's top-left: the background behind its words, on or off (undoable).
+                <button
+                  type="button"
+                  data-handle="fill"
+                  aria-label="Background"
+                  aria-pressed={markFill(selectedMark)}
+                  title={
+                    markFill(selectedMark)
+                      ? "Background on — tap to take it off the words"
+                      : "Background off — tap to put a solid box behind the words"
+                  }
+                  className="absolute flex -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full bg-transparent"
+                  style={{
+                    left: `${handles.fill.left}%`,
+                    top: `${handles.fill.top}%`,
+                    width: handle.hit,
+                    height: handle.hit,
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() =>
+                    dispatch({ type: "fill", id: selectedMark.id, fill: !markFill(selectedMark) })
+                  }
+                >
+                  <span
+                    className={cn(
+                      "flex items-center justify-center rounded-full border-2 border-white shadow",
+                      markFill(selectedMark)
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-black/70 text-white",
+                    )}
+                    style={{ width: handle.drawn, height: handle.drawn }}
+                  >
+                    <PaintBucket className="h-3 w-3" aria-hidden />
+                  </span>
+                </button>
+              )}
             </>
           )}
         </div>
@@ -1544,12 +1689,14 @@ function PlaceForm({
   /** The phone's sheet: the box and Done on one line, the note folded behind "Add a note". */
   compact?: boolean | undefined;
   inputRef?: React.RefObject<HTMLInputElement | null> | undefined;
-  onAdd: (f: { label: string; note: string }) => void;
+  onAdd: (f: { label: string; note: string; fill: boolean }) => void;
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  // Text only: a solid box behind the words (owner, Oct 28: "fill the textboxes with a background").
+  const [fill, setFill] = useState(false);
   const ok = label.trim().length > 0;
   const presets: readonly string[] = kind === "tag" ? TAG_PRESETS : [];
   const recents = recent.filter((r) => !presets.includes(r));
@@ -1571,7 +1718,7 @@ function PlaceForm({
       data-form="place-label"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ok) onAdd({ label: label.trim(), note: note.trim() });
+        if (ok) onAdd({ label: label.trim(), note: note.trim(), fill: kind === "text" && fill });
       }}
     >
       {framed && (
@@ -1607,6 +1754,15 @@ function PlaceForm({
         <div className="space-y-1" data-chips="recent">
           <p className="text-xs text-muted-foreground">Recent</p>
           <div className="flex flex-wrap gap-1">{recents.map(chip)}</div>
+        </div>
+      )}
+      {kind === "text" && (
+        <div className="flex items-center gap-2" data-field="fill">
+          <Switch id="photo-mark-fill" checked={fill} onCheckedChange={setFill} />
+          <Label htmlFor="photo-mark-fill" className="text-sm font-normal">
+            Background
+          </Label>
+          <span className="text-xs text-muted-foreground">(a solid box behind the words)</span>
         </div>
       )}
       {kind === "tag" && compact && !noteOpen && !note && (

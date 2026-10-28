@@ -2,13 +2,18 @@
  * The phone side of the photo markup editor (owner, Oct 28: "adding tags and texts on mobile are
  * difficult"; technicians mark up on phones): finger-sized handles, labels one size up, where a
  * label placed from the bottom sheet lands, and where the selected mark's handles sit over the
- * picture. Pure — the editor (components/service/photo-markup.tsx) passes coarsePointer(), its
- * view and its rotation.
+ * picture — the grip, the ×, and (later that day) the rotate handle over a circle, a box or a
+ * text and a text's Background toggle. Pure — the editor (components/service/photo-markup.tsx)
+ * passes coarsePointer(), its view and its rotation.
  */
 import {
   arrowGeom,
+  canTurn,
+  markCentre,
+  markRot,
   rectGeom,
   rotatePoint,
+  rotatedBounds,
   strokeFor,
   tagGeom,
   textBox,
@@ -45,8 +50,20 @@ export interface Box {
   h: number;
 }
 
-/** The box a mark takes in the picture's own px (the dashed selection box, the handles). */
+/**
+ * The box a mark takes in the picture's own px (the dashed selection box, the handles). A mark
+ * turned by its own `rot` takes the box its turned corners span (rotatedBounds): a box turned
+ * 90° swaps its width and height.
+ */
 export function selectionBounds(mark: PhotoMark, w: number, h: number, textScale = 1): Box {
+  const b = unturnedBounds(mark, w, h, textScale);
+  const rot = markRot(mark);
+  const c = rot ? markCentre(mark, w, h, textScale) : null;
+  return c ? rotatedBounds(b, c, rot) : b;
+}
+
+/** selectionBounds before the mark's own turn (what the SVG rotates about the mark's centre). */
+export function unturnedBounds(mark: PhotoMark, w: number, h: number, textScale = 1): Box {
   const sw = strokeFor(w, h);
   if (mark.kind === "ellipse" || mark.kind === "rect") return rectGeom(mark, w, h);
   if (mark.kind === "arrow") {
@@ -98,9 +115,11 @@ const clampPct = (v: number) => Math.min(100, Math.max(0, v));
 
 /**
  * Where the selected mark's handles sit over the picture, as percentages of the view: the grip
- * (drag to move) at the mark's centre, the × (remove) at its top-right corner. `shown` is false
- * when the mark's centre is off screen (zoomed in elsewhere) — then no handles, so a thumb does
- * not drag what it cannot see.
+ * (drag to move) at the mark's centre, the × (remove) at its top-right corner, the rotate handle
+ * (drag to turn; a circle, a box or a text only — null for an arrow or a tag) at the top centre
+ * (the editor lifts it a handle above the box in css px), and a text's Background toggle at the
+ * top-left corner (null for anything else). `shown` is false when the mark's centre is off
+ * screen (zoomed in elsewhere) — then no handles, so a thumb does not drag what it cannot see.
  */
 export function handlePlaces(
   mark: PhotoMark,
@@ -118,5 +137,14 @@ export function handlePlaces(
     shown,
     grip: { left: clampPct(cx), top: clampPct(cy) },
     remove: { left: clampPct(b.left + b.width), top: clampPct(b.top) },
+    rotate: canTurn(mark) ? { left: clampPct(cx), top: clampPct(b.top) } : null,
+    fill: mark.kind === "text" ? { left: clampPct(b.left), top: clampPct(b.top) } : null,
   };
 }
+
+/**
+ * The angle (clockwise degrees, y down) from the mark's centre `c` to the pointer `p`, both in
+ * the picture's own px: a drag of the rotate handle turns the mark by how much this changes.
+ */
+export const angleFrom = (c: Pt, p: Pt): number =>
+  (Math.atan2(p[1] - c[1], p[0] - c[0]) * 180) / Math.PI;
