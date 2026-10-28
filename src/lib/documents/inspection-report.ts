@@ -5,12 +5,17 @@
 import { INSPECTION_REPORT_TEMPLATE } from "./defaults";
 import { DEFAULT_OPTIONS, type DocOptions } from "./model";
 
-/** What an inspection report is generated with: pictures and their marks, no prices. */
+/**
+ * What an inspection report is generated with: pictures and their marks, no prices, the findings
+ * split into one Checklist item per flagged item with a gap between them (not one per page — the
+ * owner's toggle, Oct 28, off until ticked on the document).
+ */
 export const INSPECTION_REPORT_OPTIONS: DocOptions = {
   ...DEFAULT_OPTIONS,
   prices: "none",
   photos: true,
   marks: true,
+  itemPerPage: false,
 };
 
 /** The template the button uses, by name (case does not matter), or null when the install lacks it. */

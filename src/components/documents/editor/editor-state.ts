@@ -5,6 +5,8 @@
  * editor-state.test.ts. The route owns the server calls and feeds the results back as actions.
  */
 import { applyOptionsToPages, type DocOptions, type DocPage, newPage } from "@/lib/documents/model";
+import { splitRepairListModule } from "@/lib/documents/server-pure";
+import type { InspectionSnapshot } from "@/lib/documents/variables";
 
 /** What a save writes (and what "dirty" compares). */
 export interface EditorDoc {
@@ -44,6 +46,11 @@ export type EditorAction =
   | { type: "setPages"; op: (pages: readonly DocPage[]) => DocPage[] }
   /** The options checkboxes: flipping prices is applied to the pricing tables at once; the rest are view switches. */
   | { type: "setOptions"; patch: Partial<DocOptions> }
+  /**
+   * "Split into items" on a Repair List (owner, Oct 28): the module is replaced in place by one
+   * Checklist item per item it lists, from the document's current inspection snapshot.
+   */
+  | { type: "splitRepairList"; moduleId: string; inspection: InspectionSnapshot }
   | { type: "selectPage"; pageId: string }
   /** A save went through: the current copy becomes the saved one. */
   | { type: "markSaved" };
@@ -57,6 +64,7 @@ export const EMPTY_EDITOR: EditorState = {
     marks: true,
     footer: true,
     pageBreakIn: 8.8,
+    itemPerPage: false,
   },
   saved: null,
   template: null,
@@ -117,6 +125,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const flipped = options.prices !== state.options.prices;
       const pages = flipped ? applyOptionsToPages(state.pages, options) : state.pages;
       return finish({ ...state, options, pages });
+    }
+    case "splitRepairList": {
+      const pages = splitRepairListModule(state.pages, action.moduleId, action.inspection);
+      return finish({ ...state, pages });
     }
     case "selectPage":
       return { ...state, selectedPageId: fixSelection(state.pages, action.pageId) };

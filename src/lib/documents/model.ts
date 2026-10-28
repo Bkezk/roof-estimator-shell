@@ -215,6 +215,7 @@ export const MODULE_TYPES = [
   "pdf",
   "photoGrid",
   "repairList",
+  "repairItem",
 ] as const;
 export type ModuleType = (typeof MODULE_TYPES)[number];
 
@@ -234,6 +235,7 @@ export const MODULE_LABELS: Record<ModuleType, string> = {
   pdf: "Inserted PDF",
   photoGrid: "Photo Grid",
   repairList: "Repair List",
+  repairItem: "Checklist item",
 };
 /** The tiles offered on the Modules tab (an inserted PDF comes from Insert PDF, not a tile). */
 export const MODULE_TILES: ModuleType[] = [
@@ -250,6 +252,7 @@ export const MODULE_TILES: ModuleType[] = [
   "pricingTable",
   "photoGrid",
   "repairList",
+  "repairItem",
 ];
 
 /** How a Pricing Table shows the bid's money (the "with or without cost" checkbox). */
@@ -344,6 +347,46 @@ export interface RepairListModule extends ModuleBase {
   /** Each row's thumbnails' height in inches (owner, Oct 28); absent or 0 = 1.6 × 1.2 in, three a line. */
   photoHeightIn?: number | undefined;
 }
+/**
+ * ONE checklist item from the document's `__inspection` snapshot (owner, Oct 28: "the checklist
+ * currently comes through as one big box, id like the ability to manipulate each checklist item
+ * box so i can have space between them or one for each page"): the item's name in bold, its
+ * note, its pictures as thumbnails like a Repair List row, then a gap below. A new document
+ * from a template splits every Repair List into these (server-pure.ts splitRepairLists); the
+ * "Split into items" link on a Repair List does the same by hand. `label` / `note` null = live
+ * from the snapshot (Refresh data updates them); a typed text is kept instead.
+ */
+export interface RepairItemModule extends ModuleBase {
+  type: "repairItem";
+  /** The checklist item's id in the snapshot (InspectionSnapshot.items[].id). */
+  itemId: string;
+  label: string | null;
+  note: string | null;
+  /** The thumbnails' height in inches (as a Repair List's); absent or 0 = 1.6 × 1.2 in. */
+  photoHeightIn?: number | undefined;
+  /** The gap under the item in inches; absent = REPAIR_ITEM_SPACE_IN. */
+  spaceBelowIn?: number | undefined;
+}
+/** The default gap under a Checklist item, in inches. */
+export const REPAIR_ITEM_SPACE_IN = 0.25;
+/** The most a Checklist item's gap can be, in inches (the box clamps to it). */
+export const REPAIR_ITEM_SPACE_MAX_IN = 8;
+/** A Checklist item's gap below in inches: the default when absent, 0 or not a finite number. */
+export function repairItemSpaceOf(m: { spaceBelowIn?: number | undefined }): number {
+  const s = m.spaceBelowIn;
+  return typeof s === "number" && Number.isFinite(s) && s > 0
+    ? Math.min(s, REPAIR_ITEM_SPACE_MAX_IN)
+    : REPAIR_ITEM_SPACE_IN;
+}
+/**
+ * The module with its gap below set: a positive gap (clamped) is written; 0 or less removes the
+ * key, so a blank box means the default and the saved JSON never carries 0 or undefined.
+ */
+export function withRepairItemSpace(m: RepairItemModule, spaceIn: number): RepairItemModule {
+  const { spaceBelowIn: _old, ...rest } = m;
+  const s = Number.isFinite(spaceIn) ? Math.min(Math.max(spaceIn, 0), REPAIR_ITEM_SPACE_MAX_IN) : 0;
+  return s > 0 ? { ...rest, spaceBelowIn: s } : rest;
+}
 export interface PdfModule extends ModuleBase {
   type: "pdf";
   /** document_assets.id (the PDF library) and what it was called when inserted. */
@@ -365,7 +408,8 @@ export type DocModule =
   | HrModule
   | PdfModule
   | PhotoGridModule
-  | RepairListModule;
+  | RepairListModule
+  | RepairItemModule;
 
 // ------------------------------------------------------------------------- picture sizes
 
@@ -392,10 +436,11 @@ export const PICTURE_MODULE_TYPES = [
   "twoPhotos",
   "photoGrid",
   "repairList",
+  "repairItem",
 ] as const satisfies readonly ModuleType[];
 /** The modules whose size is `photoHeightIn` (Full Photo keeps its own `heightIn`). */
 export type PhotoHeightModule =
-  PhotoTextModule | TwoPhotosModule | PhotoGridModule | RepairListModule;
+  PhotoTextModule | TwoPhotosModule | PhotoGridModule | RepairListModule | RepairItemModule;
 /** A module's picture height in inches: 0 when absent, 0 or not a finite number. */
 export function photoHeightOf(m: { photoHeightIn?: number | undefined }): number {
   const h = m.photoHeightIn;
@@ -484,6 +529,15 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
     }),
     z.object({
       id: z.string(),
+      type: z.literal("repairItem"),
+      itemId: z.string(),
+      label: z.string().nullable(),
+      note: z.string().nullable(),
+      photoHeightIn: photoHeightSchema,
+      spaceBelowIn: z.number().min(0).max(REPAIR_ITEM_SPACE_MAX_IN).optional(),
+    }),
+    z.object({
+      id: z.string(),
       type: z.literal("pdf"),
       assetId: z.string().uuid(),
       name: z.string(),
@@ -516,6 +570,11 @@ export interface DocOptions {
   footer: boolean;
   /** The dotted page-break guide, inches from the top (CenterPoint: 8.8, range 5–10.5). */
   pageBreakIn: number;
+  /**
+   * Every Checklist item starts a new page (owner, Oct 28: "one for each page" as a toggle; the
+   * default is the items split with a gap between them). Documents saved before it read as off.
+   */
+  itemPerPage: boolean;
 }
 export const DEFAULT_OPTIONS: DocOptions = {
   prices: "total",
@@ -523,13 +582,15 @@ export const DEFAULT_OPTIONS: DocOptions = {
   marks: true,
   footer: true,
   pageBreakIn: 8.8,
+  itemPerPage: false,
 };
-export const optionsSchema: z.ZodType<DocOptions> = z.object({
+export const optionsSchema: z.ZodType<DocOptions, z.ZodTypeDef, unknown> = z.object({
   prices: z.enum(["total", "none"]),
   photos: z.boolean(),
   marks: z.boolean(),
   footer: z.boolean(),
   pageBreakIn: z.number().min(5).max(10.5),
+  itemPerPage: z.boolean().default(false),
 });
 
 /** What a document hangs off. */
@@ -602,6 +663,9 @@ export function newModule(type: ModuleType): DocModule {
       return { id, type, images: [], columns: 2 };
     case "repairList":
       return { id, type, rows: null, photos: true, allItems: false };
+    case "repairItem":
+      // The item is picked in the module's settings (a blank id shows "Pick a checklist item").
+      return { id, type, itemId: "", label: null, note: null };
     case "pdf":
       throw new Error("An inserted PDF is made from the library (newPdfModule), not a tile.");
   }

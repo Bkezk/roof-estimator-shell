@@ -276,7 +276,12 @@ export const OPTION_HINTS = {
   photos: "Show or hide every picture in this document",
   marks: "Show or hide the circles, arrows and text drawn on pictures",
   footer: "Footer: the footer and the dotted page-break line",
+  itemPerPage: "One checklist item per page: every Checklist item starts a new page",
 } as const;
+/** A Checklist item whose item is gone from the inspection snapshot (the PDF prints nothing for it). */
+export const ITEM_GONE_HINT = "This item is no longer on the inspection";
+/** A Checklist item added from the tile before an item is picked in its settings. */
+export const PICK_ITEM_HINT = "Pick a checklist item in the settings above";
 /** The Mark up pencil's tooltip while the document's Marks checkbox is off (the pencil is disabled). */
 export const MARKS_OFF_HINT = "Marks are off for this document";
 /** What a hidden picture module says on the canvas while Photos is off (never printed). */
@@ -323,10 +328,12 @@ export function sheetContentLimit(options: { footer: boolean; pageBreakIn: numbe
  * PDF flows such a module (a Repair List's rows, a long letter) from that very spot — and what
  * follows starts the next sheet (owner, Oct 28: the Findings heading sat alone on an empty page
  * 2 with the whole Repair List pushed to "Page 2 · continued"). An unmeasured module (no height
- * yet) counts as 0 so the first paint is one sheet. Pure, so it is tested.
+ * yet) counts as 0 so the first paint is one sheet. A module flagged `breakBefore` (a Checklist
+ * item with "One checklist item per page" on) starts a new sheet unless it is first on its
+ * sheet, as the PDF's pageBreak piece does. Pure, so it is tested.
  */
 export function packIntoSheets(
-  items: ReadonlyArray<{ id: string; height: number | undefined }>,
+  items: ReadonlyArray<{ id: string; height: number | undefined; breakBefore?: boolean }>,
   limit: number,
   gap: number,
 ): string[][] {
@@ -337,7 +344,7 @@ export function packIntoSheets(
     const h = it.height ?? 0;
     const need = (cur.length ? gap : 0) + h;
     const giant = h > limit;
-    if (cur.length && used + need > limit && !giant) {
+    if (cur.length && (it.breakBefore || (used + need > limit && !giant))) {
       sheets.push(cur);
       cur = [];
       used = 0;

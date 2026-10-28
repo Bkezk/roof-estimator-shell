@@ -235,7 +235,12 @@ function PageSheets(props: {
 
   const limit = sheetContentLimit(env.options);
   const groups = packIntoSheets(
-    props.page.modules.map((m) => ({ id: m.id, height: heights[m.id] })),
+    props.page.modules.map((m) => ({
+      id: m.id,
+      height: heights[m.id],
+      // "One checklist item per page": every Checklist item starts a sheet (the PDF, a page).
+      breakBefore: m.type === "repairItem" && env.options.itemPerPage,
+    })),
     limit,
     MODULE_GAP_PX,
   );

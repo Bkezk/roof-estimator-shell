@@ -72,6 +72,7 @@ import {
   SERVICE_BUCKET,
   shareOrigin,
   sniffImageType,
+  splitRepairLists,
   withStoredInspection,
   INSPECTION_KEY,
   withStoredPricing,
@@ -887,7 +888,11 @@ export const createDocument = createServerFn({ method: "POST" })
     // The property's cover photo (phase 2) fills the template's first empty Full Photo on page 1.
     const cover: ImageRef | null =
       loaded.siteId && loaded.siteCoverPath ? { kind: "siteCover", siteId: loaded.siteId } : null;
-    const pages = pagesForNewDocument(templatePages, data.options, cover);
+    const generated = pagesForNewDocument(templatePages, data.options, cover);
+    // From a template on an inspection ticket with a snapshot (owner, Oct 28: "default to split
+    // items"): every Repair List becomes one Checklist item per flagged item, in its place.
+    const inspection = loaded.source.kind === "ticket" ? loaded.source.inspection : null;
+    const pages = templatePages && inspection ? splitRepairLists(generated, inspection) : generated;
     const variables = snapshot(loaded.source);
     const { data: row, error } = await sb
       .from("documents")

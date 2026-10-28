@@ -17,13 +17,17 @@ import {
 
 import {
   type DocKind,
+  type DocModule,
   type DocOptions,
   type DocPage,
   type ImageRef,
   instantiatePages,
+  newId,
   newPage,
+  type RepairItemModule,
+  type RepairListModule,
 } from "./model";
-import type { DocumentSource, InspectionSnapshot } from "./variables";
+import { type DocumentSource, inspectionItems, type InspectionSnapshot } from "./variables";
 
 // ------------------------------------------------------------------------------- the bucket
 
@@ -500,6 +504,90 @@ export function inspectionSnapshotFrom(
       photoIds: byItem.get(i.id) ?? [],
     })),
   };
+}
+
+// ------------------------------------------------------------------- one item per module
+
+/**
+ * The Checklist item modules a Repair List would print as (owner, Oct 28: "lets have it default
+ * to split items"): one per item it lists — the flagged ones, or every item when `allItems` —
+ * each live from the snapshot (`label` / `note` null) and carrying the list's thumbnail size.
+ * None when the list has nothing to list (the Repair List then stays and prints "No issues found").
+ */
+export function repairItemModules(
+  list: Pick<RepairListModule, "allItems" | "photoHeightIn">,
+  insp: InspectionSnapshot | null | undefined,
+): RepairItemModule[] {
+  return inspectionItems(insp, list.allItems).map((i) => ({
+    id: newId(),
+    type: "repairItem",
+    itemId: i.id,
+    label: null,
+    note: null,
+    ...(list.photoHeightIn !== undefined ? { photoHeightIn: list.photoHeightIn } : {}),
+  }));
+}
+
+/**
+ * Every Repair List in the pages replaced IN PLACE by its item modules (createDocument, for a
+ * document made from a template on an inspection ticket with a snapshot; nothing else moves). A
+ * list with nothing to list is left as it is.
+ */
+export function splitRepairLists(
+  pages: readonly DocPage[],
+  insp: InspectionSnapshot | null | undefined,
+): DocPage[] {
+  return pages.map((p) => ({
+    ...p,
+    modules: p.modules.flatMap((m): DocModule[] => {
+      if (m.type !== "repairList") return [m];
+      const items = repairItemModules(m, insp);
+      return items.length ? items : [m];
+    }),
+  }));
+}
+
+/** One Repair List split by hand (the module's "Split into items" link); unknown id or nothing to list = unchanged. */
+export function splitRepairListModule(
+  pages: readonly DocPage[],
+  moduleId: string,
+  insp: InspectionSnapshot | null | undefined,
+): DocPage[] {
+  return pages.map((p) => ({
+    ...p,
+    modules: p.modules.flatMap((m): DocModule[] => {
+      if (m.id !== moduleId || m.type !== "repairList") return [m];
+      const items = repairItemModules(m, insp);
+      return items.length ? items : [m];
+    }),
+  }));
+}
+
+/**
+ * The flagged items a refreshed snapshot has that no Checklist item module on the pages shows
+ * (Refresh data's note: a Repair List shows them all, so a document that still has one is
+ * covered). Zero without a snapshot.
+ */
+export function flaggedItemsNotShown(
+  pages: readonly DocPage[],
+  insp: InspectionSnapshot | null | undefined,
+): number {
+  if (!insp) return 0;
+  const shown = new Set<string>();
+  let hasList = false;
+  for (const p of pages)
+    for (const m of p.modules) {
+      if (m.type === "repairItem") shown.add(m.itemId);
+      if (m.type === "repairList") hasList = true;
+    }
+  if (hasList) return 0;
+  return inspectionItems(insp, false).filter((i) => !shown.has(i.id)).length;
+}
+
+/** The sentence Refresh data adds for the flagged items not on the page yet; null for none. */
+export function notOnPageNote(n: number): string | null {
+  if (n <= 0) return null;
+  return `${n} flagged ${n === 1 ? "item is" : "items are"} not on the page yet — add ${n === 1 ? "it" : "them"} with the Checklist item tile.`;
 }
 
 /** The variables the editor lists and the text prints: text values, no reserved keys. */

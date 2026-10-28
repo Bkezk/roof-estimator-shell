@@ -59,6 +59,8 @@ import {
   photoGridKey,
   type Piece,
   type Placed,
+  repairItemData,
+  repairItemKey,
   repairListData,
   repairListKey,
   SIGNATURE_SPACE,
@@ -159,6 +161,10 @@ export function imageRefs(
           ),
         );
       }
+      if (m.type === "repairItem" && opts.inspection)
+        repairItemData(m, opts.inspection)?.photoIds.forEach((photoId, pi) =>
+          out.set(repairItemKey(m.id, pi), { kind: "ticketPhoto", photoId, marks }),
+        );
     }
   return out;
 }
@@ -348,6 +354,7 @@ class Drawer {
     const L = this.left;
     switch (p.kind) {
       case "gap":
+      case "pageBreak":
         return;
       case "text": {
         const baseline = yTop - p.line.size;
@@ -536,6 +543,7 @@ export async function renderDocumentPdf(
     inspection,
     marks: options.marks,
     photos: options.photos,
+    itemPerPage: options.itemPerPage,
   };
   const drawer = new Drawer(pdf, fonts, images);
   const top = PAGE.heightPt - PAGE.marginPt;

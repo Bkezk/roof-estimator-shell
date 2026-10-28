@@ -18,6 +18,7 @@ import {
   type ImageRef,
   type PdfModule,
   type PhotoGridModule,
+  type RepairItemModule,
   type RepairListModule,
   type RichDoc,
   type RichNode,
@@ -25,14 +26,17 @@ import {
   PAGE,
   photoHeightOf,
   PT_PER_IN,
+  repairItemSpaceOf,
   resolveCellText,
   VARIABLE_NODE,
 } from "./model";
 import {
   type DocumentSource,
+  type InspectionItem,
   type InspectionSnapshot,
   inspectionRows,
   pricingRows,
+  repairItemTitle,
 } from "./variables";
 
 // ------------------------------------------------------------------------------- constants
@@ -190,7 +194,9 @@ export type Piece =
       height: number;
       entries: Array<{ x: number; width: number; label: string }>;
     }
-  | { kind: "columns"; height: number; columns: Column[] };
+  | { kind: "columns"; height: number; columns: Column[] }
+  /** Start a new page here (the "One checklist item per page" option); nothing at the top of a page. */
+  | { kind: "pageBreak"; height: 0 };
 
 export interface Column {
   x: number;
@@ -231,6 +237,8 @@ export interface LayoutContext {
    * letterhead's logo is not a photo and prints either way. Absent = on.
    */
   photos?: boolean | undefined;
+  /** The document's "One checklist item per page" option: every Checklist item starts a new page. Absent = off. */
+  itemPerPage?: boolean | undefined;
 }
 
 export const fontKey = (bold: boolean, italic: boolean): FontKey =>
@@ -918,6 +926,8 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
       return layoutPhotoGrid(m, x, width, ctx);
     case "repairList":
       return layoutRepairList(m, x, width, ctx);
+    case "repairItem":
+      return layoutRepairItem(m, x, width, ctx);
     case "pdf":
       return [];
   }
@@ -1061,41 +1071,7 @@ export function layoutRepairList(
     out.push(rowPiece);
     const ids = data.photoIds[ri] ?? [];
     if (!ids.length) return;
-    const { thumbW, thumbH, perLine } = repairThumbBox(m, width);
-    for (let start = 0; start < ids.length; start += perLine) {
-      const line = ids.slice(start, start + perLine);
-      out.push({ kind: "gap", height: 4 });
-      out.push(
-        columnsPiece(
-          line.map((photoId, k) => {
-            const cx = x + CELL_PAD + k * (thumbW + GRID_GUTTER);
-            const key = repairListKey(m.id, ri, start + k);
-            const ref: ImageRef = { kind: "ticketPhoto", photoId, marks: ctx.marks !== false };
-            const size = ctx.image(ref, key);
-            const piece: Piece = size
-              ? (() => {
-                  const fit = fitImage(size, thumbW, thumbH);
-                  return {
-                    kind: "image",
-                    x: cx,
-                    width: fit.width,
-                    height: fit.height,
-                    ref,
-                    key,
-                  };
-                })()
-              : {
-                  kind: "placeholder",
-                  x: cx,
-                  width: thumbW,
-                  height: thumbH * 0.6,
-                  text: PLACEHOLDER_TEXT,
-                };
-            return { x: cx, width: thumbW, pieces: [piece] };
-          }),
-        ),
-      );
-    }
+    out.push(...thumbnailRows(ids, m, x + CELL_PAD, width, ctx, (k) => repairListKey(m.id, ri, k)));
     out.push({ kind: "gap", height: 6 });
   });
   const last = out[out.length - 1];
@@ -1103,13 +1079,133 @@ export function layoutRepairList(
   return out;
 }
 
-/** A page's modules as one flow of pieces, a gap between modules. */
+/**
+ * Ticket photos as small thumbnails, `perLine` a row (repairThumbBox), each row a piece of
+ * columns with a 4 pt gap above it: a Repair List row's pictures and a Checklist item's. The
+ * marks follow the document's Marks checkbox; `keyOf` names the picture the server loads.
+ */
+function thumbnailRows(
+  ids: readonly string[],
+  m: { photoHeightIn?: number | undefined },
+  x: number,
+  width: number,
+  ctx: LayoutContext,
+  keyOf: (photo: number) => string,
+): Piece[] {
+  const out: Piece[] = [];
+  const { thumbW, thumbH, perLine } = repairThumbBox(m, width);
+  for (let start = 0; start < ids.length; start += perLine) {
+    const line = ids.slice(start, start + perLine);
+    out.push({ kind: "gap", height: 4 });
+    out.push(
+      columnsPiece(
+        line.map((photoId, k) => {
+          const cx = x + k * (thumbW + GRID_GUTTER);
+          const key = keyOf(start + k);
+          const ref: ImageRef = { kind: "ticketPhoto", photoId, marks: ctx.marks !== false };
+          const size = ctx.image(ref, key);
+          const piece: Piece = size
+            ? (() => {
+                const fit = fitImage(size, thumbW, thumbH);
+                return {
+                  kind: "image",
+                  x: cx,
+                  width: fit.width,
+                  height: fit.height,
+                  ref,
+                  key,
+                };
+              })()
+            : {
+                kind: "placeholder",
+                x: cx,
+                width: thumbW,
+                height: thumbH * 0.6,
+                text: PLACEHOLDER_TEXT,
+              };
+          return { x: cx, width: thumbW, pieces: [piece] };
+        }),
+      ),
+    );
+  }
+  return out;
+}
+
+/** The key the server loads a Checklist item's picture under. */
+export const repairItemKey = (moduleId: string, photo: number) => `${moduleId}:p${photo}`;
+
+/**
+ * What a Checklist item prints, from the module and the snapshot: the typed label / note when
+ * there is one, else the item's; the status and pictures are always the snapshot's. Null when
+ * the item is no longer on the inspection (or none was picked) — the editor says so, the PDF
+ * prints nothing.
+ */
+export function repairItemData(
+  m: Pick<RepairItemModule, "itemId" | "label" | "note">,
+  insp: InspectionSnapshot | null | undefined,
+): {
+  /** The name as printed, with " · OK" / " · N/A" when the item is not an issue. */
+  title: string;
+  /** The bare name (typed, else the snapshot's) — what the editor's box holds. */
+  label: string;
+  note: string;
+  status: InspectionItem["status"];
+  photoIds: string[];
+} | null {
+  const item = m.itemId ? insp?.items.find((i) => i.id === m.itemId) : undefined;
+  if (!item) return null;
+  const label = m.label ?? item.label;
+  return {
+    title: repairItemTitle(label, item.status),
+    label,
+    note: m.note ?? item.note,
+    status: item.status,
+    photoIds: item.photoIds,
+  };
+}
+
+/**
+ * A Checklist item (owner, Oct 28): the item's name in bold, its note as body text, its pictures
+ * as thumbnails like a Repair List row's (with the document's Photos on), then its gap below. No
+ * snapshot, or an item no longer on it: nothing (the editor shows the line instead).
+ */
+export function layoutRepairItem(
+  m: RepairItemModule,
+  x: number,
+  width: number,
+  ctx: LayoutContext,
+): Piece[] {
+  if (!ctx.inspection) return [];
+  const data = repairItemData(m, ctx.inspection);
+  if (!data) return [];
+  const more = data.note.trim().length > 0 || (ctx.photos !== false && data.photoIds.length > 0);
+  // The heading stays with what follows it (a name alone at a page's foot reads as nothing).
+  const out: Piece[] = layoutPlain(data.title, x, width, BODY_SIZE, ctx, { bold: true }).map((p) =>
+    more ? { ...p, keepWithNext: true } : p,
+  );
+  if (data.note.trim()) {
+    out.push({ kind: "gap", height: 2 });
+    out.push(...layoutPlain(data.note, x, width, BODY_SIZE, ctx));
+  }
+  if (ctx.photos !== false && data.photoIds.length)
+    out.push(...thumbnailRows(data.photoIds, m, x, width, ctx, (k) => repairItemKey(m.id, k)));
+  out.push({ kind: "gap", height: repairItemSpaceOf(m) * PT_PER_IN });
+  return out;
+}
+
+/**
+ * A page's modules as one flow of pieces, a gap between modules. With the document's "One
+ * checklist item per page" on, a page break goes before every Checklist item (paginate starts a
+ * new page there, unless it is at the top of one already).
+ */
 export function layoutModules(modules: readonly DocModule[], ctx: LayoutContext): Piece[] {
   const out: Piece[] = [];
   for (const m of modules) {
     const pieces = layoutModule(m, 0, ctx.width, ctx);
     if (!pieces.length) continue;
-    if (out.length) out.push({ kind: "gap", height: MODULE_GAP });
+    const first = !out.length;
+    if (m.type === "repairItem" && ctx.itemPerPage) out.push({ kind: "pageBreak", height: 0 });
+    if (!first) out.push({ kind: "gap", height: MODULE_GAP });
     out.push(...pieces);
   }
   return out;
@@ -1177,7 +1273,8 @@ export function splitColumns(
  * Pieces onto pages `avail` tall: a piece that does not fit starts a new page (a row of columns
  * is split first; a table row brings its header along; a piece marked keepWithNext takes the
  * next piece with it). A piece taller than a whole page is placed alone and overflows rather
- * than vanish. No pieces = one empty page. A page never starts with a gap.
+ * than vanish. No pieces = one empty page. A page never starts with a gap. A pageBreak piece
+ * starts a new page, except at the top of a page or at the very end.
  */
 export function paginate(pieces: readonly Piece[], avail = CONTENT_HEIGHT): Placed[][] {
   const pages: Placed[][] = [[]];
@@ -1208,6 +1305,11 @@ export function paginate(pieces: readonly Piece[], avail = CONTENT_HEIGHT): Plac
   };
   while (queue.length) {
     const p = queue.shift()!;
+    if (p.kind === "pageBreak") {
+      // A new page from here; one at the top of a page (or after another break) does nothing.
+      if (y > 0 && queue.length) newPage();
+      continue;
+    }
     if (p.kind === "gap") {
       if (y > 0 && y + p.height <= avail) place(p);
       continue;

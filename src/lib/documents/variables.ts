@@ -258,11 +258,30 @@ export interface InspectionSnapshot {
   }>;
 }
 
-const INSPECTION_STATUS_TEXT: Record<"ok" | "issue" | "na", string> = {
+export const INSPECTION_STATUS_TEXT: Record<"ok" | "issue" | "na", string> = {
   ok: "OK",
   issue: "Issue",
   na: "N/A",
 };
+
+export type InspectionItem = InspectionSnapshot["items"][number];
+
+/** The items a Repair List lists: the issues, or every item when `allItems`. None without a snapshot. */
+export function inspectionItems(
+  insp: InspectionSnapshot | null | undefined,
+  allItems: boolean,
+): InspectionItem[] {
+  return (insp?.items ?? []).filter((i) => allItems || i.status === "issue");
+}
+
+/**
+ * A Checklist item's heading: the item's name, with " · OK" / " · N/A" after it when the item is
+ * not an issue (an issue is the usual case on a report and needs no flag).
+ */
+export function repairItemTitle(label: string, status: InspectionItem["status"]): string {
+  const st = status ?? "ok";
+  return st === "issue" ? label : `${label} · ${INSPECTION_STATUS_TEXT[st]}`;
+}
 
 /** The Repair List's rows: the issues (or every item), each with its note. */
 export function inspectionRows(
@@ -270,7 +289,7 @@ export function inspectionRows(
   allItems: boolean,
 ): { columns: string[]; rows: string[][]; photoIds: string[][] } {
   const columns = allItems ? ["Item", "Finding", "Note"] : ["Item", "Note"];
-  const items = (insp?.items ?? []).filter((i) => allItems || i.status === "issue");
+  const items = inspectionItems(insp, allItems);
   return {
     columns,
     rows: items.map((i) =>

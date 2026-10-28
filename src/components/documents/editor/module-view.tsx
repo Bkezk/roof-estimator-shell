@@ -24,12 +24,19 @@ import {
 
 import {
   IN_PX,
+  ITEM_GONE_HINT,
   NO_INSPECTION_HINT,
   photoGridCaption,
   PHOTOS_OFF_HINT,
+  PICK_ITEM_HINT,
   pricingSourceFromVariables,
 } from "@/lib/documents/editor-helpers";
-import { CONTENT_WIDTH, repairListData, repairThumbBox } from "@/lib/documents/pdf-layout";
+import {
+  CONTENT_WIDTH,
+  repairItemData,
+  repairListData,
+  repairThumbBox,
+} from "@/lib/documents/pdf-layout";
 import { storedInspection } from "@/lib/documents/server-pure";
 import {
   type DocModule,
@@ -47,6 +54,10 @@ import {
   type PricingTableModule,
   PT_PER_IN,
   removeModule,
+  REPAIR_ITEM_SPACE_IN,
+  REPAIR_ITEM_SPACE_MAX_IN,
+  type RepairItemModule,
+  repairItemSpaceOf,
   type RepairListModule,
   resolveCellText,
   type SignatureModule,
@@ -56,8 +67,15 @@ import {
   type TwoPhotosModule,
   updateModule,
   withPhotoHeight,
+  withRepairItemSpace,
 } from "@/lib/documents/model";
-import { pricingRows, variableLabel } from "@/lib/documents/variables";
+import {
+  inspectionItems,
+  INSPECTION_STATUS_TEXT,
+  pricingRows,
+  repairItemTitle,
+  variableLabel,
+} from "@/lib/documents/variables";
 import { cn } from "@/lib/utils";
 import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
@@ -195,6 +213,8 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
       return <PhotoGrid m={m} set={set} />;
     case "repairList":
       return <RepairList m={m} set={set} />;
+    case "repairItem":
+      return <RepairItem m={m} set={set} />;
     case "pdf":
       return (
         <div className="flex items-center gap-3 rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
@@ -357,6 +377,8 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
   const insp = storedInspection(env.variables);
   const data = repairListData(m, insp, env.options.photos);
   const editing = m.rows !== null;
+  // What "Split into items" would make (the flagged items, or every item when `allItems`).
+  const splitItems = inspectionItems(insp, m.allItems);
   // The thumbnail box as the PDF draws it (points → screen px), so both agree on the size.
   const box = repairThumbBox(m, CONTENT_WIDTH);
   const thumbStyle = {
@@ -406,6 +428,28 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
           Edit rows
         </button>
       )}
+      {env.mode === "document" ? (
+        // Owner, Oct 28: one Checklist item module per item, so each can be moved and spaced on
+        // its own (a template keeps its Repair List; the split happens on the document).
+        <button
+          type="button"
+          className="underline hover:text-neutral-800 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-60 dark:hover:text-neutral-800"
+          disabled={!insp || !splitItems.length}
+          title={
+            !insp
+              ? "Nothing to split yet — click Refresh data on the Variables tab to pull in the inspection's findings"
+              : !splitItems.length
+                ? "Nothing to split — this list has no items"
+                : "Replace this list with one Checklist item per item, so each can be moved and spaced on its own"
+          }
+          onClick={() => {
+            if (insp) env.dispatch({ type: "splitRepairList", moduleId: m.id, inspection: insp });
+          }}
+          data-split-items
+        >
+          Split into items
+        </button>
+      ) : null}
     </div>
   );
   if (!insp)
@@ -529,6 +573,171 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
           <Plus className="h-3 w-3" /> Add row
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A Checklist item (owner, Oct 28: "manipulate each checklist item box so i can have space
+ * between them or one for each page"): one item from the document's inspection snapshot, drawn as
+ * the PDF prints it — the name in bold (with " · OK" / " · N/A" when it is not an issue), the
+ * note, its ticket photos as thumbnails while the document's Photos is on, then the gap below.
+ * The name and note are typed over on the paper (a typed text is kept; "Undo edits" goes back
+ * to the ticket's own, which Refresh data keeps current). Its settings: the item, the thumbnail
+ * size and "Space below". An item gone from the inspection says so in a muted line (the PDF
+ * prints nothing); no snapshot at all points at Refresh data like the Repair List.
+ */
+function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
+  const env = useEditorEnv();
+  const patch = (f: (t: RepairItemModule) => RepairItemModule) =>
+    set((c) => f(c as RepairItemModule));
+  const insp = storedInspection(env.variables);
+  const data = repairItemData(m, insp);
+  // The thumbnail box as the PDF draws it (points → screen px), so both agree on the size.
+  const box = repairThumbBox(m, CONTENT_WIDTH);
+  const thumbStyle = {
+    width: Math.round((box.thumbW / PT_PER_IN) * IN_PX),
+    height: Math.round((box.thumbH / PT_PER_IN) * IN_PX),
+  };
+  // The flagged items first — the usual pick — then the rest of the checklist.
+  const choices = insp
+    ? [...inspectionItems(insp, false), ...insp.items.filter((i) => i.status !== "issue")]
+    : [];
+  const picked = choices.some((i) => i.id === m.itemId);
+  const edited = m.label !== null || m.note !== null;
+  const settings = (
+    <div
+      className="mb-1 flex flex-wrap items-center gap-3 pr-36 text-xs text-neutral-500 dark:text-neutral-500"
+      data-repair-item-settings
+    >
+      {insp ? (
+        <span className="flex items-center gap-1">
+          Item
+          <select
+            className="h-6 max-w-56 rounded border border-neutral-300 bg-transparent px-1 text-xs text-neutral-700 dark:text-neutral-700"
+            aria-label="Checklist item"
+            title="Which checklist item this box prints"
+            value={m.itemId}
+            onChange={(e) => {
+              const itemId = e.target.value;
+              // A new item starts from the ticket's own text.
+              patch((t) => ({ ...t, itemId, label: null, note: null }));
+            }}
+          >
+            {picked ? null : (
+              <option value={m.itemId}>
+                {m.itemId ? "(no longer on the inspection)" : "Choose an item…"}
+              </option>
+            )}
+            {choices.map((i) => (
+              <option key={i.id} value={i.id}>
+                {repairItemTitle(i.label, i.status)}
+              </option>
+            ))}
+          </select>
+        </span>
+      ) : null}
+      {env.options.photos ? <PhotoSizeControl module={m} set={set} what="the thumbnails" /> : null}
+      <span className="flex items-center gap-1" data-space-below>
+        Space below
+        <NumberField
+          value={m.spaceBelowIn ?? 0}
+          min={0}
+          max={REPAIR_ITEM_SPACE_MAX_IN}
+          step="0.25"
+          inputMode="decimal"
+          placeholder={String(REPAIR_ITEM_SPACE_IN)}
+          title={`The gap under this item in inches; blank = ${REPAIR_ITEM_SPACE_IN}`}
+          className="h-6 w-16 bg-transparent px-1 text-xs"
+          onChange={(v) => patch((t) => withRepairItemSpace(t, v))}
+        />
+        in
+      </span>
+      {edited ? (
+        <button
+          type="button"
+          className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+          title="Throw away the typed text and go back to the ticket's own"
+          onClick={() => patch((t) => ({ ...t, label: null, note: null }))}
+        >
+          Undo edits
+        </button>
+      ) : null}
+    </div>
+  );
+  if (!insp)
+    return (
+      <div>
+        {settings}
+        {env.mode === "template" ? (
+          <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
+            Checklist item: one of the inspection&apos;s findings prints here
+          </div>
+        ) : (
+          <p className="text-sm text-neutral-700 dark:text-neutral-700" data-no-inspection>
+            {NO_INSPECTION_HINT}
+          </p>
+        )}
+      </div>
+    );
+  if (!data)
+    return (
+      <div>
+        {settings}
+        <p className="text-sm italic text-neutral-500 dark:text-neutral-500" data-item-gone>
+          {m.itemId ? ITEM_GONE_HINT : PICK_ITEM_HINT}
+        </p>
+      </div>
+    );
+  const noteLines = data.note.split("\n").length;
+  return (
+    <div className="group/item">
+      {settings}
+      <div className="flex items-baseline text-sm">
+        <input
+          className={cn(paperInput, "font-semibold")}
+          aria-label="Item name"
+          title="The item's name as it prints"
+          value={data.label}
+          onChange={(e) => patch((t) => ({ ...t, label: e.target.value }))}
+        />
+        {data.status && data.status !== "issue" ? (
+          <span className="shrink-0 pr-1 font-semibold" data-item-status>
+            {` · ${INSPECTION_STATUS_TEXT[data.status]}`}
+          </span>
+        ) : null}
+      </div>
+      <textarea
+        className={cn(paperInput, "resize-none text-sm leading-snug")}
+        aria-label="Note"
+        title="The note under the item's name"
+        placeholder="Note"
+        rows={Math.max(1, noteLines)}
+        value={data.note}
+        onChange={(e) => patch((t) => ({ ...t, note: e.target.value }))}
+      />
+      {env.options.photos && data.photoIds.length ? (
+        <div className="mt-1 flex flex-wrap gap-2" data-item-photos>
+          {data.photoIds.map((photoId) => (
+            // A fixed box, as the Repair List's: the marks overlay sits on the picture.
+            <div key={photoId} style={thumbStyle} data-item-photo={photoId}>
+              <MarkUpAffordance
+                image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                onChange={() => {}}
+                doubleClick
+                className="h-full w-full"
+              >
+                <DocImage
+                  image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                  className="h-full w-full rounded-sm"
+                />
+              </MarkUpAffordance>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {/* The gap below, as the PDF prints it (inches → px), so the sheet packs the same way. */}
+      <div style={{ height: Math.round(repairItemSpaceOf(m) * IN_PX) }} aria-hidden data-space />
     </div>
   );
 }

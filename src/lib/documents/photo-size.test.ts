@@ -308,6 +308,7 @@ describe("the editor's Size control", () => {
       "twoPhotos",
       "photoGrid",
       "repairList",
+      "repairItem",
     ]);
     const views: Record<(typeof PICTURE_MODULE_TYPES)[number], string> = {
       fullPhoto: "FullPhoto",
@@ -316,6 +317,7 @@ describe("the editor's Size control", () => {
       twoPhotos: "TwoPhotos",
       photoGrid: "PhotoGrid",
       repairList: "RepairList",
+      repairItem: "RepairItem",
     };
     for (const type of PICTURE_MODULE_TYPES) {
       const body = fnBody(views[type]);

@@ -36,6 +36,7 @@ import {
   LayoutGrid,
   LayoutTemplate,
   ListChecks,
+  ListTodo,
   Link2,
   Loader2,
   Mail,
@@ -89,6 +90,7 @@ import {
   newPage,
   removePage,
 } from "@/lib/documents/model";
+import { flaggedItemsNotShown, notOnPageNote, storedInspection } from "@/lib/documents/server-pure";
 import { sampleVariables, variableDefs } from "@/lib/documents/variables";
 import {
   deleteSavedModule,
@@ -341,8 +343,12 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
       // The stored variables, reserved keys included: the Repair List reads the snapshot at once.
       setVariables(r.variables);
       const note = REFRESH_FINDINGS_NOTE[r.findings];
+      // Checklist items read the snapshot live; flagged items none of them shows get one sentence.
+      const missing = notOnPageNote(
+        flaggedItemsNotShown(state.pages, storedInspection(r.variables)),
+      );
       if (r.findings === "no-checklist" || r.findings === "not-inspection") toast.warning(note);
-      else toast.success(note ?? "Data refreshed");
+      else toast.success([note ?? "Data refreshed", missing].filter(Boolean).join(". "));
     },
     onError: (e) => toast.error(`Could not refresh the data: ${errText(e)}`),
   });
@@ -583,6 +589,7 @@ const TILE_ICONS: Record<ModuleType, React.ComponentType<{ className?: string }>
   pdf: FileDown,
   photoGrid: LayoutGrid,
   repairList: ListChecks,
+  repairItem: ListTodo,
 };
 
 function EditorShell(props: {
@@ -890,6 +897,16 @@ function DocumentTab(props: {
               onCheckedChange={(c) => setOpt({ footer: c === true })}
             />
             Footer
+          </label>
+          <label
+            className="col-span-2 flex items-center gap-2 text-sm"
+            title={OPTION_HINTS.itemPerPage}
+          >
+            <Checkbox
+              checked={state.options.itemPerPage}
+              onCheckedChange={(c) => setOpt({ itemPerPage: c === true })}
+            />
+            One checklist item per page
           </label>
         </div>
         <div className="flex items-center gap-2">
