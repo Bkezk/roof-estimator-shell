@@ -6,8 +6,9 @@
  * (model.ts PAGE), Helvetica. Every DocPage starts a PDF page; its modules flow top down and
  * continue on a new page when they overflow — the layout (pdf-layout.ts, pure and tested)
  * decides where every piece goes and this file only draws: text lines with their marks, pictures
- * (uploaded into the document, a ticket photo with its marks drawn exactly as the invoice draws
- * them — invoices.server.ts drawPhotoMarks — or the logo), tables, signature rules, the footer
+ * (uploaded into the document, a ticket photo turned as the ticket shows it with its marks drawn
+ * exactly as the invoice draws them — invoices.server.ts drawPhoto — or the logo), tables,
+ * signature rules, the footer
  * (the company line and "Page X of Y" in grey) on every content page, and whole pages copied in
  * from the PDF library. A picture that cannot be read (webp, heic, a missing file) prints as a
  * grey "picture not printable" box; nothing here throws for a picture.
@@ -25,8 +26,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { jbkLogoPng } from "@/lib/jbk-logo.server";
-import { drawPhotoMarks } from "@/lib/invoices.server";
-import { parsePhotoMarks, type PhotoMark } from "@/lib/photo-annotations";
+import { drawPhoto } from "@/lib/invoices.server";
+import {
+  parsePhotoMarkup,
+  rotatedBox,
+  type PhotoMark,
+  type Rotation,
+} from "@/lib/photo-annotations";
 
 import {
   DEFAULT_OPTIONS,
@@ -96,9 +102,12 @@ const clean = (s: string) =>
 
 export interface LoadedImage {
   image: PDFImage;
+  /** The picture's size as it shows: a ticket photo's sides swap when it is turned by 90 / 270. */
   width: number;
   height: number;
   marks: PhotoMark[];
+  /** How the picture is shown turned (a ticket photo's rotation; 0 for every other picture). */
+  rotation: Rotation;
 }
 
 /**
@@ -209,7 +218,9 @@ export async function loadImages(
         if (logo === undefined) logo = await embed(pdf, (deps.logo ?? jbkLogoPng)());
         out.set(
           key,
-          logo ? { image: logo, width: logo.width, height: logo.height, marks: [] } : null,
+          logo
+            ? { image: logo, width: logo.width, height: logo.height, marks: [], rotation: 0 }
+            : null,
         );
         continue;
       }
@@ -219,26 +230,42 @@ export async function loadImages(
         // the Marks checkbox is off, so what is on the ref is what prints.
         out.set(
           key,
-          img ? { image: img, width: img.width, height: img.height, marks: ref.marks ?? [] } : null,
+          img
+            ? {
+                image: img,
+                width: img.width,
+                height: img.height,
+                marks: ref.marks ?? [],
+                rotation: 0,
+              }
+            : null,
         );
         continue;
       }
       if (ref.kind === "siteCover") {
         const path = coverPaths.get(ref.siteId);
         const img = path ? await embedPath(DOCUMENTS_BUCKET, path) : null;
-        out.set(key, img ? { image: img, width: img.width, height: img.height, marks: [] } : null);
+        out.set(
+          key,
+          img ? { image: img, width: img.width, height: img.height, marks: [], rotation: 0 } : null,
+        );
         continue;
       }
       const row = photos.get(ref.photoId);
       const img = row ? await embedPath(SERVICE_BUCKET, row.storage_path) : null;
+      // The ticket's rotation always (a sideways photo prints upright whether its marks draw or
+      // not); the layout fits the turned box, so its sides are the turned ones here.
+      const markup = parsePhotoMarkup(row?.annotations);
+      const shown = img ? rotatedBox(img.width, img.height, markup.rotation) : null;
       out.set(
         key,
-        img
+        img && shown
           ? {
               image: img,
-              width: img.width,
-              height: img.height,
-              marks: ref.marks && row ? parsePhotoMarks(row.annotations) : [],
+              width: shown.w,
+              height: shown.h,
+              marks: ref.marks ? markup.marks : [],
+              rotation: markup.rotation,
             }
           : null,
       );
@@ -345,9 +372,13 @@ class Drawer {
           return;
         }
         const box = { x: L + p.x, y: yTop - p.height, w: p.width, h: p.height };
-        this.page.drawImage(img.image, { x: box.x, y: box.y, width: box.w, height: box.h });
-        if (img.marks.length)
-          drawPhotoMarks({ page: this.page, bold: this.fonts.bold }, img.marks, box);
+        drawPhoto(
+          { page: this.page, bold: this.fonts.bold },
+          img.image,
+          img.marks,
+          box,
+          img.rotation,
+        );
         return;
       }
       case "placeholder":

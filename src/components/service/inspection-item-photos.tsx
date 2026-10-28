@@ -18,7 +18,7 @@
 import { useRef, useState } from "react";
 import { Check, ImagePlus, Images, Loader2 } from "lucide-react";
 
-import { parsePhotoMarks } from "@/lib/photo-annotations";
+import { parsePhotoMarkup } from "@/lib/photo-annotations";
 import { unattachedTicketPhotos } from "@/lib/inspection";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PhotoThumb } from "@/components/service/field-shared";
-import { MarksOverlay } from "@/components/service/photo-markup";
+import { RotatedPhoto } from "@/components/service/photo-markup";
 import { takePickedFiles, useSignedUrl } from "@/components/service/field-utils";
 import {
   photosOnItem,
@@ -51,8 +51,7 @@ function PickTile({
   onToggle: () => void;
 }) {
   const url = useSignedUrl(photo.storage_path);
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const marks = parsePhotoMarks(photo.annotations);
+  const { marks, rotation } = parsePhotoMarkup(photo.annotations);
   return (
     <button
       type="button"
@@ -62,18 +61,15 @@ function PickTile({
       onClick={onToggle}
     >
       {url.data ? (
-        <>
-          <img
-            src={url.data}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-            onLoad={(e) =>
-              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-            }
-          />
-          {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />}
-        </>
+        <RotatedPhoto
+          url={url.data}
+          alt=""
+          marks={marks}
+          rotation={rotation}
+          fit="cover"
+          className="h-full w-full"
+          loading="lazy"
+        />
       ) : url.error ? (
         <span className="flex h-full items-center justify-center p-1 text-center text-[10px] text-destructive">
           Could not load

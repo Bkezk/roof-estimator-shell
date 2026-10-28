@@ -11,6 +11,7 @@ import {
   chipText,
   clampPageBreak,
   imageMarks,
+  imageRotation,
   photoGridCaption,
   dataUrlBase64,
   documentSearch,
@@ -314,6 +315,19 @@ describe("pictures and the photo grid (phase 2)", () => {
     expect(imageMarks({ kind: "ticketPhoto", photoId: "zz", marks: true }, photos)).toEqual([]);
     expect(imageMarks({ kind: "logo" }, photos)).toEqual([]);
     expect(imageMarks({ kind: "siteCover", siteId: "s" }, photos)).toEqual([]);
+  });
+  it("imageRotation: a ticket photo turns as the ticket keeps it, marks on or off; everything else is upright", () => {
+    const turned = [
+      { id: "p1", rotation: 90 as const },
+      { id: "p2", rotation: 0 as const },
+    ];
+    expect(imageRotation({ kind: "ticketPhoto", photoId: "p1", marks: true }, turned)).toBe(90);
+    expect(imageRotation({ kind: "ticketPhoto", photoId: "p1", marks: false }, turned)).toBe(90);
+    expect(imageRotation({ kind: "ticketPhoto", photoId: "p2", marks: true }, turned)).toBe(0);
+    expect(imageRotation({ kind: "ticketPhoto", photoId: "zz", marks: true }, turned)).toBe(0);
+    expect(imageRotation({ kind: "upload", path: "a", width: 1, height: 1 }, turned)).toBe(0);
+    expect(imageRotation({ kind: "logo" }, turned)).toBe(0);
+    expect(imageRotation({ kind: "siteCover", siteId: "s" }, turned)).toBe(0);
   });
   it("canMarkUp: uploads and ticket photos, not the logo, the property photo or an empty slot", () => {
     expect(canMarkUp({ kind: "upload", path: "a", width: 1, height: 1 })).toBe(true);

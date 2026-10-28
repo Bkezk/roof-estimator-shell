@@ -1,19 +1,22 @@
 /**
  * Taking a ticket photo away (owner, Oct 1: "those pictures need to be able to be exported if
  * so desired"): the marks flattened onto the photo in the browser — a canvas at the picture's
- * natural size, the photo, then the marks (paintPhotoMarks, the same geometry as on screen and
- * on the invoice) — saved as a PNG named "<ticket>-<role>-<n>.png". A photo without marks is
+ * natural size (its sides swapped when the photo is shown turned by 90 or 270), the photo turned
+ * as it is shown, then the marks (paintPhoto, the same geometry as on screen and on the invoice)
+ * — saved as a PNG named "<ticket>-<role>-<n>.png". A photo without marks that is not turned is
  * saved as the original file. The stored photo is never changed.
  */
 import { useEffect, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
 import {
-  paintPhotoMarks,
-  parsePhotoMarks,
+  paintPhoto,
+  parsePhotoMarkup,
   photoExt,
   photoFileName,
+  rotatedBox,
   type PhotoMark,
+  type Rotation,
 } from "@/lib/photo-annotations";
 import { SERVICE_BUCKET, type JobPhotoRow } from "@/lib/service-field.functions";
 
@@ -21,6 +24,9 @@ import { SERVICE_BUCKET, type JobPhotoRow } from "@/lib/service-field.functions"
 export function useNaturalSize(url: string | null | undefined) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
+    // Another picture (the lightbox leafing through a set): its size is unknown until it loads —
+    // the last one's would box it wrong.
+    setSize(null);
     if (!url) return;
     let live = true;
     const img = new Image();
@@ -51,18 +57,25 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** The photo with its marks drawn in, as a PNG at the picture's natural size. */
-export async function flattenPhoto(blob: Blob, marks: PhotoMark[]): Promise<Blob> {
+/**
+ * The photo turned as it is shown, with its marks drawn in, as a PNG at the picture's natural
+ * size (rotatedBox: the sides swap at 90 and 270).
+ */
+export async function flattenPhoto(
+  blob: Blob,
+  marks: PhotoMark[],
+  rotation: Rotation = 0,
+): Promise<Blob> {
   const src = URL.createObjectURL(blob);
   try {
     const img = await loadImage(src);
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    const box = rotatedBox(img.naturalWidth, img.naturalHeight, rotation);
+    canvas.width = box.w;
+    canvas.height = box.h;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("This browser cannot draw the picture");
-    ctx.drawImage(img, 0, 0);
-    paintPhotoMarks(ctx, marks, canvas.width, canvas.height);
+    paintPhoto(ctx, img, img.naturalWidth, img.naturalHeight, marks, rotation);
     return await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("The picture could not be made"))),
@@ -86,17 +99,22 @@ function saveBlob(blob: Blob, fileName: string) {
 }
 
 /**
- * Download one photo as "<ticket>-<role>-<n>.png" with its marks drawn in (`marks`: the
- * editor's current ones; else the stored ones), or the original file when it has none.
+ * Download one photo as "<ticket>-<role>-<n>.png" turned as it is shown with its marks drawn in
+ * (`marks` and `rotation`: the editor's current ones; else the stored ones), or the original
+ * file when it has no marks and is not turned.
  */
 export async function downloadPhoto(
   photo: JobPhotoRow,
   ticket: string | number | null | undefined,
   n: number,
-  marks: PhotoMark[] = parsePhotoMarks(photo.annotations),
+  marks: PhotoMark[] = parsePhotoMarkup(photo.annotations).marks,
+  rotation: Rotation = parsePhotoMarkup(photo.annotations).rotation,
 ) {
   const blob = await photoBlob(photo.storage_path);
-  if (marks.length)
-    saveBlob(await flattenPhoto(blob, marks), photoFileName(ticket, photo.role, n, "png"));
+  if (marks.length || rotation)
+    saveBlob(
+      await flattenPhoto(blob, marks, rotation),
+      photoFileName(ticket, photo.role, n, "png"),
+    );
   else saveBlob(blob, photoFileName(ticket, photo.role, n, photoExt(photo.storage_path)));
 }

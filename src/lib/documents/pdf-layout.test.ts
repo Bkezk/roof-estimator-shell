@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { rotatedBox } from "@/lib/photo-annotations";
+
 import {
   newModule,
   richFromText,
@@ -192,6 +194,21 @@ describe("pictures and tables", () => {
     expect(fitImage({ width: 1600, height: 1200 }, 400, null)).toEqual({ width: 400, height: 300 });
     expect(fitImage({ width: 1600, height: 1200 }, 400, 150)).toEqual({ width: 200, height: 150 });
     expect(fitImage({ width: 0, height: 0 }, 400, null)).toEqual({ width: 0, height: 0 });
+  });
+  it("a ticket photo turned by 90 / 270 is laid out from its turned box (sides swapped), as loadImages hands it over", () => {
+    // document-pdf.server.ts loadImages reports rotatedBox(picture) as the LoadedImage's size.
+    const turned = rotatedBox(1600, 1200, 90);
+    const size = { width: turned.w, height: turned.h };
+    expect(size).toEqual({ width: 1200, height: 1600 });
+    const byWidth = fitImage(size, 400, null);
+    expect(byWidth.width).toBe(400);
+    expect(byWidth.height).toBeCloseTo(533.333, 2);
+    expect(fitImage(size, 400, 300)).toEqual({ width: 225, height: 300 });
+    const upright = rotatedBox(1600, 1200, 180);
+    expect(fitImage({ width: upright.w, height: upright.h }, 400, null)).toEqual({
+      width: 400,
+      height: 300,
+    });
   });
   it("a full photo with a height fits into it, centred; without one it spans the width; a missing picture is a grey placeholder, never a throw", () => {
     const m = {

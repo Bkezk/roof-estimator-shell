@@ -1191,8 +1191,9 @@ describe("6f. the screens: compact rows, pictures from the ticket, Property insp
       "void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });",
     );
     expect(mutations).toContain("const setFn = useServerFn(setJobPhotoItem);");
-    expect(itemPhotos).toContain(
-      '<MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />',
+    // The tile is RotatedPhoto: the photo turned as the ticket keeps it, its marks over it.
+    expect(itemPhotos).toMatch(
+      /<RotatedPhoto\s+url=\{url\.data\}\s+alt=""\s+marks=\{marks\}\s+rotation=\{rotation\}\s+fit="cover"/,
     );
     // The close-out's item roll and the office fold both carry them.
     expect(cards).toContain("<FromTicketPhotosButton");

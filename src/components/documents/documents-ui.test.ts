@@ -243,19 +243,21 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(list).toContain("dark:bg-neutral-100 dark:text-neutral-700");
   });
   it("every picture draws its marks and offers Mark up: an upload keeps them on its ref, a ticket photo saves on its row through the same drawing surface", () => {
-    expect(picker).toContain(
-      '<MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="contain" />',
+    // The canvas picture is RotatedPhoto: the marks over it, turned as the ticket keeps it.
+    expect(picker).toMatch(
+      /<RotatedPhoto\s+url=\{src\}\s+alt=\{label\}\s+title=\{label\}\s+marks=\{marks\}\s+rotation=\{rotation\}\s+fit="contain"/,
     );
     expect(picker).toContain("const marks = imageMarks(image, env.photos);");
+    expect(picker).toContain("const rotation = imageRotation(image, env.photos);");
     expect(picker).toContain('title="Mark up"');
     expect(picker).toContain("{canMarkUp(props.image) ? (");
     expect(picker).toContain("export function MarkupDialog(");
     expect(picker).toContain("<PhotoMarkupSurface");
     expect(picker).toContain("props.onChange(marks.length ? { ...rest, marks } : rest);");
     expect(picker).toContain("useServerFn(savePhotoAnnotations)");
-    expect(picker).toContain("annotations: serializePhotoMarks(marks),");
+    expect(picker).toContain("annotations: serializePhotoMarks(m.marks, m.rotation),");
     expect(picker).toContain(
-      'import { MarksOverlay, PhotoMarkupSurface } from "@/components/service/photo-markup";',
+      'import { PhotoMarkupSurface, RotatedPhoto } from "@/components/service/photo-markup";',
     );
     // The surface is the ticket editor's own tools, split out so both use one drawer.
     const markup = read("src/components/service/photo-markup.tsx");
@@ -268,11 +270,11 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(editor).toContain("useServerFn(savePhotoAnnotations)");
     const surface = markup.slice(markup.indexOf("export function PhotoMarkupSurface"));
     expect(surface).not.toContain("savePhotoAnnotations");
-    expect(surface).toContain("onDone(history.marks)");
-    // The editor's photo rows carry the ticket's marks so the canvas can draw them.
+    expect(surface).toContain("onDone(history.marks, history.rotation)");
+    // The editor's photo rows carry the ticket's marks and rotation so the canvas can draw them.
     const fns = read("src/lib/documents.functions.ts");
-    expect(fns).toContain("const marks = parsePhotoMarks(r.annotations);");
-    expect(fns).toMatch(/marks,\s*itemKey: r\.item_key,/);
+    expect(fns).toContain("const { marks, rotation } = parsePhotoMarkup(r.annotations);");
+    expect(fns).toMatch(/marks,\s*rotation,\s*itemKey: r\.item_key,/);
   });
   it("the server fills __inspection for an inspection ticket, on create and on Refresh data", () => {
     const fns = read("src/lib/documents.functions.ts");

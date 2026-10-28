@@ -4,11 +4,13 @@
  * box, nothing throws, the pages count, an overflowing body continues on a new page, and an
  * empty document is one page. The layout itself is tested in pdf-layout.test.ts.
  */
-import { PDFDocument } from "pdf-lib";
+import { inflateSync } from "node:zlib";
+import { PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/integrations/supabase/types";
+import { jbkLogoPng } from "@/lib/jbk-logo.server";
 
 import { defaultTemplates, INSPECTION_REPORT_TEMPLATE } from "./defaults";
 import { imageRefs, loadImages, parseDocument, renderDocumentPdf } from "./document-pdf.server";
@@ -52,6 +54,29 @@ const sb = {
 } as unknown as SupabaseClient<Database>;
 
 const json = (v: unknown) => v as Json;
+
+/** The content streams of a PDF, inflated (pdf-lib writes them deflated). */
+async function pdfStreams(bytes: Uint8Array): Promise<string> {
+  const doc = await PDFDocument.load(bytes);
+  const out: string[] = [];
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFRawStream)) continue;
+    const filter = obj.dict.get(PDFName.of("Filter"));
+    try {
+      out.push(
+        (filter === PDFName.of("FlateDecode")
+          ? inflateSync(Buffer.from(obj.contents))
+          : Buffer.from(obj.contents)
+        ).toString("latin1"),
+      );
+    } catch {
+      /* an image */
+    }
+  }
+  return out.join("\n");
+}
+/** Bézier curves: pdf-lib draws an ellipse as four `c` operators. */
+const curves = (ops: string) => (ops.match(/(?:-?[\d.]+ ){6}c\n/g) ?? []).length;
 
 const bidVars = withStoredPricing(sampleVariables("bid"), {
   name: "Whitley",
@@ -132,6 +157,8 @@ const PNG = Uint8Array.from(
 );
 const SITE = "55555555-5555-4555-8555-555555555555";
 const PHOTO = "11111111-1111-4111-8111-111111111111";
+/** A second ticket photo (the 480 × 270 logo file), marked and shown turned by 90 on the ticket. */
+const TURNED = "22222222-2222-4222-8222-222222222222";
 const insp = {
   inspectedOn: "2026-10-20",
   grade: "D",
@@ -165,6 +192,11 @@ const sb2 = {
                   storage_path: "jobs/j/p.png",
                   annotations: { v: 1, kind: "photo", marks: [circle] },
                 },
+                {
+                  id: TURNED,
+                  storage_path: "jobs/j/r.png",
+                  annotations: { v: 1, kind: "photo", marks: [circle], rotation: 90 },
+                },
               ]
             : [],
       error: null,
@@ -172,11 +204,13 @@ const sb2 = {
   storage: {
     from: (bucket: string) => ({
       download: async (path: string) =>
-        (bucket === "documents" &&
-          (path === `sites/${SITE}/cover.png` || path === "docs/d/a.png")) ||
-        (bucket === "service" && path === "jobs/j/p.png")
-          ? { data: new Blob([PNG]), error: null }
-          : { data: null, error: { message: "not found" } },
+        bucket === "service" && path === "jobs/j/r.png"
+          ? { data: new Blob([new Uint8Array(jbkLogoPng())]), error: null }
+          : (bucket === "documents" &&
+                (path === `sites/${SITE}/cover.png` || path === "docs/d/a.png")) ||
+              (bucket === "service" && path === "jobs/j/p.png")
+            ? { data: new Blob([PNG]), error: null }
+            : { data: null, error: { message: "not found" } },
     }),
   },
 } as unknown as SupabaseClient<Database>;
@@ -215,6 +249,8 @@ describe("phase 2: the Inspection report, the Photo Grid, marked-up uploads and 
       ["s", { kind: "siteCover", siteId: SITE }],
       ["s0", { kind: "siteCover", siteId: "66666666-6666-4666-8666-666666666666" }],
       ["x", { kind: "upload", path: "docs/d/missing.png", width: 1, height: 1 }],
+      ["r", { kind: "ticketPhoto", photoId: TURNED, marks: true }],
+      ["r0", { kind: "ticketPhoto", photoId: TURNED, marks: false }],
     ]);
     const loaded = await loadImages(sb2, pdf, refs, {});
     expect(loaded.get("u")!.marks).toEqual([circle]);
@@ -224,6 +260,52 @@ describe("phase 2: the Inspection report, the Photo Grid, marked-up uploads and 
     expect(loaded.get("s")).toMatchObject({ width: 1, height: 1, marks: [] });
     expect(loaded.get("s0")).toBeNull();
     expect(loaded.get("x")).toBeNull();
+    // Every picture says how it is turned; only a ticket photo ever is.
+    expect(loaded.get("u")!.rotation).toBe(0);
+    expect(loaded.get("t")!.rotation).toBe(0);
+    expect(loaded.get("s")!.rotation).toBe(0);
+    // A ticket photo turned by 90 is handed to the layout as its turned box (the 480 × 270 file
+    // stands 270 × 480), with its rotation — whether or not its marks print.
+    expect(loaded.get("r")).toMatchObject({
+      width: 270,
+      height: 480,
+      rotation: 90,
+      marks: [circle],
+    });
+    expect(loaded.get("r0")).toMatchObject({ width: 270, height: 480, rotation: 90, marks: [] });
+    expect(loaded.get("r")!.image.width).toBe(480); // the embedded file itself is untouched
+  });
+  it("renders a turned ticket photo turned: pdf-lib's rotate on the image (its own sides), the marks under the same turn; an untouched photo has none", async () => {
+    const grid = (photoId: string) =>
+      ({
+        ...newModule("photoGrid"),
+        images: [{ image: { kind: "ticketPhoto", photoId, marks: true }, caption: "Seams" }],
+      }) as PhotoGridModule;
+    const render = (photoId: string) =>
+      renderDocumentPdf(sb2, {
+        pages: json([newPage([grid(photoId)])]),
+        options: json(DEFAULT_OPTIONS),
+        variables: json(sampleVariables("ticket")),
+      });
+    const ops = await pdfStreams(await render(TURNED));
+    // A quarter turn clockwise is -90 on pdf-lib's y-up page: `cos sin -sin cos 0 0 cm` with
+    // cos ≈ 6e-17; then the picture's own sides, the long one (480) standing.
+    const draw = ops.match(
+      /\S+ -1 1 \S+ 0 0 cm\n([\d.]+) 0 0 ([\d.]+) 0 0 cm\n1 0 0 1 0 0 cm\n\/Image\S* Do/,
+    );
+    expect(draw).not.toBeNull();
+    const [w, h] = [parseFloat(draw![1]!), parseFloat(draw![2]!)];
+    expect(w / h).toBeCloseTo(480 / 270, 3);
+    expect(w).toBeGreaterThan(h);
+    // The marks: pushed under the same shift and turn (q, translate, rotate, q …), the ellipse drawn.
+    expect(ops).toMatch(/q\n1 0 0 1 [\d.]+ [\d.]+ cm\n\S+ -1 1 \S+ 0 0 cm\nq\n/);
+    expect(curves(ops)).toBeGreaterThanOrEqual(4);
+    expect((ops.match(/^q$/gm) ?? []).length).toBe((ops.match(/^Q$/gm) ?? []).length);
+    // The same grid with the untouched photo: no turn anywhere.
+    const flat = await pdfStreams(await render(PHOTO));
+    expect(flat).not.toMatch(/\S+ -1 1 \S+ 0 0 cm/);
+    expect(flat).toMatch(/1 0 0 1 0 0 cm\n[\d.]+ 0 0 [\d.]+ 0 0 cm\n1 0 0 1 0 0 cm\n\/Image\S* Do/);
+    expect(curves(flat)).toBeGreaterThanOrEqual(4);
   });
   it("renders the shipped Inspection report for a ticket with an inspection: three document pages, the findings table and its pictures, the grid, no throw", async () => {
     const tpl = defaultTemplates().find((t) => t.name === INSPECTION_REPORT_TEMPLATE)!;

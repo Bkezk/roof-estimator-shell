@@ -18,10 +18,16 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Building2, Home, ImagePlus, Loader2, PenLine, Trash2 } from "lucide-react";
 
-import { canMarkUp, dataUrlBase64, imageMarks, LOGO_SRC } from "@/lib/documents/editor-helpers";
+import {
+  canMarkUp,
+  dataUrlBase64,
+  imageMarks,
+  imageRotation,
+  LOGO_SRC,
+} from "@/lib/documents/editor-helpers";
 import type { ImageRef } from "@/lib/documents/model";
 import { documentImageUrl, uploadDocumentImage } from "@/lib/documents.functions";
-import { type PhotoMark, serializePhotoMarks } from "@/lib/photo-annotations";
+import { type PhotoMark, type Rotation, serializePhotoMarks } from "@/lib/photo-annotations";
 import { savePhotoAnnotations } from "@/lib/service-field.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -35,13 +41,16 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { MarksOverlay, PhotoMarkupSurface } from "@/components/service/photo-markup";
+import { PhotoMarkupSurface, RotatedPhoto } from "@/components/service/photo-markup";
 
 import { documentKey, errText, imageUrlKey } from "../document-types";
 import { useEditorEnv } from "./editor-context";
 import { readImageFile } from "./editor-dom";
 
-/** The <img> for an ImageRef (the url of an upload is fetched once per path), its marks drawn over it. */
+/**
+ * The picture for an ImageRef (the url of an upload is fetched once per path), its marks drawn
+ * over it and, for a ticket photo, turned the way the ticket shows it (RotatedPhoto).
+ */
 export function DocImage(props: {
   image: ImageRef;
   className?: string | undefined;
@@ -58,7 +67,6 @@ export function DocImage(props: {
     enabled: !!upload,
     staleTime: 10 * 60_000,
   });
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   let src: string | null = null;
   let label = props.alt ?? "";
   if (image.kind === "logo") {
@@ -95,22 +103,20 @@ export function DocImage(props: {
       </div>
     );
   const marks = imageMarks(image, env.photos);
+  const rotation = imageRotation(image, env.photos);
   return (
     <span className="relative block h-full w-full">
-      <img
-        src={src}
+      <RotatedPhoto
+        url={src}
         alt={label}
         title={label}
-        className={cn("object-contain", props.className)}
+        marks={marks}
+        rotation={rotation}
+        fit="contain"
+        className={props.className}
         style={props.style}
         draggable={false}
-        onLoad={(e) =>
-          setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-        }
       />
-      {natural && marks.length > 0 ? (
-        <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="contain" />
-      ) : null}
     </span>
   );
 }
@@ -221,32 +227,34 @@ export function MarkupDialog(props: {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const size = upload ? { w: upload.width, h: upload.height } : natural;
   const marksAllowed = env.options.marks;
+  // The ticket photo's marks and its rotation save together on its row, as the ticket page does.
   const saveTicket = useMutation({
-    mutationFn: (marks: PhotoMark[]) =>
+    mutationFn: (m: { marks: PhotoMark[]; rotation: Rotation }) =>
       saveFn({
         data: {
           id: photo!.id,
           service_job_id: photo!.serviceJobId,
-          annotations: serializePhotoMarks(marks),
+          annotations: serializePhotoMarks(m.marks, m.rotation),
         },
       }),
-    onSuccess: async (_row, marks) => {
+    onSuccess: async (_row, m) => {
       // The document redraws the ticket's marks (getDocument reads the row again).
       if (env.documentId) await qc.invalidateQueries({ queryKey: documentKey(env.documentId) });
-      props.onChange({ ...ticket!, marks: marksAllowed && marks.length > 0 });
+      props.onChange({ ...ticket!, marks: marksAllowed && m.marks.length > 0 });
       toast.success("Marks saved on the ticket photo");
       props.onOpenChange(false);
     },
     onError: (e) => toast.error(`The photo's marks did not save: ${errText(e)}`),
   });
-  const done = (marks: PhotoMark[]) => {
+  const done = (marks: PhotoMark[], rotation: Rotation) => {
     if (upload) {
+      // An uploaded picture keeps no rotation (the surface offers none for it).
       const { marks: _old, ...rest } = upload;
       props.onChange(marks.length ? { ...rest, marks } : rest);
       props.onOpenChange(false);
       return;
     }
-    if (photo) saveTicket.mutate(marks);
+    if (photo) saveTicket.mutate({ marks, rotation });
   };
   const initial = upload ? (upload.marks ?? []) : (photo?.marks ?? []);
   return (
@@ -279,6 +287,8 @@ export function MarkupDialog(props: {
             url={url}
             size={size}
             initialMarks={initial}
+            initialRotation={photo?.rotation ?? 0}
+            rotatable={!upload}
             onDone={done}
             status={saveTicket.isPending ? " · saving…" : ""}
           />
@@ -384,12 +394,17 @@ export function PhotoPicker(props: {
                       })
                     }
                   >
-                    <img
-                      src={p.url}
-                      alt={p.fileName}
-                      className="aspect-square w-full object-cover"
-                      loading="lazy"
-                    />
+                    <span className="relative block">
+                      <RotatedPhoto
+                        url={p.url}
+                        alt={p.fileName}
+                        marks={[]}
+                        rotation={p.rotation}
+                        fit="cover"
+                        className="aspect-square w-full"
+                        loading="lazy"
+                      />
+                    </span>
                   </button>
                 );
               })}

@@ -12,7 +12,12 @@
 import {
   PDFDocument,
   StandardFonts,
+  degrees,
+  popGraphicsState,
+  pushGraphicsState,
   rgb,
+  rotateDegrees,
+  translate,
   type PDFFont,
   type PDFImage,
   type PDFPage,
@@ -42,14 +47,17 @@ import {
 import {
   arrowGeom,
   ellipseGeom,
-  parsePhotoMarks,
+  parsePhotoMarkup,
+  pdfImagePlacement,
   photoColorRgb,
   photoTagNumbers,
   rectGeom,
+  rotatedBox,
   strokeFor,
   tagGeom,
   textSizeFor,
   type PhotoMark,
+  type Rotation,
 } from "@/lib/photo-annotations";
 import { pieceFromCountedNotes, type PieceDef } from "@/lib/stock-units";
 import { timeLines, type RateTable } from "@/lib/invoice-labor";
@@ -716,7 +724,7 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     }
     const textBottom = doc.y;
     // Photos on the right: the chosen ones of this repair (Before over After), 200 px wide,
-    // each with its marks drawn over it.
+    // each turned as the ticket shows it, with its marks drawn over it.
     let py = textTop;
     for (const p of photoPlan.byRepair.get(rep.id) ?? []) {
       const bytes = await download(sb, p.storage_path);
@@ -729,12 +737,13 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       });
       py -= 12;
       if (img) {
+        const { marks, rotation } = parsePhotoMarkup(p.annotations);
+        const shown = rotatedBox(img.width, img.height, rotation);
         const w = 200;
-        const h = Math.min(160, (img.height / img.width) * w);
-        const dw = Math.min(w, (img.width / img.height) * h);
+        const h = Math.min(160, (shown.h / shown.w) * w);
+        const dw = Math.min(w, (shown.w / shown.h) * h);
         py -= h;
-        doc.page.drawImage(img, { x: M + 300, y: py, width: dw, height: h });
-        drawPhotoMarks(doc, parsePhotoMarks(p.annotations), { x: M + 300, y: py, w: dw, h });
+        drawPhoto(doc, img, marks, { x: M + 300, y: py, w: dw, h }, rotation);
         py -= 12;
       } else {
         doc.page.drawText("(photo not embeddable)", { x: M + 300, y: py, size: 8, font: doc.font });
@@ -802,17 +811,50 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
           });
           continue;
         }
-        const scale = Math.min(cellW / img.width, CELL_H / img.height);
-        const w = img.width * scale;
-        const h = img.height * scale;
+        const { marks, rotation } = parsePhotoMarkup(p.annotations);
+        const shown = rotatedBox(img.width, img.height, rotation);
+        const scale = Math.min(cellW / shown.w, CELL_H / shown.h);
+        const w = shown.w * scale;
+        const h = shown.h * scale;
         const y = rowTop - 12 - h;
-        doc.page.drawImage(img, { x, y, width: w, height: h });
-        drawPhotoMarks(doc, parsePhotoMarks(p.annotations), { x, y, w, h });
+        drawPhoto(doc, img, marks, { x, y, w, h }, rotation);
       }
       doc.y = rowTop - ROW_H;
     }
   }
   return doc.pdf.save();
+}
+
+/**
+ * Draw a photo turned as the ticket shows it (photo-annotations.ts rotation) with its marks over
+ * it: `box` is the turned picture's place on the page — (x, y) its bottom-left corner, w × h
+ * points, the sides already swapped for 90 / 270 (rotatedBox). The picture goes down with
+ * pdf-lib's own `rotate` (pdfImagePlacement: the corner it turns about and its unturned sides);
+ * the marks are drawn in the picture's own, unturned box under the same shift and turn as a
+ * transformation matrix (q … cm … Q), so a mark keeps its place on the picture whichever way
+ * the picture is shown. Returns how many marks were drawn. Shared with the document PDF.
+ */
+export function drawPhoto(
+  doc: { page: PDFPage; bold: PDFFont },
+  img: PDFImage,
+  marks: PhotoMark[],
+  box: { x: number; y: number; w: number; h: number },
+  rotation: Rotation,
+): number {
+  const at = pdfImagePlacement(box, rotation);
+  doc.page.drawImage(img, {
+    x: at.x,
+    y: at.y,
+    width: at.width,
+    height: at.height,
+    rotate: degrees(at.rotate),
+  });
+  if (!marks.length) return 0;
+  if (!rotation) return drawPhotoMarks(doc, marks, box);
+  doc.page.pushOperators(pushGraphicsState(), translate(at.x, at.y), rotateDegrees(at.rotate));
+  const n = drawPhotoMarks(doc, marks, { x: 0, y: 0, w: at.width, h: at.height });
+  doc.page.pushOperators(popGraphicsState());
+  return n;
 }
 
 /**

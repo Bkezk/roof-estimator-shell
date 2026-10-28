@@ -208,10 +208,12 @@ describe("types.ts and the share route", () => {
   it("the PDF renderer only draws what the pure layout placed, and reuses the invoice's photo marks", () => {
     const pdf = read("./document-pdf.server.ts");
     expect(pdf).toContain('from "./pdf-layout"');
-    expect(pdf).toContain(
-      "drawPhotoMarks({ page: this.page, bold: this.fonts.bold }, img.marks, box)",
+    // drawPhoto: the invoice's picture + marks drawer, which also turns a photo as the ticket keeps it.
+    expect(pdf).toMatch(
+      /drawPhoto\(\s*\{ page: this\.page, bold: this\.fonts\.bold \},\s*img\.image,\s*img\.marks,\s*box,\s*img\.rotation,?\s*\)/,
     );
-    expect(pdf).toContain('import { drawPhotoMarks } from "@/lib/invoices.server"');
+    expect(pdf).toContain('import { drawPhoto } from "@/lib/invoices.server"');
+    expect(pdf).not.toContain("drawPhotoMarks");
     expect(pdf).toContain("StandardFonts.HelveticaBoldOblique");
     expect(pdf).toContain("pdf.copyPages(asset, asset.getPageIndices())");
     expect(pdf).not.toContain("widthOfTextAtSize(clean(text), size) *");

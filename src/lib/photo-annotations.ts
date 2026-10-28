@@ -11,6 +11,14 @@
  * lightbox, on the exported PNG (canvas, natural size) and on the invoice PDF (pdf-lib, the
  * photo's box) — each render scales the stroke and the lettering to the picture's own size.
  *
+ * Rotation (owner, Oct 28: "allow rotation of photos on markup"): `rotation` on the same JSON
+ * (0 / 90 / 180 / 270, clockwise; written only when it is not 0) says which way the picture is
+ * shown. The marks stay in the unturned picture's own space, so old marks keep their place; every
+ * render turns the picture and the marks together (rotatedBox, rotationMatrix /
+ * rotationTransform for SVG and canvas, pdfImagePlacement for pdf-lib) and the editor maps a
+ * pointer in the turned view back into the picture (unrotatePoint). The file is still never
+ * altered; Download flattens the turned picture and its marks.
+ *
  * An aerial row (role "aerial") keeps its own markup in the same column (aerial-markup.ts,
  * lng/lat); it is not a photo markup and parses to no marks here.
  *
@@ -83,18 +91,36 @@ export type PhotoMark = z.output<typeof photoMarkSchema>;
 export type PhotoMarkKind = PhotoMark["kind"];
 export type Pt = [number, number];
 
+/** Which way the picture is shown: turned clockwise by 0, 90, 180 or 270 degrees. */
+export const ROTATIONS = [0, 90, 180, 270] as const;
+export type Rotation = (typeof ROTATIONS)[number];
+const rotationSchema = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
+
 export const photoMarksSchema = z.object({
   v: z.literal(PHOTO_MARKS_VERSION),
   kind: z.literal("photo"),
   marks: z.array(photoMarkSchema).max(PHOTO_MARKS_MAX),
+  /** Clockwise degrees the picture is shown turned by; absent when 0 (serializePhotoMarks). */
+  rotation: rotationSchema.optional(),
 });
 export type PhotoMarks = z.output<typeof photoMarksSchema>;
 
-/** The marks stored on a photo row; [] when there are none or the JSON is not a photo markup. */
-export function parsePhotoMarks(raw: unknown): PhotoMark[] {
-  const r = photoMarksSchema.safeParse(raw);
-  return r.success ? r.data.marks : [];
+/** What a photo row's JSON holds: its marks and its rotation. */
+export interface PhotoMarkup {
+  marks: PhotoMark[];
+  rotation: Rotation;
 }
+/** The marks and the rotation stored on a photo row; none / 0 when the JSON is not a photo markup. */
+export function parsePhotoMarkup(raw: unknown): PhotoMarkup {
+  const r = photoMarksSchema.safeParse(raw);
+  return r.success
+    ? { marks: r.data.marks, rotation: r.data.rotation ?? 0 }
+    : { marks: [], rotation: 0 };
+}
+/** The marks stored on a photo row; [] when there are none or the JSON is not a photo markup. */
+export const parsePhotoMarks = (raw: unknown): PhotoMark[] => parsePhotoMarkup(raw).marks;
+/** How the photo is shown turned; 0 when it is not (or the JSON is not a photo markup). */
+export const parsePhotoRotation = (raw: unknown): Rotation => parsePhotoMarkup(raw).rotation;
 
 /** Has this photo row any marks? (the thumbnail's "Marked" badge). */
 export const isMarked = (raw: unknown): boolean => parsePhotoMarks(raw).length > 0;
@@ -110,14 +136,112 @@ export function roundMark(m: PhotoMark): PhotoMark {
   return { ...m, a: roundPt(m.a), b: roundPt(m.b) };
 }
 
-/** The JSON stored for the marks: validated and rounded; null when there are none. */
-export function serializePhotoMarks(marks: PhotoMark[]): PhotoMarks | null {
-  if (!marks.length) return null;
+/**
+ * The JSON stored for the marks and the rotation: validated and rounded; null when there are no
+ * marks and the picture is not turned. `rotation` is written only when it is not 0 (no key, not
+ * an undefined one), so an unturned photo's JSON is exactly what it was before rotation existed.
+ */
+export function serializePhotoMarks(marks: PhotoMark[], rotation: Rotation = 0): PhotoMarks | null {
+  if (!marks.length && !rotation) return null;
   return photoMarksSchema.parse({
     v: PHOTO_MARKS_VERSION,
     kind: "photo",
     marks: marks.map(roundMark),
+    ...(rotation ? { rotation } : {}),
   });
+}
+
+// ── Rotation: the picture turned, the marks still in its own space ──────────────────────────
+
+/** A quarter turn from `r`: to the right (by 1, clockwise) or to the left (by -1). */
+export const turnRotation = (r: Rotation, by: 1 | -1): Rotation =>
+  ((((r + by * 90) % 360) + 360) % 360) as Rotation;
+
+/** The box a w × h picture takes once turned: the sides swap at 90 and 270. */
+export const rotatedBox = (w: number, h: number, rotation: Rotation): { w: number; h: number } =>
+  rotation === 90 || rotation === 270 ? { w: h, h: w } : { w, h };
+
+/**
+ * The transform that turns the w × h picture (its own px, top-left origin, y down) into its
+ * rotated box (rotatedBox): a shift, then a clockwise turn about the origin — SVG
+ * `translate(tx ty) rotate(deg)`, canvas `translate(tx, ty); rotate(deg)`. The picture is drawn
+ * at (0, 0) inside it, and so are its marks (the same geometry as unturned).
+ */
+export function rotationMatrix(
+  w: number,
+  h: number,
+  rotation: Rotation,
+): { tx: number; ty: number; deg: Rotation } {
+  switch (rotation) {
+    case 90:
+      return { tx: h, ty: 0, deg: 90 };
+    case 180:
+      return { tx: w, ty: h, deg: 180 };
+    case 270:
+      return { tx: 0, ty: w, deg: 270 };
+    default:
+      return { tx: 0, ty: 0, deg: 0 };
+  }
+}
+
+/** rotationMatrix as an SVG `transform` attribute; "" when the picture is not turned. */
+export function rotationTransform(w: number, h: number, rotation: Rotation): string {
+  if (!rotation) return "";
+  const m = rotationMatrix(w, h, rotation);
+  return `translate(${m.tx} ${m.ty}) rotate(${m.deg})`;
+}
+
+/** A point of the turned view (px of rotatedBox(w, h)) → the same spot in the picture's own px. */
+export function unrotatePoint(p: Pt, w: number, h: number, rotation: Rotation): Pt {
+  const [x, y] = p;
+  switch (rotation) {
+    case 90:
+      return [y, h - x];
+    case 180:
+      return [w - x, h - y];
+    case 270:
+      return [w - y, x];
+    default:
+      return [x, y];
+  }
+}
+
+/** A point in the picture's own px → where it shows in the turned view (the inverse of unrotatePoint). */
+export function rotatePoint(p: Pt, w: number, h: number, rotation: Rotation): Pt {
+  const [x, y] = p;
+  switch (rotation) {
+    case 90:
+      return [h - y, x];
+    case 180:
+      return [w - x, h - y];
+    case 270:
+      return [y, w - x];
+    default:
+      return [x, y];
+  }
+}
+
+/**
+ * Where pdf-lib draws the turned picture so it fills `box` (points; x, y its bottom-left, w × h
+ * the turned box, i.e. rotatedBox of the picture scaled): drawImage's x, y, width and height
+ * (the picture's own sides) and `rotate` in degrees — counter-clockwise as pdf-lib counts on
+ * its y-up page, about the image's (x, y). The same shift and turn, as a transformation
+ * matrix, put the marks over it (drawPhoto, invoices.server.ts).
+ */
+export function pdfImagePlacement(
+  box: { x: number; y: number; w: number; h: number },
+  rotation: Rotation,
+): { x: number; y: number; width: number; height: number; rotate: number } {
+  switch (rotation) {
+    case 90:
+      return { x: box.x, y: box.y + box.h, width: box.h, height: box.w, rotate: -90 };
+    case 180:
+      return { x: box.x + box.w, y: box.y + box.h, width: box.w, height: box.h, rotate: 180 };
+    case 270:
+      return { x: box.x + box.w, y: box.y, width: box.h, height: box.w, rotate: 90 };
+    default:
+      return { x: box.x, y: box.y, width: box.w, height: box.h, rotate: 0 };
+  }
 }
 
 // ── Normalized ↔ image px ────────────────────────────────────────────────────────────────────
@@ -331,8 +455,10 @@ export function moveMark(m: PhotoMark, du: number, dv: number): PhotoMark {
 
 export interface PhotoMarksHistory {
   marks: PhotoMark[];
-  /** Earlier states, newest last; Undo pops one. Clear and moves are undoable too. */
-  past: PhotoMark[][];
+  /** Which way the picture is shown turned (the marks stay in its own space). */
+  rotation: Rotation;
+  /** Earlier states, newest last; Undo pops one. Clear, moves and turns are undoable too. */
+  past: PhotoMarkup[];
 }
 export type PhotoMarksAction =
   | { type: "add"; mark: PhotoMark }
@@ -340,18 +466,25 @@ export type PhotoMarksAction =
   | { type: "remove"; id: string }
   | { type: "undo" }
   | { type: "clear" }
-  | { type: "load"; marks: PhotoMark[] };
+  /** A quarter turn: by 1 to the right (clockwise), by -1 to the left. */
+  | { type: "rotate"; by: 1 | -1 }
+  | { type: "load"; marks: PhotoMark[]; rotation?: Rotation | undefined };
 
 const PAST_MAX = 100;
-export const emptyPhotoHistory = (marks: PhotoMark[] = []): PhotoMarksHistory => ({
+export const emptyPhotoHistory = (
+  marks: PhotoMark[] = [],
+  rotation: Rotation = 0,
+): PhotoMarksHistory => ({
   marks,
+  rotation,
   past: [],
 });
 
 export function photoMarksReducer(s: PhotoMarksHistory, a: PhotoMarksAction): PhotoMarksHistory {
-  const push = (next: PhotoMark[]): PhotoMarksHistory => ({
+  const push = (next: PhotoMark[], rotation: Rotation = s.rotation): PhotoMarksHistory => ({
     marks: next,
-    past: [...s.past, s.marks].slice(-PAST_MAX),
+    rotation,
+    past: [...s.past, { marks: s.marks, rotation: s.rotation }].slice(-PAST_MAX),
   });
   switch (a.type) {
     case "add":
@@ -368,11 +501,15 @@ export function photoMarksReducer(s: PhotoMarksHistory, a: PhotoMarksAction): Ph
       return s.marks.some((m) => m.id === a.id) ? push(s.marks.filter((m) => m.id !== a.id)) : s;
     case "clear":
       return s.marks.length ? push([]) : s;
-    case "undo":
+    case "rotate":
+      return push(s.marks, turnRotation(s.rotation, a.by));
+    case "undo": {
       if (!s.past.length) return s;
-      return { marks: s.past[s.past.length - 1]!, past: s.past.slice(0, -1) };
+      const last = s.past[s.past.length - 1]!;
+      return { marks: last.marks, rotation: last.rotation, past: s.past.slice(0, -1) };
+    }
     case "load":
-      return emptyPhotoHistory(a.marks);
+      return emptyPhotoHistory(a.marks, a.rotation ?? 0);
   }
 }
 
@@ -541,6 +678,33 @@ export interface PhotoPaint2D {
   fill(): void;
   fillText(text: string, x: number, y: number): void;
   strokeText(text: string, x: number, y: number): void;
+  translate(x: number, y: number): void;
+  rotate(angle: number): void;
+  drawImage(image: CanvasImageSource, dx: number, dy: number): void;
+}
+
+/**
+ * The picture turned by `rotation` with its marks over it, onto a canvas sized rotatedBox(w, h)
+ * (w × h the picture's natural size): one shift and turn (rotationMatrix) for the picture and
+ * the marks alike, so the saved file is what the screen shows.
+ */
+export function paintPhoto(
+  ctx: PhotoPaint2D,
+  picture: CanvasImageSource,
+  w: number,
+  h: number,
+  marks: PhotoMark[],
+  rotation: Rotation,
+) {
+  ctx.save();
+  if (rotation) {
+    const m = rotationMatrix(w, h, rotation);
+    ctx.translate(m.tx, m.ty);
+    ctx.rotate((m.deg * Math.PI) / 180);
+  }
+  ctx.drawImage(picture, 0, 0);
+  paintPhotoMarks(ctx, marks, w, h);
+  ctx.restore();
 }
 
 /** The dark edge under every line and letter, so red, yellow and white read on any roof. */

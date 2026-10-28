@@ -6,20 +6,28 @@
  *
  * - MarksOverlay: the marks as an SVG over a picture, scaled to its rendered size (a thumbnail
  *   is cropped like object-cover, the lightbox fits like object-contain).
+ * - RotatedPhoto: a photo the way it is kept — turned by its rotation (owner, Oct 28: "allow
+ *   rotation of photos on markup"; photo-annotations.ts) with its marks over it. The one piece
+ *   every place a ticket photo shows uses: the thumbnails (ticket page, close-out, invoice fold,
+ *   inspection items, site history), the lightbox and the document canvas.
  * - PhotoLightbox: the photo with its marks and the list of marks under it; Mark up (on the
  *   office ticket page and the technician's close-out, phone and desktop), Download, the
  *   original.
  * - PhotoMarkupEditor: the tools Move, Circle, Arrow, Box, Text and Tag (the Aerial's numbered
  *   tag and text, src/components/service/aerial-markup.tsx), red / yellow / white, Undo, Delete
- *   (the selected mark), Clear, zoom in / out / fit with a drag to pan, and the marks listed
- *   under the picture as on the Aerial (a row selects its mark; × removes it). Pointer events,
- *   so a finger and a mouse both draw. Every change auto-saves (debounced, useAutosave) through
- *   savePhotoAnnotations; a failure is a loud toast with the server's message. The photo itself
- *   is never altered: the marks are JSON on its row (src/lib/photo-annotations.ts).
- * - Download / DownloadAllPhotos: the marks flattened onto the photo in the browser (a canvas at
- *   the picture's natural size → PNG; photo-export.ts) as "<ticket>-<role>-<n>.png"; a photo
- *   without marks is the original file. "Download all photos" saves one file per photo, one
- *   after another (a browser may ask once to allow several downloads).
+ *   (the selected mark), Clear, Rotate left / right (the picture and its marks turn as one; a
+ *   mark drawn afterwards is mapped back into the picture's own space), zoom in / out / fit with
+ *   a drag to pan, and the marks listed under the picture as on the Aerial (a row selects its
+ *   mark; × removes it). Pointer events, so a finger and a mouse both draw. Every change — a
+ *   mark or a turn — auto-saves (debounced, useAutosave) through savePhotoAnnotations; a failure
+ *   is a loud toast with the server's message. Undo is the marks reducer (photoMarksReducer),
+ *   so it takes a turn back too. The photo itself is never altered: the marks and the rotation
+ *   are JSON on its row (src/lib/photo-annotations.ts).
+ * - Download / DownloadAllPhotos: the marks flattened onto the photo, turned as shown, in the
+ *   browser (a canvas at the picture's natural size, sides swapped at 90 / 270 → PNG;
+ *   photo-export.ts) as "<ticket>-<role>-<n>.png"; a photo without marks that is not turned is
+ *   the original file. "Download all photos" saves one file per photo, one after another (a
+ *   browser may ask once to allow several downloads).
  */
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,6 +45,8 @@ import {
   MapPin,
   MoveUpRight,
   PenLine,
+  RotateCcw,
+  RotateCw,
   Scan,
   Square,
   Trash2,
@@ -69,13 +79,15 @@ import {
   moveMark,
   newMarkId,
   panPhotoView,
-  parsePhotoMarks,
+  parsePhotoMarkup,
   pathD,
   photoColorHex,
   photoMarksReducer,
   photoOrdinals,
   photoTagNumbers,
   rectGeom,
+  rotatedBox,
+  rotationTransform,
   serializePhotoMarks,
   shapeFromDrag,
   strokeFor,
@@ -83,14 +95,18 @@ import {
   textBox,
   textSizeFor,
   toNorm,
+  unrotatePoint,
   viewZoom,
   zoomPhotoView,
   type PhotoColor,
   type PhotoMark,
+  type PhotoMarkup,
   type PhotoView,
   type Pt,
+  type Rotation,
 } from "@/lib/photo-annotations";
 import { savePhotoAnnotations, type JobPhotoRow } from "@/lib/service-field.functions";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -321,6 +337,104 @@ export function MarksOverlay({
   );
 }
 
+/**
+ * A photo the way it is kept: turned by its rotation, its marks over it (photo-annotations.ts —
+ * the marks stay in the picture's own space; picture and marks turn as one). Inside a positioned
+ * box that it fills (`className`, e.g. "h-full w-full"), `fit` crops like object-cover (the
+ * square thumbnails) or fits like object-contain (the lightbox, the document canvas).
+ *
+ * Not turned, it is the plain <img> with MarksOverlay over it, as before. Turned, it is an SVG
+ * whose viewBox is the turned box (rotatedBox) with the picture and the marks in one rotated
+ * group (rotationTransform), so the crop and the fit come out as for a picture taken that way.
+ * The natural size comes from the caller (`size`, when it measures the picture itself — then it
+ * is the only source, so the caller's layout and this never disagree) or from the <img> as it
+ * loads; until a turned picture's size is known the <img> loads invisibly (its crop would be
+ * wrong), lazily when asked, so a long strip of thumbnails still loads as it scrolls.
+ */
+export function RotatedPhoto({
+  url,
+  alt,
+  marks,
+  rotation,
+  fit,
+  size,
+  className,
+  style,
+  title,
+  loading,
+  draggable,
+}: {
+  url: string;
+  alt: string;
+  marks: PhotoMark[];
+  rotation: Rotation;
+  fit: "cover" | "contain";
+  /** The natural size when the caller measures it (null until it knows); omit to measure here. */
+  size?: { w: number; h: number } | null | undefined;
+  /** Classes for the picture element (the <img> and the <svg> alike), e.g. "h-full w-full". */
+  className?: string | undefined;
+  style?: React.CSSProperties | undefined;
+  title?: string | undefined;
+  loading?: "lazy" | "eager" | undefined;
+  draggable?: boolean | undefined;
+}) {
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
+  const natural = size !== undefined ? size : measured;
+  if (!rotation || !natural) {
+    return (
+      <>
+        <img
+          src={url}
+          alt={alt}
+          title={title}
+          className={cn(
+            fit === "cover" ? "object-cover" : "object-contain",
+            className,
+            rotation && "invisible",
+          )}
+          style={style}
+          loading={loading}
+          draggable={draggable}
+          onLoad={(e) => {
+            const s = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight };
+            if (s.w > 0 && s.h > 0) setMeasured(s);
+          }}
+        />
+        {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit={fit} />}
+      </>
+    );
+  }
+  const box = rotatedBox(natural.w, natural.h, rotation);
+  return (
+    <svg
+      viewBox={`0 0 ${box.w} ${box.h}`}
+      width={box.w}
+      height={box.h}
+      preserveAspectRatio={fit === "cover" ? "xMidYMid slice" : "xMidYMid meet"}
+      // h-auto: the height follows the width through the viewBox's ratio, unless the caller
+      // sizes both (tailwind-merge lets the caller's height class win).
+      className={cn("h-auto", className)}
+      style={style}
+      role="img"
+      aria-label={alt}
+      data-rotation={rotation}
+    >
+      {title ? <title>{title}</title> : null}
+      <g transform={rotationTransform(natural.w, natural.h, rotation)}>
+        <image
+          href={url}
+          x={0}
+          y={0}
+          width={natural.w}
+          height={natural.h}
+          preserveAspectRatio="none"
+        />
+        <MarkShapes marks={marks} w={natural.w} h={natural.h} />
+      </g>
+    </svg>
+  );
+}
+
 /** A mark's colour, as a dot beside its row. */
 function MarkDot({ color }: { color: string }) {
   return (
@@ -469,7 +583,12 @@ export function PhotoLightbox({
   const [editing, setEditing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const size = useNaturalSize(open ? url : null);
-  const marks = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
+  const { marks, rotation } = useMemo(
+    () => parsePhotoMarkup(photo.annotations),
+    [photo.annotations],
+  );
+  // The box the turned picture takes, so the frame hugs it and is at most 65vh tall.
+  const shown = size ? rotatedBox(size.w, size.h, rotation) : null;
   const markable = canAnnotate && isAnnotatableRole(photo.role);
   const label = ROLE_LABEL[photo.role] ?? "Photo";
   const touchX = useRef<number | null>(null);
@@ -528,7 +647,15 @@ export function PhotoLightbox({
         ) : (
           <div className="space-y-3">
             <div
-              className="relative mx-auto w-fit max-w-full overflow-hidden rounded-md border bg-neutral-900"
+              className={`relative mx-auto overflow-hidden rounded-md border bg-neutral-900 ${shown ? "w-full" : "w-fit max-w-full"}`}
+              style={
+                shown
+                  ? {
+                      aspectRatio: `${shown.w} / ${shown.h}`,
+                      maxWidth: `min(100%, ${shown.w}px, calc(65vh * ${shown.w / shown.h}))`,
+                    }
+                  : undefined
+              }
               // A swipe on a phone leafs through the set (nav): left for the next, right for the one before.
               onTouchStart={(e) => {
                 touchX.current = nav ? (e.touches[0]?.clientX ?? null) : null;
@@ -543,12 +670,15 @@ export function PhotoLightbox({
                 else if (dx >= 40 && canPrev) nav.onStep(-1);
               }}
             >
-              <img
-                src={url}
+              <RotatedPhoto
+                url={url}
                 alt={`${label} photo`}
-                className="block max-h-[65vh] max-w-full object-contain"
+                marks={marks}
+                rotation={rotation}
+                size={size}
+                fit="contain"
+                className={shown ? "block h-full w-full" : "block max-h-[65vh] max-w-full"}
               />
-              {size && <MarksOverlay marks={marks} w={size.w} h={size.h} fit="contain" />}
             </div>
             {nav && nav.count > 1 && (
               <div
@@ -601,8 +731,10 @@ export function PhotoLightbox({
                 disabled={downloading}
                 title={
                   marks.length
-                    ? "Save the photo with its marks drawn in (PNG)"
-                    : "Save the photo as it was taken"
+                    ? "Save the photo with its marks drawn in, turned as shown (PNG)"
+                    : rotation
+                      ? "Save the photo turned as shown (PNG)"
+                      : "Save the photo as it was taken"
                 }
                 onClick={() => void download()}
               >
@@ -661,8 +793,9 @@ export function PhotoMarkupEditor({
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(savePhotoAnnotations);
-  const initial = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
-  const [marks, setMarks] = useState<PhotoMark[]>(initial);
+  const initial = useMemo(() => parsePhotoMarkup(photo.annotations), [photo.annotations]);
+  // The marks and the rotation as the surface has them (a turn saves like a mark).
+  const [markup, setMarkup] = useState<PhotoMarkup>(initial);
   const [downloading, setDownloading] = useState(false);
 
   // Auto-save every change (debounced); a failure is a loud toast with the server's message.
@@ -679,20 +812,20 @@ export function PhotoMarkupEditor({
     },
     { what: "The photo's marks", delay: 600 },
   );
-  const savedJson = useRef(JSON.stringify(serializePhotoMarks(marks)));
+  const savedJson = useRef(JSON.stringify(serializePhotoMarks(markup.marks, markup.rotation)));
   useEffect(() => {
-    const next = serializePhotoMarks(marks);
+    const next = serializePhotoMarks(markup.marks, markup.rotation);
     const json = JSON.stringify(next);
     if (json === savedJson.current) return;
     savedJson.current = json;
     autosave.push(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- push is stable; save on a change only
-  }, [marks]);
+  }, [markup]);
 
   const download = async () => {
     setDownloading(true);
     try {
-      await downloadPhoto(photo, ticketNumber, ordinal, marks);
+      await downloadPhoto(photo, ticketNumber, ordinal, markup.marks, markup.rotation);
     } catch (e) {
       loudError("Could not download the photo", e);
     } finally {
@@ -704,8 +837,9 @@ export function PhotoMarkupEditor({
     <PhotoMarkupSurface
       url={url}
       size={size}
-      initialMarks={initial}
-      onChange={setMarks}
+      initialMarks={initial.marks}
+      initialRotation={initial.rotation}
+      onChange={(marks, rotation) => setMarkup({ marks, rotation })}
       status={
         autosave.state === "saving" || autosave.state === "pending"
           ? " · saving…"
@@ -743,34 +877,60 @@ export function PhotoMarkupEditor({
 /**
  * The drawing surface and its tools, reusable (phase 2 of the documents: the same tools mark up a
  * picture uploaded into a document, whose marks live on the document's ImageRef instead of a
- * ticket photo row). It owns the marks (undo history, selection, zoom) and reports every change
- * through onChange; Done hands back the final marks. Nothing here saves.
+ * ticket photo row). It owns the marks and the rotation (one undo history, selection, zoom) and
+ * reports every change through onChange; Done hands back the final marks and rotation. Nothing
+ * here saves.
+ *
+ * Rotation: `size` is the picture's own (natural) size, W × H; the view, the zoom and the SVG's
+ * viewBox are in the turned box RW × RH (rotatedBox), the picture and the marks sit in one group
+ * turned by rotationTransform, and a pointer in the turned view is mapped back into the picture
+ * (unrotatePoint) before it draws, moves or hit-tests — so a new mark lands where the finger is
+ * and is stored, like every other, in the picture's own space.
  */
 export function PhotoMarkupSurface({
   url,
   size,
   initialMarks,
+  initialRotation = 0,
+  rotatable = true,
   onChange,
   onDone,
   status,
   footer,
 }: {
   url: string;
+  /** The picture's natural size (unturned). */
   size: { w: number; h: number };
   initialMarks: PhotoMark[];
-  onChange?: ((marks: PhotoMark[]) => void) | undefined;
-  onDone: (marks: PhotoMark[]) => void;
+  initialRotation?: Rotation | undefined;
+  /** Rotate left / right offered (a document's uploaded picture keeps no rotation: false). */
+  rotatable?: boolean | undefined;
+  onChange?: ((marks: PhotoMark[], rotation: Rotation) => void) | undefined;
+  onDone: (marks: PhotoMark[], rotation: Rotation) => void;
   /** " · saving…" and the like, after the marks summary. */
   status?: string | undefined;
   /** Extra buttons beside Done (the ticket version's Download). */
   footer?: React.ReactNode;
 }) {
   const { w: W, h: H } = size;
-  const [history, dispatch] = useReducer(photoMarksReducer, initialMarks, emptyPhotoHistory);
+  const [history, dispatch] = useReducer(
+    photoMarksReducer,
+    { marks: initialMarks, rotation: initialRotation },
+    (i) => emptyPhotoHistory(i.marks, i.rotation),
+  );
+  const { rotation } = history;
+  const { w: RW, h: RH } = rotatedBox(W, H, rotation);
   const [tool, setTool] = useState<Tool>("ellipse");
   const [color, setColor] = useState<PhotoColor>(DEFAULT_PHOTO_COLOR);
   const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState<PhotoView>(() => fullView(W, H));
+  const [view, setView] = useState<PhotoView>(() => fullView(RW, RH));
+  // A turn (or its undo) shows the whole turned picture again: the view is in the turned box.
+  const viewRotation = useRef(rotation);
+  useEffect(() => {
+    if (viewRotation.current === rotation) return;
+    viewRotation.current = rotation;
+    setView(fullView(RW, RH));
+  }, [rotation, RW, RH]);
   const [draft, setDraft] = useState<{ kind: ShapeKind; a: Pt; b: Pt } | null>(null);
   const [moving, setMoving] = useState<{ id: string; du: number; dv: number } | null>(null);
   const [pending, setPending] = useState<{ kind: "text" | "tag"; at: Pt } | null>(null);
@@ -786,8 +946,8 @@ export function PhotoMarkupSurface({
   const report = useRef(onChange);
   report.current = onChange;
   useEffect(() => {
-    report.current?.(history.marks);
-  }, [history.marks]);
+    report.current?.(history.marks, history.rotation);
+  }, [history.marks, history.rotation]);
 
   // A selection that was undone / removed goes away.
   useEffect(() => {
@@ -822,9 +982,14 @@ export function PhotoMarkupSurface({
     const k = screenScale(box(), { width: view.w, height: view.h });
     return k > 0 ? 1 / k : 1;
   };
+  /** The pointer in the picture's own px: through the viewBox (turned box), then turned back. */
   const toImg = (e: React.PointerEvent): Pt => {
     const [vx, vy] = screenToView(box(), { width: view.w, height: view.h }, e.clientX, e.clientY);
-    return [Math.min(W, Math.max(0, view.x + vx)), Math.min(H, Math.max(0, view.y + vy))];
+    const inView: Pt = [
+      Math.min(RW, Math.max(0, view.x + vx)),
+      Math.min(RH, Math.max(0, view.y + vy)),
+    ];
+    return unrotatePoint(inView, W, H, rotation);
   };
   const norm = (p: Pt) => toNorm(p, W, H);
 
@@ -857,7 +1022,7 @@ export function PhotoMarkupSurface({
     const g = gesture.current;
     if (!g) return;
     if (g.type === "pan") {
-      setView(panPhotoView(g.view, W, H, (e.clientX - g.sx) * g.k, (e.clientY - g.sy) * g.k));
+      setView(panPhotoView(g.view, RW, RH, (e.clientX - g.sx) * g.k, (e.clientY - g.sy) * g.k));
       return;
     }
     const p = toImg(e);
@@ -894,7 +1059,7 @@ export function PhotoMarkupSurface({
     return draft ? [...base, { id: "draft", color, ...draft } as PhotoMark] : base;
   }, [history.marks, moving, draft, color]);
 
-  const zoom = viewZoom(view, W);
+  const zoom = viewZoom(view, RW);
   const cursor =
     tool === "move"
       ? gesture.current?.type === "pan"
@@ -976,6 +1141,33 @@ export function PhotoMarkupSurface({
             <Eraser className="mr-1 h-4 w-4" /> Clear
           </Button>
         </div>
+        {rotatable && (
+          // 44 px on a phone (a thumb), the toolbar's 40 px from sm up; the row wraps, never overflows.
+          <div className="flex gap-1" role="group" aria-label="Rotate">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-11 w-11 sm:h-10 sm:w-10"
+              aria-label="Rotate left"
+              title="Turn the picture a quarter to the left (its marks turn with it; Undo turns it back)"
+              onClick={() => dispatch({ type: "rotate", by: -1 })}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-11 w-11 sm:h-10 sm:w-10"
+              aria-label="Rotate right"
+              title="Turn the picture a quarter to the right (its marks turn with it; Undo turns it back)"
+              onClick={() => dispatch({ type: "rotate", by: 1 })}
+            >
+              <RotateCw className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">
         {tool === "move"
@@ -994,18 +1186,22 @@ export function PhotoMarkupSurface({
           className="mx-auto block h-auto max-h-full w-full touch-none select-none"
           style={{
             cursor,
-            aspectRatio: `${W} / ${H}`,
-            maxWidth: `min(100%, calc((min(65vh, 640px) - 2px) * ${W / H}))`,
+            aspectRatio: `${RW} / ${RH}`,
+            maxWidth: `min(100%, calc((min(65vh, 640px) - 2px) * ${RW / RH}))`,
           }}
           role="img"
           aria-label="The photo, to mark up"
+          data-rotation={rotation}
           onPointerDown={down}
           onPointerMove={move}
           onPointerUp={up}
           onPointerCancel={up}
         >
-          <image href={url} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
-          <MarkShapes marks={shown} w={W} h={H} selected={selected} />
+          {/* The picture and its marks turn as one; the marks keep the picture's own px. */}
+          <g transform={rotationTransform(W, H, rotation) || undefined}>
+            <image href={url} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
+            <MarkShapes marks={shown} w={W} h={H} selected={selected} />
+          </g>
         </svg>
       </div>
 
@@ -1016,7 +1212,7 @@ export function PhotoMarkupSurface({
           variant="outline"
           aria-label="Zoom out"
           disabled={zoom <= 1.001}
-          onClick={() => setView(zoomPhotoView(view, W, H, 0.5))}
+          onClick={() => setView(zoomPhotoView(view, RW, RH, 0.5))}
         >
           <ZoomOut className="h-4 w-4" />
         </Button>
@@ -1026,7 +1222,7 @@ export function PhotoMarkupSurface({
           variant="outline"
           aria-label="Zoom in"
           disabled={zoom >= 5.99}
-          onClick={() => setView(zoomPhotoView(view, W, H, 2))}
+          onClick={() => setView(zoomPhotoView(view, RW, RH, 2))}
         >
           <ZoomIn className="h-4 w-4" />
         </Button>
@@ -1036,12 +1232,13 @@ export function PhotoMarkupSurface({
           variant="outline"
           title="The whole photo"
           disabled={zoom <= 1.001}
-          onClick={() => setView(fullView(W, H))}
+          onClick={() => setView(fullView(RW, RH))}
         >
           <Scan className="mr-1 h-4 w-4" /> Fit
         </Button>
         <span className="text-xs text-muted-foreground">
           {marksSummary(history.marks)}
+          {rotation ? ` · turned ${rotation}°` : ""}
           {status ?? ""}
         </span>
       </div>
@@ -1075,7 +1272,11 @@ export function PhotoMarkupSurface({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" className="h-11 sm:h-9" onClick={() => onDone(history.marks)}>
+        <Button
+          type="button"
+          className="h-11 sm:h-9"
+          onClick={() => onDone(history.marks, history.rotation)}
+        >
           Done
         </Button>
         {footer}

@@ -5,7 +5,7 @@
  * module names a page carries, the sheet's screen geometry and the small text formats. No React,
  * no server: every rule here is tested in editor-helpers.test.ts.
  */
-import type { PhotoMark } from "@/lib/photo-annotations";
+import type { PhotoMark, Rotation } from "@/lib/photo-annotations";
 
 import {
   type DocKind,
@@ -173,6 +173,19 @@ export function imageMarks(
   if (image.kind === "ticketPhoto" && image.marks)
     return photos.find((p) => p.id === image.photoId)?.marks ?? [];
   return [];
+}
+
+/**
+ * How a picture is shown turned: a ticket photo the way the ticket keeps it (whether or not its
+ * marks draw — a sideways photo is sideways with or without them); every other picture 0.
+ */
+export function imageRotation(
+  image: ImageRef,
+  photos: ReadonlyArray<{ id: string; rotation: Rotation }>,
+): Rotation {
+  if (image.kind === "ticketPhoto")
+    return photos.find((p) => p.id === image.photoId)?.rotation ?? 0;
+  return 0;
 }
 
 /** Can this picture be marked up? An upload or a ticket photo; not the logo or the property photo. */

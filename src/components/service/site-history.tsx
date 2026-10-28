@@ -34,7 +34,7 @@ import { History, Loader2, MapPinned, PenLine } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import { isFieldOnly } from "@/lib/access";
 import { OUTCOME_LABELS, type InspectionOutcome } from "@/lib/inspection";
-import { marksSummary, parsePhotoMarks, photoOrdinals } from "@/lib/photo-annotations";
+import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
 import {
   FIRST_TICKET,
@@ -60,7 +60,7 @@ import {
   type ServiceType,
 } from "@/lib/service.functions";
 import { Box } from "@/components/service/field-shared";
-import { MarksOverlay, PhotoLightbox } from "@/components/service/photo-markup";
+import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
 import { errText, fieldKeys, useSignedUrl } from "@/components/service/field-utils";
 
 /** The fold's element id: the strip scrolls to it, and so does ?open=history. */
@@ -405,8 +405,10 @@ function HistoryThumb({ photo, onOpen }: { photo: HistoryPhoto; onOpen: () => vo
   // The server signed the link; when that failed, the browser asks for its own.
   const own = useSignedUrl(photo.url ? null : photo.storage_path);
   const url = photo.url ?? own.data ?? null;
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const marks = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
+  const { marks, rotation } = useMemo(
+    () => parsePhotoMarkup(photo.annotations),
+    [photo.annotations],
+  );
   const label = ROLE_LABEL[photo.role] ?? "Photo";
   return (
     <button
@@ -421,18 +423,15 @@ function HistoryThumb({ photo, onOpen }: { photo: HistoryPhoto; onOpen: () => vo
       onClick={onOpen}
     >
       {url ? (
-        <>
-          <img
-            src={url}
-            alt={`${label} photo`}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            onLoad={(e) =>
-              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-            }
-          />
-          {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />}
-        </>
+        <RotatedPhoto
+          url={url}
+          alt={`${label} photo`}
+          marks={marks}
+          rotation={rotation}
+          fit="cover"
+          className="h-full w-full"
+          loading="lazy"
+        />
       ) : own.error ? (
         <span className="flex h-full items-center justify-center p-1 text-center text-[10px] text-destructive">
           Could not load

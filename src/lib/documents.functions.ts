@@ -25,7 +25,7 @@ import { managesTickets } from "@/lib/access";
 import { easternYmd } from "@/lib/field-day";
 import { parseInspection } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
-import { parsePhotoMarks, type PhotoMark } from "@/lib/photo-annotations";
+import { parsePhotoMarkup, type PhotoMark, type Rotation } from "@/lib/photo-annotations";
 import { toBase64 } from "@/lib/webpush";
 
 import { missingDefaultTemplates } from "./documents/defaults";
@@ -908,6 +908,8 @@ export interface DocumentPhoto {
   hasMarks: boolean;
   /** The ticket's marks (photo-annotations.ts), drawn on the editor's canvas (phase 2). */
   marks: PhotoMark[];
+  /** How the ticket shows the photo turned (photo-annotations.ts); the canvas turns it the same. */
+  rotation: Rotation;
   /** The checklist item the photo was taken for (service_job_photos.item_key), or null. */
   itemKey: string | null;
   takenAt: string | null;
@@ -1027,7 +1029,7 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
   return rows
     .filter((r) => urls.has(r.storage_path))
     .map((r) => {
-      const marks = parsePhotoMarks(r.annotations);
+      const { marks, rotation } = parsePhotoMarkup(r.annotations);
       return {
         id: r.id,
         serviceJobId: doc.service_job_id!,
@@ -1035,6 +1037,7 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
         url: urls.get(r.storage_path)!,
         hasMarks: marks.length > 0,
         marks,
+        rotation,
         itemKey: r.item_key,
         takenAt: r.taken_at ?? r.created_at,
       };

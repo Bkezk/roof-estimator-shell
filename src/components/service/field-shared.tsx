@@ -24,9 +24,9 @@ import {
 } from "lucide-react";
 
 import type { AutosaveState } from "@/lib/autosave";
-import { marksSummary, parsePhotoMarks, photoOrdinals } from "@/lib/photo-annotations";
+import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
 import { photoDragData, setPhotoDrag } from "@/lib/photo-drag";
-import { MarksOverlay, PhotoLightbox } from "@/components/service/photo-markup";
+import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
 import { listJobCrew } from "@/lib/service.functions";
@@ -283,8 +283,10 @@ export function PhotoThumb({
   const url = useSignedUrl(photo.storage_path);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const marks = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
+  const { marks, rotation } = useMemo(
+    () => parsePhotoMarkup(photo.annotations),
+    [photo.annotations],
+  );
   const box = size === "sm" ? "h-16 w-16" : "h-20 w-20";
   const n =
     ordinal ??
@@ -316,16 +318,15 @@ export function PhotoThumb({
           }
           onClick={() => setOpen(true)}
         >
-          <img
-            src={url.data}
+          <RotatedPhoto
+            url={url.data}
             alt={`${ROLE_LABEL[photo.role] ?? "Photo"} photo`}
-            className="h-full w-full object-cover"
+            marks={marks}
+            rotation={rotation}
+            fit="cover"
+            className="h-full w-full"
             loading="lazy"
-            onLoad={(e) =>
-              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-            }
           />
-          {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />}
         </button>
       ) : url.error ? (
         <span className="flex h-full items-center justify-center p-1 text-center text-[10px] text-destructive">

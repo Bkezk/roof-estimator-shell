@@ -1319,8 +1319,9 @@ export const savePhotoAnnotationsInput = z.object({
  * The same rules as recording a photo: Service access, and a technician only on their own
  * ticket (ownJob). Only a Before / After / other photo of this ticket takes marks (a signature
  * never; an aerial keeps its own markup). The image is never touched: the marks are JSON on the
- * row, rounded, and null when the last one is removed. The close-out and the ticket page
- * auto-save here as the marks change.
+ * row, rounded, with the rotation the picture is shown turned by (owner, Oct 28; 0 is not
+ * written), and null when the last mark is removed and the picture is not turned. The close-out
+ * and the ticket page auto-save here as the marks or the rotation change.
  */
 export const savePhotoAnnotations = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1338,7 +1339,10 @@ export const savePhotoAnnotations = createServerFn({ method: "POST" })
     if (!photo) throw new Error("That photo is not on this ticket (it may have been deleted)");
     if (!isAnnotatableRole(photo.role))
       throw new Error("Only a Before, After or other photo can be marked up");
-    const value = serializePhotoMarks(data.annotations?.marks ?? []);
+    const value = serializePhotoMarks(
+      data.annotations?.marks ?? [],
+      data.annotations?.rotation ?? 0,
+    );
     const { data: row, error } = await sb
       .from("service_job_photos")
       .update({ annotations: value as unknown as Json })

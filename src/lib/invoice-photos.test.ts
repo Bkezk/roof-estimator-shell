@@ -20,7 +20,12 @@ import {
   storedPhotoIds,
 } from "@/lib/invoice-photos";
 import { setInvoicePhotosInput } from "@/lib/invoice-photos.functions";
-import { drawPhotoMarks, renderInvoicePdf, type InvoiceBundle } from "@/lib/invoices.server";
+import {
+  drawPhoto,
+  drawPhotoMarks,
+  renderInvoicePdf,
+  type InvoiceBundle,
+} from "@/lib/invoices.server";
 import { jbkLogoPng } from "@/lib/jbk-logo.server";
 import { serializePhotoMarks, type PhotoMark } from "@/lib/photo-annotations";
 
@@ -332,4 +337,114 @@ describe("the invoice PDF draws the chosen photos with their marks", () => {
     expect(ops).toMatch(/m\n[-\d.]+ [-\d.]+ l\n[-\d.]+ [-\d.]+ l\nh\nf\n/);
     expect(textOf(ops)).toContain("LEAK HERE");
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+
+/** pdf-lib's `cm` for a turn: cos sin -sin cos 0 0 (cos of a right angle prints as ~6e-17). */
+const TURN = {
+  "-90": /\S+ -1 1 \S+ 0 0 cm/,
+  "90": /\S+ 1 -1 \S+ 0 0 cm/,
+  "180": /-1 \S+ \S+ -1 0 0 cm/,
+};
+/** The image draws: `[width, height]` of each `W 0 0 H 0 0 cm` right before a `Do`. */
+const imageDraws = (ops: string) =>
+  [...ops.matchAll(/([\d.]+) 0 0 ([\d.]+) 0 0 cm\n1 0 0 1 0 0 cm\n\/Image\S* Do/g)].map((m) => [
+    parseFloat(m[1]!),
+    parseFloat(m[2]!),
+  ]);
+
+describe("a photo turned on the ticket prints turned (owner, Oct 28: rotation)", () => {
+  it("drawPhoto: the picture turns about the box's corner with its own sides; its marks go under the same shift and turn, drawn unturned", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const img = await doc.embedPng(jbkLogoPng()); // 480 × 270
+    expect([img.width, img.height]).toEqual([480, 270]);
+    const box = { x: 48, y: 400, w: 180, h: 240 }; // the turned box: the picture on its side
+    expect(drawPhoto({ page, bold }, img, marks, box, 90)).toBe(5);
+    const ops = await pdfStreams(await doc.save());
+    // The picture: shifted to the box's top-left (48, 640), a quarter turn clockwise (-90 as
+    // pdf-lib counts on its y-up page), then its own 240 wide × 180 tall.
+    expect(ops).toMatch(
+      /q\n1 0 0 1 48 640 cm\n\S+ -1 1 \S+ 0 0 cm\n240 0 0 180 0 0 cm\n1 0 0 1 0 0 cm\n\/Image\S* Do\nQ/,
+    );
+    // The marks: q, the same shift and turn, then drawPhotoMarks in the picture's own 240 × 180
+    // box — the Box mark 0.6..0.9 × 0.1..0.3 is 72 × 36 at (144, 126), not turned by hand.
+    expect(ops).toMatch(/q\n1 0 0 1 48 640 cm\n\S+ -1 1 \S+ 0 0 cm\nq\n/);
+    expect(ops).toMatch(
+      /1 0 0 1 144 126 cm\n(?:1 0 0 1 0 0 cm\n)*0 0 m\n0 36 l\n72 36 l\n72 0 l\nh\n/,
+    );
+    expect(curves(ops)).toBeGreaterThanOrEqual(4 + 4);
+    expect(textOf(ops)).toContain("LEAK HERE");
+    // Every q has its Q (the turn does not leak into what is drawn next).
+    expect((ops.match(/^q$/gm) ?? []).length).toBe((ops.match(/^Q$/gm) ?? []).length);
+  });
+  it("drawPhoto, not turned, draws exactly as before; 180 and 270 take their own corner and turn", async () => {
+    const at = async (rotation: 0 | 180 | 270, m: PhotoMark[] = []) => {
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([612, 792]);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      const img = await doc.embedPng(jbkLogoPng());
+      const box =
+        rotation === 270 ? { x: 48, y: 400, w: 180, h: 240 } : { x: 48, y: 400, w: 240, h: 180 };
+      drawPhoto({ page, bold }, img, m, box, rotation);
+      return pdfStreams(await doc.save());
+    };
+    const flat = await at(0, marks);
+    expect(flat).toMatch(/1 0 0 1 48 400 cm\n1 0 0 1 0 0 cm\n240 0 0 180 0 0 cm/);
+    expect(flat).not.toMatch(TURN["-90"]);
+    expect(flat).not.toMatch(TURN["90"]);
+    expect(flat).not.toMatch(TURN["180"]);
+    // Unturned marks: straight on the page (the Box at the box's own place), as drawPhotoMarks did.
+    expect(flat).toMatch(
+      /1 0 0 1 192 526 cm\n(?:1 0 0 1 0 0 cm\n)*0 0 m\n0 36 l\n72 36 l\n72 0 l\nh\n/,
+    );
+    const half = await at(180);
+    expect(half).toMatch(/1 0 0 1 288 580 cm\n-1 \S+ \S+ -1 0 0 cm\n240 0 0 180 0 0 cm/);
+    const left = await at(270);
+    expect(left).toMatch(/1 0 0 1 228 400 cm\n\S+ 1 -1 \S+ 0 0 cm\n240 0 0 180 0 0 cm/);
+  });
+  // Each render embeds the logo PNG for every photo and inflates every stream: well over 5 s each.
+  const SLOW = 30_000;
+  it(
+    "the invoice PDF: a turned photo fills a swapped box on the closing Photos page, its marks under the turn",
+    async () => {
+      // The cell is 248 × 165; the 480 × 270 picture on its side is 270 × 480, so it scales to
+      // 165 tall × 92.8125 wide — and is drawn as its own 165 × 92.8125 turned a quarter.
+      const turned = photo(17, "other", null, 7, serializePhotoMarks(marks, 90));
+      const ops = await pdfStreams(
+        await renderInvoicePdf(sb, bundle([turned.id], [b1, a1, turned])),
+      );
+      expect(ops).toMatch(TURN["-90"]);
+      expect(imageDraws(ops)).toContainEqual([165, 92.8125]);
+      expect(curves(ops)).toBeGreaterThanOrEqual(4); // the ellipse, under the same turn
+      expect(textOf(ops)).toContain("LEAK HERE");
+    },
+    SLOW,
+  );
+  it(
+    "the invoice PDF: a turned Before photo on the Work Completed page takes a swapped box, with no marks at all",
+    async () => {
+      // 200 wide, 160 tall at most: on its side the picture is 160 tall × 90 wide, drawn as its
+      // own 160 × 90 turned — a turn without marks still prints turned.
+      const before = photo(18, "before", R1, 8, serializePhotoMarks([], 90));
+      const ops = await pdfStreams(await renderInvoicePdf(sb, bundle([before.id], [before, a1])));
+      expect(ops).toMatch(TURN["-90"]);
+      expect(imageDraws(ops)).toContainEqual([160, 90]);
+      expect(curves(ops)).toBe(0);
+    },
+    SLOW,
+  );
+  it(
+    "the invoice PDF: untouched photos draw as before, no turn anywhere",
+    async () => {
+      const plain = await pdfStreams(await renderInvoicePdf(sb, bundle([b1.id, o1.id])));
+      expect(plain).not.toMatch(TURN["-90"]);
+      expect(plain).not.toMatch(TURN["90"]);
+      expect(plain).not.toMatch(TURN["180"]);
+      expect(imageDraws(plain)).toContainEqual([200, 112.5]); // 480 × 270 at 200 wide on the repair page
+    },
+    SLOW,
+  );
 });
