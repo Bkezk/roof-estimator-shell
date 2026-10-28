@@ -131,9 +131,10 @@ export function LogContactButtons({
   // not a contact: nothing is stamped or moved; @mentions tell people).
   const [picked, setPicked] = useState<ContactMethod | typeof COMMENT_METHOD | null>(null);
   const isComment = picked === COMMENT_METHOD;
-  // Owner, Oct 27: a ticket's Activity block has one note box of its own (ticket-activity.tsx),
-  // so the Comment button is the opportunity's (and the follow-ups') alone; `kind` decides.
-  const commentButton = kind !== "ticket";
+  // Owner, Oct 28: on a ticket the button reads "Note" and sits beside Called / Texted / Emailed
+  // / Visited — the one way to write on the Activity (no separate box); the same comment row,
+  // @mentions included. Opportunities and follow-ups keep "Comment".
+  const commentLabel = kind === "ticket" ? "Note" : "Comment";
   const [note, setNote] = useState("");
   // Owner, Oct 9: "They asked to try again on" — optional; with it, the note is the hold's reason.
   const [tryAgain, setTryAgain] = useState("");
@@ -165,7 +166,7 @@ export function LogContactButtons({
     onSuccess: (row, method) => {
       const logged =
         method === COMMENT_METHOD
-          ? "Comment added"
+          ? `${commentLabel} added`
           : row.hold
             ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
             : `Logged: ${CONTACT_METHOD_LABELS[method]}`;
@@ -188,7 +189,7 @@ export function LogContactButtons({
     if (isComment && !note.trim()) return;
     log.mutate(picked);
   };
-  const pickedLabel = picked ? (isComment ? "Comment" : CONTACT_METHOD_LABELS[picked]) : "";
+  const pickedLabel = picked ? (isComment ? commentLabel : CONTACT_METHOD_LABELS[picked]) : "";
 
   return (
     <div className="space-y-2">
@@ -219,22 +220,20 @@ export function LogContactButtons({
             </Button>
           );
         })}
-        {commentButton && (
-          <Button
-            type="button"
-            size="sm"
-            variant={isComment ? "default" : "outline"}
-            className={compact ? "h-8 w-8 p-0" : "h-8"}
-            disabled={log.isPending}
-            aria-pressed={isComment}
-            title="Comment: write a note on the timeline (type @ to tell someone)"
-            aria-label={isComment ? "Comment (picked)" : "Comment"}
-            onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}
-          >
-            <MessageSquarePlus className={`h-4 w-4${compact ? "" : " mr-1"}`} />
-            {!compact && "Comment"}
-          </Button>
-        )}
+        <Button
+          type="button"
+          size="sm"
+          variant={isComment ? "default" : "outline"}
+          className={compact ? "h-8 w-8 p-0" : "h-8"}
+          disabled={log.isPending}
+          aria-pressed={isComment}
+          title={`${commentLabel}: write a note on the ${kind === "ticket" ? "activity" : "timeline"} (type @ to tell someone)`}
+          aria-label={isComment ? `${commentLabel} (picked)` : commentLabel}
+          onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}
+        >
+          <MessageSquarePlus className={`h-4 w-4${compact ? "" : " mr-1"}`} />
+          {!compact && commentLabel}
+        </Button>
       </div>
       {picked && (
         <div className="space-y-1.5">

@@ -2,7 +2,7 @@
  * The ticket's Activity block (owner, Oct 27): the contact buttons at the top, ONE note box, the
  * "N entries" line and the merged list in a capped, scrolling box — rendered to a string
  * (react-dom/server) with the two queries' data seeded in the cache, so the markup is the real
- * thing. The Comment button is the opportunity's alone (both kinds rendered). The server side
+ * thing. The fifth button is Note on a ticket, Comment on an opportunity (both kinds rendered). The server side
  * is pinned: the note saves as a contact-log comment, whose @mentions go through sendMentions.
  */
 import { readFileSync } from "node:fs";
@@ -107,29 +107,29 @@ function render(node: React.ReactElement, seed = true) {
 
 describe("TicketActivity", () => {
   const html = render(<TicketActivity jobId={JOB} />);
-  it('is the "Activity" block: heading and aria-label, the contact buttons at the top, no Comment button', () => {
+  it('is the "Activity" block: heading and aria-label, the five buttons at the top (Note is the fifth), no separate box', () => {
     expect(html).toContain('aria-label="Activity"');
     expect(html).toMatch(
       /<p class="[^"]*font-medium[^"]*"><svg[^>]*lucide-history[^]*?<\/svg> Activity<\/p>/,
     );
     const names = labels(html);
-    expect(names.slice(0, 4)).toEqual(["Called", "Texted", "Emailed", "Visited"]);
+    expect(names.slice(0, 5)).toEqual(["Called", "Texted", "Emailed", "Visited", "Note"]);
     expect(names).not.toContain("Comment");
     expect(html).not.toContain("Timeline");
   });
-  it("has ONE note box: a mention textarea with the @ hint and an Add note button", () => {
-    expect(html.match(/<textarea\b/g)).toHaveLength(1);
-    expect(html).toContain('placeholder="Add a note — type @ to tell someone"');
-    expect(html).toContain('aria-label="Note"');
-    expect(html).toMatch(/<button[^>]*type="submit"[^>]*>[^]*?Add note<\/button>/);
-    expect(html).toContain("Type @ to tell someone. Ctrl+Enter saves.");
-    expect(html).toContain('data-box="activity-note"');
+  it("owner, Oct 28: no separate note box — the note field opens from a button, like a contact", () => {
+    // Nothing picked yet: no textarea on the page (the old block always rendered one).
+    expect(html.match(/<textarea\b/g)).toBeNull();
+    expect(html).not.toContain("Add note");
+    expect(html).not.toContain('data-box="activity-note"');
+    // The Note button carries the @ hint, as the contact buttons' shared note field does.
+    expect(html).toContain('title="Note: write a note on the activity (type @ to tell someone)"');
   });
   it("lists the merged stream newest first, the copied contact dropped, with a count line", () => {
     expect(html).toContain('data-line="activity-count"');
     expect(html).toContain(">4 entries<");
     const order = [
-      "Comment",
+      "Note",
       "Date moved from Oct 3, 2026 to Oct 10, 2026",
       "Called",
       "Stage: Open",
@@ -166,10 +166,10 @@ describe("TicketActivity", () => {
   });
 });
 
-describe("LogContactButtons: the Comment button is the opportunity's (kind decides)", () => {
-  it("a ticket: Called / Texted / Emailed / Visited only", () => {
+describe("LogContactButtons: the fifth button reads Note on a ticket, Comment elsewhere (kind decides)", () => {
+  it("a ticket: Called / Texted / Emailed / Visited / Note", () => {
     const html = render(<LogContactButtons kind="ticket" itemId={JOB} />, false);
-    expect(labels(html)).toEqual(["Called", "Texted", "Emailed", "Visited"]);
+    expect(labels(html)).toEqual(["Called", "Texted", "Emailed", "Visited", "Note"]);
   });
   it("an opportunity: … and Comment", () => {
     const html = render(<LogContactButtons kind="opportunity" itemId={JOB} />, false);
@@ -187,17 +187,15 @@ describe("the page and the server side", () => {
     expect(page).not.toContain("<LogContactButtons");
   });
   it("the note saves as a contact-log comment (logContact), the path every viewer of the block already had; its mentions go through sendMentions", () => {
+    // Owner, Oct 28: the note is the Note button of the contact buttons (crm/contact-log.tsx),
+    // which saves through logContact with method "comment" — no box of its own here.
     const src = read("src/components/service/ticket-activity.tsx");
-    expect(src).toContain("const logFn = useServerFn(logContact);");
-    expect(src).toContain(
-      'data: { kind: "ticket", item_id: jobId, method: COMMENT_METHOD, note: note.trim() }',
-    );
-    expect(src).toContain("toast.success(`Note added${toldSuffix(row.mentioned)}`);");
-    expect(src).toContain(
-      "if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });",
-    );
-    expect(src).toContain('onError: (e) => loudError("Could not add the note", e),');
     expect(src).not.toContain("useServerFn(addJobNote)");
+    expect(src).not.toContain("MentionTextarea");
+    expect(src).toContain('<LogContactButtons kind="ticket" itemId={jobId} />');
+    const log = read("src/components/crm/contact-log.tsx");
+    expect(log).toContain("const logFn = useServerFn(logContact);");
+    expect(log).toContain("onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}");
     const fns = read("src/lib/contact-log.functions.ts");
     const handler = fns.slice(
       fns.indexOf("export const logContact"),

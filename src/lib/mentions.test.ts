@@ -98,15 +98,15 @@ describe("saving the note", () => {
 
 describe("the note box", () => {
   // Since Oct 14 the picker is the shared MentionTextarea (mention-everywhere.test.ts); since
-  // Oct 27 the ticket's one note box is the Activity block's (ticket-activity.tsx), saving as a
-  // contact-log comment whose mentions go through sendMentions.
-  const src = readFileSync("src/components/service/ticket-activity.tsx", "utf8");
+  // Oct 28 the ticket's note is the Note button of the contact buttons (crm/contact-log.tsx),
+  // saving as a contact-log comment whose mentions go through sendMentions.
+  const src = readFileSync("src/components/crm/contact-log.tsx", "utf8");
   const box = readFileSync("src/components/mention-textarea.tsx", "utf8");
   it("suggests people on @ and says who was told", () => {
     expect(box).toContain('aria-label="People to mention"');
     expect(box).toContain("type @ to tell someone");
     expect(src).toContain("<MentionTextarea");
-    expect(src).toContain("toast.success(`Note added${toldSuffix(row.mentioned)}`);");
+    expect(src).toContain("toast.success(`${logged}${toldSuffix(row.mentioned)}`);");
   });
 });
 

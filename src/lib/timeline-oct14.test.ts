@@ -130,15 +130,16 @@ describe("the close-out writes Service done on the ticket and its opportunity", 
 
 describe("the boxes", () => {
   const log = read("src/components/crm/contact-log.tsx");
-  it("a Comment button beside Called / Texted / Emailed / Visited (the opportunity's since Oct 27: a ticket's Activity block has its own note box); its note is required; no hold for a comment", () => {
-    expect(log).toContain('const commentButton = kind !== "ticket";');
-    expect(log).toContain("{commentButton && (");
-    expect(log).toContain('aria-label={isComment ? "Comment (picked)" : "Comment"}');
+  it("a fifth button beside Called / Texted / Emailed / Visited — Comment on an opportunity, Note on a ticket (owner, Oct 28); its note is required; no hold for a comment", () => {
+    // Always rendered (the ticket's note has no box of its own since Oct 28).
+    expect(log).not.toContain("commentButton");
+    expect(log).toContain("aria-label={isComment ? `${commentLabel} (picked)` : commentLabel}");
+    expect(log).toContain('const commentLabel = kind === "ticket" ? "Note" : "Comment";');
     expect(log).toContain("onClick={() => setPicked(isComment ? null : COMMENT_METHOD)}");
     expect(log).toContain("if (isComment && !note.trim()) return;");
     expect(log).toContain("disabled={log.isPending || !holdReady || (isComment && !note.trim())}");
     expect(log).toContain("{!isComment && (");
-    expect(log).toContain('? "Comment added"');
+    expect(log).toContain("? `${commentLabel} added`");
   });
   it("the list is the timeline: a Service done row stands out; the empty text says timeline", () => {
     expect(log).toContain('data-list="timeline"');

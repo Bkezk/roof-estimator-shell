@@ -144,7 +144,7 @@ describe("mergeTimeline", () => {
 
 describe("the rows' wording and icons (what the two lists showed until Oct 27)", () => {
   const at = "2026-10-20T14:00:00+00:00";
-  it("contact-log rows: the method's label, Comment, Service done (highlighted), Note", () => {
+  it("contact-log rows: the method's label, a comment reads Note (owner, Oct 28), Service done (highlighted), Note", () => {
     expect(contactEntry(contact({ id: 1, at, method: "called" }))).toMatchObject({
       label: "Called",
       icon: "called",
@@ -152,7 +152,7 @@ describe("the rows' wording and icons (what the two lists showed until Oct 27)",
       text: null,
     });
     expect(contactEntry(contact({ id: 1, at, method: "comment", note: "Hi" }))).toMatchObject({
-      label: "Comment",
+      label: "Note",
       icon: "comment",
       text: "Hi",
     });

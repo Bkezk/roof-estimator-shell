@@ -47,7 +47,7 @@ export interface TimelineEntry {
   key: string;
   source: "contact" | "event";
   at: string;
-  /** "Called", "Comment", "Service done", "Stage: Open", "Date moved from … to …", "En route". */
+  /** "Called", "Note", "Service done", "Stage: Open", "Date moved from … to …", "En route". */
   label: string;
   /** The note under the label, or null when the label says it all. */
   text: string | null;
@@ -90,7 +90,8 @@ export function contactEntry(r: ContactLogRow): TimelineEntry {
     key: `contact:${r.id}`,
     source: "contact",
     at: r.at,
-    label: contactMethodLabel(r.method),
+    // Owner, Oct 28: the ticket's button reads "Note", so does its row (an opportunity keeps "Comment").
+    label: r.method === COMMENT_METHOD ? "Note" : contactMethodLabel(r.method),
     text: r.note?.trim() ? r.note : null,
     byName: r.by_name ?? null,
     icon: contactIcon(r.method),

@@ -1,25 +1,17 @@
 /**
  * The ticket's Activity block, in the form (owner, Oct 27: one full stream — "cap the amount of
  * lines the timeline can grow, then make it scrollable after that line amount"). Top to bottom:
- * the contact buttons (Called / Texted / Emailed / Visited with their note and "They asked to try
- * again on", crm/contact-log.tsx), ONE note box (the Comment button and the Work fold's "Add
- * note" box until Oct 27), the "N entries" line and the list — the contact log merged with the
+ * the contact buttons (Called / Texted / Emailed / Visited / Note with their note and "They asked
+ * to try again on", crm/contact-log.tsx), the "N entries" line and the list — the contact log merged with the
  * ticket's events (lib/ticket-timeline.ts), newest first, about eight rows tall and scrolling
  * inside its own box after that.
  *
- * The note saves as a contact-log comment (logContact, method "comment"): the path every viewer
- * of the block already had through the Comment button — a technician on their own ticket or on
- * its crew included (crm_contact_log's insert rule is "the ticket is one you can see"), where
- * addJobNote (service_job_events) takes only the lead technician or the office. Its @mentions
- * tell people the same way (lib/mention-notify.ts sendMentions; a problem rides back as
- * `mention_error`, never losing the note) and a comment is not copied to the events, so the
- * merged list shows it once. Rendered the same for the office and a technician; the server
- * decides what each may do, as before.
+ * Owner, Oct 28: "Note" is one of the buttons beside Called / Texted / Emailed / Visited — no
+ * separate box; it writes a contact-log comment (logContact, method "comment"; @mentions tell
+ * people), the path every viewer of the ticket already had.
  */
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
 import {
   CalendarDays,
   Camera,
@@ -38,8 +30,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { COMMENT_METHOD, listContactLog, logContact } from "@/lib/contact-log.functions";
-import { toldSuffix } from "@/lib/mentions";
+import { listContactLog } from "@/lib/contact-log.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
 import {
   ACTIVITY_EMPTY,
@@ -49,10 +40,8 @@ import {
   type TimelineEntry,
   type TimelineIcon,
 } from "@/lib/ticket-timeline";
-import { Button } from "@/components/ui/button";
-import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { LogContactButtons } from "@/components/crm/contact-log";
-import { errText, fieldKeys, loudError, whenShort } from "@/components/service/field-utils";
+import { errText, fieldKeys, whenShort } from "@/components/service/field-utils";
 
 const ICONS: Record<TimelineIcon, typeof Phone> = {
   called: Phone,
@@ -95,72 +84,12 @@ export function TicketActivity({ jobId }: { jobId: string }) {
         <History className="h-3.5 w-3.5 text-muted-foreground" /> Activity
       </p>
       <LogContactButtons kind="ticket" itemId={jobId} />
-      <ActivityNoteBox jobId={jobId} />
       <ActivityList
         entries={entries}
         error={contacts.error ?? events.error}
         loading={!entries && (contacts.isLoading || events.isLoading)}
       />
     </section>
-  );
-}
-
-/** The one note box: a comment on the ticket's timeline; @ tells someone; Ctrl/⌘+Enter saves. */
-function ActivityNoteBox({ jobId }: { jobId: string }) {
-  const qc = useQueryClient();
-  const logFn = useServerFn(logContact);
-  const [note, setNote] = useState("");
-  const add = useMutation({
-    mutationFn: () =>
-      logFn({
-        data: { kind: "ticket", item_id: jobId, method: COMMENT_METHOD, note: note.trim() },
-      }),
-    onSuccess: (row) => {
-      setNote("");
-      toast.success(`Note added${toldSuffix(row.mentioned)}`);
-      // The note is on record; say loudly when the people named in it were not told.
-      if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
-      void qc.invalidateQueries({ queryKey: ["contact-log", "ticket", jobId] });
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-    },
-    onError: (e) => loudError("Could not add the note", e),
-  });
-  const save = () => {
-    if (note.trim() && !add.isPending) add.mutate();
-  };
-  return (
-    <form
-      className="space-y-1.5"
-      data-box="activity-note"
-      onSubmit={(e) => {
-        e.preventDefault();
-        save();
-      }}
-    >
-      <MentionTextarea
-        rows={2}
-        value={note}
-        maxLength={2000}
-        placeholder={`Add a note — ${MENTION_HINT}`}
-        aria-label="Note"
-        onValueChange={setNote}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            save();
-          }
-        }}
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" className="h-8" disabled={!note.trim() || add.isPending}>
-          {add.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          Add note
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          Type @ to tell someone. Ctrl+Enter saves.
-        </span>
-      </div>
-    </form>
   );
 }
 
