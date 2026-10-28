@@ -166,10 +166,10 @@ describe("the Complete bar", () => {
 
 describe("the Nothing used mark (step 4)", () => {
   it("is a button under the materials and POs while nothing is logged; pressed, a ticked line with Undo", () => {
-    // Since Oct 12 an inspection shows the mark pre-set (inspection-flow.test.ts).
-    expect(form).toMatch(
-      /\{\(materialsQ\.data \?\? \[\]\)\.length === 0 &&\s*\(nothingUsed \|\| inspection \? \(/,
-    );
+    // Oct 12–28 an inspection showed the mark pre-set; since Oct 28 the materials card is not on
+    // an inspection at all (inspection-flow.test.ts), so the mark is the repair flow's alone.
+    expect(form).toMatch(/\{\(materialsQ\.data \?\? \[\]\)\.length === 0 &&\s*\(nothingUsed \? \(/);
+    expect(form).toMatch(/\{!inspection && \(\s*<StepCard\s+\{\.\.\.card\("materials"\)\}/);
     expect(form).toContain("onClick={() => markNothingUsed(true)}");
     expect(form).toContain("onClick={() => markNothingUsed(false)}");
     expect(form.match(/Nothing used on this ticket/g)).toHaveLength(2);
@@ -207,14 +207,15 @@ describe("no toast when a step unlocks (owner, Oct 9, later: the tech presses Ne
 describe("the crew box is still the gate (step 1)", () => {
   it("nothing after it renders until the question is answered; the reads then settle before the steps show", () => {
     expect(form).toContain("const waiting = crewQuestionPending(job);");
+    // Oct 28: not on an inspection — its flow has no crew step, and nothing waits on it there.
     expect(form).toMatch(
-      /<StepCard \{\.\.\.card\("crew"\)\} icon=\{Users\}>\s*<CrewBox job=\{job\} embedded \/>\s*<\/StepCard>\s*\{waiting \? null : !ready \? \(/,
+      /\{!inspection && \(\s*<StepCard \{\.\.\.card\("crew"\)\} icon=\{Users\}>\s*<CrewBox job=\{job\} embedded \/>\s*<\/StepCard>\s*\)\}\s*\{waiting && !inspection \? null : !ready \? \(/,
     );
     // Owner, Oct 9 (later): the paragraph under step 1 repeated the strip and the crew card's
     // own line; while waiting, nothing renders below the card.
     expect(form).not.toContain("Check-in details, photos, repairs and the rest open");
     expect(form).toMatch(
-      /\{waiting \? null : !ready \? \(\s*<p[^>]*>\s*<Loader2 className="h-4 w-4 animate-spin" \/> Loading the ticket…/,
+      /\{waiting && !inspection \? null : !ready \? \(\s*<p[^>]*>\s*<Loader2 className="h-4 w-4 animate-spin" \/> Loading the ticket…/,
     );
     // The crew answer is step 1's rule, nothing more.
     expect(form).toContain("crewAnswered: !waiting,");

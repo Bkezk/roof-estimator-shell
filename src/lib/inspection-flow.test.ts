@@ -4,8 +4,9 @@
  * summaries, nothing checking the checklist, a manual "Save inspection" lost on Complete, photos
  * needing a fake repair, two notes boxes, two recommend fields, the outcome never recorded. Now:
  *
- *   1. closeoutSteps("inspection") is six steps — crew, checklist, findings, materials, time,
- *      signature — and every helper takes the service type ("Step 2 of 6"); leak, warranty, scope
+ *   1. closeoutSteps("inspection") is four steps — checklist, additional findings, time,
+ *      signature (Oct 28: no Who is here, no Materials) — and every helper takes the service type
+ *      ("Step 1 of 4"); leak, warranty, scope
  *      and other keep the seven (closeout-steps.ts).
  *   2. The rules: checklist done when every visible item is answered AND saved; findings done
  *      with a note, a switch or Nothing to add; materials never block (Nothing used pre-set);
@@ -122,28 +123,25 @@ const types = read("src/integrations/supabase/types.ts");
 
 const IDS = (list: readonly { id: string }[]) => list.map((s) => s.id);
 
-describe("1. closeoutSteps(serviceType): six for an inspection, the seven repair steps for the rest", () => {
-  it("an inspection: crew → checklist → findings → materials → time → signature, numbered 1–6", () => {
+describe("1. closeoutSteps(serviceType): four for an inspection, the seven repair steps for the rest", () => {
+  it("an inspection: checklist → additional findings → time → signature, numbered 1–4 (Oct 28: no Who is here, no Materials)", () => {
     expect(IDS(closeoutSteps("inspection"))).toEqual([
-      "crew",
       "checklist",
       "findings",
-      "materials",
       "time",
       "signature",
     ]);
     expect(closeoutSteps("inspection")).toBe(INSPECTION_STEPS);
-    expect(INSPECTION_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(INSPECTION_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4]);
     expect(INSPECTION_STEPS.map((s) => s.title)).toEqual([
-      "Who is here",
       "Checklist",
-      "Findings",
-      "Materials",
+      "Additional findings",
       "Time",
       "Signature",
     ]);
     for (const s of INSPECTION_STEPS) expect(s.unlocks.length).toBeGreaterThan(0);
-    expect(stepCount("inspection")).toBe(6);
+    expect(INSPECTION_STEPS[0]!.unlocks).toBe("Open from the start");
+    expect(stepCount("inspection")).toBe(4);
   });
   it("leak, warranty, scope, other and no type: the seven repair steps, unchanged (scope stays on the repair flow)", () => {
     for (const t of ["leak", "warranty", "scope", "other", undefined, null])
@@ -162,33 +160,36 @@ describe("1. closeoutSteps(serviceType): six for an inspection, the seven repair
     expect(closeout).toContain("SCOPE and other keep the seven repair steps");
   });
   it("stepOf / stepIndex / nextStep / nextStepLabel walk the flow of the type given", () => {
-    expect(stepOf("signature", "inspection").n).toBe(6);
+    expect(stepOf("signature", "inspection").n).toBe(4);
     expect(stepOf("signature").n).toBe(7);
-    expect(stepIndex("materials", "inspection")).toBe(3);
-    expect(stepIndex("time", "inspection")).toBe(4);
-    expect(nextStep("crew", "inspection")).toBe("checklist");
+    expect(stepIndex("findings", "inspection")).toBe(1);
+    expect(stepIndex("time", "inspection")).toBe(2);
     expect(nextStep("checklist", "inspection")).toBe("findings");
-    expect(nextStep("findings", "inspection")).toBe("materials");
-    expect(nextStep("materials", "inspection")).toBe("time");
+    expect(nextStep("findings", "inspection")).toBe("time");
     expect(nextStep("time", "inspection")).toBe("signature");
     expect(nextStep("signature", "inspection")).toBeNull();
-    expect(nextStepLabel("checklist", "inspection")).toBe("Next step: Findings");
+    expect(nextStepLabel("checklist", "inspection")).toBe("Next step: Additional findings");
+    expect(nextStepLabel("findings", "inspection")).toBe("Next step: Time");
     expect(nextStepLabel("time", "inspection")).toBe("Next step: Signature");
     // The repair flow still goes Time → Notes.
     expect(nextStep("time")).toBe("notes");
     expect(nextStepLabel("time", "leak")).toBe("Next step: Notes");
     // A step the flow does not have is unknown to it.
     expect(() => stepOf("before", "inspection")).toThrow(/Unknown close-out step/);
+    expect(() => stepOf("crew", "inspection")).toThrow(/Unknown close-out step/);
+    expect(() => stepOf("materials", "inspection")).toThrow(/Unknown close-out step/);
     expect(() => stepOf("checklist")).toThrow(/Unknown close-out step/);
   });
-  it('the headline says "Step n of 6" on an inspection, "of 7" on a repair; the locked and finish lines follow', () => {
-    expect(stepHeadline("checklist", "inspection")).toBe("Step 2 of 6 · Checklist");
-    expect(stepHeadline("signature", "inspection")).toBe("Step 6 of 6 · Signature");
-    expect(stepHeadline(null, "inspection")).toBe("All 6 steps done — press Complete");
+  it('the headline says "Step n of 4" on an inspection, "of 7" on a repair; the locked and finish lines follow', () => {
+    expect(stepHeadline("checklist", "inspection")).toBe("Step 1 of 4 · Checklist");
+    expect(stepHeadline("signature", "inspection")).toBe("Step 4 of 4 · Signature");
+    expect(stepHeadline(null, "inspection")).toBe("All 4 steps done — press Complete");
     expect(stepHeadline("work")).toBe("Step 3 of 7 · The work");
     expect(stepHeadline(null)).toBe("All 7 steps done — press Complete");
-    expect(lockedLine("findings", "inspection")).toBe("Locked — finish step 3: Findings first");
-    expect(finishStepLabel("time", "inspection")).toBe("Finish step 5: Time");
+    expect(lockedLine("findings", "inspection")).toBe(
+      "Locked — finish step 2: Additional findings first",
+    );
+    expect(finishStepLabel("time", "inspection")).toBe("Finish step 3: Time");
     expect(finishStepLabel("time")).toBe("Finish step 5: Time");
   });
   it("shownOpenStep compares positions within the flow given", () => {
@@ -250,7 +251,7 @@ describe("2a. the checklist step: saved on the server (Oct 26: only a problem ne
       timeHours: 0,
     };
     expect(firstOpenStep(fresh)).toBe("checklist");
-    expect(statusList(fresh)).toEqual(["done", "current", "locked", "done", "locked", "done"]);
+    expect(statusList(fresh)).toEqual(["current", "locked", "locked", "done"]);
     // Saved with nothing flagged: on to the findings.
     expect(firstOpenStep({ ...fresh, checklistSaved: true })).toBe("findings");
   });
@@ -270,7 +271,7 @@ describe("2b. the findings step: a note, a switch on, or Nothing to add", () => 
     expect(stepDone("findings", whole)).toBe(true);
     expect(stepDone("findings", blank)).toBe(false);
     expect(stepMissing("findings", blank)).toBe(
-      "Write what you found, turn a switch on, or press Nothing to add",
+      "Write what you found, pick a recommendation, or press Nothing to add",
     );
     expect(stepDone("findings", { ...blank, recommendRepairs: true })).toBe(true);
     expect(stepDone("findings", { ...blank, recommendNewRoof: true })).toBe(true);
@@ -294,14 +295,14 @@ describe("2b. the findings step: a note, a switch on, or Nothing to add", () => 
       stepSummary("findings", { ...blank, recommendRepairs: true, recommendNewRoof: true }),
     ).toBe("Recommends repairs and a new roof");
     expect(stepSummary("findings", { ...blank, notesSkipped: true })).toBe("Nothing to add");
-    expect(stepSummary("findings", blank)).toBe("No findings");
+    expect(stepSummary("findings", blank)).toBe("No additional findings");
     // A note wins over the switches in the summary (the switches show on the card).
     expect(stepSummary("findings", { ...whole, recommendRepairs: true })).toBe(whole.closingNotes);
   });
 });
 
 describe("2c. materials never block an inspection; time is required; the signature is optional", () => {
-  it("materials: done with nothing touched on an inspection (Nothing used pre-set), still done with rows", () => {
+  it("materials: done with nothing touched on an inspection (not a step of its flow since Oct 28), still done with rows", () => {
     expect(stepDone("materials", whole)).toBe(true);
     expect(stepMissing("materials", whole)).toBeNull();
     expect(stepSummary("materials", whole)).toBe("No materials");
@@ -330,13 +331,13 @@ describe("2c. materials never block an inspection; time is required; the signatu
     expect(stepSummary("signature", { ...whole, signaturePath: "x/sig.png" })).toBe("Signed");
     // Everything answered, written and timed: nothing open even without a signature.
     expect(firstOpenStep(whole)).toBeNull();
-    expect(statusList(whole)).toEqual(Array<string>(6).fill("done"));
+    expect(statusList(whole)).toEqual(Array<string>(4).fill("done"));
     // A repair ticket still needs it.
     expect(stepDone("signature", { ...whole, serviceType: "leak" })).toBe(false);
   });
   it("a finished inspection: every step done", () => {
     const s = { ...whole, finished: true, checklist: [answered(null)], timeHours: 0 };
-    expect(statusList(s)).toEqual(Array<string>(6).fill("done"));
+    expect(statusList(s)).toEqual(Array<string>(4).fill("done"));
   });
 });
 
@@ -917,7 +918,7 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
     expect(cards).toContain("<AerialSection job={job} canEdit plain />");
     expect(cards).not.toContain("TicketExtras");
     expect(read("src/components/service/aerial-markup.tsx")).toContain("plain={plain}");
-    // The strip and the cards take the type: "Step n of 6".
+    // The strip and the cards take the type: "Step n of 4".
     expect(form).toContain(
       "<StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />",
     );
@@ -948,7 +949,7 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
     expect(inspectionBranch).toContain("notes={draft.closing_notes}");
     expect(inspectionBranch).toContain("onNotes={(v) => update({ closing_notes: v })}");
     expect(form).toMatch(/\{!inspection && \(\s*<StepCard \{\.\.\.card\("notes"\)\}/);
-    expect(cards).toContain('<Label htmlFor="co-findings">Findings</Label>');
+    expect(cards).toContain('<Label htmlFor="co-findings">Additional findings</Label>');
     expect(cards.match(/<Textarea/g)).toHaveLength(1);
   });
   it("two recommendations on the Findings card, side by side (Oct 28; were switch rows): Recommend repairs (the inspection JSON) and Recommend new roof (the ticket column)", () => {
@@ -968,13 +969,13 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
     expect(inspectionBranch).toContain("onSkip={markNotesSkipped}");
     expect(cards.match(/Nothing to add/g)!.length).toBeGreaterThanOrEqual(2);
   });
-  it("the signature card says Optional for an inspection; Nothing used is pre-set on the materials card", () => {
+  it("the signature card says Optional for an inspection; the materials card and the crew card are not on an inspection (Oct 28)", () => {
     expect(form).toContain('data-line="signature-optional"');
     expect(form).toContain("Optional for an inspection");
     expect(form).toMatch(/inspection \? \(\s*<span>Optional<\/span>/);
-    expect(form).toContain("(nothingUsed || inspection ? (");
-    expect(form).toContain("pre-set for an inspection");
-    expect(form).toMatch(/\{!inspection && \(\s*<Button[\s\S]*?Undo/);
+    expect(form).toMatch(/\{!inspection && \(\s*<StepCard\s+\{\.\.\.card\("materials"\)\}/);
+    expect(form).toMatch(/\{!inspection && \(\s*<StepCard \{\.\.\.card\("crew"\)\}/);
+    expect(form).not.toContain("pre-set for an inspection");
     // The bar still completes from the signature step; the headline comes from the flow.
     expect(form).toContain(
       'const stepToFinish = open === null || open === "signature" ? null : open;',
@@ -1039,7 +1040,7 @@ describe("6c. photos: per checklist item and the findings roll, role 'other', no
     );
     expect(camera).toContain('"data-camera": "inspection",');
     expect(cards).toContain("camera={camera.controls(item.id, item.label)}");
-    expect(cards).toContain('camera={camera.controls(null, "Findings")}');
+    expect(cards).toContain('camera={camera.controls(null, "Additional findings")}');
     // Oct 28: an item's roll is every picture whose item_keys include it; the findings roll the
     // pictures on no item (inspection.ts).
     expect(cards).toContain(

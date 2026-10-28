@@ -80,29 +80,32 @@ export const CLOSEOUT_STEPS: readonly CloseoutStep[] = [
 
 export const STEP_COUNT = CLOSEOUT_STEPS.length;
 
-/** The inspection flow (owner, Oct 12): six steps, the checklist and the findings in place of the repairs. */
+/**
+ * The inspection flow (owner, Oct 12): the checklist and the findings in place of the repairs.
+ * Four steps since Oct 28 (owner: "inspections wouldnt really need the materials step or the who
+ * is here step … hide those completely and adjust the step numbers"): no Who is here, no
+ * Materials. "Findings" reads "Additional findings" — the checklist usually holds every issue.
+ */
 export const INSPECTION_STEPS: readonly CloseoutStep[] = [
-  { id: "crew", n: 1, title: "Who is here", unlocks: "Open from the start" },
-  { id: "checklist", n: 2, title: "Checklist", unlocks: "Answer who is on the job" },
-  { id: "findings", n: 3, title: "Findings", unlocks: "The checklist saved" },
+  { id: "checklist", n: 1, title: "Checklist", unlocks: "Open from the start" },
+  { id: "findings", n: 2, title: "Additional findings", unlocks: "The checklist saved" },
   {
-    id: "materials",
-    n: 4,
-    title: "Materials",
+    id: "time",
+    n: 3,
+    title: "Time",
     unlocks: "Findings written, a recommendation, or Nothing to add",
   },
-  { id: "time", n: 5, title: "Time", unlocks: "Materials logged, or Nothing used" },
-  { id: "signature", n: 6, title: "Signature", unlocks: "Time on the ticket" },
+  { id: "signature", n: 4, title: "Signature", unlocks: "Time on the ticket" },
 ];
 
 export const INSPECTION = "inspection";
 export const isInspection = (serviceType: string | null | undefined) => serviceType === INSPECTION;
 
-/** The ordered steps for a ticket of this type: six for an inspection, else the seven repair steps. */
+/** The ordered steps for a ticket of this type: four for an inspection, else the seven repair steps. */
 export function closeoutSteps(serviceType?: string | null): readonly CloseoutStep[] {
   return isInspection(serviceType) ? INSPECTION_STEPS : CLOSEOUT_STEPS;
 }
-/** How many steps the flow has (the headline's "of 6" / "of 7"). */
+/** How many steps the flow has (the headline's "of 4" / "of 7"). */
 export const stepCount = (serviceType?: string | null) => closeoutSteps(serviceType).length;
 
 export interface StepRepair {
@@ -119,7 +122,7 @@ export interface StepState {
   /** Already Done / Invoiced / Closed: every step is done (Complete checks nothing either). */
   finished: boolean;
   crewAnswered: boolean;
-  /** "inspection" takes the six-step flow (closeoutSteps); anything else the seven repair steps. */
+  /** "inspection" takes the four-step flow (closeoutSteps); anything else the seven repair steps. */
   serviceType: string;
   repairs: readonly StepRepair[];
   photos: readonly StepPhoto[];
@@ -327,7 +330,7 @@ export function stepMissing(id: StepId, s: StepState): string | null {
     case "checklist":
       return "Save the checklist (flag only what has a problem)";
     case "findings":
-      return "Write what you found, turn a switch on, or press Nothing to add";
+      return "Write what you found, pick a recommendation, or press Nothing to add";
     case "before": {
       if (!repairsSuffice(s)) return "Add at least one repair";
       const n = s.repairs.filter((r) => !hasPhoto(s.photos, r.id, "before")).length;
@@ -355,7 +358,7 @@ export function stepMissing(id: StepId, s: StepState): string | null {
   }
 }
 
-/** The strip's header: "Step 3 of 7 · The work" ("of 6" on an inspection), or that all are done. */
+/** The strip's header: "Step 3 of 7 · The work" ("of 4" on an inspection), or that all are done. */
 export function stepHeadline(open: StepId | null, serviceType?: string | null): string {
   const count = stepCount(serviceType);
   if (open === null) return `All ${count} steps done — press Complete`;
@@ -399,7 +402,7 @@ export function stepSummary(id: StepId, s: StepState): string {
         recommend_new_roof: s.recommendNewRoof === true,
       });
       if (rec) return `Recommends ${rec}`;
-      return s.notesSkipped ? "Nothing to add" : "No findings";
+      return s.notesSkipped ? "Nothing to add" : "No additional findings";
     }
     case "before": {
       const n = s.repairs.length;

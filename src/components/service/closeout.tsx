@@ -143,7 +143,8 @@ import { MaterialsSection } from "@/components/service/materials-section";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { TicketExtras } from "@/components/service/ticket-extras";
 import {
-  NothingToAdd,
+  NothingToAddButton,
+  NothingToAddMark,
   InspectionChecklistStep,
   InspectionFindingsStep,
 } from "@/components/service/inspection-closeout";
@@ -527,6 +528,7 @@ function StepCard({
   missing,
   onNext,
   footer,
+  beside,
   children,
 }: {
   id: StepId;
@@ -542,8 +544,10 @@ function StepCard({
   /** What this step still needs (closeout-steps.ts stepMissing); null once its rule holds. */
   missing: string | null;
   onNext: () => void;
-  /** A small thing beside the missing line under Next (the Findings step's "Nothing to add"). */
+  /** A small thing beside the missing line under Next (the Findings step's "Nothing to add" mark). */
   footer?: React.ReactNode;
+  /** A button beside Next, as big as it (the Findings step's "Nothing to add"; owner, Oct 28). */
+  beside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const step = stepOf(id, serviceType);
@@ -623,15 +627,19 @@ function StepCard({
       )}
       {status === "current" && nextLabel !== null && (
         <div className="space-y-1.5 border-t px-4 py-3">
-          <Button
-            type="button"
-            className="h-12 w-full text-base font-semibold"
-            disabled={missing !== null}
-            aria-describedby={missing !== null ? `${stepAnchor(id)}-missing` : undefined}
-            onClick={onNext}
-          >
-            {nextLabel} <ArrowRight className="ml-2 h-5 w-5" aria-hidden />
-          </Button>
+          <div className="flex gap-2" data-line="step-buttons">
+            {beside}
+            <Button
+              type="button"
+              className="h-12 min-w-0 flex-1 text-base font-semibold"
+              disabled={missing !== null}
+              aria-describedby={missing !== null ? `${stepAnchor(id)}-missing` : undefined}
+              onClick={onNext}
+            >
+              <span className="truncate">{nextLabel}</span>{" "}
+              <ArrowRight className="ml-2 h-5 w-5 shrink-0" aria-hidden />
+            </Button>
+          </div>
           {(missing !== null || footer) && (
             <div
               className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm"
@@ -1040,12 +1048,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       <StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
-          answered. The card's own line says so; no second paragraph under it. */}
-      <StepCard {...card("crew")} icon={Users}>
-        <CrewBox job={job} embedded />
-      </StepCard>
+          answered. The card's own line says so; no second paragraph under it. Not on an
+          inspection (owner, Oct 28): its flow has no crew step and nothing waits on one. */}
+      {!inspection && (
+        <StepCard {...card("crew")} icon={Users}>
+          <CrewBox job={job} embedded />
+        </StepCard>
+      )}
 
-      {waiting ? null : !ready ? (
+      {waiting && !inspection ? null : !ready ? (
         <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
         </p>
@@ -1077,22 +1088,24 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                 />
               </StepCard>
 
-              {/* Step 3 · Findings (compact since Oct 28, owner: "a better more efficient
-                  layout" on the phone): the notes box with the camera beside its heading, the two
-                  recommendations side by side, Inspected / Grade on tight rows; "Nothing to add"
-                  is a small link under Next, only while the step is blank. The Inspection report
-                  button lives in the header's Documents dialog (ticket-header-actions.tsx), not
-                  here. */}
+              {/* Step 2 · Additional findings (compact since Oct 28, owner: "a better more
+                  efficient layout" on the phone): the notes box with the camera beside its
+                  heading, the two recommendations side by side, Inspected / Grade on tight rows.
+                  "Nothing to add" is a button as big as Next, beside it, while the step is blank
+                  (owner: the checklist usually holds every issue, so skipping is common); pressed,
+                  the mark with Undo under the buttons. The Inspection report button lives in the
+                  header's Documents dialog (ticket-header-actions.tsx), not here. */}
               <StepCard
                 {...card("findings")}
                 icon={ClipboardList}
-                footer={
-                  <NothingToAdd
+                beside={
+                  <NothingToAddButton
                     skipped={notesSkipped}
                     onSkip={markNotesSkipped}
                     blank={findingsBlank(stepState, unattachedTicketPhotos(photoRows).length)}
                   />
                 }
+                footer={<NothingToAddMark skipped={notesSkipped} onSkip={markNotesSkipped} />}
               >
                 <InspectionFindingsStep
                   job={job}
@@ -1150,34 +1163,30 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           )}
 
           {/* Step 4 · Materials, the purchase orders (material bought for the job; never the
-              Approved toggle here) and, with nothing logged, the "Nothing used" mark. */}
-          <StepCard
-            {...card("materials")}
-            icon={Package}
-            aside={
-              materialItems > 0 ? (
-                <span>
-                  {materialItems} {materialItems === 1 ? "item" : "items"}
-                </span>
-              ) : undefined
-            }
-          >
-            <MaterialsSection jobId={job.id} />
-            {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
-            <PurchaseOrdersSection jobId={job.id} field />
-            {/* An inspection (owner, Oct 12): Nothing used is pre-set — the step never blocks;
-                a material logged above is fine too. */}
-            {(materialsQ.data ?? []).length === 0 &&
-              (nothingUsed || inspection ? (
-                <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
-                  <span className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    Nothing used on this ticket
-                    {inspection && (
-                      <span className="text-muted-foreground">· pre-set for an inspection</span>
-                    )}
+              Approved toggle here) and, with nothing logged, the "Nothing used" mark. Not on an
+              inspection (owner, Oct 28): its flow has no materials step. */}
+          {!inspection && (
+            <StepCard
+              {...card("materials")}
+              icon={Package}
+              aside={
+                materialItems > 0 ? (
+                  <span>
+                    {materialItems} {materialItems === 1 ? "item" : "items"}
                   </span>
-                  {!inspection && (
+                ) : undefined
+              }
+            >
+              <MaterialsSection jobId={job.id} />
+              {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
+              <PurchaseOrdersSection jobId={job.id} field />
+              {(materialsQ.data ?? []).length === 0 &&
+                (nothingUsed ? (
+                  <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
+                    <span className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      Nothing used on this ticket
+                    </span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1186,21 +1195,21 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     >
                       Undo
                     </Button>
-                  )}
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full text-base"
-                  onClick={() => markNothingUsed(true)}
-                >
-                  Nothing used on this ticket
-                </Button>
-              ))}
-          </StepCard>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full text-base"
+                    onClick={() => markNothingUsed(true)}
+                  >
+                    Nothing used on this ticket
+                  </Button>
+                ))}
+            </StepCard>
+          )}
 
-          {/* Step 5 · Time */}
+          {/* Step 5 · Time (step 3 of an inspection) */}
           <StepCard
             {...card("time")}
             icon={Clock}

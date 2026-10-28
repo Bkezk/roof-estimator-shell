@@ -287,8 +287,10 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     expect(card).toContain("onNext: () => void;");
     expect(card).toContain("const nextLabel = nextStepLabel(id, serviceType);");
     expect(card).toContain('{status === "current" && nextLabel !== null && (');
+    // Oct 28: Next shares a row with an optional button beside it (the Findings step's "Nothing
+    // to add"), so it fills what is left of the row rather than the whole width.
     expect(card).toMatch(
-      /<Button\s+type="button"\s+className="h-12 w-full text-base font-semibold"\s+disabled=\{missing !== null\}[\s\S]*?onClick=\{onNext\}\s*>\s*\{nextLabel\} <ArrowRight/,
+      /<div className="flex gap-2" data-line="step-buttons">\s*\{beside\}\s*<Button\s+type="button"\s+className="h-12 min-w-0 flex-1 text-base font-semibold"\s+disabled=\{missing !== null\}[\s\S]*?onClick=\{onNext\}\s*>\s*<span className="truncate">\{nextLabel\}<\/span>\{" "\}\s*<ArrowRight/,
     );
     expect(card).toMatch(
       // Oct 28: the line shares a footer row with the Findings step's "Nothing to add" link.

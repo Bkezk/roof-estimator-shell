@@ -195,7 +195,8 @@ describe("no box in a box: the step is the card", () => {
   it("the crew question is embedded (no border of its own) and the paragraph under it is gone", () => {
     expect(form).toContain("<CrewBox job={job} embedded />");
     expect(form).not.toContain("Check-in details, photos, repairs and the rest open");
-    expect(form).toContain("{waiting ? null : !ready ? (");
+    // Oct 28: an inspection has no crew step, so nothing waits on the question there.
+    expect(form).toContain("{waiting && !inspection ? null : !ready ? (");
     const crew = read("src/components/service/crew-box.tsx");
     expect(crew).toContain("embedded?: boolean | undefined;");
     expect(crew).toMatch(/embedded\s*\?\s*`space-y-3 \$\{className \?\? ""\}`/);

@@ -303,22 +303,22 @@ export function InspectionFindingsStep({
   camera: InspectionCamera;
 }) {
   return (
-    <section className="space-y-3" aria-label="Findings">
+    <section className="space-y-3" aria-label="Additional findings">
       <PhotoRoll
         photos={itemPhotos(photos, null)}
         allPhotos={photos}
         itemKey={null}
-        camera={camera.controls(null, "Findings")}
-        label="Findings"
+        camera={camera.controls(null, "Additional findings")}
+        label="Additional findings"
         jobId={job.id}
         ticketNumber={job.number}
-        heading={<Label htmlFor="co-findings">Findings</Label>}
+        heading={<Label htmlFor="co-findings">Additional findings</Label>}
       >
         <Textarea
           id="co-findings"
-          rows={5}
+          rows={4}
           className="text-base"
-          placeholder="What you found on the roof (the keyboard's microphone works here)"
+          placeholder="Anything the checklist does not cover (the keyboard's microphone works here)"
           value={notes}
           onChange={(e) => onNotes(e.target.value)}
         />
@@ -367,11 +367,12 @@ function RecommendButton({
 }
 
 /**
- * The Findings step's "Nothing to add" (the notesSkippedKey mark, the same as step 6's Skip):
- * a small link beside the missing line under Next while the step is blank (closeout-steps.ts
- * findingsBlank); once pressed, the mark with Undo.
+ * The Findings step's "Nothing to add" (the notesSkippedKey mark, the same as step 6's Skip).
+ * Owner, Oct 28: "the nothing to add should be a noticeable button … skipping would be common"
+ * — a button as big as Next, beside it (StepCard `beside`), while the step is blank
+ * (closeout-steps.ts findingsBlank) and not yet pressed.
  */
-export function NothingToAdd({
+export function NothingToAddButton({
   skipped,
   onSkip,
   blank,
@@ -380,26 +381,36 @@ export function NothingToAdd({
   onSkip: (on: boolean) => void;
   blank: boolean;
 }) {
-  if (skipped)
-    return (
-      <span className="flex items-center gap-1" data-line="nothing-to-add">
-        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
-        Nothing to add
-        <Button type="button" variant="ghost" className="h-10 px-2" onClick={() => onSkip(false)}>
-          Undo
-        </Button>
-      </span>
-    );
-  if (!blank) return null;
+  if (skipped || !blank) return null;
   return (
     <Button
       type="button"
-      variant="ghost"
-      className="h-10 px-2 text-sm"
+      variant="outline"
+      className="h-12 min-w-0 flex-1 text-base font-semibold"
       data-line="nothing-to-add"
       onClick={() => onSkip(true)}
     >
       Nothing to add
     </Button>
+  );
+}
+
+/** Once pressed: the mark with Undo, under the buttons (StepCard `footer`). */
+export function NothingToAddMark({
+  skipped,
+  onSkip,
+}: {
+  skipped: boolean;
+  onSkip: (on: boolean) => void;
+}) {
+  if (!skipped) return null;
+  return (
+    <span className="flex items-center gap-1" data-line="nothing-to-add">
+      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+      Nothing to add
+      <Button type="button" variant="ghost" className="h-10 px-2" onClick={() => onSkip(false)}>
+        Undo
+      </Button>
+    </span>
   );
 }

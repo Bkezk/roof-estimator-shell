@@ -203,8 +203,9 @@ describe("the unlock order", () => {
 });
 
 describe("an inspection ticket", () => {
-  // Since Oct 12 an inspection has its own six steps (closeoutSteps("inspection"); the rules in
-  // inspection-flow.test.ts): Before and The work are not among them.
+  // Since Oct 12 an inspection has its own steps (closeoutSteps("inspection"); the rules in
+  // inspection-flow.test.ts): Before and The work are not among them — nor, since Oct 28, Who is
+  // here and Materials.
   const inspection: StepState = { ...full, serviceType: "inspection", repairs: [], photos: [] };
   it("needs no repair: Before and The work are done with none (missingForComplete's rule)", () => {
     expect(stepDone("before", inspection)).toBe(true);
@@ -216,10 +217,8 @@ describe("an inspection ticket", () => {
     expect(closeoutSteps("inspection").map((s) => s.id)).not.toContain("before");
     expect(firstOpenStep(withOne)).toBeNull();
     expect(stepStatuses(withOne).map((x) => x.step.id)).toEqual([
-      "crew",
       "checklist",
       "findings",
-      "materials",
       "time",
       "signature",
     ]);

@@ -6,9 +6,9 @@
  *      the thumbnails under that (PhotoRoll `heading` / children). No "Optional" word there.
  *   2. Recommend repairs / Recommend new roof are two press-to-select buttons side by side.
  *   3. Inspected (date, Today) and Grade (A–F) carry their label in the row, not above.
- *   4. "Nothing to add" is a small link under Next, beside the missing line, only while the step
- *      is blank — no note, neither recommendation, no picture (findingsBlank) — then the mark
- *      with Undo.
+ *   4. "Nothing to add" is a button as big as Next, beside it (owner, later that day: "should be
+ *      a noticeable button … skipping would be common"), only while the step is blank — no note,
+ *      neither recommendation, no picture (findingsBlank) — then the mark with Undo under them.
  *   5. The Inspection report button is gone from the step: the header's Documents dialog has it
  *      (owner: "why is there an inspection report button even in that step?").
  */
@@ -44,7 +44,9 @@ describe("the Findings step's markup", () => {
     step.indexOf("function RecommendButton("),
   );
   it("the camera beside the heading, the notes box inside the roll, no Optional there", () => {
-    expect(findings).toContain('heading={<Label htmlFor="co-findings">Findings</Label>}');
+    expect(findings).toContain(
+      'heading={<Label htmlFor="co-findings">Additional findings</Label>}',
+    );
     expect(findings).toMatch(/<PhotoRoll[\s\S]*?>\s*<Textarea[\s\S]*?<\/PhotoRoll>/);
     const roll = step.slice(
       step.indexOf("function PhotoRoll("),
@@ -76,15 +78,25 @@ describe("the Findings step's markup", () => {
     expect(details).toContain("value={draft.inspectedOn}");
     expect(details).not.toContain("defaultValue");
   });
-  it("Nothing to add is the step footer's small link, only while blank; Undo once pressed", () => {
-    const nta = step.slice(step.indexOf("export function NothingToAdd("));
-    expect(nta).toContain("if (!blank) return null;");
-    expect(nta).toMatch(/onClick=\{\(\) => onSkip\(true\)\}\s*>\s*Nothing to add/);
-    expect(nta).toMatch(/onClick=\{\(\) => onSkip\(false\)\}>\s*Undo/);
-    expect(form).toMatch(
-      /footer=\{\s*<NothingToAdd\s+skipped=\{notesSkipped\}\s+onSkip=\{markNotesSkipped\}\s+blank=\{findingsBlank\(stepState, unattachedTicketPhotos\(photoRows\)\.length\)\}/,
+  it("Nothing to add is a button as big as Next, beside it, only while blank; pressed, the mark with Undo under the buttons", () => {
+    const btn = step.slice(
+      step.indexOf("export function NothingToAddButton("),
+      step.indexOf("export function NothingToAddMark("),
     );
-    // The StepCard renders it beside the missing line, under Next.
+    expect(btn).toContain("if (skipped || !blank) return null;");
+    expect(btn).toContain('className="h-12 min-w-0 flex-1 text-base font-semibold"');
+    expect(btn).toMatch(/onClick=\{\(\) => onSkip\(true\)\}\s*>\s*Nothing to add/);
+    const mark = step.slice(step.indexOf("export function NothingToAddMark("));
+    expect(mark).toContain("if (!skipped) return null;");
+    expect(mark).toMatch(/onClick=\{\(\) => onSkip\(false\)\}>\s*Undo/);
+    expect(form).toMatch(
+      /beside=\{\s*<NothingToAddButton\s+skipped=\{notesSkipped\}\s+onSkip=\{markNotesSkipped\}\s+blank=\{findingsBlank\(stepState, unattachedTicketPhotos\(photoRows\)\.length\)\}/,
+    );
+    expect(form).toContain(
+      "footer={<NothingToAddMark skipped={notesSkipped} onSkip={markNotesSkipped} />}",
+    );
+    // The StepCard puts the button in Next's row and the mark beside the missing line.
+    expect(form).toMatch(/<div className="flex gap-2" data-line="step-buttons">\s*\{beside\}/);
     expect(form).toMatch(
       /\{\(missing !== null \|\| footer\) && \(\s*<div[^>]*data-line="step-footer"[\s\S]*?\{footer\}/,
     );
