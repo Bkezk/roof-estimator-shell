@@ -315,6 +315,13 @@ describe("pictures and the photo grid (phase 2)", () => {
     expect(imageMarks({ kind: "ticketPhoto", photoId: "zz", marks: true }, photos)).toEqual([]);
     expect(imageMarks({ kind: "logo" }, photos)).toEqual([]);
     expect(imageMarks({ kind: "siteCover", siteId: "s" }, photos)).toEqual([]);
+    // The document's Marks checkbox off (Oct 28): nothing draws, the refs untouched.
+    expect(imageMarks(up, photos, false)).toEqual([]);
+    expect(imageMarks({ kind: "ticketPhoto", photoId: "p1", marks: true }, photos, false)).toEqual(
+      [],
+    );
+    expect(up.marks).toEqual([rect]);
+    expect(imageMarks(up, photos, true)).toBe(up.marks);
   });
   it("imageRotation: a ticket photo turns as the ticket keeps it, marks on or off; everything else is upright", () => {
     const turned = [

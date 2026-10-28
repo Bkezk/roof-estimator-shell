@@ -217,27 +217,83 @@ const sb2 = {
 
 describe("phase 2: the Inspection report, the Photo Grid, marked-up uploads and the property photo", () => {
   it("imageRefs lists the grid's cells and, with the inspection, the Repair List's pictures (marks per the checkbox)", () => {
+    const marked = {
+      kind: "upload" as const,
+      path: "docs/d/a.png",
+      width: 1,
+      height: 1,
+      marks: [circle],
+    };
     const grid = {
       ...(newModule("photoGrid") as PhotoGridModule),
       id: "g",
       images: [
-        {
-          image: { kind: "upload" as const, path: "docs/d/a.png", width: 1, height: 1 },
-          caption: "",
-        },
+        { image: marked, caption: "" },
         { image: { kind: "siteCover" as const, siteId: SITE }, caption: "" },
+        { image: { kind: "ticketPhoto" as const, photoId: PHOTO, marks: true }, caption: "" },
       ],
     };
     const list = { ...(newModule("repairList") as RepairListModule), id: "r" };
-    const pages = [newPage([grid, list])];
-    expect([...imageRefs(pages).keys()]).toEqual(["g:0", "g:1"]);
+    const pages = [newPage([newModule("letterhead"), grid, list])];
+    const logoKey = `${pages[0]!.modules[0]!.id}:0`;
+    expect([...imageRefs(pages).keys()]).toEqual([logoKey, "g:0", "g:1", "g:2"]);
     const withInsp = imageRefs(pages, { inspection: insp, marks: false });
-    expect([...withInsp.keys()]).toEqual(["g:0", "g:1", "r:r0p0"]);
+    expect([...withInsp.keys()]).toEqual([logoKey, "g:0", "g:1", "g:2", "r:r0p0"]);
     expect(withInsp.get("r:r0p0")).toEqual({ kind: "ticketPhoto", photoId: PHOTO, marks: false });
     expect(imageRefs(pages, { inspection: insp }).get("r:r0p0")).toMatchObject({ marks: true });
+    // Oct 28: Marks off hands the loader refs WITHOUT their marks (a copy — the pages keep theirs),
+    // so the PDF skips them; on, the pages' own refs, marks and all.
+    expect(withInsp.get("g:0")).toEqual({
+      kind: "upload",
+      path: "docs/d/a.png",
+      width: 1,
+      height: 1,
+    });
+    expect(withInsp.get("g:2")).toEqual({ kind: "ticketPhoto", photoId: PHOTO, marks: false });
+    expect(grid.images[0]!.image.marks).toEqual([circle]);
+    expect(imageRefs(pages, { inspection: insp }).get("g:0")).toBe(marked);
+    // Oct 28: the Repair List's own `photos` switch is gone and ignored; the document's Photos
+    // checkbox off lists nothing but the letterhead's logo.
     expect([
       ...imageRefs([newPage([{ ...list, photos: false }])], { inspection: insp }).keys(),
-    ]).toEqual([]);
+    ]).toEqual(["r:r0p0"]);
+    expect([...imageRefs(pages, { inspection: insp, photos: false }).keys()]).toEqual([logoKey]);
+  });
+  it("renders the same pages with Marks off and on: the circle is skipped, then drawn; with Photos off no picture is embedded", async () => {
+    const marked = {
+      kind: "upload" as const,
+      path: "docs/d/a.png",
+      width: 1,
+      height: 1,
+      marks: [circle],
+    };
+    const pages = [
+      newPage([
+        { ...(newModule("fullPhoto") as FullPhotoModule), image: marked, caption: "Roof" },
+        {
+          ...(newModule("photoGrid") as PhotoGridModule),
+          images: [{ image: { kind: "ticketPhoto", photoId: PHOTO, marks: true }, caption: "" }],
+        },
+      ]),
+    ];
+    const renderWith = (options: typeof DEFAULT_OPTIONS) =>
+      renderDocumentPdf(sb2, {
+        pages: json(pages),
+        options: json(options),
+        variables: json(sampleVariables("ticket")),
+      });
+    const on = await pdfStreams(await renderWith(DEFAULT_OPTIONS));
+    expect((on.match(/\/Image\S* Do/g) ?? []).length).toBe(2);
+    expect(curves(on)).toBeGreaterThanOrEqual(8);
+    const noMarks = await pdfStreams(await renderWith({ ...DEFAULT_OPTIONS, marks: false }));
+    expect((noMarks.match(/\/Image\S* Do/g) ?? []).length).toBe(2);
+    expect(curves(noMarks)).toBe(0);
+    const noPhotos = await pdfStreams(await renderWith({ ...DEFAULT_OPTIONS, photos: false }));
+    expect(noPhotos).not.toMatch(/\/Image\S* Do/);
+    expect(curves(noPhotos)).toBe(0);
+    expect(noPhotos).not.toContain("picture not printable");
+    // The pages were never changed by any of the three renders.
+    expect((pages[0]!.modules[0] as FullPhotoModule).image).toEqual(marked);
   });
   it("loadImages: an upload carries the marks drawn on it, a ticket photo its row's, the property photo comes from the row's path in the documents bucket", async () => {
     const pdf = await PDFDocument.create();
@@ -342,7 +398,7 @@ describe("phase 2: the Inspection report, the Photo Grid, marked-up uploads and 
     expect(findings.filter((p) => p.kind === "columns")).toHaveLength(1);
     const photoPage = layoutModules(pages[2]!.modules, ctx);
     expect(photoPage.filter((p) => p.kind === "columns")).toHaveLength(3);
-    // Without an inspection the same document still renders (the list prints its one line).
+    // Without an inspection the same document still renders (the list prints nothing; Oct 28).
     const plain = await renderDocumentPdf(sb2, {
       pages: json(pages),
       options: json(tpl.options),

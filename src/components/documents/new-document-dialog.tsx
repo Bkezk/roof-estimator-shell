@@ -11,7 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Loader2, Plus } from "lucide-react";
 
-import { newDocumentTitle } from "@/lib/documents/editor-helpers";
+import { newDocumentTitle, OPTION_HINTS } from "@/lib/documents/editor-helpers";
 import { DEFAULT_OPTIONS, type DocKind, type DocOptions } from "@/lib/documents/model";
 import { createDocument, listDocumentTemplates } from "@/lib/documents.functions";
 import { Button } from "@/components/ui/button";
@@ -161,21 +161,21 @@ export function NewDocumentDialog(props: {
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.prices}>
               <Checkbox
                 checked={effOptions.prices === "total"}
                 onCheckedChange={(c) => setOpt({ prices: c ? "total" : "none" })}
               />
               With prices
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.photos}>
               <Checkbox
                 checked={effOptions.photos}
                 onCheckedChange={(c) => setOpt({ photos: c === true })}
               />
               Include photos
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.marks}>
               <Checkbox
                 checked={effOptions.marks}
                 disabled={!effOptions.photos}
@@ -183,7 +183,7 @@ export function NewDocumentDialog(props: {
               />
               Marks on photos
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.footer}>
               <Checkbox
                 checked={effOptions.footer}
                 onCheckedChange={(c) => setOpt({ footer: c === true })}

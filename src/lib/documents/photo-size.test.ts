@@ -224,14 +224,14 @@ describe("the PDF layout honours the size", () => {
     expect(wide.height).toBeGreaterThan(2.4 * PT_PER_IN);
     // The keys the loader fills stay row/photo-based whatever the size.
     expect(pics.map((p) => p.key)).toEqual(["r:r0p0", "r:r0p1", "r:r0p2", "r:r0p3"]);
-    // Pictures off: no thumbnails, size or not.
+    // The document's Photos off (Oct 28: the module's own switch is gone): no thumbnails, size or not.
     expect(
       images(
         layoutRepairList(
-          list({ photos: false, photoHeightIn: 2.5 }),
+          list({ photoHeightIn: 2.5 }),
           0,
           CONTENT_WIDTH,
-          ctx({ inspection: insp }),
+          ctx({ inspection: insp, photos: false }),
         ),
       ),
     ).toEqual([]);

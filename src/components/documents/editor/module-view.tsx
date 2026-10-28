@@ -24,15 +24,12 @@ import {
 
 import {
   IN_PX,
+  NO_INSPECTION_HINT,
   photoGridCaption,
+  PHOTOS_OFF_HINT,
   pricingSourceFromVariables,
 } from "@/lib/documents/editor-helpers";
-import {
-  CONTENT_WIDTH,
-  NO_INSPECTION_TEXT,
-  repairListData,
-  repairThumbBox,
-} from "@/lib/documents/pdf-layout";
+import { CONTENT_WIDTH, repairListData, repairThumbBox } from "@/lib/documents/pdf-layout";
 import { storedInspection } from "@/lib/documents/server-pure";
 import {
   type DocModule,
@@ -147,6 +144,24 @@ function IconButton(props: {
 type Setter = (patch: (cur: DocModule) => DocModule) => void;
 
 function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
+  const env = useEditorEnv();
+  // The document's Photos checkbox off (Oct 28: a view switch — the module and its pictures stay
+  // in the pages and come back when it is ticked): a picture module shows one muted line in its
+  // place so it can still be moved or deleted, and Photo on left / right keeps its text, full
+  // width. The PDF prints nothing for the line (pdf-layout.ts LayoutContext.photos).
+  if (!env.options.photos) {
+    switch (m.type) {
+      case "fullPhoto":
+      case "twoPhotos":
+      case "photoGrid":
+        return <PicturesHidden />;
+      case "photoLeft":
+      case "photoRight":
+        return <PhotoText m={m} set={set} hidden />;
+      default:
+        break;
+    }
+  }
   switch (m.type) {
     case "letterhead":
       return <Letterhead m={m} set={set} />;
@@ -194,6 +209,18 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
   }
 }
 
+/** What a picture module shows on the canvas while the document's Photos checkbox is off (never printed). */
+function PicturesHidden() {
+  return (
+    <div
+      className="rounded-sm border border-dashed border-neutral-300 px-3 py-1.5 text-xs italic text-neutral-500 dark:border-neutral-300 dark:text-neutral-500"
+      data-photos-hidden
+    >
+      {PHOTOS_OFF_HINT}
+    </div>
+  );
+}
+
 /**
  * The Photo Grid (phase 2): two or three cells a row, each a picture (the picker) over a caption
  * line; cells are added one at a time or all the ticket's photos at once (captions from the
@@ -216,11 +243,9 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
       const fresh = env.photos
         .filter((p) => !have.has(p.id))
         .map((p) => ({
-          image: {
-            kind: "ticketPhoto" as const,
-            photoId: p.id,
-            marks: env.options.marks && p.hasMarks,
-          },
+          // With its marks when it has any; the document's Marks checkbox decides whether they
+          // show (Oct 28), so the pick is the same whichever way the box is.
+          image: { kind: "ticketPhoto" as const, photoId: p.id, marks: p.hasMarks },
           caption: photoGridCaption(p, insp),
         }));
       return { ...g, images: [...g.images, ...fresh] };
@@ -318,16 +343,19 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
 }
 
 /**
- * The Repair List (phase 2): the inspection's issues (or every item) from the document's
- * snapshot — editable cells once "Edit rows" copies them, "Reset to the inspection" after — and
- * each row's ticket photos as thumbnails under it when Pictures is on.
+ * The Repair List (phase 2): the inspection's issues (or every item, as the module was saved —
+ * owner, Oct 28: the "All checklist items" and "Show pictures" switches are gone, "we can select
+ * them on generation and I think it'll cause more problems than fix") from the document's
+ * snapshot — editable cells once "Edit rows" copies them, "Undo edits" after — and each row's
+ * ticket photos as thumbnails under it while the document's Photos checkbox is on. With no
+ * snapshot on a document it says so in a plain line and points at Refresh data.
  */
 function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
   const env = useEditorEnv();
   const patch = (f: (t: RepairListModule) => RepairListModule) =>
     set((c) => f(c as RepairListModule));
   const insp = storedInspection(env.variables);
-  const data = repairListData(m, insp);
+  const data = repairListData(m, insp, env.options.photos);
   const editing = m.rows !== null;
   // The thumbnail box as the PDF draws it (points → screen px), so both agree on the size.
   const box = repairThumbBox(m, CONTENT_WIDTH);
@@ -349,82 +377,51 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
     }));
   const removeRow = (r: number) =>
     patch((t) => ({ ...t, rows: (t.rows ?? data.rows).filter((_, i) => i !== r) }));
-  // Switching lists rebuilds the rows from the inspection, so hand edits would go; ask first
-  // (owner, Oct 28 — a plain dialog, as the delete confirms elsewhere).
-  const setAllItems = (allItems: boolean) => {
-    if (
-      editing &&
-      !window.confirm(
-        "Switching lists resets the rows to the inspection's. Your edits here will be lost.",
-      )
-    )
-      return;
-    patch((t) => ({ ...t, allItems, rows: null }));
-  };
-  // Always shown (owner, Oct 28: the hover-only switches hid how to get the pictures back) — a
-  // small muted settings row above the table; the PDF never draws it.
+  // Always shown — a small muted settings row above the table (the PDF never draws it): the
+  // thumbnails' size while the document's Photos checkbox is on, then Edit rows / Undo edits,
+  // all at the LEFT with room kept at the right (pr-36) for the module's floating toolbar (Move
+  // up … Delete sits top-right), which used to cover the links (owner, Oct 28).
   const toolbar = (
     <div
-      className="mb-1 flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-500"
+      className="mb-1 flex flex-wrap items-center gap-3 pr-36 text-xs text-neutral-500 dark:text-neutral-500"
       data-repair-settings
     >
-      <label className="flex items-center gap-1">
-        <Switch
-          checked={m.allItems}
-          onCheckedChange={setAllItems}
-          title="List every checklist item, not only the issues"
-        />
-        All checklist items
-      </label>
-      {env.options.photos ? (
-        <label className="flex items-center gap-1">
-          <Switch
-            checked={m.photos}
-            onCheckedChange={(photos) => patch((t) => ({ ...t, photos }))}
-            title="Print each item's ticket photos under its row"
-          />
-          Show pictures
-        </label>
+      {env.options.photos ? <PhotoSizeControl module={m} set={set} what="the thumbnails" /> : null}
+      {editing ? (
+        <button
+          type="button"
+          className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+          title="Throw away the typed changes and go back to the ticket's own findings"
+          onClick={() => patch((t) => ({ ...t, rows: null }))}
+        >
+          Undo edits
+        </button>
       ) : (
-        <span className="italic" data-photos-off>
-          Photos are off for this document
-        </span>
+        <button
+          type="button"
+          className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
+          title="Copy the rows so they can be edited by hand"
+          onClick={() => patch((t) => ({ ...t, rows: data.rows.map((r) => [...r]) }))}
+        >
+          Edit rows
+        </button>
       )}
-      {m.photos && env.options.photos ? (
-        <PhotoSizeControl module={m} set={set} what="the thumbnails" />
-      ) : null}
-      <span className="ml-auto flex items-center gap-2">
-        {editing ? (
-          <button
-            type="button"
-            className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
-            title="Back to the inspection's rows"
-            onClick={() => patch((t) => ({ ...t, rows: null }))}
-          >
-            Reset to the inspection
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="underline hover:text-neutral-800 dark:hover:text-neutral-800"
-            title="Copy the rows so they can be edited by hand"
-            onClick={() => patch((t) => ({ ...t, rows: data.rows.map((r) => [...r]) }))}
-          >
-            Edit rows
-          </button>
-        )}
-      </span>
     </div>
   );
   if (!insp)
     return (
       <div className="group/repairs">
         {toolbar}
-        <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
-          {env.mode === "template"
-            ? "Repair List: the inspection's findings print here"
-            : NO_INSPECTION_TEXT}
-        </div>
+        {env.mode === "template" ? (
+          <div className="rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
+            Repair List: the inspection&apos;s findings print here
+          </div>
+        ) : (
+          // Owner, Oct 28: a plain, visible line that says what to do (the PDF prints nothing here).
+          <p className="text-sm text-neutral-700 dark:text-neutral-700" data-no-inspection>
+            {NO_INSPECTION_HINT}
+          </p>
+        )}
       </div>
     );
   return (
@@ -700,8 +697,29 @@ function FullPhoto({ m, set }: { m: FullPhotoModule; set: Setter }) {
   );
 }
 
-function PhotoText({ m, set }: { m: PhotoTextModule; set: Setter }) {
+function PhotoText({
+  m,
+  set,
+  hidden = false,
+}: {
+  m: PhotoTextModule;
+  set: Setter;
+  /** The document's Photos checkbox is off: the text alone, full width, under the hidden-pictures line. */
+  hidden?: boolean | undefined;
+}) {
   const heightPx = photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined;
+  if (hidden)
+    return (
+      <div className="space-y-2">
+        <PicturesHidden />
+        <RichText
+          key={m.id}
+          value={m.text}
+          placeholder="Text beside the photo"
+          onChange={(t) => set((c) => ({ ...c, text: t }) as DocModule)}
+        />
+      </div>
+    );
   const photo = (
     <div className="group/photo w-[45%] shrink-0">
       <ImageSlot

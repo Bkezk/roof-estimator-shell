@@ -108,8 +108,6 @@ export function repairThumbBox(
   const perLine = Math.max(1, Math.floor((width + GRID_GUTTER) / (thumbW + GRID_GUTTER)));
   return { thumbW, thumbH, perLine };
 }
-/** The Repair List's empty state (also the editor's). */
-export const NO_INSPECTION_TEXT = "No inspection on this ticket";
 
 // ----------------------------------------------------------------------------------- types
 
@@ -226,6 +224,13 @@ export interface LayoutContext {
   inspection?: InspectionSnapshot | null | undefined;
   /** Draw a ticket photo's marks under the Repair List's rows (the document's Marks checkbox). */
   marks?: boolean | undefined;
+  /**
+   * The document's Photos checkbox (Oct 28: a view switch, nothing removed): false lays out no
+   * picture at all — Full Photo, Two Photos and the Photo Grid print nothing, Photo on left /
+   * right prints its text the full width, the Repair List its table without thumbnails. The
+   * letterhead's logo is not a photo and prints either way. Absent = on.
+   */
+  photos?: boolean | undefined;
 }
 
 export const fontKey = (bold: boolean, italic: boolean): FontKey =>
@@ -610,7 +615,10 @@ export function fitImage(
   return { width: img.width * scale, height: img.height * scale };
 }
 
-/** A picture (or its placeholder) with its caption under it, centred in a column. */
+/**
+ * A picture (or its placeholder) with its caption under it, centred in a column; nothing at all
+ * (caption included — it belongs to the picture) while the document's Photos checkbox is off.
+ */
 function imageWithCaption(
   ref: ImageRef | null,
   key: string,
@@ -620,7 +628,7 @@ function imageWithCaption(
   boxHeight: number | null,
   ctx: LayoutContext,
 ): Piece[] {
-  if (!ref) return [];
+  if (!ref || ctx.photos === false) return [];
   const out: Piece[] = [];
   const size = ctx.image(ref, key);
   if (size) {
@@ -811,7 +819,11 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
           {
             x,
             width: LOGO_WIDTH,
-            pieces: imageWithCaption({ kind: "logo" }, `${m.id}:0`, "", x, LOGO_WIDTH, 90, ctx),
+            // The logo is not a photo: it prints whatever the Photos checkbox says.
+            pieces: imageWithCaption({ kind: "logo" }, `${m.id}:0`, "", x, LOGO_WIDTH, 90, {
+              ...ctx,
+              photos: true,
+            }),
           },
           {
             x: textX,
@@ -839,6 +851,8 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
     }
     case "photoLeft":
     case "photoRight": {
+      // Photos off: the text takes the whole width rather than leaving a hole beside it.
+      if (ctx.photos === false) return layoutRich(m.text, x, width, ctx);
       const imgW = width * PHOTO_COLUMN;
       const textW = width - imgW - GUTTER;
       const imgX = m.type === "photoLeft" ? x : x + textW + GUTTER;
@@ -939,6 +953,7 @@ export function layoutPhotoGrid(
   width: number,
   ctx: LayoutContext,
 ): Piece[] {
+  if (ctx.photos === false) return [];
   const n = m.columns;
   const cellW = (width - (n - 1) * GRID_GUTTER) / n;
   // The owner's size (Oct 28) when set, else the cell's 4:3 box.
@@ -987,10 +1002,16 @@ export function layoutPhotoGrid(
   return out;
 }
 
-/** The Repair List's columns, rows and the ticket photos under each row (the hand-edited rows win). */
+/**
+ * The Repair List's columns, rows and the ticket photos under each row (the hand-edited rows
+ * win). `photos` is the document's Photos checkbox (owner, Oct 28: the module's own "Show
+ * pictures" switch is gone — the pictures follow the document; the saved `photos` field is kept
+ * in the schema for old documents and ignored).
+ */
 export function repairListData(
-  m: Pick<RepairListModule, "rows" | "allItems" | "photos">,
+  m: Pick<RepairListModule, "rows" | "allItems">,
   insp: InspectionSnapshot | null | undefined,
+  photos = true,
 ): { columns: Array<{ title: string; align: TextAlign }>; rows: string[][]; photoIds: string[][] } {
   const built = inspectionRows(insp ?? null, m.allItems);
   const rows = m.rows ?? built.rows;
@@ -1000,14 +1021,16 @@ export function repairListData(
     align: "left" as TextAlign,
   }));
   // Hand-edited rows keep their place: the i-th row prints the i-th item's pictures.
-  const photoIds = rows.map((_, i) => (m.photos ? (built.photoIds[i] ?? []) : []));
+  const photoIds = rows.map((_, i) => (photos ? (built.photoIds[i] ?? []) : []));
   return { columns, rows, photoIds };
 }
 
 /**
  * The Repair List (phase 2): the inspection's issues (or every item) as a table — the item, the
- * finding, the note — and, with Pictures on, each row's ticket photos as small thumbnails under
- * the row, three a line. With no inspection on the ticket it prints one muted line saying so.
+ * finding, the note — and, with the document's Photos on, each row's ticket photos as small
+ * thumbnails under the row, three a line. With no inspection snapshot on the document it prints
+ * nothing (owner, Oct 28: the editor shows a line pointing at Refresh data — editor-helpers
+ * NO_INSPECTION_HINT — which has no place on a printed page).
  */
 export function layoutRepairList(
   m: RepairListModule,
@@ -1015,9 +1038,8 @@ export function layoutRepairList(
   width: number,
   ctx: LayoutContext,
 ): Piece[] {
-  if (!ctx.inspection)
-    return layoutPlain(NO_INSPECTION_TEXT, x, width, BODY_SIZE, ctx, { color: "muted" });
-  const data = repairListData(m, ctx.inspection);
+  if (!ctx.inspection) return [];
+  const data = repairListData(m, ctx.inspection, ctx.photos !== false);
   if (!data.rows.length)
     return layoutPlain(
       m.allItems ? "No checklist items" : "No issues found",

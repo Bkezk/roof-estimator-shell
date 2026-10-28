@@ -1,11 +1,15 @@
 /**
  * The Repair List module's settings row and its thumbnails' Mark up (owner, Oct 28):
  *
- *   D1. The two switches were hidden until hover, so after turning pictures off the owner could
- *       not find them again. Now a small muted settings row always shows above the table — "All
- *       checklist items", "Show pictures" (or "Photos are off for this document" inline when the
- *       document's Photos option is off), the picture Size — and switching lists asks first when
- *       hand-edited rows would be lost.
+ *   D1. A small muted settings row always shows above the table. Later the same day the owner
+ *       dropped its two switches — "All checklist items" and "Show pictures" ("we can select them
+ *       on generation and I think it'll cause more problems than fix"): the list is as the module
+ *       was saved (`allItems`, default issues only — nothing on the generation path sets it yet)
+ *       and the pictures follow the document's Photos checkbox (the module's `photos` field stays
+ *       in the schema for old documents, ignored). What remains: the picture Size, then "Edit
+ *       rows" / "Undo edits" at the LEFT, with room kept at the right so the module's floating
+ *       toolbar (Move up … Delete, top-right) never covers them. With no inspection snapshot on a
+ *       document, a plain line says so and points at Refresh data.
  *   D2. A row's thumbnail carries the same "Mark up" launcher as a picture slot (the pencil on
  *       hover, always on touch, and a double-click), opening the same dialog that saves the marks
  *       on the ticket's photo.
@@ -24,48 +28,68 @@ const repairList = moduleView.slice(
 );
 
 describe("D1. the Repair List's settings row", () => {
-  it("is always shown — no hover classes — as a compact muted row above the table", () => {
+  const toolbar = repairList.slice(
+    repairList.indexOf("const toolbar = ("),
+    repairList.indexOf("if (!insp)"),
+  );
+  it("is always shown — no hover classes — as a compact muted row above the table, with room at the right for the module's floating toolbar", () => {
     expect(repairList).toContain(
-      'className="mb-1 flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-500"',
+      'className="mb-1 flex flex-wrap items-center gap-3 pr-36 text-xs text-neutral-500 dark:text-neutral-500"',
     );
     expect(repairList).toContain("data-repair-settings");
-    const toolbar = repairList.slice(
-      repairList.indexOf("const toolbar = ("),
-      repairList.indexOf("if (!insp)"),
-    );
     expect(toolbar).not.toContain("group-hover");
     expect(toolbar).not.toContain("hidden");
+    // Nothing is pushed to the right under the floating toolbar any more.
+    expect(toolbar).not.toContain("ml-auto");
     // The row-editing affordances (Remove row, Add row) stay on hover — they are not settings.
     expect(repairList).toContain('title="Remove row"');
     // The row sits above the table in both states (no inspection, and the table).
     expect(repairList.match(/\{toolbar\}/g)).toHaveLength(2);
   });
-  it("relabels the switches and says inline when photos are off for the document", () => {
-    expect(repairList).toContain("All checklist items");
-    expect(repairList).toContain('title="List every checklist item, not only the issues"');
-    expect(repairList).not.toContain("Every item\n");
-    expect(repairList).toContain("Show pictures");
-    expect(repairList).toContain('title="Print each item\'s ticket photos under its row"');
-    expect(repairList).toMatch(
-      /\{env\.options\.photos \? \(\s*<label className="flex items-center gap-1">\s*<Switch\s+checked=\{m\.photos\}/,
+  it("the two switches are gone: no 'All checklist items', no 'Show pictures', no inline photos-off text, no confirm; the list and its pictures are as saved / as the document says", () => {
+    expect(repairList).not.toContain("All checklist items");
+    expect(repairList).not.toContain("Show pictures");
+    expect(repairList).not.toContain("Photos are off for this document");
+    expect(repairList).not.toContain("data-photos-off");
+    expect(repairList).not.toContain("setAllItems");
+    expect(repairList).not.toContain("window.confirm");
+    expect(toolbar).not.toContain("<Switch");
+    expect(repairList).not.toContain("m.photos");
+    // The pictures follow the document's Photos checkbox, on screen as in the PDF.
+    expect(repairList).toContain("const data = repairListData(m, insp, env.options.photos);");
+    expect(read("src/lib/documents/pdf-layout.ts")).toContain(
+      "const data = repairListData(m, ctx.inspection, ctx.photos !== false);",
     );
-    expect(repairList).toContain(
-      '<span className="italic" data-photos-off>\n          Photos are off for this document\n        </span>',
-    );
-    expect(repairList).not.toContain("disabled={!env.options.photos}");
-    // The picture size sits in the same row, only while pictures print.
-    expect(repairList).toContain(
-      '{m.photos && env.options.photos ? (\n        <PhotoSizeControl module={m} set={set} what="the thumbnails" />\n      ) : null}',
-    );
+    // The module keeps `allItems` (and `photos`, ignored) in the schema for saved documents.
+    expect(read("src/lib/documents/model.ts")).toContain("allItems: z.boolean(),");
+    expect(read("src/lib/documents/model.ts")).toContain("photos: z.boolean(),");
   });
-  it("switching lists asks first when hand-edited rows would be lost (a plain confirm, as the delete confirms elsewhere)", () => {
-    expect(repairList).toContain("const setAllItems = (allItems: boolean) => {");
-    expect(repairList).toContain(
-      '"Switching lists resets the rows to the inspection\'s. Your edits here will be lost."',
+  it("what remains, in order: Size (while the document's Photos is on), then Edit rows / Undo edits", () => {
+    const size = toolbar.indexOf('<PhotoSizeControl module={m} set={set} what="the thumbnails" />');
+    const edit = toolbar.indexOf("Edit rows");
+    const undo = toolbar.indexOf("Undo edits");
+    expect(size).toBeGreaterThan(0);
+    expect(undo).toBeGreaterThan(size);
+    expect(edit).toBeGreaterThan(size);
+    expect(toolbar).toContain(
+      '{env.options.photos ? <PhotoSizeControl module={m} set={set} what="the thumbnails" /> : null}',
     );
-    expect(repairList).toMatch(/if \(\s*editing &&\s*!window\.confirm\(/);
-    expect(repairList).toContain("patch((t) => ({ ...t, allItems, rows: null }));");
-    expect(repairList).toContain("onCheckedChange={setAllItems}");
+    expect(toolbar).toContain('title="Copy the rows so they can be edited by hand"');
+    expect(toolbar).toContain(
+      'title="Throw away the typed changes and go back to the ticket\'s own findings"',
+    );
+    expect(repairList).not.toContain("Reset to the inspection");
+    expect(toolbar).toContain("onClick={() => patch((t) => ({ ...t, rows: null }))}");
+  });
+  it("no inspection snapshot on a document: a plain visible line pointing at Refresh data; the template placeholder stays; the PDF prints nothing", () => {
+    expect(repairList).toContain("data-no-inspection");
+    expect(repairList).toContain("{NO_INSPECTION_HINT}");
+    expect(read("src/lib/documents/editor-helpers.ts")).toContain(
+      '"No inspection findings were on the ticket when this document was made. Click Refresh data on the Variables tab to pull them in."',
+    );
+    expect(repairList).toContain("Repair List: the inspection&apos;s findings print here");
+    expect(repairList).not.toContain("NO_INSPECTION_TEXT");
+    expect(read("src/lib/documents/pdf-layout.ts")).toContain("if (!ctx.inspection) return [];");
   });
 });
 
@@ -88,7 +112,8 @@ describe("D2. Mark up from the Repair List's thumbnails", () => {
     expect(affordance).toContain("data-mark-up");
     expect(affordance).toContain('aria-label="Mark up"');
     expect(affordance).toContain("group-hover/markup:flex [@media(hover:none)]:flex");
-    expect(affordance).toMatch(/onDoubleClick=\{\s*can && props\.doubleClick/);
+    // (Oct 28: and not while the document's Marks checkbox is off — the pencil is disabled then.)
+    expect(affordance).toMatch(/onDoubleClick=\{\s*can && !marksOff && props\.doubleClick/);
     expect(affordance).toContain("<MarkupDialog");
     // The slot uses it (one launcher, not two) — the old button and dialog are gone from ImageSlot.
     const slot = picker.slice(

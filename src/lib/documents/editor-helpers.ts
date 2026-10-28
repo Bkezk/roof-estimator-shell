@@ -13,6 +13,7 @@ import {
   type DocPage,
   defaultDocumentTitle,
   type ImageRef,
+  marksShown,
   VARIABLE_NODE,
 } from "./model";
 import {
@@ -163,15 +164,17 @@ export function pricingSourceFromVariables(
 /**
  * The marks a picture draws on the canvas (phase 2): an upload's own (drawn in the editor), a
  * ticket photo's when its ref says so (the ticket row's, as getDocument read them); none for the
- * logo or the property photo.
+ * logo or the property photo — and none at all while the document's Marks checkbox is off
+ * (`marksOn`; Oct 28: the box hides marks, it no longer deletes them).
  */
 export function imageMarks(
   image: ImageRef,
   photos: ReadonlyArray<{ id: string; marks: PhotoMark[] }>,
+  marksOn = true,
 ): PhotoMark[] {
+  if (!marksShown(image, marksOn)) return [];
   if (image.kind === "upload") return image.marks ?? [];
-  if (image.kind === "ticketPhoto" && image.marks)
-    return photos.find((p) => p.id === image.photoId)?.marks ?? [];
+  if (image.kind === "ticketPhoto") return photos.find((p) => p.id === image.photoId)?.marks ?? [];
   return [];
 }
 
@@ -261,6 +264,27 @@ export const PAGE_BREAK_MIN = 5;
 export const PAGE_BREAK_MAX = 10.5;
 export const PAGE_BREAK_DEFAULT = 8.8;
 export const PAGE_BREAK_HINT = "Dotted page-breaker when Footer is on (default 8.8). Range 5–10.5.";
+
+/**
+ * The Options checkboxes' tooltips (owner, Oct 28: the labels stay CenterPoint's; a short title
+ * on each says what the box does). The editor's Document tab and the New document dialog share them.
+ */
+export const OPTION_HINTS = {
+  prices: "With prices: pricing tables show their figures",
+  photos: "Show or hide every picture in this document",
+  marks: "Show or hide the circles, arrows and text drawn on pictures",
+  footer: "Footer: the footer and the dotted page-break line",
+} as const;
+/** The Mark up pencil's tooltip while the document's Marks checkbox is off (the pencil is disabled). */
+export const MARKS_OFF_HINT = "Marks are off for this document";
+/** What a hidden picture module says on the canvas while Photos is off (never printed). */
+export const PHOTOS_OFF_HINT = "Pictures are hidden — Photos is off for this document";
+/**
+ * The Repair List on a document whose variables hold no inspection snapshot (owner, Oct 28): a
+ * plain line in the editor saying what to do; the PDF prints nothing for the module.
+ */
+export const NO_INSPECTION_HINT =
+  "No inspection findings were on the ticket when this document was made. Click Refresh data on the Variables tab to pull them in.";
 
 export const clampPageBreak = (n: number): number =>
   Number.isFinite(n) ? Math.min(PAGE_BREAK_MAX, Math.max(PAGE_BREAK_MIN, n)) : PAGE_BREAK_DEFAULT;

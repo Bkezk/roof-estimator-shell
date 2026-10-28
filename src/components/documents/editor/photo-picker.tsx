@@ -24,6 +24,7 @@ import {
   imageMarks,
   imageRotation,
   LOGO_SRC,
+  MARKS_OFF_HINT,
 } from "@/lib/documents/editor-helpers";
 import type { ImageRef } from "@/lib/documents/model";
 import { documentImageUrl, uploadDocumentImage } from "@/lib/documents.functions";
@@ -102,7 +103,8 @@ export function DocImage(props: {
               : "…"}
       </div>
     );
-  const marks = imageMarks(image, env.photos);
+  // None while the document's Marks checkbox is off (Oct 28: hidden, never removed from the ref).
+  const marks = imageMarks(image, env.photos, env.options.marks);
   const rotation = imageRotation(image, env.photos);
   return (
     <span className="relative block h-full w-full">
@@ -181,7 +183,9 @@ export function ImageSlot(props: {
  * (always on a touch screen, which has no hover) and, with `doubleClick`, opens on a
  * double-click as well; the dialog is MarkupDialog — an upload keeps the marks on its ImageRef,
  * a ticket photo saves them on the ticket's row. A picture that cannot take marks (the logo,
- * the property photo, none) is wrapped and nothing more.
+ * the property photo, none) is wrapped and nothing more. While the document's Marks checkbox is
+ * off the pencil shows disabled with "Marks are off for this document" (Oct 28) — drawing marks
+ * nobody would see, and a double-click opening nothing, were the confusing alternatives.
  */
 export function MarkUpAffordance(props: {
   image: ImageRef | null;
@@ -191,13 +195,15 @@ export function MarkUpAffordance(props: {
   className?: string | undefined;
   children: React.ReactNode;
 }) {
+  const env = useEditorEnv();
   const [open, setOpen] = useState(false);
   const can = canMarkUp(props.image);
+  const marksOff = !env.options.marks;
   return (
     <div
       className={cn("group/markup relative", props.className)}
       onDoubleClick={
-        can && props.doubleClick
+        can && !marksOff && props.doubleClick
           ? (e) => {
               e.stopPropagation();
               setOpen(true);
@@ -209,13 +215,14 @@ export function MarkUpAffordance(props: {
       {can ? (
         <button
           type="button"
-          title="Mark up"
+          title={marksOff ? MARKS_OFF_HINT : "Mark up"}
           aria-label="Mark up"
           data-mark-up
-          className="absolute right-1 top-1 hidden items-center gap-1 rounded-md border bg-popover px-1.5 py-1 text-xs text-popover-foreground shadow-md group-hover/markup:flex [@media(hover:none)]:flex"
+          disabled={marksOff}
+          className="absolute right-1 top-1 hidden items-center gap-1 rounded-md border bg-popover px-1.5 py-1 text-xs text-popover-foreground shadow-md disabled:cursor-not-allowed disabled:opacity-60 group-hover/markup:flex [@media(hover:none)]:flex"
           onClick={(e) => {
             e.stopPropagation();
-            setOpen(true);
+            if (!marksOff) setOpen(true);
           }}
         >
           <PenLine className="h-3.5 w-3.5" /> Mark up
@@ -261,7 +268,6 @@ export function MarkupDialog(props: {
   const url = upload ? (q.data ?? null) : (photo?.url ?? null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const size = upload ? { w: upload.width, h: upload.height } : natural;
-  const marksAllowed = env.options.marks;
   // The ticket photo's marks and its rotation save together on its row, as the ticket page does.
   const saveTicket = useMutation({
     mutationFn: (m: { marks: PhotoMark[]; rotation: Rotation }) =>
@@ -275,7 +281,7 @@ export function MarkupDialog(props: {
     onSuccess: async (_row, m) => {
       // The document redraws the ticket's marks (getDocument reads the row again).
       if (env.documentId) await qc.invalidateQueries({ queryKey: documentKey(env.documentId) });
-      props.onChange({ ...ticket!, marks: marksAllowed && m.marks.length > 0 });
+      props.onChange({ ...ticket!, marks: m.marks.length > 0 });
       toast.success("Marks saved on the ticket photo");
       props.onOpenChange(false);
     },
@@ -301,9 +307,6 @@ export function MarkupDialog(props: {
             {upload
               ? "Circle the problem, point at it, box it, write on it or tag it. The marks stay with this document; Done keeps them."
               : "The marks are saved on the ticket's photo when you press Done, and every document drawing it shows them."}
-            {!marksAllowed
-              ? " Marks on photos is off for this document, so they will not print until it is on."
-              : ""}
           </DialogDescription>
         </DialogHeader>
         {url && !size ? (
@@ -346,8 +349,10 @@ export function PhotoPicker(props: {
   const env = useEditorEnv();
   const uploadFn = useServerFn(uploadDocumentImage);
   const fileRef = useRef<HTMLInputElement>(null);
+  // "With marks" is the picture's own choice, kept whatever the document's Marks checkbox says
+  // (the box only hides them; Oct 28), so a photo picked while it is off shows its marks once it is on.
   const [marks, setMarks] = useState(
-    props.value?.kind === "ticketPhoto" ? props.value.marks : env.options.marks,
+    props.value?.kind === "ticketPhoto" ? props.value.marks : true,
   );
   const upload = useMutation({
     mutationFn: async (file: File) => {
@@ -374,7 +379,7 @@ export function PhotoPicker(props: {
       }),
     onError: (e) => toast.error(`Could not upload the picture: ${errText(e)}`),
   });
-  const marksAllowed = env.options.marks;
+  const marksOn = env.options.marks;
   const siteCover = env.siteId && env.siteCoverUrl ? env.siteId : null;
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -395,13 +400,12 @@ export function PhotoPicker(props: {
               {env.photos.some((p) => p.hasMarks) ? (
                 <label className="flex items-center gap-2 text-sm">
                   <Switch
-                    checked={marks && marksAllowed}
-                    disabled={!marksAllowed}
+                    checked={marks}
                     onCheckedChange={setMarks}
                     title={
-                      marksAllowed
+                      marksOn
                         ? "Draw the marks on the photo"
-                        : "Marks on photos is off for this document"
+                        : "Keep the photo's marks (hidden while Marks on photos is off for this document)"
                     }
                   />
                   With marks
@@ -425,7 +429,7 @@ export function PhotoPicker(props: {
                       props.onPick({
                         kind: "ticketPhoto",
                         photoId: p.id,
-                        marks: marksAllowed && marks && p.hasMarks,
+                        marks: marks && p.hasMarks,
                       })
                     }
                   >

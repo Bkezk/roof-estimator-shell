@@ -111,35 +111,51 @@ export interface LoadedImage {
 }
 
 /**
- * Every picture a page list shows, by the key the layout uses (`${module id}:${slot}`). A Repair
- * List's pictures come from the document's inspection snapshot (phase 2), drawn with the ticket's
- * marks when the Marks checkbox is on.
+ * Every picture a page list shows, by the key the layout uses (`${module id}:${slot}`), as the
+ * document's checkboxes show it (Oct 28, both view switches — the pages themselves are never
+ * changed): with Photos off only the letterhead's logo is listed (the layout places no picture
+ * either); with Marks off every ref comes back without its marks — a ticket photo's flag off, an
+ * upload's drawn marks left out — so what loads is what prints. A Repair List's pictures come
+ * from the document's inspection snapshot (phase 2).
  */
 export function imageRefs(
   pages: readonly DocPage[],
-  opts: { inspection?: InspectionSnapshot | null | undefined; marks?: boolean | undefined } = {},
+  opts: {
+    inspection?: InspectionSnapshot | null | undefined;
+    marks?: boolean | undefined;
+    photos?: boolean | undefined;
+  } = {},
 ): Map<string, ImageRef> {
   const out = new Map<string, ImageRef>();
+  const photos = opts.photos !== false;
+  const marks = opts.marks !== false;
+  /** The ref as the Marks checkbox shows it (a copy; the page's ref keeps its marks). */
+  const shown = (ref: ImageRef): ImageRef => {
+    if (marks) return ref;
+    if (ref.kind === "ticketPhoto") return ref.marks ? { ...ref, marks: false } : ref;
+    if (ref.kind === "upload" && ref.marks) {
+      const { marks: _hidden, ...rest } = ref;
+      return rest;
+    }
+    return ref;
+  };
   for (const p of pages)
     for (const m of p.modules) {
       if (m.type === "letterhead" && m.logo) out.set(`${m.id}:0`, { kind: "logo" });
+      if (!photos) continue;
       if ((m.type === "fullPhoto" || m.type === "photoLeft" || m.type === "photoRight") && m.image)
-        out.set(`${m.id}:0`, m.image);
+        out.set(`${m.id}:0`, shown(m.image));
       if (m.type === "twoPhotos")
         m.images.forEach((img, i) => {
-          if (img) out.set(`${m.id}:${i}`, img);
+          if (img) out.set(`${m.id}:${i}`, shown(img));
         });
       if (m.type === "photoGrid")
-        m.images.forEach((cell, i) => out.set(photoGridKey(m.id, i), cell.image));
-      if (m.type === "repairList" && m.photos && opts.inspection) {
-        const data = repairListData(m, opts.inspection);
+        m.images.forEach((cell, i) => out.set(photoGridKey(m.id, i), shown(cell.image)));
+      if (m.type === "repairList" && opts.inspection) {
+        const data = repairListData(m, opts.inspection, true);
         data.photoIds.forEach((ids, ri) =>
           ids.forEach((photoId, pi) =>
-            out.set(repairListKey(m.id, ri, pi), {
-              kind: "ticketPhoto",
-              photoId,
-              marks: opts.marks !== false,
-            }),
+            out.set(repairListKey(m.id, ri, pi), { kind: "ticketPhoto", photoId, marks }),
           ),
         );
       }
@@ -226,8 +242,8 @@ export async function loadImages(
       }
       if (ref.kind === "upload") {
         const img = await embedPath(DOCUMENTS_BUCKET, ref.path);
-        // The marks drawn on it in the editor (phase 2); applyOptionsToModule drops them when
-        // the Marks checkbox is off, so what is on the ref is what prints.
+        // The marks drawn on it in the editor (phase 2); imageRefs leaves them off the ref when
+        // the Marks checkbox is off (the page's own ref keeps them), so what is here is what prints.
         out.set(
           key,
           img
@@ -499,7 +515,12 @@ export async function renderDocumentPdf(
   };
   const measure: Measure = (text, font, size) => fonts[font].widthOfTextAtSize(clean(text), size);
   const [images, assets] = await Promise.all([
-    loadImages(sb, pdf, imageRefs(pages, { inspection, marks: options.marks }), deps),
+    loadImages(
+      sb,
+      pdf,
+      imageRefs(pages, { inspection, marks: options.marks, photos: options.photos }),
+      deps,
+    ),
     loadAssets(sb, pages),
   ]);
   const ctx: LayoutContext = {
@@ -514,6 +535,7 @@ export async function renderDocumentPdf(
     pricing,
     inspection,
     marks: options.marks,
+    photos: options.photos,
   };
   const drawer = new Drawer(pdf, fonts, images);
   const top = PAGE.heightPt - PAGE.marginPt;

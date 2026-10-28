@@ -119,14 +119,22 @@ describe("options", () => {
     expect(s.options.pageBreakIn).toBe(7);
     expect(s.dirty).toBe(true);
   });
-  it("marks off strips the marks from ticket photos", () => {
+  // Oct 28: this pinned Marks off flipping the ticket photo's flag in the pages (and, through
+  // stripMarks, deleting an upload's drawn marks). Photos and Marks are view switches now.
+  it("marks and photos leave the pages alone (same array): the renderer hides, nothing is removed", () => {
     const photo = {
       ...newModule("fullPhoto"),
       image: { kind: "ticketPhoto" as const, photoId: "p1", marks: true },
     };
-    let s = loaded([newPage([photo])]);
-    s = editorReducer(s, { type: "setOptions", patch: { marks: false } });
-    expect(s.pages[0]!.modules[0]).toMatchObject({ image: { marks: false } });
+    const s0 = loaded([newPage([photo])]);
+    const s = editorReducer(s0, { type: "setOptions", patch: { marks: false, photos: false } });
+    expect(s.pages).toBe(s0.pages);
+    expect(s.pages[0]!.modules[0]).toMatchObject({ image: { marks: true } });
+    expect(s.options).toMatchObject({ marks: false, photos: false });
+    expect(s.dirty).toBe(true);
+    const back = editorReducer(s, { type: "setOptions", patch: { marks: true, photos: true } });
+    expect(back.pages).toBe(s0.pages);
+    expect(back.dirty).toBe(false);
   });
 });
 

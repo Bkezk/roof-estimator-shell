@@ -193,8 +193,9 @@ describe("the record", () => {
     const withPhotos = pagesForNewDocument(tpl, DEFAULT_OPTIONS);
     expect(withPhotos[0]!.modules.map((m) => m.type)).toEqual(["body", "fullPhoto"]);
     expect(withPhotos[0]!.id).not.toBe(tpl[0]!.id);
+    // Oct 28: Photos off used to drop the Full Photo; it stays (hidden until the box is ticked).
     const without = pagesForNewDocument(tpl, { ...DEFAULT_OPTIONS, photos: false });
-    expect(without[0]!.modules.map((m) => m.type)).toEqual(["body"]);
+    expect(without[0]!.modules.map((m) => m.type)).toEqual(["body", "fullPhoto"]);
     expect(pagesForNewDocument(null, DEFAULT_OPTIONS)).toHaveLength(1);
     expect(pagesForNewDocument([], DEFAULT_OPTIONS)[0]!.modules).toEqual([]);
   });
@@ -502,9 +503,16 @@ describe("the reserved inspection variable (phase 2)", () => {
     const first = pages[0]!.modules.filter((m) => m.type === "fullPhoto") as FullPhotoModule[];
     expect(first.map((m) => m.image)).toEqual([{ kind: "logo" }, cover, null]);
     expect((pages[1]!.modules[0] as FullPhotoModule).image).toBeNull();
-    // Photos off: the photo modules are gone, nothing to fill.
+    // Photos off (Oct 28: a view switch): the modules stay and the cover is placed all the same,
+    // hidden until the box is ticked — it used to drop the modules and skip the cover.
     const noPhotos = pagesForNewDocument(tpl, { ...DEFAULT_OPTIONS, photos: false }, cover);
-    expect(noPhotos[0]!.modules.map((m) => m.type)).toEqual(["body"]);
+    expect(noPhotos[0]!.modules.map((m) => m.type)).toEqual([
+      "body",
+      "fullPhoto",
+      "fullPhoto",
+      "fullPhoto",
+    ]);
+    expect((noPhotos[0]!.modules[2] as FullPhotoModule).image).toEqual(cover);
     // No cover, or no slot: the pages as they were.
     expect(pagesForNewDocument(tpl, DEFAULT_OPTIONS, null)[0]!.modules[2]).toMatchObject({
       image: null,

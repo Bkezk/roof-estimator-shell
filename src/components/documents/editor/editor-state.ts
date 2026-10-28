@@ -42,7 +42,7 @@ export type EditorAction =
   | { type: "setTitle"; title: string }
   /** A page or module operation from model.ts, applied to the current pages. */
   | { type: "setPages"; op: (pages: readonly DocPage[]) => DocPage[] }
-  /** The options checkboxes: flipping prices / marks is applied to the pages at once. */
+  /** The options checkboxes: flipping prices is applied to the pricing tables at once; the rest are view switches. */
   | { type: "setOptions"; patch: Partial<DocOptions> }
   | { type: "selectPage"; pageId: string }
   /** A save went through: the current copy becomes the saved one. */
@@ -112,8 +112,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
     case "setOptions": {
       const options = { ...state.options, ...action.patch };
-      const flipped =
-        options.prices !== state.options.prices || options.marks !== state.options.marks;
+      // Only the price mode lives in the modules. Photos, Marks, Footer and the page break are
+      // read where the pages are drawn (Oct 28: Marks off used to delete an upload's marks).
+      const flipped = options.prices !== state.options.prices;
       const pages = flipped ? applyOptionsToPages(state.pages, options) : state.pages;
       return finish({ ...state, options, pages });
     }

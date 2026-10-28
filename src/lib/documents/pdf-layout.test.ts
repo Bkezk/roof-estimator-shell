@@ -16,8 +16,10 @@ import {
   type FullPhotoModule,
   type ImageRef,
   type PhotoGridModule,
+  type PhotoTextModule,
   type RepairListModule,
   type RichDoc,
+  type TwoPhotosModule,
 } from "./model";
 import {
   BLANK_PARAGRAPH,
@@ -44,7 +46,6 @@ import {
   LOGO_WIDTH,
   type Measure,
   MODULE_GAP,
-  NO_INSPECTION_TEXT,
   pageLabel,
   paginate,
   type Piece,
@@ -566,10 +567,11 @@ describe("the Repair List (phase 2)", () => {
     pieces.filter((p): p is Extract<Piece, { kind: "tableRow" }> => p.kind === "tableRow");
   const thumbsOf = (pieces: Piece[]) =>
     pieces.filter((p): p is Extract<Piece, { kind: "columns" }> => p.kind === "columns");
-  it("no inspection on the ticket: one muted line saying so", () => {
-    const pieces = layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: null }));
-    expect(texts(pieces)).toEqual([NO_INSPECTION_TEXT]);
-    expect(pieces[0]!.kind === "text" && pieces[0]!.line.color).toBe("muted");
+  // Oct 28: it printed a muted "No inspection on this ticket"; the editor now shows a line that
+  // points at Refresh data (editor-helpers NO_INSPECTION_HINT) and the PDF prints nothing here.
+  it("no inspection snapshot on the document: the module prints nothing", () => {
+    expect(layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: null }))).toEqual([]);
+    expect(layoutModule(list(), 0, CONTENT_WIDTH, ctx())).toEqual([]);
   });
   it("the issues as a table (Item, Note) with the header; every item adds the Finding column; a never-flagged item reads OK", () => {
     const data = repairListData(list(), insp);
@@ -583,11 +585,16 @@ describe("the Repair List (phase 2)", () => {
     expect(all.columns.map((c) => c.title)).toEqual(["Item", "Finding", "Note"]);
     expect(all.rows[0]).toEqual(["Membrane condition", "OK", ""]);
     expect(all.rows[3]).toEqual(["Debris", "OK", ""]);
-    // Hand-edited rows print instead, keeping their place's pictures; Pictures off prints none.
+    // Hand-edited rows print instead, keeping their place's pictures; the document's Photos off
+    // prints none (Oct 28: the module's own `photos` switch is gone and ignored).
     const edited = repairListData(list({ rows: [["Seams (NE)", "Reseal 12 ft"]] }), insp);
     expect(edited.rows).toEqual([["Seams (NE)", "Reseal 12 ft"]]);
     expect(edited.photoIds).toEqual([["p1", "p2", "p3", "p4"]]);
-    expect(repairListData(list({ photos: false }), insp).photoIds).toEqual([[], []]);
+    expect(repairListData(list(), insp, false).photoIds).toEqual([[], []]);
+    expect(repairListData(list({ photos: false }), insp).photoIds).toEqual([
+      ["p1", "p2", "p3", "p4"],
+      ["p5"],
+    ]);
     expect(repairListData(list(), null).rows).toEqual([]);
   });
   it("prints the header and a row per issue, each row's pictures under it three a line at 1.6 in, keyed for the loader", () => {
@@ -613,7 +620,8 @@ describe("the Repair List (phase 2)", () => {
     // The order on the page: header, Seams row, its two lines of pictures, Flashings row, its line.
     const kinds = pieces.filter((p) => p.kind !== "gap").map((p) => p.kind);
     expect(kinds).toEqual(["tableRow", "tableRow", "columns", "columns", "tableRow", "columns"]);
-    // Marks off: the refs say so. Pictures off: no thumbnails at all.
+    // Marks off: the refs say so. The document's Photos off: no thumbnails at all (the module's
+    // saved `photos: false` from before Oct 28 changes nothing).
     const noMarks = layoutRepairList(
       list(),
       0,
@@ -624,9 +632,14 @@ describe("the Repair List (phase 2)", () => {
     expect(t0.kind === "image" && t0.ref).toMatchObject({ marks: false });
     expect(
       thumbsOf(
-        layoutRepairList(list({ photos: false }), 0, CONTENT_WIDTH, ctx({ inspection: insp })),
+        layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: insp, photos: false })),
       ),
     ).toEqual([]);
+    expect(
+      thumbsOf(
+        layoutRepairList(list({ photos: false }), 0, CONTENT_WIDTH, ctx({ inspection: insp })),
+      ),
+    ).toHaveLength(3);
     // No issues: the list says so.
     const clean = { ...insp, items: insp.items.map((i) => ({ ...i, status: "ok" as const })) };
     expect(texts(layoutRepairList(list(), 0, CONTENT_WIDTH, ctx({ inspection: clean })))).toEqual([
@@ -652,5 +665,88 @@ describe("the Repair List (phase 2)", () => {
       for (const { piece } of page)
         if (piece.kind === "columns")
           for (const c of piece.columns) expect(c.pieces).toHaveLength(1);
+  });
+});
+
+describe("the Photos checkbox is a view switch (owner, Oct 28): off lays out no picture, on brings every one back from the same pages", () => {
+  const insp: InspectionSnapshot = {
+    inspectedOn: null,
+    grade: null,
+    technician: "",
+    notes: "",
+    recommendRepairs: false,
+    items: [{ id: "b", label: "Seams", status: "issue", note: "Open lap", photoIds: ["p1"] }],
+  };
+  const upload: ImageRef = { kind: "upload", path: "docs/d/a.jpg", width: 1600, height: 1200 };
+  const ticket: ImageRef = { kind: "ticketPhoto", photoId: "p9", marks: true };
+  const modules: DocModule[] = [
+    newModule("letterhead"),
+    { ...(newModule("fullPhoto") as FullPhotoModule), id: "f", image: upload, caption: "Roof" },
+    {
+      ...(newModule("photoLeft") as PhotoTextModule),
+      id: "l",
+      image: ticket,
+      caption: "NE corner",
+      text: richFromText("Beside the picture"),
+    },
+    {
+      ...(newModule("twoPhotos") as TwoPhotosModule),
+      id: "w",
+      images: [upload, ticket],
+      captions: ["a", "b"],
+    },
+    {
+      ...(newModule("photoGrid") as PhotoGridModule),
+      id: "g",
+      images: [{ image: upload, caption: "Grid" }],
+    },
+    { ...(newModule("repairList") as RepairListModule), id: "r" },
+    { ...newModule("body"), text: richFromText("After the pictures") } as DocModule,
+  ];
+  const flat = (pieces: readonly Piece[]): Piece[] =>
+    pieces.flatMap((p) => (p.kind === "columns" ? p.columns.flatMap((c) => flat(c.pieces)) : [p]));
+  const imagesOf = (pieces: readonly Piece[]) =>
+    flat(pieces).filter((p): p is Extract<Piece, { kind: "image" }> => p.kind === "image");
+  it("off: no image or placeholder piece but the logo; the Photo-left text spans the full width; the Repair List is its table alone; the body still prints", () => {
+    const off = layoutModules(modules, ctx({ inspection: insp, photos: false }));
+    const imgs = imagesOf(off);
+    expect(imgs.map((p) => p.key)).toEqual([`${modules[0]!.id}:0`]);
+    expect(imgs[0]!.ref).toEqual({ kind: "logo" });
+    expect(flat(off).some((p) => p.kind === "placeholder")).toBe(false);
+    const textLines = texts(flat(off));
+    expect(textLines).toContain("Beside the picture");
+    expect(textLines).toContain("After the pictures");
+    // The captions belong to the pictures and go with them.
+    for (const cap of ["Roof", "NE corner", "a", "b", "Grid"]) expect(textLines).not.toContain(cap);
+    const beside = flat(off).find(
+      (p) => p.kind === "text" && p.line.segments[0]?.text === "Beside the picture",
+    );
+    expect(beside).toMatchObject({ x: 0, width: CONTENT_WIDTH });
+    // The Repair List: header and its row, no thumbnail line.
+    expect(off.filter((p) => p.kind === "tableRow")).toHaveLength(2);
+    expect(off.filter((p) => p.kind === "columns" && p.columns.length === 1)).toHaveLength(0);
+    // A missing picture draws no placeholder either while the box is off.
+    // (The letterhead's logo is not a photo and still gets its box when it cannot load.)
+    const noneLoaded = layoutModules(
+      modules.slice(1),
+      ctx({ inspection: insp, photos: false, image: () => null }),
+    );
+    expect(flat(noneLoaded).some((p) => p.kind === "placeholder")).toBe(false);
+    expect(
+      flat(layoutModules(modules, ctx({ photos: false, image: () => null }))).filter(
+        (p) => p.kind === "placeholder",
+      ),
+    ).toHaveLength(1);
+  });
+  it("on (and absent): every picture from the very same modules — six pictures and the logo, the captions back", () => {
+    for (const photos of [true, undefined]) {
+      const on = layoutModules(modules, ctx({ inspection: insp, photos }));
+      const keys = imagesOf(on).map((p) => p.key);
+      expect(keys).toEqual([`${modules[0]!.id}:0`, "f:0", "l:0", "w:0", "w:1", "g:0", "r:r0p0"]);
+      const textLines = texts(flat(on));
+      for (const cap of ["Roof", "NE corner", "a", "b", "Grid"]) expect(textLines).toContain(cap);
+      // The modules were not touched by either pass.
+      expect((modules[1] as FullPhotoModule).image).toBe(upload);
+    }
   });
 });

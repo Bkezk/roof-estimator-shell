@@ -334,9 +334,12 @@ export interface PhotoGridModule extends ModuleBase {
 export interface RepairListModule extends ModuleBase {
   type: "repairList";
   rows: string[][] | null;
-  /** Print the pictures attached to each item under its row. */
+  /**
+   * Kept for saved documents and IGNORED since Oct 28 (owner: the module's "Show pictures" switch
+   * is gone) — each item's pictures print under its row whenever the document's Photos option is on.
+   */
   photos: boolean;
-  /** Also list the items found OK (a full checklist), not only the issues. */
+  /** Also list the items found OK (a full checklist), not only the issues; false (the default) = issues only. */
   allItems: boolean;
   /** Each row's thumbnails' height in inches (owner, Oct 28); absent or 0 = 1.6 × 1.2 in, three a line. */
   photoHeightIn?: number | undefined;
@@ -505,9 +508,9 @@ export const pagesSchema = z.array(pageSchema).max(60);
 export interface DocOptions {
   /** With or without cost. */
   prices: PriceMode;
-  /** Photo modules: keep them (with the pictures chosen on the ticket) or drop them. */
+  /** Show every picture in the document; off hides them on the canvas and in the PDF, removing nothing. */
   photos: boolean;
-  /** Draw the marks on ticket photos. */
+  /** Draw the marks on pictures — a ticket photo's and those drawn on an upload; off hides, never deletes. */
   marks: boolean;
   /** Page numbers and the company line at the foot of every page. */
   footer: boolean;
@@ -627,68 +630,44 @@ export function cloneModule(m: DocModule): DocModule {
 // ------------------------------------------------------------------------- generate / edit ops
 
 /**
- * A new document's pages from a template's pages and the checkboxes: photo modules are dropped
- * when photos are off (an empty page is kept so the structure survives); ticket photos lose their
- * marks when marks are off; every pricing table takes the price mode. Fresh ids throughout.
+ * A new document's pages from a template's pages and the checkboxes: every pricing table takes
+ * the price mode; fresh ids throughout. Photos and Marks are VIEW switches (owner, Oct 28:
+ * "Photos" looked dead on an existing document, and "Marks on photos" off deleted the marks drawn
+ * on an upload for good): they hide pictures and marks on the canvas and in the PDF and never
+ * remove a module, a picture or a mark — a document made with Photos off keeps its photo modules,
+ * hidden until the box is ticked again.
  */
 export function instantiatePages(
   templatePages: readonly DocPage[],
   options: DocOptions,
 ): DocPage[] {
-  const pages = clonePages(templatePages);
-  return pages.map((p) => ({
-    ...p,
-    modules: p.modules
-      .filter((m) => options.photos || !isPhotoModule(m))
-      .map((m) => applyOptionsToModule(m, options)),
-  }));
+  return applyOptionsToPages(clonePages(templatePages), options);
 }
-
-export const isPhotoModule = (m: DocModule) =>
-  m.type === "fullPhoto" ||
-  m.type === "photoLeft" ||
-  m.type === "photoRight" ||
-  m.type === "twoPhotos" ||
-  m.type === "photoGrid";
 
 /**
- * The Marks checkbox applied to one picture: a ticket photo keeps its flag only while marks are
- * on; an uploaded picture loses the marks drawn on it in the editor (phase 2) when they are off.
+ * Whether a picture's marks draw — the canvas (editor-helpers imageMarks) and the PDF
+ * (document-pdf.server imageRefs) agree: the Marks checkbox must be on, and the picture must have
+ * some — an upload's own, or a ticket photo picked "With marks". The checkbox never changes the
+ * refs (stripMarks used to drop an upload's marks when it was off; Oct 28, gone).
  */
-export function stripMarks(img: ImageRef | null, marks: boolean): ImageRef | null {
-  if (!img) return img;
-  if (img.kind === "ticketPhoto") return { ...img, marks: marks && img.marks };
-  if (img.kind === "upload" && !marks && img.marks?.length) {
-    const { marks: _dropped, ...rest } = img;
-    return rest;
-  }
-  return img;
+export function marksShown(img: ImageRef | null | undefined, marksOption: boolean): boolean {
+  if (!img || !marksOption) return false;
+  if (img.kind === "ticketPhoto") return img.marks;
+  if (img.kind === "upload") return (img.marks?.length ?? 0) > 0;
+  return false;
 }
 
-/** The option switches applied to one module (also run when a switch is flipped after generating). */
+/**
+ * The option switches applied to one module (also run when a switch is flipped after generating):
+ * only the Pricing Table carries an option in its data (the price mode). Photos and Marks are read
+ * where the module is drawn (pdf-layout.ts LayoutContext.photos, marksShown, the editor's
+ * env.options), so flipping them changes no module and nothing is ever lost — the Repair List's
+ * own "Show pictures" switch stays what the office set it to.
+ */
 export function applyOptionsToModule(m: DocModule, options: DocOptions): DocModule {
   switch (m.type) {
     case "pricingTable":
-      return { ...m, mode: options.prices };
-    case "fullPhoto":
-    case "photoLeft":
-    case "photoRight":
-      return { ...m, image: stripMarks(m.image, options.marks) };
-    case "twoPhotos":
-      return {
-        ...m,
-        images: [stripMarks(m.images[0], options.marks), stripMarks(m.images[1], options.marks)],
-      };
-    case "photoGrid":
-      return {
-        ...m,
-        images: m.images.map((i) => ({
-          ...i,
-          image: stripMarks(i.image, options.marks) ?? i.image,
-        })),
-      };
-    case "repairList":
-      return { ...m, photos: m.photos && options.photos };
+      return m.mode === options.prices ? m : { ...m, mode: options.prices };
     default:
       return m;
   }

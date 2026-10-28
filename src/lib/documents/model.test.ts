@@ -16,6 +16,7 @@ import {
   findModule,
   imageRefSchema,
   instantiatePages,
+  marksShown,
   MODULE_TILES,
   moduleSchema,
   moveModule,
@@ -32,7 +33,6 @@ import {
   richLine,
   richToText,
   richVariables,
-  stripMarks,
   updateModule,
   type DocPage,
   type FullPhotoModule,
@@ -152,20 +152,31 @@ describe("generating from a template with the checkboxes", () => {
       newModule("pricingTable"),
     ]),
   ];
-  it("photos off drops photo modules; prices none sets every pricing table; ids are fresh", () => {
+  // Oct 28: Photos off used to DROP the photo modules (the box then looked dead on an existing
+  // document); it is a view switch now — the modules stay, hidden until it is ticked again.
+  it("photos off keeps the photo modules (hidden, not dropped); prices none sets every pricing table; ids are fresh", () => {
     const out = instantiatePages(tpl, { ...DEFAULT_OPTIONS, photos: false, prices: "none" });
-    expect(out[0]!.modules.map((m) => m.type)).toEqual(["letterhead", "pricingTable"]);
-    expect((out[0]!.modules[1] as { mode: string }).mode).toBe("none");
+    expect(out[0]!.modules.map((m) => m.type)).toEqual(["letterhead", "fullPhoto", "pricingTable"]);
+    expect((out[0]!.modules[1] as FullPhotoModule).image).toEqual({
+      kind: "ticketPhoto",
+      photoId: "p1",
+      marks: true,
+    });
+    expect((out[0]!.modules[2] as { mode: string }).mode).toBe("none");
     expect(out[0]!.id).not.toBe(tpl[0]!.id);
     expect(out[0]!.modules[0]!.id).not.toBe(tpl[0]!.modules[0]!.id);
   });
-  it("marks off strips the marks from ticket photos, keeps the photo; flipping later keeps text", () => {
+  // Oct 28: Marks off used to turn the ticket photo's "with marks" flag off for good; the flag
+  // stays (the renderer hides the marks while the box is off).
+  it("marks off leaves the ticket photo's ref as it was; flipping prices later keeps text and ids", () => {
     const out = instantiatePages(tpl, { ...DEFAULT_OPTIONS, marks: false });
     const img = (out[0]!.modules[1] as { image: { marks: boolean } }).image;
-    expect(img.marks).toBe(false);
+    expect(img.marks).toBe(true);
     const back = applyOptionsToPages(out, { ...DEFAULT_OPTIONS, prices: "none" });
     expect((back[0]!.modules[2] as { mode: string }).mode).toBe("none");
     expect(back[0]!.modules[0]!.id).toBe(out[0]!.modules[0]!.id);
+    // Untouched modules are the very same objects (the editor's dirty check stays quiet).
+    expect(back[0]!.modules[1]).toBe(out[0]!.modules[1]);
   });
   it("the default templates are valid and use only known variables", () => {
     const known = new Set(VARIABLE_DEFS.map((d) => d.key));
@@ -215,7 +226,9 @@ describe("phase 2 modules and marked-up uploads", () => {
     };
     expect(moduleSchema.parse(grid)).toEqual(grid);
   });
-  it("the Photos and Marks checkboxes reach the new modules", () => {
+  // Oct 28: this used to pin Marks off flipping the grid's ticket photo to marks:false and Photos
+  // off flipping the Repair List's own switch off — both destructive. Neither box touches a module now.
+  it("the Photos and Marks checkboxes change no module (view switches): the grid's refs and the Repair List stay as saved", () => {
     const pages: DocPage[] = [
       {
         id: "p",
@@ -239,12 +252,27 @@ describe("phase 2 modules and marked-up uploads", () => {
     ];
     const noMarks = applyOptionsToPages(pages, { ...DEFAULT_OPTIONS, marks: false });
     expect((noMarks[0]!.modules[1] as PhotoGridModule).images[0]!.image).toMatchObject({
-      marks: false,
+      marks: true,
     });
+    expect(noMarks[0]!.modules[1]).toBe(pages[0]!.modules[1]);
     const noPhotos = applyOptionsToPages(pages, { ...DEFAULT_OPTIONS, photos: false });
-    expect((noPhotos[0]!.modules[0] as RepairListModule).photos).toBe(false);
+    expect((noPhotos[0]!.modules[0] as RepairListModule).photos).toBe(true);
+    expect(noPhotos[0]!.modules).toEqual(pages[0]!.modules);
+    // Whether the marks DRAW is decided where the picture is rendered.
+    const ref = (pages[0]!.modules[1] as PhotoGridModule).images[0]!.image;
+    expect(marksShown(ref, true)).toBe(true);
+    expect(marksShown(ref, false)).toBe(false);
+    expect(
+      marksShown(
+        { kind: "ticketPhoto", photoId: "11111111-1111-4111-8111-111111111111", marks: false },
+        true,
+      ),
+    ).toBe(false);
   });
-  it("Marks off drops the marks drawn on an uploaded picture; on, they stay (stripMarks)", () => {
+  // Oct 28: stripMarks (gone) DELETED an upload's drawn marks when the Marks checkbox was off —
+  // a mark-up lost for good the moment the box was unticked. The marks stay on the ref whatever
+  // the box says; marksShown tells the canvas and the PDF whether to draw them.
+  it("Marks off leaves the marks drawn on an uploaded picture on the ref; marksShown hides them until the box is on", () => {
     const marked: ImageRef = {
       kind: "upload",
       path: "docs/d/a.jpg",
@@ -252,14 +280,6 @@ describe("phase 2 modules and marked-up uploads", () => {
       height: 600,
       marks: [{ id: "m", kind: "rect", color: "red", a: [0.1, 0.1], b: [0.5, 0.5] }],
     };
-    expect(stripMarks(marked, false)).toEqual({
-      kind: "upload",
-      path: "docs/d/a.jpg",
-      width: 800,
-      height: 600,
-    });
-    expect(stripMarks(marked, true)).toBe(marked);
-    expect(stripMarks({ kind: "logo" }, false)).toEqual({ kind: "logo" });
     const page: DocPage = {
       id: "p",
       modules: [
@@ -271,10 +291,18 @@ describe("phase 2 modules and marked-up uploads", () => {
       ],
     };
     const off = applyOptionsToPages([page], { ...DEFAULT_OPTIONS, marks: false });
-    expect((off[0]!.modules[0] as FullPhotoModule).image).not.toHaveProperty("marks");
-    expect((off[0]!.modules[1] as PhotoGridModule).images[0]!.image).not.toHaveProperty("marks");
-    const on = applyOptionsToPages([page], DEFAULT_OPTIONS);
+    expect((off[0]!.modules[0] as FullPhotoModule).image).toEqual(marked);
+    expect((off[0]!.modules[1] as PhotoGridModule).images[0]!.image).toEqual(marked);
+    const on = applyOptionsToPages(off, DEFAULT_OPTIONS);
     expect((on[0]!.modules[0] as FullPhotoModule).image).toEqual(marked);
+    // A template instantiated with Marks off keeps them too.
+    const made = instantiatePages([page], { ...DEFAULT_OPTIONS, marks: false });
+    expect((made[0]!.modules[0] as FullPhotoModule).image).toEqual(marked);
+    expect(marksShown(marked, false)).toBe(false);
+    expect(marksShown(marked, true)).toBe(true);
+    expect(marksShown({ ...marked, marks: [] }, true)).toBe(false);
+    expect(marksShown({ kind: "logo" }, true)).toBe(false);
+    expect(marksShown(null, true)).toBe(false);
   });
 });
 

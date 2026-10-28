@@ -59,6 +59,7 @@ import {
   filterVariables,
   groupVariables,
   MODULE_DRAG_TYPE,
+  OPTION_HINTS,
   PAGE_BREAK_HINT,
   PAGE_BREAK_MAX,
   PAGE_BREAK_MIN,
@@ -854,28 +855,28 @@ function DocumentTab(props: {
       <div className="space-y-2">
         <div className="text-sm font-medium">Options</div>
         <div className="grid grid-cols-2 gap-2">
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.prices}>
             <Checkbox
               checked={state.options.prices === "total"}
               onCheckedChange={(c) => setOpt({ prices: c ? "total" : "none" })}
             />
             With prices
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.photos}>
             <Checkbox
               checked={state.options.photos}
               onCheckedChange={(c) => setOpt({ photos: c === true })}
             />
             Photos
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.marks}>
             <Checkbox
               checked={state.options.marks}
               onCheckedChange={(c) => setOpt({ marks: c === true })}
             />
             Marks on photos
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm" title={OPTION_HINTS.footer}>
             <Checkbox
               checked={state.options.footer}
               onCheckedChange={(c) => setOpt({ footer: c === true })}

@@ -250,7 +250,9 @@ export function backTo(
 /**
  * A new document's pages: the template's through the checkboxes; no template → one empty page.
  * `coverImage` (phase 2: the property's cover photo) fills the first empty Full Photo on page 1,
- * so the Proposal's cover carries the building the day it is generated (photos on only).
+ * so the Proposal's cover carries the building the day it is generated. It is placed whether or
+ * not Photos is on (Oct 28: the checkbox hides pictures, it no longer removes them), so ticking
+ * the box later shows the cover.
  */
 export function pagesForNewDocument(
   templatePages: readonly DocPage[] | null | undefined,
@@ -259,7 +261,7 @@ export function pagesForNewDocument(
 ): DocPage[] {
   const pages = templatePages?.length ? instantiatePages(templatePages, options) : [];
   const out = pages.length ? pages : [newPage()];
-  return coverImage && options.photos ? placeCoverImage(out, coverImage) : out;
+  return coverImage ? placeCoverImage(out, coverImage) : out;
 }
 
 /** The first empty Full Photo on page 1 takes the picture; nothing else changes. */

@@ -217,25 +217,32 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(grid).toContain("Add picture");
     expect(grid).toContain('title="Remove this cell"');
     expect(grid).toContain("caption: photoGridCaption(p, insp)");
-    expect(grid).toContain("marks: env.options.marks && p.hasMarks");
+    // Oct 28: the pick carries the photo's marks whatever the Marks checkbox says (it only hides them).
+    expect(grid).toContain(
+      'image: { kind: "ticketPhoto" as const, photoId: p.id, marks: p.hasMarks }',
+    );
+    expect(grid).not.toContain("marks: env.options.marks && p.hasMarks");
     expect(grid).toContain("gridTemplateColumns: `repeat(${m.columns}, minmax(0, 1fr))`");
     expect(grid).toContain("<ImageSlot");
     expect(grid).toContain("<Caption value={cell.caption}");
     expect(grid).toContain("<PhotoPicker");
   });
-  it("the Repair List: rows from the inspection snapshot, Every item / Pictures switches, Edit rows / Reset to the inspection, the thumbnails under a row, the empty state", () => {
+  it("the Repair List: rows from the inspection snapshot, Edit rows / Undo edits, the thumbnails under a row, the empty state", () => {
     const list = moduleView.slice(moduleView.indexOf("function RepairList("));
     expect(list).toContain("storedInspection(env.variables)");
-    expect(list).toContain("repairListData(m, insp)");
-    // Oct 28 (repair-list-ui.test.ts): the switches are always shown and relabelled.
-    expect(list).toContain("All checklist items");
-    expect(list).toContain("Show pictures");
-    expect(list).toContain("Reset to the inspection");
+    // Oct 28: the pictures follow the document's Photos checkbox (repair-list-ui.test.ts).
+    expect(list).toContain("repairListData(m, insp, env.options.photos)");
+    // Oct 28 (repair-list-ui.test.ts): the switches are gone; the row editing is relabelled.
+    expect(list).not.toContain("All checklist items");
+    expect(list).not.toContain("Show pictures");
+    expect(list).toContain("Undo edits");
     expect(list).toContain("Edit rows");
-    expect(list).toContain(": NO_INSPECTION_TEXT}");
-    expect(read("src/lib/documents/pdf-layout.ts")).toContain(
-      'NO_INSPECTION_TEXT = "No inspection on this ticket"',
+    // No snapshot on a document: a plain line pointing at Refresh data (the PDF prints nothing).
+    expect(list).toContain("{NO_INSPECTION_HINT}");
+    expect(read("src/lib/documents/editor-helpers.ts")).toContain(
+      'NO_INSPECTION_HINT =\n  "No inspection findings were on the ticket when this document was made. Click Refresh data on the Variables tab to pull them in."',
     );
+    expect(read("src/lib/documents/pdf-layout.ts")).not.toContain("NO_INSPECTION_TEXT");
     expect(list).toContain("data-repair-photos={r}");
     expect(list).toContain('image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}');
     // Edited cells are inputs; otherwise the text prints with its variables resolved.
@@ -248,9 +255,11 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(picker).toMatch(
       /<RotatedPhoto\s+url=\{src\}\s+alt=\{label\}\s+title=\{label\}\s+marks=\{marks\}\s+rotation=\{rotation\}\s+fit="contain"/,
     );
-    expect(picker).toContain("const marks = imageMarks(image, env.photos);");
+    // Oct 28: the document's Marks checkbox decides whether they draw; the ref keeps them.
+    expect(picker).toContain("const marks = imageMarks(image, env.photos, env.options.marks);");
     expect(picker).toContain("const rotation = imageRotation(image, env.photos);");
-    expect(picker).toContain('title="Mark up"');
+    // Oct 28: the pencil's title says why it is disabled while the Marks checkbox is off.
+    expect(picker).toContain('title={marksOff ? MARKS_OFF_HINT : "Mark up"}');
     // Oct 28: the launcher is one shared wrapper (MarkUpAffordance) the slot and the Repair
     // List's thumbnails both use (repair-list-ui.test.ts).
     expect(picker).toContain("const can = canMarkUp(props.image);");
@@ -299,6 +308,75 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     // Refresh data goes through the same snapshot.
     const refresh = fns.slice(fns.indexOf("export const refreshDocumentVariables"));
     expect(refresh).toContain("const variables = snapshot(loaded.source);");
+  });
+});
+
+describe("Photos and Marks on photos are view switches (owner, Oct 28)", () => {
+  const picker = read("src/components/documents/editor/photo-picker.tsx");
+  const helpers = read("src/lib/documents/editor-helpers.ts");
+  it("the canvas hides every picture while Photos is off: the picture modules show one muted line in their place, Photo on left / right keeps its text full width", () => {
+    const body = moduleView.slice(
+      moduleView.indexOf("function ModuleBody("),
+      moduleView.indexOf("function PicturesHidden("),
+    );
+    expect(body).toContain("if (!env.options.photos) {");
+    expect(body).toMatch(
+      /case "fullPhoto":\s*case "twoPhotos":\s*case "photoGrid":\s*return <PicturesHidden \/>;/,
+    );
+    expect(body).toMatch(
+      /case "photoLeft":\s*case "photoRight":\s*return <PhotoText m=\{m\} set=\{set\} hidden \/>;/,
+    );
+    expect(moduleView).toContain("data-photos-hidden");
+    expect(moduleView).toContain("{PHOTOS_OFF_HINT}");
+    expect(helpers).toContain(
+      'PHOTOS_OFF_HINT = "Pictures are hidden — Photos is off for this document"',
+    );
+    const photoText = moduleView.slice(
+      moduleView.indexOf("function PhotoText("),
+      moduleView.indexOf("function TwoPhotos("),
+    );
+    expect(photoText).toMatch(
+      /if \(hidden\)\s*return \(\s*<div className="space-y-2">\s*<PicturesHidden \/>\s*<RichText/,
+    );
+    // Dark mode on the new surface (the white paper).
+    expect(moduleView).toMatch(
+      /data-photos-hidden[\s\S]{0,400}dark:text-neutral-500|dark:text-neutral-500[\s\S]{0,400}data-photos-hidden/,
+    );
+  });
+  it("the Mark up pencil is disabled with its tooltip while Marks is off; the picture draws no marks; the With-marks switch is the picture's own choice", () => {
+    expect(picker).toContain("const marksOff = !env.options.marks;");
+    expect(picker).toContain('title={marksOff ? MARKS_OFF_HINT : "Mark up"}');
+    expect(picker).toContain("disabled={marksOff}");
+    expect(picker).toMatch(/onDoubleClick=\{\s*can && !marksOff && props\.doubleClick/);
+    expect(picker).toContain("if (!marksOff) setOpen(true);");
+    expect(helpers).toContain('MARKS_OFF_HINT = "Marks are off for this document"');
+    expect(picker).toContain("const marks = imageMarks(image, env.photos, env.options.marks);");
+    expect(picker).not.toContain("marksAllowed");
+    expect(picker).toContain('props.value?.kind === "ticketPhoto" ? props.value.marks : true,');
+    expect(picker).toMatch(
+      /props\.onPick\(\{\s*kind: "ticketPhoto",\s*photoId: p\.id,\s*marks: marks && p\.hasMarks,?\s*\}\)/,
+    );
+  });
+  it("the four checkboxes keep their labels and carry a title each, in the editor and the New document dialog", () => {
+    expect(helpers).toContain('prices: "With prices: pricing tables show their figures"');
+    expect(helpers).toContain('photos: "Show or hide every picture in this document"');
+    expect(helpers).toContain(
+      'marks: "Show or hide the circles, arrows and text drawn on pictures"',
+    );
+    expect(helpers).toContain('footer: "Footer: the footer and the dotted page-break line"');
+    for (const src of [route, newDialog])
+      for (const k of ["prices", "photos", "marks", "footer"])
+        expect(src).toContain(`title={OPTION_HINTS.${k}}`);
+    expect(route).toContain("\n            With prices\n");
+    expect(route).toContain("\n            Photos\n");
+    expect(route).toContain("\n            Marks on photos\n");
+    expect(route).toContain("\n            Footer\n");
+    // The reducer applies only the price mode to the pages; the rest are read where they draw.
+    expect(read("src/components/documents/editor/editor-state.ts")).toContain(
+      "const flipped = options.prices !== state.options.prices;",
+    );
+    expect(read("src/lib/documents/model.ts")).not.toContain("stripMarks(");
+    expect(read("src/lib/documents/model.ts")).not.toContain("isPhotoModule");
   });
 });
 
