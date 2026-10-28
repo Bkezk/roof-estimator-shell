@@ -226,7 +226,7 @@ describe("the rows' wording and icons (what the two lists showed until Oct 27)",
 describe("the cap, the count line and the empty line", () => {
   it("about eight rows, then the list scrolls in its own bordered box, light and dark", () => {
     expect(TIMELINE_ROWS_SHOWN).toBe(8);
-    expect(TIMELINE_LIST_CLASS).toContain("max-h-[18rem]");
+    expect(TIMELINE_LIST_CLASS).toContain("max-h-[10.75rem]");
     expect(TIMELINE_LIST_CLASS).toContain("overflow-y-auto");
     expect(TIMELINE_LIST_CLASS).toMatch(/\bborder\b/);
     expect(TIMELINE_LIST_CLASS).toMatch(/\brounded-md\b/);

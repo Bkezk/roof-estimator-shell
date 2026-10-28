@@ -60,8 +60,13 @@ export interface TimelineEntry {
 /** About eight rows' height, then the list scrolls inside its own box (owner, Oct 27). */
 export const TIMELINE_ROWS_SHOWN = 8;
 /** The list's box: capped, scrolling, a thin rounded border, light and dark. */
-export const TIMELINE_LIST_CLASS =
-  "max-h-[18rem] overflow-y-auto rounded-md border bg-background/60 p-2 dark:border-border dark:bg-muted/20";
+/**
+ * The box is exactly TIMELINE_ROWS_SHOWN rows tall and scrolls past that (owner, Oct 28: "this
+ * box isnt scrolling after 8 entries" — 18rem fit ten): a row is text-xs (1rem line) + the
+ * 0.25rem gap, so 8 rows = 8 × 1rem + 7 × 0.25rem = 9.75rem, plus the box's 2 × 0.5rem padding.
+ */
+export const TIMELINE_LIST_MAX_H = "max-h-[10.75rem]";
+export const TIMELINE_LIST_CLASS = `${TIMELINE_LIST_MAX_H} overflow-y-auto rounded-md border bg-background/60 p-2 dark:border-border dark:bg-muted/20`;
 export const ACTIVITY_EMPTY = "No activity yet";
 
 /** "1 entry" / "12 entries". */

@@ -145,7 +145,7 @@ describe("TicketActivity", () => {
   });
   it("caps the list at about eight rows and scrolls inside its own bordered box (dark too)", () => {
     const list = /<ol class="([^"]*)" data-list="activity">/.exec(html)?.[1] ?? "";
-    expect(list).toContain("max-h-[18rem]");
+    expect(list).toContain("max-h-[10.75rem]");
     expect(list).toContain("overflow-y-auto");
     expect(list).toMatch(/\brounded-md\b/);
     expect(list).toMatch(/\bborder\b/);
