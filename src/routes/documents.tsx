@@ -29,6 +29,7 @@ import {
   Eye,
   EyeOff,
   FileDown,
+  GripVertical,
   History,
   Image as ImageIcon,
   Images,
@@ -65,6 +66,7 @@ import {
   PAGE_BREAK_MIN,
   parsePageBreak,
   savedModuleNamesOnPage,
+  SNIPPET_DRAG_TYPE,
   TEMPLATES_ADMIN_PATH,
   variableRowValue,
   versionLine,
@@ -642,6 +644,7 @@ function EditorShell(props: {
         activeEditorRef.current = e;
       },
       onSaveModule: (m) => setSaveModule(m),
+      snippets: savedModules.data ?? EMPTY_SNIPPETS,
     }),
     [
       kind,
@@ -654,6 +657,7 @@ function EditorShell(props: {
       props.siteId,
       props.siteCoverUrl,
       dispatch,
+      savedModules.data,
     ],
   );
 
@@ -1130,6 +1134,9 @@ function StartOverPicker(props: {
 
 // -------------------------------------------------------------------------- Modules tab
 
+/** One stable empty list while the snippets load, so the editor env does not re-memo each render. */
+const EMPTY_SNIPPETS: ReadonlyArray<{ id: string; name: string; module: DocModule }> = [];
+
 function ModulesTab(props: {
   savedModules: ReadonlyArray<{ id: string; name: string; module: DocModule }>;
   savedError: string | null;
@@ -1151,7 +1158,8 @@ function ModulesTab(props: {
   return (
     <>
       <p className="text-xs text-muted-foreground">
-        Drag a module onto a page, or use + to add it to the selected page.
+        Drag a module or a snippet onto a page where you want it, or use + to add it to the bottom
+        of the selected page.
       </p>
       <div className="grid grid-cols-2 gap-2">
         {MODULE_TILES.map((type) => {
@@ -1197,7 +1205,17 @@ function ModulesTab(props: {
         ) : (
           <ul className="divide-y rounded-md border">
             {props.savedModules.map((s) => (
-              <li key={s.id} className="flex items-center gap-1 px-2 py-1 text-sm">
+              <li
+                key={s.id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(SNIPPET_DRAG_TYPE, s.id);
+                  e.dataTransfer.effectAllowed = "copy";
+                }}
+                className="flex cursor-grab items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 active:cursor-grabbing"
+                title={`${s.name} — drag onto a page`}
+              >
+                <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate" title={MODULE_LABELS[s.module.type]}>
                   {s.name}
                 </span>

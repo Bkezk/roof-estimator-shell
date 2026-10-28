@@ -1,8 +1,9 @@
 /**
  * What every module on the canvas needs from the editor page: the document's kind and mode, the
  * resolved variables the chips print, the ticket's photos, the options, the reducer dispatch, and
- * the TipTap editor that last had focus (the Variables tab inserts a chip there). One context so
- * the module renderers stay plain.
+ * the TipTap editor that last had focus (the Variables tab inserts a chip there), and the saved
+ * snippets (a snippet row dragged onto a sheet is looked up by its id). One context so the module
+ * renderers stay plain.
  */
 import { createContext, type Dispatch, useContext } from "react";
 import type { Editor } from "@tiptap/react";
@@ -29,6 +30,8 @@ export interface EditorEnv {
   setActiveEditor: (editor: Editor | null) => void;
   /** "Save as snippet…" on a module's toolbar: the page asks for a name and saves (document_modules). */
   onSaveModule: (module: DocModule) => void;
+  /** The saved snippets the Modules tab lists; a row dragged onto a sheet drops a fresh copy. */
+  snippets: ReadonlyArray<{ id: string; name: string; module: DocModule }>;
 }
 
 export const EditorEnvContext = createContext<EditorEnv | null>(null);

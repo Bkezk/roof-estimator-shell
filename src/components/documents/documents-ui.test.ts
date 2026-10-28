@@ -30,7 +30,13 @@ describe("the /documents route", () => {
     expect(route).toContain('<TabsTrigger value="variables">Variables</TabsTrigger>');
   });
   it("carries CenterPoint's hint lines", () => {
-    expect(route).toContain("Drag a module onto a page, or use + to add it to the selected page.");
+    // Oct 28: the Modules hint says a snippet drags too, and where a drop and a + each land.
+    expect(route.replace(/\s+/g, " ")).toContain(
+      "Drag a module or a snippet onto a page where you want it, or use + to add it to the bottom of the selected page.",
+    );
+    expect(route).not.toContain(
+      "Drag a module onto a page, or use + to add it to the selected page.",
+    );
     expect(route).toContain(
       "Available variables. Type / in a text box, drag one in, or click to insert at the cursor.",
     );
@@ -66,6 +72,31 @@ describe("the /documents route", () => {
     expect(route).toContain("deleteSavedModule");
     expect(route).toContain("MODULE_DRAG_TYPE");
   });
+  it("the saved snippet rows drag onto a page like the tiles (Oct 28), and + still adds to the selected page", () => {
+    const rows = route.slice(
+      route.indexOf("{props.savedModules.map((s) => ("),
+      route.indexOf("</ul>", route.indexOf("{props.savedModules.map((s) => (")),
+    );
+    expect(rows).toContain("draggable");
+    expect(rows).toContain("e.dataTransfer.setData(SNIPPET_DRAG_TYPE, s.id);");
+    expect(rows).toContain('e.dataTransfer.effectAllowed = "copy";');
+    expect(rows).toContain("cursor-grab");
+    expect(rows).toContain("<GripVertical");
+    expect(rows).toContain("title={`${s.name} — drag onto a page`}");
+    expect(rows).toContain("onClick={() => props.onAddSaved(s.module)}");
+    // The + paths are unchanged: a fresh copy appended to the selected page.
+    expect(route).toContain("onAdd={(type) => addToSelected(newModule(type))}");
+    expect(route).toContain("onAddSaved={(m) => addToSelected(cloneModule(m))}");
+    expect(route).toMatch(/op: \(pages\) => addModule\(pages, i, m\) \}/);
+    // The canvas looks a dragged snippet up by its id through the editor env.
+    expect(route).toContain("snippets: savedModules.data ?? EMPTY_SNIPPETS,");
+    expect(read("src/components/documents/editor/editor-context.tsx")).toContain(
+      "snippets: ReadonlyArray<{ id: string; name: string; module: DocModule }>;",
+    );
+    expect(read("src/lib/documents/editor-helpers.ts")).toContain(
+      'export const SNIPPET_DRAG_TYPE = "application/x-jbk-document-snippet";',
+    );
+  });
   it("the Variables tab lists the kind's variables grouped, with Refresh data", () => {
     expect(route).toContain("groupVariables(filterVariables(filter, defs))");
     expect(route).toContain("Refresh data");
@@ -98,6 +129,43 @@ describe("the canvas", () => {
     expect(canvas).toContain("uploadDocumentAsset");
     expect(canvas).toContain("newPdfModule(");
     expect(canvas).toContain("Upload PDF");
+  });
+  it("drops a tile or a snippet where the pointer is (Oct 28): both drag types, the insertion line, addModule with `at`, then scrolls to it", () => {
+    const sheet = canvas.slice(
+      canvas.indexOf("function Sheet("),
+      canvas.indexOf("function carriesModule("),
+    );
+    // Both kinds are accepted, through one check the dragover and the drop share.
+    expect(canvas).toMatch(
+      /return types\.includes\(MODULE_DRAG_TYPE\) \|\| types\.includes\(SNIPPET_DRAG_TYPE\);/,
+    );
+    expect(sheet).toContain("if (!carriesModule(e.dataTransfer)) return;");
+    expect(sheet).toContain('e.dataTransfer.dropEffect = "copy";');
+    // The gap under the pointer, by the midpoint rule (drop-index.ts), from the wrappers' boxes.
+    expect(sheet).toContain("const k = dropIndexFromY(");
+    expect(sheet).toContain('column.querySelectorAll<HTMLElement>(":scope > [data-module-id]")');
+    expect(sheet).toContain("w.getBoundingClientRect()");
+    // The drop passes the position; the + buttons keep appending (no `at`).
+    expect(sheet).toContain("const { at } = dropTarget(e.clientY);");
+    expect(sheet).toContain("op: (pages) => addModule(pages, props.index, dropped, at),");
+    expect(sheet).not.toContain("addModule(pages, props.index, newModule(type as ModuleType))");
+    expect(sheet).toContain('env.dispatch({ type: "selectPage", pageId: props.page.id });');
+    expect(sheet).toContain("window.setTimeout(() => scrollToModule(dropped.id), 50);");
+    expect(read("src/components/documents/editor/editor-dom.ts")).toContain(
+      "export function scrollToModule(moduleId: string)",
+    );
+    // The insertion line: thin, sky with a dark: tone, over the page's existing "over" ring.
+    expect(sheet).toContain("data-drop-line");
+    expect(sheet).toMatch(/data-drop-line[\s\S]{0,200}bg-sky-500 dark:bg-sky-400/);
+    expect(sheet).toContain('drop !== null && "ring-2 ring-primary ring-offset-2"');
+    // A snippet drop is a fresh copy, looked up by id; a missing one is said out loud.
+    const dropped = canvas.slice(canvas.indexOf("function droppedModule("));
+    expect(dropped).toContain("const snippetId = dt.getData(SNIPPET_DRAG_TYPE);");
+    expect(dropped).toContain("return cloneModule(snippet.module);");
+    expect(dropped).toContain("That saved snippet is no longer in the list");
+    expect(sheet).toContain("toast.error(errText(err));");
+    // The + buttons are the touch path (HTML5 drag does not fire on most phones).
+    expect(canvas).toContain("HTML5 drag does not fire on most phones");
   });
 });
 

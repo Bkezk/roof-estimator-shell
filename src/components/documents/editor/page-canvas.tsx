@@ -3,8 +3,11 @@
  * dpi, 0.75 in padding), a "Page N" tab above each like CenterPoint, the dotted page-break guide
  * at options.pageBreakIn inches when the footer is on, and under each sheet "Insert PDF" (the PDF
  * library dialog, with Upload PDF) and "Add Page" (inserts after that page). The sheet shrinks to
- * fit a narrow canvas. Clicking a sheet selects it (the Modules tab adds there); a module tile
- * dragged from the Modules tab drops onto a sheet.
+ * fit a narrow canvas. Clicking a sheet selects it (the Modules tab adds there); a module tile or
+ * a saved snippet dragged from the Modules tab drops onto a sheet where the pointer is (owner,
+ * Oct 28): a thin line shows the gap it will take while dragging, by the midpoint rule
+ * (drop-index.ts). HTML5 drag does not fire on most phones; the tab's + buttons stay the touch
+ * path and add to the bottom of the selected page.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,10 +24,13 @@ import {
   SHEET,
   sheetContentLimit,
   sheetScale,
+  SNIPPET_DRAG_TYPE,
 } from "@/lib/documents/editor-helpers";
 import {
   addModule,
   addPage,
+  cloneModule,
+  type DocModule,
   type DocOptions,
   type DocPage,
   MODULE_TYPES,
@@ -49,7 +55,9 @@ import {
 } from "@/components/ui/dialog";
 
 import { assetsKey, type DocumentAssetRow, errText } from "../document-types";
-import { useEditorEnv } from "./editor-context";
+import { dropIndexFromY } from "./drop-index";
+import { type EditorEnv, useEditorEnv } from "./editor-context";
+import { scrollToModule } from "./editor-dom";
 import { ModuleView } from "./module-view";
 
 /** The print styles the rich text boxes need (Tailwind's preflight strips them). */
@@ -315,10 +323,39 @@ function Sheet(props: {
   guide: number | null;
 }) {
   const env = useEditorEnv();
-  const [over, setOver] = useState(false);
+  const columnRef = useRef<HTMLDivElement>(null);
+  // While a tile or a snippet is dragged over this sheet: the page index it would take and the
+  // insertion line's top, in sheet px (null when nothing hovers).
+  const [drop, setDrop] = useState<{ at: number; top: number } | null>(null);
   const shown = props.moduleIds
     .map((id) => props.page.modules.findIndex((m) => m.id === id))
     .filter((i) => i >= 0);
+
+  /** The gap under the pointer: which page index a drop inserts at, and where the line draws. */
+  const dropTarget = (clientY: number): { at: number; top: number } => {
+    const column = columnRef.current;
+    const wrappers = column
+      ? Array.from(column.querySelectorAll<HTMLElement>(":scope > [data-module-id]"))
+      : [];
+    const k = dropIndexFromY(
+      clientY,
+      wrappers.map((w) => {
+        const r = w.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom };
+      }),
+    );
+    // k counts this sheet's wrappers; the page index is the k-th shown module's, or after the last.
+    const at = k < shown.length ? shown[k]! : shown.length ? shown[shown.length - 1]! + 1 : 0;
+    const before = wrappers[k];
+    const last = wrappers[wrappers.length - 1];
+    const top = before
+      ? before.offsetTop - MODULE_GAP_PX / 2
+      : last
+        ? last.offsetTop + last.offsetHeight + MODULE_GAP_PX / 2
+        : (column?.offsetTop ?? SHEET.pad);
+    return { at, top };
+  };
+
   return (
     <div
       id={props.part === 0 ? pageDomId(props.page.id) : undefined}
@@ -326,32 +363,54 @@ function Sheet(props: {
       className={cn(
         "document-sheet relative bg-white text-black shadow-md ring-1 ring-black/10",
         props.selected && "ring-2 ring-primary",
-        over && "ring-2 ring-primary ring-offset-2",
+        drop !== null && "ring-2 ring-primary ring-offset-2",
       )}
       style={{ width: SHEET.width, minHeight: SHEET.height, padding: SHEET.pad }}
       onMouseDown={() => {
         if (!props.selected) env.dispatch({ type: "selectPage", pageId: props.page.id });
       }}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes(MODULE_DRAG_TYPE)) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-          if (!over) setOver(true);
-        }
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        const type = e.dataTransfer.getData(MODULE_DRAG_TYPE);
-        setOver(false);
-        if (!type || !(MODULE_TYPES as readonly string[]).includes(type) || type === "pdf") return;
+        if (!carriesModule(e.dataTransfer)) return;
         e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        const next = dropTarget(e.clientY);
+        setDrop((cur) => (cur && cur.at === next.at && cur.top === next.top ? cur : next));
+      }}
+      onDragLeave={(e) => {
+        // Moving onto a child fires this too; the line stays until the pointer leaves the sheet.
+        if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+        setDrop(null);
+      }}
+      onDrop={(e) => {
+        setDrop(null);
+        if (!carriesModule(e.dataTransfer)) return;
+        e.preventDefault();
+        const { at } = dropTarget(e.clientY);
+        let module: DocModule | null;
+        try {
+          module = droppedModule(e.dataTransfer, env.snippets);
+        } catch (err) {
+          toast.error(errText(err));
+          return;
+        }
+        if (!module) return;
+        const dropped = module;
         env.dispatch({
           type: "setPages",
-          op: (pages) => addModule(pages, props.index, newModule(type as ModuleType)),
+          op: (pages) => addModule(pages, props.index, dropped, at),
         });
         env.dispatch({ type: "selectPage", pageId: props.page.id });
+        window.setTimeout(() => scrollToModule(dropped.id), 50);
       }}
     >
+      {drop !== null ? (
+        <div
+          data-drop-line
+          className="pointer-events-none absolute z-10 h-0.5 rounded-full bg-sky-500 dark:bg-sky-400"
+          style={{ top: drop.top - 1, left: SHEET.pad, right: SHEET.pad }}
+          title="The module lands here"
+        />
+      ) : null}
       {props.guide !== null ? (
         <div
           className="pointer-events-none absolute left-0 right-0 border-t-2 border-dotted border-sky-400"
@@ -361,7 +420,7 @@ function Sheet(props: {
           <span className="absolute right-2 -top-4 text-[10px] text-sky-500">page break</span>
         </div>
       ) : null}
-      <div className="flex flex-col gap-3">
+      <div ref={columnRef} className="flex flex-col gap-3">
         {shown.map((i) => {
           const m = props.page.modules[i]!;
           return (
@@ -384,6 +443,35 @@ function Sheet(props: {
       ) : null}
     </div>
   );
+}
+
+/** Whether a drag carries something the sheet takes: a Modules tab tile or a saved snippet. */
+function carriesModule(dt: DataTransfer): boolean {
+  const types = Array.from(dt.types);
+  return types.includes(MODULE_DRAG_TYPE) || types.includes(SNIPPET_DRAG_TYPE);
+}
+
+/**
+ * The module a drop carries: a fresh one of a tile's type (a PDF goes through Insert PDF), or a
+ * fresh copy (new ids, like the row's +) of the saved snippet whose id the drag names. Null when
+ * the drag was not one of ours; throws when the snippet is no longer in the list.
+ */
+function droppedModule(dt: DataTransfer, snippets: EditorEnv["snippets"]): DocModule | null {
+  const type = dt.getData(MODULE_DRAG_TYPE);
+  if (type) {
+    if (!(MODULE_TYPES as readonly string[]).includes(type) || type === "pdf") return null;
+    return newModule(type as ModuleType);
+  }
+  const snippetId = dt.getData(SNIPPET_DRAG_TYPE);
+  if (snippetId) {
+    const snippet = snippets.find((s) => s.id === snippetId);
+    if (!snippet)
+      throw new Error(
+        "That saved snippet is no longer in the list (it may have been deleted). Reload the page and try again.",
+      );
+    return cloneModule(snippet.module);
+  }
+  return null;
 }
 
 /** The PDF library: pick one to insert, or upload another. */

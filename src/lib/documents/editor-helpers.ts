@@ -248,8 +248,10 @@ export const SHEET = { width: 816, height: 1056, pad: 72 } as const;
 /** The DOM id of a page's sheet (the Pages list scrolls to it). */
 export const pageDomId = (pageId: string) => `doc-page-${pageId}`;
 
-/** The drag type a Modules tab tile carries onto a sheet. */
+/** The drag type a Modules tab tile carries onto a sheet (its data: the module type). */
 export const MODULE_DRAG_TYPE = "application/x-jbk-document-module";
+/** The drag type a saved snippet row carries onto a sheet (its data: the snippet's id). */
+export const SNIPPET_DRAG_TYPE = "application/x-jbk-document-snippet";
 
 /** The sidebar's logo file (app-sidebar.tsx), drawn by the letterhead and the "Company logo" pick. */
 export const LOGO_SRC = "/jbk-logo.webp";

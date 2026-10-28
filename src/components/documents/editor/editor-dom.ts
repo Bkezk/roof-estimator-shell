@@ -1,6 +1,6 @@
 /**
- * DOM helpers for the Documents editor (no React): scrolling the canvas to a page, and reading a
- * picture file for upload.
+ * DOM helpers for the Documents editor (no React): scrolling the canvas to a page or a module,
+ * and reading a picture file for upload.
  */
 import { pageDomId } from "@/lib/documents/editor-helpers";
 
@@ -8,6 +8,13 @@ export function scrollToPage(pageId: string) {
   document
     .getElementById(pageDomId(pageId))
     ?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Scroll a module's wrapper on the canvas into view (one just dropped where the pointer was). */
+export function scrollToModule(moduleId: string) {
+  document
+    .querySelector(`[data-module-id="${moduleId}"]`)
+    ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 /** Read a picture file: its data URL and pixel size. */
