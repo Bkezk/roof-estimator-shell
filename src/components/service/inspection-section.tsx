@@ -151,6 +151,7 @@ function InspectionBody({
             itemKey={item.id}
             itemLabel={item.label}
             photos={photos.data ?? []}
+            items={draft.items}
             ticketNumber={job.number}
             canEdit={canEdit}
           />

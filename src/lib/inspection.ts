@@ -32,12 +32,17 @@
  */
 import { z } from "zod";
 
-/** The starting checklist (seeded into inspection_checklist_items when the table is empty). */
+/**
+ * The starting checklist: the 20260930092000 seed (inspection_checklist_items when the table was
+ * empty) as 20261028131000 relabelled it (owner, Oct 28: "Flashings" → "Perimeter flashings",
+ * "Gutters/downspouts" added between Drains/scuppers and Penetrations).
+ */
 export const DEFAULT_CHECKLIST = [
   "Membrane condition",
   "Seams",
-  "Flashings",
+  "Perimeter flashings",
   "Drains/scuppers",
+  "Gutters/downspouts",
   "Penetrations",
   "Parapets/coping",
   "Ponding",
@@ -235,19 +240,105 @@ export function inspectionPayload(d: InspectionDraftFields): InspectionDraftFiel
   };
 }
 
-/** A photo row as the checklist's pictures read it (service_job_photos). */
+/**
+ * A photo row as the checklist's pictures read it (service_job_photos). `item_keys` is every
+ * checklist item the photo is on (service_job_photo_items, Oct 28: one photo on several items;
+ * listJobPhotos fills it); `item_key` is the first of them, kept for older rows and readers. A
+ * row that came without `item_keys` (an older JSON, a row another save wrote back into the list)
+ * reads its one item from `item_key`.
+ */
 export interface ItemPhotoLike {
   role: string;
   repair_id: string | null;
   item_key: string | null;
+  item_keys?: readonly string[] | undefined;
+}
+/** Every checklist item a photo is on: `item_keys` when the row carries it, else its `item_key`. */
+export function photoItemKeys(p: {
+  item_key: string | null;
+  item_keys?: readonly string[] | undefined;
+}): string[] {
+  if (p.item_keys) return [...p.item_keys];
+  return p.item_key ? [p.item_key] : [];
+}
+/** A ticket picture: role "other", on no repair (the signature, an aerial and a repair's are not). */
+export const isTicketPicture = (p: { role: string; repair_id: string | null }) =>
+  p.role === "other" && !p.repair_id;
+/** Is this ticket picture on the checklist item? */
+export function isPhotoOnItem(p: ItemPhotoLike, itemKey: string): boolean {
+  return isTicketPicture(p) && photoItemKeys(p).includes(itemKey);
+}
+/** The ticket pictures on one checklist item, in list order. */
+export function photosOnItem<T extends ItemPhotoLike>(photos: readonly T[], itemKey: string): T[] {
+  return photos.filter((p) => isPhotoOnItem(p, itemKey));
+}
+/**
+ * The ticket's photos on no checklist item at all (the findings roll, "Other photos"): ticket
+ * pictures — role "other", on no repair — with no link. A repair's Before / After, the signature
+ * and an aerial are never counted.
+ */
+export function unattachedTicketPhotos<T extends ItemPhotoLike>(photos: readonly T[]): T[] {
+  return photos.filter((p) => isTicketPicture(p) && photoItemKeys(p).length === 0);
 }
 /**
  * The ticket's photos the "From ticket photos" picker offers for a checklist item (owner, Oct
- * 26): loose pictures of the ticket — role "other", on no repair, attached to no item yet. A
- * repair's Before / After, the signature, an aerial and another item's pictures are not offered.
+ * 26; Oct 28: one photo may be on several items): every ticket picture not already on THIS item
+ * — the ones on another item too, marked "also on …" (alsoOnText). A repair's Before / After,
+ * the signature and an aerial are not offered.
  */
-export function unattachedTicketPhotos<T extends ItemPhotoLike>(photos: readonly T[]): T[] {
-  return photos.filter((p) => p.role === "other" && !p.repair_id && !p.item_key);
+export function attachableTicketPhotos<T extends ItemPhotoLike>(
+  photos: readonly T[],
+  itemKey: string,
+): T[] {
+  return photos.filter((p) => isTicketPicture(p) && !photoItemKeys(p).includes(itemKey));
+}
+/** The item keys with `itemKey` added at the end (attach) or taken out (detach); no repeats. */
+export function toggleItemKey(keys: readonly string[], itemKey: string, on: boolean): string[] {
+  const rest = keys.filter((k, i) => k !== itemKey && keys.indexOf(k) === i);
+  return on ? [...rest, itemKey] : rest;
+}
+/**
+ * The primary item (service_job_photos.item_key) for a set of links: the current one while it is
+ * still in the set, else the first of the set, else null — the database trigger's rule
+ * (20261028130000 photo_item_links_sync_primary).
+ */
+export function primaryItemKey(current: string | null, keys: readonly string[]): string | null {
+  if (current && keys.includes(current)) return current;
+  return keys[0] ?? null;
+}
+/**
+ * The labels of the OTHER checklist items a photo is on (not `itemKey`), in checklist order; an
+ * item no longer on the checklist is left out.
+ */
+export function otherItemLabels(
+  p: ItemPhotoLike,
+  itemKey: string,
+  items: ReadonlyArray<{ id: string; label: string }>,
+): string[] {
+  const keys = photoItemKeys(p).filter((k) => k !== itemKey);
+  return items.filter((i) => keys.includes(i.id)).map((i) => i.label);
+}
+/** "also on Seams", "also on Seams and Debris", "also on Seams, Drains and Debris"; "" for none. */
+export function alsoOnText(labels: readonly string[]): string {
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return `also on ${labels[0]}`;
+  return `also on ${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+/**
+ * Photo rows with their links folded in (listJobPhotos): `item_keys` = the photo's links in the
+ * order given (the server orders them earliest first); a photo with none gets [].
+ */
+export function withItemKeys<T extends { id: string }>(
+  photos: readonly T[],
+  links: ReadonlyArray<{ photo_id: string; item_key: string }>,
+): Array<T & { item_keys: string[] }> {
+  const by = new Map<string, string[]>();
+  for (const l of links) {
+    const list = by.get(l.photo_id) ?? [];
+    if (!list.includes(l.item_key)) list.push(l.item_key);
+    by.set(l.photo_id, list);
+  }
+  return photos.map((p) => ({ ...p, item_keys: by.get(p.id) ?? [] }));
 }
 
 /**

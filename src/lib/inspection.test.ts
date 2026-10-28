@@ -71,7 +71,7 @@ describe("the checklist on a ticket", () => {
   });
   it("summarises the answers: a row with no status reads as OK (owner, Oct 26), never 'not checked' or 'unanswered'", () => {
     expect(inspectionSummary(done.items)).toBe("2 issues · 1 OK · 1 N/A");
-    expect(inspectionSummary(mergeChecklist(null, checklist))).toBe("No issues · 10 OK");
+    expect(inspectionSummary(mergeChecklist(null, checklist))).toBe("No issues · 11 OK");
     expect(inspectionSummary([item("a", "Seams", "issue"), item("b", "Drains", null)])).toBe(
       "1 issue · 1 OK",
     );
@@ -248,9 +248,50 @@ describe("the migration", () => {
     ),
     "utf8",
   );
-  it("seeds the same default checklist, in the same order", () => {
-    const seeded = [...sql.matchAll(/\('([^']+)', (\d+)\)/g)].map((m) => m[1]);
-    expect(seeded).toEqual([...DEFAULT_CHECKLIST]);
+  it("seeds the checklist that, as 20261028131000 relabels it, is DEFAULT_CHECKLIST in the same order", () => {
+    const seeded = [...sql.matchAll(/\('([^']+)', (\d+)\)/g)].map((m) => ({
+      label: m[1]!,
+      sort: Number(m[2]),
+    }));
+    // The Sept 30 seed as it was: Flashings at 30, no gutters row.
+    expect(seeded.map((r) => r.label)).toEqual([
+      "Membrane condition",
+      "Seams",
+      "Flashings",
+      "Drains/scuppers",
+      "Penetrations",
+      "Parapets/coping",
+      "Ponding",
+      "Debris",
+      "Sealants",
+      "Recommend repairs",
+    ]);
+    // The Oct 28 label migration applied to it (the rename, the new row at 45) is the live list.
+    const labels = readFileSync(
+      new URL(
+        "../../supabase/migrations/20261028131000_inspection_checklist_labels.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const flat = labels
+      .replace(/--[^\n]*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    expect(flat).toContain(
+      "update public.inspection_checklist_items set label = 'Perimeter flashings' where label = 'Flashings';",
+    );
+    expect(flat).toContain(
+      "insert into public.inspection_checklist_items (label, sort) select 'Gutters/downspouts', 45 where not exists ( select 1 from public.inspection_checklist_items where label = 'Gutters/downspouts');",
+    );
+    expect(flat).not.toContain("delete from");
+    const live = [
+      ...seeded.map((r) => (r.label === "Flashings" ? { ...r, label: "Perimeter flashings" } : r)),
+      { label: "Gutters/downspouts", sort: 45 },
+    ]
+      .sort((a, b) => a.sort - b.sort)
+      .map((r) => r.label);
+    expect(live).toEqual([...DEFAULT_CHECKLIST]);
   });
   it("lets a photo be an aerial, with its annotations, and links a ticket to its inspection", () => {
     expect(sql).toMatch(/check \(role in \('before','after','other','signature','aerial'\)\)/);

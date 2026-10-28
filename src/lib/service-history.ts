@@ -13,6 +13,8 @@
  */
 import { z } from "zod";
 
+import { isPhotoOnItem, type ItemPhotoLike } from "@/lib/inspection";
+
 /** `?open=history` on a ticket's URL opens the fold on arrival (My tickets' strip links so). */
 export const HISTORY_OPEN_PARAM = "history";
 /** The strip when there is nothing before (muted on the ticket page; left out on My tickets). */
@@ -44,6 +46,8 @@ export const historyPhotoSchema = z.object({
   role: z.string(),
   repair_id: text,
   item_key: text,
+  /** Every checklist item the photo is on (Oct 28); absent from a JSON made before then. */
+  item_keys: z.array(z.string()).optional(),
   taken_at: text,
   created_at: z.string(),
   annotations: jsonSchema.nullable().default(null),
@@ -207,11 +211,12 @@ export function orderHistory<T extends Dated & { location_id: string | null }>(
 
 // ── The inspection item match ──────────────────────────────────────────────────────────────
 
-/** A checklist item's photos on a ticket: role "other", on no repair, item_key the item's id. */
-const itemPhotos = <P extends { role: string; repair_id: string | null; item_key: string | null }>(
-  photos: readonly P[],
-  itemKey: string,
-) => photos.filter((p) => p.role === "other" && !p.repair_id && p.item_key === itemKey);
+/**
+ * A checklist item's photos on a ticket: role "other", on no repair, the item among its
+ * `item_keys` (a photo may be on several items, Oct 28; an older JSON has only `item_key`).
+ */
+const itemPhotos = <P extends ItemPhotoLike>(photos: readonly P[], itemKey: string) =>
+  photos.filter((p) => isPhotoOnItem(p, itemKey));
 
 /**
  * The newest earlier ticket (rows newest first) with a photo taken for this checklist item, and

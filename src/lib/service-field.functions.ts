@@ -38,6 +38,7 @@ import { insertClockEntry } from "@/lib/clock-close.server";
 import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { mentionedIds } from "@/lib/mentions";
 import { mentionRoster } from "@/lib/auth.functions";
+import { primaryItemKey, withItemKeys } from "@/lib/inspection";
 import {
   SERVICE_CATEGORY,
   materialsByCell,
@@ -64,6 +65,13 @@ export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"][
 export type RepairTemplateRow = Database["public"]["Tables"]["repair_templates"]["Row"];
 export type JobRepairRow = Database["public"]["Tables"]["service_job_repairs"]["Row"];
 export type JobPhotoRow = Database["public"]["Tables"]["service_job_photos"]["Row"];
+/**
+ * A photo row with every checklist item it is on (service_job_photo_items, Oct 28; earliest link
+ * first). `item_key` on the row is the first of them, kept for older readers. What listJobPhotos,
+ * registerJobPhoto, savePhotoAnnotations and setJobPhotoItems hand back, so the ticket's photo
+ * list (fieldKeys.photos) always carries the links.
+ */
+export type JobPhotoWithItems = JobPhotoRow & { item_keys: string[] };
 export type JobEventRow = Database["public"]["Tables"]["service_job_events"]["Row"];
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
@@ -1200,10 +1208,37 @@ export const deleteJobRepair = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
+/**
+ * The checklist links of these photos (service_job_photo_items), earliest first — one read for a
+ * whole list, so every photo carries `item_keys` (inspection.ts withItemKeys). RLS: a link is
+ * readable where its photo is.
+ */
+async function photoLinks(
+  sb: SupabaseClient<Database>,
+  photoIds: readonly string[],
+): Promise<Array<{ photo_id: string; item_key: string }>> {
+  if (photoIds.length === 0) return [];
+  const { data, error } = await sb
+    .from("service_job_photo_items")
+    .select("photo_id, item_key, created_at")
+    .in("photo_id", [...photoIds])
+    .order("created_at")
+    .order("item_key");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((l) => ({ photo_id: l.photo_id, item_key: l.item_key }));
+}
+/** One photo row with its links folded in. */
+async function photoWithItems(
+  sb: SupabaseClient<Database>,
+  row: JobPhotoRow,
+): Promise<JobPhotoWithItems> {
+  return withItemKeys([row], await photoLinks(sb, [row.id]))[0]!;
+}
+
 export const listJobPhotos = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<JobPhotoRow[]> => {
+  .handler(async ({ data, context }): Promise<JobPhotoWithItems[]> => {
     await me(context);
     const { data: rows, error } = await context.supabase
       .from("service_job_photos")
@@ -1211,7 +1246,14 @@ export const listJobPhotos = createServerFn({ method: "GET" })
       .eq("service_job_id", data.id)
       .order("created_at");
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    const photos = rows ?? [];
+    return withItemKeys(
+      photos,
+      await photoLinks(
+        context.supabase,
+        photos.map((p) => p.id),
+      ),
+    );
   });
 
 /** Safe object name inside the bucket: <job id>/<time>-<random>.<ext>. */
@@ -1220,6 +1262,8 @@ export function photoObjectPath(jobId: string, fileName: string): string {
   return `${jobId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 }
 
+/** The most checklist items one photo goes on (the checklist itself is about ten rows). */
+export const ITEM_LINKS_MAX = 40;
 const photoSchema = z.object({
   service_job_id: z.string().uuid(),
   repair_id: z.string().uuid().nullable().optional(),
@@ -1230,6 +1274,11 @@ const photoSchema = z.object({
    * repair's photo or the findings step's general roll.
    */
   item_key: z.string().min(1).max(60).nullable().optional(),
+  /**
+   * Every checklist item the photo is taken for (Oct 28: one photo on several items); the first
+   * is the row's item_key. Given alone or with item_key (then the union, item_key first).
+   */
+  item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX).optional(),
   storage_path: z.string().min(1).max(300),
   file_name: z.string().max(200).nullable().optional(),
   file_size: z.number().int().nonnegative().nullable().optional(),
@@ -1237,22 +1286,37 @@ const photoSchema = z.object({
   lat: z.number().finite().nullable().optional(),
   lng: z.number().finite().nullable().optional(),
 });
+/** The checklist items a registration names, item_key first, no repeats (exported for its test). */
+export function registrationItemKeys(d: {
+  item_key?: string | null | undefined;
+  item_keys?: readonly string[] | undefined;
+}): string[] {
+  const out: string[] = [];
+  for (const k of [d.item_key ?? null, ...(d.item_keys ?? [])])
+    if (k && !out.includes(k)) out.push(k);
+  return out;
+}
 /** Record an uploaded photo (the browser uploaded it to the "service" bucket already). */
 export const registerJobPhoto = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => photoSchema.parse(d))
-  .handler(async ({ data, context }): Promise<JobPhotoRow> => {
+  .handler(async ({ data, context }): Promise<JobPhotoWithItems> => {
     const p = await me(context);
     const job = await ownJob(context, data.service_job_id);
     if (!data.storage_path.startsWith(`${job.id}/`))
       throw new Error("The photo must be stored under the ticket's own folder");
-    const { data: r, error } = await context.supabase
+    const itemKeys = registrationItemKeys(data);
+    if (itemKeys.length && (data.role !== "other" || data.repair_id))
+      throw new Error(
+        "Only a loose ticket photo (not a repair's or the signature) goes on a checklist item",
+      );
+    const { data: row, error } = await context.supabase
       .from("service_job_photos")
       .insert({
         service_job_id: job.id,
         repair_id: data.repair_id ?? null,
         role: data.role,
-        item_key: data.item_key ?? null,
+        item_key: itemKeys[0] ?? null,
         storage_path: data.storage_path,
         file_name: data.file_name ?? null,
         file_size: data.file_size ?? null,
@@ -1264,6 +1328,16 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // The links (the database trigger adds the first from item_key; every one here, so the
+    // row is right without it and the rest land too).
+    if (itemKeys.length) {
+      const { error: lErr } = await context.supabase.from("service_job_photo_items").upsert(
+        itemKeys.map((item_key) => ({ photo_id: row.id, item_key })),
+        { onConflict: "photo_id,item_key" },
+      );
+      if (lErr) throw new Error(lErr.message);
+    }
+    const r: JobPhotoWithItems = { ...row, item_keys: itemKeys };
     if (data.role === "signature") {
       await context.supabase
         .from("service_jobs")
@@ -1279,7 +1353,8 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
           meta: {
             role: data.role,
             repair_id: data.repair_id ?? null,
-            item_key: data.item_key ?? null,
+            item_key: itemKeys[0] ?? null,
+            item_keys: itemKeys,
           },
         },
         nameOf(p),
@@ -1326,7 +1401,7 @@ export const savePhotoAnnotationsInput = z.object({
 export const savePhotoAnnotations = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => savePhotoAnnotationsInput.parse(d))
-  .handler(async ({ data, context }): Promise<JobPhotoRow> => {
+  .handler(async ({ data, context }): Promise<JobPhotoWithItems> => {
     const job = await ownJob(context, data.service_job_id);
     const sb = context.supabase;
     const { data: photo, error: pErr } = await sb
@@ -1351,10 +1426,85 @@ export const savePhotoAnnotations = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    return row;
+    return photoWithItems(sb, row);
   });
 
-/** Attach a ticket photo to a checklist item, or detach it (item_key null): the photo, its ticket, the item. */
+/** The checklist items a ticket photo is on, in full: the photo, its ticket, the items (none = on no item). */
+export const setJobPhotoItemsInput = z.object({
+  id: z.string().uuid(),
+  service_job_id: z.string().uuid(),
+  /** inspection_checklist_items.id as kept in the ticket's inspection JSON, each; [] takes the photo off every item. */
+  item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX),
+});
+/**
+ * Owner, Oct 26: "add pictures from the service ticket to each part of the inspection"; Oct 28:
+ * "you should be able to associate one photo to multiple inspection checklist items". A loose
+ * ticket photo (role "other", on no repair) is put on exactly these checklist items: links
+ * (service_job_photo_items) not in the set are removed, missing ones added, and the row's
+ * item_key becomes the primary — the one it had while still in the set, else the first
+ * (inspection.ts primaryItemKey; the database trigger of 20261028130000 applies the same rule,
+ * so the row is written here only so the answer is right without a re-read). The row stays the
+ * ticket's; Detach on one row removes that one link and the photo stays on its other items and on
+ * the ticket. The same rules as recording a photo or saving its marks: Service access, and a
+ * technician only on their own ticket (ownJob). A repair's Before / After, the signature and an
+ * aerial never go onto an item.
+ */
+export const setJobPhotoItems = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => setJobPhotoItemsInput.parse(d))
+  .handler(({ data, context }) => applyPhotoItems(context, data));
+
+async function applyPhotoItems(
+  context: Ctx,
+  data: z.infer<typeof setJobPhotoItemsInput>,
+): Promise<JobPhotoWithItems> {
+  const job = await ownJob(context, data.service_job_id);
+  const sb = context.supabase;
+  const { data: photo, error: pErr } = await sb
+    .from("service_job_photos")
+    .select("id, role, repair_id, item_key")
+    .eq("id", data.id)
+    .eq("service_job_id", job.id)
+    .maybeSingle();
+  if (pErr) throw new Error(pErr.message);
+  if (!photo) throw new Error("That photo is not on this ticket (it may have been deleted)");
+  const keys = data.item_keys.filter((k, i, a) => a.indexOf(k) === i);
+  if (keys.length && (photo.role !== "other" || photo.repair_id))
+    throw new Error(
+      "Only a loose ticket photo (not a repair's, the signature or an aerial) goes on a checklist item",
+    );
+  const current = await photoLinks(sb, [photo.id]);
+  const gone = current.map((l) => l.item_key).filter((k) => !keys.includes(k));
+  if (gone.length) {
+    const { error } = await sb
+      .from("service_job_photo_items")
+      .delete()
+      .eq("photo_id", photo.id)
+      .in("item_key", gone);
+    if (error) throw new Error(error.message);
+  }
+  const fresh = keys.filter((k) => !current.some((l) => l.item_key === k));
+  if (fresh.length) {
+    const { error } = await sb.from("service_job_photo_items").upsert(
+      fresh.map((item_key) => ({ photo_id: photo.id, item_key })),
+      { onConflict: "photo_id,item_key" },
+    );
+    if (error) throw new Error(error.message);
+  }
+  // The links as they now stand (the kept ones in their order, the new ones after).
+  const itemKeys = [...current.map((l) => l.item_key).filter((k) => keys.includes(k)), ...fresh];
+  const { data: row, error } = await sb
+    .from("service_job_photos")
+    .update({ item_key: primaryItemKey(photo.item_key, itemKeys) })
+    .eq("id", photo.id)
+    .eq("service_job_id", job.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return { ...row, item_keys: itemKeys };
+}
+
+/** The one-item form (older callers): the photo, its ticket, the item — null detaches from every item. */
 export const setJobPhotoItemInput = z.object({
   id: z.string().uuid(),
   service_job_id: z.string().uuid(),
@@ -1362,41 +1512,19 @@ export const setJobPhotoItemInput = z.object({
   item_key: z.string().min(1).max(60).nullable(),
 });
 /**
- * Owner, Oct 26: "add pictures from the service ticket to each part of the inspection". A loose
- * ticket photo (role "other", on no repair) is attached to a checklist item by setting its
- * item_key — the row stays the ticket's, only its place in the checklist changes; Detach sets it
- * back to null and the photo stays on the ticket. The same rules as recording a photo or saving
- * its marks: Service access, and a technician only on their own ticket (ownJob). A repair's
- * Before / After, the signature and an aerial never move onto an item.
+ * The Oct 26 one-item call, kept as a thin wrapper over setJobPhotoItems: an item puts the photo
+ * on that item alone; null takes it off every item.
  */
 export const setJobPhotoItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => setJobPhotoItemInput.parse(d))
-  .handler(async ({ data, context }): Promise<JobPhotoRow> => {
-    const job = await ownJob(context, data.service_job_id);
-    const sb = context.supabase;
-    const { data: photo, error: pErr } = await sb
-      .from("service_job_photos")
-      .select("id, role, repair_id")
-      .eq("id", data.id)
-      .eq("service_job_id", job.id)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    if (!photo) throw new Error("That photo is not on this ticket (it may have been deleted)");
-    if (data.item_key !== null && (photo.role !== "other" || photo.repair_id))
-      throw new Error(
-        "Only a loose ticket photo (not a repair's, the signature or an aerial) goes on a checklist item",
-      );
-    const { data: row, error } = await sb
-      .from("service_job_photos")
-      .update({ item_key: data.item_key })
-      .eq("id", photo.id)
-      .eq("service_job_id", job.id)
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
-    return row;
-  });
+  .handler(({ data, context }): Promise<JobPhotoWithItems> =>
+    applyPhotoItems(context, {
+      id: data.id,
+      service_job_id: data.service_job_id,
+      item_keys: data.item_key === null ? [] : [data.item_key],
+    }),
+  );
 
 const closeoutSchema = z.object({
   id: z.string().uuid(),

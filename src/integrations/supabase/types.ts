@@ -3123,6 +3123,32 @@ export type Database = {
           },
         ];
       };
+      service_job_photo_items: {
+        Row: {
+          created_at: string;
+          item_key: string;
+          photo_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          item_key: string;
+          photo_id: string;
+        };
+        Update: {
+          created_at?: string;
+          item_key?: string;
+          photo_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_photo_items_photo_id_fkey";
+            columns: ["photo_id"];
+            isOneToOne: false;
+            referencedRelation: "service_job_photos";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       service_job_photos: {
         Row: {
           annotations: Json | null;

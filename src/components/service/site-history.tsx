@@ -332,7 +332,12 @@ function HistoryRow({
 // ── The photos ─────────────────────────────────────────────────────────────────────────────
 
 /** A history photo as the viewer's row type (the fields the lightbox reads, the rest empty). */
-const asPhotoRow = (ticketId: string, p: HistoryPhoto): JobPhotoRow => ({
+const asPhotoRow = (
+  ticketId: string,
+  p: HistoryPhoto,
+): JobPhotoRow & { item_keys?: string[] | undefined } => ({
+  // Every item the photo is on (Oct 28), when the JSON carries it; an older JSON has item_key only.
+  ...(p.item_keys ? { item_keys: p.item_keys } : {}),
   id: p.id,
   service_job_id: ticketId,
   repair_id: p.repair_id,

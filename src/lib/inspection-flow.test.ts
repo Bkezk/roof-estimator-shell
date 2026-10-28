@@ -79,7 +79,12 @@ import {
   type Inspection,
 } from "@/lib/inspection";
 import { CHECKLIST_NOT_SAVED } from "@/lib/closeout-check";
-import { setFieldStatus, setJobPhotoItem } from "@/lib/service-field.functions";
+import {
+  registerJobPhoto,
+  setFieldStatus,
+  setJobPhotoItem,
+  setJobPhotoItems,
+} from "@/lib/service-field.functions";
 import {
   createRepairFromInspection,
   getTicketInspection,
@@ -1028,13 +1033,16 @@ describe("6c. photos: per checklist item and the findings roll, role 'other', no
     expect(camera).toContain('"data-camera": "inspection",');
     expect(cards).toContain("camera={camera.controls(item.id)}");
     expect(cards).toContain("camera={camera.controls(null)}");
+    // Oct 28: an item's roll is every picture whose item_keys include it; the findings roll the
+    // pictures on no item (inspection.ts).
     expect(cards).toContain(
-      'photos.filter((p) => p.role === "other" && !p.repair_id && (p.item_key ?? null) === itemKey);',
+      "itemKey === null ? unattachedTicketPhotos(photos) : photosOnItem(photos, itemKey);",
     );
     expect(cards.match(/<PhotoRoll/g)).toHaveLength(2);
     expect(cards).toContain('<span className="text-xs text-muted-foreground">Optional</span>');
     expect(fieldFn).toContain("item_key: z.string().min(1).max(60).nullable().optional(),");
-    expect(fieldFn).toContain("item_key: data.item_key ?? null,");
+    // Oct 28: the row's item_key is the first of the registration's items (item_key, then item_keys).
+    expect(fieldFn).toContain("item_key: itemKeys[0] ?? null,");
     expect(types).toContain("item_key: string | null;");
     // The ticket page lists every non-signature photo; loose ones under "Other photos".
     const page = read("src/components/service/ticket-field-sections.tsx");
@@ -1093,7 +1101,11 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
     photoRow({ id: REPAIR_PHOTO, repair_id: "r1", role: "before", storage_path: `${JOB}/3.jpg` }),
   ];
   it("the assigned technician attaches (item_key set) and detaches (null); the row comes back", async () => {
-    const tables = { ...envWith(job()), service_job_photos: photos() };
+    const tables = {
+      ...envWith(job()),
+      service_job_photos: photos(),
+      service_job_photo_items: [] as Row[],
+    };
     const row = await call<Row>(
       setJobPhotoItem,
       { id: PHOTO, service_job_id: JOB, item_key: "c1" },
@@ -1112,9 +1124,140 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
     // The photo stays on the ticket: nothing deleted, the path untouched.
     expect(tables.service_job_photos).toHaveLength(3);
     expect(tables.service_job_photos[1]!["storage_path"]).toBe(`${JOB}/2.jpg`);
+    // The one-item call writes the link too (the wrapper over setJobPhotoItems).
+    expect(tables.service_job_photo_items).toEqual([
+      expect.objectContaining({ photo_id: PHOTO, item_key: "c1" }),
+    ]);
+  });
+  it("Oct 28: setJobPhotoItems puts a photo on several items; item_key stays the primary while linked, else the first; [] takes it off every item; the links table holds the rest", async () => {
+    // One fake across the calls (`call` copies the table record per call, and the fake's delete
+    // swaps a table's array, so a deleted link would stay visible to the next call otherwise).
+    const fake = fakeSupabase({
+      profiles,
+      ...envWith(job()),
+      service_job_photos: photos(),
+      service_job_photo_items: [] as Row[],
+    });
+    const run = <T>(data: Row, userId: string) =>
+      (setJobPhotoItems as unknown as Fn)({
+        data,
+        context: { supabase: fake.db, userId },
+      }) as Promise<T>;
+    const links = () =>
+      (fake.tables["service_job_photo_items"] ?? [])
+        .filter((l) => l["photo_id"] === PHOTO)
+        .map((l) => l["item_key"]);
+    const photoRowNow = () => fake.tables["service_job_photos"]!.find((p) => p["id"] === PHOTO)!;
+    const on = await run<Row>(
+      { id: PHOTO, service_job_id: JOB, item_keys: ["c1", "c2", "c1"] },
+      TECH,
+    );
+    expect(on).toMatchObject({ id: PHOTO, item_key: "c1", item_keys: ["c1", "c2"] });
+    expect(links().sort()).toEqual(["c1", "c2"]);
+    expect(photoRowNow()["item_key"]).toBe("c1");
+    // c1 goes, c3 comes: the primary moves to the first link still there (c2), not to c3.
+    const moved = await run<Row>(
+      { id: PHOTO, service_job_id: JOB, item_keys: ["c3", "c2"] },
+      OFFICE,
+    );
+    expect(moved).toMatchObject({ item_key: "c2", item_keys: ["c2", "c3"] });
+    expect(links().sort()).toEqual(["c2", "c3"]);
+    expect(photoRowNow()["item_key"]).toBe("c2");
+    // Adding an item keeps the primary.
+    const more = await run<Row>(
+      { id: PHOTO, service_job_id: JOB, item_keys: ["c2", "c3", "c4"] },
+      OFFICE,
+    );
+    expect(more).toMatchObject({ item_key: "c2", item_keys: ["c2", "c3", "c4"] });
+    expect(links().sort()).toEqual(["c2", "c3", "c4"]);
+    // Off every item: no links, item_key null, the row still on the ticket.
+    const off = await run<Row>({ id: PHOTO, service_job_id: JOB, item_keys: [] }, TECH);
+    expect(off).toMatchObject({ item_key: null, item_keys: [] });
+    expect(links()).toEqual([]);
+    expect(photoRowNow()["item_key"]).toBeNull();
+    expect(fake.tables["service_job_photos"]).toHaveLength(3);
+    // Nothing of another photo's was touched.
+    expect(fake.writes.every((w) => w.table !== "service_job_photos" || w.rows === 1)).toBe(true);
+    // A repair's photo never goes on an item; the list is capped.
+    await expect(
+      run({ id: REPAIR_PHOTO, service_job_id: JOB, item_keys: ["c1"] }, TECH),
+    ).rejects.toThrow("Only a loose ticket photo");
+    await expect(
+      Promise.resolve().then(() =>
+        run(
+          {
+            id: PHOTO,
+            service_job_id: JOB,
+            item_keys: Array.from({ length: 41 }, (_, i) => `k${i}`),
+          },
+          TECH,
+        ),
+      ),
+    ).rejects.toThrow();
+    expect(fieldFn).toContain("item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX),");
+    expect(fieldFn).toContain("export const ITEM_LINKS_MAX = 40;");
+  });
+  it("Oct 28: registerJobPhoto takes item_keys (the camera's item_key still works): the row's item_key is the first, every link is written, the event names them all", async () => {
+    const tables = {
+      ...envWith(job()),
+      service_job_photos: [] as Row[],
+      service_job_photo_items: [] as Row[],
+    };
+    const row = await call<Row>(
+      registerJobPhoto,
+      {
+        service_job_id: JOB,
+        role: "other",
+        storage_path: `${JOB}/new.jpg`,
+        item_key: "c2",
+        item_keys: ["c1", "c2"],
+      },
+      tables,
+      TECH,
+    );
+    expect(row).toMatchObject({ item_key: "c2", item_keys: ["c2", "c1"] });
+    expect(tables.service_job_photo_items.map((l) => l["item_key"]).sort()).toEqual(["c1", "c2"]);
+    const event = tables.service_job_events.find((e) => e["kind"] === "photo");
+    expect(event?.["meta"]).toMatchObject({ item_key: "c2", item_keys: ["c2", "c1"] });
+    // Without any item: no link, as before.
+    const loose = await call<Row>(
+      registerJobPhoto,
+      { service_job_id: JOB, role: "other", storage_path: `${JOB}/loose.jpg` },
+      tables,
+      TECH,
+    );
+    expect(loose).toMatchObject({ item_key: null, item_keys: [] });
+    expect(tables.service_job_photo_items).toHaveLength(2);
+    // A repair's photo with items is refused.
+    await expect(
+      call(
+        registerJobPhoto,
+        {
+          service_job_id: JOB,
+          role: "before",
+          repair_id: "44444444-4444-4444-8444-444444444444",
+          storage_path: `${JOB}/r.jpg`,
+          item_keys: ["c1"],
+        },
+        tables,
+        TECH,
+      ),
+    ).rejects.toThrow("Only a loose ticket photo");
+    expect(fieldFn).toContain(
+      "item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX).optional(),",
+    );
+    expect(fieldFn).toContain("item_key: itemKeys[0] ?? null,");
+    // The list the screens read carries every link.
+    expect(fieldFn).toContain("Promise<JobPhotoWithItems[]>");
+    expect(fieldFn).toContain('.from("service_job_photo_items")');
+    expect(types).toContain("service_job_photo_items: {");
   });
   it("another technician is refused (ownJob); a repair's photo never moves onto an item; a photo off this ticket is not found; item_key is capped at 60", async () => {
-    const tables = { ...envWith(job()), service_job_photos: photos() };
+    const tables = {
+      ...envWith(job()),
+      service_job_photos: photos(),
+      service_job_photo_items: [] as Row[],
+    };
     const other = { ...tables, profiles: [...profiles, { ...profiles[0]!, id: OTHER_JOB }] };
     await expect(
       call(setJobPhotoItem, { id: PHOTO, service_job_id: JOB, item_key: "c1" }, other, OTHER_JOB),
@@ -1146,12 +1289,14 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
       ),
     ).rejects.toThrow();
     expect(tables.service_job_photos[0]!["item_key"]).toBeNull();
-    // The guard is ownJob, as on registerJobPhoto / savePhotoAnnotations.
-    const fn = fieldFn.slice(fieldFn.indexOf("export const setJobPhotoItem ="));
+    // The guard is ownJob, as on registerJobPhoto / savePhotoAnnotations — in the shared
+    // applyPhotoItems both setJobPhotoItems and the one-item wrapper run through (Oct 28).
+    const fn = fieldFn.slice(fieldFn.indexOf("async function applyPhotoItems("));
     expect(fn.slice(0, fn.indexOf("const closeoutSchema"))).toContain(
       "const job = await ownJob(context, data.service_job_id);",
     );
     expect(fieldFn).toContain("item_key: z.string().min(1).max(60).nullable(),");
+    expect(fieldFn).toContain("item_keys: data.item_key === null ? [] : [data.item_key],");
   });
 });
 
@@ -1183,14 +1328,21 @@ describe("6f. the screens: compact rows, pictures from the ticket, Property insp
   });
   it("pictures from the ticket: the picker lists the loose photos, Attach sets item_key, Detach clears it, on both screens", () => {
     expect(itemPhotos).toContain("export function TicketPhotoPicker({");
-    expect(itemPhotos).toContain("const loose = unattachedTicketPhotos(photos);");
+    // Oct 28: the picker offers every picture not on THIS item (one photo on several items);
+    // Detach removes this item's link only.
+    expect(itemPhotos).toContain("const pickable = attachableTicketPhotos(photos, itemKey);");
     expect(itemPhotos).toContain("From ticket photos");
-    expect(itemPhotos).toContain("setItem.mutate({ ids: [p.id], item_key: null })");
-    expect(itemPhotos).toContain("setItem.mutate({ ids, item_key: itemKey }");
+    expect(itemPhotos).toContain(
+      "setItem.mutate({ ids: [p.id], item_key: itemKey, attach: false })",
+    );
+    expect(itemPhotos).toMatch(/setItem\.mutate\(\s*\{ ids, item_key: itemKey, attach: true \},/);
     expect(mutations).toContain(
       "void qc.invalidateQueries({ queryKey: fieldKeys.photos(jobId) });",
     );
-    expect(mutations).toContain("const setFn = useServerFn(setJobPhotoItem);");
+    expect(mutations).toContain("const setFn = useServerFn(setJobPhotoItems);");
+    expect(mutations).toContain(
+      "const item_keys = toggleItemKey(photoItemKeys(photo), v.item_key, v.attach);",
+    );
     // The tile is RotatedPhoto: the photo turned as the ticket keeps it, its marks over it.
     expect(itemPhotos).toMatch(
       /<RotatedPhoto\s+url=\{url\.data\}\s+alt=""\s+marks=\{marks\}\s+rotation=\{rotation\}\s+fit="cover"/,

@@ -285,11 +285,15 @@ export interface PhotoTextModule extends ModuleBase {
   image: ImageRef | null;
   caption: string;
   text: RichDoc;
+  /** Printed picture height in inches (owner, Oct 28); absent or 0 = the picture's own shape in its column. */
+  photoHeightIn?: number | undefined;
 }
 export interface TwoPhotosModule extends ModuleBase {
   type: "twoPhotos";
   images: [ImageRef | null, ImageRef | null];
   captions: [string, string];
+  /** Printed picture height in inches (owner, Oct 28); absent or 0 = up to 4 in, the width deciding. */
+  photoHeightIn?: number | undefined;
 }
 export interface TableModule extends ModuleBase {
   type: "table";
@@ -319,6 +323,8 @@ export interface PhotoGridModule extends ModuleBase {
   type: "photoGrid";
   images: Array<{ image: ImageRef; caption: string }>;
   columns: 2 | 3;
+  /** Each cell's picture height in inches (owner, Oct 28); absent or 0 = the cell's 4:3 box. */
+  photoHeightIn?: number | undefined;
 }
 /**
  * The inspection's findings (phase 2): one row per checklist item flagged as an issue — the
@@ -332,6 +338,8 @@ export interface RepairListModule extends ModuleBase {
   photos: boolean;
   /** Also list the items found OK (a full checklist), not only the issues. */
   allItems: boolean;
+  /** Each row's thumbnails' height in inches (owner, Oct 28); absent or 0 = 1.6 × 1.2 in, three a line. */
+  photoHeightIn?: number | undefined;
 }
 export interface PdfModule extends ModuleBase {
   type: "pdf";
@@ -355,6 +363,50 @@ export type DocModule =
   | PdfModule
   | PhotoGridModule
   | RepairListModule;
+
+// ------------------------------------------------------------------------- picture sizes
+
+/**
+ * The picture size on a photo-carrying module (owner, Oct 28: "we need to be able to resize the
+ * photo on the document editor" — on every ticket and bid document, whatever template it came
+ * from). Full Photo has had `heightIn` since Oct 26; Photo on left / right, Two Photos, Photo Grid
+ * and Repair List carry `photoHeightIn` the same way: inches, 0 or absent = today's shape (the
+ * key is left out of the saved JSON then — never written as undefined), at most PHOTO_HEIGHT_MAX.
+ * The editor offers Small / Medium / Large and an exact box.
+ */
+export const PHOTO_HEIGHT_MAX = 9;
+export const PHOTO_SIZE_PRESETS = [
+  { label: "Small", heightIn: 1.5 },
+  { label: "Medium", heightIn: 2.5 },
+  { label: "Large", heightIn: 4 },
+] as const;
+const photoHeightSchema = z.number().min(0).max(PHOTO_HEIGHT_MAX).optional();
+/** The modules that carry pictures and so a size setting (the letterhead's logo is not a photo). */
+export const PICTURE_MODULE_TYPES = [
+  "fullPhoto",
+  "photoLeft",
+  "photoRight",
+  "twoPhotos",
+  "photoGrid",
+  "repairList",
+] as const satisfies readonly ModuleType[];
+/** The modules whose size is `photoHeightIn` (Full Photo keeps its own `heightIn`). */
+export type PhotoHeightModule =
+  PhotoTextModule | TwoPhotosModule | PhotoGridModule | RepairListModule;
+/** A module's picture height in inches: 0 when absent, 0 or not a finite number. */
+export function photoHeightOf(m: { photoHeightIn?: number | undefined }): number {
+  const h = m.photoHeightIn;
+  return typeof h === "number" && Number.isFinite(h) && h > 0 ? Math.min(h, PHOTO_HEIGHT_MAX) : 0;
+}
+/**
+ * The module with its picture height set: a positive height (clamped to PHOTO_HEIGHT_MAX) is
+ * written; 0 or less removes the key, so the saved JSON never carries 0 or undefined for "natural".
+ */
+export function withPhotoHeight<T extends PhotoHeightModule>(m: T, heightIn: number): T {
+  const { photoHeightIn: _old, ...rest } = m;
+  const h = Number.isFinite(heightIn) ? Math.min(Math.max(heightIn, 0), PHOTO_HEIGHT_MAX) : 0;
+  return (h > 0 ? { ...rest, photoHeightIn: h } : rest) as T;
+}
 
 const align = z.enum(["left", "center", "right"]);
 export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discriminatedUnion(
@@ -386,12 +438,14 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       image: imageRefSchema.nullable(),
       caption: z.string(),
       text: richDocSchema,
+      photoHeightIn: photoHeightSchema,
     }),
     z.object({
       id: z.string(),
       type: z.literal("twoPhotos"),
       images: z.tuple([imageRefSchema.nullable(), imageRefSchema.nullable()]),
       captions: z.tuple([z.string(), z.string()]),
+      photoHeightIn: photoHeightSchema,
     }),
     z.object({
       id: z.string(),
@@ -415,6 +469,7 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       type: z.literal("photoGrid"),
       images: z.array(z.object({ image: imageRefSchema, caption: z.string() })).max(60),
       columns: z.union([z.literal(2), z.literal(3)]),
+      photoHeightIn: photoHeightSchema,
     }),
     z.object({
       id: z.string(),
@@ -422,6 +477,7 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       rows: z.array(z.array(z.string())).nullable(),
       photos: z.boolean(),
       allItems: z.boolean(),
+      photoHeightIn: photoHeightSchema,
     }),
     z.object({
       id: z.string(),

@@ -23,6 +23,7 @@ import {
   type RichNode,
   type TextAlign,
   PAGE,
+  photoHeightOf,
   PT_PER_IN,
   resolveCellText,
   VARIABLE_NODE,
@@ -82,6 +83,31 @@ export const GRID_CAPTION_SIZE = 9;
 export const REPAIR_THUMB_WIDTH = 1.6 * PT_PER_IN;
 export const REPAIR_THUMBS_PER_LINE = 3;
 export const REPAIR_THUMB_HEIGHT = 1.2 * PT_PER_IN;
+/** Two Photos: each picture fits a box up to 4 in tall when no size is set. */
+export const TWO_PHOTOS_HEIGHT = 4 * PT_PER_IN;
+/**
+ * The Repair List's thumbnail box (owner, Oct 28: a size per module): with no size, 1.6 × 1.2 in
+ * and three a line; with `photoHeightIn`, a 4:3 box of that height, as many a line as fit the
+ * row's width (at least one, a box never wider than the row). The same rule draws the editor's
+ * thumbnails (module-view.tsx), so the screen and the PDF agree.
+ */
+export function repairThumbBox(
+  m: { photoHeightIn?: number | undefined },
+  width: number,
+): { thumbW: number; thumbH: number; perLine: number } {
+  const h = photoHeightOf(m);
+  if (h <= 0) {
+    const thumbW = Math.min(
+      REPAIR_THUMB_WIDTH,
+      (width - (REPAIR_THUMBS_PER_LINE - 1) * GRID_GUTTER) / REPAIR_THUMBS_PER_LINE,
+    );
+    return { thumbW, thumbH: REPAIR_THUMB_HEIGHT, perLine: REPAIR_THUMBS_PER_LINE };
+  }
+  const thumbH = h * PT_PER_IN;
+  const thumbW = Math.min(thumbH * GRID_BOX_RATIO, width);
+  const perLine = Math.max(1, Math.floor((width + GRID_GUTTER) / (thumbW + GRID_GUTTER)));
+  return { thumbW, thumbH, perLine };
+}
 /** The Repair List's empty state (also the editor's). */
 export const NO_INSPECTION_TEXT = "No inspection on this ticket";
 
@@ -826,7 +852,8 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
           m.caption,
           imgX,
           imgW,
-          CONTENT_HEIGHT * 0.6,
+          // The owner's size (Oct 28) when set, else the column's own limit.
+          photoHeightOf(m) > 0 ? photoHeightOf(m) * PT_PER_IN : CONTENT_HEIGHT * 0.6,
           ctx,
         ),
       };
@@ -840,33 +867,19 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
     case "twoPhotos": {
       const colW = (width - GUTTER) / 2;
       const rx = x + colW + GUTTER;
+      // The owner's size (Oct 28) when set, else up to 4 in (the width usually decides).
+      const boxH = photoHeightOf(m) > 0 ? photoHeightOf(m) * PT_PER_IN : TWO_PHOTOS_HEIGHT;
       return [
         columnsPiece([
           {
             x,
             width: colW,
-            pieces: imageWithCaption(
-              m.images[0],
-              `${m.id}:0`,
-              m.captions[0],
-              x,
-              colW,
-              4 * PT_PER_IN,
-              ctx,
-            ),
+            pieces: imageWithCaption(m.images[0], `${m.id}:0`, m.captions[0], x, colW, boxH, ctx),
           },
           {
             x: rx,
             width: colW,
-            pieces: imageWithCaption(
-              m.images[1],
-              `${m.id}:1`,
-              m.captions[1],
-              rx,
-              colW,
-              4 * PT_PER_IN,
-              ctx,
-            ),
+            pieces: imageWithCaption(m.images[1], `${m.id}:1`, m.captions[1], rx, colW, boxH, ctx),
           },
         ]),
       ];
@@ -928,7 +941,8 @@ export function layoutPhotoGrid(
 ): Piece[] {
   const n = m.columns;
   const cellW = (width - (n - 1) * GRID_GUTTER) / n;
-  const boxH = cellW / GRID_BOX_RATIO;
+  // The owner's size (Oct 28) when set, else the cell's 4:3 box.
+  const boxH = photoHeightOf(m) > 0 ? photoHeightOf(m) * PT_PER_IN : cellW / GRID_BOX_RATIO;
   const out: Piece[] = [];
   for (let start = 0; start < m.images.length; start += n) {
     const row = m.images.slice(start, start + n);
@@ -1025,12 +1039,9 @@ export function layoutRepairList(
     out.push(rowPiece);
     const ids = data.photoIds[ri] ?? [];
     if (!ids.length) return;
-    const thumbW = Math.min(
-      REPAIR_THUMB_WIDTH,
-      (width - (REPAIR_THUMBS_PER_LINE - 1) * GRID_GUTTER) / REPAIR_THUMBS_PER_LINE,
-    );
-    for (let start = 0; start < ids.length; start += REPAIR_THUMBS_PER_LINE) {
-      const line = ids.slice(start, start + REPAIR_THUMBS_PER_LINE);
+    const { thumbW, thumbH, perLine } = repairThumbBox(m, width);
+    for (let start = 0; start < ids.length; start += perLine) {
+      const line = ids.slice(start, start + perLine);
       out.push({ kind: "gap", height: 4 });
       out.push(
         columnsPiece(
@@ -1041,7 +1052,7 @@ export function layoutRepairList(
             const size = ctx.image(ref, key);
             const piece: Piece = size
               ? (() => {
-                  const fit = fitImage(size, thumbW, REPAIR_THUMB_HEIGHT);
+                  const fit = fitImage(size, thumbW, thumbH);
                   return {
                     kind: "image",
                     x: cx,
@@ -1055,7 +1066,7 @@ export function layoutRepairList(
                   kind: "placeholder",
                   x: cx,
                   width: thumbW,
-                  height: REPAIR_THUMB_HEIGHT * 0.6,
+                  height: thumbH * 0.6,
                   text: PLACEHOLDER_TEXT,
                 };
             return { x: cx, width: thumbW, pieces: [piece] };

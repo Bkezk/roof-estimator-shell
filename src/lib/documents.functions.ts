@@ -23,7 +23,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { managesTickets } from "@/lib/access";
 import { easternYmd } from "@/lib/field-day";
-import { parseInspection } from "@/lib/inspection";
+import { parseInspection, withItemKeys } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
 import { parsePhotoMarkup, type PhotoMark, type Rotation } from "@/lib/photo-annotations";
 import { toBase64 } from "@/lib/webpush";
@@ -762,8 +762,9 @@ async function loadSource(
 
 /**
  * An inspection ticket's snapshot (phase 2): the saved checklist (service_jobs.inspection) merged
- * with the live checklist, each item's photos (role other, no repair, item_key = the item), and
- * the technician's name (else the inspection's saved_by). server-pure.ts inspectionSnapshotFrom.
+ * with the live checklist, each item's photos (role other, no repair, on the item — every item
+ * the photo is linked to, service_job_photo_items, Oct 28), and the technician's name (else the
+ * inspection's saved_by). server-pure.ts inspectionSnapshotFrom.
  */
 async function loadInspection(
   sb: Client,
@@ -777,7 +778,6 @@ async function loadInspection(
       .eq("service_job_id", row.id)
       .eq("role", "other")
       .is("repair_id", null)
-      .not("item_key", "is", null)
       .order("created_at"),
     row.technician_id
       ? sb.from("profiles").select("full_name, email").eq("id", row.technician_id).maybeSingle()
@@ -786,9 +786,28 @@ async function loadInspection(
   return inspectionSnapshotFrom(
     parseInspection(row.inspection),
     checklist.data ?? [],
-    photos.data ?? [],
+    await withPhotoLinks(sb, photos.data ?? []),
     displayName(tech.data),
   );
+}
+
+/** Photo rows with `item_keys` — every checklist item each is on (service_job_photo_items), earliest link first. */
+async function withPhotoLinks<T extends { id: string }>(
+  sb: Client,
+  photos: readonly T[],
+): Promise<Array<T & { item_keys: string[] }>> {
+  if (photos.length === 0) return [];
+  const { data: links, error } = await sb
+    .from("service_job_photo_items")
+    .select("photo_id, item_key, created_at")
+    .in(
+      "photo_id",
+      photos.map((p) => p.id),
+    )
+    .order("created_at")
+    .order("item_key");
+  if (error) throw new Error(error.message);
+  return withItemKeys(photos, links ?? []);
 }
 
 /** The variables map a document stores: the resolved text plus the reserved pricing / inspection keys. */
@@ -910,8 +929,10 @@ export interface DocumentPhoto {
   marks: PhotoMark[];
   /** How the ticket shows the photo turned (photo-annotations.ts); the canvas turns it the same. */
   rotation: Rotation;
-  /** The checklist item the photo was taken for (service_job_photos.item_key), or null. */
+  /** The first checklist item the photo is on (service_job_photos.item_key), or null. */
   itemKey: string | null;
+  /** Every checklist item the photo is on (service_job_photo_items, Oct 28); [] for none. */
+  itemKeys: string[];
   takenAt: string | null;
 }
 export interface DocumentBundle {
@@ -1019,14 +1040,17 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
     .neq("role", "signature")
     .order("created_at");
   if (!rows?.length) return [];
-  const { data: signed } = await sb.storage.from(SERVICE_BUCKET).createSignedUrls(
-    rows.map((r) => r.storage_path),
-    SIGNED_SECONDS,
-  );
+  const [{ data: signed }, linked] = await Promise.all([
+    sb.storage.from(SERVICE_BUCKET).createSignedUrls(
+      rows.map((r) => r.storage_path),
+      SIGNED_SECONDS,
+    ),
+    withPhotoLinks(sb, rows),
+  ]);
   const urls = new Map<string, string>();
   for (const d of signed ?? [])
     if (d.path && d.signedUrl && !d.error) urls.set(d.path, d.signedUrl);
-  return rows
+  return linked
     .filter((r) => urls.has(r.storage_path))
     .map((r) => {
       const { marks, rotation } = parsePhotoMarkup(r.annotations);
@@ -1039,6 +1063,7 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
         marks,
         rotation,
         itemKey: r.item_key,
+        itemKeys: r.item_keys,
         takenAt: r.taken_at ?? r.created_at,
       };
     });

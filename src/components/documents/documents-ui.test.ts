@@ -227,8 +227,9 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     const list = moduleView.slice(moduleView.indexOf("function RepairList("));
     expect(list).toContain("storedInspection(env.variables)");
     expect(list).toContain("repairListData(m, insp)");
-    expect(list).toContain("Every item");
-    expect(list).toContain("Pictures");
+    // Oct 28 (repair-list-ui.test.ts): the switches are always shown and relabelled.
+    expect(list).toContain("All checklist items");
+    expect(list).toContain("Show pictures");
     expect(list).toContain("Reset to the inspection");
     expect(list).toContain("Edit rows");
     expect(list).toContain(": NO_INSPECTION_TEXT}");
@@ -250,7 +251,10 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(picker).toContain("const marks = imageMarks(image, env.photos);");
     expect(picker).toContain("const rotation = imageRotation(image, env.photos);");
     expect(picker).toContain('title="Mark up"');
-    expect(picker).toContain("{canMarkUp(props.image) ? (");
+    // Oct 28: the launcher is one shared wrapper (MarkUpAffordance) the slot and the Repair
+    // List's thumbnails both use (repair-list-ui.test.ts).
+    expect(picker).toContain("const can = canMarkUp(props.image);");
+    expect(picker).toContain("export function MarkUpAffordance(");
     expect(picker).toContain("export function MarkupDialog(");
     expect(picker).toContain("<PhotoMarkupSurface");
     expect(picker).toContain("props.onChange(marks.length ? { ...rest, marks } : rest);");
@@ -284,7 +288,12 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(fns).toContain("inspectionSnapshotFrom(");
     expect(fns).toContain('.eq("role", "other")');
     expect(fns).toContain('.is("repair_id", null)');
-    expect(fns).toContain('.not("item_key", "is", null)');
+    // Oct 28: every loose picture is read and its links (every item it is on) folded in, so a
+    // photo on two items is listed under both.
+    expect(fns).not.toContain('.not("item_key", "is", null)');
+    expect(fns).toContain("await withPhotoLinks(sb, photos.data ?? []),");
+    expect(fns).toContain('.from("service_job_photo_items")');
+    expect(fns).toContain("return withItemKeys(photos, links ?? []);");
     expect(fns).toMatch(/const snapshot = \(src: DocumentSource\) =>\s*withStoredInspection\(/);
     expect(fns).toContain("missingDefaultTemplates(all ?? [])");
     // Refresh data goes through the same snapshot.

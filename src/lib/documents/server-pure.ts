@@ -12,6 +12,7 @@ import {
   type Inspection,
   mergeChecklist,
   visibleChecklist,
+  photoItemKeys,
 } from "@/lib/inspection";
 
 import {
@@ -456,9 +457,10 @@ export function storedInspection(vars: unknown): InspectionSnapshot | null {
  * The snapshot from the ticket's saved inspection (service_jobs.inspection, src/lib/inspection.ts)
  * merged with the live checklist (an item added since reads as never flagged = OK), the hidden
  * "Recommend repairs" row left out, each item's photos (the ticket's `other` photos with no
- * repair and item_key = the item's id), and who inspected (the technician's name, else the
- * inspection's saved_by). A ticket with no saved inspection still snapshots the checklist, so the
- * report lists every item as OK.
+ * repair whose `item_keys` — every item the photo is on, Oct 28; else its one `item_key` —
+ * include the item: a photo on two items is listed under both), and who inspected (the
+ * technician's name, else the inspection's saved_by). A ticket with no saved inspection still
+ * snapshots the checklist, so the report lists every item as OK.
  */
 export function inspectionSnapshotFrom(
   saved: Inspection | null,
@@ -468,16 +470,19 @@ export function inspectionSnapshotFrom(
     role: string;
     repair_id: string | null;
     item_key: string | null;
+    item_keys?: readonly string[] | undefined;
   }>,
   technician: string | null | undefined,
 ): InspectionSnapshot {
   const items = visibleChecklist(mergeChecklist(saved, checklist));
   const byItem = new Map<string, string[]>();
   for (const p of photos) {
-    if (p.role !== "other" || p.repair_id || !p.item_key) continue;
-    const list = byItem.get(p.item_key) ?? [];
-    list.push(p.id);
-    byItem.set(p.item_key, list);
+    if (p.role !== "other" || p.repair_id) continue;
+    for (const key of photoItemKeys(p)) {
+      const list = byItem.get(key) ?? [];
+      if (!list.includes(p.id)) list.push(p.id);
+      byItem.set(key, list);
+    }
   }
   return {
     inspectedOn: saved?.inspected_on ?? null,

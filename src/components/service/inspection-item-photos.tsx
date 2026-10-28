@@ -5,13 +5,19 @@
  * the ticket's loose photos here — on both screens (the close-out's step 2 and the office's
  * Inspection fold):
  *
- *   - `ItemPhotoThumbs`: the item's pictures with Delete (as everywhere) and a small Detach that
- *     sets item_key back to null — the photo stays on the ticket, under "Other photos".
- *   - `FromTicketPhotosButton`: opens `TicketPhotoPicker`, a small dialog listing the ticket's
- *     photos not yet on any item (inspection.ts unattachedTicketPhotos: role "other", no repair,
- *     no item) as thumbnails with their marks drawn, multi-select, Attach.
+ * Owner, Oct 28: one photo may be on several items ("associate one photo to multiple inspection
+ * checklist items") — the links are service_job_photo_items, read as the row's `item_keys`.
  *
- * Both go through setJobPhotoItem (service-field.functions.ts; the mutations are
+ *   - `ItemPhotoThumbs`: the item's pictures (inspection.ts photosOnItem: `item_keys` includes
+ *     the item) with Delete (as everywhere) and a small Detach that removes THIS item's link only —
+ *     the photo stays on its other items and on the ticket. A picture on other items too says
+ *     "also on Seams" under it.
+ *   - `FromTicketPhotosButton`: opens `TicketPhotoPicker`, a small dialog listing the ticket's
+ *     pictures not on this item yet (inspection.ts attachableTicketPhotos: role "other", no
+ *     repair, not on this item — the ones on another item too, marked "also on …") as thumbnails
+ *     with their marks drawn, multi-select, Attach.
+ *
+ * Both go through setJobPhotoItems (service-field.functions.ts; the mutations are
  * item-photo-mutations.ts) and refresh the ticket's photo list (fieldKeys.photos) so the Photos
  * fold and the other screen agree.
  */
@@ -19,7 +25,12 @@ import { useRef, useState } from "react";
 import { Check, ImagePlus, Images, Loader2 } from "lucide-react";
 
 import { parsePhotoMarkup } from "@/lib/photo-annotations";
-import { unattachedTicketPhotos } from "@/lib/inspection";
+import {
+  alsoOnText,
+  attachableTicketPhotos,
+  otherItemLabels,
+  photosOnItem,
+} from "@/lib/inspection";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,12 +44,11 @@ import {
 import { PhotoThumb } from "@/components/service/field-shared";
 import { RotatedPhoto } from "@/components/service/photo-markup";
 import { takePickedFiles, useSignedUrl } from "@/components/service/field-utils";
-import {
-  photosOnItem,
-  useDeleteJobPhoto,
-  useSetPhotoItem,
-} from "@/components/service/item-photo-mutations";
+import { useDeleteJobPhoto, useSetPhotoItem } from "@/components/service/item-photo-mutations";
 import { useTicketPictureUpload } from "@/components/service/ticket-picture-upload";
+
+/** A checklist row as the "also on …" labels need it (the ticket's inspection draft items). */
+export type ChecklistRowLike = { id: string; label: string };
 
 /** One picture in the picker: the photo with its marks, pressed = picked. */
 function PickTile({
@@ -89,27 +99,35 @@ function PickTile({
 }
 
 /**
- * The picker: the ticket's loose photos (`photos`, already filtered — unattachedTicketPhotos),
- * multi-select, Attach. Pure in what it shows; the attach itself is the caller's.
+ * The picker: the ticket's pictures not on this item (`photos`, already filtered —
+ * attachableTicketPhotos), multi-select, Attach. A picture already on another item carries
+ * "also on Seams" under it (`items` names the rows). Pure in what it shows; the attach itself is
+ * the caller's.
  */
 export function TicketPhotoPicker({
   open,
   onOpenChange,
   photos,
+  itemKey,
   itemLabel,
+  items,
   busy,
   onAttach,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   photos: readonly JobPhotoRow[];
+  itemKey: string;
   itemLabel: string;
+  /** The checklist rows, for the "also on …" labels; none = no labels. */
+  items?: readonly ChecklistRowLike[] | undefined;
   busy: boolean;
   onAttach: (ids: string[]) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const toggle = (id: string) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const alsoOn = (p: JobPhotoRow) => alsoOnText(otherItemLabels(p, itemKey, items ?? []));
   return (
     <Dialog
       open={open}
@@ -122,24 +140,38 @@ export function TicketPhotoPicker({
         <DialogHeader>
           <DialogTitle>From ticket photos</DialogTitle>
           <DialogDescription>
-            Pictures on this ticket that are not on a checklist item yet. Pick the ones that show{" "}
-            {itemLabel}.
+            Pictures on this ticket that are not on {itemLabel} yet. Pick the ones that show it — a
+            picture already on another item can go here too.
           </DialogDescription>
         </DialogHeader>
         {photos.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No loose photos on this ticket — every picture is already on an item or a repair.
+            No pictures to add — every loose photo on this ticket is already on this item or belongs
+            to a repair.
           </p>
         ) : (
           <div className="flex flex-wrap gap-2" role="group" aria-label="Ticket photos">
-            {photos.map((p) => (
-              <PickTile
-                key={p.id}
-                photo={p}
-                picked={picked.includes(p.id)}
-                onToggle={() => toggle(p.id)}
-              />
-            ))}
+            {photos.map((p) => {
+              const note = alsoOn(p);
+              return (
+                <div key={p.id} className="flex w-24 flex-col items-center gap-0.5">
+                  <PickTile
+                    photo={p}
+                    picked={picked.includes(p.id)}
+                    onToggle={() => toggle(p.id)}
+                  />
+                  {note && (
+                    <span
+                      className="w-full truncate text-center text-[11px] text-muted-foreground dark:text-muted-foreground"
+                      title={note}
+                      data-also-on={p.id}
+                    >
+                      {note}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         <DialogFooter className="gap-2 sm:gap-0">
@@ -169,44 +201,52 @@ export function FromTicketPhotosButton({
   itemKey,
   itemLabel,
   photos,
+  items,
   compact,
 }: {
   jobId: string;
   itemKey: string;
   itemLabel: string;
-  /** Every photo on the ticket; the loose ones are offered. */
+  /** Every photo on the ticket; the pictures not on this item yet are offered. */
   photos: readonly JobPhotoRow[];
+  /** The checklist rows, for the picker's "also on …" labels. */
+  items?: readonly ChecklistRowLike[] | undefined;
   compact?: boolean | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const setItem = useSetPhotoItem(jobId);
-  const loose = unattachedTicketPhotos(photos);
+  const pickable = attachableTicketPhotos(photos, itemKey);
   return (
     <>
       <Button
         type="button"
         variant="outline"
         className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
-        disabled={loose.length === 0}
+        disabled={pickable.length === 0}
         title={
-          loose.length === 0
-            ? "Every photo on this ticket is already on an item or a repair"
+          pickable.length === 0
+            ? "Every picture on this ticket is already on this item or belongs to a repair"
             : undefined
         }
         aria-label={`${itemLabel}: from ticket photos`}
         onClick={() => setOpen(true)}
       >
         <Images className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-        From ticket photos{loose.length ? ` (${loose.length})` : ""}
+        From ticket photos{pickable.length ? ` (${pickable.length})` : ""}
       </Button>
       <TicketPhotoPicker
         open={open}
         onOpenChange={setOpen}
-        photos={loose}
+        photos={pickable}
+        itemKey={itemKey}
         itemLabel={itemLabel}
+        items={items}
         busy={setItem.isPending}
         onAttach={(ids) =>
-          setItem.mutate({ ids, item_key: itemKey }, { onSuccess: () => setOpen(false) })
+          setItem.mutate(
+            { ids, item_key: itemKey, attach: true },
+            { onSuccess: () => setOpen(false) },
+          )
         }
       />
     </>
@@ -219,6 +259,7 @@ export function ItemPhotoThumbs({
   itemKey,
   itemLabel,
   photos,
+  items,
   ticketNumber,
   canEdit,
   compact,
@@ -228,6 +269,8 @@ export function ItemPhotoThumbs({
   itemLabel: string;
   /** Every photo on the ticket; the item's are shown. */
   photos: readonly JobPhotoRow[];
+  /** The checklist rows, for the "also on …" line under a picture on other items too. */
+  items?: readonly ChecklistRowLike[] | undefined;
   ticketNumber: number;
   canEdit: boolean;
   compact?: boolean | undefined;
@@ -238,30 +281,42 @@ export function ItemPhotoThumbs({
   if (mine.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2" data-item-photos={itemKey}>
-      {mine.map((p) => (
-        <div key={p.id} className="flex flex-col items-center gap-0.5">
-          <PhotoThumb
-            photo={p}
-            size={compact ? "sm" : undefined}
-            deleting={del.isPending && del.variables === p.id}
-            onDelete={canEdit ? () => del.mutate(p.id) : undefined}
-            canAnnotate={canEdit}
-            ticketNumber={ticketNumber}
-          />
-          {canEdit && (
-            <button
-              type="button"
-              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
-              aria-label={`Detach this photo from ${itemLabel} (it stays on the ticket)`}
-              title="Detach from this item — the photo stays on the ticket"
-              disabled={setItem.isPending && setItem.variables?.ids.includes(p.id)}
-              onClick={() => setItem.mutate({ ids: [p.id], item_key: null })}
-            >
-              Detach
-            </button>
-          )}
-        </div>
-      ))}
+      {mine.map((p) => {
+        const note = alsoOnText(otherItemLabels(p, itemKey, items ?? []));
+        return (
+          <div key={p.id} className="flex flex-col items-center gap-0.5">
+            <PhotoThumb
+              photo={p}
+              size={compact ? "sm" : undefined}
+              deleting={del.isPending && del.variables === p.id}
+              onDelete={canEdit ? () => del.mutate(p.id) : undefined}
+              canAnnotate={canEdit}
+              ticketNumber={ticketNumber}
+            />
+            {note && (
+              <span
+                className="max-w-24 truncate text-[11px] text-muted-foreground dark:text-muted-foreground"
+                title={note}
+                data-also-on={p.id}
+              >
+                {note}
+              </span>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                className="text-[11px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                aria-label={`Detach this photo from ${itemLabel} (it stays on the ticket${note ? ` and ${note.replace(/^also on /, "on ")}` : ""})`}
+                title="Detach from this item — the photo stays on the ticket and on its other items"
+                disabled={setItem.isPending && setItem.variables?.ids.includes(p.id)}
+                onClick={() => setItem.mutate({ ids: [p.id], item_key: itemKey, attach: false })}
+              >
+                Detach
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -338,6 +393,8 @@ export function ItemPhotoTools(props: {
   itemKey: string;
   itemLabel: string;
   photos: readonly JobPhotoRow[];
+  /** The checklist rows, for the "also on …" labels. */
+  items?: readonly ChecklistRowLike[] | undefined;
   ticketNumber: number;
   canEdit: boolean;
 }) {

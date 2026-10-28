@@ -109,7 +109,9 @@ export const VARIABLE_DEFS: VariableDef[] = [
   v("inspection.date", "Property Inspected", "Ticket", "October 20, 2026", ["ticket"]),
   v("inspection.grade", "Property Grade", "Ticket", "D", ["ticket"]),
   v("inspection.summary", "Inspection Summary", "Ticket", "3 issues · 6 OK", ["ticket"]),
-  v("inspection.issues", "Issues Found", "Ticket", "Seams; Flashings; Ponding", ["ticket"]),
+  v("inspection.issues", "Issues Found", "Ticket", "Seams; Perimeter flashings; Ponding", [
+    "ticket",
+  ]),
   v("inspection.recommend", "Recommendation", "Ticket", "Repairs recommended", ["ticket"]),
   v("inspection.technician", "Inspected By", "Ticket", "Braden Keck", ["ticket"]),
   // People.

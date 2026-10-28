@@ -31,7 +31,7 @@ import { Camera, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 import type { ServiceJobRow } from "@/lib/service.functions";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
-import type { InspectionItem } from "@/lib/inspection";
+import { photosOnItem, unattachedTicketPhotos, type InspectionItem } from "@/lib/inspection";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -64,6 +64,7 @@ function PhotoRoll({
   photos,
   allPhotos,
   itemKey,
+  items,
   camera,
   label,
   jobId,
@@ -75,6 +76,8 @@ function PhotoRoll({
   /** Every photo on the ticket (the item's pictures and the loose ones to attach). */
   allPhotos: readonly JobPhotoRow[];
   itemKey: string | null;
+  /** The checklist rows, for the "also on …" labels (a picture on several items, Oct 28). */
+  items?: readonly InspectionItem[] | undefined;
   camera: InspectionPhotoControls;
   label: string;
   jobId: string;
@@ -90,6 +93,7 @@ function PhotoRoll({
           itemKey={itemKey}
           itemLabel={label}
           photos={allPhotos}
+          items={items}
           ticketNumber={ticketNumber}
           canEdit
           compact={compact}
@@ -135,6 +139,7 @@ function PhotoRoll({
             itemKey={itemKey}
             itemLabel={label}
             photos={allPhotos}
+            items={items}
             compact={compact}
           />
         )}
@@ -164,9 +169,12 @@ function PhotoRoll({
 // ---------------------------------------------------------------------------------------------
 // Step 2 · Checklist
 
-/** The ticket's photos taken for checklist items / the roll: role "other", on no repair. */
+/**
+ * The ticket's photos on a checklist item (`item_keys` includes it — a photo may be on several,
+ * Oct 28) or, for the findings roll (null), on no item at all: role "other", on no repair.
+ */
 const itemPhotos = (photos: readonly JobPhotoRow[], itemKey: string | null) =>
-  photos.filter((p) => p.role === "other" && !p.repair_id && (p.item_key ?? null) === itemKey);
+  itemKey === null ? unattachedTicketPhotos(photos) : photosOnItem(photos, itemKey);
 
 export function InspectionChecklistStep({
   job,
@@ -202,6 +210,7 @@ export function InspectionChecklistStep({
                 photos={itemPhotos(photos, item.id)}
                 allPhotos={photos}
                 itemKey={item.id}
+                items={draft.items}
                 camera={camera.controls(item.id)}
                 label={item.label}
                 jobId={job.id}

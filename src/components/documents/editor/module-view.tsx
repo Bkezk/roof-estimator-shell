@@ -27,7 +27,12 @@ import {
   photoGridCaption,
   pricingSourceFromVariables,
 } from "@/lib/documents/editor-helpers";
-import { NO_INSPECTION_TEXT, repairListData } from "@/lib/documents/pdf-layout";
+import {
+  CONTENT_WIDTH,
+  NO_INSPECTION_TEXT,
+  repairListData,
+  repairThumbBox,
+} from "@/lib/documents/pdf-layout";
 import { storedInspection } from "@/lib/documents/server-pure";
 import {
   type DocModule,
@@ -36,9 +41,14 @@ import {
   type ImageRef,
   type LetterheadModule,
   moveModule,
+  PHOTO_HEIGHT_MAX,
+  PHOTO_SIZE_PRESETS,
   type PhotoGridModule,
+  photoHeightOf,
+  type PhotoHeightModule,
   type PhotoTextModule,
   type PricingTableModule,
+  PT_PER_IN,
   removeModule,
   type RepairListModule,
   resolveCellText,
@@ -48,6 +58,7 @@ import {
   type TwoColumnsModule,
   type TwoPhotosModule,
   updateModule,
+  withPhotoHeight,
 } from "@/lib/documents/model";
 import { pricingRows, variableLabel } from "@/lib/documents/variables";
 import { cn } from "@/lib/utils";
@@ -55,7 +66,7 @@ import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 
 import { useEditorEnv } from "./editor-context";
-import { DocImage, ImageSlot, PhotoPicker } from "./photo-picker";
+import { DocImage, ImageSlot, MarkUpAffordance, PhotoPicker } from "./photo-picker";
 import { RichText } from "./rich-text";
 
 // ------------------------------------------------------------------------------- the frame
@@ -235,6 +246,7 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
             </button>
           ))}
         </span>
+        <PhotoSizeControl module={m} set={set} what="each picture" />
         {env.photos.length > 0 ? (
           <button
             type="button"
@@ -273,7 +285,9 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
             <div key={i} className="group/cell relative">
               <ImageSlot
                 image={cell.image}
-                className="aspect-[1.33] bg-transparent"
+                // The cell's 4:3 box, or the owner's size (Oct 28) at screen scale.
+                className={cn("bg-transparent", photoHeightOf(m) === 0 && "aspect-[1.33]")}
+                heightPx={photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined}
                 onChange={(image) => (image ? setCell(i, { image }) : removeCell(i))}
               />
               <button
@@ -315,6 +329,12 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
   const insp = storedInspection(env.variables);
   const data = repairListData(m, insp);
   const editing = m.rows !== null;
+  // The thumbnail box as the PDF draws it (points → screen px), so both agree on the size.
+  const box = repairThumbBox(m, CONTENT_WIDTH);
+  const thumbStyle = {
+    width: Math.round((box.thumbW / PT_PER_IN) * IN_PX),
+    height: Math.round((box.thumbH / PT_PER_IN) * IN_PX),
+  };
   const setCell = (r: number, c: number, v: string) =>
     patch((t) => ({
       ...t,
@@ -329,29 +349,50 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
     }));
   const removeRow = (r: number) =>
     patch((t) => ({ ...t, rows: (t.rows ?? data.rows).filter((_, i) => i !== r) }));
+  // Switching lists rebuilds the rows from the inspection, so hand edits would go; ask first
+  // (owner, Oct 28 — a plain dialog, as the delete confirms elsewhere).
+  const setAllItems = (allItems: boolean) => {
+    if (
+      editing &&
+      !window.confirm(
+        "Switching lists resets the rows to the inspection's. Your edits here will be lost.",
+      )
+    )
+      return;
+    patch((t) => ({ ...t, allItems, rows: null }));
+  };
+  // Always shown (owner, Oct 28: the hover-only switches hid how to get the pictures back) — a
+  // small muted settings row above the table; the PDF never draws it.
   const toolbar = (
-    <div className="mb-1 hidden items-center gap-3 text-xs text-neutral-500 group-hover/repairs:flex">
+    <div
+      className="mb-1 flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-500"
+      data-repair-settings
+    >
       <label className="flex items-center gap-1">
         <Switch
           checked={m.allItems}
-          onCheckedChange={(allItems) => patch((t) => ({ ...t, allItems, rows: null }))}
-          title="List every checklist item with its finding, not only the issues"
+          onCheckedChange={setAllItems}
+          title="List every checklist item, not only the issues"
         />
-        Every item
+        All checklist items
       </label>
-      <label className="flex items-center gap-1">
-        <Switch
-          checked={m.photos}
-          disabled={!env.options.photos}
-          onCheckedChange={(photos) => patch((t) => ({ ...t, photos }))}
-          title={
-            env.options.photos
-              ? "Print each item's ticket photos under its row"
-              : "Photos are off for this document"
-          }
-        />
-        Pictures
-      </label>
+      {env.options.photos ? (
+        <label className="flex items-center gap-1">
+          <Switch
+            checked={m.photos}
+            onCheckedChange={(photos) => patch((t) => ({ ...t, photos }))}
+            title="Print each item's ticket photos under its row"
+          />
+          Show pictures
+        </label>
+      ) : (
+        <span className="italic" data-photos-off>
+          Photos are off for this document
+        </span>
+      )}
+      {m.photos && env.options.photos ? (
+        <PhotoSizeControl module={m} set={set} what="the thumbnails" />
+      ) : null}
       <span className="ml-auto flex items-center gap-2">
         {editing ? (
           <button
@@ -453,12 +494,22 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
                       >
                         <div className="flex flex-wrap gap-2" data-repair-photos={r}>
                           {ids.map((photoId) => (
-                            // A fixed box, so the marks overlay sits on the picture, not the cell.
-                            <div key={photoId} className="h-[1.2in] w-[1.6in]">
-                              <DocImage
+                            // A fixed box, so the marks overlay sits on the picture, not the cell:
+                            // 1.6 × 1.2 in, or the owner's size (Oct 28; pdf-layout repairThumbBox).
+                            <div key={photoId} style={thumbStyle} data-repair-photo={photoId}>
+                              {/* Mark up on hover / tap / double-click (owner, Oct 28): the same
+                                  launcher and dialog as a picture slot; marks save on the ticket. */}
+                              <MarkUpAffordance
                                 image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
-                                className="h-full w-full rounded-sm"
-                              />
+                                onChange={() => {}}
+                                doubleClick
+                                className="h-full w-full"
+                              >
+                                <DocImage
+                                  image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                                  className="h-full w-full rounded-sm"
+                                />
+                              </MarkUpAffordance>
                             </div>
                           ))}
                         </div>
@@ -489,6 +540,66 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
 
 const paperInput =
   "w-full rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-inherit outline-none placeholder:text-neutral-400 hover:border-neutral-300 focus:border-neutral-400";
+
+/**
+ * The picture size of a photo module (owner, Oct 28: "resize the photo on the document editor" —
+ * every ticket and bid document): a Size select — Natural (the module's own shape), Small 1.5 in,
+ * Medium 2.5 in, Large 4 in — beside the exact box in inches (blank = natural, as Full Photo's
+ * Height). A size that matches no preset reads "Custom". Writes through withPhotoHeight, so
+ * "natural" leaves the key out of the saved JSON.
+ */
+function PhotoSizeControl({
+  module: m,
+  set,
+  what,
+}: {
+  module: PhotoHeightModule;
+  set: Setter;
+  /** What the size applies to, for the tooltip ("each picture", "the thumbnails"). */
+  what: string;
+}) {
+  const h = photoHeightOf(m);
+  const preset = PHOTO_SIZE_PRESETS.find((p) => p.heightIn === h);
+  const selectValue = h === 0 ? "natural" : preset ? String(preset.heightIn) : "custom";
+  const apply = (heightIn: number) =>
+    set((c) => withPhotoHeight(c as PhotoHeightModule, heightIn) as DocModule);
+  return (
+    <span className="flex items-center gap-1" data-photo-size={m.type}>
+      Size
+      <select
+        className="h-6 rounded border border-neutral-300 bg-transparent px-1 text-xs text-neutral-700 dark:text-neutral-700"
+        aria-label="Picture size"
+        title={`How tall ${what} print${h > 0 ? ` (${h} in)` : " (the picture's own shape)"}`}
+        value={selectValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "natural") apply(0);
+          else if (v !== "custom") apply(Number(v));
+        }}
+      >
+        <option value="natural">Natural</option>
+        {PHOTO_SIZE_PRESETS.map((p) => (
+          <option key={p.heightIn} value={String(p.heightIn)}>
+            {p.label} ({p.heightIn} in)
+          </option>
+        ))}
+        {selectValue === "custom" ? <option value="custom">Custom</option> : null}
+      </select>
+      <NumberField
+        value={h}
+        min={0}
+        max={PHOTO_HEIGHT_MAX}
+        step="0.5"
+        inputMode="decimal"
+        placeholder="auto"
+        title="Exact height in inches; blank keeps the picture's shape"
+        className="h-6 w-16 bg-transparent px-1 text-xs"
+        onChange={apply}
+      />
+      in
+    </span>
+  );
+}
 
 function Caption(props: { value: string; onChange: (v: string) => void }) {
   return (
@@ -590,13 +701,21 @@ function FullPhoto({ m, set }: { m: FullPhotoModule; set: Setter }) {
 }
 
 function PhotoText({ m, set }: { m: PhotoTextModule; set: Setter }) {
+  const heightPx = photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined;
   const photo = (
-    <div className="w-[45%] shrink-0">
-      <ImageSlot image={m.image} onChange={(image) => set((c) => ({ ...c, image }) as DocModule)} />
+    <div className="group/photo w-[45%] shrink-0">
+      <ImageSlot
+        image={m.image}
+        heightPx={heightPx}
+        onChange={(image) => set((c) => ({ ...c, image }) as DocModule)}
+      />
       <Caption
         value={m.caption}
         onChange={(caption) => set((c) => ({ ...c, caption }) as DocModule)}
       />
+      <div className="hidden items-center gap-2 text-xs text-neutral-500 group-hover/photo:flex">
+        <PhotoSizeControl module={m} set={set} what="the picture" />
+      </div>
     </div>
   );
   const text = (
@@ -641,14 +760,24 @@ function TwoPhotos({ m, set }: { m: TwoPhotosModule; set: Setter }) {
       captions[i] = caption;
       return { ...cur, captions };
     });
+  const heightPx = photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined;
   return (
-    <div className="grid grid-cols-2 gap-6">
-      {([0, 1] as const).map((i) => (
-        <div key={i}>
-          <ImageSlot image={m.images[i]} onChange={(img) => setImage(i, img)} />
-          <Caption value={m.captions[i]} onChange={(v) => setCaption(i, v)} />
-        </div>
-      ))}
+    <div className="group/photos">
+      <div className="mb-1 hidden items-center gap-2 text-xs text-neutral-500 group-hover/photos:flex">
+        <PhotoSizeControl module={m} set={set} what="both pictures" />
+      </div>
+      <div className="grid grid-cols-2 gap-6">
+        {([0, 1] as const).map((i) => (
+          <div key={i}>
+            <ImageSlot
+              image={m.images[i]}
+              heightPx={heightPx}
+              onChange={(img) => setImage(i, img)}
+            />
+            <Caption value={m.captions[i]} onChange={(v) => setCaption(i, v)} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

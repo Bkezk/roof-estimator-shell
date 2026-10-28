@@ -195,16 +195,21 @@ export const canMarkUp = (image: ImageRef | null): boolean =>
 // ---------------------------------------------------------------------------- the photo grid
 
 /**
- * The caption "Add all ticket photos" gives a picture (phase 2): the checklist item it was taken
- * for, by its item_key in the document's inspection snapshot, else blank — the camera's own file
- * name (IMG_1234.jpg) says nothing a customer should read.
+ * The caption "Add all ticket photos" gives a picture (phase 2): the checklist item(s) it is on,
+ * by their keys in the document's inspection snapshot ("Seams, Perimeter flashings" for a photo
+ * on two items, Oct 28; `itemKeys` when the photo carries it, else its one `itemKey`), else
+ * blank — the camera's own file name (IMG_1234.jpg) says nothing a customer should read.
  */
 export function photoGridCaption(
-  photo: { itemKey?: string | null | undefined },
+  photo: { itemKey?: string | null | undefined; itemKeys?: readonly string[] | undefined },
   insp: InspectionSnapshot | null | undefined,
 ): string {
-  if (!photo.itemKey || !insp) return "";
-  return insp.items.find((i) => i.id === photo.itemKey)?.label ?? "";
+  if (!insp) return "";
+  const keys = photo.itemKeys ?? (photo.itemKey ? [photo.itemKey] : []);
+  return insp.items
+    .filter((i) => keys.includes(i.id))
+    .map((i) => i.label)
+    .join(", ");
 }
 
 // ------------------------------------------------------------------------- saved modules

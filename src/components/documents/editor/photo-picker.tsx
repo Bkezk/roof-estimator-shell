@@ -131,12 +131,11 @@ export function ImageSlot(props: {
   title?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
-  const [markup, setMarkup] = useState(false);
   const style: React.CSSProperties | undefined = props.heightPx
     ? { height: props.heightPx }
     : undefined;
   return (
-    <div className="group/slot relative">
+    <MarkUpAffordance image={props.image} onChange={props.onChange} className="group/slot">
       <button
         type="button"
         title={props.title ?? (props.image ? "Change picture" : "Choose photo")}
@@ -163,20 +162,6 @@ export function ImageSlot(props: {
           </div>
         )}
       </button>
-      {canMarkUp(props.image) ? (
-        <button
-          type="button"
-          title="Mark up"
-          aria-label="Mark up"
-          className="absolute right-1 top-1 hidden items-center gap-1 rounded-md border bg-popover px-1.5 py-1 text-xs text-popover-foreground shadow-md group-hover/slot:flex"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMarkup(true);
-          }}
-        >
-          <PenLine className="h-3.5 w-3.5" /> Mark up
-        </button>
-      ) : null}
       <PhotoPicker
         open={open}
         onOpenChange={setOpen}
@@ -186,10 +171,60 @@ export function ImageSlot(props: {
           setOpen(false);
         }}
       />
-      {props.image && canMarkUp(props.image) ? (
+    </MarkUpAffordance>
+  );
+}
+
+/**
+ * The "Mark up" launcher every picture in a document shares (phase 2; owner, Oct 28: from the
+ * Repair List's thumbnails too): wraps the picture, shows the pencil at its top-right on hover
+ * (always on a touch screen, which has no hover) and, with `doubleClick`, opens on a
+ * double-click as well; the dialog is MarkupDialog — an upload keeps the marks on its ImageRef,
+ * a ticket photo saves them on the ticket's row. A picture that cannot take marks (the logo,
+ * the property photo, none) is wrapped and nothing more.
+ */
+export function MarkUpAffordance(props: {
+  image: ImageRef | null;
+  onChange: (image: ImageRef) => void;
+  /** Also open on a double-click (not where a single click already does something, like a slot). */
+  doubleClick?: boolean | undefined;
+  className?: string | undefined;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const can = canMarkUp(props.image);
+  return (
+    <div
+      className={cn("group/markup relative", props.className)}
+      onDoubleClick={
+        can && props.doubleClick
+          ? (e) => {
+              e.stopPropagation();
+              setOpen(true);
+            }
+          : undefined
+      }
+    >
+      {props.children}
+      {can ? (
+        <button
+          type="button"
+          title="Mark up"
+          aria-label="Mark up"
+          data-mark-up
+          className="absolute right-1 top-1 hidden items-center gap-1 rounded-md border bg-popover px-1.5 py-1 text-xs text-popover-foreground shadow-md group-hover/markup:flex [@media(hover:none)]:flex"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(true);
+          }}
+        >
+          <PenLine className="h-3.5 w-3.5" /> Mark up
+        </button>
+      ) : null}
+      {props.image && can ? (
         <MarkupDialog
-          open={markup}
-          onOpenChange={setMarkup}
+          open={open}
+          onOpenChange={setOpen}
           image={props.image}
           onChange={props.onChange}
         />
