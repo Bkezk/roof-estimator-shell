@@ -11,8 +11,11 @@
  *     place through the query cache).
  *   - `AfterShotEditor`: mark up as you shoot (the phone's camera only — the caller decides with
  *     shouldMarkUpAfterShot): the fresh shot in the markup editor while its upload runs; Done
- *     saves the marks onto the row (held until the row exists), Skip saves none, "Take another"
- *     saves and opens the camera again for the same repair / item and role — one tap per shot.
+ *     saves whatever marks were drawn onto the row (held until the row exists) — none drawn is
+ *     the picture as taken, so there is no separate Skip (owner, Oct 28: "i saw skip and done
+ *     which is essentially the same thing"); "Take another" saves the same way and opens the
+ *     camera again for the same repair / item and role — one tap per shot. Closing the dialog
+ *     any other way counts as Done.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Hourglass, Loader2, RefreshCw, X } from "lucide-react";
@@ -197,27 +200,18 @@ export function AfterShotEditor({
     onClose();
     then?.();
   };
+  // Two buttons only on a phone: Done (the editor's own) and Take another. No Skip — Done with
+  // nothing drawn keeps the picture as taken.
   const footer = (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        className="h-11 sm:h-9"
-        onClick={() => finish(true, onTakeAnother)}
-        data-action="take-another"
-      >
-        <Camera className="mr-1 h-4 w-4" aria-hidden /> Take another {shot.label}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-11 sm:h-9"
-        onClick={() => finish(false)}
-        data-action="skip"
-      >
-        Skip
-      </Button>
-    </>
+    <Button
+      type="button"
+      variant="outline"
+      className="h-11 sm:h-9"
+      onClick={() => finish(true, onTakeAnother)}
+      data-action="take-another"
+    >
+      <Camera className="mr-1 h-4 w-4" aria-hidden /> Take another {shot.label}
+    </Button>
   );
   return (
     <Dialog open onOpenChange={(o) => !o && finish(true)}>
@@ -226,10 +220,9 @@ export function AfterShotEditor({
         data-dialog="after-shot"
       >
         <DialogHeader>
-          <DialogTitle>{shot.label} photo — mark it up?</DialogTitle>
+          <DialogTitle>{shot.label} photo</DialogTitle>
           <DialogDescription>
-            Circle the problem, point at it, box it or write on it, then Done. The picture is going
-            up meanwhile; Skip keeps it as taken.
+            Mark the problem if you want, then Done. Nothing drawn keeps it as taken.
           </DialogDescription>
         </DialogHeader>
         {size ? (

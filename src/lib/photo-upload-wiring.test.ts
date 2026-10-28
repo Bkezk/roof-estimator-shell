@@ -205,10 +205,13 @@ describe("5. mark up as you shoot — the phone's camera only", () => {
     expect(code(itemPhotos)).not.toMatch(/\bcapture\b/);
     expect(fieldUtils).toMatch(/window\.matchMedia\("\(pointer: coarse\)"\)\.matches/);
   });
-  it("the editor offers Take another <role>, Skip and Done; Done / Take another hand the marks to the queue for the row", () => {
+  it("the editor offers Done and Take another <role> only — no Skip (owner, Oct 28: Done with nothing drawn is the same thing); both hand the marks to the queue for the row", () => {
     expect(ui).toContain("Take another {shot.label}");
     expect(ui).toMatch(/onClick=\{\(\) => finish\(true, onTakeAnother\)\}/);
-    expect(ui).toMatch(/onClick=\{\(\) => finish\(false\)\}[\s\S]*?Skip/);
+    expect(ui).not.toMatch(/finish\(false\)/);
+    expect(ui).not.toContain(">\n        Skip\n");
+    expect(ui).not.toContain('data-action="skip"');
+    expect(ui).toContain("Nothing drawn keeps it as taken.");
     expect(ui).toMatch(/void attachMarks\(shot\.id, marks\)/);
     expect(closeout).toMatch(/onTakeAnother=\{\(\) => takePhoto\(shot\.repairId, shot\.role\)\}/);
     expect(closeout).toContain("attachMarks={pictures.attachMarks}");
