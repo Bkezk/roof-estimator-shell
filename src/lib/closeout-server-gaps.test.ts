@@ -83,10 +83,10 @@ const bare = () => ({
   service_time_entries: [],
 });
 const complete = (tables: Record<string, Row[]>, userId: string) =>
-  (setFieldStatus as unknown as (a: { data: Row; context: unknown }) => Promise<Row>)({
+  (setFieldStatus as unknown as (a: { data: Row; context: unknown }) => Promise<{ row: Row }>)({
     data: { id: JOB, to: "done" },
     context: { supabase: fakeSupabase({ profiles, service_job_events: [], ...tables }).db, userId },
-  });
+  }).then((r) => r.row);
 
 describe("the shared rule", () => {
   it("closeoutGaps is completeGaps with the rows in hand", () => {

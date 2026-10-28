@@ -117,10 +117,10 @@ function world(job: Row) {
   return { tables, context: { supabase: fakeDb(tables), userId: MANAGER } };
 }
 const call = (data: Row, context: unknown) =>
-  (setFieldStatus as unknown as (a: { data: Row; context: unknown }) => Promise<Row>)({
+  (setFieldStatus as unknown as (a: { data: Row; context: unknown }) => Promise<{ row: Row }>)({
     data,
     context,
-  });
+  }).then((r) => r.row);
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });

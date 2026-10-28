@@ -319,7 +319,7 @@ describe("the phone sends its own day with every field action that stamps one", 
     const today = readFileSync("src/components/service/today-page.tsx", "utf8");
     // Owner, Oct 15: Start travel / On site / Leave site send the phone's day (the Oct 8 screen
     // had no button that stamped one).
-    expect(today).toContain("await statusFn({ data: { id: ticket.id, to, day: localYmd() } });");
+    expect(today).toContain("statusFn({ data: { id: ticket.id, to, day: localYmd() } }),");
     expect(today).toContain("search: { id: j.id, closeout: 1 }");
     const closeout = readFileSync("src/components/service/closeout.tsx", "utf8");
     expect(closeout).toContain('statusFn({ data: { id: job.id, to: "done", day: localYmd() } })');

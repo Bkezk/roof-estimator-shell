@@ -198,7 +198,7 @@ import {
 } from "@/lib/closeout-steps";
 import { isFlagged, issueCountText } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
-import { closedLine, runningLabel } from "@/lib/tech-clock";
+import { pressLine, runningLabel } from "@/lib/tech-clock";
 import {
   clock,
   errText,
@@ -647,13 +647,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     return () => clearInterval(t);
   }, []);
   const leave = useMutation({
-    mutationFn: async () => {
-      const before = clockHere;
-      await statusFn({ data: { id: job.id, to: "leave", day: localYmd() } });
-      return before;
-    },
-    onSuccess: (before) => {
-      toast.success(before ? closedLine(before, new Date(), before) : "Left the site");
+    mutationFn: async () =>
+      // The toast says what the server did (its report), not what the cached clock promised.
+      await statusFn({ data: { id: job.id, to: "leave", day: localYmd() } }),
+    onSuccess: ({ transition, warning }) => {
+      toast.success(pressLine(transition, "leave", job));
+      if (warning) toast.warning(warning);
       for (const k of [
         fieldKeys.clock,
         fieldKeys.today,
@@ -728,7 +727,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       // Invoiced / Closed from the stage picker is still stamped here (owner, Oct 5: #6004).
       if (FINISHED.includes(row.stage) && row.completed_at) return row;
       // The phone's own calendar day: the labor entry's date (not UTC's day).
-      return statusFn({ data: { id: job.id, to: "done", day: localYmd() } });
+      const r = await statusFn({ data: { id: job.id, to: "done", day: localYmd() } });
+      if (r.warning) toast.warning(r.warning);
+      return r.row;
     },
     onSuccess: (row) => {
       // The stage and the stamps changed too: the whole row, then a re-read (invalidated below).

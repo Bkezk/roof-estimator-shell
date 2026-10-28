@@ -13,9 +13,21 @@ export interface EditorDoc {
   options: DocOptions;
 }
 
+/** The template a document's pages came from ("From template: X"; documents.template_id). */
+export interface EditorTemplate {
+  id: string;
+  name: string;
+}
+
 export interface EditorState extends EditorDoc {
   /** The copy as last loaded or saved; null until the first load. */
   saved: EditorDoc | null;
+  /**
+   * The template the pages came from, shown as "From template: X" and saved as template_id.
+   * Follows "Start over from template…" (Oct 28: it used to keep the original's name while the
+   * pages were another template's). Null for a blank document and in the template editor.
+   */
+  template: EditorTemplate | null;
   /** Differs from `saved` (the Save button is enabled). */
   dirty: boolean;
   /** The page the Modules tab's "+" adds to (the last clicked; the first by default). */
@@ -24,7 +36,9 @@ export interface EditorState extends EditorDoc {
 
 export type EditorAction =
   /** The server's copy arrived (first load, reload after a refused save, a restored revision). */
-  | { type: "load"; doc: EditorDoc }
+  | { type: "load"; doc: EditorDoc; template?: EditorTemplate | null }
+  /** "Start over from template…": the pages replaced, and the template they now come from. */
+  | { type: "startOver"; pages: DocPage[]; template: EditorTemplate }
   | { type: "setTitle"; title: string }
   /** A page or module operation from model.ts, applied to the current pages. */
   | { type: "setPages"; op: (pages: readonly DocPage[]) => DocPage[] }
@@ -45,6 +59,7 @@ export const EMPTY_EDITOR: EditorState = {
     pageBreakIn: 8.8,
   },
   saved: null,
+  template: null,
   dirty: false,
   selectedPageId: null,
 };
@@ -83,9 +98,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return finish({
         ...doc,
         saved: doc,
+        template: action.template ?? null,
         selectedPageId: fixSelection(pages, state.selectedPageId),
       });
     }
+    case "startOver":
+      return applyStartOver(state, action.pages, action.template);
     case "setTitle":
       return finish({ ...state, title: action.title });
     case "setPages": {
@@ -106,18 +124,48 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   }
 }
 
-/** The saveDocument input (expectVersion is the version the tab opened; the server refuses a stale one). */
+/**
+ * "Start over from template…" applied: the pages are the picked template's (instantiated by the
+ * caller) and the document now comes FROM that template — its name in "From template: X", its
+ * id in the next save's template_id. The selection is fixed to the new pages.
+ */
+export function applyStartOver(
+  state: EditorState,
+  pages: DocPage[],
+  template: EditorTemplate,
+): EditorState {
+  return finish({
+    ...state,
+    pages,
+    template,
+    selectedPageId: fixSelection(pages, state.selectedPageId),
+  });
+}
+
+/**
+ * The saveDocument input (expectVersion is the version the tab opened; the server refuses a stale
+ * one). templateId is the template the pages come from now (null: blank), so the saved row follows
+ * a "Start over".
+ */
 export function buildSavePayload(
-  state: EditorDoc,
+  state: EditorDoc & Pick<EditorState, "template">,
   id: string,
   expectVersion: number,
-): { id: string; title: string; pages: DocPage[]; options: DocOptions; expectVersion: number } {
+): {
+  id: string;
+  title: string;
+  pages: DocPage[];
+  options: DocOptions;
+  expectVersion: number;
+  templateId: string | null;
+} {
   return {
     id,
     title: state.title.trim() || "Untitled document",
     pages: state.pages,
     options: state.options,
     expectVersion,
+    templateId: state.template?.id ?? null,
   };
 }
 

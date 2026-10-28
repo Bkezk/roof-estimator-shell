@@ -440,13 +440,28 @@ describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets
       crew_names: ["Donnie"],
       warranty_badges: ["Duro-Last 15 NDL"],
     } as unknown as TodayJob;
-    expect(seedJobFromToday(j, { full_name: "Trace Floyd", email: "t@x.com" })).toEqual({
+    const seeded = seedJobFromToday(j, { full_name: "Trace Floyd", email: "t@x.com" });
+    expect(seeded).toMatchObject({
       id: "j1",
       number: 6012,
       technician_id: "me",
       stage: "scheduled",
       technician_name: "Trace Floyd",
     });
+    for (const extra of [
+      "technician_instructions",
+      "contact_name",
+      "contact_phone",
+      "account_phone",
+      "crew_names",
+      "warranty_badges",
+    ])
+      expect(extra in seeded).toBe(false);
+    // Oct 28: My tickets reads a named column list; the columns it leaves out are null in the
+    // seed (job-cache.ts UNREAD_COLUMNS) until the loader's own read lands.
+    expect(seeded.invoice_id).toBeNull();
+    expect(seeded.notes).toBeNull();
+    expect(seeded.deleted_at).toBeNull();
     expect(seedJobFromToday(j, { full_name: "  ", email: "t@x.com" }).technician_name).toBe(
       "t@x.com",
     );

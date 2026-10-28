@@ -16,6 +16,7 @@ import {
 } from "@/lib/documents/model";
 
 import {
+  applyStartOver,
   buildSavePayload,
   buildTemplatePayload,
   type EditorDoc,
@@ -150,6 +151,7 @@ describe("payloads", () => {
       pages: s.pages,
       options: s.options,
       expectVersion: 4,
+      templateId: null,
     });
     expect(buildSavePayload({ ...s, title: "   " }, "doc1", 1).title).toBe("Untitled document");
   });
@@ -165,5 +167,39 @@ describe("payloads", () => {
     });
     expect("id" in p).toBe(false);
     expect(buildTemplatePayload(s, { id: "t1", kind: "ticket", description: "" }).id).toBe("t1");
+  });
+});
+
+describe("start over from a template (Oct 28: the label and the saved template_id follow the pick)", () => {
+  const tpl = { id: "t2", name: "Inspection report" };
+  it("applyStartOver replaces the pages and the template they come from; the selection follows; dirty", () => {
+    const s = loaded();
+    const pages = [newPage([newModule("body")])];
+    const next = applyStartOver(s, pages, tpl);
+    expect(next.pages).toBe(pages);
+    expect(next.template).toEqual(tpl);
+    expect(next.selectedPageId).toBe(pages[0]!.id);
+    expect(next.dirty).toBe(true);
+    expect(next.saved).toBe(s.saved);
+    expect(next.title).toBe(s.title);
+  });
+  it("load carries the document's template (none for a blank document or a template); startOver is the reducer's", () => {
+    const s = editorReducer(EMPTY_EDITOR, {
+      type: "load",
+      doc: { title: "Proposal", pages: twoPages(), options: { ...DEFAULT_OPTIONS } },
+      template: { id: "t1", name: "Proposal — standard" },
+    });
+    expect(s.template).toEqual({ id: "t1", name: "Proposal — standard" });
+    expect(loaded().template).toBeNull();
+    const pages = [newPage([newModule("body")])];
+    const next = editorReducer(s, { type: "startOver", pages, template: tpl });
+    expect(next).toEqual(applyStartOver(s, pages, tpl));
+    expect(next.template?.name).toBe("Inspection report");
+  });
+  it("buildSavePayload sends the template the pages come from now (null for blank)", () => {
+    const s = loaded();
+    expect(buildSavePayload(s, "doc1", 1).templateId).toBeNull();
+    const next = applyStartOver(s, [newPage()], tpl);
+    expect(buildSavePayload(next, "doc1", 1).templateId).toBe("t2");
   });
 });

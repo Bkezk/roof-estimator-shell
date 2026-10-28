@@ -16,6 +16,7 @@ import {
 } from "@/lib/documents/inspection-report";
 
 const read = (p: string) => readFileSync(p, "utf8");
+const flat = (s: string) => s.replace(/\s+/g, " ");
 const estimate = read("src/routes/estimate.tsx");
 const bids = read("src/routes/bids.tsx");
 const service = read("src/components/service-page.tsx");
@@ -216,10 +217,10 @@ describe("the opportunity's linked bid", () => {
 });
 
 describe("Admin › Documents", () => {
-  it("is the /admin/documents route with the Templates, Saved modules and PDF library tabs", () => {
+  it("is the /admin/documents route with the Templates, Saved snippets and PDF library tabs", () => {
     expect(admin).toContain('createFileRoute("/admin/documents")');
     expect(admin).toContain('<TabsTrigger value="templates">Templates</TabsTrigger>');
-    expect(admin).toContain('<TabsTrigger value="modules">Saved modules</TabsTrigger>');
+    expect(admin).toContain('<TabsTrigger value="modules">Saved snippets</TabsTrigger>');
     expect(admin).toContain('<TabsTrigger value="pdfs">PDF library</TabsTrigger>');
     expect(admin).toContain(
       'export const DOCUMENTS_TABS = ["templates", "modules", "pdfs"] as const;',
@@ -238,12 +239,18 @@ describe("Admin › Documents", () => {
     // No "Restore defaults" button: the server seeds a kind with none (the header comment says so).
     expect(admin).not.toMatch(/Restore defaults\s*<\/Button>/);
   });
-  it("saved modules: name, type (MODULE_LABELS), updated; inline Rename and Delete; the editor note", () => {
+  it("saved snippets: name, type (MODULE_LABELS), updated; inline Rename and Delete; the editor note", () => {
     expect(admin).toContain("{MODULE_LABELS[m.module.type]}");
     expect(admin).toContain("setRenaming({ id: m.id, name: m.name })");
     expect(admin).toContain("saveFn({ data: { id: m.id, name: m.newName, module: m.module } })");
-    expect(admin).toContain("<AlertDialogTitle>Delete this saved module?</AlertDialogTitle>");
-    expect(admin).toMatch(/saved from inside the editor \(“Save as module…” on any module\)/);
+    expect(admin).toContain("<AlertDialogTitle>Delete this saved snippet?</AlertDialogTitle>");
+    expect(admin).toContain("<CardTitle>Saved snippets</CardTitle>");
+    expect(flat(admin)).toContain(
+      "Pieces of content people keep for reuse — a terms block, a warranty paragraph, a signature. Save one from inside a document: fill in a module, then choose “Save as snippet…” on it. The module kinds themselves (Text, Photo Grid, Repair List …) are always on the editor's Modules tab and need no saving.",
+    );
+    expect(admin).toContain(
+      "No saved snippets yet. Open a document, pick a module and choose “Save as snippet…”.",
+    );
   });
   it("PDF library: Upload PDF (PDF only, 20 MB, base64) with a busy state, Delete (confirmed), the Insert PDF hint", () => {
     expect(admin).toContain('accept="application/pdf,.pdf"');
@@ -296,5 +303,34 @@ describe("Admin › Settings: the company's website and email", () => {
     const save = settings.slice(settings.indexOf("function useCompanyDraft("));
     expect(save).toContain("website: c.website,");
     expect(save).toContain("email: c.email,");
+  });
+});
+
+describe("Saved snippets (owner, Oct 28: 'saved modules' were confused with the module kinds)", () => {
+  const route = read("src/routes/documents.tsx");
+  const moduleView = read("src/components/documents/editor/module-view.tsx");
+  const editorCtx = read("src/components/documents/editor/editor-context.tsx");
+  const fns = read("src/lib/documents.functions.ts");
+  it("the editor: 'Save as snippet…' on a module, its dialog, its toasts, and the Modules tab's 'Saved snippets' section (the kinds keep 'Modules')", () => {
+    expect(moduleView).toContain('title="Save as snippet…"');
+    expect(route).toContain('title="Save as snippet"');
+    expect(route).toContain('label="Snippet name"');
+    expect(route).toContain('toast.success("Snippet saved");');
+    expect(route).toContain('<div className="text-sm font-medium">Saved snippets</div>');
+    expect(route).toContain('<TabsTrigger value="modules">Modules</TabsTrigger>');
+    expect(route).toContain(
+      '<AlertDialogTitle>Delete the saved snippet "{pendingDelete?.name}"?</AlertDialogTitle>',
+    );
+  });
+  it("no user-facing 'Saved modules' / 'Save as module' remains; the identifiers and the table do not change", () => {
+    for (const src of [admin, route, moduleView, editorCtx, fns]) {
+      expect(src).not.toMatch(/Saved modules?\b/);
+      expect(src).not.toMatch(/Save as module/);
+      expect(src).not.toMatch(/saved modules? (yet|and the PDF)/);
+    }
+    expect(fns).toContain('.from("document_modules")');
+    expect(fns).toContain("export const listSavedModules");
+    expect(fns).toContain("export const saveSavedModule");
+    expect(admin).toContain("function SavedModulesTab()");
   });
 });

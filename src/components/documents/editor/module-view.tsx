@@ -95,7 +95,7 @@ export function ModuleView(props: {
         >
           <Copy className="h-3.5 w-3.5" />
         </IconButton>
-        <IconButton title="Save as module…" onClick={() => env.onSaveModule(m)}>
+        <IconButton title="Save as snippet…" onClick={() => env.onSaveModule(m)}>
           <BookmarkPlus className="h-3.5 w-3.5" />
         </IconButton>
         <IconButton

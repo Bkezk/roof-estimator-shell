@@ -199,14 +199,93 @@ export function closedLine(
   now: string | Date,
   ticket: { number: number | string; customer_name: string | null },
 ): string {
-  const tag = ticketTag(ticket);
-  if (ms(now) - ms(clock.started_at) < MISTAP_MS)
-    return `${clock.kind === "labor" ? "Left" : "Travel to"} ${tag} · under a minute, nothing logged`;
-  const hours = durationHours(clock.started_at, now);
-  return clock.kind === "labor"
-    ? `Left ${tag} · ${hours} h labor logged`
-    : `Travel to ${tag} · ${hours} h logged`;
+  const mistap = ms(now) - ms(clock.started_at) < MISTAP_MS;
+  return stoppedLine({
+    jobId: "",
+    jobNumber: ticket.number,
+    customer: ticket.customer_name,
+    kind: clock.kind,
+    hours: mistap ? 0 : durationHours(clock.started_at, now),
+  });
 }
+
+/**
+ * What a press DID, as the server reports it (setFieldStatus returns it beside the row; audit
+ * risk 3, Oct 28): the toast is built from this, never from the clock the phone had cached —
+ * another device may have closed that one already. `close` is the clock that stopped and the
+ * hours its entry logged (0 when it ran under a minute: a mistap, nothing written); `open` the
+ * clock the press started; `note` why less happened than the button promised.
+ */
+export interface ClockPress {
+  close: {
+    jobId: string;
+    jobNumber: number | string;
+    customer: string | null;
+    kind: ClockKind;
+    hours: number;
+  } | null;
+  open: { jobNumber: number | string; kind: ClockKind } | null;
+  /**
+   * "already": the same button twice; "mistap": the stopped clock ran under a minute; "no clock
+   * on this ticket": Leave / Undo where none ran; "undo": a clock dropped, nothing logged;
+   * "moved": the clock the server read had already been changed on another device — nothing
+   * was written (the page re-reads).
+   */
+  note: "already" | "mistap" | "no clock on this ticket" | "undo" | "moved" | null;
+}
+
+/** The press that changed nothing because the clock row had moved under it (applyClock's swap). */
+export const MOVED_PRESS: ClockPress = { close: null, open: null, note: "moved" };
+
+/**
+ * The report of a transition the server applied: `before` is the clock that was running (with
+ * its ticket's number and customer — null when none), `pressed` the ticket pressed.
+ */
+export function pressReport(
+  t: ClockTransition,
+  before: (Clock & { number: number | string; customer_name: string | null }) | null,
+  pressed: { number: number | string },
+): ClockPress {
+  const stopped = !!before && t.changed && (t.close !== null || t.note === "mistap");
+  const note =
+    t.note === "already" ||
+    t.note === "mistap" ||
+    t.note === "no clock on this ticket" ||
+    t.note === "undo"
+      ? t.note
+      : null;
+  return {
+    close:
+      stopped && before
+        ? {
+            jobId: before.service_job_id,
+            jobNumber: before.number,
+            customer: before.customer_name,
+            kind: before.kind,
+            hours: t.close ? durationHours(t.close.started_at, t.close.ended_at) : 0,
+          }
+        : null,
+    open: t.changed && t.open ? { jobNumber: pressed.number, kind: t.open.kind } : null,
+    note,
+  };
+}
+
+/**
+ * "Left #6012 Acme · 0.75 h labor logged", "Travel to #6012 Acme · 0.25 h logged", or "Left
+ * #6012 Acme · under a minute, nothing logged" when the clock was a mistap (hours 0).
+ */
+export function stoppedLine(close: NonNullable<ClockPress["close"]>): string {
+  const tag = ticketTag({ number: close.jobNumber, customer_name: close.customer });
+  const verb = close.kind === "labor" ? "Left" : "Travel to";
+  if (close.hours <= 0) return `${verb} ${tag} · under a minute, nothing logged`;
+  return close.kind === "labor"
+    ? `Left ${tag} · ${close.hours} h labor logged`
+    : `Travel to ${tag} · ${close.hours} h logged`;
+}
+
+/** The plain line for a press the server refused because the clock had moved (owner: no jargon). */
+export const CLOCK_MOVED_LINE =
+  "Your clock was already changed on another device. Showing the latest.";
 
 /** What a ticket card offers (today-page.tsx), from the technician's clock. */
 export type CardAction = "travel" | "on_site";
@@ -272,26 +351,28 @@ export function entryTimes(
 }
 
 /**
- * The toast after a press on My tickets: what started and what stopped. `before` is the clock
- * that was running when the button was pressed (any ticket), `ticket` the one pressed.
+ * The toast after a press on My tickets (and the close-out's Leave site): what started and what
+ * stopped, from the server's report of the press (`ClockPress`, setFieldStatus) — never from the
+ * clock the phone had cached (audit risk 3). `ticket` is the one pressed.
  */
 export function pressLine(
-  before: (Clock & { number: number | string; customer_name: string | null }) | null,
+  press: ClockPress,
   action: "en_route" | "on_site" | "leave" | "undo",
-  ticket: { id: string; number: number | string; customer_name: string | null },
-  now: string | Date,
+  ticket: { number: number | string; customer_name: string | null },
 ): string {
+  if (press.note === "moved") return CLOCK_MOVED_LINE;
   const tag = ticketTag(ticket);
-  const here = !!before && before.service_job_id === ticket.id;
-  const stopped = before ? closedLine(before, now, before) : null;
+  const stopped = press.close ? stoppedLine(press.close) : null;
   // Cancel (the banner's "started by mistake"): the clock is dropped, nothing logged.
   if (action === "undo")
-    return here ? `Cancelled — nothing logged at ${tag}` : `No clock was running at ${tag}`;
-  if (action === "leave") return here && stopped ? stopped : `No clock was running at ${tag}`;
+    return press.note === "undo"
+      ? `Cancelled — nothing logged at ${tag}`
+      : `No clock was running at ${tag}`;
+  if (action === "leave") return stopped ?? `No clock was running at ${tag}`;
   if (action === "en_route") {
-    if (here && before.kind === "travel") return `Already travelling to ${tag}`;
+    if (press.note === "already") return `Already travelling to ${tag}`;
     return stopped ? `${stopped} — travelling to ${tag}` : `Travelling to ${tag}`;
   }
-  if (here && before.kind === "labor") return `Already on site at ${tag}`;
+  if (press.note === "already") return `Already on site at ${tag}`;
   return stopped ? `${stopped} — on site at ${tag}` : `On site at ${tag}`;
 }

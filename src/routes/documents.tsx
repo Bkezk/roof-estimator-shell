@@ -290,6 +290,10 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
     dispatch({
       type: "load",
       doc: { title: doc.title, pages: doc.pages, options: doc.options },
+      // The template the pages came from (its name for "From template: X"); follows Start over.
+      template: doc.template_id
+        ? { id: doc.template_id, name: bundle.templateName ?? "Template" }
+        : null,
     });
     setVersion(doc.version);
     setVariables(doc.variables);
@@ -450,8 +454,8 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
       documentTab={
         <StartOverPicker
           kind={doc.kind}
-          templateName={bundle.templateName}
-          onPick={(pages) => dispatch({ type: "setPages", op: () => pages })}
+          templateName={state.template?.name ?? null}
+          onPick={(pages, template) => dispatch({ type: "startOver", pages, template })}
           options={state.options}
         />
       }
@@ -614,11 +618,11 @@ function EditorShell(props: {
   const saveModuleMut = useMutation({
     mutationFn: (input: { name: string; module: DocModule }) => saveModuleFn({ data: input }),
     onSuccess: () => {
-      toast.success("Module saved");
+      toast.success("Snippet saved");
       setSaveModule(null);
       void qc.invalidateQueries({ queryKey: savedModulesKey });
     },
-    onError: (e) => toast.error(`Could not save the module: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not save the snippet: ${errText(e)}`),
   });
 
   const env = useMemo<EditorEnv>(
@@ -805,9 +809,9 @@ function EditorShell(props: {
         onOpenChange={(o) => {
           if (!o) setSaveModule(null);
         }}
-        title="Save as module"
-        description="A saved module is offered on the Modules tab of every document and template."
-        label="Module name"
+        title="Save as snippet"
+        description="A saved snippet is this module with its content kept; it is offered under Saved snippets on the Modules tab of every document and template."
+        label="Snippet name"
         placeholder="e.g. Sustainability_Sheet"
         busy={saveModuleMut.isPending}
         onSubmit={(name) => {
@@ -1021,7 +1025,7 @@ function DocumentTab(props: {
                         key={c}
                         variant="secondary"
                         className="h-5 px-1.5 text-[10px]"
-                        title="A saved module on this page"
+                        title="A saved snippet on this page"
                       >
                         {c}
                       </Badge>
@@ -1048,12 +1052,15 @@ function DocumentTab(props: {
   );
 }
 
-/** Document mode: "From template: X" and "Start over from template…" (confirms, then replaces the pages). */
+/**
+ * Document mode: "From template: X" and "Start over from template…" (confirms, then replaces the
+ * pages). The pick hands back the template too, so the label and the saved template_id follow it.
+ */
 function StartOverPicker(props: {
   kind: DocKind;
   templateName: string | null;
   options: DocOptions;
-  onPick: (pages: DocPage[]) => void;
+  onPick: (pages: DocPage[], template: { id: string; name: string }) => void;
 }) {
   const listFn = useServerFn(listDocumentTemplates);
   const getFn = useServerFn(getDocumentTemplate);
@@ -1067,7 +1074,7 @@ function StartOverPicker(props: {
   const apply = useMutation({
     mutationFn: async (id: string) => getFn({ data: { id } }),
     onSuccess: (t) => {
-      props.onPick(instantiatePages(t.pages, props.options));
+      props.onPick(instantiatePages(t.pages, props.options), { id: t.id, name: t.name });
       setPending(null);
       toast.success(`Pages replaced from "${t.name}" — Save to keep them`);
     },
@@ -1134,11 +1141,11 @@ function ModulesTab(props: {
   const remove = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
     onSuccess: () => {
-      toast.success("Saved module deleted");
+      toast.success("Saved snippet deleted");
       setPendingDelete(null);
       void qc.invalidateQueries({ queryKey: savedModulesKey });
     },
-    onError: (e) => toast.error(`Could not delete the saved module: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not delete the saved snippet: ${errText(e)}`),
   });
   return (
     <>
@@ -1176,15 +1183,15 @@ function ModulesTab(props: {
         })}
       </div>
       <div className="space-y-1">
-        <div className="text-sm font-medium">Saved modules</div>
+        <div className="text-sm font-medium">Saved snippets</div>
         {props.savedError ? (
           <p className="text-xs text-destructive">
-            Could not load the saved modules: {props.savedError}
+            Could not load the saved snippets: {props.savedError}
           </p>
         ) : props.savedModules.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            None yet. Hover a module on the page and use <BookmarkPlus className="inline h-3 w-3" />{" "}
-            Save as module…
+            None yet. Fill in a module on the page, hover it and use{" "}
+            <BookmarkPlus className="inline h-3 w-3" /> Save as snippet…
           </p>
         ) : (
           <ul className="divide-y rounded-md border">
@@ -1211,7 +1218,7 @@ function ModulesTab(props: {
                   size="icon"
                   variant="ghost"
                   className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                  title="Delete this saved module"
+                  title="Delete this saved snippet"
                   onClick={() => setPendingDelete({ id: s.id, name: s.name })}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1224,7 +1231,7 @@ function ModulesTab(props: {
       <AlertDialog open={pendingDelete !== null} onOpenChange={(o) => !o && setPendingDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete the saved module "{pendingDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogTitle>Delete the saved snippet "{pendingDelete?.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
               Pages that already use it keep their copy; it just stops being offered here.
             </AlertDialogDescription>

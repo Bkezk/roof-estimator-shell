@@ -15,16 +15,34 @@ vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
-vi.mock("@/lib/ticket-events.server", () => ({ afterTicketStage: vi.fn(async () => {}) }));
+vi.mock("@/lib/ticket-events.server", () => ({
+  afterTicketStage: vi.fn(async () => {}),
+  afterTicketDispatch: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/followups.server", () => ({ syncFollowup: vi.fn(async () => {}) }));
+vi.mock("@/lib/notify.server", () => ({
+  serverClient: async (fallback: unknown) => fallback,
+  notify: vi.fn(async () => 0),
+}));
+vi.mock("@/lib/service-crew.server", () => ({
+  syncCrewLead: vi.fn(async () => {}),
+  writeCrew: vi.fn(async () => 0),
+  readCrew: vi.fn(async () => []),
+}));
 
 import {
   TIME_END_BEFORE_START,
   TIME_HOURS_NEEDED,
+  addJobNote,
   myClock,
+  myDay,
   saveTimeEntry,
   setFieldStatus,
+  type FieldStatusResult,
 } from "@/lib/service-field.functions";
+import { setServiceStage } from "@/lib/service.functions";
+import { clockStoppedNote } from "@/lib/clock-close.server";
+import { MOVED_PRESS, pressLine } from "@/lib/tech-clock";
 import { fakeSupabase } from "@/test/fake-supabase";
 
 type Row = Record<string, unknown>;
@@ -109,7 +127,7 @@ const call = async <T = Row>(fn: unknown, data: Row, userId = TECH) =>
     context: { supabase: env.db, userId },
   });
 const press = (id: string, to: string, userId = TECH) =>
-  call(setFieldStatus, { id, to, day: DAY }, userId);
+  call<FieldStatusResult>(setFieldStatus, { id, to, day: DAY }, userId);
 const clocks = () => env.tables["service_tech_clock"]!;
 const entries = () => env.tables["service_time_entries"]!;
 const jobRow = (id: string) => env.tables["service_jobs"]!.find((j) => j["id"] === id)!;
@@ -159,7 +177,7 @@ describe("travel → on site → leave", () => {
     expect(jobRow(A)).toMatchObject({ field_status: "on_site", on_site_at: at(20).toISOString() });
 
     vi.setSystemTime(at(95));
-    const row = await press(A, "leave");
+    const { row } = await press(A, "leave");
     expect(clocks()).toEqual([]);
     expect(entries()).toHaveLength(2);
     expect(entries()[1]).toMatchObject({
@@ -224,7 +242,7 @@ describe("travel to B while on site at A", () => {
     setup();
     await press(A, "on_site");
     vi.setSystemTime(at(60));
-    const b = await press(B, "en_route");
+    const b = (await press(B, "en_route")).row;
     expect(clocks()).toHaveLength(1);
     expect(clocks()[0]).toMatchObject({ service_job_id: B, kind: "travel" });
     expect(entries()).toHaveLength(1);
@@ -267,7 +285,7 @@ describe("undo", () => {
     setup();
     await press(A, "en_route");
     vi.setSystemTime(at(10));
-    const row = await press(A, "undo");
+    const { row } = await press(A, "undo");
     expect(clocks()).toEqual([]);
     expect(entries()).toEqual([]);
     expect(row).toMatchObject({ field_status: null, en_route_at: null });
@@ -300,7 +318,7 @@ describe("Complete with a clock", () => {
     vi.setSystemTime(at(20));
     await press(A, "on_site");
     vi.setSystemTime(at(140));
-    const row = await press(A, "done");
+    const { row } = await press(A, "done");
     expect(row).toMatchObject({
       stage: "done",
       field_status: null,
@@ -547,11 +565,11 @@ describe("My tickets (today-page.tsx): the clock's banner and buttons", () => {
     expect(today).toContain('onClick={() => press.mutate("undo")}');
     expect(today).toContain("— use the clock at the top");
   });
-  it("a press sends the phone's day, re-reads the day, the clock and the time, and toasts pressLine; failures are loud", () => {
-    expect(today).toContain("await statusFn({ data: { id: ticket.id, to, day: localYmd() } });");
-    expect(today).toContain("toast.success(pressLine(before, to, ticket, at));");
+  it("a press sends the phone's day, re-reads the day, the clock and the time, and toasts pressLine from the server's report; failures are loud", () => {
+    expect(today).toContain("statusFn({ data: { id: ticket.id, to, day: localYmd() } }),");
+    expect(today).toContain("else toast.success(pressLine(transition, to, ticket));");
     expect(flat(today)).toContain("fieldKeys.today, fieldKeys.clock, fieldKeys.time(ticket.id),");
-    expect(today).toContain("fieldKeys.time(before.service_job_id),");
+    expect(today).toContain("[fieldKeys.time(left), fieldKeys.job(left), fieldKeys.events(left)]");
     expect(today).toContain('onError: (e) => loudError("The clock did not move", e),');
   });
   it("the header says the Oct 8 one-button screen is superseded by the clock (Oct 15)", () => {
@@ -569,7 +587,7 @@ describe("the close-out (closeout.tsx): the clock line and Complete", () => {
     expect(closeout).toContain('data-line="closeout-clock"');
     expect(flat(closeout)).toContain("runningLabel( clockHere,");
     expect(closeout).toContain(
-      'await statusFn({ data: { id: job.id, to: "leave", day: localYmd() } });',
+      'await statusFn({ data: { id: job.id, to: "leave", day: localYmd() } }),',
     );
     expect(closeout).toContain("Leave site");
   });
@@ -626,9 +644,10 @@ describe("the server's shape", () => {
     expect(fn).toContain("export const myClock = createServerFn");
     expect(fn).toContain("export const clockOnJob = createServerFn");
     expect(fn).toContain('to: z.enum(["en_route", "on_site", "leave", "done", "undo"]),');
-    expect(fn).toContain(
-      'import { clockTransition, durationHours, entryDay, type Clock } from "@/lib/tech-clock";',
+    expect(flat(fn)).toContain(
+      'import { clockTransition, durationHours, MOVED_PRESS, pressReport, type Clock, type ClockPress, } from "@/lib/tech-clock";',
     );
+    expect(fn).toContain('import { insertClockEntry } from "@/lib/clock-close.server";');
   });
   it("quarterHours is tech-clock's durationHours (one rounding rule)", () => {
     expect(flat(fn)).toContain(
@@ -672,5 +691,322 @@ describe("tightened after the review (Oct 15)", () => {
     const fns = readFileSync("src/lib/service-field.functions.ts", "utf8");
     expect(fns).toContain("if (other && (other.technician_id === tech || isOffice(p))) {");
     expect(fns).toContain("could not clear its field status after the clock left it");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Oct 28 (the audit): the server reports what the press did; the swap is compare-and-swap; the
+// office's closing stages stop the clock; a timeline write that fails is heard; My tickets' reads.
+
+describe("the server reports what the press did (audit risk 3)", () => {
+  const acme = { number: 6012, customer_name: "Acme" };
+  const bell = { number: 6014, customer_name: "Bell County" };
+  it("a move — on site at A, Start travel to B — reports A's labor closed with its hours and B's travel opened", async () => {
+    setup();
+    await press(A, "on_site");
+    vi.setSystemTime(at(60));
+    const r = await press(B, "en_route");
+    expect(r.transition).toEqual({
+      close: { jobId: A, jobNumber: 6014, customer: "Bell County", kind: "labor", hours: 1 },
+      open: { jobNumber: 6012, kind: "travel" },
+      note: null,
+    });
+    expect(r.warning).toBeUndefined();
+    expect(pressLine(r.transition, "en_route", acme)).toBe(
+      "Left #6014 Bell County · 1 h labor logged — travelling to #6012 Acme",
+    );
+  });
+  it("the same button twice reports 'already': nothing closed, nothing opened, nothing written", async () => {
+    setup();
+    await press(A, "on_site");
+    vi.setSystemTime(at(30));
+    const r = await press(A, "on_site");
+    expect(r.transition).toEqual({ close: null, open: null, note: "already" });
+    expect(r.row).toMatchObject({ id: A });
+    expect(entries()).toEqual([]);
+    expect(clocks()).toHaveLength(1);
+    expect(pressLine(r.transition, "on_site", bell)).toBe("Already on site at #6014 Bell County");
+  });
+  it("Leave site where no clock runs reports 'no clock on this ticket'; a mistap names the stopped clock with 0 hours", async () => {
+    setup();
+    const r = await press(A, "leave");
+    expect(r.transition).toEqual({ close: null, open: null, note: "no clock on this ticket" });
+    expect(pressLine(r.transition, "leave", bell)).toBe(
+      "No clock was running at #6014 Bell County",
+    );
+    await press(A, "en_route");
+    vi.setSystemTime(new Date(T0.getTime() + 30_000));
+    const m = await press(A, "on_site");
+    expect(m.transition).toEqual({
+      close: { jobId: A, jobNumber: 6014, customer: "Bell County", kind: "travel", hours: 0 },
+      open: { jobNumber: 6014, kind: "labor" },
+      note: "mistap",
+    });
+    expect(entries()).toEqual([]);
+  });
+  it("the pages build the toast from the report, never from the clock the phone had cached", () => {
+    const today = read("src/components/service/today-page.tsx");
+    expect(today).not.toContain("qc.getQueryData<MyClock | null>(fieldKeys.clock)");
+    expect(today).not.toContain("pressLine(before");
+    expect(today).toContain("onSuccess: ({ transition, warning }, to) => {");
+    expect(today).toContain("if (warning) toast.warning(warning);");
+    const closeout = read("src/components/service/closeout.tsx");
+    expect(closeout).not.toContain("closedLine(");
+    expect(closeout).toContain('toast.success(pressLine(transition, "leave", job));');
+    expect(closeout).toContain("if (r.warning) toast.warning(r.warning);");
+    expect(closeout).toContain("return r.row;");
+  });
+});
+
+describe("the clock swap is compare-and-swap (audit risk 2)", () => {
+  /** The fake's service_tech_clock delete finds no row: the clock moved on another device. */
+  function deleteFindsNothing() {
+    const db = env.db as unknown as { from: (t: string) => Record<string, unknown> };
+    const realFrom = db.from;
+    db.from = (t: string) => {
+      const b = realFrom(t) as Record<string, unknown> & {
+        then: (res: (v: unknown) => unknown) => Promise<unknown>;
+      };
+      if (t === "service_tech_clock")
+        b["delete"] = () => {
+          b.then = (res) => Promise.resolve({ data: [], error: null, count: 0 }).then(res);
+          return b;
+        };
+      return b;
+    };
+  }
+  it("a delete that finds no row: no entry written, no new clock, note 'moved', the ticket untouched", async () => {
+    setup();
+    await press(A, "on_site");
+    vi.setSystemTime(at(60));
+    deleteFindsNothing();
+    const r = await press(B, "en_route");
+    expect(r.transition).toEqual(MOVED_PRESS);
+    expect(r.transition.note).toBe("moved");
+    expect(entries()).toEqual([]);
+    expect(clocks()).toHaveLength(1);
+    expect(clocks()[0]).toMatchObject({ service_job_id: A, kind: "labor" });
+    expect(jobRow(B)).toMatchObject({ field_status: null, en_route_at: null });
+    expect(jobRow(A)).toMatchObject({ field_status: "on_site" });
+    expect(events(B)).toEqual([]);
+    // Leave site and Complete hit the same wall.
+    const l = await press(A, "leave");
+    expect(l.transition).toEqual(MOVED_PRESS);
+    expect(entries()).toEqual([]);
+  });
+  it("source: the delete names the started_at that was read, and the entry is written after the swap held", () => {
+    const fn = read("src/lib/service-field.functions.ts");
+    const swap = fn.slice(
+      fn.indexOf("const applyClock = async ("),
+      fn.indexOf('return "applied";'),
+    );
+    expect(flat(swap)).toContain(
+      '.delete() .eq("technician_id", tech) .eq("started_at", open.started_at) .select("technician_id");',
+    );
+    expect(swap).toContain('if (!gone?.length) return "moved";');
+    expect(swap.indexOf("insertClockEntry(")).toBeGreaterThan(swap.indexOf('return "moved"'));
+    const today = read("src/components/service/today-page.tsx");
+    expect(today).toContain('if (transition.note === "moved") toast.info(CLOCK_MOVED_LINE);');
+  });
+});
+
+describe("the office closing a ticket stops the clock and writes its time (audit risk 4)", () => {
+  const invoice = (id: string) => call(setServiceStage, { id, stage: "invoiced" }, MANAGER);
+  it("a clock running on B, the office sets Invoiced: the labor entry, the clock gone, the timeline row, the stage", async () => {
+    setup();
+    await press(B, "on_site");
+    vi.setSystemTime(at(90));
+    await invoice(B);
+    expect(entries()).toHaveLength(1);
+    expect(entries()[0]).toMatchObject({
+      service_job_id: B,
+      technician_id: TECH,
+      kind: "labor",
+      hours: 1.5,
+      source: "clock",
+      started_at: T0.toISOString(),
+      ended_at: at(90).toISOString(),
+      on_date: DAY,
+      created_by: MANAGER,
+    });
+    expect(clocks()).toEqual([]);
+    expect(events(B).at(-1)).toMatchObject({
+      kind: "field",
+      field_status: null,
+      note: "Clock stopped by the office — stage Invoiced",
+      by_user: MANAGER,
+    });
+    expect(clockStoppedNote("invoiced")).toBe("Clock stopped by the office — stage Invoiced");
+    expect(jobRow(B)).toMatchObject({ stage: "invoiced", field_status: null });
+  });
+  it("no clock: nothing extra is written", async () => {
+    setup();
+    await invoice(A);
+    expect(entries()).toEqual([]);
+    expect(events(A)).toEqual([]);
+    expect(clocks()).toEqual([]);
+    expect(jobRow(A)["stage"]).toBe("invoiced");
+  });
+  it("the technician's Leave after the office closed it: the friendly path, no RLS text, nothing written", async () => {
+    setup();
+    await press(B, "on_site");
+    vi.setSystemTime(at(90));
+    await invoice(B);
+    vi.setSystemTime(at(100));
+    const r = await press(B, "leave");
+    expect(r.transition).toEqual({ close: null, open: null, note: "no clock on this ticket" });
+    expect(pressLine(r.transition, "leave", { number: 6012, customer_name: "Acme" })).toBe(
+      "No clock was running at #6012 Acme",
+    );
+    expect(entries()).toHaveLength(1);
+    // And the banner is gone: myClock reads no clock (the row was deleted).
+    expect(await call(myClock, {})).toBeNull();
+  });
+  it("a clock the office could not stop refuses the stage change (nothing half done)", async () => {
+    setup();
+    await press(B, "on_site");
+    vi.setSystemTime(at(90));
+    const db = env.db as unknown as { from: (t: string) => Record<string, unknown> };
+    const realFrom = db.from;
+    db.from = (t: string) => {
+      const b = realFrom(t) as Record<string, unknown> & {
+        then: (res: (v: unknown) => unknown) => Promise<unknown>;
+      };
+      if (t === "service_time_entries")
+        b["insert"] = () => {
+          b.then = (res) =>
+            Promise.resolve({ data: null, error: { message: "no room" }, count: null }).then(res);
+          return b;
+        };
+      return b;
+    };
+    await expect(invoice(B)).rejects.toThrow(
+      /The time entry \(labor, .* – .*\) was not written: no room/,
+    );
+    expect(jobRow(B)["stage"]).toBe("scheduled");
+  });
+  it("withTicket drops a banner whose ticket is past Done (defensive): myClock is null on an Invoiced ticket", async () => {
+    setup();
+    await press(B, "on_site");
+    // A clock that slipped past the office's stop (set the stage around the app).
+    jobRow(B)["stage"] = "invoiced";
+    expect(await call(myClock, {})).toBeNull();
+    jobRow(B)["stage"] = "done";
+    expect(await call(myClock, {})).toMatchObject({ service_job_id: B });
+  });
+  it("source: setServiceStage and the invoice's finalise stop the clocks BEFORE the stage write; the stages are the office's", () => {
+    const svc = read("src/lib/service.functions.ts");
+    const stage = svc.slice(
+      svc.indexOf("export const setServiceStage"),
+      svc.indexOf("export const assignServiceJob"),
+    );
+    expect(stage.indexOf("stopClocksForOffice(")).toBeGreaterThan(0);
+    expect(stage.indexOf("stopClocksForOffice(")).toBeLessThan(stage.indexOf("stage: data.stage,"));
+    expect(stage).toContain("...(stopped ? { field_status: null } : {}),");
+    const inv = read("src/lib/invoices.functions.ts");
+    const fin = inv.slice(
+      inv.indexOf("async function finalizeDraft("),
+      inv.indexOf("const pdfPath ="),
+    );
+    expect(fin.indexOf("stopClocksForOffice(")).toBeLessThan(
+      fin.indexOf("ticketStageFromInvoice(sb,"),
+    );
+    const helper = read("src/lib/clock-close.server.ts");
+    expect(helper).toContain(
+      "export const CLOCK_CLOSING_STAGES: readonly string[] = OFFICE_STAGES;",
+    );
+    expect(helper).toContain(
+      'clockTransition(open, "leave", job.id, now, open.helper_count, open.technician_id)',
+    );
+    expect(helper).toContain("if (t.close) await insertClockEntry(sb, t.close, day, actor.id);");
+    // No SQL needed: the office passes ticket_open_for_tech at any stage (the function says so).
+    const sql = readFileSync("supabase/migrations/20261006192000_field_edit_lock.sql", "utf8");
+    expect(sql).toContain(
+      "select not public.is_technician() or public.is_admin() or public.is_manager()",
+    );
+  });
+});
+
+describe("a timeline write that fails is heard (audit nit)", () => {
+  function eventsRefuse() {
+    const db = env.db as unknown as { from: (t: string) => Record<string, unknown> };
+    const realFrom = db.from;
+    db.from = (t: string) => {
+      const b = realFrom(t) as Record<string, unknown> & {
+        then: (res: (v: unknown) => unknown) => Promise<unknown>;
+      };
+      if (t === "service_job_events")
+        b["insert"] = () => {
+          b.then = (res) =>
+            Promise.resolve({ data: null, error: { message: "RLS says no" }, count: null }).then(
+              res,
+            );
+          return b;
+        };
+      return b;
+    };
+  }
+  it("a clock press stands and comes back with a warning the screen toasts (the clock moved)", async () => {
+    setup();
+    eventsRefuse();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await press(A, "on_site");
+    spy.mockRestore();
+    expect(r.row).toMatchObject({ field_status: "on_site" });
+    expect(clocks()).toHaveLength(1);
+    expect(r.warning).toBe(
+      "The clock moved, but the ticket's timeline was not updated: The timeline row was not written: RLS says no",
+    );
+    expect(events(A)).toEqual([]);
+  });
+  it("a note IS the timeline row: the add fails loudly", async () => {
+    setup();
+    eventsRefuse();
+    await expect(call(addJobNote, { id: A, note: "Gate code 4411" })).rejects.toThrow(
+      "The timeline row was not written: RLS says no",
+    );
+  });
+  it("source: logEvent throws; the photo, signature and crew sites say what already stands", () => {
+    const fn = read("src/lib/service-field.functions.ts");
+    expect(fn).toContain(
+      'if (error)\n    throw new Error(\n      `${stands ? `${stands}, but the` : "The"} timeline row was not written: ${error.message}`,',
+    );
+    for (const stands of [
+      '"The signature is saved"',
+      '"The photo is saved"',
+      '"The crew is saved"',
+    ])
+      expect(fn).toContain(stands);
+  });
+});
+
+describe("myDay (Oct 28 audit): the columns it sends, and the roster only when a crew needs names", () => {
+  const rpcCalls = () => env.rpcCalls.map((c) => c.fn);
+  it("no crew rows: technician_options is not called", async () => {
+    setup();
+    const day = await call<Row[]>(myDay, {});
+    expect(day).toHaveLength(2);
+    expect(rpcCalls()).not.toContain("technician_options");
+    expect(day[0]).toMatchObject({ crew_names: [] });
+  });
+  it("a crew row: the roster is read once", async () => {
+    setup({ service_job_crew: [{ service_job_id: A, technician_id: MATE, sort: 1 }] });
+    const day = await call<Row[]>(myDay, {});
+    expect(rpcCalls().filter((f) => f === "technician_options")).toHaveLength(1);
+    expect(day.find((j) => j["id"] === A)).toMatchObject({ crew_names: ["Mia Mate"] });
+  });
+  it("source: a named column list, no select('*'); the seed fills the rest", () => {
+    const fn = read("src/lib/service-field.functions.ts");
+    const day = fn.slice(fn.indexOf("export const myDay"), fn.indexOf("export interface MyClock"));
+    expect(day).toContain(".select(TODAY_JOB_SELECT)");
+    expect(day).not.toContain('.select("*")');
+    expect(day).toContain(
+      'const techs = crewRows?.length ? (await sb.rpc("technician_options")).data : [];',
+    );
+    expect(fn).toContain("export type TodayJobRow = Pick<ServiceJobRow, TodayJobColumn>;");
+    expect(fn).toContain("export interface TodayJob extends TodayJobRow {");
+    const cache = read("src/lib/job-cache.ts");
+    expect(cache).toContain("const UNREAD_COLUMNS: Omit<ServiceJobRow, TodayJobColumn> = {");
+    expect(cache).toContain("...UNREAD_COLUMNS,\n    ...row,");
   });
 });

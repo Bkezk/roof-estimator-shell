@@ -27,7 +27,7 @@ export interface EditorEnv {
   dispatch: Dispatch<EditorAction>;
   /** The TipTap editor that last had focus (null when it blurred away for good). */
   setActiveEditor: (editor: Editor | null) => void;
-  /** "Save as module…" on a module's toolbar: the page asks for a name and saves. */
+  /** "Save as snippet…" on a module's toolbar: the page asks for a name and saves (document_modules). */
   onSaveModule: (module: DocModule) => void;
 }
 

@@ -626,7 +626,7 @@ describe("4a. setFieldStatus 'done' on an inspection", () => {
     expect(none.service_jobs[0]).toMatchObject({ stage: "scheduled", completed_at: null });
     // Saved with one of the two visible items: the other reads as OK (Oct 26), not unanswered.
     const tables = envWith(job({ inspection: savedJson({ items: [savedJson().items[0]!] }) }));
-    const row = await call<Row>(setFieldStatus, { id: JOB, to: "done" }, tables, TECH);
+    const { row } = await call<{ row: Row }>(setFieldStatus, { id: JOB, to: "done" }, tables, TECH);
     expect(row["stage"]).toBe("done");
     // Saved with nothing flagged at all: a clean roof is a complete inspection.
     const clean = envWith(
@@ -636,13 +636,13 @@ describe("4a. setFieldStatus 'done' on an inspection", () => {
         }),
       }),
     );
-    expect((await call<Row>(setFieldStatus, { id: JOB, to: "done" }, clean, TECH))["stage"]).toBe(
-      "done",
-    );
+    expect(
+      (await call<{ row: Row }>(setFieldStatus, { id: JOB, to: "done" }, clean, TECH)).row["stage"],
+    ).toBe("done");
   });
   it("lets a technician through with every item answered and time logged — no photo, no signature", async () => {
     const tables = envWith(job({ inspection: savedJson() }));
-    const row = await call<Row>(setFieldStatus, { id: JOB, to: "done" }, tables, TECH);
+    const { row } = await call<{ row: Row }>(setFieldStatus, { id: JOB, to: "done" }, tables, TECH);
     expect(row["stage"]).toBe("done");
     expect(tables.service_job_photos).toEqual([]);
   });
@@ -652,7 +652,12 @@ describe("4a. setFieldStatus 'done' on an inspection", () => {
       "The close-out is not complete: No time logged.",
     );
     const asManager = envWith(job());
-    const row = await call<Row>(setFieldStatus, { id: JOB, to: "done" }, asManager, MANAGER);
+    const { row } = await call<{ row: Row }>(
+      setFieldStatus,
+      { id: JOB, to: "done" },
+      asManager,
+      MANAGER,
+    );
     expect(row["stage"]).toBe("done");
   });
   it("reads the live checklist only on an inspection and hands the JSON to closeoutGaps", () => {

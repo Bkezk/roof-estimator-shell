@@ -135,8 +135,8 @@ describe("the modules", () => {
     ])
       expect(moduleView).toContain(`case "${t}":`);
   });
-  it("has the hover toolbar: move, duplicate, save as module, delete", () => {
-    for (const title of ["Move up", "Move down", "Duplicate", "Save as module…", "Delete"])
+  it("has the hover toolbar: move, duplicate, save as snippet, delete", () => {
+    for (const title of ["Move up", "Move down", "Duplicate", "Save as snippet…", "Delete"])
       expect(moduleView).toContain(`title="${title}"`);
   });
   it("the pricing table has Show sections, Edit rows and Reset", () => {
@@ -288,5 +288,26 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     // Refresh data goes through the same snapshot.
     const refresh = fns.slice(fns.indexOf("export const refreshDocumentVariables"));
     expect(refresh).toContain("const variables = snapshot(loaded.source);");
+  });
+});
+
+describe("Start over from template… follows through (Oct 28)", () => {
+  it("the pick dispatches startOver with the template; the label reads the state's template; the save sends templateId", () => {
+    expect(route).toContain(
+      'onPick={(pages, template) => dispatch({ type: "startOver", pages, template })}',
+    );
+    expect(route).toContain("templateName={state.template?.name ?? null}");
+    expect(route).not.toContain("templateName={bundle.templateName}");
+    expect(route).toContain(
+      "props.onPick(instantiatePages(t.pages, props.options), { id: t.id, name: t.name });",
+    );
+    // The first load carries the document's template (the name the bundle looked up).
+    expect(route).toContain('? { id: doc.template_id, name: bundle.templateName ?? "Template" }');
+    const fns = read("src/lib/documents.functions.ts");
+    expect(fns).toContain("templateId: z.string().uuid().nullable().optional(),");
+    expect(fns).toContain("...(templateChanged ? { template_id: next.templateId ?? null } : {}),");
+    expect(fns).toContain(
+      'if (t.kind !== row.kind) throw new Error("That template is for the other kind of record");',
+    );
   });
 });

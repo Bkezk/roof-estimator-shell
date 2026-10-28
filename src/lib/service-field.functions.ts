@@ -26,7 +26,15 @@ import { SERVICE_DONE_METHOD } from "@/lib/contact-log.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
 import { easternYmd, resolveFieldDay } from "@/lib/field-day";
-import { clockTransition, durationHours, entryDay, type Clock } from "@/lib/tech-clock";
+import {
+  clockTransition,
+  durationHours,
+  MOVED_PRESS,
+  pressReport,
+  type Clock,
+  type ClockPress,
+} from "@/lib/tech-clock";
+import { insertClockEntry } from "@/lib/clock-close.server";
 import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { mentionedIds } from "@/lib/mentions";
 import { mentionRoster } from "@/lib/auth.functions";
@@ -163,18 +171,19 @@ export function quarterHours(from: string | Date, to: string | Date): number {
  * of stage (trigger service_jobs_stage_log, 20261001130000_opened_and_stage_dates.sql).
  */
 export type AppEventKind = "field" | "note" | "assign" | "photo" | "signature" | "edit";
-async function logEvent(
-  ctx: Ctx,
-  jobId: string,
-  ev: {
-    kind: AppEventKind;
-    field_status?: string | null;
-    note?: string | null;
-    meta?: Record<string, unknown>;
-  },
-  byName: string,
-) {
-  await ctx.supabase.from("service_job_events").insert({
+type AppEvent = {
+  kind: AppEventKind;
+  field_status?: string | null;
+  note?: string | null;
+  meta?: Record<string, unknown>;
+};
+/**
+ * Write a timeline row; a refused insert throws (Oct 28 audit: it used to vanish silently). The
+ * caller's loud error path shows it — with `stands`, what was already saved is said first ("The
+ * photo is saved, but …"), so the person knows the main write went through.
+ */
+async function logEvent(ctx: Ctx, jobId: string, ev: AppEvent, byName: string, stands?: string) {
+  const { error } = await ctx.supabase.from("service_job_events").insert({
     service_job_id: jobId,
     kind: ev.kind,
     field_status: ev.field_status ?? null,
@@ -183,10 +192,43 @@ async function logEvent(
     by_name: byName,
     ...(ev.meta ? { meta: ev.meta as Json } : {}),
   });
+  if (error)
+    throw new Error(
+      `${stands ? `${stands}, but the` : "The"} timeline row was not written: ${error.message}`,
+    );
+}
+/**
+ * logEvent for setFieldStatus, whose clock and entry writes are done by the time the row is
+ * logged and whose ticket update still follows: a refusal must not fail the press, so it is
+ * logged here and handed back as a warning the screen toasts beside the result.
+ */
+async function tryLogEvent(ctx: Ctx, jobId: string, ev: AppEvent, byName: string) {
+  try {
+    await logEvent(ctx, jobId, ev, byName);
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`Ticket ${jobId}: ${msg}`);
+    return `The clock moved, but the ticket's timeline was not updated: ${msg}`;
+  }
 }
 
-/** A ticket on the My tickets page: the row plus what the tech needs at a glance. */
-export interface TodayJob extends ServiceJobRow {
+/**
+ * The service_jobs columns My tickets reads (Oct 28 audit: `select("*")` sent every column of
+ * every ticket to the phone): what the card shows, plus what the close-out reads when the card
+ * seeds it (job-cache.ts seedJobFromToday fills the rest with nulls — the compiler holds the two
+ * lists together: a column dropped here must be added there). No wider than before: RLS still
+ * decides which rows a technician reads.
+ */
+export const TODAY_JOB_SELECT =
+  "id, number, customer_name, description, service_type, stage, field_status, en_route_at, on_site_at, completed_at, scheduled_date, arrival_window, technician_id, helper_count, crew_confirmed_at, site_id, site_name, site_address, contact_id, account_id, from_job_id, signature_path, signed_at, signed_by, closing_notes, checked_in_with, checked_out_with, recommend_new_roof, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by, labor_rate_kind, created_at, updated_at, updated_by_name" as const;
+type SplitColumns<S extends string> = S extends `${infer H}, ${infer T}` ? H | SplitColumns<T> : S;
+export type TodayJobColumn = SplitColumns<typeof TODAY_JOB_SELECT>;
+/** The ticket row as My tickets reads it (TODAY_JOB_SELECT). */
+export type TodayJobRow = Pick<ServiceJobRow, TodayJobColumn>;
+
+/** A ticket on the My tickets page: the row's columns plus what the tech needs at a glance. */
+export interface TodayJob extends TodayJobRow {
   technician_instructions: string | null;
   contact_name: string | null;
   contact_phone: string | null;
@@ -211,7 +253,7 @@ export const myDay = createServerFn({ method: "GET" })
     // Mine only, whoever I am (RLS also filters a technician's reads).
     const { data: jobs, error } = await sb
       .from("service_jobs")
-      .select("*")
+      .select(TODAY_JOB_SELECT)
       .is("deleted_at", null)
       .in("stage", ["open", "scheduled"])
       .eq("technician_id", context.userId)
@@ -233,7 +275,6 @@ export const myDay = createServerFn({ method: "GET" })
       { data: contacts },
       { data: accounts },
       { data: crewRows },
-      { data: techs },
       warrantyRes,
     ] = await Promise.all([
       siteIds.length
@@ -267,7 +308,6 @@ export const myDay = createServerFn({ method: "GET" })
               sort: number | null;
             }[],
           }),
-      sb.rpc("technician_options"),
       // M5: before 20261005160000_site_warranties.sql is applied this errors; no badges then.
       siteIds.length
         ? sb
@@ -276,6 +316,8 @@ export const myDay = createServerFn({ method: "GET" })
             .in("site_id", siteIds)
         : Promise.resolve({ data: [] as Warranty[], error: null }),
     ]);
+    // The crew's names (the roster rpc) only when a crew row needs one (Oct 28 audit).
+    const techs = crewRows?.length ? (await sb.rpc("technician_options")).data : [];
     const today = easternYmd();
     const warrantiesOf = new Map<string, Warranty[]>();
     for (const w of warrantyRes.error ? [] : (warrantyRes.data ?? []))
@@ -352,45 +394,35 @@ export const clockOnJob = createServerFn({ method: "GET" })
     return { ...clock, technician_name: t ? (t.full_name ?? "").trim() || t.email : "Technician" };
   });
 
-/** A clock with its ticket's number and customer; null when the ticket is gone. */
+/** The stages a technician's clock can still be closed at (ticket_open_for_tech's list). */
+const CLOCKABLE_STAGES: readonly string[] = ["open", "scheduled", "done"];
+/**
+ * A clock with its ticket's number and customer; null when the ticket is gone — or past Done
+ * (Oct 28 audit, defensive: the office's closing stages stop the clock themselves,
+ * clock-close.server.ts; a row that slipped through would otherwise show a banner whose Leave
+ * site can only hit the RLS wall).
+ */
 async function withTicket(ctx: Ctx, clock: Clock | null): Promise<MyClock | null> {
   if (!clock) return null;
   const { data: job, error } = await ctx.supabase
     .from("service_jobs")
-    .select("number, customer_name")
+    .select("number, customer_name, stage")
     .eq("id", clock.service_job_id)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!job) return null;
+  if (!job || !CLOCKABLE_STAGES.includes(job.stage)) return null;
   return { ...clock, number: job.number, customer_name: job.customer_name };
 }
 
-/** A closed clock as a service_time_entries row (source 'clock'; owner, Oct 15). */
-async function writeClockEntry(
-  ctx: Ctx,
-  close: {
-    jobId: string;
-    technician_id: string;
-    kind: "travel" | "labor";
-    started_at: string;
-    ended_at: string;
-    helper_count: number;
-  },
-  onDate: string,
-) {
-  const { error } = await ctx.supabase.from("service_time_entries").insert({
-    service_job_id: close.jobId,
-    technician_id: close.technician_id,
-    kind: close.kind,
-    started_at: close.started_at,
-    ended_at: close.ended_at,
-    hours: quarterHours(close.started_at, close.ended_at),
-    helper_count: close.helper_count,
-    source: "clock",
-    on_date: entryDay(onDate, close.started_at, close.ended_at),
-    created_by: ctx.userId,
-  });
-  if (error) throw new Error(`The time entry was not written: ${error.message}`);
+/**
+ * What a press returns (Oct 28, audit risk 3): the ticket row and what the clock actually did
+ * (tech-clock.ts ClockPress — the toast is built from this, not from the phone's cached clock),
+ * plus a warning when a timeline row could not be written (the press itself stood).
+ */
+export interface FieldStatusResult {
+  row: ServiceJobRow;
+  transition: ClockPress;
+  warning?: string;
 }
 
 /**
@@ -422,7 +454,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<ServiceJobRow> => {
+  .handler(async ({ data, context }): Promise<FieldStatusResult> => {
     // The day the time entries belong to: the phone's, not UTC's (field-day.ts). Checked first,
     // so a refused day changes nothing.
     const at = new Date();
@@ -441,30 +473,69 @@ export const setFieldStatus = createServerFn({ method: "POST" })
     const who = nameOf(p);
     const open = await openClock(context, tech);
     const clockHere = open?.service_job_id === job.id ? open : null;
+    // The OTHER ticket the clock is on (its lead, and its name for the toast), read once.
+    const other =
+      open && open.service_job_id !== job.id
+        ? (
+            await sb
+              .from("service_jobs")
+              .select("number, customer_name, technician_id")
+              .eq("id", open.service_job_id)
+              .maybeSingle()
+          ).data
+        : null;
+    const before = open
+      ? {
+          ...open,
+          number: clockHere ? job.number : (other?.number ?? "?"),
+          customer_name: clockHere ? job.customer_name : (other?.customer_name ?? null),
+        }
+      : null;
+    /** What the press did, for the toast (tech-clock.ts pressReport). */
+    const report = (t: ReturnType<typeof clockTransition>): ClockPress =>
+      pressReport(t, before, job);
+    const unchanged = (t: ReturnType<typeof clockTransition>): FieldStatusResult => ({
+      row: job,
+      transition: report(t),
+    });
+    const warnings: string[] = [];
+    const note = async (ev: AppEvent) => {
+      const w = await tryLogEvent(context, job.id, ev, who);
+      if (w) warnings.push(w);
+    };
+    let transition: ClockPress = { close: null, open: null, note: null };
     let patch: Database["public"]["Tables"]["service_jobs"]["Update"] = {};
 
-    /** Move the clock row to `t.open` and write the entry of what it closed. */
-    const applyClock = async (t: ReturnType<typeof clockTransition>) => {
-      if (!t.changed) return;
-      if (t.close) await writeClockEntry(context, t.close, onDate);
+    /**
+     * Move the clock row to `t.open` and write the entry of what it closed. The swap first, on
+     * the row as read (audit risk 2, Oct 28): the delete names the started_at that was read, so
+     * a clock another device already moved is not deleted — nothing is written and the press
+     * reports "moved" (the page re-reads). The entry is written only after the swap held.
+     */
+    const applyClock = async (
+      t: ReturnType<typeof clockTransition>,
+    ): Promise<"applied" | "moved" | "unchanged"> => {
+      if (!t.changed) return "unchanged";
       if (open) {
-        const { error } = await sb.from("service_tech_clock").delete().eq("technician_id", tech);
+        const { data: gone, error } = await sb
+          .from("service_tech_clock")
+          .delete()
+          .eq("technician_id", tech)
+          .eq("started_at", open.started_at)
+          .select("technician_id");
         if (error) throw new Error(`Could not stop the clock: ${error.message}`);
+        if (!gone?.length) return "moved";
       }
       if (t.open) {
         const { error } = await sb.from("service_tech_clock").insert(t.open);
         if (error) throw new Error(`Could not start the clock: ${error.message}`);
       }
+      if (t.close) await insertClockEntry(sb, t.close, onDate, context.userId);
       // He left the OTHER ticket the clock was on: it is no longer en route / on site. The
       // ticket's field_status is the lead's whereabouts: cleared when the clock's owner leads
       // that ticket (or the office presses); a crew member's clock leaving it changes nothing
       // there (RLS would refuse the update anyway). A refused update is said out loud.
       if (open && open.service_job_id !== job.id) {
-        const { data: other } = await sb
-          .from("service_jobs")
-          .select("technician_id")
-          .eq("id", open.service_job_id)
-          .maybeSingle();
         if (other && (other.technician_id === tech || isOffice(p))) {
           const { error: leftErr } = await sb
             .from("service_jobs")
@@ -476,29 +547,34 @@ export const setFieldStatus = createServerFn({ method: "POST" })
               leftErr.message,
             );
         }
-        await logEvent(
+        const w = await tryLogEvent(
           context,
           open.service_job_id,
           { kind: "field", note: open.kind === "labor" ? "left site" : "stopped travelling" },
           who,
         );
+        if (w) warnings.push(w);
       }
+      return "applied";
     };
+    const moved: FieldStatusResult = { row: job, transition: MOVED_PRESS };
 
     if (data.to === "en_route") {
       const t = clockTransition(open, "travel", job.id, at, job.helper_count, tech);
-      if (!t.changed) return job;
-      await applyClock(t);
+      if (!t.changed) return unchanged(t);
+      if ((await applyClock(t)) === "moved") return moved;
+      transition = report(t);
       patch = {
         field_status: "en_route",
         en_route_at: now,
         stage: job.stage === "open" ? "scheduled" : job.stage,
       };
-      await logEvent(context, job.id, { kind: "field", field_status: "en_route" }, who);
+      await note({ kind: "field", field_status: "en_route" });
     } else if (data.to === "on_site") {
       const t = clockTransition(open, "on_site", job.id, at, job.helper_count, tech);
-      if (!t.changed) return job;
-      await applyClock(t);
+      if (!t.changed) return unchanged(t);
+      if ((await applyClock(t)) === "moved") return moved;
+      transition = report(t);
       // No clock, still "en route" from the buttons of before Oct 8: the travel from en_route_at
       // as it always was (source 'buttons'); a clock's travel comes from the clock (above).
       if (!open && job.field_status === "en_route" && job.en_route_at) {
@@ -520,20 +596,21 @@ export const setFieldStatus = createServerFn({ method: "POST" })
         on_site_at: now,
         stage: job.stage === "open" ? "scheduled" : job.stage,
       };
-      await logEvent(context, job.id, { kind: "field", field_status: "on_site" }, who);
+      await note({ kind: "field", field_status: "on_site" });
     } else if (data.to === "leave") {
       const t = clockTransition(open, "leave", job.id, at, job.helper_count, tech);
-      await applyClock(t);
-      if (!t.changed && !job.field_status) return job;
+      if ((await applyClock(t)) === "moved") return moved;
+      if (!t.changed && !job.field_status) return unchanged(t);
+      transition = report(t);
       patch = { field_status: null };
-      await logEvent(context, job.id, { kind: "field", note: "left site" }, who);
+      await note({ kind: "field", note: "left site" });
     } else if (data.to === "done") {
       const finished = ["done", "authorized", "invoiced", "closed"].includes(job.stage);
       // Owner, Oct 5 (RoAnna closed #6004 from the stage picker, then completed its close-out and
       // "the status didn't move"): a ticket the office already set Done / Invoiced / Closed keeps
       // that stage, but its close-out is still recorded — completed_at is stamped once, so the
       // ticket page's Close-out fold says "Done <date>" instead of "not closed out yet".
-      if (finished && job.completed_at) return job;
+      if (finished && job.completed_at) return { row: job, transition };
       // The labor the clock supplies (owner, Oct 15): a labor clock on this ticket, closed now.
       // With no clock, a ticket still "on site" from the old buttons supplies it from on_site_at
       // (never after Leave site: the clock wrote that labor already).
@@ -576,7 +653,8 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       patch = finished
         ? { field_status: null, completed_at: now }
         : { field_status: null, completed_at: now, stage: "done" };
-      await applyClock(t);
+      if ((await applyClock(t)) === "moved") return moved;
+      transition = report(t);
       if (!t.changed && laborFromStamp) {
         await sb.from("service_time_entries").insert({
           service_job_id: job.id,
@@ -597,8 +675,9 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       // undo: a clock on this ticket is dropped, nothing written, the ticket back to neither en
       // route nor on site (owner, Oct 15; the stamps of that press go with it).
       const t = clockTransition(open, "cancel", job.id, at, job.helper_count, tech);
+      transition = report(t);
       if (t.changed) {
-        await applyClock(t);
+        if ((await applyClock(t)) === "moved") return moved;
         patch =
           clockHere?.kind === "travel"
             ? { field_status: null, en_route_at: null }
@@ -625,8 +704,8 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           .eq("ended_at", job.on_site_at);
       } else if (job.field_status === "en_route") {
         patch = { field_status: null, en_route_at: null };
-      } else return job;
-      await logEvent(context, job.id, { kind: "field", note: "undo" }, who);
+      } else return unchanged(t);
+      await note({ kind: "field", note: "undo" });
     }
     const { data: row, error } = await sb
       .from("service_jobs")
@@ -667,7 +746,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
         context.supabase,
       );
     }
-    return row;
+    return { row, transition, ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
   });
 
 /** The "Service done" timeline rows (service-done-summary.ts): the ticket's, and the opportunity's. */
@@ -1190,7 +1269,7 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
         .from("service_jobs")
         .update({ signature_path: data.storage_path, signed_at: new Date().toISOString() })
         .eq("id", job.id);
-      await logEvent(context, job.id, { kind: "signature" }, nameOf(p));
+      await logEvent(context, job.id, { kind: "signature" }, nameOf(p), "The signature is saved");
     } else {
       await logEvent(
         context,
@@ -1204,6 +1283,7 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
           },
         },
         nameOf(p),
+        "The photo is saved",
       );
     }
     return r;
@@ -1408,6 +1488,7 @@ export const setJobCrew = createServerFn({ method: "POST" })
         meta: { crew: data.others },
       },
       nameOf(p),
+      "The crew is saved",
     );
     return row;
   });

@@ -1,8 +1,9 @@
 /**
  * Admin › Documents (owner, Oct 26: the CenterPoint-style document generator). What the editor
  * builds from: the TEMPLATES a new document starts from (one table per kind — bid documents,
- * ticket documents — with the default starred), the SAVED MODULES people keep from inside the
- * editor ("Save as module…"), and the PDF LIBRARY (award letters, warranty samples, spec sheets)
+ * ticket documents — with the default starred), the SAVED SNIPPETS people keep from inside the
+ * editor ("Save as snippet…" on a filled-in module; the table is still document_modules), and
+ * the PDF LIBRARY (award letters, warranty samples, spec sheets)
  * inserted under any page with Insert PDF. Managers and admins (pageForPath: /admin/documents →
  * manager, as Setup); the sidebar lists it in the Admin group for both. Editing a template opens
  * the editor itself (/documents?template=<id>); this page only lists, duplicates, stars and
@@ -114,7 +115,7 @@ function DocumentsAdminPage() {
           <Files className="h-6 w-6" /> Documents
         </h1>
         <p className="text-sm text-muted-foreground">
-          The templates proposals and letters start from, the modules saved from inside the editor,
+          The templates proposals and letters start from, the snippets saved from inside the editor,
           and the PDF library inserted into documents. Documents themselves are made from a bid (the
           estimator, Project Bids) or a ticket — every one by hand, none automatically.
         </p>
@@ -127,7 +128,7 @@ function DocumentsAdminPage() {
       >
         <TabsList className="flex-wrap">
           <TabsTrigger value="templates">Templates</TabsTrigger>
-          <TabsTrigger value="modules">Saved modules</TabsTrigger>
+          <TabsTrigger value="modules">Saved snippets</TabsTrigger>
           <TabsTrigger value="pdfs">PDF library</TabsTrigger>
         </TabsList>
         <TabsContent value="templates">
@@ -370,7 +371,7 @@ function TemplatesTab() {
   );
 }
 
-// -------------------------------------------------------------------------------- Saved modules
+// ------------------------------------------------------------------------------- Saved snippets
 
 function SavedModulesTab() {
   const qc = useQueryClient();
@@ -389,20 +390,20 @@ function SavedModulesTab() {
     mutationFn: (m: SavedModuleRow & { newName: string }) =>
       saveFn({ data: { id: m.id, name: m.newName, module: m.module } }),
     onSuccess: () => {
-      toast.success("Module renamed");
+      toast.success("Snippet renamed");
       setRenaming(null);
       refresh();
     },
-    onError: (e) => toast.error(`Could not rename the module: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not rename the snippet: ${errText(e)}`),
   });
   const remove = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
     onSuccess: () => {
-      toast.success("Module deleted");
+      toast.success("Snippet deleted");
       setConfirmDelete(null);
       refresh();
     },
-    onError: (e) => toast.error(`Could not delete the module: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not delete the snippet: ${errText(e)}`),
   });
 
   const commitRename = (m: SavedModuleRow) => {
@@ -418,7 +419,7 @@ function SavedModulesTab() {
   if (list.error)
     return (
       <p className="text-sm text-destructive">
-        Could not load the saved modules: {errText(list.error)}
+        Could not load the saved snippets: {errText(list.error)}
       </p>
     );
   const rows = list.data ?? [];
@@ -427,21 +428,22 @@ function SavedModulesTab() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Saved modules</CardTitle>
+          <CardTitle>Saved snippets</CardTitle>
           <CardDescription>
-            Pieces people keep for reuse — a terms block, a warranty paragraph, a signature. Modules
-            are saved from inside the editor (“Save as module…” on any module) and appear on its
-            Modules tab; here they can be renamed or removed.
+            Pieces of content people keep for reuse — a terms block, a warranty paragraph, a
+            signature. Save one from inside a document: fill in a module, then choose “Save as
+            snippet…” on it. The module kinds themselves (Text, Photo Grid, Repair List …) are
+            always on the editor's Modules tab and need no saving.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {list.isLoading ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading modules…
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading snippets…
             </p>
           ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No saved modules yet. Open a document, pick a module and choose “Save as module…”.
+              No saved snippets yet. Open a document, pick a module and choose “Save as snippet…”.
             </p>
           ) : (
             <Table>
@@ -539,7 +541,7 @@ function SavedModulesTab() {
                             variant="ghost"
                             size="sm"
                             className="text-destructive hover:text-destructive"
-                            title="Delete this saved module (documents that used it are not changed)"
+                            title="Delete this saved snippet (documents that used it are not changed)"
                             disabled={remove.isPending}
                             onClick={() => setConfirmDelete(m)}
                           >
@@ -565,10 +567,10 @@ function SavedModulesTab() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this saved module?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this saved snippet?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{confirmDelete?.name}” leaves the editor's Modules tab. Documents and templates that
-              already use it are not changed.
+              “{confirmDelete?.name}” leaves the editor's Saved snippets list. Documents and
+              templates that already use it are not changed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

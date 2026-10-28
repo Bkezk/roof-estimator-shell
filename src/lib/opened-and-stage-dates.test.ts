@@ -366,7 +366,7 @@ describe("the app writes no 'stage' rows (the database does, once)", () => {
     expect(field).toContain(
       'export type AppEventKind = "field" | "note" | "assign" | "photo" | "signature" | "edit";',
     );
-    expect(flat(field)).toContain("ev: { kind: AppEventKind;");
+    expect(flat(field)).toContain("type AppEvent = { kind: AppEventKind;");
     expect(field).not.toMatch(/stage: ev\.stage/);
   });
   it("no other server file inserts a 'stage' row", () => {

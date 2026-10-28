@@ -10,8 +10,8 @@
  * 30 s) with the next buttons. Each card offers what comes next: no clock on it → Start travel
  * and On site (arriving without having pressed travel is fine); travelling to it → On site; on
  * site → Leave site and Complete. A clock running on ANOTHER ticket moves: pressing Start travel
- * or On site here closes it there (the toast says "Left #6012 · 0.75 h labor logged") — one
- * clock per technician. Every close writes a time entry with the real start and end (source
+ * or On site here closes it there (the toast says "Left #6012 · 0.75 h labor logged", from the
+ * server's report of the press, never the cached clock — Oct 28) — one clock per technician. Every close writes a time entry with the real start and end (source
  * 'clock') that the Time section lets the technician edit. The Oct 8 "one button" screen
  * (owner: "we dont need the en route then on site buttons") is superseded by this: the buttons
  * are back as the clock, Oct 15.
@@ -51,12 +51,13 @@ import {
   myClock,
   myDay,
   setFieldStatus,
+  type FieldStatusResult,
   type MyClock,
   type TodayJob,
 } from "@/lib/service-field.functions";
 import type { ServiceJobWithTech } from "@/lib/service.functions";
 import { seedJobFromToday } from "@/lib/job-cache";
-import { cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
+import { CLOCK_MOVED_LINE, cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
 import { HistoryLink } from "@/components/service/site-history";
@@ -72,7 +73,22 @@ import {
 
 const mapsUrl = (q: string) => `https://maps.google.com/?q=${encodeURIComponent(q)}`;
 
-/** The clock's ticking "now": every 30 s, so the banner's minutes move. */
+/**
+ * The phone's calendar day (field-utils.ts localYmd), checked once a minute so the Today /
+ * Coming up split flips at midnight without a reload (Oct 28 audit: the 30-second clock tick
+ * used to live on the page and re-render every card twice a minute; it is the banner's now,
+ * useTick below). The same day sets the same state, so nothing re-renders until it changes.
+ */
+function useLocalDay(): string {
+  const [day, setDay] = useState(() => localYmd());
+  useEffect(() => {
+    const t = setInterval(() => setDay((d) => (localYmd() === d ? d : localYmd())), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return day;
+}
+
+/** The clock's ticking "now": every 30 s, so the banner's minutes move (the banner's alone). */
 function useTick(everyMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -87,32 +103,31 @@ type ClockAction = "en_route" | "on_site" | "leave" | "undo";
 /**
  * A clock press on a ticket: setFieldStatus with the phone's day (field-day.ts), then the day,
  * the clock and the ticket's time (and the ticket the clock left) are re-read. The toast says
- * what started and what stopped (tech-clock.ts pressLine); a failure is loud.
+ * what started and what stopped from the SERVER's report of the press (tech-clock.ts pressLine
+ * fed FieldStatusResult.transition; audit risk 3, Oct 28) — never from the clock this phone had
+ * cached, which another device may have closed already. A press the server found already moved
+ * on another device gets one plain line and the re-read (audit risk 2). A failure is loud.
  */
 function useClockPress(ticket: { id: string; number: number; customer_name: string }) {
   const qc = useQueryClient();
   const statusFn = useServerFn(setFieldStatus);
   return useMutation({
-    mutationFn: async (to: ClockAction) => {
-      const before = qc.getQueryData<MyClock | null>(fieldKeys.clock) ?? null;
-      await statusFn({ data: { id: ticket.id, to, day: localYmd() } });
-      return { before, at: new Date() };
-    },
-    onSuccess: ({ before, at }, to) => {
-      toast.success(pressLine(before, to, ticket, at));
+    mutationFn: (to: ClockAction): Promise<FieldStatusResult> =>
+      statusFn({ data: { id: ticket.id, to, day: localYmd() } }),
+    onSuccess: ({ transition, warning }, to) => {
+      if (transition.note === "moved") toast.info(CLOCK_MOVED_LINE);
+      else toast.success(pressLine(transition, to, ticket));
+      if (warning) toast.warning(warning);
+      // The ticket the clock left, when it was another one: its time and timeline changed too.
+      const left =
+        transition.close && transition.close.jobId !== ticket.id ? transition.close.jobId : null;
       const keys: readonly (readonly string[])[] = [
         fieldKeys.today,
         fieldKeys.clock,
         fieldKeys.time(ticket.id),
         fieldKeys.job(ticket.id),
         fieldKeys.events(ticket.id),
-        ...(before && before.service_job_id !== ticket.id
-          ? [
-              fieldKeys.time(before.service_job_id),
-              fieldKeys.job(before.service_job_id),
-              fieldKeys.events(before.service_job_id),
-            ]
-          : []),
+        ...(left ? [fieldKeys.time(left), fieldKeys.job(left), fieldKeys.events(left)] : []),
         ["service-jobs"],
       ];
       for (const k of keys) void qc.invalidateQueries({ queryKey: k });
@@ -139,8 +154,8 @@ export function TodayPage() {
     refetchInterval: 60_000,
   });
   const clock = clockQ.data ?? null;
-  const now = useTick(30_000);
-  const today = localYmd();
+  // The phone's day, re-checked every minute: the groups flip at midnight without a reload.
+  const today = useLocalDay();
   const jobs = q.data ?? [];
   // Today (and anything overdue or already started) first, then the coming days, then undated.
   const now_ = jobs.filter(
@@ -160,7 +175,10 @@ export function TodayPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">My tickets</h1>
           <p className="text-sm text-muted-foreground">{title}</p>
-          <Link to="/service" className="text-sm text-primary underline-offset-2 hover:underline">
+          <Link
+            to="/service"
+            className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
+          >
             Every stage, on the Service page
           </Link>
         </div>
@@ -186,7 +204,7 @@ export function TodayPage() {
           {errText(clockQ.error)}
         </p>
       )}
-      {clock && <ClockBanner clock={clock} now={now} jobs={jobs} />}
+      {clock && <ClockBanner clock={clock} jobs={jobs} />}
 
       {q.error ? (
         <div className="space-y-2 rounded-lg border border-destructive p-4 text-destructive">
@@ -231,7 +249,9 @@ export function TodayPage() {
  * (travelling → On site; on site → Leave site, Complete). Complete opens the close-out, whose
  * Complete clocks out.
  */
-function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: TodayJob[] }) {
+function ClockBanner({ clock, jobs }: { clock: MyClock; jobs: TodayJob[] }) {
+  // The ticking minutes are this banner's alone: the cards below never re-render for them.
+  const now = useTick(30_000);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { profile } = useAuth();
@@ -354,7 +374,7 @@ function ClockBanner({ clock, now, jobs }: { clock: MyClock; now: number; jobs: 
       {!onSite && (
         <button
           type="button"
-          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          className="inline-flex min-h-11 items-center text-xs text-muted-foreground underline-offset-2 hover:underline"
           disabled={press.isPending}
           onClick={() => press.mutate("undo")}
         >
@@ -437,7 +457,7 @@ function JobCard({
         <Link
           to="/service"
           search={{ id: j.id }}
-          className="block text-lg font-semibold leading-snug underline-offset-2 hover:underline"
+          className="flex min-h-11 items-center text-lg font-semibold leading-snug underline-offset-2 hover:underline"
         >
           #{j.number} · {j.customer_name}
         </Link>
@@ -464,7 +484,7 @@ function JobCard({
           href={mapsUrl(mapQuery)}
           target="_blank"
           rel="noreferrer"
-          className="flex items-start gap-2 rounded-md py-1 text-sm hover:bg-muted"
+          className="flex min-h-11 items-start gap-2 rounded-md py-1 text-sm hover:bg-muted"
         >
           <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <span>
@@ -499,7 +519,7 @@ function JobCard({
             {phone && (
               <a
                 href={`tel:${phone}`}
-                className="inline-flex min-h-9 items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+                className="inline-flex min-h-11 items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
               >
                 <Phone className="h-4 w-4" />
                 {phone}
@@ -528,7 +548,7 @@ function JobCard({
         {j.crew_confirmed_at && (
           <button
             type="button"
-            className="min-h-9 px-1 text-sm font-medium text-primary underline-offset-2 hover:underline"
+            className="min-h-11 px-1 text-sm font-medium text-primary underline-offset-2 hover:underline"
             aria-expanded={crewOpen}
             onClick={() => setCrewOpen((v) => !v)}
           >

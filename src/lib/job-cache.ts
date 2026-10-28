@@ -11,7 +11,7 @@
  * background). Pure, so it is tested without the screens.
  */
 import type { ServiceJobRow, ServiceJobWithTech } from "@/lib/service.functions";
-import type { TodayJob } from "@/lib/service-field.functions";
+import type { TodayJob, TodayJobColumn } from "@/lib/service-field.functions";
 
 /** What saveCloseout writes from the Notes and Signed-by boxes (plus the stamp columns). */
 export const CLOSEOUT_TEXT_FIELDS = [
@@ -48,8 +48,33 @@ export function mergeSaved<T extends object, K extends keyof T>(
 }
 
 /**
- * The ticket cache entry My tickets can plant before the close-out opens: the TodayJob row IS
- * the service_jobs row (myDay selects *) plus its own extras; the loader's shape adds the
+ * The service_jobs columns My tickets does not read (TODAY_JOB_SELECT, Oct 28 audit), as the seed
+ * supplies them: none of these is read by the close-out, so null stands until the loader's own
+ * read lands. The type is the complement of the select, so a column dropped from the select must
+ * be added here (and one the close-out starts reading must move to the select).
+ */
+const UNREAD_COLUMNS: Omit<ServiceJobRow, TodayJobColumn> = {
+  assigned_at: null,
+  location_id: null,
+  location_name: null,
+  stage_changed_at: null,
+  contacted_at: null,
+  escalated_at: null,
+  centerpoint_invoice: null,
+  centerpoint_ticket: null,
+  created_by: null,
+  deleted_at: null,
+  from_opportunity_id: null,
+  invoice_id: null,
+  job_number: null,
+  notes: null,
+  po_number: null,
+};
+
+/**
+ * The ticket cache entry My tickets can plant before the close-out opens: the TodayJob row is
+ * the service_jobs row's columns My tickets reads (TODAY_JOB_SELECT) plus its own extras; the
+ * columns it does not read are null here (UNREAD_COLUMNS) and the loader's shape adds the
  * technician's name, which on My tickets is always the signed-in person (myDay lists their own
  * tickets only). The optional site_city / site_state stay absent (the loader fills them).
  */
@@ -66,5 +91,9 @@ export function seedJobFromToday(
     warranty_badges: _wb,
     ...row
   } = j;
-  return { ...row, technician_name: me ? me.full_name?.trim() || me.email : null };
+  return {
+    ...UNREAD_COLUMNS,
+    ...row,
+    technician_name: me ? me.full_name?.trim() || me.email : null,
+  };
 }

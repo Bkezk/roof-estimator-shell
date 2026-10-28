@@ -16,6 +16,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { shiftYmd } from "@/lib/tech-clock";
+import { stopClocksForOffice } from "@/lib/clock-close.server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { readInChunks } from "@/lib/chunk-ids";
@@ -671,7 +672,13 @@ async function syncTicketFollowup(
   );
 }
 
-/** Stage-only change (the header select and the tech's buttons). */
+/**
+ * Stage-only change (the header select and the tech's buttons). An office stage (Authorized /
+ * Invoiced / Closed) first stops any technician's clock still running on the ticket and writes
+ * its time (clock-close.server.ts; owner, Oct 28: "if the office closes it shouldn't it just
+ * close the time?") — before the stage write, and the move is refused when that fails, so no
+ * clock is left that its owner can no longer close.
+ */
 export const setServiceStage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -681,13 +688,22 @@ export const setServiceStage = createServerFn({ method: "POST" })
     const p = await serviceWrite(context);
     const { data: prev } = await context.supabase
       .from("service_jobs")
-      .select("stage")
+      .select("stage, number")
       .eq("id", data.id)
       .maybeSingle();
     // A technician: Open / Scheduled / Done; Invoiced and Closed: a manager's (ticket-stage.ts;
     // the database trigger service_jobs_stage_rule says the same).
     const problem = stageProblem(p, data.stage, prev?.stage);
     if (problem) throw new Error(problem);
+    const { stopped } =
+      prev && prev.stage !== data.stage
+        ? await stopClocksForOffice(
+            context.supabase,
+            { id: data.id, number: prev.number },
+            data.stage,
+            { id: context.userId, name: nameOf(p) },
+          )
+        : { stopped: 0 };
     // Back to Open / Scheduled from Done (or an office stage): the ticket is reopened, so the
     // first visit's close-out stamp goes with the move (ticket-stage.ts reopensTicket, Oct 21).
     const reopened = reopensTicket(prev?.stage, data.stage);
@@ -697,6 +713,8 @@ export const setServiceStage = createServerFn({ method: "POST" })
         stage: data.stage,
         updated_by_name: nameOf(p),
         ...(reopened ? { completed_at: null } : {}),
+        // A stopped clock's technician is no longer en route / on site here.
+        ...(stopped ? { field_status: null } : {}),
       })
       .eq("id", data.id)
       .select("*")

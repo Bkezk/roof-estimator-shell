@@ -126,8 +126,9 @@ describe("source", () => {
   it("setServiceStage clears the stamp through reopensTicket, in the same write as the stage", () => {
     const src = readFileSync("src/lib/service.functions.ts", "utf8");
     expect(src).toContain("const reopened = reopensTicket(prev?.stage, data.stage);");
+    // Oct 28: the same write also clears field_status when the office stopped a clock.
     expect(src).toMatch(
-      /\.update\(\{\s*stage: data\.stage,\s*updated_by_name: nameOf\(p\),\s*\.\.\.\(reopened \? \{ completed_at: null \} : \{\}\),\s*\}\)/,
+      /\.update\(\{\s*stage: data\.stage,\s*updated_by_name: nameOf\(p\),\s*\.\.\.\(reopened \? \{ completed_at: null \} : \{\}\),\s*(\/\/[^\n]*\s*)?\.\.\.\(stopped \? \{ field_status: null \} : \{\}\),\s*\}\)/,
     );
   });
   it("the technician's own Undo already clears it the same way (the twin this follows)", () => {

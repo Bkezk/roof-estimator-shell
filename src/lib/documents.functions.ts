@@ -11,7 +11,7 @@
  * Nothing is automated: no document is made or sent without someone pressing the button.
  *
  * Who: the database decides (migration 20261026150000: documents_access() = admins, managers,
- * Estimate / Invoices / Customers access; templates, saved modules and the PDF library are
+ * Estimate / Invoices / Customers access; templates, saved snippets and the PDF library are
  * written by admins and managers). Every read and write here runs as the signed-in user.
  * Pure helpers live in documents/server-pure.ts; the model in documents/model.ts.
  */
@@ -117,10 +117,10 @@ async function whoami(ctx: Ctx) {
   if (!data) throw new Error("Forbidden: no profile");
   return { profile: data, name: displayName(data) };
 }
-/** Templates, saved modules and the PDF library are written by admins and managers (RLS too). */
+/** Templates, saved snippets (document_modules) and the PDF library are written by admins and managers (RLS too). */
 function managerOnly(p: { role: string; access: string[] }) {
   if (!managesTickets(p))
-    throw new Error("Templates, saved modules and the PDF library are a manager's");
+    throw new Error("Templates, saved snippets and the PDF library are a manager's");
 }
 
 const json = (v: unknown) => v as Json;
@@ -333,7 +333,7 @@ export const duplicateDocumentTemplate = createServerFn({ method: "POST" })
     return asTemplate(row);
   });
 
-// ---- Saved modules --------------------------------------------------------------------------
+// ---- Saved snippets (document_modules) --------------------------------------------------------------------------
 
 export type SavedModuleRow = Omit<
   Pick<DocumentModuleRow, "id" | "name" | "module" | "updated_at">,
@@ -357,7 +357,7 @@ export const listSavedModules = createServerFn({ method: "POST" })
       .select("id, name, module, updated_at")
       .is("deleted_at", null)
       .order("name");
-    if (error) throw err(error, "Could not read the saved modules");
+    if (error) throw err(error, "Could not read the saved snippets");
     return (data ?? []) as unknown as SavedModuleRow[];
   });
 
@@ -382,7 +382,7 @@ export const saveSavedModule = createServerFn({ method: "POST" })
       : sb.from("document_modules").insert({ ...patch, created_by: context.userId });
     const { data: row, error } = await q.select("id, name, module, updated_at").maybeSingle();
     if (error) throw err(error, "The module was not saved");
-    if (!row) throw new Error("Saved module not found");
+    if (!row) throw new Error("Saved snippet not found");
     return row as unknown as SavedModuleRow;
   });
 
@@ -1050,13 +1050,25 @@ async function ticketPhotos(sb: Client, doc: DocumentRow): Promise<DocumentPhoto
 async function writeVersion(
   sb: Client,
   row: DocumentRow,
-  next: { title: string; pages: DocPage[]; options: DocOptions },
+  next: {
+    title: string;
+    pages: DocPage[];
+    options: DocOptions;
+    templateId?: string | null | undefined;
+  },
   expectVersion: number,
   byName: string | null,
 ): Promise<{ version: number; updated_at: string }> {
   if (row.deleted_at) throw new Error(documentDeletedMessage(row.deleted_at));
   if (documentSaveIsStale(expectVersion, row.version))
     throw new Error(documentStaleMessage(row.updated_by_name, row.updated_at, byName));
+  // The template the pages come from now ("Start over from template…", Oct 28): sent by the
+  // editor, kept when an older bundle leaves it out. A new one must be this kind's.
+  const templateChanged = next.templateId !== undefined && next.templateId !== row.template_id;
+  if (templateChanged && next.templateId) {
+    const t = await templateRow(sb, next.templateId);
+    if (t.kind !== row.kind) throw new Error("That template is for the other kind of record");
+  }
   const version = row.version + 1;
   const { data, error } = await sb
     .from("documents")
@@ -1064,6 +1076,7 @@ async function writeVersion(
       title: next.title,
       pages: json(next.pages),
       options: json(next.options),
+      ...(templateChanged ? { template_id: next.templateId ?? null } : {}),
       version,
       updated_at: new Date().toISOString(),
       updated_by_name: byName,
@@ -1103,6 +1116,8 @@ export const saveDocument = createServerFn({ method: "POST" })
         pages: pagesSchema,
         options: optionsSchema,
         expectVersion: z.number().int().positive(),
+        // The template the pages come from now (null: blank); left out by an older bundle.
+        templateId: z.string().uuid().nullable().optional(),
       })
       .parse(d),
   )

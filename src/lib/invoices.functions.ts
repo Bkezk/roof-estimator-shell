@@ -25,6 +25,7 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
+import { stopClocksForOffice } from "@/lib/clock-close.server";
 import {
   lineFlagsChanged,
   mergeRebuild,
@@ -211,9 +212,23 @@ async function finalizeDraft(
     .single();
   if (error) throw new Error(error.message);
   // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc) — unless
-  // it is Closed already: a second invoice never reopens it (owner, Oct 12, item 6).
-  if (!invoiceKeepsTicketStage(b.job.stage))
+  // it is Closed already: a second invoice never reopens it (owner, Oct 12, item 6). A
+  // technician's clock still running on it is stopped first and its time written
+  // (clock-close.server.ts, Oct 28); a clock that cannot be stopped refuses the stage change,
+  // the invoice itself being saved already.
+  if (!invoiceKeepsTicketStage(b.job.stage)) {
+    try {
+      await stopClocksForOffice(sb, { id: b.job.id, number: b.job.number }, "invoiced", {
+        id: actor.id,
+        name: actor.name,
+      });
+    } catch (e) {
+      throw new Error(
+        `The invoice is saved, but the ticket was not marked Invoiced: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
+  }
   await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);
   await closeTicketFollowup(sb, b.job, actor, "stage invoiced");
   return updated;

@@ -192,8 +192,16 @@ describe("finalising a second invoice", () => {
     expect(sql).toContain("elsif p_stage = 'authorized' then");
     expect(sql).toContain("elsif p_stage = 'closed' then");
     const inv = readFileSync("src/lib/invoices.functions.ts", "utf8");
-    expect(inv).toContain(
-      'if (!invoiceKeepsTicketStage(b.job.stage))\n    await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);',
+    // Oct 28: the same guard now also wraps the clock stop that precedes the stage change.
+    const guarded = inv.slice(
+      inv.indexOf("if (!invoiceKeepsTicketStage(b.job.stage)) {"),
+      inv.indexOf("await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);"),
+    );
+    expect(guarded).toContain(
+      'await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);',
+    );
+    expect(guarded).toContain(
+      'await stopClocksForOffice(sb, { id: b.job.id, number: b.job.number }, "invoiced", {',
     );
   });
 });

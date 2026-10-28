@@ -9,7 +9,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLOCK_MOVED_LINE,
   MISTAP_MS,
+  MOVED_PRESS,
   cardActions,
   clockTransition,
   closedLine,
@@ -19,9 +21,11 @@ import {
   entryTimes,
   localHm,
   pressLine,
+  pressReport,
   runningLabel,
   shiftYmd,
   type Clock,
+  type ClockPress,
 } from "@/lib/tech-clock";
 
 const TECH = "tech-1";
@@ -204,34 +208,104 @@ describe("labels", () => {
       "Left #6014 Bell County · under a minute, nothing logged",
     );
   });
-  it("pressLine: the toast after a press, naming what stopped and what started", () => {
+  it("pressReport: what a transition did — the stopped clock's ticket and hours, what opened, the note", () => {
     const beforeA = { ...laborA, number: 6012, customer_name: "Acme" };
-    const ticketB = { id: B, number: 6014, customer_name: "Bell County" };
-    expect(pressLine(null, "en_route", ticketB, at(0))).toBe("Travelling to #6014 Bell County");
-    expect(pressLine(null, "on_site", ticketB, at(0))).toBe("On site at #6014 Bell County");
-    expect(pressLine(beforeA, "en_route", ticketB, at(45))).toBe(
-      "Left #6012 Acme · 0.75 h labor logged — travelling to #6014 Bell County",
-    );
+    const travelBeforeA = { ...travelA, number: 6012, customer_name: "Acme" };
+    const ticketB = { number: 6014 };
+    // A move: the labor on A closed (45 min → 0.75 h), travel to B opened.
     expect(
-      pressLine({ ...beforeA, kind: "travel", service_job_id: B }, "on_site", ticketB, at(20)),
-    ).toBe("Travel to #6012 Acme · 0.25 h logged — on site at #6014 Bell County");
-    expect(
-      pressLine(beforeA, "leave", { ...ticketA, number: 6012, customer_name: "Acme" }, at(45)),
-    ).toBe("Left #6012 Acme · 0.75 h labor logged");
-    expect(pressLine(null, "leave", ticketB, at(0))).toBe(
-      "No clock was running at #6014 Bell County",
+      pressReport(clockTransition(laborA, "travel", B, at(45), 1, TECH), beforeA, ticketB),
+    ).toEqual({
+      close: { jobId: A, jobNumber: 6012, customer: "Acme", kind: "labor", hours: 0.75 },
+      open: { jobNumber: 6014, kind: "travel" },
+      note: null,
+    });
+    // No clock running: only an open.
+    expect(pressReport(clockTransition(null, "on_site", B, at(0), 1, TECH), null, ticketB)).toEqual(
+      { close: null, open: { jobNumber: 6014, kind: "labor" }, note: null },
     );
+    // The same button twice: nothing closed, nothing opened.
+    expect(
+      pressReport(clockTransition(laborA, "on_site", A, at(3), 1, TECH), beforeA, { number: 6012 }),
+    ).toEqual({ close: null, open: null, note: "already" });
+    // A mistap: the stopped clock is still named, with 0 hours (nothing was written).
+    expect(
+      pressReport(clockTransition(travelA, "on_site", A, at(0.5), 1, TECH), travelBeforeA, {
+        number: 6012,
+      }),
+    ).toEqual({
+      close: { jobId: A, jobNumber: 6012, customer: "Acme", kind: "travel", hours: 0 },
+      open: { jobNumber: 6012, kind: "labor" },
+      note: "mistap",
+    });
+    // Leave where no clock runs; Undo dropping one.
+    expect(
+      pressReport(clockTransition(laborA, "leave", B, at(45), 1, TECH), beforeA, ticketB),
+    ).toEqual({ close: null, open: null, note: "no clock on this ticket" });
+    expect(
+      pressReport(clockTransition(travelA, "cancel", A, at(5), 1, TECH), travelBeforeA, {
+        number: 6012,
+      }),
+    ).toEqual({ close: null, open: null, note: "undo" });
+  });
+  it("pressLine: the toast from the server's report, naming what stopped and what started", () => {
+    const ticketB = { number: 6014, customer_name: "Bell County" };
+    const ticketA2 = { number: 6012, customer_name: "Acme" };
+    const none: ClockPress = { close: null, open: null, note: null };
+    const closedA = (kind: "travel" | "labor", hours: number) => ({
+      jobId: A,
+      jobNumber: 6012,
+      customer: "Acme",
+      kind,
+      hours,
+    });
+    expect(
+      pressLine({ ...none, open: { jobNumber: 6014, kind: "travel" } }, "en_route", ticketB),
+    ).toBe("Travelling to #6014 Bell County");
+    expect(
+      pressLine({ ...none, open: { jobNumber: 6014, kind: "labor" } }, "on_site", ticketB),
+    ).toBe("On site at #6014 Bell County");
     expect(
       pressLine(
-        { ...beforeA, kind: "travel" },
+        { close: closedA("labor", 0.75), open: { jobNumber: 6014, kind: "travel" }, note: null },
         "en_route",
-        { ...ticketA, number: 6012, customer_name: "Acme" },
-        at(3),
+        ticketB,
       ),
-    ).toBe("Already travelling to #6012 Acme");
+    ).toBe("Left #6012 Acme · 0.75 h labor logged — travelling to #6014 Bell County");
     expect(
-      pressLine(beforeA, "on_site", { ...ticketA, number: 6012, customer_name: "Acme" }, at(3)),
-    ).toBe("Already on site at #6012 Acme");
+      pressLine(
+        { close: closedA("travel", 0.25), open: { jobNumber: 6014, kind: "labor" }, note: null },
+        "on_site",
+        ticketB,
+      ),
+    ).toBe("Travel to #6012 Acme · 0.25 h logged — on site at #6014 Bell County");
+    expect(
+      pressLine({ close: closedA("labor", 0.75), open: null, note: null }, "leave", ticketA2),
+    ).toBe("Left #6012 Acme · 0.75 h labor logged");
+    expect(pressLine({ ...none, note: "no clock on this ticket" }, "leave", ticketB)).toBe(
+      "No clock was running at #6014 Bell County",
+    );
+    expect(pressLine({ ...none, note: "already" }, "en_route", ticketA2)).toBe(
+      "Already travelling to #6012 Acme",
+    );
+    expect(pressLine({ ...none, note: "already" }, "on_site", ticketA2)).toBe(
+      "Already on site at #6012 Acme",
+    );
+    // A mistap: the stopped clock ran under a minute, nothing logged.
+    expect(
+      pressLine(
+        { close: closedA("travel", 0), open: { jobNumber: 6012, kind: "labor" }, note: "mistap" },
+        "on_site",
+        ticketA2,
+      ),
+    ).toBe("Travel to #6012 Acme · under a minute, nothing logged — on site at #6012 Acme");
+    // The clock had moved on another device: one plain line, whatever the button (owner: no jargon).
+    expect(pressLine(MOVED_PRESS, "leave", ticketA2)).toBe(CLOCK_MOVED_LINE);
+    expect(pressLine(MOVED_PRESS, "en_route", ticketA2)).toBe(CLOCK_MOVED_LINE);
+    expect(CLOCK_MOVED_LINE).toBe(
+      "Your clock was already changed on another device. Showing the latest.",
+    );
+    expect(CLOCK_MOVED_LINE).not.toMatch(/refresh|reload|server|sync/i);
   });
 });
 
@@ -296,20 +370,11 @@ describe("the time editor's helpers", () => {
 
 describe("pressLine: cancel (owner, Oct 15: the banner's 'started by mistake')", () => {
   it("says nothing was logged", () => {
-    const travelA = {
-      technician_id: "t",
-      service_job_id: "A",
-      kind: "travel" as const,
-      started_at: "2026-10-15T14:00:00Z",
-      helper_count: 0,
-      number: 6029,
-      customer_name: "5K, Inc",
-    };
-    const a = { id: "A", number: 6029, customer_name: "5K, Inc" };
-    expect(pressLine(travelA, "undo", a, "2026-10-15T14:05:00Z")).toBe(
+    const a = { number: 6029, customer_name: "5K, Inc" };
+    expect(pressLine({ close: null, open: null, note: "undo" }, "undo", a)).toBe(
       "Cancelled — nothing logged at #6029 5K, Inc",
     );
-    expect(pressLine(null, "undo", a, "2026-10-15T14:05:00Z")).toBe(
+    expect(pressLine({ close: null, open: null, note: "no clock on this ticket" }, "undo", a)).toBe(
       "No clock was running at #6029 5K, Inc",
     );
   });
