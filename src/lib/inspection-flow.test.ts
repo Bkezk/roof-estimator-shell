@@ -951,16 +951,19 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
     expect(cards).toContain('<Label htmlFor="co-findings">Findings</Label>');
     expect(cards.match(/<Textarea/g)).toHaveLength(1);
   });
-  it("two switches on the Findings card: Recommend repairs (the inspection JSON) and Recommend a new roof (the ticket column)", () => {
-    expect(cards).toContain('<span className="font-medium">Recommend repairs</span>');
-    expect(cards).toContain('<span className="font-medium">Recommend a new roof</span>');
-    expect(cards.match(/<Switch/g)).toHaveLength(2);
+  it("two recommendations on the Findings card, side by side (Oct 28; were switch rows): Recommend repairs (the inspection JSON) and Recommend new roof (the ticket column)", () => {
+    expect(cards).toContain('data-section="recommendations"');
+    expect(cards).toContain('label="Recommend repairs"');
+    expect(cards).toContain('label="Recommend new roof"');
+    expect(cards.match(/<RecommendButton/g)).toHaveLength(2);
+    expect(cards).not.toContain("<Switch");
     expect(inspectionBranch).toContain("recommendRepairs={insp.recommendRepairs}");
     expect(inspectionBranch).toContain("onRecommendRepairs={insp.setRecommendRepairs}");
     expect(inspectionBranch).toContain(
       "onRecommendNewRoof={(v) => update({ recommend_new_roof: v })}",
     );
-    // "Nothing to add" is the same mark as step 6's Skip.
+    // "Nothing to add" is the same mark as step 6's Skip — since Oct 28 a small link in the
+    // step's footer, beside the missing line under Next (findings-step-compact.test.ts).
     expect(inspectionBranch).toContain("skipped={notesSkipped}");
     expect(inspectionBranch).toContain("onSkip={markNotesSkipped}");
     expect(cards.match(/Nothing to add/g)!.length).toBeGreaterThanOrEqual(2);
@@ -1359,7 +1362,9 @@ describe("6f. the screens: compact rows, pictures from the ticket, Property insp
   });
   it("Property inspected (blank; Today is the phone's day) and Property grade (A–F, none pressed) on the Findings step and the office fold, saved through saveTicketInspection", () => {
     expect(section).toContain("export function InspectionDetails({");
-    expect(section).toContain("<Label htmlFor={dateId}>Property inspected</Label>");
+    // Oct 28: the label sits in the row ("Inspected"); the box keeps the full name for a reader.
+    expect(section).toMatch(/<Label htmlFor=\{dateId\}[^>]*>\s*Inspected\s*<\/Label>/);
+    expect(section).toContain('aria-label="Property inspected"');
     expect(section).toContain("onClick={() => draft.setInspectedOn(localYmd())}");
     expect(section).not.toContain("toISOString().slice(0, 10)");
     expect(section).toContain("{INSPECTION_GRADES.map((g) => (");

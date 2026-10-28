@@ -141,7 +141,7 @@ describe("the ticket page's Documents icon (Oct 27: the header, not a fold)", ()
       'import { NewDocumentDialog } from "@/components/documents/new-document-dialog";',
     );
   });
-  it("an inspection ticket gets the one-tap Inspection report button, in the dialog and the field close-out (documents access only)", () => {
+  it("an inspection ticket gets the one-tap Inspection report button in the dialog — and only there (Oct 28: the copy on the Findings step was a duplicate)", () => {
     const dialog = actions.slice(actions.indexOf("export function TicketDocumentsDialog("));
     expect(dialog).toMatch(
       /\{job\.service_type === "inspection" && \(\s*<InspectionReportButton\s+serviceJobId=\{job\.id\}\s+ticketNumber=\{job\.number\}/,
@@ -150,19 +150,8 @@ describe("the ticket page's Documents icon (Oct 27: the header, not a fold)", ()
       'import { InspectionReportButton } from "@/components/documents/inspection-report-button";',
     );
     const closeout = read("src/components/service/closeout.tsx");
-    expect(closeout).toContain(
-      'import { InspectionReportButton } from "@/components/documents/inspection-report-button";',
-    );
-    expect(closeout).toContain('import { hasDocumentsAccess } from "@/lib/access";');
-    // Inside the inspection branch's Findings step, gated on documents access.
-    const findings = closeout.slice(
-      closeout.indexOf("<InspectionFindingsStep"),
-      closeout.indexOf("Step 2 · Before: the Inspection checklist"),
-    );
-    expect(findings).toMatch(
-      /\{hasDocumentsAccess\(profile\) && \(\s*<div[^>]*data-line="inspection-report"/,
-    );
-    expect(findings).toContain("<InspectionReportButton");
+    expect(closeout).not.toContain("InspectionReportButton");
+    expect(closeout).not.toContain('data-line="inspection-report"');
     // The button itself: the template by name, photos + marks on, no prices, straight to the editor.
     const button = read("src/components/documents/inspection-report-button.tsx");
     expect(button).toContain("findInspectionTemplate(templates)");

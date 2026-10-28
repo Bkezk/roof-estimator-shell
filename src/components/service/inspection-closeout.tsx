@@ -27,14 +27,13 @@
  * ticket page's Repairs fold under "Other photos" (ticket-field-sections.tsx lists every photo
  * that is not a signature, loose ones under that heading).
  */
-import { Camera, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { Camera, Check, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 import type { ServiceJobRow } from "@/lib/service.functions";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
 import { photosOnItem, unattachedTicketPhotos, type InspectionItem } from "@/lib/inspection";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { AerialSection } from "@/components/service/aerial-markup";
 import { PhotoThumb } from "@/components/service/field-shared";
@@ -75,6 +74,8 @@ function PhotoRoll({
   jobId,
   ticketNumber,
   compact,
+  heading,
+  children,
 }: {
   /** The roll's own photos (the item's, or the loose ones on the findings step). */
   photos: JobPhotoRow[];
@@ -88,6 +89,13 @@ function PhotoRoll({
   jobId: string;
   ticketNumber: number;
   compact?: boolean | undefined;
+  /**
+   * Compact findings layout (owner, Oct 28): the camera button sits at the right of this
+   * heading, `children` (the notes box) goes under it, the thumbnails under that — and no
+   * "Optional" word, nothing on that step is required.
+   */
+  heading?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   const delPhoto = useDeleteJobPhoto(jobId);
   // The pictures still going up (the portal's one queue): grey placeholders until each row lands.
@@ -99,8 +107,30 @@ function PhotoRoll({
       onDiscard={camera.onDiscard}
     />
   );
+  const button = (
+    <Button
+      type="button"
+      variant="outline"
+      className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+      onClick={camera.onPhoto}
+      aria-label={`${label}: photo`}
+    >
+      <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
+      Photo{photos.length ? ` (${photos.length})` : ""}
+    </Button>
+  );
   return (
     <div className="space-y-2">
+      {heading && (
+        <div className="flex items-center justify-between gap-2" data-line="roll-heading">
+          {heading}
+          <div className="flex shrink-0 items-center gap-2">
+            {button}
+            <UploadBadge n={camera.uploading} />
+          </div>
+        </div>
+      )}
+      {children}
       {itemKey ? (
         <>
           <ItemPhotoThumbs
@@ -133,30 +163,23 @@ function PhotoRoll({
           </div>
         )
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
-          onClick={camera.onPhoto}
-          aria-label={`${label}: photo`}
-        >
-          <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-          Photo{photos.length ? ` (${photos.length})` : ""}
-        </Button>
-        <UploadBadge n={camera.uploading} />
-        {itemKey && (
-          <FromTicketPhotosButton
-            jobId={jobId}
-            itemKey={itemKey}
-            itemLabel={label}
-            photos={allPhotos}
-            items={items}
-            compact={compact}
-          />
-        )}
-        <span className="text-xs text-muted-foreground">Optional</span>
-      </div>
+      {!heading && (
+        <div className="flex flex-wrap items-center gap-2">
+          {button}
+          <UploadBadge n={camera.uploading} />
+          {itemKey && (
+            <FromTicketPhotosButton
+              jobId={jobId}
+              itemKey={itemKey}
+              itemLabel={label}
+              photos={allPhotos}
+              items={items}
+              compact={compact}
+            />
+          )}
+          <span className="text-xs text-muted-foreground">Optional</span>
+        </div>
+      )}
       <WaitingForSignalLine n={camera.waitingForSignal} />
       {camera.pending
         .filter((p) => p.status === "failed")
@@ -263,13 +286,11 @@ export function InspectionFindingsStep({
   onRecommendRepairs,
   recommendNewRoof,
   onRecommendNewRoof,
-  skipped,
-  onSkip,
   photos,
   camera,
 }: {
   job: ServiceJobRow;
-  /** The checklist draft: Property inspected / Property grade save with it (owner, Oct 26). */
+  /** The checklist draft: Inspected / Grade save with it (owner, Oct 26). */
   draft: InspectionDraftState;
   /** The ticket's closing_notes draft (closeout.tsx TextDraft): the one notes box. */
   notes: string;
@@ -278,43 +299,11 @@ export function InspectionFindingsStep({
   onRecommendRepairs: (on: boolean) => void;
   recommendNewRoof: boolean;
   onRecommendNewRoof: (on: boolean) => void;
-  /** "Nothing to add" pressed (the notesSkippedKey mark). */
-  skipped: boolean;
-  onSkip: (on: boolean) => void;
   photos: readonly JobPhotoRow[];
   camera: InspectionCamera;
 }) {
-  const nothingYet = !notes.trim() && !recommendRepairs && !recommendNewRoof;
   return (
     <section className="space-y-3" aria-label="Findings">
-      <div className="space-y-1">
-        <Label htmlFor="co-findings">Findings</Label>
-        <Textarea
-          id="co-findings"
-          rows={5}
-          className="text-base"
-          placeholder="What you found on the roof (the keyboard's microphone works here)"
-          value={notes}
-          onChange={(e) => onNotes(e.target.value)}
-        />
-      </div>
-      <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-        <span className="font-medium">Recommend repairs</span>
-        <Switch
-          checked={recommendRepairs}
-          onCheckedChange={onRecommendRepairs}
-          aria-label="Recommend repairs"
-        />
-      </label>
-      <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-        <span className="font-medium">Recommend a new roof</span>
-        <Switch
-          checked={recommendNewRoof}
-          onCheckedChange={onRecommendNewRoof}
-          aria-label="Recommend a new roof"
-        />
-      </label>
-      <InspectionDetails draft={draft} canEdit idPrefix="co" />
       <PhotoRoll
         photos={itemPhotos(photos, null)}
         allPhotos={photos}
@@ -323,28 +312,94 @@ export function InspectionFindingsStep({
         label="Findings"
         jobId={job.id}
         ticketNumber={job.number}
-      />
-      {nothingYet &&
-        (skipped ? (
-          <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
-            <span className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              Nothing to add
-            </span>
-            <Button type="button" variant="ghost" className="h-10" onClick={() => onSkip(false)}>
-              Undo
-            </Button>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 w-full text-base"
-            onClick={() => onSkip(true)}
-          >
-            Nothing to add
-          </Button>
-        ))}
+        heading={<Label htmlFor="co-findings">Findings</Label>}
+      >
+        <Textarea
+          id="co-findings"
+          rows={5}
+          className="text-base"
+          placeholder="What you found on the roof (the keyboard's microphone works here)"
+          value={notes}
+          onChange={(e) => onNotes(e.target.value)}
+        />
+      </PhotoRoll>
+      <div className="grid grid-cols-2 gap-2" data-section="recommendations">
+        <RecommendButton
+          label="Recommend repairs"
+          on={recommendRepairs}
+          onChange={onRecommendRepairs}
+        />
+        <RecommendButton
+          label="Recommend new roof"
+          on={recommendNewRoof}
+          onChange={onRecommendNewRoof}
+        />
+      </div>
+      <InspectionDetails draft={draft} canEdit idPrefix="co" />
     </section>
+  );
+}
+
+/** One of the two recommendations: a press-to-select button (owner, Oct 28; was a switch row). */
+function RecommendButton({
+  label,
+  on,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      aria-pressed={on}
+      className={`h-11 whitespace-normal px-2 text-sm font-medium leading-tight ${
+        on ? "border-transparent bg-primary text-primary-foreground hover:bg-primary/90" : ""
+      }`}
+      onClick={() => onChange(!on)}
+    >
+      {on && <Check className="mr-1 h-4 w-4 shrink-0" aria-hidden />}
+      {label}
+    </Button>
+  );
+}
+
+/**
+ * The Findings step's "Nothing to add" (the notesSkippedKey mark, the same as step 6's Skip):
+ * a small link beside the missing line under Next while the step is blank (closeout-steps.ts
+ * findingsBlank); once pressed, the mark with Undo.
+ */
+export function NothingToAdd({
+  skipped,
+  onSkip,
+  blank,
+}: {
+  skipped: boolean;
+  onSkip: (on: boolean) => void;
+  blank: boolean;
+}) {
+  if (skipped)
+    return (
+      <span className="flex items-center gap-1" data-line="nothing-to-add">
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+        Nothing to add
+        <Button type="button" variant="ghost" className="h-10 px-2" onClick={() => onSkip(false)}>
+          Undo
+        </Button>
+      </span>
+    );
+  if (!blank) return null;
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-10 px-2 text-sm"
+      data-line="nothing-to-add"
+      onClick={() => onSkip(true)}
+    >
+      Nothing to add
+    </Button>
   );
 }

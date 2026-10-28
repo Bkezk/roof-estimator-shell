@@ -200,6 +200,19 @@ const findingsGiven = (s: StepState) =>
   s.recommendNewRoof === true ||
   s.notesSkipped;
 
+/**
+ * Step 3 has nothing on it yet (owner, Oct 28: the "Nothing to add" link shows only then): no
+ * note, neither recommendation, and no picture on the findings roll.
+ */
+export const findingsBlank = (
+  s: Pick<StepState, "closingNotes" | "recommendRepairs" | "recommendNewRoof">,
+  photoCount: number,
+) =>
+  s.closingNotes.trim().length === 0 &&
+  s.recommendRepairs !== true &&
+  s.recommendNewRoof !== true &&
+  photoCount === 0;
+
 /** Whether the ticket's data satisfies the step's rule. */
 export function stepDone(id: StepId, s: StepState): boolean {
   if (s.finished) return true;

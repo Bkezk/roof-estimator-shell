@@ -327,41 +327,47 @@ export function InspectionDetails({
   idPrefix: string;
 }) {
   const dateId = `${idPrefix}-inspected-on`;
+  // Oct 28 (owner: a tighter Findings step on the phone): the labels sit in the row — "Inspected"
+  // with the date and Today, "Grade" with A–F — instead of a line above each.
   return (
-    <div className="grid gap-3 sm:grid-cols-2" data-section="inspection-details">
-      <div className="space-y-1">
-        <Label htmlFor={dateId}>Property inspected</Label>
-        <div className="flex items-center gap-2">
-          <Input
-            id={dateId}
-            type="date"
-            className="h-10 w-[170px]"
-            value={draft.inspectedOn}
-            disabled={!canEdit}
-            onChange={(e) => draft.setInspectedOn(e.target.value)}
-          />
-          {canEdit && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10"
-              onClick={() => draft.setInspectedOn(localYmd())}
-            >
-              Today
-            </Button>
-          )}
-        </div>
+    <div
+      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6"
+      data-section="inspection-details"
+    >
+      <div className="flex items-center gap-2">
+        <Label htmlFor={dateId} className="w-[4.25rem] shrink-0 sm:w-auto">
+          Inspected
+        </Label>
+        <Input
+          id={dateId}
+          type="date"
+          aria-label="Property inspected"
+          className="h-10 w-[150px]"
+          value={draft.inspectedOn}
+          disabled={!canEdit}
+          onChange={(e) => draft.setInspectedOn(e.target.value)}
+        />
+        {canEdit && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 px-3"
+            onClick={() => draft.setInspectedOn(localYmd())}
+          >
+            Today
+          </Button>
+        )}
       </div>
-      <div className="space-y-1">
-        <span className="text-sm font-medium leading-none" id={`${idPrefix}-grade-label`}>
-          Property grade
+      <div
+        className="flex items-center gap-2"
+        role="group"
+        aria-label="Property grade"
+        data-section="inspection-grade"
+      >
+        <span className="w-[4.25rem] shrink-0 text-sm font-medium sm:w-auto" aria-hidden>
+          Grade
         </span>
-        <div
-          className="flex gap-1"
-          role="group"
-          aria-labelledby={`${idPrefix}-grade-label`}
-          data-section="inspection-grade"
-        >
+        <div className="flex gap-1">
           {INSPECTION_GRADES.map((g) => (
             <GradeButton
               key={g}

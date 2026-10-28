@@ -291,7 +291,8 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
       /<Button\s+type="button"\s+className="h-12 w-full text-base font-semibold"\s+disabled=\{missing !== null\}[\s\S]*?onClick=\{onNext\}\s*>\s*\{nextLabel\} <ArrowRight/,
     );
     expect(card).toMatch(
-      /\{missing !== null && \(\s*<p id=\{`\$\{stepAnchor\(id\)\}-missing`\} className="text-sm text-muted-foreground">\s*\{missing\}/,
+      // Oct 28: the line shares a footer row with the Findings step's "Nothing to add" link.
+      /\{missing !== null && \(\s*<p id=\{`\$\{stepAnchor\(id\)\}-missing`\} className="text-muted-foreground">\s*\{missing\}/,
     );
     expect(card).toContain(
       "aria-describedby={missing !== null ? `${stepAnchor(id)}-missing` : undefined}",

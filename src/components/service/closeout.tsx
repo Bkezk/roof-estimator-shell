@@ -93,7 +93,6 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isOffice, managesTickets } from "@/lib/access";
 // Phase 2 of the documents (Oct 26): who sees the Inspection report button (documents_access()).
-import { hasDocumentsAccess } from "@/lib/access";
 import { closeoutDestination } from "@/lib/closeout-destination";
 import {
   REPAIR_TAGS,
@@ -144,10 +143,10 @@ import { MaterialsSection } from "@/components/service/materials-section";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { TicketExtras } from "@/components/service/ticket-extras";
 import {
+  NothingToAdd,
   InspectionChecklistStep,
   InspectionFindingsStep,
 } from "@/components/service/inspection-closeout";
-import { InspectionReportButton } from "@/components/documents/inspection-report-button";
 import { useInspectionCamera } from "@/components/service/inspection-camera";
 import { clearInspectionDraft, useInspectionDraft } from "@/components/service/inspection-draft";
 import {
@@ -174,6 +173,7 @@ import {
   type RepairPhase,
 } from "@/lib/closeout-repairs";
 import {
+  findingsBlank,
   countMaterialItems,
   finishStepLabel,
   firstOpenStep,
@@ -195,7 +195,7 @@ import {
   type StepState,
   type StepStatus,
 } from "@/lib/closeout-steps";
-import { isFlagged, issueCountText } from "@/lib/inspection";
+import { isFlagged, issueCountText, unattachedTicketPhotos } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { pressLine, runningLabel } from "@/lib/tech-clock";
 import {
@@ -526,6 +526,7 @@ function StepCard({
   onToggle,
   missing,
   onNext,
+  footer,
   children,
 }: {
   id: StepId;
@@ -541,6 +542,8 @@ function StepCard({
   /** What this step still needs (closeout-steps.ts stepMissing); null once its rule holds. */
   missing: string | null;
   onNext: () => void;
+  /** A small thing beside the missing line under Next (the Findings step's "Nothing to add"). */
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const step = stepOf(id, serviceType);
@@ -629,10 +632,18 @@ function StepCard({
           >
             {nextLabel} <ArrowRight className="ml-2 h-5 w-5" aria-hidden />
           </Button>
-          {missing !== null && (
-            <p id={`${stepAnchor(id)}-missing`} className="text-sm text-muted-foreground">
-              {missing}
-            </p>
+          {(missing !== null || footer) && (
+            <div
+              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm"
+              data-line="step-footer"
+            >
+              {missing !== null && (
+                <p id={`${stepAnchor(id)}-missing`} className="text-muted-foreground">
+                  {missing}
+                </p>
+              )}
+              {footer}
+            </div>
           )}
         </div>
       )}
@@ -1066,10 +1077,23 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                 />
               </StepCard>
 
-              {/* Step 3 · Findings: the one notes box (closing_notes), Recommend repairs,
-                  Recommend a new roof, Property inspected / grade (the checklist draft's), an
-                  optional photo roll, Nothing to add. */}
-              <StepCard {...card("findings")} icon={ClipboardList}>
+              {/* Step 3 · Findings (compact since Oct 28, owner: "a better more efficient
+                  layout" on the phone): the notes box with the camera beside its heading, the two
+                  recommendations side by side, Inspected / Grade on tight rows; "Nothing to add"
+                  is a small link under Next, only while the step is blank. The Inspection report
+                  button lives in the header's Documents dialog (ticket-header-actions.tsx), not
+                  here. */}
+              <StepCard
+                {...card("findings")}
+                icon={ClipboardList}
+                footer={
+                  <NothingToAdd
+                    skipped={notesSkipped}
+                    onSkip={markNotesSkipped}
+                    blank={findingsBlank(stepState, unattachedTicketPhotos(photoRows).length)}
+                  />
+                }
+              >
                 <InspectionFindingsStep
                   job={job}
                   draft={insp}
@@ -1079,29 +1103,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   onRecommendRepairs={insp.setRecommendRepairs}
                   recommendNewRoof={draft.recommend_new_roof}
                   onRecommendNewRoof={(v) => update({ recommend_new_roof: v })}
-                  skipped={notesSkipped}
-                  onSkip={markNotesSkipped}
                   photos={photoRows}
                   camera={inspCamera}
                 />
-                {/* Phase 2 (owner, Oct 26): the report, one tap, for whoever has documents access
-                    (a technician-only user has none, so the button is not theirs). */}
-                {hasDocumentsAccess(profile) && (
-                  <div
-                    className="mt-3 flex flex-wrap items-center gap-2"
-                    data-line="inspection-report"
-                  >
-                    <InspectionReportButton
-                      serviceJobId={job.id}
-                      ticketNumber={job.number}
-                      size="default"
-                      className="h-11 sm:h-9"
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      Makes the report from the checklist and photos and opens it to edit.
-                    </span>
-                  </div>
-                )}
               </StepCard>
             </>
           ) : (
