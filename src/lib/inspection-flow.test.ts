@@ -933,7 +933,8 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
   });
   it("the step state carries the checklist, its saved flag and the two switches; the reads wait for the checklist", () => {
     expect(form).toContain("checklist: insp.items,");
-    expect(form).toContain("checklistSaved: insp.saved,");
+    // Oct 28: a record on the server and no failed save (checklist-step-pending-save.test.ts).
+    expect(form).toContain('checklistSaved: insp.hasRecord && insp.state !== "error",');
     expect(form).toContain("recommendRepairs: insp.recommendRepairs,");
     expect(form).toContain("recommendNewRoof: draft.recommend_new_roof,");
     expect(form).toContain("&& !insp.loading;");

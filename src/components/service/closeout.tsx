@@ -935,9 +935,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     materialItems: countMaterialItems(materialsQ.data ?? []),
     signedBy: draft.signed_by,
     // The inspection flow's steps (owner, Oct 12): the checklist draft and its saved state, the
-    // two switches (the roof one is the text draft's, as on a repair).
+    // two recommendations (the roof one is the text draft's, as on a repair). Oct 28 (owner: a
+    // press on Recommend repairs "jumped the screen around … locked the additional findings step
+    // and took me back to the checklist"): that answer lives in the same saved record as the
+    // checklist, so while its save was in flight the checklist read "not saved" and the later
+    // steps locked. The step is done once the server holds a record and the last save did not
+    // fail — a save on its way never locks anything; Complete flushes it (insp.saveNow).
     checklist: insp.items,
-    checklistSaved: insp.saved,
+    checklistSaved: insp.hasRecord && insp.state !== "error",
     recommendRepairs: insp.recommendRepairs,
     recommendNewRoof: draft.recommend_new_roof,
   };

@@ -147,9 +147,10 @@ export interface StepState {
   signedBy: string;
   /**
    * The inspection flow (owner, Oct 12). `checklist`: the visible rows with their answers (the
-   * screen's draft, hidden "Recommend repairs" row left out); `checklistSaved`: the draft is what
-   * the server holds (the autosave landed); `recommendRepairs`: the findings switch. All optional
-   * so a repair ticket's state needs none of them.
+   * screen's draft, hidden "Recommend repairs" row left out); `checklistSaved`: the server holds
+   * a checklist record and the last save did not fail (Oct 28: a save still on its way does not
+   * count as unsaved — it must never lock the later steps); `recommendRepairs`: the findings
+   * step's answer. All optional so a repair ticket's state needs none of them.
    */
   checklist?: readonly StepChecklistItem[] | undefined;
   checklistSaved?: boolean | undefined;
