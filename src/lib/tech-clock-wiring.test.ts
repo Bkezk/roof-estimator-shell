@@ -41,7 +41,7 @@ import {
   type FieldStatusResult,
 } from "@/lib/service-field.functions";
 import { setServiceStage } from "@/lib/service.functions";
-import { clockStoppedNote } from "@/lib/clock-close.server";
+import { CLOCK_CLOSING_STAGES, clockStoppedNote } from "@/lib/clock-close.server";
 import { MOVED_PRESS, pressLine } from "@/lib/tech-clock";
 import { fakeSupabase } from "@/test/fake-supabase";
 
@@ -839,6 +839,28 @@ describe("the office closing a ticket stops the clock and writes its time (audit
     expect(clockStoppedNote("invoiced")).toBe("Clock stopped by the office — stage Invoiced");
     expect(jobRow(B)).toMatchObject({ stage: "invoiced", field_status: null });
   });
+  it("Done from the stage picker stops the clock too (owner, Oct 28); the technician's own pick reads without 'by the office'", async () => {
+    setup();
+    await press(B, "on_site");
+    vi.setSystemTime(at(60));
+    await call(setServiceStage, { id: B, stage: "done" }, MANAGER);
+    expect(entries()).toHaveLength(1);
+    expect(entries()[0]).toMatchObject({
+      service_job_id: B,
+      kind: "labor",
+      hours: 1,
+      source: "clock",
+    });
+    expect(clocks()).toEqual([]);
+    expect(events(B).at(-1)).toMatchObject({
+      note: "Clock stopped by the office — stage Done",
+      by_user: MANAGER,
+    });
+    expect(jobRow(B)).toMatchObject({ stage: "done", field_status: null });
+    expect(clockStoppedNote("done", true)).toBe("Clock stopped — stage Done");
+    expect(CLOCK_CLOSING_STAGES).toContain("done");
+    expect(CLOCK_CLOSING_STAGES).not.toContain("scheduled");
+  });
   it("no clock: nothing extra is written", async () => {
     setup();
     await invoice(A);
@@ -913,7 +935,7 @@ describe("the office closing a ticket stops the clock and writes its time (audit
     );
     const helper = read("src/lib/clock-close.server.ts");
     expect(helper).toContain(
-      "export const CLOCK_CLOSING_STAGES: readonly string[] = OFFICE_STAGES;",
+      'export const CLOCK_CLOSING_STAGES: readonly string[] = ["done", ...OFFICE_STAGES];',
     );
     expect(helper).toContain(
       'clockTransition(open, "leave", job.id, now, open.helper_count, open.technician_id)',

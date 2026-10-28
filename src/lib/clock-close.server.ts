@@ -15,9 +15,11 @@
  * technician, 20261006192000_field_edit_lock.sql, so the office writes time at any stage). It
  * runs BEFORE the stage write and throws when a clock could not be closed, so the stage change
  * is refused rather than leaving a clock the technician can no longer close (their Leave would
- * hit the RLS wall once the ticket is past Done). No clock → nothing written. Stages below
- * Authorized (Done from the picker included) leave the clock alone: the technician's own buttons
- * still work there.
+ * hit the RLS wall once the ticket is past Done). No clock → nothing written. Done from the
+ * stage picker stops it too (owner, Oct 28: "do you think done should stop the clock?" — yes:
+ * the only clock alive at Done is one the technician forgot, and it would tick until noticed);
+ * the technician's own Complete closes its clock itself and never comes through here. Open and
+ * Scheduled leave the clock alone.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -34,15 +36,16 @@ import {
 
 type Client = SupabaseClient<Database>;
 
-/** The stages whose setting stops a running clock: the ones a technician cannot write time at. */
-export const CLOCK_CLOSING_STAGES: readonly string[] = OFFICE_STAGES;
+/** The stages whose setting stops a running clock: Done, and the ones a technician cannot write time at. */
+export const CLOCK_CLOSING_STAGES: readonly string[] = ["done", ...OFFICE_STAGES];
 
 /** "Invoiced" for 'invoiced' — the stage word in the timeline row (no import from service.functions: it imports this). */
 const stageWord = (stage: string) => stage.charAt(0).toUpperCase() + stage.slice(1);
 
 /** The timeline note the office's stop writes (kind 'field', no field_status: the label is the note). */
-export const clockStoppedNote = (stage: string) =>
-  `Clock stopped by the office — stage ${stageWord(stage)}`;
+/** The timeline row; "by the office" unless the technician stopped their own clock from the picker. */
+export const clockStoppedNote = (stage: string, own = false) =>
+  `Clock stopped${own ? "" : " by the office"} — stage ${stageWord(stage)}`;
 
 /**
  * A closed clock as a service_time_entries row (source 'clock'; owner, Oct 15). `onDate` is the
@@ -120,7 +123,7 @@ export async function stopClocksForOffice(
       service_job_id: job.id,
       kind: "field",
       field_status: null,
-      note: clockStoppedNote(stage),
+      note: clockStoppedNote(stage, open.technician_id === actor.id),
       by_user: actor.id,
       by_name: actor.name,
       meta: {
