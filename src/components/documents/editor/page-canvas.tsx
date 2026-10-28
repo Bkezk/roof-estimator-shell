@@ -189,7 +189,9 @@ const MODULE_GAP_PX = 12;
  * (owner, Oct 26: "the page breaks should start a new page to see what it looks like rather
  * than have it continue the page"); what does not fit starts the next sheet, labelled "Page N ·
  * continued". A module is never split on screen (the PDF splits text more finely, so a long
- * letter may print on fewer pages than it shows here).
+ * letter may print on fewer pages than it shows here); one taller than a sheet stays with what
+ * precedes it and overflows the sheet, as the PDF flows it from there (editor-helpers.ts
+ * packIntoSheets).
  */
 function PageSheets(props: {
   page: DocPage;

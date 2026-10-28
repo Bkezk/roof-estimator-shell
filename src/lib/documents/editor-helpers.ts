@@ -318,9 +318,12 @@ export function sheetContentLimit(options: { footer: boolean; pageBreakIn: numbe
 
 /**
  * Pack modules into sheets by their measured heights: a module that does not fit the room left
- * starts the next sheet; one taller than a whole sheet gets a sheet of its own (and overflows it
- * on screen, as it continues in the PDF). An unmeasured module (no height yet) counts as 0 so the
- * first paint is one sheet. Pure, so it is tested.
+ * starts the next sheet. One TALLER than a whole sheet can never fit anywhere, so it stays on
+ * the sheet it is on, right after what is already there, overflowing the sheet on screen — the
+ * PDF flows such a module (a Repair List's rows, a long letter) from that very spot — and what
+ * follows starts the next sheet (owner, Oct 28: the Findings heading sat alone on an empty page
+ * 2 with the whole Repair List pushed to "Page 2 · continued"). An unmeasured module (no height
+ * yet) counts as 0 so the first paint is one sheet. Pure, so it is tested.
  */
 export function packIntoSheets(
   items: ReadonlyArray<{ id: string; height: number | undefined }>,
@@ -333,13 +336,19 @@ export function packIntoSheets(
   for (const it of items) {
     const h = it.height ?? 0;
     const need = (cur.length ? gap : 0) + h;
-    if (cur.length && used + need > limit) {
+    const giant = h > limit;
+    if (cur.length && used + need > limit && !giant) {
       sheets.push(cur);
       cur = [];
       used = 0;
     }
     cur.push(it.id);
     used += (cur.length > 1 ? gap : 0) + h;
+    if (giant) {
+      sheets.push(cur);
+      cur = [];
+      used = 0;
+    }
   }
   if (cur.length || !sheets.length) sheets.push(cur);
   return sheets;

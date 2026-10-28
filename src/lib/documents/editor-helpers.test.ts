@@ -258,7 +258,7 @@ describe("the screen breaks pages where the PDF does (owner, Oct 26: 'the page b
     expect(sheetContentLimit({ footer: true, pageBreakIn: 8.8 })).toBe(Math.round(8.8 * 96) - 72);
     expect(sheetContentLimit({ footer: false, pageBreakIn: 8.8 })).toBe(1056 - 72 - 72);
   });
-  it("packIntoSheets: a module that does not fit starts the next sheet; a giant one gets its own", () => {
+  it("packIntoSheets: a module that does not fit starts the next sheet; a giant one stays where it is (owner, Oct 28) and ends its sheet", () => {
     const items = [
       { id: "a", height: 300 },
       { id: "b", height: 300 },
@@ -266,7 +266,30 @@ describe("the screen breaks pages where the PDF does (owner, Oct 26: 'the page b
       { id: "d", height: 2000 },
       { id: "e", height: 10 },
     ];
-    expect(packIntoSheets(items, 700, 12)).toEqual([["a", "b"], ["c"], ["d"], ["e"]]);
+    // Old code: [["a","b"],["c"],["d"],["e"]] — "c" (a heading) alone on an empty sheet.
+    expect(packIntoSheets(items, 700, 12)).toEqual([["a", "b"], ["c", "d"], ["e"]]);
+    // A giant first module: its own sheet, the rest after it.
+    expect(
+      packIntoSheets(
+        [
+          { id: "big", height: 2000 },
+          { id: "x", height: 10 },
+        ],
+        700,
+        12,
+      ),
+    ).toEqual([["big"], ["x"]]);
+    // Exactly the limit is not a giant: it starts a fresh sheet as before.
+    expect(
+      packIntoSheets(
+        [
+          { id: "a", height: 100 },
+          { id: "full", height: 700 },
+        ],
+        700,
+        12,
+      ),
+    ).toEqual([["a"], ["full"]]);
     // Unmeasured modules weigh nothing, so the first paint is one sheet.
     expect(
       packIntoSheets(
