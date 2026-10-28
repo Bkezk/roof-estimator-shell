@@ -303,7 +303,7 @@ describe("3. the sun / moon toggle", () => {
 
   it("sits in the sidebar footer right after Collapse menu, open and collapsed", () => {
     const src = read("src/components/app-sidebar.tsx");
-    const footer = src.slice(src.indexOf("<SidebarFooter>"), src.indexOf("</SidebarFooter>"));
+    const footer = src.slice(src.indexOf("<SidebarFooter"), src.indexOf("</SidebarFooter>"));
     const collapse = footer.indexOf("<span>Collapse menu</span>");
     const collapseButtonEnd = footer.indexOf("</SidebarMenuButton>", collapse);
     const open = footer.indexOf('<ThemeToggle variant="sidebar" />');

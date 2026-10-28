@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   Users,
@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { closeDrawerAfterLink, type Tapped } from "@/lib/sidebar-phone-close";
 import {
   isOffice,
   managesTickets,
@@ -339,8 +340,11 @@ function NavGroup({
 }
 
 export function AppSidebar() {
-  const { state, toggleSidebar } = useSidebar();
+  const { state, toggleSidebar, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
+  // Owner, Oct 28: on a phone the drawer closes after a tap on a page link (sidebar-phone-close.ts).
+  const onMenuClick = (e: MouseEvent<HTMLDivElement>) =>
+    closeDrawerAfterLink(isMobile, e.target as Tapped, setOpenMobile);
   const navigate = useNavigate();
   const { profile, role, can, signOut } = useAuth();
 
@@ -415,7 +419,7 @@ export function AppSidebar() {
           />
         </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent onClick={onMenuClick}>
         {/* Work Overview (owner, Sep 30): the landing page — their own tickets, tasks and
             follow-ups in one list and calendar. Not for a technician-only user (owner, Oct 15):
             My tickets is their page, and the Service board is the office's. */}
@@ -608,7 +612,7 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter onClick={onMenuClick}>
         <SidebarMenu>
           {/* Owner, Sep 28: the account link (info, password, notifications) sits in the footer
               so the menu has one item fewer. Owner, Oct 12: it reads "My account"; the name is

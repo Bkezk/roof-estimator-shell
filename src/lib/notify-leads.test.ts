@@ -410,7 +410,7 @@ describe("the prefs functions carry notify_leads", () => {
 
 describe("the sidebar's account entry", () => {
   const src = read("src/components/app-sidebar.tsx");
-  const footer = src.slice(src.indexOf("<SidebarFooter>"), src.indexOf("</SidebarFooter>"));
+  const footer = src.slice(src.indexOf("<SidebarFooter"), src.indexOf("</SidebarFooter>"));
   const link = footer.slice(
     footer.indexOf('<Link to="/account"'),
     footer.indexOf("</Link>", footer.indexOf('<Link to="/account"')),
