@@ -73,6 +73,7 @@ import {
   shareOrigin,
   sniffImageType,
   withStoredInspection,
+  INSPECTION_KEY,
   withStoredPricing,
 } from "./documents/server-pure";
 import { type DocumentSource, resolveVariables } from "./documents/variables";
@@ -1156,32 +1157,78 @@ export const saveDocument = createServerFn({ method: "POST" })
     return writeVersion(sb, row, data, data.expectVersion, me.name);
   });
 
-/** Re-read the record and store the variables again (the Variables tab's "Refresh data"). */
+/**
+ * What "Refresh data" found for the inspection findings (owner, Oct 28: the Findings page stayed
+ * empty after a refresh — the editor was handed the variables with the stored snapshot stripped,
+ * and nothing said whether the ticket had findings at all).
+ */
+export type RefreshFindings = "stored" | "no-checklist" | "not-inspection" | "bid";
+export const refreshFindings = (
+  kind: DocKind,
+  ticketType: string | null | undefined,
+  stored: boolean,
+): RefreshFindings =>
+  kind !== "ticket"
+    ? "bid"
+    : ticketType !== "inspection"
+      ? "not-inspection"
+      : stored
+        ? "stored"
+        : "no-checklist";
+export const REFRESH_FINDINGS_NOTE: Record<RefreshFindings, string | null> = {
+  stored: "Data refreshed — the inspection's findings are in",
+  "no-checklist": "Data refreshed, but the ticket has no saved inspection checklist yet",
+  "not-inspection": "Data refreshed; the ticket is not an inspection, so there are no findings",
+  bid: null,
+};
+
+/**
+ * Re-read the record and store the variables again (the Variables tab's "Refresh data"). Returns
+ * the variables AS STORED — the reserved keys included — so the editor's canvas (the Repair List
+ * reads the stored inspection snapshot) is current without a reload; the Variables tab lists only
+ * the defined keys anyway.
+ */
 export const refreshDocumentVariables = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(idInput)
-  .handler(async ({ data, context }): Promise<{ variables: Record<string, string> }> => {
-    const me = await whoami(context);
-    const sb = context.supabase;
-    const row = await documentRow(sb, data.id);
-    const loaded = await loadSource(sb, {
-      kind: row.kind as DocKind,
-      bidId: row.bid_id,
-      serviceJobId: row.service_job_id,
-      documentTitle: row.title,
-    });
-    const variables = snapshot(loaded.source);
-    const { error } = await sb
-      .from("documents")
-      .update({
-        variables: json(variables),
-        account_id: loaded.accountId,
-        updated_by_name: me.name,
-      })
-      .eq("id", row.id);
-    if (error) throw err(error, "The variables were not refreshed");
-    return { variables: displayVariables(variables) };
-  });
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ variables: Record<string, string>; findings: RefreshFindings }> => {
+      const me = await whoami(context);
+      const sb = context.supabase;
+      const row = await documentRow(sb, data.id);
+      const loaded = await loadSource(sb, {
+        kind: row.kind as DocKind,
+        bidId: row.bid_id,
+        serviceJobId: row.service_job_id,
+        documentTitle: row.title,
+      });
+      const variables = snapshot(loaded.source);
+      const { data: written, error } = await sb
+        .from("documents")
+        .update({
+          variables: json(variables),
+          account_id: loaded.accountId,
+          updated_by_name: me.name,
+        })
+        .eq("id", row.id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw err(error, "The variables were not refreshed");
+      if (!written)
+        throw new Error("The variables were not refreshed: the document could not be updated");
+      return {
+        variables,
+        findings: refreshFindings(
+          row.kind as DocKind,
+          loaded.source.ticket?.type,
+          INSPECTION_KEY in variables,
+        ),
+      };
+    },
+  );
 
 export interface DocumentListItem {
   id: string;

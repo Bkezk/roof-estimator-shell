@@ -97,6 +97,7 @@ import {
   listDocumentRevisions,
   listDocumentTemplates,
   listSavedModules,
+  REFRESH_FINDINGS_NOTE,
   refreshDocumentVariables,
   restoreDocumentRevision,
   saveDocument,
@@ -337,8 +338,11 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
   const refresh = useMutation({
     mutationFn: () => refreshFn({ data: { id: doc.id } }),
     onSuccess: (r) => {
+      // The stored variables, reserved keys included: the Repair List reads the snapshot at once.
       setVariables(r.variables);
-      toast.success("Data refreshed");
+      const note = REFRESH_FINDINGS_NOTE[r.findings];
+      if (r.findings === "no-checklist" || r.findings === "not-inspection") toast.warning(note);
+      else toast.success(note ?? "Data refreshed");
     },
     onError: (e) => toast.error(`Could not refresh the data: ${errText(e)}`),
   });
