@@ -112,7 +112,8 @@ describe("the canvas", () => {
     // The tab reads "Page N" on a page's first sheet and "Page N · continued" on the sheets its
     // modules overflow onto (owner, Oct 26: the page break starts a new sheet on screen).
     expect(canvas).toContain("continuedTabLabel(props.index, part)");
-    expect(canvas).toContain("packIntoSheets(");
+    // Oct 29: picture modules are cut between their rows (sheet-segments.test.ts).
+    expect(canvas).toContain("packIntoSegments(");
     expect(canvas).toContain("sheetContentLimit(env.options)");
     expect(canvas).toContain("addPage(pages, i + 1)");
   });

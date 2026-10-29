@@ -327,7 +327,9 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
           style={{ gridTemplateColumns: `repeat(${m.columns}, minmax(0, 1fr))` }}
         >
           {m.images.map((cell, i) => (
-            <div key={i} className="group/cell relative">
+            // Each cell may start a new sheet: the cells of one row share a top (page-canvas cuts
+            // a tall grid between rows; Oct 29).
+            <div key={i} className="group/cell relative" data-break="">
               <ImageSlot
                 image={cell.image}
                 // The cell's 4:3 box, or the owner's size (Oct 28) at screen scale.
@@ -500,7 +502,8 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
               const ids = data.photoIds[r] ?? [];
               return (
                 <Fragment key={r}>
-                  <tr>
+                  {/* An item's row, and each thumbnail line under it, may start a new sheet. */}
+                  <tr data-break="">
                     {data.columns.map((_, c) => (
                       <td key={c} className="border border-neutral-300 px-2 py-1 align-top">
                         {editing ? (
@@ -537,7 +540,12 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
                           {ids.map((photoId) => (
                             // A fixed box, so the marks overlay sits on the picture, not the cell:
                             // 1.6 × 1.2 in, or the owner's size (Oct 28; pdf-layout repairThumbBox).
-                            <div key={photoId} style={thumbStyle} data-repair-photo={photoId}>
+                            <div
+                              key={photoId}
+                              style={thumbStyle}
+                              data-repair-photo={photoId}
+                              data-break=""
+                            >
                               {/* Mark up on hover / tap / double-click (owner, Oct 28): the same
                                   launcher and dialog as a picture slot; marks save on the ticket. */}
                               <MarkUpAffordance
@@ -720,7 +728,8 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
         <div className="mt-1 flex flex-wrap gap-2" data-item-photos>
           {data.photoIds.map((photoId) => (
             // A fixed box, as the Repair List's: the marks overlay sits on the picture.
-            <div key={photoId} style={thumbStyle} data-item-photo={photoId}>
+            // Each thumbnail line may start a new sheet (the ones of one line share a top).
+            <div key={photoId} style={thumbStyle} data-item-photo={photoId} data-break="">
               <MarkUpAffordance
                 image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
                 onChange={() => {}}

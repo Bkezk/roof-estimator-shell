@@ -361,6 +361,116 @@ export function packIntoSheets(
   return sheets;
 }
 
+/** A module, or the part of it from `from` to `to` px (both absent = the whole module), on a sheet. */
+export interface SheetSegment {
+  id: string;
+  from?: number | undefined;
+  to?: number | undefined;
+}
+
+/**
+ * The sheets as the editor draws them (owner, Oct 29: "when the page breaks and a new page
+ * starts it should reflect that in the visual … something with a lot of pictures extends the
+ * screen really far down"). packIntoSheets' rules, plus: a module that does not fit the room left
+ * and carries `breaks` (px from its top where a new page may start — a Checklist item's thumbnail
+ * rows, a Repair List's rows, a Photo Grid's rows) is cut there, as the PDF's paginate cuts it
+ * between its pieces: the largest part that fits stays, the rest continues on the next sheet,
+ * and is cut again as often as it takes. A module whose whole fits a fresh sheet but not the room
+ * left is still cut at the room left, as the PDF flows its rows. With no breaks (a letter) the
+ * old rule holds: a module taller than a sheet stays where it is and overflows. Pure.
+ */
+export function packIntoSegments(
+  items: ReadonlyArray<{
+    id: string;
+    height: number | undefined;
+    breakBefore?: boolean | undefined;
+    breaks?: readonly number[] | undefined;
+  }>,
+  limit: number,
+  gap: number,
+): SheetSegment[][] {
+  const sheets: SheetSegment[][] = [];
+  let cur: SheetSegment[] = [];
+  let used = 0;
+  const flush = () => {
+    sheets.push(cur);
+    cur = [];
+    used = 0;
+  };
+  const room = () => limit - used - (cur.length ? gap : 0);
+  const put = (seg: SheetSegment, h: number) => {
+    used += (cur.length ? gap : 0) + h;
+    cur.push(seg);
+  };
+  for (const it of items) {
+    const h = it.height ?? 0;
+    if (cur.length && it.breakBefore) flush();
+    if (h <= room()) {
+      put({ id: it.id }, h);
+      continue;
+    }
+    const breaks = [...new Set(it.breaks ?? [])]
+      .filter((b) => b > 0 && b < h)
+      .sort((a, b) => a - b);
+    if (!breaks.length) {
+      const giant = h > limit;
+      if (cur.length && !giant) flush();
+      put({ id: it.id }, h);
+      if (giant) flush();
+      continue;
+    }
+    let from = 0;
+    for (;;) {
+      const rest = h - from;
+      if (rest <= room()) {
+        put(from ? { id: it.id, from, to: h } : { id: it.id }, rest);
+        break;
+      }
+      const fit = breaks.filter((b) => b > from && b - from <= room());
+      if (fit.length) {
+        const to = fit[fit.length - 1]!;
+        put({ id: it.id, from, to }, to - from);
+        flush();
+        from = to;
+        continue;
+      }
+      if (cur.length) {
+        flush();
+        continue;
+      }
+      // A fresh sheet and still no cut fits: the next part overflows this sheet, as one row
+      // taller than a page does in the PDF.
+      const next = breaks.find((b) => b > from);
+      if (next === undefined) {
+        put(from ? { id: it.id, from, to: h } : { id: it.id }, rest);
+        flush();
+        break;
+      }
+      put({ id: it.id, from, to: next }, next - from);
+      flush();
+      from = next;
+    }
+  }
+  if (cur.length || !sheets.length) sheets.push(cur);
+  return sheets;
+}
+
+/**
+ * Where a module may be cut (packIntoSegments' `breaks`): the tops of its `[data-break]` blocks,
+ * in px from the module's top at screen scale (`scale` = drawn px per layout px — the sheet is
+ * shown scaled), rounded, the duplicates of one line folded together. Pure.
+ */
+export function breakOffsets(
+  moduleTop: number,
+  blockTops: readonly number[],
+  scale: number,
+): number[] {
+  const k = scale > 0 ? scale : 1;
+  return [...new Set(blockTops.map((t) => Math.round((t - moduleTop) / k)))]
+    .filter((b) => b > 0)
+    .sort((a, b) => a - b);
+}
+
 export const continuedTabLabel = (index: number, part: number) =>
   part === 0 ? pageTabLabel(index) : `${pageTabLabel(index)} · continued`;
 

@@ -331,8 +331,8 @@ describe("the editor's Size control", () => {
       "heightPx={photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined}",
     );
     expect(fnBody("RepairList")).toContain("const box = repairThumbBox(m, CONTENT_WIDTH);");
-    expect(fnBody("RepairList")).toContain(
-      "<div key={photoId} style={thumbStyle} data-repair-photo={photoId}>",
+    expect(fnBody("RepairList")).toMatch(
+      /<div\s+key=\{photoId\}\s+style=\{thumbStyle\}\s+data-repair-photo=\{photoId\}/,
     );
     expect(fnBody("PhotoText")).toContain("heightPx={heightPx}");
     expect(fnBody("TwoPhotos")).toContain("heightPx={heightPx}");

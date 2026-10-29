@@ -18,7 +18,9 @@ import { FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
 import {
   continuedTabLabel,
   MODULE_DRAG_TYPE,
-  packIntoSheets,
+  breakOffsets,
+  packIntoSegments,
+  type SheetSegment,
   pageBreakPx,
   pageDomId,
   SHEET,
@@ -188,10 +190,13 @@ const MODULE_GAP_PX = 12;
  * One page's sheets: its modules are measured as they render and packed up to the page break
  * (owner, Oct 26: "the page breaks should start a new page to see what it looks like rather
  * than have it continue the page"); what does not fit starts the next sheet, labelled "Page N ·
- * continued". A module is never split on screen (the PDF splits text more finely, so a long
- * letter may print on fewer pages than it shows here); one taller than a sheet stays with what
- * precedes it and overflows the sheet, as the PDF flows it from there (editor-helpers.ts
- * packIntoSheets).
+ * continued". A picture module (a Checklist item, a Repair List, a Photo Grid) is cut between
+ * its rows where the PDF cuts it, and continues on the next sheet (owner, Oct 29: "when the page
+ * breaks and a new page starts it should reflect that in the visual"); the rows that may start a
+ * sheet carry `data-break` (module-view.tsx). A text module is never split on screen (the PDF
+ * splits text more finely, so a long letter may print on fewer pages than it shows here); one
+ * taller than a sheet stays with what precedes it and overflows the sheet (editor-helpers.ts
+ * packIntoSegments).
  */
 function PageSheets(props: {
   page: DocPage;
@@ -204,6 +209,8 @@ function PageSheets(props: {
 }) {
   const env = useEditorEnv();
   const [heights, setHeights] = useState<Record<string, number>>({});
+  // Where each module may be cut across sheets (px from its top; Oct 29, packIntoSegments).
+  const [breaks, setBreaks] = useState<Record<string, number[]>>({});
   const observer = useRef<ResizeObserver | null>(null);
   const elements = useRef(new Map<string, HTMLDivElement>());
   const measureRef = useCallback((id: string) => {
@@ -221,9 +228,27 @@ function PageSheets(props: {
           setHeights((cur) => {
             let next = cur;
             for (const e of entries) {
-              const mid = (e.target as HTMLElement).dataset["moduleId"];
+              const mid = (e.target as HTMLElement).dataset["measureId"];
               const h = (e.target as HTMLElement).offsetHeight;
               if (mid && next[mid] !== h) next = { ...next, [mid]: h };
+            }
+            return next;
+          });
+          setBreaks((cur) => {
+            let next = cur;
+            for (const e of entries) {
+              const target = e.target as HTMLElement;
+              const mid = target.dataset["measureId"];
+              if (!mid) continue;
+              const box = target.getBoundingClientRect();
+              const scale = target.offsetHeight > 0 ? box.height / target.offsetHeight : 1;
+              const tops = Array.from(target.querySelectorAll<HTMLElement>("[data-break]")).map(
+                (b) => b.getBoundingClientRect().top,
+              );
+              const offs = breakOffsets(box.top, tops, scale);
+              const was = next[mid] ?? [];
+              if (was.length !== offs.length || was.some((v, i) => v !== offs[i]))
+                next = { ...next, [mid]: offs };
             }
             return next;
           });
@@ -234,10 +259,11 @@ function PageSheets(props: {
   useEffect(() => () => observer.current?.disconnect(), []);
 
   const limit = sheetContentLimit(env.options);
-  const groups = packIntoSheets(
+  const groups = packIntoSegments(
     props.page.modules.map((m) => ({
       id: m.id,
       height: heights[m.id],
+      breaks: breaks[m.id],
       // "One checklist item per page": every Checklist item starts a sheet (the PDF, a page).
       breakBefore: m.type === "repairItem" && env.options.itemPerPage,
     })),
@@ -250,7 +276,7 @@ function PageSheets(props: {
 
   return (
     <>
-      {groups.map((ids, part) => (
+      {groups.map((segments, part) => (
         <div key={part} className={part > 0 ? "mt-4" : undefined}>
           <div className="mb-1 flex items-end gap-2">
             <button
@@ -277,7 +303,7 @@ function PageSheets(props: {
               page={props.page}
               index={props.index}
               part={part}
-              moduleIds={ids}
+              segments={segments}
               measureRef={measureRef}
               printedNumber={props.startNumber + part}
               selected={props.selected}
@@ -323,7 +349,8 @@ function Sheet(props: {
   index: number;
   /** Which sheet of the page this is (0 = the first; the Pages list scrolls to it). */
   part: number;
-  moduleIds: string[];
+  /** The modules on this sheet; a cut one is the part from `from` to `to` px (packIntoSegments). */
+  segments: SheetSegment[];
   measureRef: (id: string) => (el: HTMLDivElement | null) => void;
   printedNumber: number;
   selected: boolean;
@@ -334,9 +361,10 @@ function Sheet(props: {
   // While a tile or a snippet is dragged over this sheet: the page index it would take and the
   // insertion line's top, in sheet px (null when nothing hovers).
   const [drop, setDrop] = useState<{ at: number; top: number } | null>(null);
-  const shown = props.moduleIds
-    .map((id) => props.page.modules.findIndex((m) => m.id === id))
-    .filter((i) => i >= 0);
+  const placed = props.segments
+    .map((seg) => ({ seg, i: props.page.modules.findIndex((m) => m.id === seg.id) }))
+    .filter((x) => x.i >= 0);
+  const shown = placed.map((x) => x.i);
 
   /** The gap under the pointer: which page index a drop inserts at, and where the line draws. */
   const dropTarget = (clientY: number): { at: number; top: number } => {
@@ -428,11 +456,27 @@ function Sheet(props: {
         </div>
       ) : null}
       <div ref={columnRef} className="flex flex-col gap-3">
-        {shown.map((i) => {
+        {placed.map(({ seg, i }) => {
           const m = props.page.modules[i]!;
+          const from = seg.from ?? 0;
+          const cut = seg.to !== undefined;
+          // The part of a module cut across sheets (Oct 29): a window `to - from` tall onto the
+          // whole module, shifted up by `from`. Only the first part is measured — a later one is a
+          // second copy drawn for its rows, and measuring it would feed the packing back on itself.
           return (
-            <div key={m.id} ref={props.measureRef(m.id)} data-module-id={m.id}>
-              <ModuleView module={m} index={i} count={props.page.modules.length} />
+            <div
+              key={`${m.id}:${from}`}
+              data-module-id={m.id}
+              data-segment={from > 0 ? "continued" : undefined}
+              style={cut ? { height: seg.to! - from, overflow: "hidden" } : undefined}
+            >
+              <div
+                ref={from === 0 ? props.measureRef(m.id) : undefined}
+                data-measure-id={from === 0 ? m.id : undefined}
+                style={from > 0 ? { transform: `translateY(-${from}px)` } : undefined}
+              >
+                <ModuleView module={m} index={i} count={props.page.modules.length} />
+              </div>
             </div>
           );
         })}
