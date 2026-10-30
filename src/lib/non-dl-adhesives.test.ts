@@ -46,7 +46,7 @@ describe("isNonDlAdhesive", () => {
   it("the seeded Firestone bonding adhesives (Non-DL TPO / EPDM Rubber groups) are non-DL", () => {
     expect(isNonDlAdhesive(seeded("Single-Ply LVOC Bonding Adhesive"))).toBe(true);
     expect(isNonDlAdhesive(seeded("UltraPly Bonding Adhesive"))).toBe(true);
-    expect(isNonDlAdhesive(seeded("EPDM Bonding Adhesive (BA-2004 T)"))).toBe(true);
+    expect(isNonDlAdhesive(seeded("EPDM Bonding Adhesive"))).toBe(true);
     expect(isNonDlAdhesive(seeded("Water Based Bonding Adhesive (P)"))).toBe(true);
   });
   it("the I.S.O. insulation adhesives are non-DL by their W56 part number (their group is Insulations)", () => {
@@ -57,8 +57,8 @@ describe("isNonDlAdhesive", () => {
     expect(isNonDlAdhesive({ part_no: " w56RACINSA ", coverage: [] })).toBe(true);
   });
   it("TECH-Bond (Duro-Tech) and the Duro-Last adhesives stay on the Duro-Last side", () => {
-    expect(isNonDlAdhesive(seeded("TECH-Bond TPO Bonding Solvent Adhesive"))).toBe(false);
-    expect(isNonDlAdhesive(seeded("TECH-Bond TPO LVOC Solvent Bonding Adhesive"))).toBe(false);
+    expect(isNonDlAdhesive(seeded("TECH-Bond TPO Bonding Adhesive"))).toBe(false);
+    expect(isNonDlAdhesive(seeded("TECH-Bond TPO LVOC Bonding Adhesive"))).toBe(false);
     expect(isNonDlAdhesive(waterBased)).toBe(false);
     expect(isNonDlAdhesive(solventBased)).toBe(false);
     expect(isDuroLastAdhesive(waterBased)).toBe(true);
@@ -70,7 +70,7 @@ describe("isNonDlAdhesive", () => {
 
 describe("mergeAdhesiveProducts: a view's edits go back into the whole list", () => {
   const ultra = product("UltraPly Bonding Adhesive", "W56TPO3005", ["Non-DL TPO"]);
-  const techBond = product("TECH-Bond TPO Bonding Solvent Adhesive", "1112T", ["Duro-Tech TPO"]);
+  const techBond = product("TECH-Bond TPO Bonding Adhesive", "1112T", ["Duro-Tech TPO"]);
   const iso = product("I.S.O.FIX Adhesive", "W56RACINSA", ["Insulations"]);
   const stored = [waterBased, ultra, solventBased, techBond, iso];
   it("the non-DL page's edits land in place; the Duro-Last products are untouched", () => {
@@ -82,7 +82,7 @@ describe("mergeAdhesiveProducts: a view's edits go back into the whole list", ()
       ["Water Based Adhesive", 1],
       ["UltraPly Bonding Adhesive", 135],
       ["Solvent Based Adhesive", 1],
-      ["TECH-Bond TPO Bonding Solvent Adhesive", 1],
+      ["TECH-Bond TPO Bonding Adhesive", 1],
       ["I.S.O.FIX Adhesive", 330],
     ]);
   });
@@ -94,7 +94,7 @@ describe("mergeAdhesiveProducts: a view's edits go back into the whole list", ()
       "Water Based Adhesive",
       "UltraPly Bonding Adhesive",
       "Solvent Based Adhesive",
-      "TECH-Bond TPO Bonding Solvent Adhesive",
+      "TECH-Bond TPO Bonding Adhesive",
       "I.S.O.FIX Adhesive",
       "XR Bonding Adhesive",
     ]);
@@ -103,7 +103,7 @@ describe("mergeAdhesiveProducts: a view's edits go back into the whole list", ()
       "Water Based Adhesive",
       "UltraPly Bonding Adhesive",
       "Solvent Based Adhesive",
-      "TECH-Bond TPO Bonding Solvent Adhesive",
+      "TECH-Bond TPO Bonding Adhesive",
     ]);
   });
   it("the Duro-Last tab's edits leave the non-DL products untouched", () => {
@@ -116,7 +116,7 @@ describe("mergeAdhesiveProducts: a view's edits go back into the whole list", ()
       ["Water Based Adhesive", 9],
       ["UltraPly Bonding Adhesive", 1],
       ["Solvent Based Adhesive", 8],
-      ["TECH-Bond TPO Bonding Solvent Adhesive", 140],
+      ["TECH-Bond TPO Bonding Adhesive", 140],
       ["I.S.O.FIX Adhesive", 1],
     ]);
   });

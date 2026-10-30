@@ -1192,7 +1192,8 @@ export const ADHESIVE_PRODUCTS: SeedAdhesiveProduct[] = [
     coverage: membraneCoverage([TPO], mid(70, 85) * 5),
   },
   {
-    name: "EPDM Bonding Adhesive (BA-2004 T)",
+    // The sheet prints "EPDM Bonding Adhesive (BA-2004 T)"; the estimator's name (Oct 30).
+    name: "EPDM Bonding Adhesive",
     part_no: "W563587052",
     price: 27 * 5,
     unit: "5 gal pail ($27/gal)",
@@ -1220,16 +1221,20 @@ export const ADHESIVE_PRODUCTS: SeedAdhesiveProduct[] = [
     unit: "5 gal box",
     coverage: membraneCoverage([TPO], null),
   },
-  // ---- Duro-Tech TECH-Bond (no coverage on the sheet).
+  // ---- Duro-Tech TECH-Bond (no coverage on the sheet). Named as the bid estimator has known them
+  //      since Sept 22 (legacy_adhesive; owner, Oct 30): the sheet prints "TECH-Bond TPO Bonding
+  //      Solvent Adhesive" / "… LVOC Solvent Bonding Adhesive", but the estimator joins an
+  //      adhesive's price to a bid by exact name, so a second spelling priced nothing
+  //      (20261030120000_adhesive_names_match_estimator.sql). Never rename one without the other.
   {
-    name: "TECH-Bond TPO Bonding Solvent Adhesive",
+    name: "TECH-Bond TPO Bonding Adhesive",
     part_no: "1112T",
     price: 140,
     unit: "5 gal",
     coverage: membraneCoverage([DURO_TECH_SYSTEM], null),
   },
   {
-    name: "TECH-Bond TPO LVOC Solvent Bonding Adhesive",
+    name: "TECH-Bond TPO LVOC Bonding Adhesive",
     part_no: "1112-010T",
     price: 220,
     unit: "5 gal",

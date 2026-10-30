@@ -404,7 +404,9 @@ describe("a photo turned on the ticket prints turned (owner, Oct 28: rotation)",
     expect(half).toMatch(/1 0 0 1 288 580 cm\n-1 \S+ \S+ -1 0 0 cm\n240 0 0 180 0 0 cm/);
     const left = await at(270);
     expect(left).toMatch(/1 0 0 1 228 400 cm\n\S+ 1 -1 \S+ 0 0 cm\n240 0 0 180 0 0 cm/);
-  });
+    // Real pdf-lib documents, three of them: about 5.5 s on the build machine (Oct 30), over
+    // vitest's 5 s default. A budget for the work, not a skip.
+  }, 20_000);
   // Each render embeds the logo PNG for every photo and inflates every stream: well over 5 s each.
   const SLOW = 30_000;
   it(
