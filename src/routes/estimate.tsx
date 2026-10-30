@@ -1,4 +1,5 @@
 import { Link, createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
+import { adhesivePriceGapText, adhesivePriceGaps } from "@/lib/adhesive-price-gaps";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -2246,6 +2247,9 @@ function EstimatePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
+  // The adhesives this bid uses with no price (lib/adhesive-price-gaps.ts): a red line on the
+  // Bid total card (owner, Oct 30).
+  const adhesiveGaps = adhesivePriceGaps(result?.adhesiveWholeUnits, admin?.adhesivePrices);
 
   // Legacy Underlayment screen readouts (frmUnderlayment.UpdateGraphic) for the selected sections:
   // Σ UnderlaymentBaseHours / UnderlaymentAdjustedBaseHours / UnderlaymentQuoteHours, and the
@@ -7043,6 +7047,23 @@ function EstimatePage() {
               )}
             </Button>
           </CardHeader>
+          {/* An adhesive the bid uses with no price bills $0 (owner, Oct 30: the Somerset bid's
+              TECH-Bond line sat at $0 behind a small amber line in the folded details). Red and
+              outside the fold, so it shows whether the details are open or not. */}
+          {adhesiveGaps.length > 0 && (
+            <div
+              role="alert"
+              data-line="adhesive-price-gap"
+              className="mx-6 mb-3 space-y-1 rounded-md border border-red-500/50 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-300"
+            >
+              {adhesiveGaps.map((g) => (
+                <p key={g.name} className="flex gap-1.5">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  {adhesivePriceGapText(g, frozenAsOf !== null)}
+                </p>
+              ))}
+            </div>
+          )}
           <CardContent id="bid-total-body" className={bidTotalOpen ? "space-y-3" : "hidden"}>
             {frozenAsOf !== null && pricingStale && (
               <div className="rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
