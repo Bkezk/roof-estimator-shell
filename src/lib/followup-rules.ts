@@ -106,9 +106,10 @@ export interface FollowupStateIn {
   due_at: string;
   /**
    * The follow-up's kind (Nov 2): an "invoice" timer — "Authorize ticket #…" on a Done ticket —
-   * reads "Authorization overdue N days" / "Authorization due …", since the ticket itself is
-   * finished and what is late is the office's review (the owner: "if something is marked done
-   * it can still show as overdue"). Any other kind, or none, reads "Overdue N days" / "Due …".
+   * has no Due / Overdue part at all: the ticket is finished and cannot be overdue (the owner:
+   * "if something is marked done it can still show as overdue … it cant really be overdue so
+   * waiting is likely the better tag"); the row's "Waiting N days" says how long it has sat.
+   * Any other kind, or none, reads "Overdue N days" / "Due today" / "Due <day>".
    */
   kind?: string | null;
   every_days?: number | null;
@@ -144,15 +145,14 @@ export function followupStateText(
   const parts: FollowupStatePart[] = [];
   const due = toYmd(f.due_at);
   const late = daysBetween(due, today);
-  const what = f.kind === "invoice" ? "Authorization " : "";
-  const cap = (s: string) => (what ? s.toLowerCase() : s);
-  if (late > 0)
-    parts.push({
-      text: `${what}${cap("Overdue")} ${late} day${late === 1 ? "" : "s"}`,
-      tone: "overdue",
-    });
-  else if (late === 0) parts.push({ text: `${what}${cap("Due")} today`, tone: "normal" });
-  else parts.push({ text: `${what}${cap("Due")} ${shortDay(due)}`, tone: "normal" });
+  // An Authorize timer (kind "invoice") is never "due" or "overdue" on the row: its ticket is
+  // Done, and the row's "Waiting N days" is the measure (owner, Nov 2).
+  if (f.kind === "invoice") {
+    // no due part
+  } else if (late > 0)
+    parts.push({ text: `Overdue ${late} day${late === 1 ? "" : "s"}`, tone: "overdue" });
+  else if (late === 0) parts.push({ text: "Due today", tone: "normal" });
+  else parts.push({ text: `Due ${shortDay(due)}`, tone: "normal" });
   if (f.snoozed_until) {
     const until = toYmd(f.snoozed_until);
     if (until > today) {

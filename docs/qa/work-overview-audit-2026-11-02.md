@@ -264,9 +264,10 @@ authorization row of a Done ticket: its "Authorize ticket #…" timer's state li
 days" in red (the timer's due day is the close-out plus one). The ticket is finished; what is late
 is the office's authorization. A Done task never shows anywhere (the list drops `status = done`),
 a Done ticket is never in the Overdue column, never a red calendar day and never counted overdue
-on the Owner page (`isOverdueTicket` and `bucketOf` both exclude it). The line now reads
-"Authorization overdue 17 days" / "Authorization due today" / "Authorization due Fri, Oct 16" for
-that kind of timer, so nothing marked Done reads as overdue work. The authorizer's reminder notice
+on the Owner page (`isOverdueTicket` and `bucketOf` both exclude it). The line first became
+"Authorization overdue 17 days"; the owner then said "it cant really be overdue so waiting is
+likely the better tag", so the Due / Overdue part is gone from that kind of timer altogether —
+the row's "Waiting N days" is the measure, and the reminder cadence and any hold still show. The authorizer's reminder notice
 ("N days overdue") is unchanged; it goes to the person who must authorize.
 
 **"(unknown)" → "No technician".** A ticket row with no technician that is not Unassigned (a Done

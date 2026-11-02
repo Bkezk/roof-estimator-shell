@@ -7,9 +7,10 @@
  *     kind whose person cannot be named still reads "(unknown)".
  *  2. "if something is marked done it can still show as overdue": a Done ticket under Needs
  *     authorization carried its Authorize timer's state line, "Overdue 17 days" in red — the
- *     ticket is finished; what is late is the authorization. The line for an Authorize timer
- *     (kind "invoice") now reads "Authorization overdue 17 days" / "Authorization due today" /
- *     "Authorization due Fri, Oct 16", so nothing marked Done reads as overdue work.
+ *     ticket is finished and cannot be overdue (the owner: "it cant really be overdue so waiting
+ *     is likely the better tag"). The line for an Authorize timer (kind "invoice") has no Due /
+ *     Overdue part at all now; the row's "Waiting N days" is the measure. Reminders and holds
+ *     still show.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -34,21 +35,35 @@ describe("1. a ticket with no technician reads 'No technician'", () => {
   });
 });
 
-describe("2. an Authorize timer's line names the authorization, not the ticket, as late", () => {
+describe("2. an Authorize timer's line has no Due / Overdue part: the ticket is done; Waiting is the measure", () => {
   const base = { due_at: "2026-10-16T14:33:00Z", every_days: 3 };
-  it("overdue / due today / due later, for kind invoice", () => {
+  it("overdue / due today / due later: nothing for kind invoice, as before for every other kind", () => {
     const texts = (f: Parameters<typeof followupStateText>[0]) =>
       followupStateText(f, TODAY, utcDay).map((p) => `${p.tone}:${p.text}`);
-    expect(texts({ ...base, kind: "invoice" })).toEqual([
-      "overdue:Authorization overdue 17 days",
+    expect(texts({ ...base, kind: "invoice" })).toEqual(["normal:Reminders every 3 days"]);
+    expect(texts({ ...base, kind: "invoice", due_at: "2026-11-02T14:00:00Z" })).toEqual([
       "normal:Reminders every 3 days",
     ]);
-    expect(texts({ ...base, kind: "invoice", due_at: "2026-11-02T14:00:00Z" })[0]).toBe(
-      "normal:Authorization due today",
-    );
-    expect(texts({ ...base, kind: "invoice", due_at: "2026-11-05T14:00:00Z" })[0]).toBe(
-      "normal:Authorization due Thu, Nov 5",
-    );
+    expect(texts({ ...base, kind: "invoice", due_at: "2026-11-05T14:00:00Z" })).toEqual([
+      "normal:Reminders every 3 days",
+    ]);
+    // A hold and the reminder history still show on it.
+    expect(
+      texts({
+        ...base,
+        kind: "invoice",
+        snoozed_until: "2026-11-05T13:00:00Z",
+        hold_reason: "Owner away",
+        held_by_name: "Brandon",
+        last_reminded_at: "2026-10-31T12:00:00Z",
+      }),
+    ).toEqual([
+      "normal:On hold until Thu, Nov 5",
+      "normal:Owner away",
+      "normal:held by Brandon",
+      "normal:Reminders every 3 days",
+      "normal:last reminded Oct 31",
+    ]);
     // Any other kind, and no kind at all: as before.
     expect(texts({ ...base, kind: "ticket" })[0]).toBe("overdue:Overdue 17 days");
     expect(texts(base)[0]).toBe("overdue:Overdue 17 days");
