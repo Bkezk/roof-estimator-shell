@@ -84,11 +84,17 @@ export interface MyWorkResult {
   /**
    * The Done tickets waiting to be authorized (owner, Oct 12: "make managers able to authorize"),
    * longest waiting first, for an admin or a manager whatever `who` asks for (the queue is the
-   * office's); [] for anyone else. The page lists each once under Needs authorization — as its
-   * Authorize follow-up row when that is among `followups`, else as the ticket row (my-work.ts
-   * mergeWork).
+   * office's); [] for anyone else. The page lists each once under Needs authorization, as the
+   * ticket row on its close-out day (Nov 2: the same row whatever the scope), its Authorize
+   * follow-up riding on it when that is among `followups` (my-work.ts mergeWork).
    */
   toAuthorize: TicketIn[];
+  /**
+   * The named authorizer (ticket_authorizers()[0]; Nov 2): the "Authorizer:" on a Needs
+   * authorization row whose timer is not among the caller's follow-ups. Null when the rpc failed
+   * or named nobody.
+   */
+  authorizerId: string | null;
   /**
    * Draft bids by due date (owner, Oct 12: "at the origination of bids we should have a bid due
    * date required so we can also have those show on this week, overdue, etc"), for a caller with
@@ -343,6 +349,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     // names (it names only admins and managers, so the two agree once the migration is applied).
     const authorizer =
       reviewer || (!auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId));
+    const authorizerId = !auth.error && typeof auth.data?.[0] === "string" ? auth.data[0] : null;
     if (tickets.error) throw new Error(`Tickets: ${tickets.error.message}`);
     if (tasks.error) throw new Error(`Tasks: ${tasks.error.message}`);
     if (followups.error) throw new Error(`Follow-ups: ${followups.error.message}`);
@@ -374,7 +381,15 @@ export const listMyWork = createServerFn({ method: "GET" })
         (followups.data ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),
       ),
     ];
-    const [buildings, accounts, roster, opps] = await Promise.all([
+    // Nov 2 (the audit's finding 2): a caller who cannot pick reads no other profile, so a plain
+    // user who invoices saw the to-invoice rows without the technician's name. technician_options()
+    // answers anyone with Service (the ticket roster, SECURITY DEFINER), so it names them here;
+    // best effort, like the labels.
+    const techNames =
+      !canPick && canAccess(me, "service")
+        ? sb.rpc("technician_options")
+        : Promise.resolve({ data: null, error: null });
+    const [buildings, accounts, roster, opps, techs] = await Promise.all([
       readInChunks(buildingIds, (ids) =>
         sb.from("buildings").select("id, name, address1, city").in("id", ids),
       ),
@@ -383,6 +398,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       readInChunks(oppIds, (ids) =>
         sb.from("crm_opportunities").select("id, status").in("id", ids),
       ),
+      techNames,
     ]);
     const oppStatus = new Map(opps.map((o) => [o.id, o.status]));
     const buildingLabel = new Map(
@@ -399,6 +415,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     const names: Record<string, string> = {};
     const people = roster.people;
     for (const p of people) names[p.id] = p.name;
+    if (!techs.error) for (const t of techs.data ?? []) names[t.id] ??= nameOf(t);
     // The caller's own name, so their own cards say who (owner, Oct 9: "why doesnt this show
     // who its assigned to on the card?"); a plain user reads no other profile and holds no
     // other person's item.
@@ -433,6 +450,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       canPick,
       scope,
       authorizer,
+      authorizerId,
       unassigned: showUnassigned
         ? {
             tickets: (unTickets.data ?? []) as TicketIn[],

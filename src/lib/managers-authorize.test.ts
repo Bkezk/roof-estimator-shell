@@ -254,7 +254,9 @@ describe("3a. the pure rules", () => {
       key: "ticket:t1",
       kind: "ticket",
       title: "#6012 Leak",
-      status: "Done",
+      // Nov 2: "Done — to authorize" and the close-out day, whatever row the viewer gets.
+      status: "Done — to authorize",
+      date: "2026-10-08",
       done: false,
       needsAuth: true,
       waitingSince: "2026-10-08T15:00:00Z",
@@ -276,9 +278,10 @@ describe("3a. the pure rules", () => {
     expect(toAuthorizeItem(ticket({ stage: "authorized" }))).toBeNull();
     const items = toAuthorizeItems(
       [
-        ticket({ id: "b", scheduled_date: "2026-10-03" }),
+        // Nov 2: sorted by the close-out day (the row's day), longest waiting first.
+        ticket({ id: "b", completed_at: "2026-10-03T12:00:00Z" }),
         ticket({ id: "x", stage: "authorized" }),
-        ticket({ id: "a", scheduled_date: "2026-10-02" }),
+        ticket({ id: "a", completed_at: "2026-10-02T12:00:00Z" }),
       ],
       {},
       utcDay,
@@ -299,14 +302,24 @@ describe("3a. the pure rules", () => {
     ]);
     expect(groups.filter((g) => g.items.length > 0).map((g) => g.bucket)).toEqual(["authorize"]);
   });
-  it("mergeWork: with its Authorize follow-up listed, that row alone — carrying the ticket's waiting time", () => {
+  it("mergeWork: with its Authorize follow-up listed, the ticket row alone — carrying the timer (Nov 2) and the waiting time", () => {
     const items = mergeWork(
-      { tickets: [], tasks: [], followups: [authorize()], toAuthorize: [ticket()] },
+      {
+        tickets: [],
+        tasks: [],
+        followups: [authorize()],
+        toAuthorize: [ticket()],
+        names: { ted: "Ted", brandon: "Brandon" },
+      },
       utcDay,
     );
-    expect(items.map((i) => i.key)).toEqual(["followup:f1"]);
+    expect(items.map((i) => i.key)).toEqual(["ticket:t1"]);
     expect(items[0]).toMatchObject({
       needsAuth: true,
+      date: "2026-10-08",
+      status: "Done — to authorize",
+      assigneeName: "Ted",
+      reviewerName: "Brandon",
       waitingSince: "2026-10-08T15:00:00Z",
       followup: { id: "f1", every_days: 1 },
     });
@@ -481,12 +494,16 @@ describe("3b. listMyWork, through the fake client", () => {
     });
     // Brandon's follow-up is not among Mo's own follow-ups: the ticket rows stand.
     expect(r.followups).toEqual([]);
-    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done", "ticket:j-done-nobody"]);
-    expect(by["authorize"]![0]).toMatchObject({
+    // Nov 2: by the close-out day, longest waiting first (the ticket nobody is on: Oct 6).
+    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "ticket:j-done"]);
+    expect(by["authorize"]![1]).toMatchObject({
       needsAuth: true,
       done: false,
+      date: "2026-10-08",
       waitingSince: "2026-10-08T15:00:00Z",
       assigneeName: "Ted",
+      // The named authorizer, from the server (authorizerId): Brandon.
+      reviewerName: "Brandon",
     });
     expect(where("ticket:j-done")).toEqual(["authorize"]);
     expect(where("ticket:j-done-nobody")).toEqual(["authorize"]);
@@ -500,33 +517,38 @@ describe("3b. listMyWork, through the fake client", () => {
     const { r, by } = await run(MANAGER);
     expect(r.authorizer).toBe(true);
     expect(r.toAuthorize.map((t) => t.id)).toEqual(["j-done", "j-done-nobody"]);
-    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done", "ticket:j-done-nobody"]);
+    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "ticket:j-done"]);
   });
-  it("the named authorizer (Mine): one row per ticket — the follow-up row for his, with the waiting time", async () => {
+  it("the named authorizer (Mine): one row per ticket — the ticket row, his timer on it (Nov 2), with the waiting time", async () => {
     const { r, by, where } = await run(BRANDON);
     expect(r.authorizer).toBe(true);
     expect(r.toAuthorize.map((t) => t.id)).toEqual(["j-done", "j-done-nobody"]);
     expect(r.followups.map((f) => f.id)).toEqual(["f-auth"]);
-    // compareWork: by day — the ticket's Oct 1, the follow-up's due day Oct 9.
-    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "followup:f-auth"]);
+    // The same two rows as any other manager sees, on their close-out days.
+    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "ticket:j-done"]);
     expect(by["authorize"]![1]).toMatchObject({
       needsAuth: true,
+      date: "2026-10-08",
+      status: "Done — to authorize",
       waitingSince: "2026-10-08T15:00:00Z",
+      assigneeName: "Ted",
+      reviewerName: "Brandon",
       followup: { id: "f-auth", every_days: 1 },
     });
-    expect(where("ticket:j-done")).toEqual([]);
+    expect(where("followup:f-auth")).toEqual([]);
   });
-  it("Everyone (the manager): the follow-up row is listed for the ticket that has one, the ticket row for the other", async () => {
+  it("Everyone (the manager): the ticket rows, the timer riding on the one that has it (Nov 2)", async () => {
     const { r, by, where } = await run(MANAGER, "all");
     expect(r.followups.map((f) => f.id)).toEqual(["f-auth"]);
-    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "followup:f-auth"]);
-    expect(where("ticket:j-done")).toEqual([]);
+    expect(by["authorize"]!.map((i) => i.key)).toEqual(["ticket:j-done-nobody", "ticket:j-done"]);
+    expect(by["authorize"]![1]!.followup).toMatchObject({ id: "f-auth" });
+    expect(where("followup:f-auth")).toEqual([]);
     // One person's view (Ted's): his Scheduled ticket, and still the whole queue as ticket rows.
     const ted = await run(MANAGER, TECH);
     expect(ted.r.tickets.map((t) => t.id)).toEqual(["j-sched"]);
     expect(ted.by["authorize"]!.map((i) => i.key)).toEqual([
-      "ticket:j-done",
       "ticket:j-done-nobody",
+      "ticket:j-done",
     ]);
   });
   it("a technician gets nothing of it; an office user (plain, Invoices) neither — as before", async () => {

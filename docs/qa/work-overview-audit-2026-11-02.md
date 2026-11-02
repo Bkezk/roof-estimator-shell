@@ -158,22 +158,82 @@ List too (it already exists for the Calendar), defaulting the day to today. Edge
   technician-only user too (SECURITY DEFINER, no caller check). They expose a setting number, the
   Service roster and the authorizer order, nothing more; noted, not a finding.
 
-## What could not be exercised on live data
+## What the morning pass could not exercise on live data
 
-- **Tasks.** The tasks table is empty, so task rows, open-in-place, the Done tick with Undo, task
-  drags, Claim / Assign to… on a task and the `content_updated_at` stale-drag guard were checked
-  by code reading and the 775 unit tests only (`tasks*.test.ts`, `my-work-actions.test.ts`,
-  `work-overview-oct21-audit8-*.test.ts` cover each path with the fake database).
-- **Unassigned work.** No live Open / Scheduled ticket, opportunity or task is unassigned, so the
-  Unassigned column, the red "needs assignment" flag, Claim and the Calendar's Unassigned pane ran
-  on an empty set. The rules are unit-tested (`my-work-unassigned.test.ts`, `claim-work.test.ts`,
-  `calendar-unassigned-pane.test.ts`).
-- **Clicking through.** I hold no login and create none, so the page was not driven in a browser.
-  The drag-and-drop, the popovers and the dialogs are covered by the component-level tests in
-  `work-overview-oct20-*.test.ts` and `work-overview-oct21-audit8-client.test.ts`, which read the
-  component source for the wiring.
-- **Writes.** No row was changed. Earlier audits (Oct 6, Oct 21) probed the write guards live in
-  rolled-back transactions; this one re-read the policies, triggers and functions instead.
+- **Tasks.** The tasks table was empty, so task rows, open-in-place, the Done tick with Undo, task
+  drags and Claim / Assign to… on a task were checked by code reading and the 775 unit tests only.
+- **Unassigned work.** No live Open / Scheduled ticket, opportunity or task was unassigned, so the
+  Unassigned column, Claim and the Calendar's Unassigned pane ran on an empty set.
+- **Clicking through.** No login, so the page was not driven in a browser.
+- **Writes.** No row was changed.
+
+All four were covered in the afternoon (part 2, below), with a login the owner made for the test.
+
+## Part 2 — the three fixes, and the page driven in a browser (Nov 2, afternoon)
+
+The owner: "go ahead and fix all 3 … also please test the tasks, unassigned work, and clicking
+through the browser. i made you a login." The fixes are in `src/lib/my-work.ts`,
+`src/lib/my-work.functions.ts`, `src/lib/my-work-actions.ts`, `src/components/my-work-actions.tsx`
+and `src/components/my-work-page.tsx`; the tests in `src/lib/work-overview-nov2-fixes.test.ts`
+(10 tests: 7 fail on the morning's code, all 10 pass after; the three that pass either way pin
+behaviour the fix must keep). Four older tests that pinned the old Needs authorization rule were
+updated to the new one (`managers-authorize.test.ts`, `work-empty-fold.test.ts`,
+`my-work-actions.test.ts`). Full suite after: 463 files, 5,976 tests, all pass; tsc, eslint and
+prettier clean; `bun run build` clean.
+
+| Fix                                | What changed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. One Needs authorization row     | `mergeWork` now lists a Done ticket as its ticket row whatever the scope: the day it was closed out (`completed_at`, else the stage stamp, else the scheduled day), status "Done — to authorize", the technician as the row's person, and a new "Authorizer: <name>" line (the timer's holder when the viewer sees the timer, else the named authorizer the server now sends as `authorizerId`). When the viewer holds the "Authorize ticket #…" timer it rides on that row (Snooze, the reminder line) instead of being its own row. A timer whose ticket is not in the queue still lists as before. The Owner page's counts are untouched (it never sends the queue). |
+| 2. Names for plain invoicers       | `listMyWork` reads `technician_options()` for a caller who cannot pick but has Service access, so their to-invoice rows name the technician.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 3. Assign to… on an undated ticket | `assignPlan` returns no plan for a ticket without a day; the List's pick opens the assign-for-a-day dialog with a Day input set to today and the line "This ticket has no date yet — pick the day they get it."                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### The browser run
+
+Local dev server on this commit against the live database, Chromium through Playwright, signed in
+as the test login (`Claude`, an admin ticked Technician). Three temporary rows of mine were made
+by SQL and deleted afterwards (ticket #6043 "Claude temp (delete me)", an opportunity and a task
+by the same name, with their follow-ups, timeline lines and opportunity events); the test
+profile's role was flipped by SQL for the plain-user and technician-only runs and set back to
+admin. No existing ticket, bid, opportunity or task was touched, and no notification went to
+anyone else (0 rows in `notifications` for other users over the run). Screenshots are in the
+scratchpad (`…/wo/shot-01` to `shot-13`).
+
+| #       | What was done                                                                                  | Result                                                                                                                                                                                                                                                                                               |
+| ------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1      | Sign in, land on Work Overview, Everyone                                                       | List with Overdue 5 · Later 15 · Needs authorization 5 · Authorized — to invoice 3; the Needs authorization rows read "Done — to authorize", "Authorizer: Brandon Keck", "Waiting N days", with Snooze (fix 1 live)                                                                                  |
+| A2      | Hover the ⓘ beside Overdue                                                                     | the plain-language tooltip                                                                                                                                                                                                                                                                           |
+| A3–A5   | X on Overdue, reload, Hidden chip, Reset layout                                                | column gone, "Hidden: Overdue (5)", survives a reload (the profile's copy), chip brings it back, Reset layout shows only while customised                                                                                                                                                            |
+| A6–A8   | Drag the Later heading onto Overdue, reload, Reset layout                                      | Later first, survives a reload, Reset restores the default order                                                                                                                                                                                                                                     |
+| A9–A10  | Show menu: untick Bids, re-tick                                                                | no Bid badges and "Show: 5 of 6", then "Show: all"                                                                                                                                                                                                                                                   |
+| A11–A13 | Show picker: Mine, Brian Folden, Everyone                                                      | `?who=mine` and "Your tickets…"; Brian's rows with "Brian Folden:" in the intro; Everyone back                                                                                                                                                                                                       |
+| A14     | `?view=list&bucket=overdue`                                                                    | the Overdue column ringed                                                                                                                                                                                                                                                                            |
+| A15     | `?view=owner` (an old link)                                                                    | sent to /owner                                                                                                                                                                                                                                                                                       |
+| B1–B8   | Calendar: month, previous month, Oct 15, red days, undated note, back to List, Today, bare URL | October in the URL; Oct 15 red (the overdue opportunity), Oct 16 not red (to-invoice / to-authorize); "14 items have no date — see the List."; the List keeps `?month`; Today drops it; the bare URL reopens the remembered view                                                                     |
+| C1–C2   | Phone width (390px)                                                                            | four tabs with counts; the Needs authorization tab shows its rows with the Authorizer line                                                                                                                                                                                                           |
+| D1      | Temp ticket (no date) and temp opportunity, nobody's                                           | both under Unassigned with Assign to… and Claim; the ticket "No date · Open · Unassigned", not yet flagged (entered today, timer 1 day)                                                                                                                                                              |
+| D2      | Assign to… → Claude on the undated ticket (fix 3)                                              | the dialog "Assign #6043 … for Mon, Nov 2" with the Day input on today and the no-date line; day set to Nov 3, Assign → "Assigned to Claude for Nov 3"; the ticket under This week, Scheduled, Claude; the database: technician Claude, Nov 3, Scheduled, timeline "Date set to Nov 3, 2026"         |
+| D3      | Claim the opportunity                                                                          | "Yours — it is on your list now"; under Later (expected close Nov 9) with its 7-day timer; the database: assignee Claude, follow-up open due Nov 9                                                                                                                                                   |
+| D4      | Snooze the ticket's follow-up until Nov 5 with a reason                                        | "On hold until Thu, Nov 5"; the row under Waiting with "On hold until … · Nov 2 audit test hold · held by Claude"; the database: snoozed_until set, hold_count 1, timeline "On hold until Nov 5, 2026 by Claude: …"                                                                                  |
+| D5      | Calendar: drag the ticket from Nov 3 to Nov 7                                                  | "Moved to Nov 7 — its hold was ended"; the day's list shows it on Nov 7; the database: Nov 7, snoozed_until null, timeline "Date moved from Nov 3, 2026 to Nov 7, 2026"                                                                                                                              |
+| D6      | Ticket made nobody's again (SQL); drag it from the Calendar's Unassigned pane onto Nov 5       | the pane with the claimer's hint; "Yours, on Thu, Nov 5"; the pane then "Nothing waiting."                                                                                                                                                                                                           |
+| D7      | New task (dated today, assigned to me by default)                                              | the row under This week with the Done tick and no map link (no building); the row opens the task in place ("Edit task"); Done tick → "Task done" with Undo, row gone; Undo → "Task reopened", row back; Calendar drag to Nov 5 → "Moved to Nov 5"; the database: due Nov 5, all day, assignee Claude |
+| D8      | Task made nobody's (SQL)                                                                       | under Unassigned with Claim and Assign to…; an admin opens it in place (assignee "Nobody"); Assign to… → Claude → "Assigned to Claude"; mine again                                                                                                                                                   |
+| D9      | Task made nobody's again; Claim                                                                | "Yours — it is on your list now"; mine again                                                                                                                                                                                                                                                         |
+| G1–G4   | Test profile as a plain user (Service + Invoices, not ticked)                                  | "Your tickets…", no Show picker, no Needs authorization column, no Snooze, "Follow-ups are managed by your manager."; New ticket present; only my own open work; the to-invoice rows read "#6026 … Braden Keck" (fix 2 live)                                                                         |
+| H1–H2   | Test profile as technician-only (Service, ticked)                                              | /my-work sends them to My tickets; no Work Overview in the sidebar                                                                                                                                                                                                                                   |
+| Z       | Every run                                                                                      | no page errors and no console errors                                                                                                                                                                                                                                                                 |
+
+One probe of mine misfired (D7's "the New task dialog names me" read the select before the roster
+had loaded); the saved task carried my name, as the row and the database show.
+
+### Seen along the way, not changed
+
+- A Done or Authorized ticket with no technician shows "(unknown)" as its person on Everyone
+  (#6039, #6038, #6024 today). "(unknown)" reads as a lookup that failed; "No technician" would be
+  truer. Small wording change, the owner's call.
+- A ticket's hold record (`hold_reason`, `hold_count`) stays on the follow-up after a date move
+  clears the hold; nothing shows it (no "Back from hold" badge, since `snoozed_until` is null). As
+  designed for a logged contact; harmless.
 
 ## How this was proved, and how to repeat it
 

@@ -192,16 +192,25 @@ export function assignKind(item: ActionIn, viewer: Viewer): AssignKind | null {
 }
 
 /**
- * What "Assign to…" sends: a ticket keeps its day (assignServiceJob needs one) unless a day is
- * given; a task or an opportunity carries `date` only when a day is given (Oct 20: a drop on a
+ * What "Assign to…" sends: a ticket keeps its day (assignServiceJob needs one; a ticket without
+ * one gets no plan until a day is given — assignNeedsDay) unless a day is given; a task or an opportunity carries `date` only when a day is given (Oct 20: a drop on a
  * calendar day). An opportunity's `dateKept`: the day was NOT sent because the viewer may not
  * move a stored expected close (followup-rules dateMoveProblem, the rule claimOpportunity
  * applies) — the toast says the date stayed.
  */
 export type AssignPlan =
-  | { kind: "ticket"; id: string; technicianId: string; date: string | null }
+  | { kind: "ticket"; id: string; technicianId: string; date: string }
   | { kind: "task"; id: string; assignee: string; date?: string }
   | { kind: "opportunity"; id: string; assignee: string; date?: string; dateKept?: true };
+
+/**
+ * Does "Assign to…" on this Unassigned row need a day first (Nov 2, the audit's finding 3)? An
+ * unassigned ticket without a date: assignServiceJob requires one, and the List's pick used to
+ * send `date: null` and fail ("Pick a date — every ticket needs a follow-up date"). The page
+ * opens the assign-for-a-day dialog instead (the Calendar's), with a day input set to today.
+ */
+export const assignNeedsDay = (item: Pick<WorkItem, "kind" | "unassigned" | "date">): boolean =>
+  isTicketKind(item.kind) && !!item.unassigned && !item.date;
 
 /**
  * The assignment picking `userId` on an Unassigned row makes; null when not allowed. `day`
@@ -219,7 +228,12 @@ export function assignPlan(
   if (!kind || !userId) return null;
   const onDay = day && YMD.test(day) ? day : null;
   const id = workId(item);
-  if (kind === "ticket") return { kind, id, technicianId: userId, date: onDay ?? item.date };
+  // A ticket needs a day (Nov 2): none from the row and none given is no plan — the page asks
+  // for the day first (assignNeedsDay) rather than sending a plan the server refuses.
+  if (kind === "ticket") {
+    const date = onDay ?? item.date;
+    return date ? { kind, id, technicianId: userId, date } : null;
+  }
   if (!onDay) return { kind, id, assignee: userId };
   if (kind === "task") return { kind, id, assignee: userId, date: onDay };
   const kept = !!dateMoveProblem({

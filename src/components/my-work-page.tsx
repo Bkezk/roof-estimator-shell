@@ -323,6 +323,11 @@ function WorkRow({
         ) : (
           (showWho || item.assigneeName) && <span>{item.assigneeName ?? "(unknown)"}</span>
         )}
+        {/* A Needs authorization row names its authorizer too (Nov 2): the person whose
+            "Authorize ticket #…" timer and reminders these are. */}
+        {item.needsAuth && item.reviewerName && (
+          <span data-line="authorizer">Authorizer: {item.reviewerName}</span>
+        )}
         {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
             (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
         {item.flag && <span className="font-medium text-destructive">Overdue</span>}

@@ -35,9 +35,10 @@ import { toast } from "sonner";
 
 import { listTechnicians, type UserProfile } from "@/lib/auth.functions";
 import { shortDay } from "@/lib/followup-rules";
-import type { WorkItem } from "@/lib/my-work";
+import { localYmd, type WorkItem } from "@/lib/my-work";
 import {
   assignKind,
+  assignNeedsDay,
   assignPlan,
   assignedToast,
   assignedToastExtra,
@@ -67,6 +68,8 @@ import {
 } from "@/lib/tasks.functions";
 import { AssignSelect, type AssignOption as Option } from "@/components/work-assign-select";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -283,7 +286,9 @@ export function useWorkActions(profile: UserProfile | null): {
   const rosters = { ticket: techs, task: users, opportunity: oppUsers } as const;
 
   // The assign-for-a-day dialog (Oct 20): the row dropped on a day, and the person picked so far.
-  const [drop, setDrop] = useState<{ item: WorkItem; day: string } | null>(null);
+  // `editDay` (Nov 2): opened from the List's "Assign to…" on a ticket with no date
+  // (assignNeedsDay) — the day is the person's to set, today to start with.
+  const [drop, setDrop] = useState<{ item: WorkItem; day: string; editDay?: boolean } | null>(null);
   const [picked, setPicked] = useState("");
   const dropKind = drop ? assignKind(drop.item, profile) : null;
   const dropPlanned = drop && dropKind ? assignPlan(drop.item, picked, profile, drop.day) : null;
@@ -305,15 +310,28 @@ export function useWorkActions(profile: UserProfile | null): {
               Assign {drop.item.title} for {shortDay(drop.day)}
             </DialogTitle>
             <DialogDescription>
-              {dropKind === "ticket"
-                ? "They get the ticket, scheduled for that day."
-                : dropKind === "task"
-                  ? "They get the task, due that day."
-                  : dropPlanned?.kind === "opportunity" && dropPlanned.dateKept && drop.item.date
-                    ? `They get the opportunity; its expected close stays ${monthDay(drop.item.date)} — only a manager moves it.`
-                    : "They get the opportunity, with that day as its expected close."}
+              {dropKind === "ticket" && drop.editDay
+                ? "This ticket has no date yet — pick the day they get it."
+                : dropKind === "ticket"
+                  ? "They get the ticket, scheduled for that day."
+                  : dropKind === "task"
+                    ? "They get the task, due that day."
+                    : dropPlanned?.kind === "opportunity" && dropPlanned.dateKept && drop.item.date
+                      ? `They get the opportunity; its expected close stays ${monthDay(drop.item.date)} — only a manager moves it.`
+                      : "They get the opportunity, with that day as its expected close."}
             </DialogDescription>
           </DialogHeader>
+          {drop.editDay && (
+            <div className="space-y-1">
+              <Label htmlFor="assign-day">Day</Label>
+              <Input
+                id="assign-day"
+                type="date"
+                value={drop.day}
+                onChange={(e) => setDrop({ ...drop, day: e.target.value })}
+              />
+            </div>
+          )}
           <AssignSelect
             label={`Assign ${drop.item.title} to`}
             roster={rosters[dropKind].data ?? []}
@@ -378,6 +396,12 @@ export function useWorkActions(profile: UserProfile | null): {
           disabled={pendingIds.has(workId(item))}
           onOpen={() => want(kind)}
           onPick={(id) => {
+            // A ticket with no date (Nov 2): the day first, in the dialog, with this pick held.
+            if (assignNeedsDay(item)) {
+              setPicked(id);
+              setDrop({ item, day: localYmd(new Date()), editDay: true });
+              return;
+            }
             const plan = assignPlan(item, id, profile);
             if (!plan) return;
             const name = (q.data ?? []).find((o) => o.id === id)?.name ?? "them";

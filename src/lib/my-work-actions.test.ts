@@ -321,9 +321,8 @@ describe("assignPlan: Assign to… on an Unassigned row", () => {
       technicianId: BOB,
       date: "2026-10-20",
     });
-    expect(assignPlan(item({ ...unTicket, date: null }), BOB, office)).toMatchObject({
-      date: null,
-    });
+    // Nov 2: a ticket without a day gets no plan (the page asks for the day first).
+    expect(assignPlan(item({ ...unTicket, date: null }), BOB, office)).toBeNull();
     expect(assignPlan(unTask, BOB, manager)).toEqual({ kind: "task", id: "k1", assignee: BOB });
     expect(assignPlan(unOpp, BOB, admin)).toEqual({
       kind: "opportunity",

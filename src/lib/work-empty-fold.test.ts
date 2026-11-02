@@ -452,14 +452,18 @@ describe("3. listMyWork, through the fake client", () => {
     // The authorizer's own view (Mine).
     const mine = await run(BRANDON);
     expect(mine.r.authorizer).toBe(true);
-    expect(mine.where("followup:f-auth")).toEqual(["authorize"]);
-    expect(mine.where("ticket:j-done-nobody")).toEqual([]);
+    // Nov 2: the ticket row, with his timer on it — not a follow-up row.
+    expect(mine.where("ticket:j-done-nobody")).toEqual(["authorize"]);
+    expect(mine.where("followup:f-auth")).toEqual([]);
+    expect(
+      mine.by["authorize"]!.find((i) => i.key === "ticket:j-done-nobody")!.followup,
+    ).toMatchObject({ id: "f-auth" });
     expect(mine.by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
-    // Everyone: the ticket is not even in the rows; its Authorize row is the one listed.
+    // Everyone: the ticket is not among the tickets; its queue row is the one listed.
     const all = await run(MANAGER, "all");
     expect(all.r.tickets.map((t) => t.id)).not.toContain("j-done-nobody");
-    expect(all.where("followup:f-auth")).toEqual(["authorize"]);
-    expect(all.where("ticket:j-done-nobody")).toEqual([]);
+    expect(all.where("ticket:j-done-nobody")).toEqual(["authorize"]);
+    expect(all.where("followup:f-auth")).toEqual([]);
     expect(all.by["done"]).toBeUndefined();
     expect(all.by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
   });

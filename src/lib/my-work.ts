@@ -48,8 +48,8 @@ const OPP_STATUS_LABELS: Record<string, string> = {
  * The ticket stages Work Overview lists: Open and Scheduled — the work still to be done. A Done
  * ticket is finished work (owner, Oct 12: the "Done — waiting on the office" group is gone, for
  * everyone): it is not listed at all here; it waits under Needs authorization for every admin and
- * manager (`toAuthorizeItems`), the named authorizer's row being its "Authorize ticket #…"
- * follow-up. Authorized / Invoiced / Closed are the office's, not anyone's to-do (the Authorized
+ * manager (`toAuthorizeItems`) as one ticket row on its close-out day, the named authorizer's
+ * "Authorize ticket #…" timer riding on it (Nov 2). Authorized / Invoiced / Closed are the office's, not anyone's to-do (the Authorized
  * ones wait under "Authorized — to invoice" for whoever invoices).
  */
 export const WORK_TICKET_STAGES = ["open", "scheduled"] as const;
@@ -377,6 +377,11 @@ export interface WorkRows {
    * listed once, as that follow-up row (`mergeWork`).
    */
   toAuthorize?: TicketIn[] | null;
+  /**
+   * The named authorizer (ticket_authorizers()[0]; Nov 2): names the "Authorizer:" on a Needs
+   * authorization row whose timer is not among the viewer's follow-ups.
+   */
+  authorizerId?: string | null;
 }
 
 // ---- items ---------------------------------------------------------------------------------
@@ -420,6 +425,12 @@ export interface WorkItem {
    * to-invoice or a Needs authorization row.
    */
   waitingSince?: string | null;
+  /**
+   * A Needs authorization row (Nov 2): the person whose "Authorize ticket #…" timer this is —
+   * the timer's assignee when the viewer holds it, else the named authorizer the server sends
+   * (`WorkRows.authorizerId`); null when unknown. The row reads "Authorizer: <name>".
+   */
+  reviewerName?: string | null;
   /**
    * A task's content stamp as listed (TaskIn.content_updated_at; Oct 21, the eighth audit): a
    * drag onto another day sends it back (dropPlan `expectStamp` → moveTaskDate
@@ -537,20 +548,36 @@ export function toInvoiceItems(
  * A Done ticket as a Needs authorization row (owner, Oct 12: every admin and manager sees the
  * queue, not only the named authorizer). Not `done`: the ticket is finished on the technician's
  * side, but authorizing it is this viewer's to-do, so it is placed (under "Needs authorization",
- * whatever its date) rather than dropped. Waiting since its close-out (completed_at), else since
- * it entered the stage. Null for any other stage: the server filters, this keeps the rule here.
+ * whatever its date) rather than dropped. Nov 2 (the audit's finding 1): ONE row whatever the
+ * Show picker — its day is the day it was closed out (`authorizeWaitingSince`; the scheduled day
+ * only for a row with no stamp at all), its status "Done — to authorize", its person the
+ * technician, and `reviewerName` the authorizer: the timer's assignee when the viewer holds the
+ * "Authorize ticket #…" follow-up (`timer`, attached as the row's follow-up — Snooze and the
+ * reminder line), else the named authorizer (`authorizerId`). Until then the viewer who held
+ * the timer saw the follow-up row (the timer's due day, the authorizer's name) and everyone
+ * else the ticket row (its scheduled day, the technician): the same ticket on two calendar
+ * days. Null for any other stage: the server filters, this keeps the rule here.
  */
 export function toAuthorizeItem(
   t: TicketIn,
   names: Record<string, string> = {},
   toYmd: (iso: string) => string = localYmd,
+  timer: FollowupIn | null = null,
+  authorizerId: string | null = null,
 ): WorkItem | null {
   if (t.stage !== TO_AUTHORIZE_STAGE) return null;
+  const base = ticketItem(t, names, null, toYmd);
+  const since = authorizeWaitingSince(t);
+  const reviewer = timer?.assignee_id ?? authorizerId ?? null;
   return {
-    ...ticketItem(t, names, null, toYmd),
+    ...base,
+    date: since ? toYmd(since) : base.date,
+    status: AUTHORIZE_FOLLOWUP_STATUS,
     done: false,
     needsAuth: true,
-    waitingSince: authorizeWaitingSince(t),
+    waitingSince: since,
+    followup: timer ? workFollowup(timer) : null,
+    reviewerName: reviewer ? (names[reviewer] ?? null) : null,
   };
 }
 
@@ -774,9 +801,19 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
   );
   const listed = new Set(listedTickets.map((t) => `${t.id}|${t.technician_id ?? ""}`));
   const tasks = rows.tasks.filter((t) => t.status !== "done").map((t) => taskItem(t, names));
+  // An Authorize timer (kind "invoice") rides on its ticket's Needs authorization row when the
+  // server sent the queue (Nov 2); a timer whose ticket is not in the queue (a viewer without it,
+  // or a ticket gone from it) is still its own row, as before.
+  const authorizeTimer = new Map<string, FollowupIn>();
+  for (const f of rows.followups)
+    if (f.kind === "invoice" && f.status === "open") authorizeTimer.set(f.item_id, f);
+  const queued = new Set(
+    (rows.toAuthorize ?? []).filter((t) => t.stage === TO_AUTHORIZE_STAGE).map((t) => t.id),
+  );
   const followups = rows.followups
     .filter((f) => f.status === "open")
     .filter((f) => !(f.kind === "ticket" && listed.has(`${f.item_id}|${f.assignee_id}`)))
+    .filter((f) => !(f.kind === "invoice" && queued.has(f.item_id)))
     .map((f) => followupItem(f, names, toYmd));
   // Unassigned work comes separately and never doubles an assigned row (a ticket or a task is
   // either somebody's or nobody's).
@@ -789,32 +826,27 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
   const seen = new Set([...assignedKeys, ...unassigned.map((u) => u.key)]);
   const toInvoice = toInvoiceItems(rows.toInvoice, names, toYmd).filter((t) => !seen.has(t.key));
   // The Done tickets waiting to be authorized (owner, Oct 12), for every admin and manager. One
-  // row per ticket: its Authorize follow-up when that is listed (the named authorizer's row —
-  // Snooze / Close, the reminder line — which then also says how long the ticket has waited),
-  // else the ticket row itself.
-  const authorizeTimer = new Map<string, string>();
-  for (const f of rows.followups)
-    if (f.kind === "invoice" && f.status === "open")
-      authorizeTimer.set(f.item_id, `followup:${f.id}`);
-  const waitingByTimer = new Map<string, string | null>();
+  // row per ticket, the same row whatever the scope (Nov 2): the ticket row on its close-out day,
+  // with its "Authorize ticket #…" timer attached when that is among the viewer's follow-ups
+  // (`authorizeTimer`), and the named authorizer otherwise (`rows.authorizerId`).
   const toAuthorize: WorkItem[] = [];
   for (const t of rows.toAuthorize ?? []) {
-    const item = toAuthorizeItem(t, names, toYmd);
-    if (!item) continue;
-    const timerKey = authorizeTimer.get(t.id);
-    if (timerKey) waitingByTimer.set(timerKey, item.waitingSince ?? null);
-    else if (!seen.has(item.key)) toAuthorize.push(item);
+    const item = toAuthorizeItem(
+      t,
+      names,
+      toYmd,
+      authorizeTimer.get(t.id) ?? null,
+      rows.authorizerId ?? null,
+    );
+    if (item && !seen.has(item.key)) toAuthorize.push(item);
   }
-  const followupsOut = followups.map((i) =>
-    waitingByTimer.has(i.key) ? { ...i, waitingSince: waitingByTimer.get(i.key) ?? null } : i,
-  );
   // Draft bids by due date (owner, Oct 12), for a caller with Estimate access; the server
   // already scoped them to the viewer's people (created_by).
   const bids = bidItems(rows.bids, names);
   return [
     ...tickets,
     ...tasks,
-    ...followupsOut,
+    ...followups,
     ...unassigned,
     ...toInvoice,
     ...toAuthorize,
