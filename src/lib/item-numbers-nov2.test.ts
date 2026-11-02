@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   ADHESIVE_PRODUCTS,
   CUSTOM_APPLICATION_ROWS,
+  DURO_LAST_ADDITIONS,
   DURO_LAST_OTHER_SCREEN,
   EPDM_SCREENS,
   NON_DL_TPO_SCREENS,
@@ -171,5 +172,25 @@ describe("Nov 2 item-number corrections", () => {
     );
     expect(sql).toContain("set item_no = 'W56TPO301P'");
     expect(sql).toContain("where item_no = 'W56TPO301L'");
+  });
+
+  it("Duro-Caulk Plus is the only Duro-Caulk, and the sheet's pitch pan filler is the 10.2 oz row", () => {
+    const sealants = DURO_LAST_ADDITIONS.find((a) => a.screen_id === "duro_last:sealants")!.rows;
+    expect(sealants.some((r) => String(r["Description"]).includes("Pitch Pan Filler"))).toBe(false);
+    expect(seedItemNumbers(EXISTING_COLUMNS).some((n) => n.item_no === "11222")).toBe(false);
+    const sql = readFileSync("supabase/migrations/20261102140000_duro_caulk_plus_only.sql", "utf8");
+    // The materials list follows the rows it stocked from.
+    expect(sql).toContain(
+      "set stock_row_label = replace(stock_row_label, 'Duro-Caulk - ', 'Duro-Caulk Plus - ')",
+    );
+    expect(sql).toContain("where stock_screen_id = 'duro_last:sealants'");
+    // The plain rows are named in the materials update, the link delete and the row delete; the
+    // Duro-Tech row in the last two.
+    const plain =
+      "'Duro-Caulk - White', 'Duro-Caulk - Tan', 'Duro-Caulk - Gray', 'Duro-Caulk - Bronze'";
+    expect(sql.split(plain).length - 1).toBe(3);
+    expect(sql.split("'Duro-Tech TPO Pitch Pan Filler (30/case or single)'").length - 1).toBe(2);
+    expect(sql).toContain("where c.id = 'duro_last:sealants'");
+    expect(sql).not.toContain("Duro-Caulk Plus - White'");
   });
 });

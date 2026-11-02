@@ -161,8 +161,8 @@ export const DURO_LAST_ADDITIONS: Array<{ screen_id: string; rows: SeedRow[] }> 
     screen_id: "duro_last:sealants",
     rows: [
       row(`${DT}White TPO Caulk`, "1136T", 10.0),
-      // Owner, Oct 27: a second row beside Pitch Pocket Filler (10.2 oz) 1121, to be safe.
-      row(`${DT}Pitch Pan Filler (30/case or single)`, "11222", 10.7),
+      // The sheet's "Pitch Pan Filler" 11222 ($10.70) is the Pitch Pocket Filler (10.2 oz) row
+      // already on the screen (owner, Nov 2: one product); 11222 is that row's item number.
       row(`${DT}Duro-Stop Non-Skinning Sealant (water cut-off mastic)`, "11029", 9.5),
       row(`${DT}TECH-Bond LVOC Splice Wash Cleaner (3 gal)`, "11022T", 165.0),
       row(`${DT}Primer Millennium 240LVOC (6 × 1 gal case)`, "11221T", 423.9),
