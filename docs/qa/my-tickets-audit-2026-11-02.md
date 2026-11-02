@@ -1,5 +1,13 @@
 # My tickets audit — Nov 2, 2026
 
+**Status: audited and closed, Nov 2, 2026 (main `4b1d5d8`).** The page was read, proved against
+the live database and driven end to end in the browser as the test login (parts 1 and 2 below).
+Since the browser run the only code that changed and stayed changed is the history rule of fix 1,
+proved live before and after and seen on a card in the browser; the clock handler on main is
+byte-for-byte the code the browser run exercised (the Nov 2 afternoon change to it was withdrawn
+the same afternoon). The full suite is green at 465 files / 5,984 tests. No further run was needed;
+the owner agreed. Findings 2 and 3 stay as designed by the owner's decision.
+
 Audit of the My tickets page (`/service/today`) at main `8fab2e1`. Nothing on the page was changed:
 the findings below are proposals for the owner to decide on, each with its proof. The page was read
 end to end, its rules were proved against the live database as each kind of user, and it was driven
