@@ -555,6 +555,7 @@ export type Database = {
           email: string | null;
           id: string;
           is_billing: boolean;
+          is_primary: boolean;
           mobile: string | null;
           name: string;
           notes: string | null;
@@ -570,6 +571,7 @@ export type Database = {
           email?: string | null;
           id?: string;
           is_billing?: boolean;
+          is_primary?: boolean;
           mobile?: string | null;
           name: string;
           notes?: string | null;
@@ -585,6 +587,7 @@ export type Database = {
           email?: string | null;
           id?: string;
           is_billing?: boolean;
+          is_primary?: boolean;
           mobile?: string | null;
           name?: string;
           notes?: string | null;
@@ -4916,6 +4919,11 @@ export type Database = {
       /** 20261002130000_audit_readable.sql: the contact row plus its site_ids. */
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] | null };
+        Returns: Json;
+      };
+      /** 20261102190000_primary_contact_and_merge.sql: one customer into another, admins only. */
+      merge_accounts: {
+        Args: { p_keep: string; p_drop: string };
         Returns: Json;
       };
       /** 20261012100000_bid_drives_opportunity.sql: the bid's status drives the opportunity. */

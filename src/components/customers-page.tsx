@@ -45,7 +45,9 @@ import {
   ListTodo,
   Loader2,
   Mail,
+  Map as MapIcon,
   MapPin,
+  Merge,
   Pencil,
   Phone,
   Plus,
@@ -64,7 +66,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { dispatchesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import { dispatchesTickets, isAdmin, seesEveryone, seesOpportunitiesList } from "@/lib/access";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
 import { AuditHistory } from "@/components/audit-history";
@@ -86,6 +88,7 @@ import {
   listAccounts,
   listContacts,
   listUnlinkedBids,
+  mergeAccounts,
   restoreAccount,
   saveAccount,
   saveContact,
@@ -93,13 +96,13 @@ import {
   suggestBidsForAccount,
   type AccountDetail,
   type AccountListRow,
+  type AccountHit,
   type AccountRow,
   type ContactWithSites,
   type LinkedBidRow,
   type SiteRow,
 } from "@/lib/crm.functions";
 import {
-  CONTACT_REQUIRED,
   NO_CONTACT_ON_FILE,
   CRM_MAX,
   addressLines,
@@ -111,10 +114,10 @@ import {
 } from "@/lib/crm-account";
 import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { listAccountTakeoffs } from "@/lib/takeoff.functions";
-import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
+import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
-import { SiteWarranties } from "@/components/crm/site-warranties";
-import { PropertySites, SiteCoverPhoto } from "@/components/crm/property-sites";
+import { SiteWarranties, warrantyKey } from "@/components/crm/site-warranties";
+import { PropertySites, propertySitesKey, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
   AccountManagerSelect,
@@ -123,6 +126,14 @@ import {
   type AddressValue,
 } from "@/components/crm/account-fields";
 import { useCrmUsers } from "@/lib/use-crm-users";
+import {
+  CUSTOMER_SORTS,
+  DEFAULT_CUSTOMER_SORT,
+  isCustomerSort,
+  sortCustomers,
+  type CustomerSort,
+} from "@/lib/customer-list-sort";
+import { mapsUrl, telHref } from "@/lib/maps-link";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import { VendorsSection } from "@/components/crm/vendors-section";
 import {
@@ -135,6 +146,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -169,6 +188,8 @@ const day = (ymd: string | null) => {
 };
 const stageLabel = (s: string) =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? STAGE_LABELS[s as ServiceStage] : s;
+/** How long the customers list is kept before a visit fetches it again. */
+export const ACCOUNTS_STALE_MS = 2 * 60_000;
 
 /** The Customers page's tabs (`?tab=`): Customers (no param) and Vendors. */
 const CUSTOMERS_TABS = [
@@ -284,15 +305,21 @@ function NoContactInfoBadge() {
  * tickets in progress — that opens the customer's own page.
  */
 function AccountCard({ a, managerName }: { a: AccountListRow; managerName: string | undefined }) {
+  const navigate = useNavigate();
   const address = [a.address1, [a.city, a.state].filter(Boolean).join(", "), a.zip]
     .filter(Boolean)
     .join(" · ");
+  // The card is not one anchor any more (owner, Nov 2): a phone number and an email on it are
+  // real tel: / mailto: links (a link inside a link is not HTML), so a phone taps to call from
+  // the list. A click anywhere else on the card still opens the customer; the name is the
+  // keyboard's link.
+  const open = () => void navigate({ to: "/customers/$id", params: { id: a.id } });
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
-    <Link
-      to="/customers/$id"
-      params={{ id: a.id }}
-      className="block rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+    <div
+      className="block cursor-pointer rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
       data-customer-card={a.id}
+      onClick={open}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
         <div className="min-w-0 flex-1 space-y-1">
@@ -302,9 +329,14 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
             ) : (
               <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
-            <span className="min-w-0 break-words text-base font-semibold sm:truncate">
+            <Link
+              to="/customers/$id"
+              params={{ id: a.id }}
+              className="min-w-0 break-words text-base font-semibold sm:truncate"
+              onClick={stop}
+            >
               {a.name}
-            </span>
+            </Link>
             <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
               {a.kind === "individual" ? "Individual" : "Company"}
             </Badge>
@@ -326,13 +358,37 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
               {(a.mobile || a.phone) && (
                 <span className="flex items-center gap-1">
                   <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {a.mobile || a.phone}
-                  {a.mobile && a.phone ? ` · ${a.phone}` : ""}
+                  <a
+                    href={telHref((a.mobile || a.phone)!)}
+                    className="underline-offset-2 hover:underline"
+                    onClick={stop}
+                  >
+                    {a.mobile || a.phone}
+                  </a>
+                  {a.mobile && a.phone ? (
+                    <>
+                      {" · "}
+                      <a
+                        href={telHref(a.phone)}
+                        className="underline-offset-2 hover:underline"
+                        onClick={stop}
+                      >
+                        {a.phone}
+                      </a>
+                    </>
+                  ) : null}
                 </span>
               )}
               {a.email && (
                 <span className="flex items-center gap-1">
-                  <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden /> {a.email}
+                  <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />{" "}
+                  <a
+                    href={`mailto:${a.email}`}
+                    className="break-all underline-offset-2 hover:underline"
+                    onClick={stop}
+                  >
+                    {a.email}
+                  </a>
                 </span>
               )}
             </p>
@@ -358,8 +414,24 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
           </div>
         </dl>
       </div>
-    </Link>
+    </div>
   );
+}
+
+/**
+ * The warranties and the named sites getAccount read for every property, into the cache the
+ * property cards read (warrantyKey / propertySitesKey): a property with none gets [] too, so no
+ * card asks again.
+ */
+export function seedPropertyCaches(
+  qc: Pick<ReturnType<typeof useQueryClient>, "setQueryData">,
+  d: Pick<AccountDetail, "sites" | "warranties" | "property_sites">,
+): void {
+  if (!d.warranties && !d.property_sites) return;
+  for (const s of d.sites) {
+    if (d.warranties) qc.setQueryData(warrantyKey(s.id), d.warranties[s.id] ?? []);
+    if (d.property_sites) qc.setQueryData(propertySitesKey(s.id), d.property_sites[s.id] ?? []);
+  }
 }
 
 /**
@@ -391,44 +463,72 @@ function AccountList() {
     queryKey: ["accounts"],
     queryFn: () => listFn(),
     enabled: !!session,
+    // Owner, Nov 2: the list was fetched again on every visit (customer, back, customer, back).
+    // Two minutes; a save, a delete and a restore still refresh it at once (invalidateQueries).
+    staleTime: ACCOUNTS_STALE_MS,
   });
   const users = useCrmUsers();
   const userName = new Map((users.data ?? []).map((u) => [u.id, u.name]));
   const [search, setSearch] = useState("");
   const [manager, setManager] = useState<ManagerFilter>("all");
+  const [sort, setSort] = useState<CustomerSort>(DEFAULT_CUSTOMER_SORT);
   const q = search.trim().toLowerCase();
-  const rows = (list.data ?? []).filter(
-    (a) =>
-      matchesManager(a, manager) &&
-      (!q ||
-        [a.name, a.city, a.contact_name, a.external_id, a.phone, a.mobile, a.email]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(q)),
+  const rows = sortCustomers(
+    (list.data ?? []).filter(
+      (a) =>
+        matchesManager(a, manager) &&
+        (!q ||
+          [a.name, a.city, a.contact_name, a.external_id, a.phone, a.mobile, a.email]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(q)),
+    ),
+    sort,
+    (id) => userName.get(id),
   );
   return (
     <div className="space-y-3">
       <Input
         type="search"
-        placeholder="Search name, city, contact, customer #…"
+        placeholder="Search name, city, contact, phone, email, customer #…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
-      <Select value={manager} onValueChange={(v) => setManager(v)}>
-        <SelectTrigger aria-label="Filter by account manager">
-          <SelectValue placeholder="Filter by account manager" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All account managers</SelectItem>
-          <SelectItem value="unassigned">Unassigned</SelectItem>
-          {(users.data ?? []).map((u) => (
-            <SelectItem key={u.id} value={u.id}>
-              {u.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Select value={manager} onValueChange={(v) => setManager(v)}>
+          <SelectTrigger aria-label="Filter by account manager">
+            <SelectValue placeholder="Filter by account manager" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All account managers</SelectItem>
+            <SelectItem value="unassigned">Unassigned</SelectItem>
+            {(users.data ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {/* Owner, Nov 2: sort choices. */}
+        <Select
+          value={sort}
+          onValueChange={(v) => {
+            if (isCustomerSort(v)) setSort(v);
+          }}
+        >
+          <SelectTrigger aria-label="Sort customers">
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            {CUSTOMER_SORTS.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                Sort: {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       {users.error && (
         <p className="text-xs text-destructive">
           Could not load the account managers: {errText(users.error)}
@@ -480,10 +580,26 @@ function AccountDetailPane({ id }: { id: string }) {
   const restoreFn = useServerFn(restoreAccount);
   const detail = useQuery({
     queryKey: ["account", id],
-    queryFn: () => getFn({ data: { id } }),
+    // `detail`: every property's warranties and named sites come with the customer (owner,
+    // Nov 2), and go into the cache under each property's key before the cards mount, so the
+    // cards read nothing more.
+    queryFn: async () => {
+      const d = await getFn({ data: { id, detail: true } });
+      seedPropertyCaches(qc, d);
+      return d;
+    },
     enabled: !!session,
   });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [merging, setMerging] = useState(false);
+  // The contacts, for the header's Primary contact line (the Contacts section shares the key).
+  const contactsFn = useServerFn(listContacts);
+  const contacts = useQuery({
+    queryKey: ["contacts", id],
+    queryFn: () => contactsFn({ data: { account_id: id } }),
+    enabled: !!session,
+  });
+  const primary = contacts.data ? (contacts.data.find((c) => c.is_primary) ?? null) : undefined;
   const remove = useMutation({
     mutationFn: () => deleteFn({ data: { id } }),
     onSuccess: () => {
@@ -553,8 +669,10 @@ function AccountDetailPane({ id }: { id: string }) {
       )}
       <AccountBlock
         account={d.account}
+        primary={primary}
         readOnly={deleted}
         onDelete={() => setConfirmDelete(true)}
+        onMerge={isAdmin(profile) && !deleted ? () => setMerging(true) : undefined}
       />
       <ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />
       <SitesSection accountId={id} sites={d.sites} jobs={d.jobs} readOnly={deleted} />
@@ -575,6 +693,8 @@ function AccountDetailPane({ id }: { id: string }) {
       <DocumentsSection accountId={id} />
       {/* Admins and managers: who changed the customer, its sites and contacts (audit_log). */}
       <AuditHistory entity="account" entityId={id} className="rounded-lg border p-4" />
+
+      <MergeCustomerDialog account={d.account} open={merging} onOpenChange={setMerging} />
 
       <AlertDialog
         open={confirmDelete}
@@ -667,12 +787,18 @@ const accountFields = (a: AccountRow): AccountFields => ({
  */
 function AccountBlock({
   account,
+  primary,
   readOnly,
   onDelete,
+  onMerge,
 }: {
   account: AccountRow;
+  /** The primary contact row; null = none marked; undefined = still loading. */
+  primary: ContactWithSites | null | undefined;
   readOnly: boolean;
   onDelete: () => void;
+  /** Admins: merge this customer into another (undefined = not offered). */
+  onMerge?: (() => void) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   if (editing && !readOnly)
@@ -680,18 +806,42 @@ function AccountBlock({
   return (
     <AccountSummary
       account={account}
+      primary={primary}
       readOnly={readOnly}
       onEdit={() => setEditing(true)}
       onDelete={onDelete}
+      onMerge={onMerge}
     />
   );
 }
 
+/**
+ * The header's "Primary contact" line (owner, Nov 2): the primary contact row's name and
+ * position; without one, the mirrored name with a nudge to mark one under Contacts.
+ */
+export function primaryContactLine(
+  primary: Pick<ContactWithSites, "name" | "position"> | null | undefined,
+  mirroredName: string | null,
+): { text: string; muted: boolean } {
+  if (primary === undefined) return { text: "…", muted: true };
+  if (primary)
+    return {
+      text: primary.position ? `${primary.name} · ${primary.position}` : primary.name,
+      muted: false,
+    };
+  const name = (mirroredName ?? "").trim();
+  return name
+    ? { text: `${name} — no primary contact marked; mark one under Contacts`, muted: true }
+    : { text: "None — add one under Contacts and mark it primary", muted: true };
+}
+
 function AccountSummary(props: {
   account: AccountRow;
+  primary: ContactWithSites | null | undefined;
   readOnly: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onMerge?: (() => void) | undefined;
 }) {
   const { can, profile } = useAuth();
   // Only a manager creates tickets (owner, Oct 1).
@@ -717,10 +867,12 @@ function AccountSummary(props: {
     ) : null;
   const tel = (n: string | null) =>
     n ? (
-      <a href={`tel:${n}`} className="underline-offset-2 hover:underline">
+      <a href={telHref(n)} className="underline-offset-2 hover:underline">
         {n}
       </a>
     ) : null;
+  // Owner, Nov 2: the physical address opens in maps, as the ticket's does on My tickets.
+  const mapHref = mapsUrl(physical.join(", "));
   const none = <span className="text-muted-foreground">—</span>;
   const row = (label: string, value: React.ReactNode, wide?: boolean) => (
     <div className={wide ? "sm:col-span-2" : undefined}>
@@ -757,6 +909,17 @@ function AccountSummary(props: {
               <Button type="button" variant="outline" size="sm" onClick={props.onEdit}>
                 <Pencil className="mr-1 h-4 w-4" /> Edit
               </Button>
+              {props.onMerge && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  title="Move everything on this customer to another one and delete this one (a duplicate)"
+                  onClick={props.onMerge}
+                >
+                  <Merge className="mr-1 h-4 w-4" /> Merge into…
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -777,7 +940,17 @@ function AccountSummary(props: {
       )}
       <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
         {row("Account manager", manager ?? "Unassigned")}
-        {row("Contact", a.contact_name)}
+        {(() => {
+          // Owner, Nov 2: the customer's contact is the primary contact row (Contacts below);
+          // the phones and the email under it are that row's, mirrored.
+          const line = primaryContactLine(props.primary, a.contact_name);
+          return row(
+            "Primary contact",
+            <span className={line.muted ? "text-muted-foreground" : undefined} data-primary-contact>
+              {line.text}
+            </span>,
+          );
+        })()}
         {row("Cell phone", tel(a.mobile))}
         {row("Office phone", tel(a.phone))}
         {row(
@@ -788,7 +961,25 @@ function AccountSummary(props: {
             </a>
           ) : null,
         )}
-        {row("Physical address", lines(physical))}
+        {row(
+          "Physical address",
+          physical.length ? (
+            <>
+              {lines(physical)}
+              {mapHref && (
+                <a
+                  href={mapHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-0.5 inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+                  data-link="map"
+                >
+                  <MapIcon className="h-3.5 w-3.5" aria-hidden /> Open in maps
+                </a>
+              )}
+            </>
+          ) : null,
+        )}
         {row(
           "Mailing address",
           a.mailing_same ? (
@@ -830,8 +1021,6 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
   const set = <K extends keyof AccountFields>(k: K, v: AccountFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 
-  const reachable = hasContactMethod(f);
-  const [tried, setTried] = useState(false);
   const mailing: AddressValue = {
     address1: f.mailing_address1,
     address2: f.mailing_address2,
@@ -841,14 +1030,18 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
   };
 
   const save = useMutation({
-    mutationFn: () =>
-      saveFn({
+    mutationFn: () => {
+      // The Contact / Cell phone / Office phone / Email are the primary contact's (owner,
+      // Nov 2): edited under Contacts, never sent from here.
+      const { contact_name: _cn, phone: _ph, mobile: _mo, email: _em, ...rest } = f;
+      return saveFn({
         data: {
           id: account.id,
-          ...f,
+          ...rest,
           account_manager_id: f.account_manager_id || null,
         },
-      }),
+      });
+    },
     onSuccess: ({ mentioned, mention_error, ...row }) => {
       toast.success(`Customer saved${toldSuffix(mentioned)}`);
       // The customer is saved; say loudly when the people named in Notes were not told.
@@ -867,7 +1060,10 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
   });
 
   const field = (
-    k: Exclude<keyof AccountFields, "mailing_same" | "kind">,
+    k: Exclude<
+      keyof AccountFields,
+      "mailing_same" | "kind" | "contact_name" | "phone" | "mobile" | "email"
+    >,
     label: string,
     props?: { type?: string },
   ) => (
@@ -889,13 +1085,8 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
       aria-label="Edit customer"
       onSubmit={(e) => {
         e.preventDefault();
-        setTried(true);
         if (!f.name.trim()) {
           toast.error("The customer needs a name");
-          return;
-        }
-        if (!reachable) {
-          toast.error(CONTACT_REQUIRED);
           return;
         }
         save.mutate();
@@ -938,27 +1129,15 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {field("contact_name", "Contact")}
         <AccountManagerSelect
           id="acct-manager"
           value={f.account_manager_id}
           onChange={(v) => set("account_manager_id", v)}
         />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        {field("email", "Email", { type: "email" })}
-        {field("mobile", "Cell phone", { type: "tel" })}
-        {field("phone", "Office phone", { type: "tel" })}
-      </div>
-      {tried && !reachable ? (
-        <p role="alert" className="text-sm font-medium text-destructive">
-          {CONTACT_REQUIRED}
+        <p className="self-end text-xs text-muted-foreground" data-note="primary-contact">
+          The contact, phones and email are the primary contact&apos;s: change them under Contacts.
         </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          At least one of email, cell phone or office phone is required.
-        </p>
-      )}
+      </div>
       <div className="space-y-2">
         <p className="text-sm font-medium">Physical address</p>
         <AddressInputs
@@ -1037,22 +1216,23 @@ type ContactFields = {
   mobile: string;
   office_phone: string;
   is_billing: boolean;
+  /** The customer's main person (owner, Nov 2): one per customer. */
+  is_primary: boolean;
   notes: string;
   site_ids: string[];
 };
-const contactFields = (c: ContactWithSites | null): ContactFields => ({
+const contactFields = (c: ContactWithSites | null, firstContact = false): ContactFields => ({
   name: c?.name ?? "",
   position: c?.position ?? "",
   email: c?.email ?? "",
   mobile: c?.mobile ?? "",
   office_phone: c?.office_phone ?? "",
   is_billing: c?.is_billing ?? false,
+  // A customer's first contact starts as its primary (the form can untick it).
+  is_primary: c?.is_primary ?? firstContact,
   notes: c?.notes ?? "",
   site_ids: c?.site_ids ?? [],
 });
-/** "tel:" wants the digits (and a leading +), not the formatting. */
-const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
-
 function ContactsSection({
   accountId,
   sites,
@@ -1158,17 +1338,27 @@ function ContactsSection({
               className={`flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2 ${INNER_BOX}`}
             >
               <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="flex flex-wrap items-center gap-2">
+                {/* A div: the badges are divs, which a <p> may not hold. */}
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{c.name}</span>
                   {c.position && (
                     <span className="text-sm text-muted-foreground">{c.position}</span>
+                  )}
+                  {c.is_primary && (
+                    <Badge
+                      className="px-1.5 py-0 text-[11px]"
+                      title="The customer's main person: their name, phones and email show on the customer"
+                      data-badge="primary"
+                    >
+                      Primary
+                    </Badge>
                   )}
                   {c.is_billing && (
                     <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
                       Billing
                     </Badge>
                   )}
-                </p>
+                </div>
                 {(c.mobile || c.office_phone || c.email) && (
                   <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm">
                     {c.mobile && (
@@ -1235,6 +1425,7 @@ function ContactsSection({
           <ContactForm
             accountId={accountId}
             contact={null}
+            firstContact={!rows.some((c) => c.is_primary)}
             sites={sites}
             onDone={(changed) => {
               setEditing(null);
@@ -1279,11 +1470,15 @@ function ContactsSection({
 function ContactForm(props: {
   accountId: string;
   contact: ContactWithSites | null;
+  /** A new contact on a customer with no primary yet: starts ticked as the primary. */
+  firstContact?: boolean;
   sites: SiteRow[];
   onDone: (changed: boolean) => void;
 }) {
   const saveFn = useServerFn(saveContact);
-  const [f, setF] = useState<ContactFields>(() => contactFields(props.contact));
+  const [f, setF] = useState<ContactFields>(() =>
+    contactFields(props.contact, !!props.firstContact),
+  );
   const set = <K extends keyof ContactFields>(k: K, v: ContactFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
   const toggleSite = (id: string, on: boolean) =>
@@ -1305,6 +1500,7 @@ function ContactForm(props: {
           mobile: f.mobile,
           office_phone: f.office_phone,
           is_billing: f.is_billing,
+          is_primary: f.is_primary,
           notes: f.notes,
           // Only sites that still exist on the account (a deleted site's link is dropped).
           site_ids: f.site_ids.filter((id) => props.sites.some((s) => s.id === id)),
@@ -1387,15 +1583,27 @@ function ContactForm(props: {
           />
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Switch
-          id={`contact-${idp}-billing`}
-          checked={f.is_billing}
-          onCheckedChange={(v) => set("is_billing", v)}
-        />
-        <Label htmlFor={`contact-${idp}-billing`} className="font-normal">
-          Billing contact (gets the invoices)
-        </Label>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`contact-${idp}-primary`}
+            checked={f.is_primary}
+            onCheckedChange={(v) => set("is_primary", v)}
+          />
+          <Label htmlFor={`contact-${idp}-primary`} className="font-normal">
+            Primary contact (the customer&apos;s main person; shown on the customer)
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`contact-${idp}-billing`}
+            checked={f.is_billing}
+            onCheckedChange={(v) => set("is_billing", v)}
+          />
+          <Label htmlFor={`contact-${idp}-billing`} className="font-normal">
+            Billing contact (gets the invoices)
+          </Label>
+        </div>
       </div>
       <fieldset className="space-y-1">
         <legend className="text-sm font-medium">Properties</legend>
@@ -1452,6 +1660,114 @@ function ContactForm(props: {
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Merge this customer into another (owner, Nov 2; admins). The admin picks the customer to
+ * KEEP; everything on this one (properties, contacts, tickets, bids, opportunities, tasks,
+ * takeoffs, documents, follow-ups) moves there, this one is deleted with a note, and the page
+ * goes to the kept customer. The database does it in one go (mergeAccounts).
+ */
+function MergeCustomerDialog({
+  account,
+  open,
+  onOpenChange,
+}: {
+  account: AccountRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const mergeFn = useServerFn(mergeAccounts);
+  const [keep, setKeep] = useState<AccountHit | null>(null);
+  const merge = useMutation({
+    mutationFn: () => mergeFn({ data: { keep_id: keep!.account_id, drop_id: account.id } }),
+    onSuccess: (r) => {
+      toast.success(`Merged “${account.name}” into “${r.kept_name}”`, { duration: 8000 });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["account-search"] });
+      void qc.invalidateQueries({ queryKey: ["account", r.kept] });
+      void qc.invalidateQueries({ queryKey: ["contacts", r.kept] });
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+      void qc.removeQueries({ queryKey: ["account", account.id] });
+      onOpenChange(false);
+      void navigate({ to: "/customers/$id", params: { id: r.kept } });
+    },
+    onError: (e) => toast.error(`Could not merge the customers: ${errText(e)}`),
+  });
+  const same = keep?.account_id === account.id;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (merge.isPending) return;
+        if (!o) setKeep(null);
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-lg"
+        // The dialog would focus the picker, whose list then opens over the buttons: the admin
+        // clicks into it instead.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Merge “{account.name}” into another customer</DialogTitle>
+          <DialogDescription>
+            Pick the customer to keep. Everything on “{account.name}” — its properties, contacts,
+            tickets, bids, opportunities, tasks, takeoffs and documents — moves to that customer,
+            and “{account.name}” is deleted with a note saying where it went. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1">
+          <Label htmlFor="merge-keep">Customer to keep</Label>
+          <AccountPicker
+            id="merge-keep"
+            value={
+              keep ? { account_id: keep.account_id, site_id: null, label: keep.account_name } : null
+            }
+            onChange={setKeep}
+            placeholder="Search customers…"
+            allowAdd={false}
+          />
+          {same && (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              That is this customer. Pick the one to keep.
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={merge.isPending}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            disabled={!keep || same || merge.isPending}
+            onClick={() => merge.mutate()}
+            data-action="merge"
+          >
+            {merge.isPending ? (
+              <>
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" /> Merging…
+              </>
+            ) : (
+              <>
+                <Merge className="mr-1 h-4 w-4" /> Merge into{" "}
+                {keep ? `“${keep.account_name}”` : "…"}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

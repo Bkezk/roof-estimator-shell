@@ -26,7 +26,9 @@ const opt = (max: number) =>
     .nullable()
     .transform((v) => (v ? v : null));
 
-const COLS = "id, site_id, manufacturer, kind, number, start_date, end_date, notes";
+/** The columns a Warranty is (listSiteWarranties, and the customer page's one read for every property). */
+export const WARRANTY_COLS = "id, site_id, manufacturer, kind, number, start_date, end_date, notes";
+const COLS = WARRANTY_COLS;
 
 /** A site's warranties, the one ending last first (no end = last of all). */
 export const listSiteWarranties = createServerFn({ method: "GET" })

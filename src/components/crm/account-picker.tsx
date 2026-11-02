@@ -18,9 +18,16 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Building2, Loader2, Plus, User, X } from "lucide-react";
+import { AlertTriangle, Building2, Loader2, Plus, User, X } from "lucide-react";
 
-import { quickCreateAccount, searchAccounts, type AccountHit } from "@/lib/crm.functions";
+import {
+  quickCreateAccount,
+  searchAccounts,
+  similarAccounts,
+  type AccountHit,
+  type SimilarAccount,
+} from "@/lib/crm.functions";
+import { LOOKALIKE_MIN_CHARS, compactName } from "@/lib/customer-lookalike";
 import {
   CONTACT_REQUIRED,
   CRM_MAX,
@@ -334,6 +341,34 @@ export function QuickAddCustomerDialog(props: {
   const [manager, setManager] = useState("");
   // The "Add an email or a phone number" line shows once Save has been tried.
   const [tried, setTried] = useState(false);
+  // Owner, Nov 2: customers already here whose name looks like the one typed ("DD Roberts"
+  // beside "D.D Roberts"), with "Use this customer" instead of saving a second one.
+  const [nameDebounced, setNameDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setNameDebounced(name.trim()), 300);
+    return () => clearTimeout(t);
+  }, [name]);
+  const similarFn = useServerFn(similarAccounts);
+  const similar = useQuery({
+    queryKey: ["similar-accounts", nameDebounced],
+    queryFn: () => similarFn({ data: { name: nameDebounced } }),
+    enabled: props.open && compactName(nameDebounced).length >= LOOKALIKE_MIN_CHARS,
+    staleTime: 30_000,
+  });
+  const lookalikes = similar.data ?? [];
+  const pickExisting = (a: SimilarAccount) =>
+    props.onCreated({
+      account_id: a.id,
+      account_name: a.name,
+      kind: a.kind === "individual" ? "individual" : "company",
+      site_id: null,
+      site_name: null,
+      site_address: "",
+      // Not known here; the forms that take the pick read the customer's sites themselves.
+      site_count: 0,
+      contact_name: a.contact_name,
+      phone: a.phone,
+    });
 
   // Reset each time the dialog opens, prefilled with the typed name.
   useEffect(() => {
@@ -396,7 +431,8 @@ export function QuickAddCustomerDialog(props: {
             {props.requireAddress
               ? "The name, the address and one way to reach them (email or a phone) are required."
               : "The name and one way to reach them (email or a phone) are required."}{" "}
-            Properties are added on the customer after it is saved.
+            The contact typed here becomes the customer&apos;s primary contact. Properties are added
+            on the customer after it is saved.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -448,6 +484,47 @@ export function QuickAddCustomerDialog(props: {
               </ToggleGroup>
             </div>
           </div>
+          {lookalikes.length > 0 && (
+            <div
+              role="status"
+              className="space-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40"
+              data-lookalikes={lookalikes.length}
+            >
+              <p className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                {lookalikes.length === 1
+                  ? "A customer with a name like this is already here"
+                  : "Customers with a name like this are already here"}
+              </p>
+              <div className="divide-y rounded-md border bg-card">
+                {lookalikes.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5"
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium">{a.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {[a.city, a.external_id ? `#${a.external_id}` : null, a.contact_name]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={save.isPending}
+                      onClick={() => pickExisting(a)}
+                    >
+                      Use this customer
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Save anyway if this really is a different customer.
+              </p>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="qa-contact">Contact name</Label>

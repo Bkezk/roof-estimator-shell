@@ -84,7 +84,11 @@ describe("quickCreateAccount", () => {
       const env = world();
       const hit = await call<Row>(quickCreateAccount, newCustomer, env.db, who);
       expect(hit["account_name"]).toBe("New Roof Co");
-      expect(env.writes.map((w) => [w.table, w.op])).toEqual([["crm_accounts", "insert"]]);
+      // The customer, then its primary contact row from the phone typed (Nov 2).
+      expect(env.writes.map((w) => [w.table, w.op])).toEqual([
+        ["crm_accounts", "insert"],
+        ["crm_contacts", "insert"],
+      ]);
     }
   });
   it("saveSite on a customer the technician's ticket links keeps working (the fence admits that customer)", async () => {

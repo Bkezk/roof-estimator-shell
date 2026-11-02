@@ -18,7 +18,14 @@ const todayYmd = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
-const warrantyKey = (siteId: string) => ["site-warranties", siteId] as const;
+export const warrantyKey = (siteId: string) => ["site-warranties", siteId] as const;
+/**
+ * The customer's page reads every property's warranties with the customer (getAccount `detail`)
+ * and puts them in the cache under warrantyKey before the cards mount (owner, Nov 2); a card's
+ * own read then only runs when there is nothing cached, or after the property's form saved
+ * (site-form invalidates the key).
+ */
+export const WARRANTIES_STALE_MS = 60_000;
 
 /** The badge(s) on a ticket: the site's warranties in force today; nothing when there are none. */
 export function WarrantyBadges({ siteId }: { siteId: string | null | undefined }) {
@@ -58,6 +65,7 @@ export function SiteWarranties({ siteId }: { siteId: string }) {
     queryKey: warrantyKey(siteId),
     queryFn: () => listFn({ data: { site_id: siteId } }),
     enabled: !!session,
+    staleTime: WARRANTIES_STALE_MS,
   });
   const list = q.data ?? [];
   const today = todayYmd();

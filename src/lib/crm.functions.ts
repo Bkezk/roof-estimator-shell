@@ -23,7 +23,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, isFieldOnly, seesEveryone } from "@/lib/access";
+import { canAccess, isAdmin, isFieldOnly, seesEveryone } from "@/lib/access";
+import { compactName, LOOKALIKE_MIN_CHARS, lookalikeCustomers } from "@/lib/customer-lookalike";
 import {
   ACCOUNT_ALREADY_DELETED,
   ACCOUNT_DELETED,
@@ -50,6 +51,9 @@ import {
   type SearchSiteRow,
 } from "@/lib/account-search";
 import { countBy, fetchAllPages } from "@/lib/paging";
+import type { PropertySiteRow } from "@/lib/property-sites.functions";
+import { isMissingTable, type Warranty } from "@/lib/warranty";
+import { WARRANTY_COLS } from "@/lib/warranties.functions";
 
 export type { AccountInput, QuickAccountInput };
 
@@ -205,7 +209,31 @@ export const searchAccounts = createServerFn({ method: "GET" })
     return shapeAccountHits(q, found, sites);
   });
 
-export interface AccountListRow extends AccountRow {
+/**
+ * The columns the Customers list reads (owner, Nov 2: "the list downloads every column"): what
+ * the card shows and the search, the filter and the sort use — not the notes, the billing
+ * instructions, the mailing address or the CenterPoint ids. 635 customers were 800 KB with every
+ * column; these are a fraction of that.
+ */
+export const LIST_COLUMNS =
+  "id, name, kind, contact_name, phone, mobile, email, address1, city, state, zip, external_id, account_manager_id, updated_at, deleted_at" as const;
+export type AccountListColumn =
+  | "id"
+  | "name"
+  | "kind"
+  | "contact_name"
+  | "phone"
+  | "mobile"
+  | "email"
+  | "address1"
+  | "city"
+  | "state"
+  | "zip"
+  | "external_id"
+  | "account_manager_id"
+  | "updated_at"
+  | "deleted_at";
+export interface AccountListRow extends Pick<AccountRow, AccountListColumn> {
   site_count: number;
   open_jobs: number;
 }
@@ -222,7 +250,7 @@ export const listAccounts = createServerFn({ method: "GET" })
       fetchAllPages((from, to) =>
         sb
           .from("crm_accounts")
-          .select("*")
+          .select(LIST_COLUMNS)
           .is("deleted_at", null)
           .order("name")
           .order("id")
@@ -315,11 +343,28 @@ export interface AccountDetail {
    * else what tasks RLS lets through (their own, and open unassigned ones).
    */
   tasks: Database["public"]["Tables"]["tasks"]["Row"][];
+  /**
+   * With `detail` (the customer's page; owner, Nov 2): every property's roof warranties and
+   * named sites, by property id, in two reads — the page asked for them property by property
+   * (92 requests on a customer with 46 properties, before its Properties fold was even opened).
+   * Left out otherwise (a ticket's customer, a bid's): those pages read a site's own.
+   */
+  warranties?: Record<string, Warranty[]>;
+  property_sites?: Record<string, PropertySiteRow[]>;
+}
+
+/** The rows grouped by one column, in the order read. */
+function groupBy<T>(rows: readonly T[], key: (r: T) => string): Record<string, T[]> {
+  const out: Record<string, T[]> = {};
+  for (const r of rows) (out[key(r)] ??= []).push(r);
+  return out;
 }
 
 export const getAccount = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
+  .validator((d: unknown) =>
+    parseInput(z.object({ id: z.string().uuid(), detail: z.boolean().optional() }), d),
+  )
   .handler(async ({ data, context }): Promise<AccountDetail> => {
     const p = await readAccess(context);
     const sb = context.supabase;
@@ -386,7 +431,7 @@ export const getAccount = createServerFn({ method: "GET" })
       bids = (b ?? []) as LinkedBidRow[];
     }
     const opportunities = await accountOpportunities(sb, oppRows ?? []);
-    return {
+    const out: AccountDetail = {
       account,
       deleted_by,
       sites: sites ?? [],
@@ -395,6 +440,34 @@ export const getAccount = createServerFn({ method: "GET" })
       bids,
       tasks: tasks ?? [],
     };
+    if (data.detail) {
+      const siteIds = out.sites.map((s) => s.id);
+      const [{ data: w, error: wErr }, { data: ps, error: pErr }] = siteIds.length
+        ? await Promise.all([
+            sb
+              .from("site_warranties")
+              .select(WARRANTY_COLS)
+              .in("site_id", siteIds)
+              .order("end_date", { ascending: false, nullsFirst: true }),
+            sb
+              .from("property_sites")
+              .select("*")
+              .in("property_id", siteIds)
+              .is("deleted_at", null)
+              .order("sort")
+              .order("name"),
+          ])
+        : [
+            { data: [] as Warranty[], error: null },
+            { data: [] as PropertySiteRow[], error: null },
+          ];
+      // Before either migration: none, not an error (as the per-site reads say).
+      if (wErr && !isMissingTable(wErr)) throw new Error(wErr.message);
+      if (pErr && !isMissingTable(pErr)) throw new Error(pErr.message);
+      out.warranties = groupBy(w ?? [], (r) => r.site_id);
+      out.property_sites = groupBy(ps ?? [], (r) => r.property_id);
+    }
+    return out;
   });
 
 /** The customer's opportunities with the assignee's name and the linked bid's status, ordered. */
@@ -557,6 +630,51 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
     [K in keyof T]: Exclude<T[K], undefined>;
   };
 
+/** The customer's fields that mirror its primary contact row (migration 20261102190000). */
+export const ACCOUNT_CONTACT_FIELDS = ["contact_name", "phone", "mobile", "email"] as const;
+
+/** Does the customer have a live primary contact row? */
+async function hasPrimaryContact(sb: SupabaseClient<Database>, accountId: string) {
+  const { data, error } = await sb
+    .from("crm_contacts")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("is_primary", true)
+    .is("deleted_at", null)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+/**
+ * The primary contact row a new customer gets from the dialog's contact fields: the name typed
+ * (or the customer's own name when only a number or an email was), the cell and office phones
+ * and the email; null when none of the four was given.
+ */
+export function primaryContactFromAccount(a: {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  phone: string | null;
+  mobile: string | null;
+  email: string | null;
+}): Database["public"]["Tables"]["crm_contacts"]["Insert"] | null {
+  const t = (v: string | null) => (v ?? "").trim() || null;
+  const name = t(a.contact_name);
+  const mobile = t(a.mobile);
+  const office_phone = t(a.phone);
+  const email = t(a.email);
+  if (!name && !mobile && !office_phone && !email) return null;
+  return {
+    account_id: a.id,
+    name: name ?? a.name,
+    mobile,
+    office_phone,
+    email,
+    is_primary: true,
+  };
+}
+
 /**
  * Create (no id) or update an account. Returns the saved row. Needs an email, a cell phone or
  * an office phone (crm-account.ts; the database checks it too).
@@ -570,6 +688,11 @@ export const saveAccount = createServerFn({ method: "POST" })
     const { id, source, ...fields } = data;
     const patch = { ...defined(fields), updated_by_name: nameOf(p) };
     let row: AccountRow;
+    // Owner, Nov 2: the Contact / Cell phone / Office phone / Email are the primary contact
+    // row's (mirrored by trigger). A customer with one takes no change to them here — the
+    // Edit form no longer sends them; an older page's are dropped so the two cannot drift.
+    if (id && (await hasPrimaryContact(sb, id)))
+      for (const k of ACCOUNT_CONTACT_FIELDS) delete (patch as Record<string, unknown>)[k];
     // The stored Notes, read only when the new ones name someone (owner, Oct 14: @mentions on a
     // customer's Notes): the names already there were told when they were written.
     let oldNotes: string | null = null;
@@ -689,6 +812,18 @@ export const quickCreateAccount = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // The person typed on the dialog is the customer's primary contact row (owner, Nov 2: the
+    // customer's contact is a pointer to one contact row). A company with a number and no
+    // contact name gets a row named after the company. Should the row fail, the customer just
+    // made is taken back, so a retry cannot make a second one.
+    const primary = primaryContactFromAccount(account);
+    if (primary) {
+      const { error: cErr } = await sb.from("crm_contacts").insert(primary);
+      if (cErr) {
+        await sb.from("crm_accounts").delete().eq("id", account.id);
+        throw new Error(`Could not save the contact: ${cErr.message}`);
+      }
+    }
     return {
       account_id: account.id,
       account_name: account.name,
@@ -940,6 +1075,78 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------------------------
 // Contacts (phase B): people at an account, optionally tied to specific sites.
 export type ContactRow = Database["public"]["Tables"]["crm_contacts"]["Row"];
+/**
+ * Customers whose name looks like the one typed (the New customer dialog's warning; owner,
+ * Nov 2). The live names are few (635) and the likeness rule is in TypeScript
+ * (customer-lookalike.ts), so they are read and sifted here: at most LOOKALIKE_MAX, exact first.
+ */
+export const similarAccounts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => parseInput(z.object({ name: z.string().trim().max(CRM_MAX.name) }), d))
+  .handler(async ({ data, context }): Promise<SimilarAccount[]> => {
+    await readAccess(context);
+    if (compactName(data.name).length < LOOKALIKE_MIN_CHARS) return [];
+    const rows = await fetchAllPages((from, to) =>
+      context.supabase
+        .from("crm_accounts")
+        .select("id, name, kind, city, external_id, contact_name, phone")
+        .is("deleted_at", null)
+        .order("name")
+        .order("id")
+        .range(from, to),
+    );
+    return lookalikeCustomers(data.name, rows);
+  });
+export interface SimilarAccount {
+  id: string;
+  name: string;
+  kind: string;
+  city: string | null;
+  external_id: string | null;
+  contact_name: string | null;
+  phone: string | null;
+}
+
+/** What merge_accounts reports (migration 20261102190000): the kept customer and the counts moved. */
+export interface MergeResult {
+  kept: string;
+  kept_name: string;
+  merged_from: string;
+  properties: number;
+  contacts: number;
+  tickets: number;
+  bids: number;
+  opportunities: number;
+  tasks: number;
+  takeoffs: number;
+  documents: number;
+  followups: number;
+}
+
+/**
+ * Merge one customer into another (owner, Nov 2: "Boyd Cat" twice, "D.D Roberts" and "DD
+ * Roberts"): admins only. Everything on `drop` moves to `keep` and `drop` is deleted with a
+ * note saying where it went — one transaction in the database (merge_accounts, which checks
+ * is_admin() itself) with the counts on the kept customer's history.
+ */
+export const mergeAccounts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    parseInput(z.object({ keep_id: z.string().uuid(), drop_id: z.string().uuid() }), d),
+  )
+  .handler(async ({ data, context }): Promise<MergeResult> => {
+    const p = await me(context);
+    if (!isAdmin(p)) throw new Error("Only an admin can merge customers");
+    if (data.keep_id === data.drop_id) throw new Error("Pick a different customer to merge into");
+    const { data: out, error } = await context.supabase.rpc("merge_accounts", {
+      p_keep: data.keep_id,
+      p_drop: data.drop_id,
+    });
+    if (error) throw new Error(error.message);
+    if (!out) throw new Error("The merge did not report back");
+    return out as unknown as MergeResult;
+  });
+
 export interface ContactWithSites extends ContactRow {
   site_ids: string[];
 }
@@ -955,6 +1162,7 @@ export const listContacts = createServerFn({ method: "GET" })
       .select("*")
       .eq("account_id", data.account_id)
       .is("deleted_at", null)
+      .order("is_primary", { ascending: false })
       .order("is_billing", { ascending: false })
       .order("name");
     if (error) throw new Error(error.message);
@@ -981,6 +1189,12 @@ export const contactSchema = z.object({
   mobile: keepText(CRM_MAX.mobile),
   office_phone: keepText(CRM_MAX.office_phone),
   is_billing: z.boolean().optional(),
+  /**
+   * The customer's main person (owner, Nov 2): their name, phones and email are the customer's
+   * Contact / Cell phone / Office phone / Email (mirrored by trigger; migration 20261102190000).
+   * One per customer: marking one unmarks the previous.
+   */
+  is_primary: z.boolean().optional(),
   notes: keepText(CRM_MAX.contact_notes),
   /** Sites this contact belongs to (empty = the whole account). */
   site_ids: z.array(z.string().uuid()).max(200).optional(),

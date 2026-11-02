@@ -283,9 +283,10 @@ describe("searches and pickers leave deleted customers out", () => {
       search.slice(0, search.indexOf("\nexport ")).match(/\.is\("deleted_at", null\)/g),
     ).toHaveLength(4);
     const list = src.slice(src.indexOf("export const listAccounts"));
-    // Paged since Oct 2 (crm-list-paging.test.ts): the same filter, one page at a time.
+    // Paged since Oct 2 (crm-list-paging.test.ts): the same filter, one page at a time; the
+    // card's columns only since Nov 2 (customers-nov2-list.test.ts).
     expect(list.slice(0, list.indexOf("\nexport "))).toMatch(
-      /\.from\("crm_accounts"\)\s*\.select\("\*"\)\s*\.is\("deleted_at", null\)/,
+      /\.from\("crm_accounts"\)\s*\.select\(LIST_COLUMNS\)\s*\.is\("deleted_at", null\)/,
     );
     const picker = read("src/components/crm/account-picker.tsx");
     expect(picker).toContain("useServerFn(searchAccounts)");
@@ -303,7 +304,10 @@ describe("the Customers page on a deleted customer (source)", () => {
   });
   it("passes read-only to every block when deleted", () => {
     expect(page).toContain("const deleted = !!d.account.deleted_at;");
-    expect(page).toMatch(/<AccountBlock\s+account=\{d\.account\}\s+readOnly=\{deleted\}/);
+    // The primary contact row sits between (Nov 2).
+    expect(page).toMatch(
+      /<AccountBlock\s+account=\{d\.account\}\s+primary=\{primary\}\s+readOnly=\{deleted\}/,
+    );
     expect(page).toContain("<ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />");
     expect(page).toContain(
       "<SitesSection accountId={id} sites={d.sites} jobs={d.jobs} readOnly={deleted} />",

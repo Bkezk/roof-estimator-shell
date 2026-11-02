@@ -24,13 +24,18 @@ import { shrinkPhoto } from "@/components/service/field-utils";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+export const propertySitesKey = (propertyId: string) => ["property-sites", propertyId] as const;
+/** As site-warranties.tsx WARRANTIES_STALE_MS: the customer's page fills the cache first. */
+export const PROPERTY_SITES_STALE_MS = 60_000;
+
 export function PropertySites({ propertyId }: { propertyId: string }) {
   const { session } = useAuth();
   const listFn = useServerFn(listPropertySites);
   const q = useQuery({
-    queryKey: ["property-sites", propertyId],
+    queryKey: propertySitesKey(propertyId),
     queryFn: () => listFn({ data: { property_id: propertyId } }),
     enabled: !!session,
+    staleTime: PROPERTY_SITES_STALE_MS,
   });
   if (q.error)
     return (
