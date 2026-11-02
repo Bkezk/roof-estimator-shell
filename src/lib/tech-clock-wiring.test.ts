@@ -196,10 +196,10 @@ describe("travel → on site → leave", () => {
       ["field", null, "left site"],
     ]);
   });
-  it("an Open ticket goes Scheduled on Start travel (as the old buttons did)", async () => {
+  it("an Open ticket stays Open on Start travel (owner, Nov 2: the stage is the office's; until then it went Scheduled)", async () => {
     setup({ service_jobs: [job(A, 6014, { stage: "open" }), job(B, 6012)] });
     await press(A, "en_route");
-    expect(jobRow(A)["stage"]).toBe("scheduled");
+    expect(jobRow(A)["stage"]).toBe("open");
   });
   it("On site without travel first: labor opens, no travel entry", async () => {
     setup();

@@ -84,7 +84,7 @@ site, en_route, undo, en_route, on_site, left site, on_site, stage (C to Schedul
 
 None of these breaks the page. No fix has been applied; the owner decides.
 
-### 1. The history strip calls a future ticket "earlier" (minor, wording)
+### 1. The history strip calls a future ticket "earlier" (minor, wording) — FIXED, see part 2
 
 Card A (today) read **"History here: 2 earlier tickets, last Nov 5 (Claude temp B … — coming up)."**
 Ticket B is scheduled three days from now, not earlier, and "last Nov 5" names a day that has not
@@ -100,7 +100,7 @@ Proposed fix (either): count and name only tickets that are finished or whose da
 reword the strip to "2 other tickets here" when the latest is still to come. The History fold on
 the ticket page has the same count.
 
-### 2. "Every stage, on the Service page" is a dead link for a technician-only user (minor)
+### 2. "Every stage, on the Service page" is a dead link for a technician-only user (minor) — left as is (owner: expected)
 
 The link under the heading shows for everyone; for a technician-only user `src/routes/service.tsx`
 line 35 sends `/service` without a ticket id straight back to `/service/today`, so the tap does
@@ -111,7 +111,7 @@ Proof: T22 above — the URL after the click was `/service/today`.
 Proposed fix: leave the link out when `isFieldOnly(profile)` (the sidebar already hides Service
 for them for the same reason).
 
-### 3. A crew member cannot clock in from anywhere (worth a decision)
+### 3. A crew member cannot clock in from anywhere (worth a decision) — left as is (owner: expected; the lead's clock carries the crew)
 
 The server lets a technician named in "Who is on this job with you?" clock their own travel and
 labor on that ticket (`clockJob` / `worksOnJob`, and the comment "a crew member clocks into the
@@ -132,11 +132,10 @@ server's crew path. Either is a design choice, so no change was made.
 
 ## Behaviour notes (not changed)
 
-- A clock press on an **Open** ticket moves it to **Scheduled** even when it has no date (T14: C
-  became Scheduled with no day). It stays under "No date yet" here, and `syncFollowup` opened a
-  "Ticket #…" follow-up for the technician on that stage change (no notice, the actor is the
-  assignee). As coded on purpose ("en_route also moves an Open ticket to Scheduled"); noted in case
-  the office expects Scheduled to mean dated.
+- A clock press on an **Open** ticket used to move it to **Scheduled** even with no date (T14: C became
+  Scheduled with no day, and a "Ticket #…" follow-up opened for the technician on that stage
+  change). The owner: "opening a ticket clock shouldn't set it to scheduled as it isn't scheduled" —
+  FIXED, see part 2.
 - The banner's minutes tick every 30 s, so the label can lag up to 30 s; the cards never re-render
   for it (the Oct 28 change). Proved: "0 m" at 70 s after a move, "1 m" by 95 s.
 - A ticket that is overdue or already started (any `field_status`) is in Today whatever its date;
@@ -171,3 +170,64 @@ The browser scripts (`pw-login.cjs`, `pw-t.cjs` with steps `look`, `travel`, `un
 test login, the dev server on `127.0.0.1:4173`, and four tickets of that login's own numbered as
 above. The SQL proofs are plain `select`s under `set local role authenticated` with the user's
 `request.jwt.claims`, read-only.
+
+## Part 2 — the fixes (Nov 2, afternoon)
+
+The owner: "fix 1 test and prove. isnt 2 and 3 expected behavior? opening a ticket clock shouldnt
+set it to scheduled as it isnt scheduled. fix this and prove it." Findings 2 and 3 stay as they are.
+
+### Fix 1 — history at a property counts only what has happened
+
+Migration `supabase/migrations/20261102170000_site_history_past_only.sql`, applied to the live
+database the same afternoon. One new rule, `ticket_is_history(stage, scheduled_date)`: a ticket is
+history unless it is still Open / Scheduled and booked for today or later, or not yet given a day.
+A finished ticket always counts; an Open one whose day has passed counts too. "Today" is the
+office's day (Eastern), the day the server stamps field actions with. `site_history` (the fold's
+list) and `site_history_summary` (the strip: count, photo count, last) keep their bodies and gain the
+rule on every read of the site's other tickets. The strip's wording ("earlier ticket(s)") is
+unchanged and now true.
+
+Proof, on a temporary site of the test login's with five temporary tickets (deleted after): H1 Done
+Oct 20, H2 booked Nov 5, H3 Open with no date, H4 Open and due Oct 30, H5 booked today.
+
+| Read                                                | Before the fix                                             | After the fix                                                                                                                                             |
+| --------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the strip from H2 (`site_history_summary`)          | count 4, "last" = H3 (Open, no date)                       | count 2, "last" = H4 (Oct 30)                                                                                                                             |
+| the fold from H2 (`site_history`)                   | H1, H3, H4, H5                                             | H1, H4                                                                                                                                                    |
+| the strip from H1                                   | count 4                                                    | count 1 (H4)                                                                                                                                              |
+| the strip from H3                                   | —                                                          | count 2 (H1, H4)                                                                                                                                          |
+| `ticket_is_history` itself                          | —                                                          | done Oct 20 true · open Oct 30 true · open today false · scheduled Nov 5 false · open undated false · done undated true · invoiced with a future day true |
+| the live ticket #6031 (the only live scheduled one) | its property has no other ticket: count 0 before and after |                                                                                                                                                           |
+| in the browser, card H2 on My tickets               | —                                                          | "History here: 2 earlier tickets, last Oct 30 (Claude temp H4 …)"                                                                                         |
+
+### Fix 2 — a clock press leaves an Open ticket Open
+
+`src/lib/service-field.functions.ts` `setFieldStatus`: the Start travel (`en_route`) and On site
+(`on_site`) patches no longer carry `stage: job.stage === "open" ? "scheduled" : job.stage`; they
+stamp `field_status` and the time only. The stage is the office's. Complete still sets Done; Undo of
+a Done ticket still steps it back to Scheduled as before. Nothing else changed.
+
+Proof: in the browser as the test login, On site on a live Open, undated temporary ticket (#6050) —
+toast "On site at #6050 …", the card "You are on site here" (it moves into Today, as every started
+ticket does), then Leave site under a minute. The database afterwards: `stage open`, `on_site_at`
+stamped, timeline rows "on_site" and "left site" and **no stage row** (the stage trigger logs every
+change of stage; before the fix the same press on #6046 wrote one, and opened a follow-up). No
+follow-up was opened, nobody was notified.
+
+### Tests
+
+`src/lib/my-tickets-nov2-fixes.test.ts` (5 tests): the migration's rule and its presence on all
+four reads; Start travel and On site on an Open ticket through the real handler (fake Supabase)
+leave `stage open`; the handler's source no longer flips the stage. On the old code all five fail
+("expected 'scheduled' to be 'open'", and no migration); on the new code all pass.
+`tech-clock-wiring.test.ts` had pinned the old flip ("an Open ticket goes Scheduled on Start travel
+(as the old buttons did)"); that one test now pins the new rule.
+
+Delivery chain: prettier, eslint (0), `bunx tsc --noEmit -p .` (0), the full suite 465 files /
+5,984 tests green, `bun run build` green.
+
+### Temporary rows and clean-up (part 2)
+
+One account, one site and five tickets of the test login's own, made by SQL, deleted afterwards and
+verified at zero; `service_tech_clock` empty; no follow-up, no notification to anyone; the saved
+browser sign-in deleted again. No existing ticket, bid or customer was touched.

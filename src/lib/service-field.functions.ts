@@ -441,7 +441,8 @@ export interface FieldStatusResult {
  * runs, on any ticket, and open the new clock; a closed clock becomes a time entry with its real
  * start and end (source 'clock', hours to the quarter hour, under a minute nothing — a mistap).
  * The ticket's field_status / en_route_at / on_site_at are still stamped so the board and My
- * tickets show where he is: en_route also moves an Open ticket to Scheduled; leave clears
+ * tickets show where he is (the stage is the office's: a press on an Open ticket leaves it Open —
+ * owner, Nov 2; until then en_route moved it to Scheduled); leave clears
  * field_status (the stamps stay). Travel to ticket B while on site at A closes A's labor and
  * clears A's field_status ("left site" on its timeline). done keeps every close-out rule (the
  * gaps refusal for a technician, managers complete anyway, finished tickets only stamped, the
@@ -572,11 +573,9 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       if (!t.changed) return unchanged(t);
       if ((await applyClock(t)) === "moved") return moved;
       transition = report(t);
-      patch = {
-        field_status: "en_route",
-        en_route_at: now,
-        stage: job.stage === "open" ? "scheduled" : job.stage,
-      };
+      // The stage is the office's: a press never moves an Open ticket to Scheduled (owner, Nov 2:
+      // "opening a ticket clock shouldn't set it to scheduled as it isn't scheduled").
+      patch = { field_status: "en_route", en_route_at: now };
       await note({ kind: "field", field_status: "en_route" });
     } else if (data.to === "on_site") {
       const t = clockTransition(open, "on_site", job.id, at, job.helper_count, tech);
@@ -599,11 +598,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           created_by: context.userId,
         });
       }
-      patch = {
-        field_status: "on_site",
-        on_site_at: now,
-        stage: job.stage === "open" ? "scheduled" : job.stage,
-      };
+      patch = { field_status: "on_site", on_site_at: now };
       await note({ kind: "field", field_status: "on_site" });
     } else if (data.to === "leave") {
       const t = clockTransition(open, "leave", job.id, at, job.helper_count, tech);
