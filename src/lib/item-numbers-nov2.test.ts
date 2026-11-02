@@ -193,4 +193,15 @@ describe("Nov 2 item-number corrections", () => {
     expect(sql).toContain("where c.id = 'duro_last:sealants'");
     expect(sql).not.toContain("Duro-Caulk Plus - White'");
   });
+
+  it("Duro-Fleece 60mil Plus White: 226 -> 2.26 per sq ft (owner's figure for now), only while it reads 226", () => {
+    const sql = readFileSync(
+      "supabase/migrations/20261102150000_duro_fleece_60_plus_price.sql",
+      "utf8",
+    );
+    expect(sql).toContain(
+      "e->>'Description' = 'Duro-Fleece - 60mil Plus' and (e->>'White')::numeric = 226",
+    );
+    expect(sql).toContain("jsonb_set(e, '{White}', '2.26'::jsonb)");
+  });
 });
