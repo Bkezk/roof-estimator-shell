@@ -74,7 +74,7 @@ describe("setServiceStage by a manager", () => {
           number: 6010,
           customer_name: "Bell County Schools",
           description: "Leak over the gym",
-          service_type: "leak",
+          service_type: "repair",
           stage,
           technician_id: TECH,
           scheduled_date: "2026-10-15",

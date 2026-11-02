@@ -32,7 +32,7 @@ const notes = form.slice(
 const atNotes: StepState = {
   finished: false,
   crewAnswered: true,
-  serviceType: "leak",
+  serviceType: "repair",
   repairs: [{ id: "r1", resolution_text: "Patched." }],
   photos: [
     { repair_id: "r1", role: "before" },
@@ -77,7 +77,7 @@ describe("step 6 is done when the notes are written OR skipped", () => {
 describe("the closing notes are not a Complete gap any more", () => {
   it("missingForComplete and completeGaps list time and the signature, never 'No closing notes'", () => {
     const base = {
-      service_type: "leak",
+      service_type: "repair",
       repairs: [{ id: "r1", name: "Seam" }],
       photos: [
         { repair_id: "r1", role: "before" },
@@ -89,7 +89,7 @@ describe("the closing notes are not a Complete gap any more", () => {
     expect(missingForComplete(base)).toEqual(["No time logged", "No customer signature"]);
     const gaps = completeGaps({
       finished: false,
-      service_type: "leak",
+      service_type: "repair",
       signature_path: null,
       on_site_at: null,
       repairs: { data: base.repairs, error: null },

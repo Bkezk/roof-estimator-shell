@@ -55,7 +55,7 @@ const job = (over: Row = {}): Row => ({
   id: JOB,
   number: 6010,
   customer_name: "Acme",
-  service_type: "leak",
+  service_type: "repair",
   technician_id: TECH,
   stage: "scheduled",
   field_status: null,
@@ -91,7 +91,7 @@ const complete = (tables: Record<string, Row[]>, userId: string) =>
 describe("the shared rule", () => {
   it("closeoutGaps is completeGaps with the rows in hand", () => {
     const rows = {
-      service_type: "leak",
+      service_type: "repair",
       signature_path: null,
       on_site_at: null,
       repairs: [{ id: "r1", name: "Seam" }],

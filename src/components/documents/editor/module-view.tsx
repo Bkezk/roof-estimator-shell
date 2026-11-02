@@ -51,6 +51,7 @@ import {
   photoHeightOf,
   type PhotoHeightModule,
   type PhotoTextModule,
+  type PriceLinesModule,
   type PricingTableModule,
   PT_PER_IN,
   removeModule,
@@ -69,6 +70,7 @@ import {
   withPhotoHeight,
   withRepairItemSpace,
 } from "@/lib/documents/model";
+import { moneyText, parseMoney, priceLinesTotal } from "@/lib/documents/price-lines";
 import {
   inspectionItems,
   INSPECTION_STATUS_TEXT,
@@ -205,6 +207,8 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
       return <Table m={m} set={set} />;
     case "pricingTable":
       return <PricingTable m={m} set={set} />;
+    case "priceLines":
+      return <PriceLines m={m} set={set} />;
     case "signature":
       return <Signature m={m} set={set} />;
     case "hr":
@@ -1165,6 +1169,113 @@ function Table({ m, set }: { m: TableModule; set: Setter }) {
         onClick={addRow}
       >
         <Plus className="h-3 w-3" /> Add row
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Price lines (owner, Nov 2): a description and a price per row, typed; the Total row adds the
+ * prices up as they are typed (price-lines.ts). A price that is not a number ("TBD") prints as
+ * typed and adds nothing. The Total label can be renamed.
+ */
+function PriceLines({ m, set }: { m: PriceLinesModule; set: Setter }) {
+  const env = useEditorEnv();
+  const patch = (f: (t: PriceLinesModule) => PriceLinesModule) =>
+    set((c) => f(c as PriceLinesModule));
+  const setRow = (r: number, k: "description" | "price", v: string) =>
+    patch((t) => ({ ...t, rows: t.rows.map((row, i) => (i === r ? { ...row, [k]: v } : row)) }));
+  const addRow = () => patch((t) => ({ ...t, rows: [...t.rows, { description: "", price: "" }] }));
+  const removeRow = (r: number) => patch((t) => ({ ...t, rows: t.rows.filter((_, i) => i !== r) }));
+  const total = priceLinesTotal(m.rows);
+  return (
+    <div className="group/price" data-module="price-lines">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className="border border-neutral-300 bg-neutral-100 px-1 py-0.5 text-left font-semibold dark:bg-neutral-100">
+              Description
+            </th>
+            <th className="w-32 border border-neutral-300 bg-neutral-100 px-1 py-0.5 text-right font-semibold dark:bg-neutral-100">
+              Price
+            </th>
+            <th className="w-6 border-0 p-0" />
+          </tr>
+        </thead>
+        <tbody>
+          {m.rows.map((row, r) => {
+            const n = parseMoney(row.price);
+            return (
+              <tr key={r}>
+                <td className="border border-neutral-300 p-0">
+                  <input
+                    className={paperInput}
+                    placeholder="What is done"
+                    title={
+                      row.description.includes("{{")
+                        ? `Prints: ${resolveCellText(row.description, env.variables, variableLabel)}`
+                        : "Description ({{key}} prints a variable)"
+                    }
+                    value={row.description}
+                    onChange={(e) => setRow(r, "description", e.target.value)}
+                  />
+                </td>
+                <td className="border border-neutral-300 p-0">
+                  <input
+                    className={cn(paperInput, "text-right")}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                    title={
+                      row.price.trim() && n === null
+                        ? "Not a number: prints as typed and adds nothing to the total"
+                        : n === null
+                          ? "A price; the Total adds them up"
+                          : `Prints ${moneyText(n)}`
+                    }
+                    value={row.price}
+                    onChange={(e) => setRow(r, "price", e.target.value)}
+                  />
+                </td>
+                <td className="w-6 border-0 p-0">
+                  <button
+                    type="button"
+                    className="hidden rounded p-0.5 text-neutral-500 hover:bg-neutral-200 group-hover/price:block"
+                    title="Remove row"
+                    onClick={() => removeRow(r)}
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+          <tr className="font-semibold">
+            <td className="border border-neutral-300 p-0">
+              <input
+                className={cn(paperInput, "font-semibold")}
+                title="The total row's label"
+                value={m.totalLabel}
+                onChange={(e) => patch((t) => ({ ...t, totalLabel: e.target.value }))}
+              />
+            </td>
+            <td
+              className="border border-neutral-300 px-1 py-0.5 text-right tabular-nums"
+              title="Adds up the prices above"
+              data-price-total
+            >
+              {moneyText(total)}
+            </td>
+            <td className="w-6 border-0 p-0" />
+          </tr>
+        </tbody>
+      </table>
+      <button
+        type="button"
+        className="mt-1 hidden items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 group-hover/price:flex"
+        title="Add a line"
+        onClick={addRow}
+      >
+        <Plus className="h-3 w-3" /> Add line
       </button>
     </div>
   );

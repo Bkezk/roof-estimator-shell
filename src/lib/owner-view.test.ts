@@ -158,7 +158,7 @@ describe("bucketCounts: due today and overdue per person, as My Work buckets the
       site_name: null,
       site_address: null,
       description: "Leak",
-      service_type: "leak",
+      service_type: "repair",
       stage: "scheduled",
       scheduled_date: "2026-09-30",
       technician_id: "bob",

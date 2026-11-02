@@ -107,7 +107,7 @@ describe("1b. assignServiceJob with expect_technician_id: the ticket must still 
     number: 6010,
     customer_name: "Bell County Schools",
     description: "Leak over the gym",
-    service_type: "leak",
+    service_type: "repair",
     stage: "scheduled",
     technician_id: TECH,
     scheduled_date: "2026-10-20",

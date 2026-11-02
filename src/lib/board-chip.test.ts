@@ -20,7 +20,7 @@ const base: ChipJob = {
   site_address: "101 Courthouse Sq, Pineville, KY 40977",
   site_city: "Pineville",
   site_state: "KY",
-  service_type: "leak",
+  service_type: "repair",
   labor_rate_kind: "standard",
   arrival_window: null,
   description: "Leak over the clerk's office",
@@ -59,11 +59,11 @@ describe("chipPlace", () => {
 
 describe("chipFacts", () => {
   it("the type; Standard says nothing", () => {
-    expect(chipFacts(base)).toEqual(["Leak"]);
+    expect(chipFacts(base)).toEqual(["Repair"]);
   });
   it("Urgent and Emergency are called out, with the arrival window last", () => {
     expect(chipFacts({ ...base, labor_rate_kind: "urgent", arrival_window: "morning" })).toEqual([
-      "Leak",
+      "Repair",
       "Urgent",
       "Morning 8–10",
     ]);
@@ -89,7 +89,7 @@ describe("chipDescription and the hover text", () => {
     expect(chipTitleLines({ ...base, labor_rate_kind: "urgent" })).toEqual([
       "#6016 Bell County",
       "Courthouse · Pineville, KY",
-      "Leak · Urgent",
+      "Repair · Urgent",
       "Leak over the clerk's office",
     ]);
   });

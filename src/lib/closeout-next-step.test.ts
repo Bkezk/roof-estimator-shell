@@ -41,7 +41,7 @@ const repairCard = src.slice(
 const atNotes: StepState = {
   finished: false,
   crewAnswered: true,
-  serviceType: "leak",
+  serviceType: "repair",
   repairs: [{ id: "r1", resolution_text: "Patched." }],
   photos: [
     { repair_id: "r1", role: "before" },

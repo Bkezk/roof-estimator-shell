@@ -108,7 +108,7 @@ describe("the overdue rule", () => {
   it("the Tickets list's Overdue filter follows: an unassigned ticket past its day is not in it", () => {
     const base = {
       number: 1,
-      service_type: "leak",
+      service_type: "repair",
       technician_name: null,
       customer_name: "Acme",
       site_name: null,

@@ -216,7 +216,7 @@ describe("6. Create repair ticket from an inspection: a second call returns the 
       saved_by: null,
     },
   };
-  const req = { id: INSP, service_type: "leak", scheduled_date: "2026-10-05" };
+  const req = { id: INSP, service_type: "repair", scheduled_date: "2026-10-05" };
   beforeEach(() => {
     env = fakeDb({
       profiles: [manager],
@@ -308,7 +308,7 @@ describe("7. Ticket Save never moves the stage", () => {
     account_id: null,
     customer_name: "Acme",
     description: "Leak, again",
-    service_type: "leak",
+    service_type: "repair",
     technician_id: TECH,
     scheduled_date: "2026-10-01",
     ...over,

@@ -309,14 +309,15 @@ describe("parseCpDate", () => {
 
 describe("CP_SERVICE_TYPE_MAP", () => {
   it("maps CenterPoint's service types, anything else to other", () => {
+    // Leak is Repair and Scope is Other since Nov 2 (service-type-repair-nov2.test.ts).
     expect(CP_SERVICE_TYPE_MAP).toEqual({
-      leak: "leak",
-      scope: "scope",
+      leak: "repair",
+      scope: "other",
       warranty: "warranty",
       inspection: "inspection",
     });
-    expect(cpServiceType("Leak")).toBe("leak");
-    expect(cpServiceType(" SCOPE ")).toBe("scope");
+    expect(cpServiceType("Leak")).toBe("repair");
+    expect(cpServiceType(" SCOPE ")).toBe("other");
     expect(cpServiceType("Warranty")).toBe("warranty");
     expect(cpServiceType("Inspection")).toBe("inspection");
     for (const t of ["Non-Billable", "Rooftop Maintenance", "Snow Removal", "", "Gutters"])

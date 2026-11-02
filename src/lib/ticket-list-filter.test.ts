@@ -17,7 +17,7 @@ const TODAY = "2026-10-05";
 const t = (n: number, over: Partial<ListTicket> = {}): ListTicket => ({
   number: n,
   stage: "scheduled",
-  service_type: "leak",
+  service_type: "repair",
   scheduled_date: TODAY,
   technician_id: null,
   technician_name: null,

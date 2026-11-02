@@ -13,7 +13,7 @@ import {
 } from "@/lib/closeout-check";
 
 const full: CloseoutCheckInput = {
-  service_type: "leak",
+  service_type: "repair",
   repairs: [{ id: "r1", name: "Membrane – Holes" }],
   photos: [
     { repair_id: "r1", role: "before" },

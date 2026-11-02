@@ -504,8 +504,9 @@ export function parseCpDate(raw: string): string | null {
 
 /** CenterPoint's service type → the portal's service_tickets.service_type (ci; else "other"). */
 export const CP_SERVICE_TYPE_MAP: Record<string, string> = {
-  leak: "leak",
-  scope: "scope",
+  // Leak is Repair since Nov 2; a CenterPoint Scope visit is Other (the Scope type went).
+  leak: "repair",
+  scope: "other",
   warranty: "warranty",
   inspection: "inspection",
 };

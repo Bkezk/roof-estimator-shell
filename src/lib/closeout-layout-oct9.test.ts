@@ -32,7 +32,7 @@ const work = src.slice(src.indexOf("{!before && ("), src.indexOf("{shown.length 
 const full: StepState = {
   finished: false,
   crewAnswered: true,
-  serviceType: "leak",
+  serviceType: "repair",
   repairs: [{ id: "r1", resolution_text: "Cleared the drain." }],
   photos: [
     { repair_id: "r1", role: "before" },

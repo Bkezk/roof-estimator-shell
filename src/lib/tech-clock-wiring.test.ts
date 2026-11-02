@@ -79,7 +79,7 @@ const job = (id: string, number: number, over: Row = {}): Row => ({
   id,
   number,
   customer_name: number === 6014 ? "Bell County" : "Acme",
-  service_type: "leak",
+  service_type: "repair",
   technician_id: TECH,
   stage: "scheduled",
   field_status: null,

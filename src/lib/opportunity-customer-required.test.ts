@@ -383,7 +383,7 @@ describe("4. Start a ticket", () => {
       account_id: ACC,
       site_id: SITE,
       description: "TPO over the gym",
-      service_type: "leak",
+      service_type: "repair",
       scheduled_date: "2026-10-05",
       from_opportunity_id: OPP,
     });

@@ -174,7 +174,7 @@ beforeEach(() => {
         site_id: SITE,
         customer_name: "Bell County Schools",
         description: "Leak over the gym",
-        service_type: "leak",
+        service_type: "repair",
         stage: "scheduled",
         technician_id: TECH,
         scheduled_date: "2026-10-12",
@@ -203,7 +203,7 @@ describe("saveServiceJob as the office", () => {
       account_id: ACC,
       site_id: SITE,
       description: "New leak",
-      service_type: "leak",
+      service_type: "repair",
       technician_id: TECH2,
       scheduled_date: "2026-10-20",
     });
@@ -218,7 +218,7 @@ describe("saveServiceJob as the office", () => {
       account_id: ACC,
       site_id: SITE,
       description: "Leak over the gym",
-      service_type: "leak",
+      service_type: "repair",
       technician_id: TECH2,
       scheduled_date: "2026-10-19",
     });
@@ -236,7 +236,7 @@ describe("saveServiceJob as the office", () => {
         account_id: ACC,
         site_id: SITE,
         description: "x",
-        service_type: "leak",
+        service_type: "repair",
         scheduled_date: "2026-10-20",
       }),
     ).rejects.toThrow("Only the office or a manager creates tickets");
@@ -246,7 +246,7 @@ describe("saveServiceJob as the office", () => {
         account_id: ACC,
         site_id: SITE,
         description: "x",
-        service_type: "leak",
+        service_type: "repair",
         technician_id: TECH,
         scheduled_date: "2026-10-19",
       }),
@@ -257,7 +257,7 @@ describe("saveServiceJob as the office", () => {
       account_id: ACC,
       site_id: SITE,
       description: "x",
-      service_type: "leak",
+      service_type: "repair",
       technician_id: TECH2,
     });
     expect(row["technician_id"]).toBe(TECH);

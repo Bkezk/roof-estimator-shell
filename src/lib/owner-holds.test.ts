@@ -64,7 +64,7 @@ describe("the pure counts", () => {
             site_name: null,
             site_address: null,
             description: "Leak",
-            service_type: "leak",
+            service_type: "repair",
             stage: "scheduled",
             scheduled_date: YESTERDAY,
             technician_id: ANN,

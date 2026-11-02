@@ -16,7 +16,7 @@ describe("Refresh data", () => {
   it("says what it found: stored findings, no checklist yet, not an inspection, a bid", () => {
     expect(refreshFindings("ticket", "inspection", true)).toBe("stored");
     expect(refreshFindings("ticket", "inspection", false)).toBe("no-checklist");
-    expect(refreshFindings("ticket", "leak", false)).toBe("not-inspection");
+    expect(refreshFindings("ticket", "repair", false)).toBe("not-inspection");
     expect(refreshFindings("bid", undefined, false)).toBe("bid");
     expect(REFRESH_FINDINGS_NOTE.stored).toContain("findings are in");
     expect(REFRESH_FINDINGS_NOTE["no-checklist"]).toContain("no saved inspection checklist");

@@ -168,6 +168,8 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
       // The header's Documents icon and its dialog.
       "officeOrAdmin",
       "{officeOrAdmin && (",
+      // The Done inspection's banner (Nov 2): visibility only, like the section.
+      "{job && <InspectionNextStep job={job} officeOrAdmin={officeOrAdmin} />}",
       "<InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />",
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />",
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />",

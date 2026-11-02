@@ -22,7 +22,7 @@ const OTHER = "33333333-3333-4333-8333-333333333333";
 const ticket = (n: number, over: Partial<ListTicket> = {}): ListTicket => ({
   number: n,
   stage: "scheduled",
-  service_type: "leak",
+  service_type: "repair",
   scheduled_date: "2026-10-05",
   technician_id: null,
   technician_name: null,

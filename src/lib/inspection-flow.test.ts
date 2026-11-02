@@ -143,8 +143,8 @@ describe("1. closeoutSteps(serviceType): four for an inspection, the seven repai
     expect(INSPECTION_STEPS[0]!.unlocks).toBe("Open from the start");
     expect(stepCount("inspection")).toBe(4);
   });
-  it("leak, warranty, scope, other and no type: the seven repair steps, unchanged (scope stays on the repair flow)", () => {
-    for (const t of ["leak", "warranty", "scope", "other", undefined, null])
+  it("repair, warranty, other and no type: the seven repair steps, unchanged (an old scope row too)", () => {
+    for (const t of ["repair", "warranty", "scope", "other", undefined, null])
       expect(closeoutSteps(t)).toBe(CLOSEOUT_STEPS);
     expect(IDS(CLOSEOUT_STEPS)).toEqual([
       "crew",
@@ -156,8 +156,8 @@ describe("1. closeoutSteps(serviceType): four for an inspection, the seven repai
       "signature",
     ]);
     expect(stepCount("scope")).toBe(7);
-    expect(steps).toContain("SCOPE and other keep the seven repair steps");
-    expect(closeout).toContain("SCOPE and other keep the seven repair steps");
+    expect(steps).toContain("Repair, warranty and other keep the seven repair steps");
+    expect(closeout).toContain("Repair, warranty and other keep the seven repair steps");
   });
   it("stepOf / stepIndex / nextStep / nextStepLabel walk the flow of the type given", () => {
     expect(stepOf("signature", "inspection").n).toBe(4);
@@ -173,7 +173,7 @@ describe("1. closeoutSteps(serviceType): four for an inspection, the seven repai
     expect(nextStepLabel("time", "inspection")).toBe("Next step: Signature");
     // The repair flow still goes Time → Notes.
     expect(nextStep("time")).toBe("notes");
-    expect(nextStepLabel("time", "leak")).toBe("Next step: Notes");
+    expect(nextStepLabel("time", "repair")).toBe("Next step: Notes");
     // A step the flow does not have is unknown to it.
     expect(() => stepOf("before", "inspection")).toThrow(/Unknown close-out step/);
     expect(() => stepOf("crew", "inspection")).toThrow(/Unknown close-out step/);
@@ -311,7 +311,7 @@ describe("2c. materials never block an inspection; time is required; the signatu
       "2 items logged",
     );
     // A repair ticket still waits.
-    expect(stepDone("materials", { ...whole, serviceType: "leak" })).toBe(false);
+    expect(stepDone("materials", { ...whole, serviceType: "repair" })).toBe(false);
   });
   it("time: hours above zero or an On site stamp, as on a repair", () => {
     expect(stepDone("time", whole)).toBe(true);
@@ -333,7 +333,7 @@ describe("2c. materials never block an inspection; time is required; the signatu
     expect(firstOpenStep(whole)).toBeNull();
     expect(statusList(whole)).toEqual(Array<string>(4).fill("done"));
     // A repair ticket still needs it.
-    expect(stepDone("signature", { ...whole, serviceType: "leak" })).toBe(false);
+    expect(stepDone("signature", { ...whole, serviceType: "repair" })).toBe(false);
   });
   it("a finished inspection: every step done", () => {
     const s = { ...whole, finished: true, checklist: [answered(null)], timeHours: 0 };
@@ -483,7 +483,7 @@ describe("3. completeGaps / closeoutGaps on an inspection", () => {
     expect(
       closeoutGaps({
         ...rows,
-        service_type: "leak",
+        service_type: "repair",
         repairs: [{ id: "r1", name: "Seam" }],
         photos: [{ repair_id: "r1", role: "before" }],
       }),
@@ -718,7 +718,7 @@ describe("4b. saveTicketInspection carries the switch; the outcome; Warranty", (
       inspection_outcome_by: MANAGER,
     });
     expect(typeof tables.service_jobs[0]!["inspection_outcome_at"]).toBe("string");
-    expect(inspFn).toContain('service_type: z.enum(["leak", "warranty", "other"]),');
+    expect(inspFn).toContain('service_type: z.enum(["repair", "warranty", "other"]),');
   });
   it("setInspectionOutcome 'none' / 'bid': the office or a manager on a Done inspection; a technician is refused", async () => {
     const tables = envWith(job({ stage: "done", inspection: savedJson() }));
@@ -845,7 +845,7 @@ describe("5. the Done notice for an inspection", () => {
     expect(doneTitle({ ...base, service_type: "inspection", inspection: "garbage" })).toBe(
       "Inspection #6012 Acme is done — ready for your review",
     );
-    expect(doneTitle({ ...base, service_type: "leak" })).toBe(
+    expect(doneTitle({ ...base, service_type: "repair" })).toBe(
       "Ticket #6012 Acme — Annual inspection is done — ready for your review",
     );
     expect(doneTitle(base)).toBe(
@@ -1075,7 +1075,7 @@ describe("6d. the office's After the inspection panel", () => {
     expect(section).toContain('onClick={() => record.mutate("bid")}');
     expect(section).toContain('data-line="inspection-outcome"');
     expect(section).toContain("outcomeLine({");
-    expect(section).toMatch(/type RepairType = "leak" \| "warranty" \| "other";/);
+    expect(section).toMatch(/type RepairType = "repair" \| "warranty" \| "other";/);
     // The existing guards stay.
     expect(section).toContain("disabled={dirty || create.isPending || !date}");
     expect(section).toContain("if (inFlight.current || create.isPending) return;");

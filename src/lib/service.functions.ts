@@ -72,11 +72,15 @@ export const STAGE_LABELS: Record<ServiceStage, string> = {
   invoiced: "Invoiced",
   closed: "Closed",
 };
-export const SERVICE_TYPES = ["leak", "scope", "warranty", "inspection", "other"] as const;
+/**
+ * The ticket types (owner, Nov 2: "just call it repair, the pictures will tell the story" — Leak
+ * became Repair, and Scope, which no ticket ever used and which did nothing a Repair did not,
+ * went; migration 20261102230000 moved the rows).
+ */
+export const SERVICE_TYPES = ["repair", "warranty", "inspection", "other"] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 export const TYPE_LABELS: Record<ServiceType, string> = {
-  leak: "Leak",
-  scope: "Scope",
+  repair: "Repair",
   warranty: "Warranty",
   inspection: "Inspection",
   other: "Other",
@@ -311,7 +315,7 @@ const jobSchema = z.object({
   /** Used only when no account is linked (a one-off caller). */
   customer_name: z.string().trim().max(200).optional(),
   description: z.string().trim().max(TICKET_DESCRIPTION_MAX).default(""),
-  service_type: z.enum(SERVICE_TYPES).default("leak"),
+  service_type: z.enum(SERVICE_TYPES).default("repair"),
   po_number: optText(60),
   /** The job number (owner, Sep 30), next to PO #; carried to the invoice as job_code. */
   job_number: z.string().trim().max(60).nullable().optional(),

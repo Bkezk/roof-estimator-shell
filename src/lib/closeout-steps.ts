@@ -35,7 +35,7 @@
  * "Nothing to add") · 4 Materials (never blocks an inspection: Nothing used is pre-set, a row
  * logged is fine too) · 5 Time (required, as on a repair) · 6 Signature (OPTIONAL: never a gap,
  * the pad says "Optional for an inspection", Complete does not wait for it). Photos are optional
- * everywhere in the inspection flow. Leak, warranty, SCOPE and other keep the seven repair steps
+ * everywhere in the inspection flow. Repair, warranty and other keep the seven repair steps
  * (the owner did not say otherwise for scope). Every helper that walks the list takes the
  * service type (default: the repair flow), or reads it off the StepState.
  */

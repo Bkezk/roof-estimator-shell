@@ -45,7 +45,7 @@ describe("where it applies", () => {
   it("the Tickets list's Overdue filter leaves a Done ticket out", () => {
     const base = {
       number: 1,
-      service_type: "leak",
+      service_type: "repair",
       // With a technician: one without is Unassigned, never overdue (owner, Oct 12, item 6).
       technician_id: "tech",
       technician_name: "Ted",
@@ -103,7 +103,7 @@ describe("where it applies", () => {
       site_name: null,
       site_address: null,
       description: "",
-      service_type: "leak",
+      service_type: "repair",
       stage: "done",
       scheduled_date: PAST,
       technician_id: "tech",

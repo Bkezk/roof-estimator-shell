@@ -57,7 +57,7 @@ describe("searchFilter", () => {
       expect(f).toContain(`${c}.ilike.%6008%`);
   });
   it("text only: no number clause; invoices search their display number and bill-to", () => {
-    expect(searchFilter("ticket", parseGlobalQuery("leak"))).not.toContain("number.eq");
+    expect(searchFilter("ticket", parseGlobalQuery("repair"))).not.toContain("number.eq");
     const inv = searchFilter("invoice", parseGlobalQuery("6006.2"));
     // bill_to / property are jsonb: their name key, never the whole column (owner's phone, Oct 6:
     // "operator does not exist: jsonb ~~* unknown").

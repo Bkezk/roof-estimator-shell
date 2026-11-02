@@ -102,7 +102,7 @@ const job = (over: Row = {}): Row => ({
   number: 6010,
   customer_name: "Bell County Schools",
   description: "Leak over the gym",
-  service_type: "leak",
+  service_type: "repair",
   stage: "scheduled",
   technician_id: TECH,
   scheduled_date: SHOWN,

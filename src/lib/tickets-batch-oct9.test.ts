@@ -218,7 +218,7 @@ describe("S9. the list's filters live in the URL; Back returns where you came fr
       overdue: 1 as const,
       q: "gym",
       tech: "unassigned",
-      type: "leak" as const,
+      type: "repair" as const,
     };
     expect(parseServiceSearch(full)).toEqual(full);
     expect(parseServiceSearch({ q: "  bell  ", tech: "all", type: "bogus" })).toEqual({
@@ -228,8 +228,8 @@ describe("S9. the list's filters live in the URL; Back returns where you came fr
     expect(parseServiceSearch({ q: 5, tech: 7 })).toEqual({});
     expect(parseServiceSearch({ q: "x".repeat(300) })).toEqual({ q: "x".repeat(200) });
     // A new ticket and a ticket ignore the list's filters.
-    expect(parseServiceSearch({ new: 1, q: "a", type: "leak" })).toEqual({ new: 1 });
-    expect(parseServiceSearch({ id: "x", q: "a", type: "leak" })).toEqual({ id: "x" });
+    expect(parseServiceSearch({ new: 1, q: "a", type: "repair" })).toEqual({ new: 1 });
+    expect(parseServiceSearch({ id: "x", q: "a", type: "repair" })).toEqual({ id: "x" });
   });
   it("a ticket carries where it was opened from, and the Board's week only with from=board", () => {
     expect([...TICKET_FROM]).toEqual(["board", "invoices"]);

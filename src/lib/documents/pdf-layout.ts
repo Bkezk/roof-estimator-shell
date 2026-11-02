@@ -30,6 +30,7 @@ import {
   resolveCellText,
   VARIABLE_NODE,
 } from "./model";
+import { priceLinesEmpty, priceLinesTable } from "./price-lines";
 import {
   type DocumentSource,
   type InspectionItem,
@@ -913,6 +914,16 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
       if (!data.rows.length) return [];
       return layoutTable(
         { ...data, boldRow: (r) => (r[0] ?? "").trim().toLowerCase() === "total" },
+        x,
+        width,
+        ctx,
+      );
+    }
+    case "priceLines": {
+      if (priceLinesEmpty(m.rows)) return [];
+      const data = priceLinesTable(m);
+      return layoutTable(
+        { ...data, boldRow: (_r, i) => i === data.rows.length - 1 },
         x,
         width,
         ctx,

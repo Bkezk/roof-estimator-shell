@@ -83,7 +83,7 @@ describe("2. a clock press on an Open ticket moves it to Scheduled (the owner, N
     id,
     number,
     customer_name: "Acme",
-    service_type: "leak",
+    service_type: "repair",
     technician_id: TECH,
     stage,
     field_status: null,

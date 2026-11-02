@@ -499,9 +499,9 @@ export function ChecklistSavedLine({
   );
 }
 
-type RepairType = "leak" | "warranty" | "other";
+type RepairType = "repair" | "warranty" | "other";
 const asRepairType = (v: string): RepairType =>
-  v === "warranty" ? "warranty" : v === "other" ? "other" : "leak";
+  v === "warranty" ? "warranty" : v === "other" ? "other" : "repair";
 
 /**
  * From a completed inspection: a repair ticket, a bid, or "No action needed" (the office's
@@ -524,7 +524,7 @@ function OfficeActions({
   const navigate = useNavigate();
   const createFn = useServerFn(createRepairFromInspection);
   const outcomeFn = useServerFn(setInspectionOutcome);
-  const [type, setType] = useState<RepairType>("leak");
+  const [type, setType] = useState<RepairType>("repair");
   // Every ticket has a date (owner, Oct 1): the repair ticket gets its day here.
   const [date, setDate] = useState("");
   const complete = inspectionComplete(job.stage);
@@ -627,7 +627,7 @@ function OfficeActions({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="leak">Leak</SelectItem>
+                    <SelectItem value="repair">Repair</SelectItem>
                     <SelectItem value="warranty">Warranty</SelectItem>
                     <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
@@ -721,6 +721,38 @@ function OfficeActions({
 }
 
 /** "From inspection #6012" on a ticket that was created from an inspection. */
+/**
+ * The banner at the top of a Done inspection with no outcome yet (owner, Nov 2: "the create
+ * repair ticket should be somewhere more noticeable"): the same three choices the Inspection
+ * section offers, under the ticket's title where they cannot be missed. Gone once an outcome is
+ * recorded (the section keeps the "Outcome: …" line).
+ */
+export function InspectionNextStep({
+  job,
+  officeOrAdmin,
+}: {
+  job: ServiceJobRow;
+  officeOrAdmin: boolean;
+}) {
+  const applies =
+    job.service_type === "inspection" && officeOrAdmin && inspectionComplete(job.stage);
+  const draft = useInspectionDraft(job, { enabled: applies, readOnly: true });
+  if (!applies || !draft.data || draft.data.outcome) return null;
+  return (
+    <div
+      role="status"
+      data-banner="inspection-next"
+      className="space-y-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden /> The inspection is done — what
+        happens next?
+      </p>
+      <OfficeActions job={job} data={draft.data} dirty={!draft.saved} />
+    </div>
+  );
+}
+
 export function FromInspectionNote({ job }: { job: ServiceJobRow }) {
   const { session } = useAuth();
   const getFn = useServerFn(getSourceInspection);

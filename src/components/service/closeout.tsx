@@ -52,7 +52,7 @@
  * 5 Time (required), 6 Signature (optional: "Optional for an inspection", never a gap). Photos
  * are optional everywhere on an inspection. The same StepCard / StepStrip / Next step mechanics,
  * the same server-side gap list ("The checklist is not saved yet"; owner, Oct 26: only a problem
- * needs a status or a note, so no row is ever "unanswered") and Complete anyway for managers. Leak, warranty, SCOPE and other keep the seven repair steps (the owner did not say
+ * needs a status or a note, so no row is ever "unanswered") and Complete anyway for managers. Repair, warranty and other keep the seven repair steps (the owner did not say
  * otherwise for scope).
  */
 import { useEffect, useRef, useState } from "react";

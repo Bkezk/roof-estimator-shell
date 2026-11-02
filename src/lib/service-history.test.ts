@@ -62,7 +62,7 @@ const summary = (over: Partial<SiteHistorySummary> = {}): SiteHistorySummary => 
 
 const ticket = (over: Partial<SiteHistoryTicket> & { id: string }): SiteHistoryTicket => ({
   number: 6000,
-  service_type: "leak",
+  service_type: "repair",
   description: null,
   scheduled_date: null,
   completed_at: null,
@@ -238,7 +238,7 @@ describe("the server functions", () => {
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       number: 6012,
-      service_type: "leak",
+      service_type: "repair",
       description: "Leak at HVAC curb",
       scheduled_date: "2026-06-11",
       completed_at: "2026-06-12T15:00:00+00:00",

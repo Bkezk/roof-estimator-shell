@@ -300,8 +300,8 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        /** Leak, Warranty (owner, Oct 12) or Other: the repair ticket's type. */
-        service_type: z.enum(["leak", "warranty", "other"]),
+        /** Repair (Leak until Nov 2), Warranty (owner, Oct 12) or Other: the repair ticket's type. */
+        service_type: z.enum(["repair", "warranty", "other"]),
         /** The repair ticket's date (every ticket has one — owner, Oct 1). */
         scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       })

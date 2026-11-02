@@ -22,7 +22,7 @@ const doneTicket = (id: string, over: Partial<TicketIn> = {}): TicketIn => ({
   site_name: "Plant 2",
   site_address: "1 Main St",
   description: "Leak over office",
-  service_type: "leak",
+  service_type: "repair",
   stage: "done",
   scheduled_date: "2026-10-05",
   technician_id: BOB,

@@ -210,6 +210,7 @@ export const MODULE_TYPES = [
   "twoPhotos",
   "table",
   "pricingTable",
+  "priceLines",
   "signature",
   "hr",
   "pdf",
@@ -232,6 +233,7 @@ export const MODULE_LABELS: Record<ModuleType, string> = {
   hr: "Horizontal Line",
   letterhead: "Letterhead",
   pricingTable: "Pricing Table",
+  priceLines: "Price lines",
   pdf: "Inserted PDF",
   photoGrid: "Photo Grid",
   repairList: "Repair List",
@@ -250,6 +252,7 @@ export const MODULE_TILES: ModuleType[] = [
   "hr",
   "letterhead",
   "pricingTable",
+  "priceLines",
   "photoGrid",
   "repairList",
   "repairItem",
@@ -312,6 +315,17 @@ export interface PricingTableModule extends ModuleBase {
   /** Hand edits after generation: when set, these rows print instead of the record's. */
   rows: string[][] | null;
   showSections: boolean;
+}
+/**
+ * Price lines (owner, Nov 2): descriptions and prices typed by hand, the Total row adding the
+ * prices up itself (lib/documents/price-lines.ts) — the quote the office builds as a saved
+ * template. A description may carry {{variables}}.
+ */
+export interface PriceLinesModule extends ModuleBase {
+  type: "priceLines";
+  rows: Array<{ description: string; price: string }>;
+  /** The last row's label ("Total"). */
+  totalLabel: string;
 }
 export interface SignatureModule extends ModuleBase {
   type: "signature";
@@ -404,6 +418,7 @@ export type DocModule =
   | TwoPhotosModule
   | TableModule
   | PricingTableModule
+  | PriceLinesModule
   | SignatureModule
   | HrModule
   | PdfModule
@@ -509,6 +524,12 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       mode: z.enum(["total", "none"]),
       rows: z.array(z.array(z.string())).nullable(),
       showSections: z.boolean(),
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("priceLines"),
+      rows: z.array(z.object({ description: z.string(), price: z.string() })).max(200),
+      totalLabel: z.string(),
     }),
     z.object({ id: z.string(), type: z.literal("signature"), lines: z.array(z.string()) }),
     z.object({ id: z.string(), type: z.literal("hr") }),
@@ -655,6 +676,8 @@ export function newModule(type: ModuleType): DocModule {
       };
     case "pricingTable":
       return { id, type, mode: "total", rows: null, showSections: true };
+    case "priceLines":
+      return { id, type, rows: [{ description: "", price: "" }], totalLabel: "Total" };
     case "signature":
       return { id, type, lines: ["Customer", "Date", "JBK, Inc."] };
     case "hr":
@@ -873,6 +896,7 @@ export function pagesVariables(pages: readonly DocPage[]): Set<string> {
       }
       if (m.type === "table") m.rows.forEach((r) => r.forEach(cell));
       if (m.type === "pricingTable" && m.rows) m.rows.forEach((r) => r.forEach(cell));
+      if (m.type === "priceLines") m.rows.forEach((r) => cell(r.description));
       if (m.type === "repairList" && m.rows) m.rows.forEach((r) => r.forEach(cell));
     }
   return keys;

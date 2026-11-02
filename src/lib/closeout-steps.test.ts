@@ -30,7 +30,7 @@ import { PHASE_PHOTO_ROLES, needsFor } from "@/lib/closeout-repairs";
 const full: StepState = {
   finished: false,
   crewAnswered: true,
-  serviceType: "leak",
+  serviceType: "repair",
   repairs: [{ id: "r1", resolution_text: "Patched two holes." }],
   photos: [
     { repair_id: "r1", role: "before" },

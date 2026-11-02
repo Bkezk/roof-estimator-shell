@@ -175,7 +175,7 @@ import {
 } from "@/components/service/ticket-field-sections";
 import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-extras";
 import { AerialSection } from "@/components/service/aerial-markup";
-import { InspectionSection } from "@/components/service/inspection-section";
+import { InspectionNextStep, InspectionSection } from "@/components/service/inspection-section";
 import { NeedsActionStrip, UntouchedBadge, untouchedKey } from "@/components/crm/contact-log";
 import { TicketActivity } from "@/components/service/ticket-activity";
 import { MaterialsPosFold } from "@/components/service/materials-pos-fold";
@@ -1286,7 +1286,7 @@ const draftFrom = (job: ServiceJobWithTech | null): Draft =>
         contact_id: "",
         location_id: "",
         description: "",
-        service_type: "leak",
+        service_type: "repair",
         labor_rate_kind: "standard",
         po_number: "",
         job_number: "",
@@ -2600,6 +2600,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </p>
         )}
         {job && <FromInspectionNote job={job} />}
+        {/* Owner, Nov 2: a Done inspection asks what happens next, up here where it is seen. */}
+        {job && <InspectionNextStep job={job} officeOrAdmin={officeOrAdmin} />}
         {/* The clock on this ticket (owner, Oct 15): who is travelling here / on site, since when. */}
         {job && <JobClockLine jobId={job.id} />}
         {!job && seed?.note && (

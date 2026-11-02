@@ -28,7 +28,7 @@ const today = read("src/components/service/today-page.tsx");
 
 const answered: CompleteGapsInput = {
   finished: false,
-  service_type: "leak",
+  service_type: "repair",
   signature_path: "job/sig.png",
   on_site_at: null,
   repairs: { data: [{ id: "r1", name: "Seam" }], error: null },

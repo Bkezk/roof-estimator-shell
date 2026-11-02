@@ -51,7 +51,7 @@ const ticket = (over: Partial<TicketIn> = {}): TicketIn => ({
   site_name: null,
   site_address: null,
   description: "Leak",
-  service_type: "leak",
+  service_type: "repair",
   stage: "done",
   scheduled_date: "2026-10-01",
   technician_id: "ted",

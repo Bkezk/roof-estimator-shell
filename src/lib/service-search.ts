@@ -34,7 +34,7 @@ export const STAGE_VALUES = [
 ] as const;
 export type StageValue = (typeof STAGE_VALUES)[number];
 /** The service types (SERVICE_TYPES in service.functions.ts; the test checks they agree). */
-export const TYPE_VALUES = ["leak", "scope", "warranty", "inspection", "other"] as const;
+export const TYPE_VALUES = ["repair", "warranty", "inspection", "other"] as const;
 export type TypeValue = (typeof TYPE_VALUES)[number];
 /** The list's stage chip: everything, "Open work", or one stage. */
 export type StageFilter = "all" | typeof SERVICE_OPEN_WORK | StageValue;
