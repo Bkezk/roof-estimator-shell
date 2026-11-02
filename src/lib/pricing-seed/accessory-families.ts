@@ -1321,7 +1321,9 @@ export const PITCH_PAN_ROWS: Array<{
   },
 ];
 export const PITCH_PAN_ITEM_NUMBERS: Array<{ item_no: string; description: string }> = [
-  { item_no: "W56TPO301L", description: PITCH_PAN_ROWS[0]!.description },
+  // The 2013 sheet prints TPO301L; the owner wrote "301P" beside it (Nov 2) and the inventory
+  // list carries FS-W56TPO-301P "TPO-UP Penetration Pockets-W".
+  { item_no: "W56TPO301P", description: PITCH_PAN_ROWS[0]!.description },
   { item_no: "W56RACQS06", description: PITCH_PAN_ROWS[1]!.description },
   { item_no: "W56RACQS10", description: PITCH_PAN_ROWS[2]!.description },
 ];

@@ -159,4 +159,17 @@ describe("Nov 2 item-number corrections", () => {
     expect(s).toContain("e->>'Description' = 'Duro-Tuff - 60' and (e->>'White')::numeric = 125");
     expect(s).toContain("on conflict (item_no, screen_id, row_label, price_col) do nothing");
   });
+
+  it("the UltraPly TPO penetration pocket is W56TPO301P, as the owner wrote on the sheet", () => {
+    const links = seedItemNumbers(EXISTING_COLUMNS).filter((n) =>
+      n.row_label.startsWith("UltraPly TPO Penetration Pocket"),
+    );
+    expect(links.map((n) => n.item_no)).toEqual(["W56TPO301P"]);
+    const sql = readFileSync(
+      "supabase/migrations/20261102130000_penetration_pocket_301p.sql",
+      "utf8",
+    );
+    expect(sql).toContain("set item_no = 'W56TPO301P'");
+    expect(sql).toContain("where item_no = 'W56TPO301L'");
+  });
 });
