@@ -302,8 +302,13 @@ export function scoreAddress(target: ParsedAddress, c: AddressCandidate): number
   if (p.directions.length && target.directions.length)
     score += sameSet(p.directions, target.directions) ? 0.5 : -1.5;
   const city = c.city ? clean(c.city) : null;
-  if (city && target.city) score += city === target.city ? 2 : -1;
   const zip = c.zip?.trim().slice(0, 5) || null;
+  // A different town is a different address (Nov 2: "200 E Main St, Lexington" was matched to
+  // Scottsville's, whose row has no zip to lose points on) — unless the zip says it is the same
+  // place under another name.
+  if (city && target.city && city !== target.city && !(zip && target.zip && zip === target.zip))
+    return null;
+  if (city && target.city) score += city === target.city ? 2 : -1;
   if (zip && target.zip) score += zip === target.zip ? 3 : -3;
   return score;
 }

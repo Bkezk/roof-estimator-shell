@@ -244,6 +244,16 @@ export function fakeSupabase(
         if (!o) return { data: null, error: { message: "Object not found" } };
         return { data: { arrayBuffer: async () => o.slice().buffer }, error: null };
       },
+      /** The files go (a missing one is not an error, as on Supabase). */
+      remove: async (paths: string[]) => {
+        for (const p of paths) delete objects[p];
+        return { data: paths.map((name) => ({ name })), error: null };
+      },
+      /** A stand-in link: signed://<bucket>/<path>; a missing file is an error. */
+      createSignedUrl: async (path: string, seconds: number) => {
+        if (!objects[path]) return { data: null, error: { message: "Object not found" } };
+        return { data: { signedUrl: `signed://${bucket}/${path}?t=${seconds}` }, error: null };
+      },
     }),
   };
   let seq = 0;

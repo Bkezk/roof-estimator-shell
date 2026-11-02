@@ -206,7 +206,7 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
             <SiteWarranties siteId={s.id} />
             <PropertySites propertyId={s.id} />
             {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
-            <SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!deleted} />
+            <SiteCoverPhoto site={s} canEdit={!deleted} />
           </>
         )}
       </section>

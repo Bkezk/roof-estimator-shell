@@ -54,6 +54,7 @@ import { countBy, fetchAllPages } from "@/lib/paging";
 import type { PropertySiteRow } from "@/lib/property-sites.functions";
 import { isMissingTable, type Warranty } from "@/lib/warranty";
 import { WARRANTY_COLS } from "@/lib/warranties.functions";
+import { DOCUMENTS_BUCKET } from "@/lib/documents/server-pure";
 
 export type { AccountInput, QuickAccountInput };
 
@@ -760,6 +761,25 @@ export const siteSchema = z
   .transform((s) => normalizeAddress(s));
 export type SiteInput = z.input<typeof siteSchema>;
 
+/** Did the save change any part of the street address? A part left out is unchanged. */
+export function addressChanged(
+  before: {
+    address1: string | null;
+    address2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  },
+  fields: Partial<
+    Record<"address1" | "address2" | "city" | "state" | "zip", string | null | undefined>
+  >,
+): boolean {
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  return (["address1", "address2", "city", "state", "zip"] as const).some(
+    (k) => fields[k] !== undefined && norm(fields[k]) !== norm(before[k]),
+  );
+}
+
 export const saveSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => parseInput(siteSchema, d))
@@ -771,13 +791,33 @@ export const saveSite = createServerFn({ method: "POST" })
     // A county code left out stays as it is.
     const fields = defined(rest);
     if (id) {
+      // Owner, Nov 2: an aerial cover is of the address; a new address drops it (the file too),
+      // and the next visit makes a new one. A photo the office uploaded stays.
+      const { data: before, error: bErr } = await sb
+        .from("crm_sites")
+        .select("address1, address2, city, state, zip, cover_photo_path, cover_photo_source")
+        .eq("id", id)
+        .maybeSingle();
+      if (bErr) throw new Error(bErr.message);
+      const redoAerial =
+        !!before && before.cover_photo_source === "aerial" && addressChanged(before, fields);
       const { data: row, error } = await sb
         .from("crm_sites")
-        .update(fields)
+        .update(
+          redoAerial
+            ? { ...fields, cover_photo_path: null, aerial_tried_at: null, aerial_note: null }
+            : fields,
+        )
         .eq("id", id)
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      if (redoAerial && before?.cover_photo_path) {
+        const { error: rmErr } = await sb.storage
+          .from(DOCUMENTS_BUCKET)
+          .remove([before.cover_photo_path]);
+        if (rmErr) console.warn(`Aerial cover: the old file was not removed (${rmErr.message})`);
+      }
       return row;
     }
     const { data: row, error } = await sb.from("crm_sites").insert(fields).select("*").single();

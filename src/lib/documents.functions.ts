@@ -1029,7 +1029,18 @@ async function recordSite(
     .eq("id", siteId)
     .maybeSingle();
   if (!site) return none;
-  if (!site.cover_photo_path) return { id: site.id, coverUrl: null };
+  if (!site.cover_photo_path) {
+    // Owner, Nov 2: no cover photo → the aerial of the building, made now (once) so the cover
+    // page prints the property whether or not anyone opened its card. A miss is a null cover.
+    try {
+      const { ensureAerialCover } = await import("@/lib/site-aerial-cover.server");
+      const made = await ensureAerialCover(sb, site.id);
+      return { id: site.id, coverUrl: made.url };
+    } catch (e) {
+      console.warn(`Aerial cover for ${site.id}: ${e instanceof Error ? e.message : String(e)}`);
+      return { id: site.id, coverUrl: null };
+    }
+  }
   const { data: signed } = await sb.storage
     .from(DOCUMENTS_BUCKET)
     .createSignedUrl(site.cover_photo_path, SIGNED_SECONDS);

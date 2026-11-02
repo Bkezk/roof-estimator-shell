@@ -1891,7 +1891,7 @@ function SitesSection({
                 {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
                 <PropertySites propertyId={s.id} />
                 {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
-                <SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!readOnly} />
+                <SiteCoverPhoto site={s} canEdit={!readOnly} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (

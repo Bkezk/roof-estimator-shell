@@ -17,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isFieldOnly } from "@/lib/access";
+import { AERIAL_REMOVED_NOTE } from "@/lib/aerial-cover";
 import { bytesFromBase64, DOCUMENTS_BUCKET, sniffImageType } from "@/lib/documents/server-pure";
 import {
   isSiteCoverPath,
@@ -32,7 +33,7 @@ const SIGNED_SECONDS = 3600;
 const siteInput = (d: unknown) => z.object({ siteId: z.string().uuid() }).parse(d);
 
 /** The property's editors: Customers or Service access, never a technician-only user. */
-async function siteWriteAccess(ctx: Ctx) {
+export async function siteWriteAccess(ctx: Ctx) {
   const { data: p } = await ctx.supabase
     .from("profiles")
     .select("role, access, technician")
@@ -46,7 +47,7 @@ async function siteWriteAccess(ctx: Ctx) {
 async function siteRow(sb: Client, siteId: string) {
   const { data, error } = await sb
     .from("crm_sites")
-    .select("id, cover_photo_path, deleted_at")
+    .select("id, cover_photo_path, cover_photo_source, deleted_at")
     .eq("id", siteId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -92,9 +93,10 @@ export const setSiteCoverPhoto = createServerFn({ method: "POST" })
       .from(DOCUMENTS_BUCKET)
       .upload(path, bytes, { contentType: siteCoverContentType(type), upsert: false });
     if (upErr) throw new Error(`Could not store the picture: ${upErr.message}`);
+    // A photo the office uploads wins over the aerial (owner, Nov 2; aerial-cover.ts).
     const { error } = await sb
       .from("crm_sites")
-      .update({ cover_photo_path: path })
+      .update({ cover_photo_path: path, cover_photo_source: "photo" })
       .eq("id", site.id);
     if (error) {
       await removeFile(sb, path);
@@ -115,9 +117,18 @@ export const clearSiteCoverPhoto = createServerFn({ method: "POST" })
     await siteWriteAccess(context);
     const sb = context.supabase;
     const site = await siteRow(sb, data.siteId);
+    // Removing the aerial (owner, Nov 2): it is not made again until "Try the aerial again" or
+    // AERIAL_RETRY_DAYS pass; the note says so. Removing a photo: the aerial may take its place.
+    const wasAerial = site.cover_photo_source === "aerial";
     const { error } = await sb
       .from("crm_sites")
-      .update({ cover_photo_path: null })
+      .update({
+        cover_photo_path: null,
+        cover_photo_source: "photo",
+        ...(wasAerial
+          ? { aerial_tried_at: new Date().toISOString(), aerial_note: AERIAL_REMOVED_NOTE }
+          : { aerial_tried_at: null, aerial_note: null }),
+      })
       .eq("id", site.id);
     if (error) throw new Error(error.message);
     await removeFile(sb, site.cover_photo_path);

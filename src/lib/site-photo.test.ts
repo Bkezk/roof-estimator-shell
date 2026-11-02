@@ -65,10 +65,11 @@ describe("site-photo.functions.ts", () => {
     expect(set).toContain("bytes.length > MAX_SITE_COVER_BYTES");
     expect(set).toContain("siteCoverPath(site.id, randomUUID(), type)");
     expect(set).toContain(".from(DOCUMENTS_BUCKET)\n      .upload(path, bytes");
-    expect(set).toContain(".update({ cover_photo_path: path })");
+    // A photo wins over the aerial (Nov 2, aerial-cover.ts): the source says which it is.
+    expect(set).toContain('.update({ cover_photo_path: path, cover_photo_source: "photo" })');
     expect(set).toContain("await removeFile(sb, site.cover_photo_path);");
     const clear = serverFn("clearSiteCoverPhoto");
-    expect(clear).toContain(".update({ cover_photo_path: null })");
+    expect(clear).toContain('cover_photo_path: null,\n        cover_photo_source: "photo",');
     expect(clear).toContain("await removeFile(sb, site.cover_photo_path);");
     expect(serverFn("siteCoverUrl")).toContain(
       ".createSignedUrl(site.cover_photo_path, SIGNED_SECONDS)",
@@ -86,7 +87,8 @@ describe("the property card's cover photo (property-sites.tsx SiteCoverPhoto)", 
     expect(card).toContain("const shrunk = await shrinkPhoto(file);");
     expect(card).toContain("shrunk.blob.size > MAX_SITE_COVER_BYTES");
     expect(card).toContain("bytesBase64: await fileBase64(shrunk.blob)");
-    expect(card).toContain("{coverButtonLabel(has)}");
+    // Over an aerial the button reads "Set a photo" (Nov 2).
+    expect(card).toContain('{isAerial && has ? "Set a photo" : coverButtonLabel(has)}');
     expect(card).toMatch(/<Trash2 className="mr-1 h-4 w-4" \/> Remove/);
     expect(card).toContain("if (!has && !canEdit) return null;");
     expect(card).toContain('accept="image/*"');
@@ -94,12 +96,9 @@ describe("the property card's cover photo (property-sites.tsx SiteCoverPhoto)", 
   it("is mounted on the customer page's property cards and the property's own page, editors only", () => {
     const customers = read("src/components/customers-page.tsx");
     const property = read("src/components/property-page.tsx");
-    expect(customers).toContain(
-      "<SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!readOnly} />",
-    );
-    expect(property).toContain(
-      "<SiteCoverPhoto siteId={s.id} path={s.cover_photo_path} canEdit={!deleted} />",
-    );
+    // The card takes the row since Nov 2 (its cover source, the aerial's note and time).
+    expect(customers).toContain("<SiteCoverPhoto site={s} canEdit={!readOnly} />");
+    expect(property).toContain("<SiteCoverPhoto site={s} canEdit={!deleted} />");
   });
   it("the documents editor offers the Property photo when the record's property has a cover, and the renderer reads the row's path", () => {
     const picker = read("src/components/documents/editor/photo-picker.tsx");

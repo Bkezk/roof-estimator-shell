@@ -935,6 +935,12 @@ export type Database = {
           city: string | null;
           county_code_id: string | null;
           cover_photo_path: string | null;
+          cover_photo_source: string;
+          lat: number | null;
+          lng: number | null;
+          aerial_state: string | null;
+          aerial_tried_at: string | null;
+          aerial_note: string | null;
           created_at: string;
           deleted_at: string | null;
           id: string;
@@ -954,6 +960,12 @@ export type Database = {
           city?: string | null;
           county_code_id?: string | null;
           cover_photo_path?: string | null;
+          cover_photo_source?: string;
+          lat?: number | null;
+          lng?: number | null;
+          aerial_state?: string | null;
+          aerial_tried_at?: string | null;
+          aerial_note?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;
@@ -973,6 +985,12 @@ export type Database = {
           city?: string | null;
           county_code_id?: string | null;
           cover_photo_path?: string | null;
+          cover_photo_source?: string;
+          lat?: number | null;
+          lng?: number | null;
+          aerial_state?: string | null;
+          aerial_tried_at?: string | null;
+          aerial_note?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;
