@@ -162,6 +162,9 @@ const followLink =
     void navigate({ href });
   };
 
+/** A ticket or an inspection: the kinds whose person is a technician. */
+const isTicketKind = (k: WorkKind) => k === "ticket" || k === "inspection";
+
 const KIND_CLASS: Record<WorkKind, string> = {
   ticket:
     "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
@@ -302,6 +305,9 @@ function WorkRow({
   const tick = !!act && act.canEditTask(item);
   const assignNode = item.unassigned && actions ? actions.assign(item) : null;
   const showClaim = !!item.unassigned && !!claim;
+  // A ticket nobody is on that is not Unassigned (Done or Authorized with the technician
+  // removed; Nov 2): "No technician", not "(unknown)" — no name lookup failed.
+  const noTech = !item.assigneeId && isTicketKind(item.kind);
   const body = (
     <>
       <div className="flex items-start gap-2">
@@ -321,7 +327,9 @@ function WorkRow({
         {item.unassigned ? (
           <span className="font-medium text-destructive">Unassigned</span>
         ) : (
-          (showWho || item.assigneeName) && <span>{item.assigneeName ?? "(unknown)"}</span>
+          (showWho || item.assigneeName || noTech) && (
+            <span>{noTech ? "No technician" : (item.assigneeName ?? "(unknown)")}</span>
+          )
         )}
         {/* A Needs authorization row names its authorizer too (Nov 2): the person whose
             "Authorize ticket #…" timer and reminders these are. */}

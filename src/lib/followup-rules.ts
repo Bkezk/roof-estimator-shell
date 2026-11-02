@@ -104,6 +104,13 @@ export function dateMoveNote(
 /** What Work Overview needs of a follow-up to describe it. */
 export interface FollowupStateIn {
   due_at: string;
+  /**
+   * The follow-up's kind (Nov 2): an "invoice" timer — "Authorize ticket #…" on a Done ticket —
+   * reads "Authorization overdue N days" / "Authorization due …", since the ticket itself is
+   * finished and what is late is the office's review (the owner: "if something is marked done
+   * it can still show as overdue"). Any other kind, or none, reads "Overdue N days" / "Due …".
+   */
+  kind?: string | null;
   every_days?: number | null;
   snoozed_until?: string | null;
   status?: string | null;
@@ -137,10 +144,15 @@ export function followupStateText(
   const parts: FollowupStatePart[] = [];
   const due = toYmd(f.due_at);
   const late = daysBetween(due, today);
+  const what = f.kind === "invoice" ? "Authorization " : "";
+  const cap = (s: string) => (what ? s.toLowerCase() : s);
   if (late > 0)
-    parts.push({ text: `Overdue ${late} day${late === 1 ? "" : "s"}`, tone: "overdue" });
-  else if (late === 0) parts.push({ text: "Due today", tone: "normal" });
-  else parts.push({ text: `Due ${shortDay(due)}`, tone: "normal" });
+    parts.push({
+      text: `${what}${cap("Overdue")} ${late} day${late === 1 ? "" : "s"}`,
+      tone: "overdue",
+    });
+  else if (late === 0) parts.push({ text: `${what}${cap("Due")} today`, tone: "normal" });
+  else parts.push({ text: `${what}${cap("Due")} ${shortDay(due)}`, tone: "normal" });
   if (f.snoozed_until) {
     const until = toYmd(f.snoozed_until);
     if (until > today) {

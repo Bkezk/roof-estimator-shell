@@ -252,3 +252,46 @@ had loaded); the saved task carried my name, as the row and the database show.
    followed by counts over each table and the five functions, once per user.
 3. Policies, triggers and function bodies were read with `pg_policies`, `pg_trigger` and
    `pg_get_functiondef`.
+
+## Part 3 — two wording changes, the Price List Import and the Owner page in the browser (Nov 2, later)
+
+The owner: "change (unknown) to No technician … one thing i noticed is if something is marked done
+it can still show as overdue", and whether the other pages should be clicked through now that
+there is a login.
+
+**"Done but overdue" — what it was.** The only place a finished item read as overdue was the Needs
+authorization row of a Done ticket: its "Authorize ticket #…" timer's state line said "Overdue 17
+days" in red (the timer's due day is the close-out plus one). The ticket is finished; what is late
+is the office's authorization. A Done task never shows anywhere (the list drops `status = done`),
+a Done ticket is never in the Overdue column, never a red calendar day and never counted overdue
+on the Owner page (`isOverdueTicket` and `bucketOf` both exclude it). The line now reads
+"Authorization overdue 17 days" / "Authorization due today" / "Authorization due Fri, Oct 16" for
+that kind of timer, so nothing marked Done reads as overdue work. The authorizer's reminder notice
+("N days overdue") is unchanged; it goes to the person who must authorize.
+
+**"(unknown)" → "No technician".** A ticket row with no technician that is not Unassigned (a Done
+or Authorized ticket closed out by the office or whose technician was removed: #6039, #6038,
+#6024) says "No technician". Any other kind whose person cannot be named still reads "(unknown)".
+
+Tests: `src/lib/work-overview-nov2-wording.test.ts` (3 tests, all fail on the previous commit,
+pass after); `work-card-assignee.test.ts` updated to the new line. tsc, eslint, prettier clean.
+
+### The browser run (the same login)
+
+| #     | What was done                                                                                                                                                           | Result                                                                                                                                                                                                                                                             |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| I1–I2 | Price List Import: open, load a 5-line test .csv (three Duro-Caulk Plus numbers at today's price, White at 10.25, a renumbered Tan line "1137Z", a made-up line "ZZZ1") | the page reads the file in the browser and guesses Header row 1, Item Number / Description / Price                                                                                                                                                                 |
+| I3    | "2. Matched by item number"                                                                                                                                             | "5 sheet rows · 3 products matched · 1 price would change"; the table shows 1136 White $10.20 → $10.25 (0.5%); "2 already at the sheet price" folded                                                                                                               |
+| I4    | "3. Likely matches (1)"                                                                                                                                                 | 1137Z "Duro-Caulk Plus - Tan 10.3 oz" beside Sealants › Duro-Caulk Plus - Tan, "was item # 1137, not on this sheet", strong, Link / Not this                                                                                                                       |
+| I5    | "4. No match found (1)"                                                                                                                                                 | ZZZ1 "Widget frobnicator" with the Screen / Product / Colour pickers, Link, Skip, "add as new product", and a search box                                                                                                                                           |
+| I6    | "Update 1 price…"                                                                                                                                                       | the review dialog: "3 price cells will be written: 1 change (1 up, 0 down, 0 newly priced), 2 already at the sheet price. 2 sheet item(s) with no mapping are skipped." Cancel closed it; nothing written (Import history still "No imports applied yet")          |
+| I7    | Not this on the likely row                                                                                                                                              | Likely matches (0), No match found (2)                                                                                                                                                                                                                             |
+| I8    | Skip on ZZZ1                                                                                                                                                            | gone from the list, No match found (1)                                                                                                                                                                                                                             |
+| I9    | Link on 1137Z with the default pickers (Duro-Last Membrane › 40mil Roll Goods · White)                                                                                  | toast "1137Z → Duro-Last - 40mil Roll Goods · White"; the line left No match and, having no size column, landed under "Membrane rolls not turned into $/sq ft (1)" in the matched card. The saved mapping (a temporary row of mine) was deleted by SQL afterwards. |
+| O1–O2 | Owner page, People                                                                                                                                                      | the team table with Due today / Overdue                                                                                                                                                                                                                            |
+| O3    | an Overdue number link                                                                                                                                                  | Work Overview on the List, that person, the Overdue column ringed                                                                                                                                                                                                  |
+| O4    | Business tab                                                                                                                                                            | to invoice / unpaid / pipeline / bids                                                                                                                                                                                                                              |
+| Z     | every run                                                                                                                                                               | no page errors and no console errors                                                                                                                                                                                                                               |
+
+Not clicked: the Update prices confirmation (it writes to the live price list), "add as new
+product" (it adds a live product), and the Revert of an import (none to revert).

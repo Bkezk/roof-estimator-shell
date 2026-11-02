@@ -290,6 +290,8 @@ export interface FollowupIn {
 export interface WorkFollowup {
   id: string;
   title: string;
+  /** Its kind (ticket / invoice / opportunity; Nov 2): an Authorize timer's state line names the authorization. */
+  kind?: string;
   due_at: string;
   status: string;
   every_days: number | null;
@@ -304,6 +306,7 @@ export interface WorkFollowup {
 const workFollowup = (f: FollowupIn): WorkFollowup => ({
   id: f.id,
   title: f.title,
+  kind: f.kind,
   due_at: f.due_at,
   status: f.status,
   every_days: f.every_days ?? null,

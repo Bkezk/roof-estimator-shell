@@ -40,7 +40,7 @@ describe("whose card it is", () => {
   it("the row shows the name whenever it has one, not only in the Everyone view", () => {
     const src = read("src/components/my-work-page.tsx");
     expect(src).toMatch(
-      /\(showWho \|\| item\.assigneeName\) && <span>\{item\.assigneeName \?\? "\(unknown\)"\}<\/span>/,
+      /\(showWho \|\| item\.assigneeName \|\| noTech\) && \(\s*<span>\{noTech \? "No technician" : \(item\.assigneeName \?\? "\(unknown\)"\)\}<\/span>/,
     );
     expect(src).not.toMatch(/\n\s*showWho && <span>\{item\.assigneeName \?\? "\(unknown\)"\}/);
   });
