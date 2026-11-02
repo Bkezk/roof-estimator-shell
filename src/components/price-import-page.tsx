@@ -60,12 +60,7 @@ import {
   matchSheet,
   readMembraneSheet,
   readSheetItems,
-  buildNameIndex,
   convertSheetPrice,
-  crossCheck,
-  suggestCatalogRow,
-  suggestSheetLine,
-  type CatalogRowRef,
   type HeaderGuess,
   type MatchResult,
   type MembraneMatchResult,
@@ -73,6 +68,7 @@ import {
   type SheetItem,
   type SheetRow,
 } from "@/lib/price-import";
+import { triageUnmatched, type LikelyMatch } from "@/lib/price-import-triage";
 
 const LAYOUT_KEY = "priceImport.layout.v1";
 interface SavedLayout {
@@ -126,72 +122,6 @@ interface PlannedUpdate {
   next: number;
   /** How `next` was derived when it is not the sheet price as written (membrane rolls → $/sq ft). */
   note?: string;
-  /** Cross-check: the sheet line does not name the catalog product it is mapped to. */
-  nameDiffers?: boolean;
-  /** Cross-check: the description stamped by the last import no longer matches this line. */
-  descChanged?: boolean;
-  /** The description stamped by the last import (shown when it changed). */
-  previousDescription?: string | null;
-}
-
-/**
- * Search the loaded sheet by description / item number — for re-pointing a catalog item number
- * that Duro-Last has renumbered, or mapping a product that never had one.
- */
-function SheetSearch(props: {
-  items: SheetItem[];
-  initial: string;
-  onPick: (it: SheetItem) => void;
-}) {
-  const [q, setQ] = useState(props.initial);
-  const hits = useMemo(() => {
-    const words = q
-      .toLowerCase()
-      .split(/[^a-z0-9/."]+/)
-      .filter((w) => w.length > 1);
-    if (words.length === 0) return [];
-    const scored = props.items
-      .map((it) => {
-        const hay = `${it.itemNo} ${it.description}`.toLowerCase();
-        const score = words.reduce((n, w) => n + (hay.includes(w) ? 1 : 0), 0);
-        return { it, score };
-      })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score || a.it.rowIndex - b.it.rowIndex)
-      .slice(0, 8);
-    return scored.map((x) => x.it);
-  }, [q, props.items]);
-  return (
-    <div className="space-y-1">
-      <Input
-        className="h-7 w-[280px] text-xs"
-        value={q}
-        placeholder="Search the sheet…"
-        onChange={(e) => setQ(e.target.value)}
-      />
-      {q.trim() !== "" && (
-        <ul className="max-h-40 overflow-auto rounded border bg-background text-[11px]">
-          {hits.length === 0 && <li className="px-2 py-1 text-muted-foreground">No sheet rows</li>}
-          {hits.map((it) => (
-            <li key={it.rowIndex} className="flex items-center gap-2 px-2 py-0.5">
-              <span className="font-mono">{it.itemNo}</span>
-              <span className="flex-1 truncate">{it.description}</span>
-              <span className="tabular-nums">{money(it.price)}</span>
-              <span className="text-muted-foreground">{it.unit}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 px-2"
-                onClick={() => props.onPick(it)}
-              >
-                Use
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 /** Admin › Price List Import: load a Duro-Last price sheet, review, confirm, apply. */
@@ -403,7 +333,6 @@ export function PriceImportPage() {
         unitSkipped.push({ item, mapping, reason: conv.error });
         continue;
       }
-      const { nameDiffers, descChanged } = crossCheck(mapping, item.description);
       out.push({
         item_no: mapping.item_no,
         screen_id: mapping.screen_id,
@@ -415,8 +344,6 @@ export function PriceImportPage() {
         current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
         next: conv.price,
         ...(conv.note ? { note: conv.note } : {}),
-        ...(nameDiffers ? { nameDiffers } : {}),
-        ...(descChanged ? { descChanged, previousDescription: mapping.dl_description } : {}),
       });
     }
     return { plan: out, membraneSkipped: skipped, unitSkipped };
@@ -427,15 +354,12 @@ export function PriceImportPage() {
   const decreases = changed.filter((p) => p.current !== null && p.next < p.current).length;
   const newlyPriced = changed.filter((p) => p.current === null).length;
   const swings = changed.filter((p) => bigSwing(p.current, p.next)).length;
-  /** Matched by number but the sheet line does not name the product — likely renumbered. */
-  const suspect = plan.filter((p) => p.nameDiffers || p.descChanged);
-  const isSuspect = (p: PlannedUpdate) =>
-    !!p.nameDiffers || !!p.descChanged || bigSwing(p.current, p.next);
+  const isSuspect = (p: PlannedUpdate) => bigSwing(p.current, p.next);
 
   /* ---------------- Review & confirm ---------------- */
   const [reviewOpen, setReviewOpen] = useState(false);
-  // Per-row opt-out on the review. Flagged (⚠) rows start unticked: a likely unit problem needs
-  // an explicit tick before it is written.
+  // Per-row opt-out on the review. A ⚠ row (more than double or under half the current price —
+  // usually a per-box vs per-piece slip) starts unticked and needs an explicit tick.
   const planKey = (p: PlannedUpdate) => `${p.item_no}|${p.screen_id}|${p.row_label}|${p.price_col}`;
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const openReview = () => {
@@ -596,67 +520,43 @@ export function PriceImportPage() {
     }
   };
 
-  // Catalog products with no item number at all, each with the sheet line that best names it
-  // (idea: fill the gaps from the sheet as a checklist rather than by hand).
-  const [dismissedGaps, setDismissedGaps] = useState<Set<string>>(() => new Set());
-  const sheetIndex = useMemo(() => buildNameIndex(items, (it) => it.description), [items]);
-  const gapSuggestions = useMemo(() => {
-    if (!items.length) return [];
-    const has = new Set(mappings.map((m) => `${m.screen_id}\u0000${m.row_label}`));
-    const out: {
-      key: string;
-      target: TargetRef;
-      category: string;
-      suggestion: ReturnType<typeof suggestSheetLine>;
-    }[] = [];
-    for (const t of targets) {
-      const priceCol = t.price_cols[0];
-      if (!priceCol) continue;
-      for (const r of t.rows) {
-        const key = `${t.screen_id}\u0000${r}`;
-        if (has.has(key)) continue;
-        out.push({
-          key,
-          category: t.category,
-          target: { screen_id: t.screen_id, row_label: r, price_col: priceCol },
-          suggestion: suggestSheetLine(r, sheetIndex),
-        });
-      }
-    }
-    return out;
-  }, [items, sheetIndex, mappings, targets]);
-  const gapsWithSuggestion = gapSuggestions.filter(
-    (g) => g.suggestion && !dismissedGaps.has(g.key),
-  );
-  const [showAllGaps, setShowAllGaps] = useState(false);
-  const catalogRowRefs: CatalogRowRef[] = useMemo(
+  // Lists 3 and 4 (price-import-triage.ts): every unmatched sheet line is a likely match for one
+  // product or has no match. Not this / Skip are per file: they clear when another file loads.
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
+  const [likelyLimit, setLikelyLimit] = useState(100);
+  const triage = useMemo(
     () =>
-      targets.flatMap((t) =>
-        t.price_cols[0]
-          ? t.rows.map((r) => ({
-              screen_id: t.screen_id,
-              category: t.category,
-              row_label: r,
-              price_col: t.price_cols[0]!,
-            }))
-          : [],
-      ),
-    [targets],
+      match
+        ? triageUnmatched({
+            unmatched: match.unmatched,
+            notInSheet: match.notInSheet,
+            mappings,
+            targets,
+            dismissed,
+          })
+        : null,
+    [match, mappings, targets, dismissed],
   );
-  const catalogIndex = useMemo(
-    () => buildNameIndex(catalogRowRefs, (r) => r.row_label),
-    [catalogRowRefs],
+  const noMatchShown = useMemo(
+    () => (triage ? triage.noMatch.filter((it) => !skipped.has(it.key)) : []),
+    [triage, skipped],
   );
-
-  const notInSheetByItem = useMemo(() => {
-    const g = new Map<string, ItemNumberRow[]>();
-    for (const m of match?.notInSheet ?? []) {
-      const arr = g.get(m.item_no);
-      if (arr) arr.push(m as ItemNumberRow);
-      else g.set(m.item_no, [m as ItemNumberRow]);
+  /** Link on a likely match: a new number for the product, or the product's old number re-pointed. */
+  const link = async (p: LikelyMatch) => {
+    if (p.kind === "new") {
+      await saveMapping(p.item.itemNo, p.target, p.item.description);
+      return;
     }
-    return [...g.entries()];
-  }, [match]);
+    // Every column the old number priced on that product follows it (White / Tan / Gray …).
+    const olds = (match?.notInSheet ?? []).filter(
+      (m) =>
+        m.item_no === p.oldItemNo &&
+        m.screen_id === p.target.screen_id &&
+        m.row_label === p.target.row_label,
+    );
+    for (const m of olds) await remap(m as ItemNumberRow, p.item);
+  };
 
   if (mappingsQ.isLoading || targetsQ.isLoading)
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -666,8 +566,8 @@ export function PriceImportPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Price List Import</h1>
         <p className="text-sm text-muted-foreground">
-          Load a Duro-Last Excel price list. Rows match the catalog by item number (the map lives
-          under{" "}
+          Load a Duro-Last Excel price list. Lines match the price list by item number only (the
+          numbers live under{" "}
           <Link
             to="/admin/duro-last"
             search={{ tab: "items" }}
@@ -675,8 +575,8 @@ export function PriceImportPage() {
           >
             Duro-Last Pricing › Item Numbers
           </Link>
-          ); the &quot;Duro-Last Membrane&quot; tab maps onto the membrane price matrix by product,
-          mil and colour. Nothing is written until you review and confirm.
+          ). Lines with no number are offered as likely matches or listed as no match for you to
+          link. Nothing is written until you review and confirm.
         </p>
       </div>
 
@@ -831,319 +731,256 @@ export function PriceImportPage() {
         </CardContent>
       </Card>
 
-      {match && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">2. Match results</CardTitle>
-            <CardDescription>
-              {items.length.toLocaleString()} sheet rows · {plan.length} price cell(s) will be
-              written ({changed.length} change) · {match.unmatched.length.toLocaleString()} sheet
-              item(s) have no mapping · {match.noPrice.length} matched but no price ·{" "}
-              {notInSheetByItem.length} catalog item number(s) not in this sheet
-              {match.duplicatesInSheet.length
-                ? ` · duplicates in sheet: ${match.duplicatesInSheet.slice(0, 10).join(", ")}${match.duplicatesInSheet.length > 10 ? "…" : ""}`
-                : ""}
-              {membraneMatch
-                ? ` · membrane: ${membraneMatch.matched.length} cell(s), ${membraneMatch.unmatched.length} unmatched`
-                : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={openReview} disabled={plan.length === 0}>
-                Review &amp; confirm {plan.length} update{plan.length === 1 ? "" : "s"}…
-              </Button>
-              {lastReport && (
-                <span className="rounded-md bg-muted px-3 py-1.5 text-xs">{lastReport}</span>
-              )}
-            </div>
-
-            {notInSheetByItem.length > 0 && (
-              <details className="rounded-md border p-3">
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Catalog item numbers not in this sheet ({notInSheetByItem.length}) — re-point them
-                  at the sheet&apos;s numbers
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Duro-Last renumbers products over time. Search the sheet for the product and click
-                  Use to move the mapping to that item number; it then matches on this and every
-                  later import.
-                </p>
-                <div className="mt-2 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Old item #</TableHead>
-                        <TableHead>Product (screen)</TableHead>
-                        <TableHead>Find in sheet</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {notInSheetByItem.map(([itemNo, ms]) => (
-                        <TableRow key={itemNo}>
-                          <TableCell className="align-top font-mono text-xs">{itemNo}</TableCell>
-                          <TableCell className="align-top text-xs">
-                            {ms.map((m) => (
-                              <div key={`${m.screen_id}|${m.row_label}|${m.price_col}`}>
-                                {m.row_label} · {m.price_col}{" "}
-                                <span className="text-muted-foreground">
-                                  ({categoryOf(m.screen_id)})
-                                </span>
-                              </div>
-                            ))}
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <SheetSearch
-                              items={items}
-                              initial={ms[0]?.row_label ?? ""}
-                              onPick={(it) => {
-                                for (const m of ms) void remap(m, it);
-                              }}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </details>
-            )}
-
-            {gapSuggestions.length > 0 && (
-              <details
-                className="rounded-md border border-primary/40 p-3"
-                open={gapsWithSuggestion.length > 0}
-              >
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Catalog products with no item number ({gapSuggestions.length}) —{" "}
-                  {gapsWithSuggestion.length} suggestion
-                  {gapsWithSuggestion.length === 1 ? "" : "s"} from this sheet
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Each suggestion is the sheet line whose wording best matches the product name.
-                  Accept maps that item number (saved immediately; the price shows on the next
-                  pass); Not this hides the suggestion for now.
-                </p>
-                <label className="mt-1 flex items-center gap-1.5 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={showAllGaps}
-                    onChange={(e) => setShowAllGaps(e.target.checked)}
-                  />
-                  Also list products with no suggestion
-                </label>
-                <div className="mt-2 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Catalog product</TableHead>
-                        <TableHead>Suggested sheet line</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(showAllGaps
-                        ? gapSuggestions.filter((g) => !dismissedGaps.has(g.key))
-                        : gapsWithSuggestion
-                      ).map((g) => (
-                        <TableRow key={g.key}>
-                          <TableCell className="text-xs">
-                            <span className="text-muted-foreground">{g.category} › </span>
-                            {g.target.row_label}
-                            <span className="ml-1 text-[10px] text-muted-foreground">
-                              {g.target.price_col}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {g.suggestion ? (
-                              <>
-                                <span className="font-mono">{g.suggestion.item.itemNo}</span>{" "}
-                                {g.suggestion.item.description}
-                                <span className="ml-1 text-[10px] text-muted-foreground">
-                                  {Math.round(g.suggestion.score * 100)}% of the name
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">— nothing close</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-xs tabular-nums">
-                            {g.suggestion ? money(g.suggestion.item.price) : ""}
-                          </TableCell>
-                          <TableCell>
-                            {g.suggestion && (
-                              <div className="flex gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7"
-                                  onClick={() =>
-                                    void saveMapping(
-                                      g.suggestion!.item.itemNo,
-                                      g.target,
-                                      g.suggestion!.item.description,
-                                    )
-                                  }
-                                >
-                                  Accept
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7"
-                                  onClick={() => setDismissedGaps((d) => new Set(d).add(g.key))}
-                                >
-                                  Not this
-                                </Button>
-                              </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </details>
-            )}
-
-            {match.unmatched.length > 0 && (
-              <details className="rounded-md border p-3">
-                <summary className="cursor-pointer text-sm font-semibold text-destructive">
-                  No match — {match.unmatched.length.toLocaleString()} sheet item number(s) the
-                  catalog doesn&apos;t know
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  A full Duro-Last list carries thousands of products the estimator never prices;
-                  only map the ones you bid. Mapping saves immediately; the review picks the price
-                  up on the next pass.
-                </p>
-                <UnmatchedList
-                  items={match.unmatched}
-                  targets={targets}
-                  defaultTarget={defaultTarget}
-                  drafts={mapDrafts}
-                  setDrafts={setMapDrafts}
-                  onMap={(it, t) => void saveMapping(it.itemNo, t, it.description)}
-                  onAdd={openNewProduct}
-                  suggest={(it) => suggestCatalogRow(it.description, catalogIndex)}
-                />
-              </details>
-            )}
-
-            {membraneMatch && membraneMatch.unmatched.length > 0 && (
-              <details className="rounded-md border p-3">
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Membrane tab lines with no matrix cell ({membraneMatch.unmatched.length})
-                </summary>
-                <ul className="mt-1 text-xs text-muted-foreground">
-                  {membraneMatch.unmatched.map((u) => (
-                    <li key={u.item.rowIndex}>
-                      row {u.item.rowIndex + 1}: {u.item.description} {u.item.mil} mil{" "}
-                      {u.item.color} — {u.reason}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {suspect.length > 0 && (
-              <details className="rounded-md border border-destructive/60 p-3" open>
-                <summary className="cursor-pointer text-sm font-semibold text-destructive">
-                  Number matched but the description disagrees ({suspect.length}) — likely
-                  renumbered
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Duro-Last reuses item numbers. These lines carry a mapped number, but their
-                  wording does not name the product the number points at (or differs from the
-                  description stamped by the last import). They start unticked on the review.
-                  Confirm the mapping if the number really is this product — it stays quiet under
-                  that wording from then on. Remove it if the number now belongs to something else,
-                  then map the product&apos;s real number from the unmatched list.
-                </p>
-                <div className="mt-2 overflow-x-auto">
+      {match && triage && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">2. Matched by item number</CardTitle>
+              <CardDescription>
+                {items.length.toLocaleString()} sheet rows · {plan.length} product
+                {plan.length === 1 ? "" : "s"} matched · {changed.length} price
+                {changed.length === 1 ? "" : "s"} would change
+                {membraneMatch ? ` (membrane tab: ${membraneMatch.matched.length})` : ""}. Nothing
+                is written until you review and confirm.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={openReview} disabled={plan.length === 0}>
+                  Update {changed.length} price{changed.length === 1 ? "" : "s"}…
+                </Button>
+                {lastReport && (
+                  <span className="rounded-md bg-muted px-3 py-1.5 text-xs">{lastReport}</span>
+                )}
+              </div>
+              {changed.length > 0 && (
+                <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Item #</TableHead>
-                        <TableHead>Mapped to</TableHead>
-                        <TableHead>Sheet description now</TableHead>
-                        <TableHead>Why</TableHead>
-                        <TableHead />
+                        <TableHead>Product</TableHead>
+                        <TableHead>Sheet line</TableHead>
+                        <TableHead className="text-right">Now</TableHead>
+                        <TableHead className="text-right">Sheet</TableHead>
+                        <TableHead className="text-right">Δ</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {suspect.map((p) => (
+                      {changed.map((p) => (
                         <TableRow key={planKey(p)}>
                           <TableCell className="font-mono text-xs">{p.item_no}</TableCell>
                           <TableCell className="text-xs">
                             <span className="text-muted-foreground">{p.category} › </span>
-                            {p.row_label} · {p.price_col}
+                            {p.row_label}
+                            {p.price_col !== "Price" && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                {p.price_col}
+                              </span>
+                            )}
                           </TableCell>
-                          <TableCell className="text-xs">{p.description}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">
-                            {p.nameDiffers ? "does not name the product" : ""}
-                            {p.nameDiffers && p.descChanged ? "; " : ""}
-                            {p.descChanged
-                              ? `was "${p.previousDescription ?? ""}" at the last import`
-                              : ""}
+                            {p.description}
+                            {p.note && <div className="text-[10px] italic">{p.note}</div>}
+                          </TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">
+                            {money(p.current)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-semibold tabular-nums">
+                            {money(p.next)}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right text-xs tabular-nums ${
+                              p.current !== null && p.next > p.current
+                                ? "text-destructive"
+                                : p.current !== null && p.next < p.current
+                                  ? "text-green-700 dark:text-green-400"
+                                  : "text-muted-foreground"
+                            }`}
+                            title={
+                              bigSwing(p.current, p.next)
+                                ? "More than double or less than half the current price — check the units before applying"
+                                : undefined
+                            }
+                          >
+                            {pct(p.current, p.next)}
+                            {bigSwing(p.current, p.next) ? " ⚠" : ""}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              {plan.length - changed.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    {plan.length - changed.length} already at the sheet price
+                  </summary>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {plan
+                      .filter((p) => p.current === p.next)
+                      .map((p) => `${p.item_no} ${p.row_label}`)
+                      .join(" · ")}
+                  </p>
+                </details>
+              )}
+              {match.noPrice.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    {match.noPrice.length} matched but the sheet has no price for them
+                  </summary>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {match.noPrice.map((u) => `${u.itemNo} ${u.description}`).join(" · ")}
+                  </p>
+                </details>
+              )}
+              {unitSkipped.length > 0 && (
+                <details className="rounded-md border border-amber-300 p-3" open>
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    Not written — the sheet prices per piece, the list per box ({unitSkipped.length}
+                    )
+                  </summary>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Enter the pieces per box on the product&apos;s screen (Fasteners/Box, Parts/Bag,
+                    Parts/Package) and load the file again.
+                  </p>
+                  <ul className="mt-1 text-xs text-muted-foreground">
+                    {unitSkipped.map((u) => (
+                      <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
+                        {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
+                        {u.mapping.price_col}: {u.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {membraneSkipped.length > 0 && (
+                <details className="rounded-md border border-amber-300 p-3">
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    Membrane rolls not turned into $/sq ft ({membraneSkipped.length})
+                  </summary>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    The membrane list is per sq ft; a roll price is only written once the
+                    sheet&apos;s Size column gives the roll&apos;s area.
+                  </p>
+                  <ul className="mt-1 text-xs text-muted-foreground">
+                    {membraneSkipped.map((u) => (
+                      <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
+                        {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
+                        {u.mapping.price_col}: {u.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {membraneMatch && membraneMatch.unmatched.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    Membrane tab lines with no cell on the membrane list (
+                    {membraneMatch.unmatched.length})
+                  </summary>
+                  <ul className="mt-1 text-xs text-muted-foreground">
+                    {membraneMatch.unmatched.map((u) => (
+                      <li key={u.item.rowIndex}>
+                        row {u.item.rowIndex + 1}: {u.item.description} {u.item.mil} mil{" "}
+                        {u.item.color} — {u.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {match.duplicatesInSheet.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Listed twice on the sheet (the last line wins):{" "}
+                  {match.duplicatesInSheet.slice(0, 10).join(", ")}
+                  {match.duplicatesInSheet.length > 10 ? "…" : ""}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                3. Likely matches ({triage.likely.length})
+              </CardTitle>
+              <CardDescription>
+                Sheet lines with no item number on the price list, next to the product whose name
+                they fit. Link saves the item number and the line moves up to the matched list. Not
+                this sends it down to No match. A product with an old number the sheet no longer
+                carries shows the old number.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {triage.likely.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing to decide.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Sheet line</TableHead>
+                        <TableHead className="text-right">Sheet price</TableHead>
+                        <TableHead>Product on the price list</TableHead>
+                        <TableHead className="text-right">Now</TableHead>
+                        <TableHead>Match</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {triage.likely.slice(0, likelyLimit).map((p) => (
+                        <TableRow key={p.key}>
+                          <TableCell className="text-xs">
+                            <span className="font-mono">{p.item.itemNo}</span> {p.item.description}
+                            {p.item.unit && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                per {p.item.unit}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">
+                            {money(p.item.price)}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="text-muted-foreground">{p.target.category} › </span>
+                            {p.target.row_label}
+                            {p.target.price_col !== "Price" && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                {p.target.price_col}
+                              </span>
+                            )}
+                            {p.kind === "renumbered" && (
+                              <div className="text-[10px] text-muted-foreground">
+                                was item # <span className="font-mono">{p.oldItemNo}</span>, not on
+                                this sheet
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">
+                            {money(p.currentPrice)}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {p.strength === "strong" ? (
+                              <span className="font-semibold text-green-700 dark:text-green-400">
+                                strong
+                              </span>
+                            ) : (
+                              <span className="text-amber-700 dark:text-amber-400">possible</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                className="h-7"
-                                title="This number really is this product — remember the sheet wording and stop flagging it (it flags again if the wording changes)"
-                                onClick={() =>
-                                  void upsertFn({
-                                    data: {
-                                      item_no: p.item_no,
-                                      screen_id: p.screen_id,
-                                      row_label: p.row_label,
-                                      price_col: p.price_col,
-                                      dl_description: p.description,
-                                      confirmed_description: p.description,
-                                    },
-                                  })
-                                    .then(() => {
-                                      toast.success(
-                                        `Confirmed ${p.item_no} → ${p.row_label} as "${p.description}"`,
-                                      );
-                                      refresh();
-                                    })
-                                    .catch((e: unknown) =>
-                                      toast.error(
-                                        e instanceof Error ? e.message : "Could not confirm",
-                                      ),
-                                    )
-                                }
-                              >
-                                Confirm mapping
+                              <Button size="sm" className="h-7" onClick={() => void link(p)}>
+                                Link
                               </Button>
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="ghost"
                                 className="h-7"
-                                onClick={() =>
-                                  void deleteFn({
-                                    data: {
-                                      item_no: p.item_no,
-                                      screen_id: p.screen_id,
-                                      row_label: p.row_label,
-                                      price_col: p.price_col,
-                                    },
-                                  })
-                                    .then(() => {
-                                      toast.success(`Removed ${p.item_no} from ${p.row_label}`);
-                                      refresh();
-                                    })
-                                    .catch((e: unknown) =>
-                                      toast.error(
-                                        e instanceof Error ? e.message : "Could not remove mapping",
-                                      ),
-                                    )
-                                }
+                                onClick={() => setDismissed((d) => new Set(d).add(p.key))}
                               >
-                                Remove mapping
+                                Not this
                               </Button>
                             </div>
                           </TableCell>
@@ -1151,62 +988,49 @@ export function PriceImportPage() {
                       ))}
                     </TableBody>
                   </Table>
+                  {triage.likely.length > likelyLimit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setLikelyLimit((l) => l + 100)}
+                    >
+                      Show more ({triage.likely.length - likelyLimit} left)
+                    </Button>
+                  )}
                 </div>
-              </details>
-            )}
-            {unitSkipped.length > 0 && (
-              <details className="rounded-md border border-amber-300 p-3" open>
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Unit mismatch — not written ({unitSkipped.length})
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  The catalog prices these per box / bag / package while the sheet prices per piece
-                  (or the reverse), and the row has no pack quantity to convert with. Enter the
-                  quantity on the catalog screen (Fasteners/Box, Parts/Bag, Parts/Package) and
-                  reload the file.
-                </p>
-                <ul className="mt-1 text-xs text-muted-foreground">
-                  {unitSkipped.map((u) => (
-                    <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
-                      {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
-                      {u.mapping.price_col}: {u.reason}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {membraneSkipped.length > 0 && (
-              <details className="rounded-md border border-amber-300 p-3">
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Membrane roll lines not converted to $/sq ft ({membraneSkipped.length})
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  The membrane matrix is priced per sq ft; a roll price is only written once it can
-                  be divided by the roll&apos;s area from the sheet&apos;s Size column. These lines
-                  are left as they are.
-                </p>
-                <ul className="mt-1 text-xs text-muted-foreground">
-                  {membraneSkipped.map((u) => (
-                    <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
-                      {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
-                      {u.mapping.price_col}: {u.reason}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {match.noPrice.length > 0 && (
-              <details>
-                <summary className="cursor-pointer text-sm font-semibold">
-                  Matched but no price in the sheet ({match.noPrice.length})
-                </summary>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {match.noPrice.map((u) => u.itemNo).join(", ")}
-                </p>
-              </details>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                4. No match found ({noMatchShown.length.toLocaleString()})
+              </CardTitle>
+              <CardDescription>
+                Sheet lines nothing on the price list resembles. A full Duro-Last list carries
+                thousands of products the estimator never prices, so only link the ones you bid:
+                pick the product and press Link, or Skip to hide the line for this file.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {noMatchShown.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing left.</p>
+              ) : (
+                <UnmatchedList
+                  items={noMatchShown}
+                  targets={targets}
+                  defaultTarget={defaultTarget}
+                  drafts={mapDrafts}
+                  setDrafts={setMapDrafts}
+                  onMap={(it, t) => void saveMapping(it.itemNo, t, it.description)}
+                  onSkip={(it) => setSkipped((s) => new Set(s).add(it.key))}
+                  onAdd={openNewProduct}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {/* ── Add as new product ────────────────────────────────────────── */}
@@ -1324,9 +1148,6 @@ export function PriceImportPage() {
               written: {changed.length} change ({increases} up, {decreases} down, {newlyPriced}{" "}
               newly priced
               {swings > 0 ? `; ${swings} flagged ⚠ as a likely unit problem` : ""}
-              {suspect.filter((p) => p.current !== p.next).length > 0
-                ? `; ${suspect.filter((p) => p.current !== p.next).length} flagged ⚠ as a likely renumbered item`
-                : ""}
               ), {plan.length - changed.length} already at the sheet price.
               {match && match.unmatched.length > 0
                 ? ` ${match.unmatched.length.toLocaleString()} sheet item(s) with no mapping are skipped.`
@@ -1390,20 +1211,6 @@ export function PriceImportPage() {
                         <TableCell className="text-xs text-muted-foreground">
                           {p.description}
                           {p.note && <div className="text-[10px] italic">{p.note}</div>}
-                          {(p.nameDiffers || p.descChanged) && (
-                            <div
-                              className="text-[10px] font-semibold text-destructive"
-                              title={
-                                p.descChanged
-                                  ? `Last import stamped "${p.previousDescription ?? ""}"`
-                                  : "The sheet wording does not name this catalog product"
-                              }
-                            >
-                              ⚠ {p.nameDiffers ? "description does not name this product" : ""}
-                              {p.nameDiffers && p.descChanged ? "; " : ""}
-                              {p.descChanged ? "description changed since last import" : ""}
-                            </div>
-                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{p.unit}</TableCell>
                         <TableCell className="text-right text-xs tabular-nums">
@@ -1455,10 +1262,9 @@ export function PriceImportPage() {
             )}
             <p className="text-xs text-muted-foreground">
               Untick any change you do not want written; the rest still apply. Rows flagged ⚠ (more
-              than double or under half the current price, or a description that does not name the
-              product) start unticked — tick one only once you have checked it. Unticked rows keep
-              their current price and come back on the next import. Every confirmed import is logged
-              below and can be reverted.
+              than double or under half the current price) start unticked — tick one only once you
+              have checked the units. Unticked rows keep their current price and come back on the
+              next import. Every confirmed import is logged below and can be reverted.
             </p>
           </div>
           <DialogFooter>
@@ -1485,9 +1291,8 @@ function UnmatchedList(props: {
   drafts: Record<string, TargetRef>;
   setDrafts: (f: (d: Record<string, TargetRef>) => Record<string, TargetRef>) => void;
   onMap: (it: SheetItem, t: TargetRef) => void;
+  onSkip: (it: SheetItem) => void;
   onAdd: (it: SheetItem) => void;
-  /** Closest catalog product by name for a sheet line (computed for the rows on screen only). */
-  suggest: (it: SheetItem) => { row: CatalogRowRef; score: number } | null;
 }) {
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
@@ -1501,11 +1306,11 @@ function UnmatchedList(props: {
     return { total: list.length, rows: list.slice(0, limit) };
   }, [props.items, q, limit]);
   return (
-    <div className="mt-2 space-y-2">
+    <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Input
           className="h-8 max-w-xs text-xs"
-          placeholder="Filter unmatched by item # or description…"
+          placeholder="Find by item # or description…"
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -1520,12 +1325,10 @@ function UnmatchedList(props: {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Row</TableHead>
               <TableHead>Item #</TableHead>
-              <TableHead>Sheet description</TableHead>
-              <TableHead>Price</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Map to</TableHead>
+              <TableHead>Sheet line</TableHead>
+              <TableHead className="text-right">Price</TableHead>
+              <TableHead>Link to</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -1534,11 +1337,16 @@ function UnmatchedList(props: {
               const draft = props.drafts[u.key] ?? props.defaultTarget;
               return (
                 <TableRow key={u.key}>
-                  <TableCell className="text-xs text-muted-foreground">{u.rowIndex + 1}</TableCell>
                   <TableCell className="font-mono text-xs">{u.itemNo}</TableCell>
-                  <TableCell className="text-xs">{u.description}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{money(u.price)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{u.unit}</TableCell>
+                  <TableCell className="text-xs">
+                    {u.description}
+                    {u.unit && (
+                      <span className="ml-1 text-[10px] text-muted-foreground">per {u.unit}</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">
+                    {money(u.price)}
+                  </TableCell>
                   <TableCell>
                     {draft && (
                       <TargetPicker
@@ -1547,57 +1355,33 @@ function UnmatchedList(props: {
                         onChange={(v) => props.setDrafts((d) => ({ ...d, [u.key]: v }))}
                       />
                     )}
-                    {(() => {
-                      const sug = props.suggest(u);
-                      if (!sug) return null;
-                      const isDraft =
-                        draft?.screen_id === sug.row.screen_id &&
-                        draft?.row_label === sug.row.row_label;
-                      return (
-                        <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-                          Suggested: {sug.row.category} › {sug.row.row_label}
-                          {!isDraft && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-2 text-[11px]"
-                              onClick={() =>
-                                props.setDrafts((d) => ({
-                                  ...d,
-                                  [u.key]: {
-                                    screen_id: sug.row.screen_id,
-                                    row_label: sug.row.row_label,
-                                    price_col: sug.row.price_col,
-                                  },
-                                }))
-                              }
-                            >
-                              Use
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })()}
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-1">
                       <Button
                         size="sm"
-                        variant="outline"
+                        className="h-7"
                         disabled={!draft}
-                        title="Point this item number at an existing catalog product"
                         onClick={() => draft && props.onMap(u, draft)}
                       >
-                        Map
+                        Link
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        title="Create a new catalog product from this sheet line"
+                        className="h-7"
+                        onClick={() => props.onSkip(u)}
+                      >
+                        Skip
+                      </Button>
+                      <button
+                        type="button"
+                        className="text-[11px] text-muted-foreground underline underline-offset-2"
+                        title="Create a new product on the price list from this sheet line"
                         onClick={() => props.onAdd(u)}
                       >
-                        Add as new product
-                      </Button>
+                        add as new product
+                      </button>
                     </div>
                   </TableCell>
                 </TableRow>
