@@ -331,7 +331,8 @@ const universalOther = (): SeedRow[] => [
   other("Protection Mat 4.5 oz (per sq ft; 15' x 320' roll, 4,800 sq ft)", "W56RAC9000", 0.22),
   other("Drain Bar 4\" x 10' (includes fasteners; 100 lin ft/tube)", "W56RAC358-3065", 335.0),
   other('Drain Bar Fasteners 1 1/2" (1000/ctn)', "W56RAC4255", 655.0),
-  other("Quickseam Yellow Safety Strip 5.5\" x 100' (100 lin ft)", "W56RAC1870", 397.0),
+  // $545/ct on the Universal accessories sheet (the $397 above it is the termination bar; Nov 2).
+  other("Quickseam Yellow Safety Strip 5.5\" x 100' (100 lin ft)", "W56RAC1870", 545.0),
   other("Setter Tool (AP & HD pre-assembled plates)", "W56RAC358-2035", 107.0),
   other("Stand-Up Fastening Tool (AP & HD pre-assembled plates)", "W56RAC358-2039", 469.0),
   other("Metal Cap Nailing Machine", "W56RAC2700", 3000.0),
@@ -1033,7 +1034,8 @@ export const DURO_LAST_OTHER_SCREEN: SeedScreen = {
     other(`${DT}Unsupported T-Joint Cover - White (100/box)`, "45105TW", 67.0),
     other(`${DT}Unsupported T-Joint Cover - Tan (100/box)`, "45105TB", 67.0),
     other(`${DT}Unsupported T-Joint Cover - Gray (100/box)`, "45105TG", 67.0),
-    other(`${DT}TECH-Bond Spray Solvent Adhesive (canister)`, "11028T", 595.0),
+    // The spray adhesive canister (11028T) is on the Adhesives list as "TECH-Bond TPO Spray
+    // Adhesive" (ADHESIVE_PRODUCTS): the bid estimator prices adhesives from that list by name.
     other(`${DT}TECH-Bond Spray Adhesive Cleaner (canister)`, "11021T", 265.0),
     other(`${DT}TECH-Bond Spray Gun (vertical application)`, "11023-111T", 172.0),
     other(`${DT}TECH-Bond Spray Gun with Extension (horizontal application)`, "11023T", 403.0),
@@ -1240,6 +1242,16 @@ export const ADHESIVE_PRODUCTS: SeedAdhesiveProduct[] = [
     unit: "5 gal",
     coverage: membraneCoverage([DURO_TECH_SYSTEM], null),
   },
+  // The sheet's "TECH-Bond TPO Spray Solvent Adhesive" canister, $595. It sat on Other
+  // Accessories until Nov 2, where the estimator never looked for it; coverage per canister is
+  // not on the sheet (the office fills it on the Adhesives grid, as for the two pails above).
+  {
+    name: "TECH-Bond TPO Spray Adhesive",
+    part_no: "11028T",
+    price: 595,
+    unit: "canister",
+    coverage: membraneCoverage([DURO_TECH_SYSTEM], null),
+  },
   // ---- Firestone insulation adhesives (the Insulations group = the underlayment adhesive list).
   {
     name: "I.S.O.SPRAY S Part A + Part B (55 gal drum set)",
@@ -1366,7 +1378,9 @@ export const CUSTOM_APPLICATION_ROWS: Array<SeedRow & { part: string }> = [
     "W56-RAC-GR02",
   ),
   custom('SkyPaver Ruby 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVR"),
-  custom('SkyPaver Chestnut 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVW"),
+  // The sheet prints PAVW for Chestnut and Ash alike; its 1.98" set prints Chestnut PAVB2 / Ash
+  // PAVW2, so Chestnut 1.23" is PAVB (Nov 2).
+  custom('SkyPaver Chestnut 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVB"),
   custom('SkyPaver Sage 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVO"),
   custom('SkyPaver Ash 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVW"),
   custom('SkyPaver Lavender 4" x 8" x 1.23" (per grid of 8, 1.78 sq ft)', 24.0, "W56GARPAVV"),
