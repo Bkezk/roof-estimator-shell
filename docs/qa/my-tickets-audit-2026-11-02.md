@@ -132,10 +132,11 @@ server's crew path. Either is a design choice, so no change was made.
 
 ## Behaviour notes (not changed)
 
-- A clock press on an **Open** ticket used to move it to **Scheduled** even with no date (T14: C became
-  Scheduled with no day, and a "Ticket #…" follow-up opened for the technician on that stage
-  change). The owner: "opening a ticket clock shouldn't set it to scheduled as it isn't scheduled" —
-  FIXED, see part 2.
+- A clock press on an **Open** ticket moves it to **Scheduled**, with or without a date (T14: C
+  became Scheduled with no day; `syncFollowup` then opens the technician's "Ticket #…" follow-up,
+  no notice since the actor is the assignee). Confirmed by the owner on Nov 2 as intended: Start
+  travel and On site should do that. (It was taken out for an hour on a misreading and put back —
+  part 2.)
 - The banner's minutes tick every 30 s, so the label can lag up to 30 s; the cards never re-render
   for it (the Oct 28 change). Proved: "0 m" at 70 s after a move, "1 m" by 95 s.
 - A ticket that is overdue or already started (any `field_status`) is in Today whatever its date;
@@ -200,28 +201,22 @@ Oct 20, H2 booked Nov 5, H3 Open with no date, H4 Open and due Oct 30, H5 booked
 | the live ticket #6031 (the only live scheduled one) | its property has no other ticket: count 0 before and after |                                                                                                                                                           |
 | in the browser, card H2 on My tickets               | —                                                          | "History here: 2 earlier tickets, last Oct 30 (Claude temp H4 …)"                                                                                         |
 
-### Fix 2 — a clock press leaves an Open ticket Open
+### Fix 2 — withdrawn: a clock press on an Open ticket moves it to Scheduled, as before
 
-`src/lib/service-field.functions.ts` `setFieldStatus`: the Start travel (`en_route`) and On site
-(`on_site`) patches no longer carry `stage: job.stage === "open" ? "scheduled" : job.stage`; they
-stamp `field_status` and the time only. The stage is the office's. Complete still sets Done; Undo of
-a Done ticket still steps it back to Scheduled as before. Nothing else changed.
-
-Proof: in the browser as the test login, On site on a live Open, undated temporary ticket (#6050) —
-toast "On site at #6050 …", the card "You are on site here" (it moves into Today, as every started
-ticket does), then Leave site under a minute. The database afterwards: `stage open`, `on_site_at`
-stamped, timeline rows "on_site" and "left site" and **no stage row** (the stage trigger logs every
-change of stage; before the fix the same press on #6046 wrote one, and opened a follow-up). No
-follow-up was opened, nobody was notified.
+Read from "opening a ticket clock shouldn't set it to scheduled as it isn't scheduled", Start travel
+and On site were changed to leave an Open ticket Open (commit `caf274a`, proved in the browser on a
+temporary Open ticket: stage still open after On site, no stage row on its timeline). The owner then
+corrected the reading ("sorry misunderstood, start travel and on site should do that"), so the
+handler is back exactly as it was: `en_route` and `on_site` set `stage: "scheduled"` on an Open
+ticket. `tech-clock-wiring.test.ts` keeps its original pin and the new test file pins the same rule
+under the owner's words, so the press is not mistaken for a leftover again.
 
 ### Tests
 
 `src/lib/my-tickets-nov2-fixes.test.ts` (5 tests): the migration's rule and its presence on all
-four reads; Start travel and On site on an Open ticket through the real handler (fake Supabase)
-leave `stage open`; the handler's source no longer flips the stage. On the old code all five fail
-("expected 'scheduled' to be 'open'", and no migration); on the new code all pass.
-`tech-clock-wiring.test.ts` had pinned the old flip ("an Open ticket goes Scheduled on Start travel
-(as the old buttons did)"); that one test now pins the new rule.
+four reads (both fail without the migration file); Start travel and On site on an Open ticket
+through the real handler (fake Supabase) set `stage scheduled`, and the handler's source carries
+that on both presses (the owner's confirmed rule). `tech-clock-wiring.test.ts` is unchanged.
 
 Delivery chain: prettier, eslint (0), `bunx tsc --noEmit -p .` (0), the full suite 465 files /
 5,984 tests green, `bun run build` green.

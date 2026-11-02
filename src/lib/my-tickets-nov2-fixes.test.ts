@@ -7,9 +7,10 @@
  *     ticket_is_history(stage, scheduled_date): a ticket is history unless it is still Open /
  *     Scheduled for today or later, or undated. Pinned here by the migration's text; the live
  *     proof is in the audit record.
- *  2. "opening a ticket clock shouldn't set it to scheduled as it isn't scheduled": Start travel
- *     and On site moved an Open ticket to Scheduled (a leftover of the Oct 8 buttons). The stage
- *     is the office's: a press stamps where the technician is and leaves the stage alone.
+ *  2. The stage on a clock press: Start travel and On site move an Open ticket to Scheduled (as
+ *     the Oct 8 buttons did). Changed on Nov 2 on a misreading of the owner, and put back the same
+ *     afternoon ("sorry misunderstood, start travel and on site should do that"): pinned here so it
+ *     is not taken for a leftover again.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,7 +74,7 @@ describe("1. history at a property counts only what has happened (migration 2026
   });
 });
 
-describe("2. a clock press leaves an Open ticket Open", () => {
+describe("2. a clock press on an Open ticket moves it to Scheduled (the owner, Nov 2: on purpose)", () => {
   const A = "11111111-1111-4111-8111-111111111111";
   const B = "11111111-1111-4111-8111-222222222222";
   const TECH = "22222222-2222-4222-8222-222222222222";
@@ -135,23 +136,23 @@ describe("2. a clock press leaves an Open ticket Open", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("Start travel: en route stamped, the stage still Open", async () => {
+  it("Start travel: en route stamped, the ticket Scheduled", async () => {
     const r = await press(A, "en_route");
-    expect(r.row.stage).toBe("open");
-    expect(row(A)).toMatchObject({ stage: "open", field_status: "en_route" });
+    expect(r.row.stage).toBe("scheduled");
+    expect(row(A)).toMatchObject({ stage: "scheduled", field_status: "en_route" });
   });
-  it("On site straight away (no travel): on site stamped, the stage still Open", async () => {
+  it("On site straight away (no travel): on site stamped, the ticket Scheduled", async () => {
     const r = await press(B, "on_site");
-    expect(r.row.stage).toBe("open");
+    expect(r.row.stage).toBe("scheduled");
     expect(row(B)).toMatchObject({
-      stage: "open",
+      stage: "scheduled",
       field_status: "on_site",
       on_site_at: T0.toISOString(),
     });
   });
-  it("the handler no longer flips the stage on a press (the Done press still sets Done)", () => {
+  it("the handler's two presses carry the flip; a Scheduled ticket stays Scheduled (the Done press sets Done)", () => {
     const src = read("src/lib/service-field.functions.ts");
-    expect(src).not.toContain('stage: job.stage === "open" ? "scheduled" : job.stage');
+    expect(src.split('stage: job.stage === "open" ? "scheduled" : job.stage')).toHaveLength(3);
     expect(src).toContain('{ field_status: null, completed_at: now, stage: "done" }');
   });
 });
