@@ -218,6 +218,16 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </span>
         )
+      ) : cover.isError ? (
+        // Said plainly (owner: bugs announced loudly), never a quiet "No cover photo".
+        <span
+          role="alert"
+          className="flex h-24 w-40 shrink-0 items-center justify-center rounded-md border border-destructive/40 p-1 text-center text-[10px] text-destructive"
+          title={errText(cover.error)}
+          data-cover-error
+        >
+          Could not make the aerial: {errText(cover.error).slice(0, 120)}
+        </span>
       ) : cover.isPending && willMake ? (
         <span
           className="flex h-24 w-32 shrink-0 items-center justify-center gap-1 rounded-md border border-dashed p-1 text-center text-[10px] text-muted-foreground"
@@ -287,7 +297,7 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
               <Trash2 className="mr-1 h-4 w-4" /> Remove
             </Button>
           )}
-          {!has && note && !cover.isPending && (
+          {!has && (note || cover.isError) && !cover.isPending && (
             <Button
               type="button"
               size="sm"

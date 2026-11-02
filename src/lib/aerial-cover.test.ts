@@ -569,6 +569,28 @@ describe("the address finder (shared with the ticket aerial): a different town i
   });
 });
 
+describe("the server runs on Cloudflare Workers", () => {
+  it("decodes PNG with upng-js, never pngjs (its zlib call throws there: every Kentucky tile decoded to nothing on the first live run)", () => {
+    const src = read("src/lib/site-aerial-cover.server.ts");
+    expect(src).toContain('import UPNG from "upng-js";');
+    expect(src).not.toContain('from "pngjs"');
+    expect(src).toContain("UPNG.toRGBA8(png)[0]");
+    const pkg = JSON.parse(read("package.json")) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    expect(pkg.dependencies["upng-js"]).toBeTruthy();
+    expect(pkg.dependencies["jpeg-js"]).toBeTruthy();
+    expect(pkg.dependencies["pngjs"]).toBeUndefined();
+  });
+  it("the card says plainly when the server could not make the aerial, with Try the aerial again", () => {
+    const card = read("src/components/crm/property-sites.tsx");
+    expect(card).toContain("data-cover-error");
+    expect(card).toContain("Could not make the aerial: {errText(cover.error).slice(0, 120)}");
+    expect(card).toContain("{!has && (note || cover.isError) && !cover.isPending && (");
+  });
+});
+
 describe("the document loader and the card", () => {
   it("documents: a property with no cover gets its aerial made when the editor opens", () => {
     const src = read("src/lib/documents.functions.ts");

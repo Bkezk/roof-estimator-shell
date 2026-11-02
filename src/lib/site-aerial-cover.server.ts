@@ -12,12 +12,12 @@
  * Called by the property card when it has no picture (site-aerial-cover.functions.ts
  * ensureSiteAerialCover, a few at a time) and by the document editor's loader, so a document
  * made for a property no one visited still prints the building. The lookups are injectable for
- * the tests. Server only (pngjs / jpeg-js are Node libraries): the pages reach it through the
+ * the tests. Server only (the decoders and the JPEG encoder are server weight): the pages reach it through the
  * server functions, which import it when they run.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import jpeg from "jpeg-js";
-import { PNG } from "pngjs";
+import UPNG from "upng-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import {
@@ -59,8 +59,15 @@ export async function fetchTileBytes(url: string): Promise<Uint8Array | null> {
 export function decodeTile(bytes: Uint8Array): DecodedTile | null {
   try {
     if (bytes[0] === 0x89 && bytes[1] === 0x50) {
-      const png = PNG.sync.read(Buffer.from(bytes));
-      return { width: png.width, height: png.height, data: new Uint8Array(png.data) };
+      // upng-js, not pngjs: the server runs on Cloudflare Workers, where pngjs's zlib call
+      // throws ("Class constructor Inflate cannot be invoked without 'new'") and every
+      // Kentucky tile decoded to nothing (Nov 2, the first live run). upng-js inflates itself.
+      const copy = new Uint8Array(bytes.length);
+      copy.set(bytes);
+      const png = UPNG.decode(copy.buffer);
+      const rgba = UPNG.toRGBA8(png)[0];
+      if (!rgba) return null;
+      return { width: png.width, height: png.height, data: new Uint8Array(rgba) };
     }
     if (bytes[0] === 0xff && bytes[1] === 0xd8) {
       const img = jpeg.decode(Buffer.from(bytes), { useTArray: true, formatAsRGBA: true });
