@@ -344,20 +344,21 @@ describe("the ticket aerial shares the lookup", () => {
     expect(fn).toContain(
       "return buildingAtImpl(context.supabase, { lat: data.lat, lng: data.lng });",
     );
+    // The lookup, Pick the building, and (Nov 3) the suggestions: all under Takeoff access.
     expect(
       fn.match(/assertPageAccess\(context\.supabase, context\.userId, "takeoff"\)/g),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 });
 
-describe("the New takeoff dialog's third option", () => {
+describe("the New takeoff dialog's address option", () => {
   const src = read("src/components/takeoff-page.tsx");
-  it('offers "From an address" beside the PDF and the screenshot', () => {
-    expect(src).toContain('const TAKEOFF_SOURCES = ["pdf", "image", "address"] as const;');
-    expect(src).toContain('address: "From an address",');
+  it('offers "Satellite picture" (first, the default since Nov 3) beside the PDF and the screenshot', () => {
+    expect(src).toContain('const TAKEOFF_SOURCES = ["address", "pdf", "image"] as const;');
+    expect(src).toContain('address: "Satellite picture",');
     expect(src).toContain('pdf: "Plan-set PDF",');
-    expect(src).toContain('image: "Aerial screenshot",');
-    expect(src).toContain("<AerialAddressPicker disabled={!!busy} onChange={setAerial} />");
+    expect(src).toContain('image: "Screenshot you took",');
+    expect(src).toContain("<AerialAddressPicker\n              disabled={!!busy}");
   });
   it('"Use this picture": the imagery alone to a PNG, takeoffFromAerial, the same upload as a screenshot', () => {
     expect(src).toContain('"Use this picture"');

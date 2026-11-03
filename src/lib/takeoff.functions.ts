@@ -241,7 +241,7 @@ export const createTakeoff = createServerFn({ method: "POST" })
         pages: z.array(pageSchema).max(500),
         building_id: z.string().uuid().nullable().optional(),
         account_id: z.string().uuid().nullable().optional(),
-        /** The address an aerial underlay was looked up by (New takeoff › From an address). */
+        /** The address an aerial underlay was looked up by (New takeoff › Satellite picture). */
         source_address: z.string().trim().min(1).max(300).nullable().optional(),
       })
       .parse(d),

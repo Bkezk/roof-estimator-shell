@@ -1,5 +1,5 @@
 /**
- * "New takeoff › From an address" (owner, Oct 27): the pure side of the dialog's third option.
+ * "New takeoff › Satellite picture" (owner, Oct 27; the first option since Nov 3): the pure side.
  * `takeoffFromAerial` turns the aerial view the user settled on into createTakeoff's input — an
  * image underlay named after the address, one page already scaled from the imagery
  * (./aerial-scale.ts) — and the file name its PNG is uploaded under. `addressStateHint` reads the

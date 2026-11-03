@@ -1,7 +1,7 @@
 /**
  * The aerial picture as a PNG (browser only: a canvas). Shared by the ticket's "Save markup"
  * (src/components/service/aerial-markup.tsx — imagery, then the marks and legend painted over
- * it) and the takeoff's "New takeoff › From an address" (owner, Oct 27 — the imagery alone, as
+ * it) and the takeoff's "New takeoff › Satellite picture" (owner, Oct 27 — the imagery alone, as
  * the underlay the roof is measured on). The tiles are the same `tilesForView` the screen draws,
  * so the PNG is the view pixel for pixel: a point's ground scale is `metresPerPixel` at the
  * view's zoom and latitude (src/lib/aerial-geo.ts).

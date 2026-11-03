@@ -3,7 +3,7 @@
  * takeoff please remove that, just make it the name and plan file or aerial screenshot or
  * address"). The customer is optional for everyone; what is needed is:
  *   - Plan-set PDF / aerial screenshot: a name and the file;
- *   - From an address: the address picture (the name is optional — it defaults to the address).
+ *   - Satellite picture (an address): the address picture (the name is optional — it defaults to the address).
  * Pure.
  */
 export type NewTakeoffMode = "pdf" | "image" | "address";

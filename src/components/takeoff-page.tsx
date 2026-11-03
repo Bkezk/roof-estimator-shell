@@ -80,6 +80,8 @@ import { isTakeoffLocked } from "@/lib/takeoff/lock";
 import { suggestTakeoffName } from "@/lib/takeoff/naming";
 import { canCreateTakeoff, newTakeoffBlocker } from "@/lib/takeoff/new-takeoff-rules";
 import { AerialAddressPicker, type AerialSelection } from "@/components/takeoff/aerial-pick";
+import type { AddressSuggestion } from "@/lib/takeoff-aerial.functions";
+import { suggestionLabel } from "@/lib/takeoff/address-suggest";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
@@ -87,19 +89,26 @@ import { pdfPageCount } from "@/components/takeoff/underlay";
 const MAX_BYTES = 100 * 1024 * 1024;
 const ACCEPT = ["application/pdf", "image/png", "image/jpeg"];
 
-/** Where a new takeoff's underlay comes from (the New takeoff dialog's three options). */
-const TAKEOFF_SOURCES = ["pdf", "image", "address"] as const;
+/**
+ * Where a new takeoff's underlay comes from (the New takeoff dialog's three options). The
+ * satellite picture comes first and is the default (owner, Nov 3: "when you want a satelitte
+ * picture theres no easy way to search an address from the new takeoff prompt" — it used to be
+ * the third pill, named From an address, behind a PDF default).
+ */
+const TAKEOFF_SOURCES = ["address", "pdf", "image"] as const;
 type TakeoffSource = (typeof TAKEOFF_SOURCES)[number];
+const DEFAULT_SOURCE: TakeoffSource = "address";
 const SOURCE_LABELS: Record<TakeoffSource, string> = {
+  address: "Satellite picture",
   pdf: "Plan-set PDF",
-  image: "Aerial screenshot",
-  address: "From an address",
+  image: "Screenshot you took",
 };
 const SOURCE_HELP: Record<TakeoffSource, string> = {
-  pdf: "A plan-set PDF (every sheet becomes a page), up to 100 MB. Set the scale from a known dimension.",
-  image: "An aerial screenshot (PNG or JPEG), up to 100 MB. Set the scale from a known dimension.",
   address:
-    "Type the address, find it on our aerial imagery (Kentucky and Tennessee), frame the roof, and use the picture: it opens scaled, ready to measure.",
+    "Search an address: the satellite picture comes up (Kentucky and Tennessee), frame the roof and use it. It opens scaled, ready to measure.",
+  pdf: "A plan-set PDF (every sheet becomes a page), up to 100 MB. Set the scale from a known dimension.",
+  image:
+    "An aerial screenshot you took (PNG or JPEG), up to 100 MB. Set the scale from a known dimension.",
 };
 const SOURCE_ACCEPT: Record<Exclude<TakeoffSource, "address">, string> = {
   pdf: "application/pdf",
@@ -249,9 +258,9 @@ function TakeoffList() {
             <Ruler className="h-6 w-6" /> Takeoffs
           </h1>
           <p className="text-sm text-muted-foreground">
-            Open a plan-sheet PDF or an aerial screenshot and set the scale from a known dimension,
-            or search an address for its aerial (scaled for you), then draw the roof areas, walls
-            and penetrations.
+            Search an address for its satellite picture (scaled for you), or open a plan-sheet PDF
+            or a screenshot and set the scale from a known dimension, then draw the roof areas,
+            walls and penetrations.
           </p>
         </div>
         <Button size="lg" className="text-base font-semibold" onClick={() => setCreating(true)}>
@@ -637,9 +646,9 @@ function NewTakeoffDialog(props: {
   const deleteFn = useServerFn(deleteTakeoff);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  // Which of the three options is open: a plan-set PDF, an aerial screenshot, or the aerial of
-  // an address (owner, Oct 27).
-  const [source, setSource] = useState<TakeoffSource>("pdf");
+  // Which of the three options is open: the satellite picture of an address (the default,
+  // owner, Nov 3), a plan-set PDF, or a screenshot (owner, Oct 27).
+  const [source, setSource] = useState<TakeoffSource>(DEFAULT_SOURCE);
   // The address option's picture as it stands (null until an address is found or picked).
   const [aerial, setAerial] = useState<AerialSelection | null>(null);
   // The customer profile the takeoff belongs to — optional for everyone (owner, Oct 27:
@@ -656,7 +665,7 @@ function NewTakeoffDialog(props: {
     setName("");
     setNameTouched(false);
     setFile(null);
-    setSource("pdf");
+    setSource(DEFAULT_SOURCE);
     setAerial(null);
     setAccount(null);
     setBusy(null);
@@ -679,6 +688,16 @@ function NewTakeoffDialog(props: {
     setAccount(v);
     // "Acme Foods — Plant 2 · Sep 30, 2026", numbered when that name is already in the list.
     if (!nameTouched) setName(v ? suggestTakeoffName(v.label, props.existingNames) : "");
+  };
+  /** A property picked from the address suggestions files the takeoff under its customer. */
+  const pickSuggestion = (s: AddressSuggestion) => {
+    const v: AccountPickerValue = {
+      account_id: s.account_id,
+      site_id: s.site_id,
+      label: suggestionLabel(s),
+    };
+    setAccount(v);
+    if (!nameTouched) setName(suggestTakeoffName(v.label, props.existingNames));
   };
 
   const pickFile = (f: File | null) => {
@@ -864,6 +883,14 @@ function NewTakeoffDialog(props: {
               </Button>
             ))}
           </div>
+          {source === "address" && (
+            <AerialAddressPicker
+              disabled={!!busy}
+              autoFocus
+              onChange={setAerial}
+              onSuggestion={pickSuggestion}
+            />
+          )}
           {canPickCustomer && (
             <div className="space-y-1">
               <Label htmlFor="takeoff-customer">Customer (optional)</Label>
@@ -871,7 +898,7 @@ function NewTakeoffDialog(props: {
                 id="takeoff-customer"
                 value={account}
                 disabled={!!busy}
-                autoFocus
+                autoFocus={source !== "address"}
                 placeholder="Start typing a customer name…"
                 onChange={pickAccount}
               />
@@ -909,9 +936,7 @@ function NewTakeoffDialog(props: {
                 : "Required. Name the job, not the plan file."}
             </p>
           </div>
-          {source === "address" ? (
-            <AerialAddressPicker disabled={!!busy} onChange={setAerial} />
-          ) : (
+          {source !== "address" && (
             <div className="space-y-1">
               <Label htmlFor="takeoff-file">
                 {source === "pdf" ? "Plan file" : "Screenshot"}{" "}
