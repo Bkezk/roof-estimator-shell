@@ -49,23 +49,37 @@ const lines: OrderLine[] = [
 describe("order list export", () => {
   it("builds sheet rows with numbers kept numeric", () => {
     const rows = orderListRows(lines);
-    expect(ORDER_COLUMNS).toHaveLength(7);
-    expect(rows[0]).toEqual(["Membrane", "Duro-Bond - 50 · White", 55880, "sq ft", "", "", 55880]);
+    expect(ORDER_COLUMNS).toHaveLength(9);
+    expect(rows[0]).toEqual([
+      "Membrane",
+      "Duro-Bond - 50 · White",
+      55880,
+      "sq ft",
+      "",
+      "",
+      "",
+      "",
+      55880,
+    ]);
     expect(rows[1]).toEqual([
       "Adhesives",
       "Duro-Fleece Adhesive(cartridge)",
       3,
       "4-Cartridge Case",
+      "",
+      "",
       0.75,
       1.25,
       3,
     ]);
-    expect(rows[2]![5]).toBe("shelf in piece");
+    expect(rows[2]![7]).toBe("shelf in piece");
     expect(rows[3]).toEqual([
       "Accessories",
       "Sealants — Duro-Caulk Plus - White",
       15,
       "tube",
+      "",
+      "",
       15,
       2,
       0,

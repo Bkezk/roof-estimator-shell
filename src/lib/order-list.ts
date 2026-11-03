@@ -58,6 +58,33 @@ export interface OrderLine {
    * pieces vs feet): on hand is shown in its own unit and NOT netted.
    */
   stockUnit?: string;
+  /**
+   * Material price for ONE `unit` — the catalog figure the bid prices from (the engine's own
+   * unit cost for accessories, adhesives and fasteners; the membrane / underlayment cell for
+   * sq-ft lines). Absent when the catalog has no price for the product.
+   */
+  unitPrice?: number;
+  /** unitPrice × needed, to the cent: what this material costs for the whole job. */
+  total?: number;
+}
+
+/** A catalog price that can be shown: a finite number above zero. */
+const knownPrice = (p: number | null | undefined): p is number =>
+  typeof p === "number" && Number.isFinite(p) && p > 0;
+
+/** unitPrice × qty to the cent (the row's Material total). */
+export const lineTotal = (unitPrice: number, qty: number): number =>
+  Math.round(unitPrice * qty * 100) / 100;
+
+/** Material total across lines; `unpriced` counts lines the catalog has no price for. */
+export function orderListTotal(lines: readonly OrderLine[]): { total: number; unpriced: number } {
+  let total = 0;
+  let unpriced = 0;
+  for (const l of lines) {
+    if (l.total === undefined) unpriced += 1;
+    else total += l.total;
+  }
+  return { total: Math.round(total * 100) / 100, unpriced };
 }
 
 /**
@@ -229,6 +256,8 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
   const pieceFor = (c: OrderCell) => targetByScreen.get(c.screen_id)?.pieces?.[c.row_label] ?? null;
   const unitFor = (c: OrderCell, fallback: string) =>
     targetByScreen.get(c.screen_id)?.row_units?.[c.row_label] ?? fallback;
+  const catalogPrice = (c: OrderCell): number | null =>
+    targetByScreen.get(c.screen_id)?.values?.[c.row_label]?.[c.price_col] ?? null;
 
   const out: OrderLine[] = [];
   const add = (
@@ -238,6 +267,8 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
     unit: string,
     cell: OrderCell | undefined,
     pieces?: number,
+    /** Price for one `unit`; null = look the catalog cell up. */
+    unitPrice: number | null = null,
   ) => {
     if (needed <= 0) return;
     const resolved = cell && cellExists(cell) ? cell : undefined;
@@ -275,6 +306,11 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
       line.piece = pieceFor(resolved);
     }
     if (onHand !== undefined) line.onHand = onHand;
+    const price = unitPrice ?? (resolved ? catalogPrice(resolved) : null);
+    if (knownPrice(price)) {
+      line.unitPrice = price;
+      line.total = lineTotal(price, needed);
+    }
     out.push(line);
   };
 
@@ -325,16 +361,21 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
       "box",
       { screen_id: SCREEN.fasteners, row_label: rowKey, price_col: "Price/Box" },
       r.totalQty,
+      r.boxes > 0 && r.cost > 0 ? Math.round((r.cost / r.boxes) * 100) / 100 : null,
     );
   }
 
   // Adhesives: whole units (calc + extras) per adhesive.
   for (const l of i.build.adhesiveLines)
-    add("Adhesives", l.name, l.qty, "unit", {
-      screen_id: SCREEN.adhesives,
-      row_label: l.name,
-      price_col: "price",
-    });
+    add(
+      "Adhesives",
+      l.name,
+      l.qty,
+      "unit",
+      { screen_id: SCREEN.adhesives, row_label: l.name, price_col: "price" },
+      undefined,
+      knownPrice(l.unitCost) ? l.unitCost : null,
+    );
 
   // Every other Accessories line, matched to its catalog row by name.
   for (const l of i.build.accessories?.lines ?? []) {
@@ -346,6 +387,10 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
       l.qty,
       accessoryLineUnit(l.screen, l.name),
       matchAccessoryCell(l, i.targets),
+      undefined,
+      // The engine's unit cost is per the unit it bills (term bar per ft, drip edge per ft),
+      // which the name-matched catalog cell may not be (drip edge is priced per piece).
+      knownPrice(l.unitCost) ? l.unitCost : null,
     );
   }
   return out;

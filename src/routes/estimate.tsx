@@ -107,8 +107,14 @@ import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-char
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { tearOffLaborForSection } from "@/lib/engine/quantities";
-import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
-import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
+import { buildOrderList, describeOrderQty, orderListTotal, type OrderLine } from "@/lib/order-list";
+import {
+  ORDER_COLUMNS,
+  orderListHtml,
+  orderListRows,
+  orderMoney,
+  toBuyCount,
+} from "@/lib/order-list-export";
 import * as XLSX from "xlsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { addMovement, listMovements, listStock } from "@/lib/inventory.functions";
@@ -2401,6 +2407,8 @@ function EstimatePage() {
       { wch: 48 },
       { wch: 10 },
       { wch: 16 },
+      { wch: 11 },
+      { wch: 14 },
       { wch: 11 },
       { wch: 14 },
       { wch: 10 },
@@ -6316,6 +6324,18 @@ function EstimatePage() {
                               <TableHead className="text-right">Needed</TableHead>
                               <TableHead
                                 className="text-right"
+                                title="Catalog price for one unit of the product — the figure the bid prices from"
+                              >
+                                Price each
+                              </TableHead>
+                              <TableHead
+                                className="text-right"
+                                title="Price each × Needed — what this material costs for the whole job, before anything taken from inventory"
+                              >
+                                Material total
+                              </TableHead>
+                              <TableHead
+                                className="text-right"
                                 title="Taken from inventory for this bid — already subtracted from To buy"
                               >
                                 From inventory
@@ -6339,7 +6359,7 @@ function EstimatePage() {
                               .map((g) => (
                                 <Fragment key={g}>
                                   <TableRow className="bg-muted/40">
-                                    <TableCell colSpan={6} className="py-1 text-xs font-semibold">
+                                    <TableCell colSpan={8} className="py-1 text-xs font-semibold">
                                       {g}
                                     </TableCell>
                                   </TableRow>
@@ -6364,6 +6384,36 @@ function EstimatePage() {
                                             <span className="ml-1 text-[10px] text-muted-foreground">
                                               ({l.pieces.toLocaleString()} pcs)
                                             </span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell
+                                          className="text-right text-xs tabular-nums"
+                                          data-col="price-each"
+                                        >
+                                          {l.unitPrice === undefined ? (
+                                            <span
+                                              className="text-muted-foreground"
+                                              title="The catalog has no price for this product"
+                                            >
+                                              —
+                                            </span>
+                                          ) : (
+                                            <>
+                                              {orderMoney(l.unitPrice)}
+                                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                                / {l.unit}
+                                              </span>
+                                            </>
+                                          )}
+                                        </TableCell>
+                                        <TableCell
+                                          className="text-right text-xs tabular-nums"
+                                          data-col="material-total"
+                                        >
+                                          {l.total === undefined ? (
+                                            <span className="text-muted-foreground">—</span>
+                                          ) : (
+                                            orderMoney(l.total)
                                           )}
                                         </TableCell>
                                         <TableCell className="text-right text-xs tabular-nums">
@@ -6465,6 +6515,30 @@ function EstimatePage() {
                                     ))}
                                 </Fragment>
                               ))}
+                            {(() => {
+                              const t = orderListTotal(orderList);
+                              return (
+                                <TableRow className="border-t-2" data-row="material-total">
+                                  <TableCell colSpan={2} className="text-xs font-semibold">
+                                    Material total
+                                    <span className="ml-1 font-normal text-muted-foreground">
+                                      (price each × needed)
+                                    </span>
+                                  </TableCell>
+                                  <TableCell />
+                                  <TableCell className="text-right text-xs font-semibold tabular-nums">
+                                    {orderMoney(t.total)}
+                                  </TableCell>
+                                  <TableCell
+                                    colSpan={4}
+                                    className="text-[10px] text-muted-foreground"
+                                  >
+                                    {t.unpriced > 0 &&
+                                      `${t.unpriced} product${t.unpriced === 1 ? " has" : "s have"} no catalog price and ${t.unpriced === 1 ? "is" : "are"} not in the total`}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })()}
                           </TableBody>
                         </Table>
                       </div>
