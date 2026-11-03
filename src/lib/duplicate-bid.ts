@@ -4,8 +4,10 @@
  * — "(copy 2)", "(copy 3)" when that name is taken on the same bid again. Not copied: the status
  * and lost reason (a copy is a fresh draft), and the one-to-one provenance links — the takeoff
  * it was drawn from and the opportunity it answers — so the copy never shows up as that
- * takeoff's or that opportunity's bid. Pure helpers here; the server function is in
- * bids.functions.ts (duplicateBid).
+ * takeoff's or that opportunity's bid. Owner, Nov 3: "when you copy a bid can we have a popup
+ * that allows you to edit the job name of the newly copied bid" — the Bids page asks for the
+ * copy's job name first (copyBidName: the typed name, else "<name> (copy)"), then makes the copy.
+ * Pure helpers here; the server function is in bids.functions.ts (duplicateBid).
  */
 
 /** "Gym reroof" → "Gym reroof (copy)"; "Gym reroof (copy)" → "Gym reroof (copy 2)"; capped at 200. */
@@ -16,7 +18,16 @@ export function duplicateBidName(name: string): string {
   return next.length <= 200 ? next : `${next.slice(0, 200 - 7).trimEnd()} (copy)`;
 }
 
-/** The columns a copy takes from its source, and what it resets. */
+/**
+ * The copy's job name: what was typed in the popup, trimmed and cut at 200, else the source's
+ * name with "(copy)" (duplicateBidName). Blank or absent = the default.
+ */
+export function copyBidName(sourceName: string, typed?: string | null): string {
+  const t = (typed ?? "").trim();
+  return t ? t.slice(0, 200).trimEnd() : duplicateBidName(sourceName);
+}
+
+/** The columns a copy takes from its source, and what it resets. `name` = the typed job name. */
 export function duplicateBidRow<
   T extends {
     name: string;
@@ -27,9 +38,9 @@ export function duplicateBidRow<
     building_id: string | null;
     roof_id: string | null;
   },
->(source: T, updatedByName: string | null, now: string) {
+>(source: T, updatedByName: string | null, now: string, name?: string | null) {
   return {
-    name: duplicateBidName(source.name),
+    name: copyBidName(source.name, name),
     data: source.data as T["data"],
     grand_total: source.grand_total ?? 0,
     status: "draft" as const,

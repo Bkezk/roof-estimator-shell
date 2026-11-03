@@ -35,6 +35,7 @@ import {
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
+import { duplicateBidName } from "@/lib/duplicate-bid";
 import {
   BID_STATUSES,
   STATUS_LABELS,
@@ -319,6 +320,10 @@ function BidsPage() {
   // Marking Won asks for the day it was won (bids.won_on; owner, Oct 21: "a way to adjust the
   // date the bid was won to ensure the data appears correctly"), today's office day to start.
   const [wonFor, setWonFor] = useState<{ id: string; name: string; day: string } | null>(null);
+  // The copy popup (owner, Nov 3): the copy's job name is typed before the copy is made.
+  const [copyFor, setCopyFor] = useState<{ id: string; name: string; newName: string } | null>(
+    null,
+  );
   const setStatus = useMutation({
     mutationFn: (v: {
       id: string;
@@ -362,11 +367,13 @@ function BidsPage() {
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not rename the folder"),
   });
-  // Duplicate (owner, Oct 6): a new draft copy, opened in the estimator to be renamed.
+  // Duplicate (owner, Oct 6): a new draft copy, opened in the estimator. Owner, Nov 3: the
+  // popup asks for the copy's job name first; the server falls back to "<name> (copy)".
   const duplicateFn = useServerFn(duplicateBid);
   const duplicate = useMutation({
-    mutationFn: (id: string) => duplicateFn({ data: { id } }),
+    mutationFn: (v: { id: string; name: string }) => duplicateFn({ data: v }),
     onSuccess: (copy) => {
+      setCopyFor(null);
       toast.success(`Copied as "${copy.name}" — opening the copy`);
       refresh();
       void navigate({ to: "/estimate", search: { bid: copy.id } });
@@ -652,11 +659,11 @@ function BidsPage() {
           <Button
             variant="ghost"
             size="sm"
-            title="Duplicate this bid (a new draft copy)"
+            title="Copy this bid (a new draft copy, named in a popup)"
             disabled={duplicate.isPending}
             onClick={(e) => {
               e.stopPropagation();
-              duplicate.mutate(bid.id);
+              setCopyFor({ id: bid.id, name: bid.name, newName: duplicateBidName(bid.name) });
             }}
             onKeyDown={(e) => e.stopPropagation()}
           >
@@ -1388,6 +1395,59 @@ function BidsPage() {
                 </Button>
                 <Button type="submit" disabled={setStatus.isPending}>
                   Mark won
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+      {/* Copy this bid (owner, Nov 3): "a popup that allows you to edit the job name of the newly
+          copied bid". The name is typed first, then the copy is made and opened. */}
+      {copyFor && (
+        <Dialog open onOpenChange={(o) => !o && !duplicate.isPending && setCopyFor(null)}>
+          <DialogContent className="sm:max-w-md" data-dialog="copy-bid">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (duplicate.isPending) return;
+                duplicate.mutate({
+                  id: copyFor.id,
+                  name: copyFor.newName.trim() || duplicateBidName(copyFor.name),
+                });
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>Copy this bid</DialogTitle>
+                <DialogDescription>
+                  A new draft copy of “{copyFor.name}” with the same work, prices and customer. Give
+                  the copy its job name; it opens in the estimator once it is made.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1 py-3">
+                <Label htmlFor="copy-bid-name">Job name</Label>
+                <Input
+                  id="copy-bid-name"
+                  autoFocus
+                  maxLength={200}
+                  value={copyFor.newName}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => setCopyFor({ ...copyFor, newName: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Left blank, the copy is named “{duplicateBidName(copyFor.name)}”.
+                </p>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={duplicate.isPending}
+                  onClick={() => setCopyFor(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={duplicate.isPending}>
+                  {duplicate.isPending ? "Copying…" : "Make the copy"}
                 </Button>
               </DialogFooter>
             </form>

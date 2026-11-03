@@ -524,12 +524,13 @@ export const deleteBid = createServerFn({ method: "POST" })
 
 /**
  * Duplicate a bid as a new draft (owner, Oct 6): the same payload, total, customer, site and
- * building under "<name> (copy)"; status, lost reason and the takeoff / opportunity links are not
- * copied (lib/duplicate-bid.ts). Returns the new row; the Bids page opens it.
+ * building under the job name typed in the Bids page's popup (owner, Nov 3), else "<name> (copy)";
+ * status, lost reason and the takeoff / opportunity links are not copied (lib/duplicate-bid.ts).
+ * Returns the new row; the Bids page opens it.
  */
 export const duplicateBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d) => getBidSchema.parse(d))
+  .validator((d) => getBidSchema.extend({ name: z.string().max(200).optional() }).parse(d))
   .handler(async ({ data, context }) => {
     const { data: source, error } = await context.supabase
       .from("bids")
@@ -551,6 +552,7 @@ export const duplicateBid = createServerFn({ method: "POST" })
           source,
           (me?.full_name ?? "").trim() || me?.email || null,
           new Date().toISOString(),
+          data.name,
         ),
       )
       .select()

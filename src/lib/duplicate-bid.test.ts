@@ -165,18 +165,19 @@ describe("duplicateBid (the server function, against a fake database)", () => {
 describe("the Bids page", () => {
   const src = readFileSync("src/routes/bids.tsx", "utf8");
   it("has a Duplicate button beside Delete on each row, which opens the copy", () => {
-    expect(src).toContain('title="Duplicate this bid (a new draft copy)"');
+    // Owner, Nov 3: the button opens the naming popup first (copy-bid-name-nov3.test.ts).
+    expect(src).toContain('title="Copy this bid (a new draft copy, named in a popup)"');
     expect(src).toMatch(
       /<Copy className="h-4 w-4" \/>\s*<span className="sr-only">Duplicate<\/span>/,
     );
-    expect(src.indexOf('title="Duplicate this bid')).toBeLessThan(
+    expect(src.indexOf('title="Copy this bid')).toBeLessThan(
       src.indexOf('title="Delete this bid"'),
     );
     expect(src).toContain('void navigate({ to: "/estimate", search: { bid: copy.id } });');
-    expect(src).toContain("duplicate.mutate(bid.id);");
+    expect(src).toContain("newName: duplicateBidName(bid.name) });");
     // The row itself opens the bid on click; the button must not also do that.
     expect(src).toMatch(
-      /duplicate\.mutate\(bid\.id\);[\s\S]{0,80}onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/,
+      /newName: duplicateBidName\(bid\.name\) \}\);[\s\S]{0,80}onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/,
     );
   });
 });
