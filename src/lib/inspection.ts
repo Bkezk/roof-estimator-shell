@@ -426,12 +426,21 @@ export const DESCRIPTION_MAX = 500;
 
 const clip = (s: string, max: number) =>
   s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+/** Cut at a word, never inside one (the cut falls back to a letter only when a word is half the room). */
+export const clipWords = (s: string, max: number): string => {
+  if (s.length <= max) return s;
+  const head = s.slice(0, max - 1);
+  const at = head.lastIndexOf(" ");
+  return `${(at >= max / 2 ? head.slice(0, at) : head).trimEnd()}…`;
+};
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /**
  * A repair ticket's prefilled text from an inspection: the description names the Issue items
- * (with their notes) on one line, clipped to the ticket's 500 characters; the notes carry the
- * full list and the inspection's general notes.
+ * on one line — the items alone (owner, Nov 3: with their notes it ran past the ticket's 500
+ * characters and stopped mid-sentence; the notes box carries every note in full); with none
+ * flagged, the findings note. A cut falls at a word. The notes carry the full list and the
+ * inspection's general notes.
  */
 export function repairTicketText(
   inspectionNumber: number,
@@ -439,10 +448,9 @@ export function repairTicketText(
 ): { description: string; notes: string } {
   const issues = ins.items.filter((i) => i.status === "issue");
   const head = `From inspection #${inspectionNumber}`;
-  const list = issues.map((i) => (i.note ? `${i.label} — ${oneLine(i.note)}` : i.label));
-  const description = clip(
-    list.length
-      ? `${head}: ${list.join("; ")}`
+  const description = clipWords(
+    issues.length
+      ? `${head}: ${issues.map((i) => i.label.trim()).join(", ")}`
       : ins.notes.trim()
         ? `${head}: ${oneLine(ins.notes)}`
         : head,

@@ -89,6 +89,52 @@ describe("1. Repair, no Scope", () => {
   });
 });
 
+describe("1b. the repair ticket's description names the items alone (owner, Nov 3)", () => {
+  it("inspection #6040's four items read as one line instead of 560 characters cut mid-sentence", async () => {
+    const { clipWords, repairTicketText } = await import("@/lib/inspection");
+    const item = (label: string, note: string) => ({
+      id: label.toLowerCase(),
+      label,
+      status: "issue" as const,
+      note,
+      photos: [],
+    });
+    const t = repairTicketText(6040, {
+      items: [
+        item(
+          "Membrane condition",
+          "Existing metal roof.  Panels look to be aluminum, no rust except at fasteners.  Panels are bellowed as aluminum panel thickness allows for deflection.  Several ribs are creased due to foot traffic and/or panel movement.",
+        ),
+        item(
+          "Seams",
+          "Total of six horizontal seams on roof.  These seams are gapping open due to building movement and foot traffic.",
+        ),
+        item(
+          "Flashings",
+          "Wall flashing at low to high roof transition.   Low roof panels at wall flashing show deflection.",
+        ),
+        item(
+          "Sealants",
+          "sealant failure at horizontal seams of roof panel, extreme movement and age deterioration.",
+        ),
+      ] as never,
+      notes: "",
+    });
+    expect(t.description).toBe(
+      "From inspection #6040: Membrane condition, Seams, Flashings, Sealants",
+    );
+    // The notes keep every word.
+    expect(t.notes).toContain("- Sealants: sealant failure at horizontal seams of roof panel");
+    // With nothing flagged, the findings note, cut at a word when long.
+    const long = repairTicketText(6040, { items: [], notes: "word ".repeat(200) });
+    expect(long.description.length).toBeLessThanOrEqual(500);
+    expect(long.description).toMatch(/ word…$/);
+    expect(clipWords("abc def ghi", 8)).toBe("abc def…");
+    expect(clipWords("abcdefghij", 8)).toBe("abcdefg…");
+    expect(clipWords("short", 8)).toBe("short");
+  });
+});
+
 describe("2. the Done inspection's banner", () => {
   it("InspectionNextStep: an inspection, Done, the office, no outcome yet; the three choices; under the title", () => {
     const section = read("src/components/service/inspection-section.tsx");

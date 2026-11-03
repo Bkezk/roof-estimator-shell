@@ -165,9 +165,8 @@ describe("the checklist on a ticket", () => {
 describe("repair ticket text from an inspection", () => {
   it("names the Issue items with their notes; the notes carry the full list", () => {
     const t = repairTicketText(6012, done);
-    expect(t.description).toBe(
-      "From inspection #6012: Seams — Open seam at the NE corner, about 6 ft; Ponding",
-    );
+    // The items alone (Nov 3): the notes box has every note in full.
+    expect(t.description).toBe("From inspection #6012: Seams, Ponding");
     expect(t.notes).toBe(
       [
         "Issues found on inspection #6012:",
@@ -182,13 +181,15 @@ describe("repair ticket text from an inspection", () => {
   it("fits the ticket's 500-character description", () => {
     const many: Inspection = {
       ...done,
-      items: Array.from({ length: 30 }, (_, i) =>
-        item(`i${i}`, `Item ${i}`, "issue", "x".repeat(40)),
+      items: Array.from({ length: 60 }, (_, i) =>
+        item(`i${i}`, `Checklist item number ${i}`, "issue", "x".repeat(40)),
       ),
     };
     const t = repairTicketText(6012, many);
     expect(t.description.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
     expect(t.description.endsWith("…")).toBe(true);
+    // Cut at a word, never inside one.
+    expect(t.description).toMatch(/(Checklist|item|number|\d+),?…$/);
   });
   it("with no issues, says where it came from (and the notes)", () => {
     expect(repairTicketText(6012, { items: [], notes: "" })).toEqual({
