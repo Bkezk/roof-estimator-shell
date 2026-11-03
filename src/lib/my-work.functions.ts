@@ -262,6 +262,8 @@ export const listMyWork = createServerFn({ method: "GET" })
           )
           .is("deleted_at", null)
           .eq("stage", TO_AUTHORIZE_STAGE)
+          // An inspection ends at Done (owner, Nov 3): nothing to authorize.
+          .neq("service_type", "inspection")
           .order("completed_at", { ascending: true, nullsFirst: false })
           .order("stage_changed_at", { ascending: true, nullsFirst: false })
           .limit(LIMIT)

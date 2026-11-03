@@ -226,9 +226,11 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
       "<TicketRepairs",
       "{materials}",
       "<TicketFieldSections",
-      '{jobStage !== "done" && <InvoiceBlock',
+      '{jobStage !== "done" && !inspectionTicket && <InvoiceBlock',
     ].map((p) => aside.indexOf(p));
-    expect(aside.indexOf('{jobStage === "done" && <InvoiceBlock')).toBeLessThan(seq[0]!);
+    expect(
+      aside.indexOf('{jobStage === "done" && !inspectionTicket && <InvoiceBlock'),
+    ).toBeLessThan(seq[0]!);
     expect(seq.every((i) => i > 0)).toBe(true);
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
     // Repairs (with the photos) is not repeated by TicketFieldSections in the column.

@@ -195,6 +195,8 @@ export function stageActors(
 export function ticketStageStrip(
   current: string | null | undefined,
   events: readonly StageEventLike[],
+  /** The ticket's stages (ticket-stage.ts stagesForType: an inspection ends at Done). */
+  stages: readonly ServiceStage[] = SERVICE_STAGES,
 ): StripCell[] {
   const dates = stageDates(events);
   const actors = stageActors(events);
@@ -212,7 +214,7 @@ export function ticketStageStrip(
       if (who) actors.open = who;
     }
   }
-  return SERVICE_STAGES.map((s) => ({
+  return stages.map((s) => ({
     key: s,
     label: STAGE_LABELS[s],
     at: dates[s] ?? null,

@@ -142,9 +142,9 @@ describe("2. the Done inspection's banner", () => {
     expect(section).toContain(
       'job.service_type === "inspection" && officeOrAdmin && inspectionComplete(job.stage);',
     );
-    expect(section).toContain("if (!applies || !draft.data || draft.data.outcome) return null;");
+    expect(section).toContain("if (!applies || !q.data || q.data.outcome) return null;");
     expect(section).toContain('data-banner="inspection-next"');
-    expect(section).toContain("<OfficeActions job={job} data={draft.data} dirty={!draft.saved} />");
+    expect(section).toContain("<OfficeActions job={job} data={q.data} dirty={false} />");
     const page = read("src/components/service-page.tsx");
     expect(page).toContain(
       "{job && <InspectionNextStep job={job} officeOrAdmin={officeOrAdmin} />}",

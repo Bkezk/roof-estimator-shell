@@ -108,6 +108,10 @@ export async function afterTicketStage(
   const admin = await serverClient(sb);
   const office = await officeUsers(admin);
   const live = !row.deleted_at;
+  // An inspection ends at Done (owner, Nov 3): nobody authorizes or invoices it, so the Done
+  // notice asks the office to pick what happens next (the ticket's own banner) instead of "mark
+  // it Authorized", and no Authorize timer opens.
+  const reviewable = row.service_type !== "inspection";
   const becameDone = row.stage === "done" && prevStage !== "done" && live;
   const becameAuthorized = row.stage === "authorized" && prevStage !== "authorized" && live;
   // M9 (owner, Oct 5): the owner reviews a Done ticket ("Brandon … will be the go to person to
@@ -132,7 +136,9 @@ export async function afterTicketStage(
         {
           kind: "ticket_done",
           title: doneTitle(row),
-          body: `${actor.name ?? "The technician"} marked it done. Review it and mark it Authorized; the invoice is made after that.`,
+          body: reviewable
+            ? `${actor.name ?? "The technician"} marked it done. Review it and mark it Authorized; the invoice is made after that.`
+            : `${actor.name ?? "The technician"} marked it done. Look it over and pick what happens next on the ticket: create a repair ticket, or no action needed.`,
           url: `/service?id=${row.id}`,
         },
         admin,
@@ -178,11 +184,15 @@ export async function afterTicketStage(
       kind: "invoice",
       itemId: row.id,
       accountId: row.account_id,
-      assigneeId: row.stage === "done" && live ? assignee : null,
+      assigneeId: row.stage === "done" && live && reviewable ? assignee : null,
       title: `Authorize ${ticketTitle(row)}`,
       url: `/service?id=${row.id}`,
-      closing: row.stage !== "done" || !!row.deleted_at,
-      closeReason: row.deleted_at ? "deleted" : `stage ${row.stage}`,
+      closing: row.stage !== "done" || !!row.deleted_at || !reviewable,
+      closeReason: row.deleted_at
+        ? "deleted"
+        : !reviewable
+          ? "an inspection ends at Done"
+          : `stage ${row.stage}`,
       dueDate: null,
       actorId: actor.id,
       actorName: actor.name,

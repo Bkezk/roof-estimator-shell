@@ -134,7 +134,7 @@ describe("the stage picker offers Invoiced / Closed only to managers", () => {
   const page = read("src/components/service-page.tsx");
   it("options come from stageChoices; the select is read-only on a locked stage", () => {
     expect(page).toContain(
-      "const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage);",
+      "const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage, job?.service_type);",
     );
     expect(page).toContain("const lockedStage = stageLocked(profile, jobStage);");
     expect(page).toMatch(

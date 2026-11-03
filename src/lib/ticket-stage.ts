@@ -37,6 +37,16 @@ export const INVOICE_NEEDS_AUTH =
 /** Every stage, in board order (the same as SERVICE_STAGES). */
 const ALL_STAGES: readonly ServiceStage[] = [...TECH_STAGES, ...OFFICE_STAGES];
 
+/**
+ * An inspection's stages (owner, Nov 3: "inspections just need the steps open, scheduled, and
+ * done"): it ends at Done — no review, no invoice, no Closed. Everything else has them all.
+ */
+export const INSPECTION_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
+export const endsAtDone = (serviceType: string | null | undefined): boolean =>
+  serviceType === "inspection";
+export const stagesForType = (serviceType: string | null | undefined): readonly ServiceStage[] =>
+  endsAtDone(serviceType) ? INSPECTION_STAGES : ALL_STAGES;
+
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";
 export const MANAGER_STAGE_MESSAGE = "Only a manager authorizes, invoices or closes a ticket";
@@ -105,8 +115,9 @@ export const techStageLocked = (
 export function stageChoices(
   p: AccessLike | null | undefined,
   current: ServiceStage | null,
+  serviceType?: string | null,
 ): ServiceStage[] {
-  return ALL_STAGES.filter((s) => s === current || !stageProblem(p, s, current));
+  return stagesForType(serviceType).filter((s) => s === current || !stageProblem(p, s, current));
 }
 
 /** The ticket sits at a stage `p` may not set (Invoiced / Closed for a non-manager): read-only. */

@@ -49,6 +49,8 @@ describe("ticket stage strip: by <name> under each stage date", () => {
     expect(strip).toMatch(/\{c\.by && \(/);
     expect(strip).toContain("by {c.by}");
     const page = readFileSync("src/components/service-page.tsx", "utf8");
-    expect(page).toContain("ticketStageStrip(asStage(job.stage), eventsQ.data ?? [])");
+    expect(page).toContain(
+      "ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))",
+    );
   });
 });

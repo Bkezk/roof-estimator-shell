@@ -58,7 +58,7 @@ describe("the ticket page uses it for the Close out button", () => {
   const src = readFileSync("src/components/service-page.tsx", "utf8");
   it("the button shows on canCloseOut(profile, job), not on canEdit", () => {
     expect(src).toContain(
-      'import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";',
+      'import {\n  canCloseOut,\n  stageChoices,\n  stageLocked,\n  endsAtDone,\n  stagesForType,\n} from "@/lib/ticket-stage";',
     );
     expect(src).toContain("const showCloseOut = canCloseOut(profile, job);");
     expect(src).not.toContain("const canCloseOut = !!job && canEdit;");

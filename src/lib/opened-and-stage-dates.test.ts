@@ -433,8 +433,9 @@ describe("the ticket page: the stage strip under the header carries the opened d
     expect(flat(src)).toContain(
       'queryKey: fieldKeys.events(job?.id ?? "new"), queryFn: () => eventsFn({ data: { id: job!.id } })',
     );
+    // Since Nov 3 the strip takes the ticket's stages (an inspection ends at Done).
     expect(src).toContain(
-      "const stageCells = job ? ticketStageStrip(asStage(job.stage), eventsQ.data ?? []) : [];",
+      "ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))",
     );
     // Owner, Oct 21: "the opened date is shown twice; the one on the timeline is sufficient" —
     // no separate Opened line; the strip's Open cell (date, "by <name>") is the one place.

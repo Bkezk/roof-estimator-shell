@@ -39,6 +39,7 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { listJobPhotos } from "@/lib/service-field.functions";
+import { getTicketInspection } from "@/lib/service-inspection.functions";
 import {
   createRepairFromInspection,
   getSourceInspection,
@@ -686,12 +687,13 @@ function OfficeActions({
                   </Link>
                 </Button>
               ))}
+            {/* Black (owner, Nov 3): the one that closes the matter without another ticket. */}
             <Button
               type="button"
-              variant="outline"
               className="h-10"
               disabled={dirty || record.isPending || outcome?.outcome === "none"}
               onClick={() => record.mutate("none")}
+              data-action="no-action-needed"
             >
               {record.isPending && record.variables === "none" ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -734,10 +736,20 @@ export function InspectionNextStep({
   job: ServiceJobRow;
   officeOrAdmin: boolean;
 }) {
+  const { session } = useAuth();
+  const getFn = useServerFn(getTicketInspection);
   const applies =
     job.service_type === "inspection" && officeOrAdmin && inspectionComplete(job.stage);
-  const draft = useInspectionDraft(job, { enabled: applies, readOnly: true });
-  if (!applies || !draft.data || draft.data.outcome) return null;
+  // The saved record, on the same key the Inspection section's draft keeps current (a save
+  // there lands here too). Not a second draft of its own: one the owner saw (Nov 3) was started
+  // before the close-out saved and said "still saving" until the page was reloaded.
+  const q = useQuery({
+    queryKey: inspectionKey(job.id),
+    queryFn: () => getFn({ data: { id: job.id } }),
+    enabled: !!session && applies,
+    staleTime: 30_000,
+  });
+  if (!applies || !q.data || q.data.outcome) return null;
   return (
     <div
       role="status"
@@ -748,7 +760,8 @@ export function InspectionNextStep({
         <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden /> The inspection is done — what
         happens next?
       </p>
-      <OfficeActions job={job} data={draft.data} dirty={!draft.saved} />
+      {/* `dirty` is the section's own autosave guard; the server's record is what is read. */}
+      <OfficeActions job={job} data={q.data} dirty={false} />
     </div>
   );
 }

@@ -25,9 +25,13 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const notify = vi.hoisted(() =>
-  vi.fn<(ids: string[], msg: { kind: string; title: string }, sb: unknown) => Promise<number>>(
-    async () => 1,
-  ),
+  vi.fn<
+    (
+      ids: string[],
+      msg: { kind: string; title: string; body?: string },
+      sb: unknown,
+    ) => Promise<number>
+  >(async () => 1),
 );
 vi.mock("@/lib/notify.server", () => ({
   serverClient: async (fallback: unknown) => fallback,
@@ -852,7 +856,7 @@ describe("5. the Done notice for an inspection", () => {
       "Ticket #6012 Acme — Annual inspection is done — ready for your review",
     );
   });
-  it("afterTicketStage sends it once, as ticket_done, to the authorizers; the Authorize follow-up still says Ticket", async () => {
+  it("afterTicketStage sends it once, as ticket_done, to the authorizers; no Authorize timer for an inspection", async () => {
     const tables: Record<string, Row[]> = {
       profiles,
       crm_followups: [],
@@ -886,14 +890,21 @@ describe("5. the Done notice for an inspection", () => {
     expect(msg.title).toBe(
       "Inspection #6012 Acme is done — 1 issue found, recommends repairs — ready for your review",
     );
-    // The Authorize follow-up (syncFollowup is stubbed here) keeps the ticket title and the
-    // single-notice rule (quiet on the step the ticket became Done).
+    // The body asks for the next step, not "mark it Authorized" (owner, Nov 3: an inspection
+    // ends at Done).
+    expect(msg.body).toBe(
+      "Ted Tech marked it done. Look it over and pick what happens next on the ticket: create a repair ticket, or no action needed.",
+    );
+    // No Authorize timer for an inspection (syncFollowup is stubbed here): the follow-up closes
+    // with its reason; the single-notice rule still holds (quiet on the step it became Done).
     expect(vi.mocked(syncFollowup)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(syncFollowup).mock.calls[0]![0]).toMatchObject({
       kind: "invoice",
       itemId: "job-1",
-      assigneeId: MANAGER,
+      assigneeId: null,
       title: "Authorize Ticket #6012 Acme — Annual inspection",
+      closing: true,
+      closeReason: "an inspection ends at Done",
       quiet: true,
     });
   });
