@@ -113,7 +113,8 @@ import {
   type NewObjectRoles,
   type Tool,
 } from "./shapes";
-import { closePdf, openPdf, type UnderlaySource } from "./underlay";
+import { DEFAULT_PAGE_NAME, sheetPageName } from "./sheet-title";
+import { closePdf, openPdf, readSheetTitle, type UnderlaySource } from "./underlay";
 import { useAutosave, type SaveState } from "./use-autosave";
 import { TIP_DELAY_MS, Tip } from "./toolbar";
 import { TakeoffViewer } from "./viewer";
@@ -361,6 +362,67 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
       dispose?.();
     };
   }, [row.file_path, row.underlay_kind]);
+  // Name the sheets (owner, Nov 3): a PDF's pages still called "Page N" take their sheet number
+  // and title from the title block ("A2.1 Roof Plan"), read once per open document, and the
+  // roof plan is flagged and offered. Pages renamed by hand keep their names.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const namedDoc = useRef<object | null>(null);
+  useEffect(() => {
+    if (!source || source.kind !== "pdf" || locked) return;
+    const doc = source.doc;
+    if (namedDoc.current === doc) return;
+    namedDoc.current = doc;
+    let live = true;
+    void (async () => {
+      const reads = new Map<number, { name: string | null; roofPlan: boolean }>();
+      for (const p of pagesRef.current) {
+        if (!DEFAULT_PAGE_NAME.test(p.name) && p.roofPlan !== undefined) continue;
+        const t = await readSheetTitle(doc, p.index).catch(() => null);
+        if (!live) return;
+        if (t) reads.set(p.index, { name: sheetPageName(t), roofPlan: t.roofPlan });
+      }
+      if (!live || reads.size === 0) return;
+      let named = 0;
+      let roof: { index: number; name: string } | null = null;
+      setPages((ps) =>
+        ps.map((p) => {
+          const r = reads.get(p.index);
+          if (!r) return p;
+          const rename = DEFAULT_PAGE_NAME.test(p.name) && r.name !== null && r.name !== p.name;
+          if (rename) named++;
+          const name = rename ? r.name! : p.name;
+          if (r.roofPlan && !roof) roof = { index: p.index, name };
+          return { ...p, name, roofPlan: r.roofPlan };
+        }),
+      );
+      if (named > 0)
+        toast.success(
+          `${named} sheet${named === 1 ? "" : "s"} named from the title block${named === 1 ? "" : "s"}.`,
+        );
+      const found = roof as { index: number; name: string } | null;
+      if (found && pagesRef.current[pageIdxRef.current]?.index !== found.index) {
+        const at = pagesRef.current.findIndex((p) => p.index === found.index);
+        toast.info(`${found.name} looks like the roof plan.`, {
+          duration: 12000,
+          action: {
+            label: "Open it",
+            onClick: () => {
+              if (at >= 0) {
+                setPageIdx(at);
+                setSelectedId(null);
+              }
+            },
+          },
+        });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [source, locked]);
+  const pageIdxRef = useRef(pageIdx);
+  pageIdxRef.current = pageIdx;
 
   const page = pages[Math.min(pageIdx, pages.length - 1)]!;
   const pageObjects = useMemo(() => objects.filter((o) => o.page === page.index), [objects, page]);
@@ -1026,6 +1088,14 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     >
                       <div className="truncate text-sm font-medium">{p.name}</div>
                       <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        {p.roofPlan && (
+                          <span
+                            className="rounded bg-emerald-100 px-1 font-medium text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200"
+                            data-roof-plan
+                          >
+                            Roof plan
+                          </span>
+                        )}
                         {p.scale ? (
                           <span className="flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400">
                             <Ruler className="h-3 w-3" /> scaled

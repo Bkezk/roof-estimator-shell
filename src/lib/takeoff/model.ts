@@ -53,6 +53,8 @@ export interface TakeoffPage {
   width?: number;
   height?: number;
   scale: PageScale | null;
+  /** The sheet's title block names a roof plan (read off the text; owner, Nov 3). */
+  roofPlan?: boolean;
 }
 
 export type ObjectKind = "area" | "linear" | "count";

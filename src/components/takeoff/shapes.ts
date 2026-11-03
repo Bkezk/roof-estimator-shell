@@ -105,8 +105,41 @@ export function parseFeetInches(text: string): number | null {
   return Number.isFinite(feet) && feet > 0 ? feet : null;
 }
 
-/** Keys that may appear in a typed length. */
-export const isLengthKey = (key: string): boolean => /^[0-9.'" ]$/.test(key);
+/** Keys that may appear in a typed length, or a typed size ("40 x 120"; owner, Nov 3). */
+export const isLengthKey = (key: string): boolean => /^[0-9.'" xX*]$/.test(key);
+
+/**
+ * A typed size (owner, Nov 3: "type 40 x 120 with the Area tool to drop a rectangle"): two
+ * lengths either side of an "x" (or "*"), each as parseFeetInches reads them — "40 x 120",
+ * "40x120", "40' x 120'6". `a` is the width (along the page), `b` the height. Null for anything
+ * else, including a plain length.
+ */
+export function parseTypedSize(text: string): { a: number; b: number } | null {
+  const parts = text.split(/\s*[xX*]\s*/);
+  if (parts.length !== 2) return null;
+  const a = parseFeetInches(parts[0]!);
+  const b = parseFeetInches(parts[1]!);
+  return a !== null && b !== null ? { a, b } : null;
+}
+
+/**
+ * The page-aligned rectangle `a` feet wide and `b` feet high with `from` as one corner, laid
+ * toward the cursor (`toward`): to the right when the cursor is right of the corner (or level
+ * with it), to the left otherwise, and down / up the same way. Null when the page has no scale.
+ * The corners come as rectPoints orders them.
+ */
+export function typedRectangle(
+  from: PagePoint,
+  toward: PagePoint | null,
+  a: number,
+  b: number,
+  fpp: number | null,
+): PagePoint[] | null {
+  if (fpp === null || !(fpp > 0) || !(a > 0) || !(b > 0)) return null;
+  const sx = toward && toward[0] < from[0] ? -1 : 1;
+  const sy = toward && toward[1] < from[1] ? -1 : 1;
+  return rectPoints(from, [from[0] + (sx * a) / fpp, from[1] + (sy * b) / fpp]);
+}
 
 /**
  * Ortho tolerance in degrees: a side within this of level or plumb locks to it; anything
@@ -999,4 +1032,37 @@ export function downloadText(fileName: string, text: string, mime = "text/csv"):
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Pinch to zoom on a touch screen (owner, Nov 3: the drawing zoomed only with the wheel, the
+ * buttons and the keys). `start` is the two fingers' first distance and midpoint with the view
+ * then; `d` / `mid` are where they are now. The zoom scales with the distance (clamped), and the
+ * page point that sat under the first midpoint stays under the fingers as they move. Pure.
+ */
+export interface PinchStart {
+  d0: number;
+  mid0: [number, number];
+  zoom0: number;
+  x0: number;
+  y0: number;
+}
+export function pinchView(
+  start: PinchStart,
+  d: number,
+  mid: [number, number],
+  clamp: (z: number) => number,
+): { zoom: number; x: number; y: number } {
+  const z = clamp(start.zoom0 * (start.d0 > 0 ? d / start.d0 : 1));
+  const px = (start.mid0[0] - start.x0) / start.zoom0;
+  const py = (start.mid0[1] - start.y0) / start.zoom0;
+  return { zoom: z, x: mid[0] - px * z, y: mid[1] - py * z };
+}
+
+/** Two screen points' distance and midpoint. */
+export function pinchGeometry(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): { d: number; mid: [number, number] } {
+  return { d: Math.hypot(b.x - a.x, b.y - a.y), mid: [(a.x + b.x) / 2, (a.y + b.y) / 2] };
 }

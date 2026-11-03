@@ -160,12 +160,17 @@ import {
   lengthLabel,
   lockPoint,
   parseFeetInches,
+  parseTypedSize,
+  pinchGeometry,
+  pinchView,
   rectObjectPoints,
   snapCandidates,
   stampReference,
   translateObject,
   typedPoint,
+  typedRectangle,
   type EdgeSession,
+  type PinchStart,
   type NewObjectRoles,
   type Tool,
 } from "./shapes";
@@ -188,6 +193,8 @@ const CLOSE_PX = 9;
 const DOUBLE_PX = 4;
 /** Screen px: the cursor snaps to another object's corner this close. */
 const SNAP_PX = 8;
+/** Screen px: a finger that moves less than this between touch and lift is a tap. */
+const TAP_PX = 10;
 const ZOOM_STEP = 1.25;
 /** Browser key remembering the "Snap to plan" toggle (on unless turned off). */
 const SNAP_PLAN_KEY = "takeoff.snapPlan";
@@ -317,6 +324,12 @@ export function TakeoffViewer(props: ViewerProps) {
   const [scalePick, setScalePick] = useState<{ a: PagePoint; b: PagePoint } | null>(null);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  // Touch (owner, Nov 3): the fingers on the drawing; two of them pinch to zoom (./shapes
+  // pinchView), and a one-finger tap places its point on release, so a second finger landing
+  // turns the first into a pinch instead of a corner.
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<PinchStart | null>(null);
+  const tapRef = useRef<{ pointerId: number; p: PagePoint; sx: number; sy: number } | null>(null);
   /** Snap to the plan's own lines (PDF only); read from localStorage after mount. */
   const [snapPlan, setSnapPlan] = useState(true);
   /** "Square corners" / "Snap to corners" (default off); read from localStorage after mount. */
@@ -675,6 +688,10 @@ export function TakeoffViewer(props: ViewerProps) {
   const typingTool = tool === "area" || tool === "linear" || tool === "cutout";
   const canType = typingTool && draft.length > 0 && fpp !== null;
   const typedFeet = canType && typed ? parseFeetInches(typed) : null;
+  /** A typed size ("40 x 120") with one corner placed: Enter makes the whole rectangle. */
+  const typedSize = canType && draft.length === 1 && typed ? parseTypedSize(typed) : null;
+  const typedRect =
+    typedSize && draft[0] ? typedRectangle(draft[0], cursor, typedSize.a, typedSize.b, fpp) : null;
   /** Where Enter would put the typed length: toward the cursor, else along the last side. */
   const typedTarget = (): PagePoint | null => {
     if (!last || typedFeet === null) return null;
@@ -709,7 +726,11 @@ export function TakeoffViewer(props: ViewerProps) {
     const at = (q: PagePoint) => snapAt(q, shiftNow)?.p ?? q;
     return { a: at(a), b: at(b) };
   };
-  const rectLive = press?.active ? rectEnds(press.a, press.b, shift) : null;
+  const rectLive = press?.active
+    ? rectEnds(press.a, press.b, shift)
+    : typedRect
+      ? { a: typedRect[0]!, b: typedRect[2]! }
+      : null;
   const live = drawing && cursor ? resolve(cursor) : null;
   const snapped: PagePoint | null = live?.p ?? null;
   const dragSnap = drag && cursor ? snapAt(cursor) : null;
@@ -949,10 +970,31 @@ export function TakeoffViewer(props: ViewerProps) {
     return true;
   };
 
-  /** Enter with a typed length: place the next point that far along. */
+  /**
+   * Enter with a typed length: place the next point that far along. With a typed size and one
+   * corner placed (owner, Nov 3): the whole rectangle, as a drag-a-box makes it.
+   */
   const placeTyped = (): boolean => {
+    if (typedRect) {
+      if (tool === "area" || tool === "linear") {
+        props.onCreate(tool, rectObjectPoints(tool, typedRect), roles);
+      } else if (tool === "cutout") {
+        if (!selectedArea) {
+          toast.info("Select an area first, then draw the cut-out inside it.");
+          return true;
+        }
+        props.onAddCutout(selectedArea.id, typedRect);
+      } else return true;
+      setDraft([]);
+      setTyped("");
+      return true;
+    }
     if (typedFeet === null) {
-      toast.info(`Type a length like 24, 24.5 or 24'6" and press Enter.`);
+      toast.info(
+        draft.length === 1
+          ? `Type a length like 24 or 24'6", or a size like 40 x 120, and press Enter.`
+          : `Type a length like 24, 24.5 or 24'6" and press Enter.`,
+      );
       return true;
     }
     const t = typedTarget();
@@ -1171,6 +1213,26 @@ export function TakeoffViewer(props: ViewerProps) {
   });
 
   const onPointerDownCapture = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") {
+      touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.current.size === 2) {
+        const [a, b] = [...touches.current.values()] as [
+          { x: number; y: number },
+          { x: number; y: number },
+        ];
+        const r = e.currentTarget.getBoundingClientRect();
+        const g = pinchGeometry(
+          { x: a.x - r.left, y: a.y - r.top },
+          { x: b.x - r.left, y: b.y - r.top },
+        );
+        pinchRef.current = { d0: g.d, mid0: g.mid, zoom0: view.zoom, x0: view.x, y0: view.y };
+        tapRef.current = null;
+        endPress();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        e.stopPropagation();
+        return;
+      }
+    }
     if (e.button === 1 || (e.button === 0 && spaceDown)) {
       e.preventDefault();
       e.stopPropagation();
@@ -1180,6 +1242,24 @@ export function TakeoffViewer(props: ViewerProps) {
     }
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch" && touches.current.has(e.pointerId)) {
+      touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pinch = pinchRef.current;
+      if (pinch && touches.current.size >= 2) {
+        const [a, b] = [...touches.current.values()] as [
+          { x: number; y: number },
+          { x: number; y: number },
+        ];
+        const r = e.currentTarget.getBoundingClientRect();
+        const g = pinchGeometry(
+          { x: a.x - r.left, y: a.y - r.top },
+          { x: b.x - r.left, y: b.y - r.top },
+        );
+        fittedRef.current = false;
+        setView(pinchView(pinch, g.d, g.mid, clampZoom));
+        return;
+      }
+    }
     const pan = panRef.current;
     if (pan) {
       fittedRef.current = false;
@@ -1204,7 +1284,25 @@ export function TakeoffViewer(props: ViewerProps) {
       setMove({ ...move, dx: p[0] - move.start[0], dy: p[1] - move.start[1] });
     }
   };
+  /** A finger lifted (or cancelled): ends a pinch, or places a tap that did not move. */
+  const touchEnd = (e: PointerEvent<HTMLDivElement>, cancelled: boolean): boolean => {
+    if (e.pointerType !== "touch") return false;
+    touches.current.delete(e.pointerId);
+    if (pinchRef.current) {
+      if (touches.current.size < 2) pinchRef.current = null;
+      tapRef.current = null;
+      return true;
+    }
+    const tap = tapRef.current;
+    if (tap && tap.pointerId === e.pointerId) {
+      tapRef.current = null;
+      if (!cancelled && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) < TAP_PX) place(tap.p);
+      return true;
+    }
+    return false;
+  };
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    if (touchEnd(e, false)) return;
     if (panRef.current) {
       panRef.current = null;
       setPanning(false);
@@ -1309,6 +1407,7 @@ export function TakeoffViewer(props: ViewerProps) {
     draftPoints: draft.length,
     countSession: !!countSession,
     typing: !!typed,
+    typedSize: !!typedRect,
   });
 
   const linearChipOptions = LINEAR_ROLES.map((r) => ({
@@ -1399,7 +1498,10 @@ export function TakeoffViewer(props: ViewerProps) {
         onPointerDownCapture={onPointerDownCapture}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={endPress}
+        onPointerCancel={(e) => {
+          touchEnd(e, true);
+          endPress();
+        }}
         onPointerLeave={() => setCursor(null)}
         onMouseDown={(e) => {
           // No middle-click autoscroll / paste.
@@ -1466,6 +1568,11 @@ export function TakeoffViewer(props: ViewerProps) {
                     pointerId: e.pointerId,
                     active: false,
                   });
+                  return;
+                }
+                if (e.pointerType === "touch") {
+                  // Placed on release, unless a second finger makes this a pinch.
+                  tapRef.current = { pointerId: e.pointerId, p, sx: e.clientX, sy: e.clientY };
                   return;
                 }
                 place(p);

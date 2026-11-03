@@ -13,9 +13,9 @@ export const HINTS: Record<Tool, string> = {
     "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a penetration pin to move that pin. Click a selected deficiency pin to show its pictures. Ctrl+D (or Duplicate) stamps copies of it; Delete removes it; Ctrl+Z undoes.",
   scale:
     "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
-  area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click or press Enter to close; right-click places the last corner and closes. Backspace removes the last point, Esc cancels.",
+  area: "Click each corner, or press and drag a box for a rectangle. On a scaled page, type a side's length (24'6) and press Enter to place the next corner, or after the first corner type a size (40 x 120) and press Enter for the whole rectangle. Click the first point, double-click or press Enter to close; right-click places the last corner and closes. Backspace removes the last point, Esc cancels.",
   linear:
-    "Click points along the line, or press and drag a box for a rectangle's perimeter; double-click or press Enter to finish; right-click places the last point and finishes. Backspace removes the last point, Esc cancels.",
+    "Click points along the line, or press and drag a box for a rectangle's perimeter (after the first point, type a size like 40 x 120 and press Enter for the same). Double-click or press Enter to finish; right-click places the last point and finishes. Backspace removes the last point, Esc cancels.",
   count:
     "Click each item. Clicks add to the same penetration until you right-click or press Enter or Esc; the next click then starts a new one. Keys 1–7 pick the type; a Deficiency is one pin per click, with a note and pictures to show the customer.",
   dimension: "Click two points to measure a distance (not saved).",
@@ -109,6 +109,8 @@ export interface StatusContext {
   countSession: boolean;
   /** A length is being typed. */
   typing: boolean;
+  /** The typed text is a size ("40 x 120") that Enter turns into a rectangle. */
+  typedSize?: boolean;
 }
 
 /**
@@ -119,7 +121,10 @@ export function statusLine(s: StatusContext): string | null {
   if (s.edge) return "Click a side to change its role · Enter creates · Esc cancels";
   if (s.stamp)
     return `Click to stamp a copy of ${s.stamp.name} · ${s.stamp.count} stamped · right-click or Esc stops`;
-  if (s.typing) return "Enter places the typed length · Backspace edits it · Esc cancels";
+  if (s.typing)
+    return s.typedSize
+      ? "Enter makes the rectangle from the first corner, toward the cursor · Backspace edits the size · Esc cancels"
+      : "Enter places the typed length · Backspace edits it · Esc cancels";
   if (s.draftPoints > 0) {
     if (s.tool === "scale") return "Click the other end of the known dimension · Esc cancels";
     if (s.tool === "dimension") return "Click the other end · Esc cancels";

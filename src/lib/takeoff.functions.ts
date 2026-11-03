@@ -56,6 +56,7 @@ const pageSchema = z.object({
   rotation: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
   width: z.number().positive().optional(),
   height: z.number().positive().optional(),
+  roofPlan: z.boolean().optional(),
   scale: z
     .object({
       ax: z.number(),

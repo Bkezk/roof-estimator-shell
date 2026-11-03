@@ -17,6 +17,7 @@ import {
   type PlanIndex,
 } from "./plan-lines";
 import { joinTextItems, pickSheetScale, type ScaleNote, type TextItemLike } from "./sheet-scale";
+import { pickSheetTitle, type SheetTitle } from "./sheet-title";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -228,6 +229,33 @@ export function readSheetScale(doc: PDFDocumentProxy, pageIndex: number): Promis
     for (const it of content.items) if ("str" in it) items.push(it);
     const { text, starts } = joinTextItems(items);
     return pickSheetScale(text, starts);
+  })();
+  cache.set(pageIndex, promise);
+  promise.catch(() => {
+    if (cache.get(pageIndex) === promise) cache.delete(pageIndex);
+  });
+  return promise;
+}
+
+const titleCache = new WeakMap<PDFDocumentProxy, Map<number, Promise<SheetTitle>>>();
+
+/** The sheet number and title in one PDF page's text (./sheet-title); read once per page. */
+export function readSheetTitle(doc: PDFDocumentProxy, pageIndex: number): Promise<SheetTitle> {
+  let byPage = titleCache.get(doc);
+  if (!byPage) {
+    byPage = new Map();
+    titleCache.set(doc, byPage);
+  }
+  const cache = byPage;
+  const hit = cache.get(pageIndex);
+  if (hit) return hit;
+  const promise = (async () => {
+    const page = await doc.getPage(pageIndex + 1);
+    const content = await page.getTextContent();
+    const items: TextItemLike[] = [];
+    for (const it of content.items) if ("str" in it) items.push(it);
+    const [x0, y0, x1, y1] = page.view;
+    return pickSheetTitle(items, Number(x1) - Number(x0), Number(y1) - Number(y0));
   })();
   cache.set(pageIndex, promise);
   promise.catch(() => {
