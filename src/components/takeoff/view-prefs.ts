@@ -12,6 +12,12 @@ export interface ViewFlags {
   labels: boolean;
   lines: boolean;
   onlySelected: boolean;
+  /**
+   * The scale line stays on the sheet (owner, Nov 3: off — "the line just kind of clutters the
+   * page"; a corner chip says the scale instead, and the line shows while the Scale tool is
+   * active or the chip is hovered / tapped).
+   */
+  scaleLine: boolean;
 }
 export type ViewFlagKey = keyof ViewFlags;
 
@@ -21,12 +27,14 @@ export const DEFAULT_VIEW_FLAGS: ViewFlags = {
   labels: true,
   lines: true,
   onlySelected: false,
+  scaleLine: false,
 };
 export const VIEW_FLAG_LABELS: Record<ViewFlagKey, string> = {
   fills: "Fills",
   labels: "Labels",
   lines: "Lines",
   onlySelected: "Only selected",
+  scaleLine: "Scale line",
 };
 /** The key shown beside each item in the View menu ("" = none). */
 export const VIEW_FLAG_KEYS: Record<ViewFlagKey, string> = {
@@ -34,6 +42,7 @@ export const VIEW_FLAG_KEYS: Record<ViewFlagKey, string> = {
   labels: "Shift+L",
   lines: "",
   onlySelected: "",
+  scaleLine: "",
 };
 
 /** The saved JSON as flags; a missing or bad key keeps its default. */

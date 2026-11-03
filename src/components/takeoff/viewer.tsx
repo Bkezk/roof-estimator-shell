@@ -112,8 +112,8 @@ import {
 import { pickSnap, type PlanIndex, type SnapHit } from "./plan-lines";
 import { ScaleDialog } from "./scale-dialog";
 import {
-  aerialScaleChipText,
   isAerialScaleNote,
+  scaleChipText,
   scaleOrigin,
   sheetScaleLine,
   sheetScaleMessage,
@@ -322,6 +322,10 @@ export function TakeoffViewer(props: ViewerProps) {
   const [countRole, setCountRole] = useState<CountRole>("drain");
   const [linearRole, setLinearRole] = useState<LinearRole>("parapet");
   const [scalePick, setScalePick] = useState<{ a: PagePoint; b: PagePoint } | null>(null);
+  // The scale line shows only while the Scale tool is active, the scale chip is hovered or
+  // tapped (pinned), or the View menu keeps it on (owner, Nov 3: it cluttered the sheet).
+  const [scaleHover, setScaleHover] = useState(false);
+  const [scalePinned, setScalePinned] = useState(false);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const [panning, setPanning] = useState(false);
   // Touch (owner, Nov 3): the fingers on the drawing; two of them pinch to zoom (./shapes
@@ -1589,7 +1593,10 @@ export function TakeoffViewer(props: ViewerProps) {
                 view={viewFlags}
                 deficiencyNumbers={props.deficiencyNumbers}
               />
-              {page.scale && <ScaleLine scale={page.scale} zoom={zoom} />}
+              {page.scale &&
+                (tool === "scale" || scaleHover || scalePinned || viewFlags.scaleLine) && (
+                  <ScaleLine scale={page.scale} zoom={zoom} />
+                )}
               {edge && edgeArea && (
                 <EdgePicker
                   points={edgeArea.points}
@@ -1725,15 +1732,28 @@ export function TakeoffViewer(props: ViewerProps) {
               <Loader2 className="h-3 w-3 animate-spin" /> {source ? "Rendering…" : "Loading plan…"}
             </div>
           )}
-          {/* A scale set from the aerial imagery is not drawn across the picture (owner, Oct 27:
-              it was in the way); this ruler chip says what it is instead. */}
-          {sheetInfo && isAerialScaleNote(sheetInfo.note) && (
-            <div
-              className="flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow"
-              title="The page's scale, set from the aerial imagery; redraw it with Scale (S) to replace it"
+          {/* The page's scale as a chip (owner, Oct 27: the aerial scale line was in the way;
+              Nov 3: every scale line — hover or tap the chip to see where it was measured, the
+              View menu keeps it on). */}
+          {page.scale && (
+            <button
+              type="button"
+              data-scale-chip
+              aria-pressed={scalePinned}
+              className={`pointer-events-auto flex items-center gap-1 rounded px-2 py-1 text-left text-xs shadow ${
+                scalePinned || scaleHover
+                  ? "bg-orange-50 text-orange-900 ring-1 ring-orange-400 dark:bg-orange-950 dark:text-orange-100"
+                  : "bg-background/90 text-muted-foreground"
+              }`}
+              title="The page's scale. Hover or tap to see the line it was measured on; redraw it with Scale (S) to replace it."
+              onPointerEnter={(e) => {
+                if (e.pointerType !== "touch") setScaleHover(true);
+              }}
+              onPointerLeave={() => setScaleHover(false)}
+              onClick={() => setScalePinned((p) => !p)}
             >
-              <Ruler className="h-3 w-3" /> {aerialScaleChipText(sheetInfo.note, fpp)}
-            </div>
+              <Ruler className="h-3 w-3 shrink-0" /> {scaleChipText(page.scale, fpp)}
+            </button>
           )}
         </div>
         {(props.loadError || renderError) && (

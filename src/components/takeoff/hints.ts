@@ -36,7 +36,7 @@ export const ZOOM_HINT = "Wheel or + / − zooms, 0 fits; middle-drag or Space +
 
 /** The View menu's tip (fills / labels / lines / only selected, keys F and Shift+L). */
 export const VIEW_HINT =
-  "Show or hide the areas' fills (F), the labels (Shift+L) and the outlines, or show only the selected object. Remembered in this browser.";
+  "Show or hide the areas' fills (F), the labels (Shift+L) and the outlines, show only the selected object, or keep the scale line on the sheet. Remembered in this browser.";
 
 /** The tools whose drawing is affected by the snap toggles, Shift and typed lengths. */
 export const DRAWING_TOOLS: readonly Tool[] = ["area", "linear", "cutout"];

@@ -281,6 +281,31 @@ export const isScaleLineDrawn = (scale: PageScale | null | undefined): boolean =
  * "Scale: aerial imagery, zoom 19 · 0.52 ft/px" (`fpp` = feet per picture pixel, 2 decimals,
  * 3 when it would otherwise read 0.00).
  */
+/**
+ * The corner chip that says the page's scale (owner, Nov 3: the scale line no longer stays on
+ * the sheet): "Scale: 42' line drawn on the sheet", "Scale: read from the sheet, 1/8" = 1'-0"",
+ * or the aerial chip's text; each with the feet per pixel.
+ */
+export function scaleChipText(scale: PageScale, fpp: number | null): string {
+  const origin = scaleOrigin(scale);
+  if (origin?.source === "sheet" && isAerialScaleNote(origin.note))
+    return aerialScaleChipText(origin.note, fpp);
+  const head =
+    origin?.source === "sheet"
+      ? `Scale: read from the sheet, ${origin.note}`
+      : `Scale: ${feetLabel(scale.feet)} line drawn on the sheet`;
+  if (fpp === null || !Number.isFinite(fpp)) return head;
+  const two = fpp.toFixed(2);
+  return `${head} · ${two === "0.00" ? fpp.toFixed(3) : two} ft/px`;
+}
+/** 42' or 42' 6" (shapes.ts feetInches, kept here so this module stays import-free). */
+const feetLabel = (feet: number): string => {
+  const totalIn = Math.round(feet * 12);
+  const ft = Math.floor(totalIn / 12);
+  const inch = totalIn - ft * 12;
+  return inch === 0 ? `${ft}'` : `${ft}' ${inch}"`;
+};
+
 export function aerialScaleChipText(note: string, fpp: number | null): string {
   const detail = aerialScaleDetail(note);
   const head = `Scale: aerial imagery${detail && detail !== note ? `, ${detail}` : ""}`;

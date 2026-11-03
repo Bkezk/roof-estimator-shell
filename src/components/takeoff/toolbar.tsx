@@ -177,7 +177,7 @@ export interface RoleChips {
   onChange: (value: string) => void;
 }
 
-const VIEW_ORDER: ViewFlagKey[] = ["fills", "labels", "lines", "onlySelected"];
+const VIEW_ORDER: ViewFlagKey[] = ["fills", "labels", "lines", "onlySelected", "scaleLine"];
 
 export function ViewerToolbar(props: {
   tool: Tool;
@@ -206,8 +206,9 @@ export function ViewerToolbar(props: {
   const ps = props.planSnap;
   const dup = props.duplicate;
   const snap = props.snap;
+  // Flags that are off by default count as "something changed" when ON, the rest when OFF.
   const anyHidden = VIEW_ORDER.some((k) =>
-    k === "onlySelected" ? props.view.flags[k] : !props.view.flags[k],
+    k === "onlySelected" || k === "scaleLine" ? props.view.flags[k] : !props.view.flags[k],
   );
   const blur = (e: { detail: number; currentTarget: HTMLElement }) => {
     // Mouse click: hand the keys back to the drawing.

@@ -24,6 +24,7 @@ describe("View menu flags (owner, Oct 27)", () => {
       labels: true,
       lines: true,
       onlySelected: false,
+      scaleLine: false,
     });
     expect(parseViewFlags(null)).toEqual(DEFAULT_VIEW_FLAGS);
     expect(parseViewFlags("{")).toEqual(DEFAULT_VIEW_FLAGS);
@@ -32,6 +33,7 @@ describe("View menu flags (owner, Oct 27)", () => {
       labels: true,
       lines: true,
       onlySelected: true,
+      scaleLine: false,
     });
   });
   it("toggling flips one flag", () => {
