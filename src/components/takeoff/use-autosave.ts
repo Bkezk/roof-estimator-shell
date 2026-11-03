@@ -112,6 +112,20 @@ export function useAutosave<T>(
     return run();
   }, [run]);
 
+  // The page goes to the background (owner, Nov 3: an iPad switching apps, Safari suspending
+  // the tab): send whatever is still unsaved now, not 800 ms from now.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") void flush();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [flush]);
+
   // Unmount: stop the timers and send whatever is still unsaved (fire and forget).
   useEffect(
     () => () => {

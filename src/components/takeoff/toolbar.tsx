@@ -29,6 +29,7 @@ import {
   Magnet,
   MapPin,
   Maximize,
+  PenTool,
   MousePointer2,
   MoveHorizontal,
   Pentagon,
@@ -69,6 +70,7 @@ import {
 import { TOOL_KEYS, type Tool } from "./shapes";
 import type { SnapPrefKey } from "./snap-prefs";
 import { VIEW_FLAG_KEYS, VIEW_FLAG_LABELS, type ViewFlagKey, type ViewFlags } from "./view-prefs";
+import { TOUCH_BUTTON_CLASS } from "./touch";
 
 /** How long the pointer rests on a control before its tooltip opens. */
 export const TIP_DELAY_MS = 300;
@@ -198,6 +200,10 @@ export function ViewerToolbar(props: {
   view: ViewMenu;
   /** "Scale set from the aerial imagery…" — folded into the Scale button's tooltip. */
   scaleNote?: string | null;
+  /** A coarse pointer (owner, Nov 3): finger-sized buttons, the Help label, "Pencil draws". */
+  touch?: boolean;
+  /** "Pencil draws": an Apple Pencil places points, a finger only pans (touch screens). */
+  pencil?: { on: boolean; onToggle: () => void } | null;
   /** "Edge from this area" for the selected area; null when no area is selected. */
   edgeFromArea?: { active: boolean; onClick: () => void } | null;
   /** "Duplicate and stamp": active while stamping; disabled with nothing selected. */
@@ -215,7 +221,10 @@ export function ViewerToolbar(props: {
     if (e.detail > 0) e.currentTarget.blur();
   };
   return (
-    <div className="border-b bg-background">
+    <div
+      className={`border-b bg-background ${props.touch ? TOUCH_BUTTON_CLASS : ""}`}
+      data-touch={props.touch ? "" : undefined}
+    >
       <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
         {TOOLS.map(({ tool: t, label, purpose, icon: Icon }) => {
           const off = !toolAllowed(t, !!props.readOnly);
@@ -455,11 +464,34 @@ export function ViewerToolbar(props: {
               <Maximize className="h-4 w-4" /> <span className="text-xs">Fit</span>
             </Button>
           </Tip>
+          {props.pencil && (
+            <Tip
+              name="Pencil draws"
+              text="an Apple Pencil places the points; a finger only pans and pinches (a tap in Select still picks)"
+            >
+              <Button
+                size="sm"
+                variant={props.pencil.on ? "secondary" : "ghost"}
+                className="h-8 gap-1 px-2"
+                aria-pressed={props.pencil.on}
+                onClick={props.pencil.onToggle}
+              >
+                <PenTool className="h-4 w-4" />
+                <span className="text-xs">Pencil draws</span>
+              </Button>
+            </Tip>
+          )}
           <Popover>
             <Tip name="Tips" text="every tool and what it does (for a touch screen, with no hover)">
               <PopoverTrigger asChild>
-                <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Tips">
+                <Button
+                  size={props.touch ? "sm" : "icon"}
+                  variant="ghost"
+                  className={props.touch ? "h-8 gap-1 px-2" : "h-8 w-8"}
+                  aria-label="Tips"
+                >
                   <CircleHelp className="h-4 w-4" />
+                  {props.touch && <span className="text-xs">Help</span>}
                 </Button>
               </PopoverTrigger>
             </Tip>

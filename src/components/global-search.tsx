@@ -83,7 +83,7 @@ export function GlobalSearch() {
       >
         <Search className="h-4 w-4 shrink-0" aria-hidden />
         <span className="flex-1 truncate text-left">Search tickets, customers, bids…</span>
-        <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline">
+        <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline [@media(pointer:coarse)]:hidden">
           Ctrl K
         </kbd>
       </button>

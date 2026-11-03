@@ -19,7 +19,20 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationsBell } from "@/components/notifications-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { StalledNotice } from "@/components/stalled-sign-in";
-import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from "@/components/ui/sidebar";
+import { isNarrow } from "@/components/takeoff/touch";
+
+/**
+ * On a narrow screen (an iPad; owner, Nov 3) the app menu starts folded so the page has the
+ * width; its button opens it for the visit. (Wider screens start open, as before.)
+ */
+function NarrowMenuDefault() {
+  const { setOpen } = useSidebar();
+  useEffect(() => {
+    if (isNarrow(window.innerWidth)) setOpen(false);
+  }, [setOpen]);
+  return null;
+}
 
 function FullScreen({ children }: { children: ReactNode }) {
   return <div className="flex min-h-svh items-center justify-center bg-background">{children}</div>;
@@ -73,6 +86,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   useLazyReminderDispatch();
   return (
     <SidebarProvider>
+      <NarrowMenuDefault />
       <div className="flex min-h-svh w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col">

@@ -81,6 +81,7 @@ import { Loader2, Ruler, SquareDashed } from "lucide-react";
 
 import { toolAllowed } from "@/lib/takeoff/lock";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 import {
   COUNT_ROLES,
@@ -175,6 +176,7 @@ import {
   type Tool,
 } from "./shapes";
 import { Tip, ViewerToolbar } from "./toolbar";
+import { PENCIL_PREF_KEY, TAP_PX, parsePencilPref, touchDrawBar } from "./touch";
 import {
   pdfPointToPage,
   readPlanLines,
@@ -193,8 +195,6 @@ const CLOSE_PX = 9;
 const DOUBLE_PX = 4;
 /** Screen px: the cursor snaps to another object's corner this close. */
 const SNAP_PX = 8;
-/** Screen px: a finger that moves less than this between touch and lift is a tap. */
-const TAP_PX = 10;
 const ZOOM_STEP = 1.25;
 /** Browser key remembering the "Snap to plan" toggle (on unless turned off). */
 const SNAP_PLAN_KEY = "takeoff.snapPlan";
@@ -268,6 +268,8 @@ export interface ViewerProps {
   deficiencyNumbers?: ReadonlyMap<string, number>;
   /** A click on an already selected deficiency pin: show its pictures (the lightbox). */
   onOpenDeficiency?: (id: string) => void;
+  /** A coarse pointer (a finger): bigger targets, the drawing bar, "Pencil draws" (./touch.ts). */
+  touch?: boolean;
 }
 
 export function TakeoffViewer(props: ViewerProps) {
@@ -334,6 +336,24 @@ export function TakeoffViewer(props: ViewerProps) {
   const touches = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<PinchStart | null>(null);
   const tapRef = useRef<{ pointerId: number; p: PagePoint; sx: number; sy: number } | null>(null);
+  /** "Pencil draws": an Apple Pencil places points, a finger only pans (read after mount). */
+  const [pencilOnly, setPencilOnly] = useState(false);
+  useEffect(() => {
+    try {
+      setPencilOnly(parsePencilPref(window.localStorage.getItem(PENCIL_PREF_KEY)));
+    } catch {
+      // Storage unavailable: the toggle still works for this visit.
+    }
+  }, []);
+  const togglePencil = () =>
+    setPencilOnly((on) => {
+      try {
+        window.localStorage.setItem(PENCIL_PREF_KEY, String(!on));
+      } catch {
+        // Storage unavailable.
+      }
+      return !on;
+    });
   /** Snap to the plan's own lines (PDF only); read from localStorage after mount. */
   const [snapPlan, setSnapPlan] = useState(true);
   /** "Square corners" / "Snap to corners" (default off); read from localStorage after mount. */
@@ -1263,6 +1283,18 @@ export function TakeoffViewer(props: ViewerProps) {
         setView(pinchView(pinch, g.d, g.mid, clampZoom));
         return;
       }
+      // A finger that moves with the Select tool (or with "Pencil draws" on) pans the drawing.
+      const tap = tapRef.current;
+      if (
+        tap &&
+        tap.pointerId === e.pointerId &&
+        (tool === "select" || pencilOnly) &&
+        Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) > TAP_PX
+      ) {
+        tapRef.current = null;
+        panRef.current = { sx: tap.sx, sy: tap.sy, x: view.x, y: view.y };
+        setPanning(true);
+      }
     }
     const pan = panRef.current;
     if (pan) {
@@ -1297,10 +1329,18 @@ export function TakeoffViewer(props: ViewerProps) {
       tapRef.current = null;
       return true;
     }
+    if (panRef.current) {
+      panRef.current = null;
+      setPanning(false);
+      return true;
+    }
     const tap = tapRef.current;
     if (tap && tap.pointerId === e.pointerId) {
       tapRef.current = null;
-      if (!cancelled && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) < TAP_PX) place(tap.p);
+      // With "Pencil draws" on, a finger never places a point (a tap in Select still clears).
+      const places = !(pencilOnly && tool !== "select");
+      if (!cancelled && places && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) < TAP_PX)
+        place(tap.p);
       return true;
     }
     return false;
@@ -1403,6 +1443,15 @@ export function TakeoffViewer(props: ViewerProps) {
           ? "default"
           : "crosshair";
 
+  /** The touch bar's buttons while something is drawn on a touch screen (./touch.ts). */
+  const bar = touchDrawBar({
+    touch: !!props.touch,
+    tool,
+    draftPoints: draft.length,
+    countSession: !!countSession,
+    busy: !!edge || !!stamp,
+    scaled: fpp !== null,
+  });
   /** The one-line status chip (bottom left) while something is in progress; null otherwise. */
   const status = statusLine({
     tool,
@@ -1450,6 +1499,8 @@ export function TakeoffViewer(props: ViewerProps) {
     <div className="flex h-full min-h-0 flex-col">
       <ViewerToolbar
         tool={tool}
+        touch={!!props.touch}
+        pencil={props.touch ? { on: pencilOnly, onToggle: togglePencil } : null}
         zoom={zoom}
         onTool={changeTool}
         onZoomIn={() => zoomCenter(ZOOM_STEP)}
@@ -1561,7 +1612,9 @@ export function TakeoffViewer(props: ViewerProps) {
                 // Nothing in progress with an outline tool: wait for the release, which is a
                 // click (one corner) or, after a drag, a whole rectangle.
                 const box = containerRef.current;
-                const canBox = typingTool && draft.length === 0 && !typed && !press && !!box;
+                const fingerPans = pencilOnly && e.pointerType === "touch";
+                const canBox =
+                  typingTool && draft.length === 0 && !typed && !press && !!box && !fingerPans;
                 if (canBox && (tool !== "cutout" || selectedArea)) {
                   box.setPointerCapture(e.pointerId);
                   setPress({
@@ -1592,6 +1645,7 @@ export function TakeoffViewer(props: ViewerProps) {
                 onVertexDown={onVertexDown}
                 view={viewFlags}
                 deficiencyNumbers={props.deficiencyNumbers}
+                touch={!!props.touch}
               />
               {page.scale &&
                 (tool === "scale" || scaleHover || scalePinned || viewFlags.scaleLine) && (
@@ -1765,7 +1819,63 @@ export function TakeoffViewer(props: ViewerProps) {
         {/* Owner, Oct 27: no hint paragraph here any more (the tips are in the toolbar's
             tooltips and its "?" list); only a one-line status while something is in progress. */}
         <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end gap-2">
-          {status && (
+          {bar && (
+            // The keys an iPad has not got (owner, Nov 3): Enter, Backspace, Esc, typed lengths.
+            <div
+              data-draw-bar
+              className="pointer-events-auto flex flex-wrap items-center gap-1 rounded-md bg-background/95 p-1 shadow"
+            >
+              {bar.finish && (
+                <Button type="button" size="sm" className="h-[44px] px-4" onClick={() => finish()}>
+                  {bar.finish}
+                </Button>
+              )}
+              {bar.undo && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-[44px] px-3"
+                  onClick={() => backspace()}
+                >
+                  Undo point
+                </Button>
+              )}
+              {bar.cancel && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-[44px] px-3"
+                  onClick={() => cancel()}
+                >
+                  Cancel
+                </Button>
+              )}
+              {bar.length && (
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    placeTyped();
+                  }}
+                >
+                  <Input
+                    value={typed}
+                    aria-label="Length or size"
+                    placeholder="Length 24'6, or size 40 x 120"
+                    className="h-[44px] w-56"
+                    autoComplete="off"
+                    onChange={(e) => setTyped(e.target.value.slice(0, 16))}
+                  />
+                  <Button type="submit" size="sm" variant="secondary" className="h-[44px] px-3">
+                    Place
+                  </Button>
+                </form>
+              )}
+            </div>
+          )}
+          {status && !bar && (
             <div
               role="status"
               className="max-w-[640px] truncate rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow"

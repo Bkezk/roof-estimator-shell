@@ -33,6 +33,7 @@ import {
   RotateCw,
   Ruler,
   Undo2,
+  X,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -115,6 +116,8 @@ import {
 } from "./shapes";
 import { DEFAULT_PAGE_NAME, sheetPageName } from "./sheet-title";
 import { closePdf, openPdf, readSheetTitle, type UnderlaySource } from "./underlay";
+import { TOUCH_BUTTON_CLASS } from "./touch";
+import { useCoarsePointer, useNarrowScreen } from "./use-screen";
 import { useAutosave, type SaveState } from "./use-autosave";
 import { TIP_DELAY_MS, Tip } from "./toolbar";
 import { TakeoffViewer } from "./viewer";
@@ -697,6 +700,19 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
       writePanel("panel", !o);
       return !o;
     });
+  // A narrow screen (an iPad; owner, Nov 3; ./touch.ts) opens in Focus, and its pages list and
+  // side panel slide OVER the drawing when asked for instead of squeezing it. A coarse pointer
+  // (a finger) gets finger-sized buttons throughout the editor.
+  const narrow = useNarrowScreen();
+  const touch = useCoarsePointer();
+  const narrowApplied = useRef(false);
+  useEffect(() => {
+    if (!narrow || narrowApplied.current) return;
+    narrowApplied.current = true;
+    setPagesOpen(false);
+    setPanelOpen(false);
+    if (!isMobile) setNavOpen(false);
+  }, [narrow, isMobile, setNavOpen]);
   const focused = !pagesOpen && !panelOpen && (isMobile || !navOpen);
   const toggleFocus = () => {
     const next = !focused;
@@ -752,12 +768,20 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     setEdge(null);
     toast.success(`Made from ${area.attrs.name}: ${sum.text}.`);
   };
-  const gridCols = `${pagesOpen ? "150px " : ""}minmax(0,1fr)${panelOpen ? " 380px" : ""}`;
+  const gridCols = narrow
+    ? "minmax(0,1fr)"
+    : `${pagesOpen ? "150px " : ""}minmax(0,1fr)${panelOpen ? " 380px" : ""}`;
 
   return (
     // -m-4 reclaims most of the page padding around the editor; the height is the viewport minus
     // the 3.5rem app header and the 0.5rem gap left above and below.
-    <div className="-m-4 flex h-[calc(100svh-4.5rem)] min-h-[560px] flex-col gap-2">
+    <div
+      className={`-m-4 flex h-[calc(100svh-4.5rem)] min-h-[560px] flex-col gap-2 ${
+        touch ? TOUCH_BUTTON_CLASS : ""
+      }`}
+      data-touch={touch ? "" : undefined}
+      data-narrow={narrow ? "" : undefined}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild variant="ghost" size="sm" className="px-2">
           <Link to="/takeoff">
@@ -1059,13 +1083,33 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="grid min-h-0 flex-1 gap-2" style={{ gridTemplateColumns: gridCols }}>
+      <div className="relative grid min-h-0 flex-1 gap-2" style={{ gridTemplateColumns: gridCols }}>
         {pagesOpen && (
-          <Card className="min-h-0 overflow-y-auto">
+          <Card
+            className={
+              narrow
+                ? "absolute inset-y-0 left-0 z-20 w-[220px] overflow-y-auto shadow-xl"
+                : "min-h-0 overflow-y-auto"
+            }
+            data-pages-panel
+          >
             <CardContent className="space-y-1 p-2">
-              <p className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Pages ({pages.length})
-              </p>
+              <div className="flex items-center justify-between px-1 pb-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Pages ({pages.length})
+                </p>
+                {narrow && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8"
+                    aria-label="Hide the pages list"
+                    onClick={togglePages}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
               {pages.map((p, i) => {
                 const n = objects.filter((o) => o.page === p.index).length;
                 const active = i === pageIdx;
@@ -1151,17 +1195,38 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             readOnly={locked}
             deficiencyNumbers={defNumbers}
             onOpenDeficiency={setLightbox}
+            touch={touch}
           />
         </div>
 
         {panelOpen && (
-          <Card className="flex min-h-0 flex-col overflow-hidden">
+          <Card
+            className={
+              narrow
+                ? "absolute inset-y-0 right-0 z-20 flex w-[min(380px,92vw)] flex-col overflow-hidden shadow-xl"
+                : "flex min-h-0 flex-col overflow-hidden"
+            }
+            data-side-panel
+          >
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-              <TabsList className="m-2 grid grid-cols-3">
-                <TabsTrigger value="setup">Setup</TabsTrigger>
-                <TabsTrigger value="objects">Objects</TabsTrigger>
-                <TabsTrigger value="quantities">Quantities</TabsTrigger>
-              </TabsList>
+              <div className="m-2 flex items-center gap-1">
+                <TabsList className="grid h-auto flex-1 grid-cols-3">
+                  <TabsTrigger value="setup">Setup</TabsTrigger>
+                  <TabsTrigger value="objects">Objects</TabsTrigger>
+                  <TabsTrigger value="quantities">Quantities</TabsTrigger>
+                </TabsList>
+                {narrow && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    aria-label="Hide the side panel"
+                    onClick={togglePanel}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
                 <TabsContent value="setup" className="mt-0">
                   <SetupTab

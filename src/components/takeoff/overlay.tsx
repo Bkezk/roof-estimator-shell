@@ -38,6 +38,7 @@ import {
   rectPoints,
   rectSizeLabel,
 } from "./shapes";
+import { TOUCH_HIT_PX } from "./touch";
 import type { SnapKind } from "./plan-lines";
 import { isScaleLineDrawn, scaleOrigin, scaleOriginLabel } from "./sheet-scale";
 
@@ -138,6 +139,8 @@ export interface ObjectsLayerProps {
   view?: ViewFlags;
   /** Deficiency number by object id (the pin shows it). */
   deficiencyNumbers?: ReadonlyMap<string, number> | undefined;
+  /** A coarse pointer: a TOUCH_HIT_PX hit circle round every handle and pin (owner, Nov 3). */
+  touch?: boolean;
 }
 
 /** The small camera on a deficiency pin that has pictures (lucide's Camera, 24-unit box). */
@@ -174,6 +177,8 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
   const { zoom, fpp } = props;
   const view = props.view ?? DEFAULT_VIEW_FLAGS;
   const pe = props.interactive ? "auto" : "none";
+  /** The invisible hit circle's radius on a touch screen (page units), else null. */
+  const hit = props.touch && props.interactive ? TOUCH_HIT_PX / zoom : null;
   const shown = props.objects.filter((o) => objectVisible(view, o.id, props.selectedId));
   // Labels are drawn in a second pass, above every shape, so a later outline never crosses an
   // earlier label (owner, Sep 30: "it appears below the lines sometimes"). Side lengths show on
@@ -314,6 +319,18 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
           <g key={o.id}>
             {o.points.map(([x, y], i) => (
               <g key={i}>
+                {hit !== null && (
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={hit}
+                    fill="transparent"
+                    stroke="none"
+                    data-touch-hit
+                    style={{ cursor: "move" }}
+                    onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
+                  />
+                )}
                 <circle
                   cx={x}
                   cy={y}
@@ -359,19 +376,32 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
           .filter((o) => o.id === props.selectedId && o.kind !== "count")
           .map((o) =>
             o.points.map(([x, y], i) => (
-              <rect
-                key={`${o.id}-${i}`}
-                x={x - 5 / zoom}
-                y={y - 5 / zoom}
-                width={10 / zoom}
-                height={10 / zoom}
-                fill="#ffffff"
-                stroke={o.color ?? "#2563eb"}
-                strokeWidth={2}
-                vectorEffect="non-scaling-stroke"
-                style={{ cursor: "move" }}
-                onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
-              />
+              <g key={`${o.id}-${i}`}>
+                {hit !== null && (
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={hit}
+                    fill="transparent"
+                    stroke="none"
+                    data-touch-hit
+                    style={{ cursor: "move" }}
+                    onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
+                  />
+                )}
+                <rect
+                  x={x - 5 / zoom}
+                  y={y - 5 / zoom}
+                  width={10 / zoom}
+                  height={10 / zoom}
+                  fill="#ffffff"
+                  stroke={o.color ?? "#2563eb"}
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                  style={{ cursor: "move" }}
+                  onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
+                />
+              </g>
             )),
           )}
     </g>

@@ -189,7 +189,7 @@ describe("5. pinchView: two fingers zoom about their midpoint", () => {
       "tapRef.current = { pointerId: e.pointerId, p, sx: e.clientX, sy: e.clientY };",
     );
     expect(viewer).toContain(
-      "if (!cancelled && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) < TAP_PX) place(tap.p);",
+      "if (!cancelled && places && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) < TAP_PX)\n        place(tap.p);",
     );
     expect(viewer).toContain("if (touchEnd(e, false)) return;");
     expect(viewer).toContain("touchEnd(e, true);\n          endPress();");
