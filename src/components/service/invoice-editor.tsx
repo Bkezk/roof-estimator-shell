@@ -215,8 +215,13 @@ function KindBadge({ kind }: { kind: LineKind }) {
 /** Everything the editor needs to report a changed invoice back to the page. */
 interface Ctx {
   job: ServiceJobWithTech;
-  /** Put the server's answer in the cache; `stageChanged` also refreshes the ticket. */
-  applied: (r: InvoiceWithLines, stageChanged?: boolean) => void;
+  /**
+   * Put the server's answer in the page's cache. The Invoices list, the ticket's chips and
+   * History are re-read too — unless `quiet` (the autosave; Nov 3, review item 47: every saved
+   * keystroke re-read four lists, so they are only marked stale and read when next shown) —
+   * and `stage` re-reads the ticket as well.
+   */
+  applied: (r: InvoiceWithLines, opts?: { stage?: boolean; quiet?: boolean }) => void;
   /** After a failed step that saved first: show what the server now holds. */
   refresh: () => void;
   onVoided: (voidedId: string) => void;
@@ -267,11 +272,14 @@ export function InvoiceEditorPage({
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["accounts"] });
   };
-  const refreshLists = (jid: string) => {
-    void qc.invalidateQueries({ queryKey: ["invoices"] });
-    void qc.invalidateQueries({ queryKey: ticketInvoicesKey(jid) });
-    void qc.invalidateQueries({ queryKey: invoiceKey(jid) });
-    void qc.invalidateQueries({ queryKey: ["audit"] });
+  // `refetch` false (Nov 3, review item 47): the lists are marked stale and read again when
+  // next shown, not now.
+  const refreshLists = (jid: string, refetch = true) => {
+    const refetchType = refetch ? "active" : "none";
+    void qc.invalidateQueries({ queryKey: ["invoices"], refetchType });
+    void qc.invalidateQueries({ queryKey: ticketInvoicesKey(jid), refetchType });
+    void qc.invalidateQueries({ queryKey: invoiceKey(jid), refetchType });
+    void qc.invalidateQueries({ queryKey: ["audit"], refetchType });
   };
   const openInvoice = (invoiceId: string, replace = false) =>
     void navigate({ to: "/service/invoices", search: { id: invoiceId }, replace });
@@ -330,10 +338,10 @@ export function InvoiceEditorPage({
 
   const ctx: Ctx = {
     job,
-    applied: (r, stageChanged) => {
+    applied: (r, opts) => {
       qc.setQueryData(invoicePageKey(r.invoice.id), r);
-      refreshLists(job.id);
-      if (stageChanged) refreshTicket(job.id);
+      refreshLists(job.id, !opts?.quiet);
+      if (opts?.stage) refreshTicket(job.id);
     },
     refresh: () => void qc.invalidateQueries({ queryKey: invoicePageKey(id) }),
     askSend: (invoiceId) => setSendNow({ id: invoiceId, step: "ask" }),
@@ -798,7 +806,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             ? { ...h, send_to: sendToOf(r.invoice.bill_to as Record<string, unknown> | null) }
             : h,
         );
-      ctx.applied(r);
+      ctx.applied(r, { quiet: true });
     },
     { what: `Invoice #${no}`, delay: 900, signal: false },
   );
@@ -891,7 +899,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         await saveIfNeeded(true);
         const r = await finalizeFn({ data: { id: inv.id } });
         setConfirm(null);
-        ctx.applied(r, true);
+        ctx.applied(r, { stage: true });
         toast.success(`Invoice #${invoiceLabel(r.invoice)} is final; the ticket is Invoiced`);
         // Owner, Oct 14: "Send it now?" follows, on the final invoice (the page asks).
         ctx.askSend(r.invoice.id);
@@ -1544,6 +1552,13 @@ function SendToBox(props: { label: string; value: string; onChange: (v: string) 
 
 type PdfView = { blob: Blob; fileName: string };
 
+/**
+ * How long after a save lands the preview is drawn again (Nov 3, review item 47): four seconds,
+ * so a run of edits is one render, not one per saved keystroke (each is a full PDF on the
+ * server). The first draw, when the pane opens, is immediate.
+ */
+export const PREVIEW_DEBOUNCE_MS = 4000;
+
 /** Whether the preview pane was left open (owner, Oct 14), per browser. */
 const PREVIEW_OPEN_KEY = "jbk-portal:invoice-preview";
 
@@ -1583,7 +1598,7 @@ function PreviewPane({ invoiceId, version }: { invoiceId: string; version: strin
             toast.error(`Could not make the PDF preview: ${errText(e)}`);
           });
       },
-      hasView.current ? 1500 : 0,
+      hasView.current ? PREVIEW_DEBOUNCE_MS : 0,
     );
     return () => {
       cancelled = true;
@@ -1885,7 +1900,7 @@ function FinalInvoice({
       }),
     onSuccess: (r) => {
       setDialog(null);
-      ctx.applied(r, r.ticket_closed);
+      ctx.applied(r, { stage: r.ticket_closed });
       // Owner, Oct 5: a manager closes the ticket by hand (its stage); paid no longer does.
       toast.success(
         `Invoice #${invoiceLabel(r.invoice)} marked paid; close the ticket from its stage when it is finished`,

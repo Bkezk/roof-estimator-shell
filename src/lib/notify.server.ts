@@ -95,7 +95,12 @@ export async function sendEmail(input: {
   html?: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = process.env["RESEND_API_KEY"];
-  if (!key) return { ok: false, error: "RESEND_API_KEY is not set (Lovable Cloud › secrets)" };
+  if (!key)
+    return {
+      ok: false,
+      error:
+        "Email is not set up yet: the RESEND_API_KEY secret is missing (Lovable Cloud › Secrets)",
+    };
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",

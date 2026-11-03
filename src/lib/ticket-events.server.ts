@@ -13,6 +13,7 @@
  * No notice to the person who made the change, none for a PO or for Closed (owner).
  */
 import { longDay } from "@/lib/followup-rules";
+import { rosterDisplayName, technicianRoster } from "@/lib/roster.server";
 import { inspectionDoneTitle, parseInspection } from "@/lib/inspection";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { syncFollowup } from "@/lib/followups.server";
@@ -60,20 +61,16 @@ export function doneTitle(j: JobRow): string {
  * empty or failed roster is logged rather than passed over in silence.
  */
 async function officeUsers(sb: Client): Promise<{ id: string; technician: boolean }[]> {
-  const { data, error } = await sb.rpc("technician_options");
-  if (error) console.error(`afterTicketStage: technician_options failed — ${error.message}`);
-  return (data ?? []).filter((u) => !u.technician).map((u) => ({ id: u.id, technician: false }));
+  // Once per request (Nov 3, review item 44; roster.server.ts).
+  return (await technicianRoster(sb))
+    .filter((u) => !u.technician)
+    .map((u) => ({ id: u.id, technician: false }));
 }
 
 /** A roster user's display name (technician_options), or null when not on it. */
 async function rosterName(sb: Client, id: string): Promise<string | null> {
-  const { data, error } = await sb.rpc("technician_options");
-  if (error) {
-    console.error(`afterTicketDispatch: technician_options failed — ${error.message}`);
-    return null;
-  }
-  const u = (data ?? []).find((r) => r.id === id);
-  return u ? (u.full_name ?? "").trim() || u.email : null;
+  const u = (await technicianRoster(sb)).find((r) => r.id === id);
+  return u ? rosterDisplayName(u) : null;
 }
 
 /**

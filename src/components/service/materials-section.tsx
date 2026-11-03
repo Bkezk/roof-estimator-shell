@@ -105,8 +105,11 @@ import {
   usedPacks,
   type LocatedCell,
 } from "@/components/service/materials-utils";
+import { isWorkStage } from "@/lib/ticket-stages";
 
 /** Rows shown before "Show all". */
+/** How long after the last + on a cell its taps go to the server as one write (Nov 3, item 43). */
+export const TAP_QUIET_MS = 600;
 const FIRST_ROWS = 12;
 const VEHICLE_KEY = "bid-o-matic:closeout:vehicle";
 const truckKey = (userId: string) => ["service-my-truck-stock", userId] as const;
@@ -167,7 +170,7 @@ export function MaterialsSection({
   }>(["service-job", jobId]);
   const ticketOpen =
     !!ticketRow &&
-    ["open", "scheduled", "done"].includes(ticketRow.stage) &&
+    isWorkStage(ticketRow.stage) &&
     (ticketRow.technician_id === userId || can("service"));
   const canLog = can("service") || can("inventory") || can("estimate");
   // Putting a piece back against this ticket is allowed for any login that may log material
@@ -506,6 +509,46 @@ export function MaterialsSection({
       setShort({ r, units });
       return;
     }
+    queueAdd(r, units, ok);
+  };
+  /**
+   * Quick taps on the same cell become ONE write (owner, Nov 3, review item 43): five + in a
+   * row used to be five server round trips of nine queries each. The count moves at once
+   * (bump); the write goes TAP_QUIET_MS after the last tap with the total. Pending taps are sent
+   * when the screen closes.
+   */
+  const pendingTaps = useRef<
+    Map<string, { r: ListRow; units: number; ok: boolean; timer: ReturnType<typeof setTimeout> }>
+  >(new Map());
+  const flushTap = (key: string) => {
+    const t = pendingTaps.current.get(key);
+    if (!t) return;
+    pendingTaps.current.delete(key);
+    clearTimeout(t.timer);
+    bump(key, -t.units);
+    sendAdd(t.r, t.units, t.ok);
+  };
+  const queueAdd = (r: ListRow, units: number, ok: boolean) => {
+    const prev = pendingTaps.current.get(r.key);
+    if (prev) clearTimeout(prev.timer);
+    bump(r.key, units);
+    const total = round6((prev?.units ?? 0) + units);
+    pendingTaps.current.set(r.key, {
+      r,
+      units: total,
+      ok: ok || !!prev?.ok,
+      timer: setTimeout(() => flushTap(r.key), TAP_QUIET_MS),
+    });
+  };
+  useEffect(() => {
+    const taps = pendingTaps.current;
+    return () => {
+      for (const key of [...taps.keys()]) flushTap(key);
+    };
+    // Once, on unmount: the taps still waiting go out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const sendAdd = (r: ListRow, units: number, ok: boolean) => {
     enqueue(r.key, units, `Could not log ${cellName(r)}`, async () => {
       try {
         await record(r, units, "consumed", ok);
@@ -743,7 +786,9 @@ export function MaterialsSection({
                       {stock.error ? `the stock (${errText(stock.error)})` : ""}
                       {stock.error && options.error ? " and " : ""}
                       {options.error ? `the material list (${errText(options.error)})` : ""}
-                      {stock.error ? "; what is left where is unknown — the server checks" : ""}
+                      {stock.error
+                        ? "; the shelf count could not be read, so it is checked when you add"
+                        : ""}
                     </p>
                   )}
                   {found.length === 0 ? (

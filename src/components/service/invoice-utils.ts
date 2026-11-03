@@ -5,6 +5,7 @@
  * browser opens or saves.
  */
 import { INVOICE_STATUSES, type InvoiceStatus } from "@/lib/invoices.functions";
+import { plainErrText } from "@/lib/plain-error";
 
 /** Every invoice query of a ticket on its card (the prefix). */
 export const invoiceKey = (jobId: string) => ["ticket-invoice", jobId] as const;
@@ -19,7 +20,8 @@ export const invoicePageKey = (id: string) => ["invoice-page", id] as const;
 export const deleteDraftNote = (ticketNumber: number, label: string) =>
   `The draft and its lines are removed. The next invoice made for ticket #${ticketNumber} takes number ${label}.`;
 
-export const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** What went wrong, in plain English (lib/plain-error.ts; Nov 3, review item 49). */
+export const errText = plainErrText;
 
 const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 /** $1,234.56 (and -$5.00). */

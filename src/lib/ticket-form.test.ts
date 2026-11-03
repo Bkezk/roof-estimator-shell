@@ -45,7 +45,8 @@ describe("saveServiceJob refuses a multi-site customer without a site", () => {
     expect(src).toMatch(
       /count: "exact", head: true \}\)\s*\.eq\("account_id", fields\.account_id\)\s*\.is\("deleted_at", null\)/,
     );
-    expect(src).toContain("siteProblem({ siteCount: count ?? 0, site_id: null })");
+    // Nov 3 (review item 44): the count is read with the customer, in one Promise.all.
+    expect(src).toContain("siteProblem({ siteCount: siteCountRead.count ?? 0, site_id: null })");
   });
 });
 

@@ -21,8 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { plainErrText } from "@/lib/plain-error";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 const KEY = ["service-materials"] as const;
 const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const GRID = "md:grid-cols-[minmax(0,1fr)_6rem_6.5rem_6rem_10rem_3.5rem]";

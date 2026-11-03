@@ -69,8 +69,9 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
+import { plainErrText } from "@/lib/plain-error";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 const asStage = (s: string): ServiceStage =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? (s as ServiceStage) : "open";
 

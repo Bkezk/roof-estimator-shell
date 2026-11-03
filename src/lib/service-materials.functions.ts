@@ -14,8 +14,7 @@ import { canAccess, managesTickets } from "@/lib/access";
 import type { ServiceMaterial } from "@/lib/service-materials";
 import { loadServiceMaterialLinks, loadServiceMaterials } from "@/lib/service-materials.server";
 
-export const MATERIALS_NOT_SET_UP =
-  "Material pricing is not set up in the database yet (apply 20261006130000_service_materials.sql)";
+export const MATERIALS_NOT_SET_UP = "Material pricing is not set up yet. Ask an admin.";
 export const NAME_TAKEN = (name: string) => `Two materials are called "${name}" — rename one`;
 
 async function pricingManager(ctx: { supabase: SupabaseClient<Database>; userId: string }) {
@@ -24,7 +23,7 @@ async function pricingManager(ctx: { supabase: SupabaseClient<Database>; userId:
     .select("role, access, technician")
     .eq("id", ctx.userId)
     .maybeSingle();
-  if (!managesTickets(data)) throw new Error("Material pricing is a manager's");
+  if (!managesTickets(data)) throw new Error("Only a manager changes material pricing");
   return data;
 }
 

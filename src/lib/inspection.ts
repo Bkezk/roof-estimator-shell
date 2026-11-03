@@ -31,6 +31,7 @@
  * older saves carry them, and a row can still be ticked OK or set N/A by hand.
  */
 import { z } from "zod";
+import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 /**
  * The starting checklist: the 20260930092000 seed (inspection_checklist_items when the table was
@@ -418,7 +419,7 @@ export function outcomeLine(o: {
 }
 
 /** Stages at which an inspection is complete (the tech has marked the ticket Done). */
-export const COMPLETE_STAGES: readonly string[] = ["done", "authorized", "invoiced", "closed"];
+export const COMPLETE_STAGES: readonly string[] = FINISHED_STAGES;
 export const inspectionComplete = (stage: string): boolean => COMPLETE_STAGES.includes(stage);
 
 /** The ticket description's limit (service.functions jobSchema). */

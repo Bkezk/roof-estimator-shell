@@ -22,6 +22,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { readProfile } from "@/lib/profile-cache.server";
+import { rosterDisplayName, technicianRoster } from "@/lib/roster.server";
 import {
   CLAIM_NEEDS_TICK,
   CLAIM_TAKEN,
@@ -48,6 +49,7 @@ import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { assignedStage, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
+import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
 export { TECH_STAGES } from "@/lib/ticket-stage";
@@ -169,9 +171,10 @@ async function withTechNames<T extends { technician_id: string | null }>(
   sb: SupabaseClient<Database>,
   rows: T[],
 ): Promise<(T & { technician_name: string | null })[]> {
-  const { data: techs } = await sb.rpc("technician_options");
+  // Once per request (Nov 3, review item 44; roster.server.ts).
+  const techs = await technicianRoster(sb);
   const names = new Map<string, string>();
-  for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  for (const t of techs) names.set(t.id, rosterDisplayName(t));
   return rows.map((r) => ({
     ...r,
     technician_name: r.technician_id ? (names.get(r.technician_id) ?? null) : null,
@@ -238,7 +241,7 @@ export const listBoardJobs = createServerFn({ method: "GET" })
         .select(LIST_JOB_COLUMNS)
         .is("deleted_at", null)
         .not("technician_id", "is", null)
-        .in("stage", ["done", "authorized", "invoiced", "closed"])
+        .in("stage", [...FINISHED_STAGES])
         .gte("completed_at", `${shiftYmd(data.from, -1)}T00:00:00Z`)
         .lte("completed_at", `${shiftYmd(data.to, 1)}T23:59:59Z`)
         .order("number", { ascending: true })
@@ -441,49 +444,59 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     let site_address: string | null = null;
     let site_city: string | null = null;
     let site_state: string | null = null;
-    if (fields.account_id) {
-      const { data: a, error } = await sb
-        .from("crm_accounts")
-        .select("name")
-        .eq("id", fields.account_id)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
+    let location_name: string | null = null;
+    if (!fields.account_id) fields.site_id = null;
+    // The customer, the property (or the property count) and the site are read together (Nov 3,
+    // review item 44): they were one after another, three round trips before the write.
+    const [accountRead, siteRead, siteCountRead, locationRead] = await Promise.all([
+      fields.account_id
+        ? sb.from("crm_accounts").select("name").eq("id", fields.account_id).maybeSingle()
+        : null,
+      fields.account_id && fields.site_id
+        ? sb
+            .from("crm_sites")
+            .select("name, address1, address2, city, state, zip, account_id")
+            .eq("id", fields.site_id)
+            .maybeSingle()
+        : null,
+      fields.account_id && !fields.site_id
+        ? sb
+            .from("crm_sites")
+            .select("id", { count: "exact", head: true })
+            .eq("account_id", fields.account_id)
+            .is("deleted_at", null)
+        : null,
+      // The site inside the property (owner, Oct 6): one of that property's, its name kept.
+      fields.location_id
+        ? sb
+            .from("property_sites")
+            .select("name, property_id")
+            .eq("id", fields.location_id)
+            .maybeSingle()
+        : null,
+    ]);
+    if (accountRead) {
+      if (accountRead.error) throw new Error(accountRead.error.message);
+      const a = accountRead.data;
       if (!a) throw new Error("Customer not found");
       customer_name = a.name;
-      if (fields.site_id) {
-        const { data: s } = await sb
-          .from("crm_sites")
-          .select("name, address1, address2, city, state, zip, account_id")
-          .eq("id", fields.site_id)
-          .maybeSingle();
+      if (siteRead) {
+        const s = siteRead.data;
         if (!s || s.account_id !== fields.account_id)
           throw new Error("That property does not belong to the customer");
         site_name = s.name;
         site_address = siteAddressLine(s) || null;
         site_city = s.city;
         site_state = s.state;
-      } else {
+      } else if (siteCountRead) {
         // A customer with more than one site: the ticket names which (owner, Oct 1).
-        const { count, error: cErr } = await sb
-          .from("crm_sites")
-          .select("id", { count: "exact", head: true })
-          .eq("account_id", fields.account_id)
-          .is("deleted_at", null);
-        if (cErr) throw new Error(cErr.message);
-        const problem = siteProblem({ siteCount: count ?? 0, site_id: null });
+        if (siteCountRead.error) throw new Error(siteCountRead.error.message);
+        const problem = siteProblem({ siteCount: siteCountRead.count ?? 0, site_id: null });
         if (problem) throw new Error(problem);
       }
-    } else {
-      fields.site_id = null;
     }
-    // The site inside the property (owner, Oct 6): one of that property's, its name kept.
-    let location_name: string | null = null;
     if (fields.location_id) {
-      const { data: loc } = await sb
-        .from("property_sites")
-        .select("name, property_id")
-        .eq("id", fields.location_id)
-        .maybeSingle();
+      const loc = locationRead?.data;
       if (!loc || loc.property_id !== fields.site_id)
         throw new Error("That site is not at this property — pick the site again");
       location_name = loc.name;
@@ -659,7 +672,7 @@ async function logTicketDateMove(
 }
 
 /** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
-const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced", "closed"];
+const TICKET_CLOSING: readonly ServiceStage[] = FINISHED_STAGES;
 /**
  * Keep the ticket's follow-up timer in step with its technician and stage (design §11). With
  * `before` (the technician and day as they were, from the paths that may change them: the save,
@@ -683,7 +696,11 @@ async function syncTicketFollowup(
 ): Promise<SyncResult> {
   const { syncFollowup } = await import("@/lib/followups.server");
   const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
-  await afterTicketStage(row, prevStage, actor, sb);
+  // The stage notices and the Authorize timer (afterTicketStage) only when the stage moved, the
+  // ticket was deleted, or it came back (a restore re-syncs, `quiet`) — Nov 3, review item 44:
+  // it ran on every save and dispatch, three or four round trips for nothing.
+  if (prevStage !== row.stage || !!row.deleted_at || opts.quiet)
+    await afterTicketStage(row, prevStage, actor, sb);
   if (before) await afterTicketDispatch(row, before, actor, sb);
   return syncFollowup(
     {

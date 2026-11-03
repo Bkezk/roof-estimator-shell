@@ -310,7 +310,8 @@ describe("1. the draft saves itself (invoice-editor.tsx)", () => {
       draft.indexOf("const autosave = useAutosave<Pushed>("),
       draft.indexOf("const lastPushed"),
     );
-    expect(saveFn).toContain("ctx.applied(r);");
+    // Nov 3 (review item 47): the autosave sets the page cache only (`quiet`).
+    expect(saveFn).toContain("ctx.applied(r, { quiet: true });");
     // The office's desktop: no "Check your signal" (field-utils.ts).
     const utils = read("src/components/service/field-utils.ts");
     expect(utils).toContain(
@@ -419,7 +420,10 @@ describe("3. one primary action, a menu, a collapsible preview (invoice-editor.t
     expect(ed).not.toContain("Preview PDF");
   });
   it('after a finalise the page asks "Send it now?"; Send opens the final invoice\'s Send dialog', () => {
-    expect(draft).toMatch(/ctx\.applied\(r, true\);[\s\S]*?ctx\.askSend\(r\.invoice\.id\);/);
+    // Nov 3 (review item 47): `{ stage: true }` re-reads the ticket too.
+    expect(draft).toMatch(
+      /ctx\.applied\(r, \{ stage: true \}\);[\s\S]*?ctx\.askSend\(r\.invoice\.id\);/,
+    );
     expect(ed).toContain("askSend: (invoiceId: string) => void;");
     expect(page).toContain('askSend: (invoiceId) => setSendNow({ id: invoiceId, step: "ask" }),');
     expect(page).toContain("<AlertDialogTitle>Send it now?</AlertDialogTitle>");
@@ -467,7 +471,9 @@ describe("3. one primary action, a menu, a collapsible preview (invoice-editor.t
       ed.indexOf("const INTERNAL_OPEN_KEY"),
     );
     expect(pane).toContain('id="invoice-preview"');
-    expect(pane).toContain("hasView.current ? 1500 : 0,");
+    // Nov 3 (review item 47): four seconds after a save, not 1.5.
+    expect(pane).toContain("hasView.current ? PREVIEW_DEBOUNCE_MS : 0,");
+    expect(ed).toContain("export const PREVIEW_DEBOUNCE_MS = 4000;");
     expect(pane).toMatch(/\}, \[invoiceId, version\]\);/);
     expect(pane).toContain("Updating…");
     // The dialog's blob-URL handling and its reasons (Chrome blocking) stay.

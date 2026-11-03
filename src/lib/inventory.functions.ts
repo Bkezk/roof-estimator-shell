@@ -40,8 +40,8 @@ import {
   unitWord,
 } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
-import { readAllMovements } from "@/lib/inventory-reconcile.functions";
 import { readCrew } from "@/lib/service-crew.server";
+import { WORK_STAGES } from "@/lib/ticket-stages";
 
 export const MOVEMENT_REASONS = [
   "leftover",
@@ -216,12 +216,12 @@ export const listStock = createServerFn({ method: "GET" })
 /**
  * listStock's work as a plain function, so the Export dialog's "Stock on hand" report
  * (inventory-export.functions.ts) sums the same ledger the same way instead of carrying a copy.
- * The ledger is read whole, by page (readAllMovements): PostgREST answers at most 1,000 rows per
- * request, and a cell's count is wrong when any of its entries is left out.
+ * The cells come summed from the database (inventory_stock_cells, Nov 3): the ledger used to be
+ * read whole, by page, and added up here.
  */
 export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[]> {
-  const [data, cats, { data: nums, error }, materials] = await Promise.all([
-    readAllMovements(sb),
+  const [cells, cats, { data: nums, error }, materials] = await Promise.all([
+    readStockCells(sb),
     categories(sb),
     sb.from("catalog_item_numbers_map").select("screen_id, row_label, price_col, item_no"),
     loadServiceMaterialLinks(sb),
@@ -229,28 +229,21 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
   if (error) throw new Error(error.message);
   const byMaterial = materialsByCell(materials);
   const byCell = new Map<string, StockRow>();
-  for (const m of data) {
+  for (const m of cells) {
     const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
-    let row = byCell.get(key);
-    if (!row) {
-      row = {
-        location_id: m.location_id,
-        screen_id: m.screen_id,
-        category: cats(m.screen_id, m.row_label),
-        row_label: m.row_label,
-        price_col: m.price_col,
-        unit: m.unit,
-        on_hand: 0,
-        last_at: null,
-        item_nos: [],
-        piece: null,
-        label: serviceLabel(byMaterial, m),
-      };
-      byCell.set(key, row);
-    }
-    row.on_hand += Number(m.qty);
-    row.unit = m.unit;
-    row.last_at = m.created_at;
+    byCell.set(key, {
+      location_id: m.location_id,
+      screen_id: m.screen_id,
+      category: cats(m.screen_id, m.row_label),
+      row_label: m.row_label,
+      price_col: m.price_col,
+      unit: m.unit,
+      on_hand: m.on_hand,
+      last_at: m.last_at,
+      item_nos: [],
+      piece: null,
+      label: serviceLabel(byMaterial, m),
+    });
   }
   const numsByCell = new Map<string, string[]>();
   for (const n of nums ?? []) {
@@ -284,6 +277,49 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
         a.category.localeCompare(b.category) ||
         a.row_label.localeCompare(b.row_label),
     );
+}
+
+/** A row of inventory_stock_cells (20261103200000): one cell at one location, summed by the database. */
+interface StockCell {
+  location_id: string;
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+  on_hand: number;
+  last_at: string | null;
+  unit: string;
+}
+
+/**
+ * The cells and their on-hand sums from the database's own view (Nov 3, review item 42) — the
+ * ledger used to be paged whole to the server function (1,000 rows a request) and added up
+ * there on every "Find any material" search. The view is not in the generated types (Lovable's
+ * to regenerate), so the read is through a loose client; its rows are checked here.
+ */
+async function readStockCells(sb: SupabaseClient<Database>): Promise<StockCell[]> {
+  const loose = sb as unknown as SupabaseClient;
+  const { data, error } = await loose
+    .from("inventory_stock_cells")
+    .select("location_id, screen_id, row_label, price_col, on_hand, last_at, unit")
+    .limit(100_000);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Record<string, unknown>[])
+    .filter(
+      (r) =>
+        typeof r["location_id"] === "string" &&
+        typeof r["screen_id"] === "string" &&
+        typeof r["row_label"] === "string" &&
+        typeof r["price_col"] === "string",
+    )
+    .map((r) => ({
+      location_id: r["location_id"] as string,
+      screen_id: r["screen_id"] as string,
+      row_label: r["row_label"] as string,
+      price_col: r["price_col"] as string,
+      on_hand: Number(r["on_hand"] ?? 0) || 0,
+      last_at: typeof r["last_at"] === "string" ? r["last_at"] : null,
+      unit: typeof r["unit"] === "string" ? r["unit"] : "",
+    }));
 }
 
 /** One page of the ledger (PostgREST answers at most 1,000 rows per request). */
@@ -948,7 +984,7 @@ export const myServiceDefaults = createServerFn({ method: "GET" })
         .select("id, number, customer_name, description, stage")
         .eq("technician_id", context.userId)
         .is("deleted_at", null)
-        .in("stage", ["open", "scheduled", "done"])
+        .in("stage", [...WORK_STAGES])
         .order("scheduled_date", { ascending: false })
         .limit(50),
     ]);

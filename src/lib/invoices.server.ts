@@ -100,7 +100,7 @@ export async function loadRates(sb: Client, rateKind: string): Promise<RateTable
     t[`${r.role}:${r.time_kind}`] = { bill: Number(r.bill_rate), cost: Number(r.cost_rate) };
   if (!Object.keys(t).length)
     throw new Error(
-      `No service rates for "${rateKind}" — set them on Admin › Settings › Service rates`,
+      `No service rates for "${rateKind}" yet — a manager sets them under Setup › Service rates`,
     );
   return t;
 }
@@ -1069,7 +1069,12 @@ export async function emailInvoice(input: {
   fileName: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = process.env["RESEND_API_KEY"];
-  if (!key) return { ok: false, error: "RESEND_API_KEY is not set (Lovable Cloud › secrets)" };
+  if (!key)
+    return {
+      ok: false,
+      error:
+        "Email is not set up yet: the RESEND_API_KEY secret is missing (Lovable Cloud › Secrets)",
+    };
   const { fromAddress } = await import("@/lib/notify.server");
   try {
     const res = await fetch("https://api.resend.com/emails", {

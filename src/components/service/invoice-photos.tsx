@@ -30,8 +30,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { PhotoThumb } from "@/components/service/field-shared";
+import { plainErrText } from "@/lib/plain-error";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 /** Under "invoice-photos" (the photo editor refreshes every invoice's fold after a save). */
 const invoicePhotosKey = (invoiceId: string) => ["invoice-photos", invoiceId] as const;
 

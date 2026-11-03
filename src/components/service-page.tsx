@@ -208,8 +208,11 @@ import {
 import { RateBox } from "@/components/service/rate-box";
 import { FIELD_READ, fieldKeys } from "@/components/service/field-utils";
 import { defaultBillRate, MAX_HELPERS, othersOf } from "@/lib/service-crew";
+import { isFinishedStage } from "@/lib/ticket-stages";
+import { plainErrText } from "@/lib/plain-error";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// Plain English for what the server or the database said (Nov 3, review item 49).
+const errText = plainErrText;
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
@@ -1761,7 +1764,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // the server's rule (setJobCrew, ownJob); an office user who is not a manager sees no button.
   const showCloseOut = canCloseOut(profile, job);
   // Repeat work: once a ticket is Done (or later) the office opens the next one at the same site.
-  const repeatable = !!jobStage && ["done", "authorized", "invoiced", "closed"].includes(jobStage);
+  const repeatable = isFinishedStage(jobStage);
 
   // Section 4's controls, shared by the office layout (under the grid) and the technician's.
   const techSelect = (triggerClass?: string) => (

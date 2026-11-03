@@ -17,8 +17,9 @@
  * and the signature as they are made, the text fields a moment after typing stops (a subtle
  * "Saved", a loud toast when it fails). The text is also kept in localStorage per ticket
  * (bid-o-matic:closeout:<id>) until the server has it, so a lost signal on the roof does not
- * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly, and
- * the file is kept on the repair for "Retry upload" (owner, Oct 9) until it lands or is discarded.
+ * lose typed notes. Photos go through the picture queue (picture-queue.ts; owner, Oct 28): a
+ * picture taken without signal is kept on the phone and sent when the signal is back, with a
+ * small copy (the thumbnail) beside the full one (Nov 3).
  *
  * Reached from My tickets' and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
  * This IS the workflow (owner, Oct 8): a tech opens it, takes the Before photos, leaves, comes
@@ -43,17 +44,18 @@
  * "Skip — nothing to add" only mark their step done; Next is the one way forward. The sticky
  * bar's "Finish step N" names the REAL first open step and takes the tech there the same way.
  *
- * Owner, Oct 12: an INSPECTION ticket (service_type "inspection") closes out through its own six
- * steps (closeout-steps.ts closeoutSteps; the cards are inspection-closeout.tsx): 1 Who is here,
- * 2 Checklist (every item OK / Issue / N/A, saved as you go — inspection-draft.ts; the Aerial
- * fold once above it, plain; no repair picker), 3 Findings (ONE note — the closing_notes box
- * moved here, step 6 is not shown — the Recommend repairs / Recommend a new roof switches, an
- * optional photo roll, "Nothing to add"), 4 Materials (Nothing used pre-set: never blocks),
- * 5 Time (required), 6 Signature (optional: "Optional for an inspection", never a gap). Photos
- * are optional everywhere on an inspection. The same StepCard / StepStrip / Next step mechanics,
- * the same server-side gap list ("The checklist is not saved yet"; owner, Oct 26: only a problem
- * needs a status or a note, so no row is ever "unanswered") and Complete anyway for managers. Repair, warranty and other keep the seven repair steps (the owner did not say
- * otherwise for scope).
+ * Owner, Oct 12: an INSPECTION ticket (service_type "inspection") closes out through its own four
+ * steps (closeout-steps.ts closeoutSteps; the cards are inspection-closeout.tsx): 1 Checklist
+ * (every item OK / Issue / N/A, saved as you go — inspection-draft.ts; the Aerial fold once
+ * above it, plain; no repair picker), 2 Additional findings (ONE note — the closing_notes box
+ * moved here, the Notes step is not shown — the Recommend repairs / Recommend a new roof
+ * switches, the roof's grade, an optional photo roll), 3 Time (required), 4 Signature
+ * (optional: "Optional for an inspection", never a gap). No crew question and no materials
+ * step since Oct 28: an inspection is one person looking, nothing used. Photos are optional
+ * everywhere on an inspection. The same StepCard / StepStrip / Next step mechanics, the same
+ * server-side gap list ("The checklist is not saved yet"; owner, Oct 26: only a problem needs a
+ * status or a note, so no row is ever "unanswered") and Complete anyway for managers. Repair,
+ * warranty and other keep the seven repair steps (the owner did not say otherwise for scope).
  */
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -79,7 +81,6 @@ import {
   LogOut,
   MapPin,
   MapPinCheck,
-  Minus,
   Package,
   Pencil,
   PenLine,
@@ -232,6 +233,7 @@ import {
   type FreshShot,
 } from "@/components/service/picture-queue-ui";
 import { PhotoSelectBar } from "@/components/service/photo-select-bar";
+import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 // ---------------------------------------------------------------------------------------------
 // The text fields and their local draft.
@@ -320,7 +322,7 @@ function clearMark(key: string) {
 }
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
-const FINISHED = ["done", "authorized", "invoiced", "closed"];
+const FINISHED: readonly string[] = FINISHED_STAGES;
 const asStage = (s: string): ServiceStage =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? (s as ServiceStage) : "open";
 

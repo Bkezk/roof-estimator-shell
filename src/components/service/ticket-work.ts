@@ -7,6 +7,7 @@
  */
 import { STAGE_LABELS, type ServiceJobWithTech, type ServiceStage } from "@/lib/service.functions";
 import { whenShort } from "@/components/service/field-utils";
+import { isOfficeStage } from "@/lib/ticket-stages";
 
 /** "3.5 h" — hours to two decimals, no trailing zeros (the Time line's wording). */
 export const hoursText = (h: number) => `${Number(h.toFixed(2))} h`;
@@ -62,7 +63,7 @@ export function closeoutInfo(
     job.signature_path ||
     job.completed_at
   );
-  const officeStage = ["authorized", "invoiced", "closed"].includes(job.stage);
+  const officeStage = isOfficeStage(job.stage);
   const line = job.completed_at
     ? `Closed out ${whenShort(job.completed_at)}`
     : any

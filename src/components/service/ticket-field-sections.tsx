@@ -19,7 +19,6 @@ import {
   Phone,
   Wrench,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";

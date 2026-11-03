@@ -12,11 +12,22 @@ import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import { listChecklistItems, saveChecklistItems } from "@/lib/service-inspection.functions";
 import { ITEM_LABEL_MAX } from "@/lib/inspection";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { plainErrText } from "@/lib/plain-error";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 const KEY = ["inspection-checklist"] as const;
 
 interface Row {
@@ -33,6 +44,9 @@ export function InspectionChecklistSettings() {
   const q = useQuery({ queryKey: KEY, queryFn: () => listFn(), enabled: !!session });
   const [rows, setRows] = useState<Row[] | null>(null);
   const [dirty, setDirty] = useState(false);
+  // Remove asks first (owner, Nov 3, review item 32): the trash can sat beside the arrows, one
+  // slip took an item off the list, and Save made it final.
+  const [removing, setRemoving] = useState<Row | null>(null);
   useEffect(() => {
     if (q.data && !dirty) setRows(q.data.map((r) => ({ key: r.id, id: r.id, label: r.label })));
   }, [q.data, dirty]);
@@ -71,6 +85,30 @@ export function InspectionChecklistSettings() {
 
   return (
     <Card>
+      <AlertDialog open={!!removing} onOpenChange={(o) => !o && setRemoving(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove &ldquo;{removing?.label.trim() || "this item"}&rdquo; from the checklist?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              New inspections will not ask about it. Inspections already done keep their answers.
+              Nothing changes until you press Save.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (removing && rows) edit(rows.filter((x) => x.key !== removing.key));
+                setRemoving(null);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <CardHeader>
         <CardTitle>Inspection checklist</CardTitle>
         <CardDescription>
@@ -127,7 +165,7 @@ export function InspectionChecklistSettings() {
                     size="icon"
                     variant="ghost"
                     aria-label={`Remove ${r.label || "item"}`}
-                    onClick={() => edit(rows.filter((x) => x.key !== r.key))}
+                    onClick={() => setRemoving(r)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

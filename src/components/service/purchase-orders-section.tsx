@@ -189,7 +189,7 @@ function ReceiptLink({ path, name }: { path: string; name: string | null }) {
 function usePoMutations(jobId: string) {
   const qc = useQueryClient();
   const refresh = () => void qc.invalidateQueries({ queryKey: fieldKeys.pos(jobId) });
-  return { qc, refresh };
+  return { refresh };
 }
 
 function PoRow({

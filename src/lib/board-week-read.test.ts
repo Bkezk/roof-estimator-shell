@@ -149,7 +149,8 @@ describe("a finished ticket sits on the day it was completed (owner, Oct 15)", (
       fns.indexOf("export const listBoardJobs"),
       fns.indexOf("export interface AwaitingInvoice"),
     );
-    expect(body).toContain('.in("stage", ["done", "authorized", "invoiced", "closed"])');
+    // Nov 3 (review item 52): the one stage set, lib/ticket-stages.ts.
+    expect(body).toContain('.in("stage", [...FINISHED_STAGES])');
     expect(body).toContain('.gte("completed_at", `${shiftYmd(data.from, -1)}T00:00:00Z`)');
     expect(body).toContain('.lte("completed_at", `${shiftYmd(data.to, 1)}T23:59:59Z`)');
     expect(body).toContain("...(finished.data ?? [])");

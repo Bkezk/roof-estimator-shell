@@ -161,7 +161,10 @@ describe("1. closeoutSteps(serviceType): four for an inspection, the seven repai
     ]);
     expect(stepCount("scope")).toBe(7);
     expect(steps).toContain("Repair, warranty and other keep the seven repair steps");
-    expect(closeout).toContain("Repair, warranty and other keep the seven repair steps");
+    // Nov 3 (review item 53): the header wraps differently; the same sentence.
+    expect(closeout.replace(/\n \* /g, " ")).toContain(
+      "Repair, warranty and other keep the seven repair steps",
+    );
   });
   it("stepOf / stepIndex / nextStep / nextStepLabel walk the flow of the type given", () => {
     expect(stepOf("signature", "inspection").n).toBe(4);
@@ -1200,7 +1203,7 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
     // A repair's photo never goes on an item; the list is capped.
     await expect(
       run({ id: REPAIR_PHOTO, service_job_id: JOB, item_keys: ["c1"] }, TECH),
-    ).rejects.toThrow("Only a loose ticket photo");
+    ).rejects.toThrow("Only a ticket photo that is not on a repair");
     await expect(
       Promise.resolve().then(() =>
         run(
@@ -1261,7 +1264,7 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
         tables,
         TECH,
       ),
-    ).rejects.toThrow("Only a loose ticket photo");
+    ).rejects.toThrow("Only a ticket photo that is not on a repair");
     expect(fieldFn).toContain(
       "item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX).optional(),",
     );
@@ -1288,7 +1291,7 @@ describe("6e. setJobPhotoItem: a loose ticket photo onto a checklist item, and o
         tables,
         TECH,
       ),
-    ).rejects.toThrow("Only a loose ticket photo");
+    ).rejects.toThrow("Only a ticket photo that is not on a repair");
     await expect(
       call(
         setJobPhotoItem,

@@ -184,9 +184,8 @@ describe("the ticket page's Close-out fold", () => {
     // Oct 27: the close-out's state moved to ticket-work.ts (closeoutInfo) for the Work fold's
     // line; the tab's body keeps the sentence.
     const work = readFileSync("src/components/service/ticket-work.ts", "utf8");
-    expect(work).toContain(
-      'const officeStage = ["authorized", "invoiced", "closed"].includes(job.stage);',
-    );
+    // Nov 3 (review item 52): the one stage set, lib/ticket-stages.ts.
+    expect(work).toContain("const officeStage = isOfficeStage(job.stage);");
     expect(work).toContain(
       "`${STAGE_LABELS[job.stage as ServiceStage]} by the office — no close-out`",
     );

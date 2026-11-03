@@ -50,6 +50,7 @@ import {
 } from "@/lib/my-work";
 import { TASK_TZ, localYmd as easternYmd } from "@/lib/tasks";
 import { OPP_ALL_OPEN, isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
+import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 // ---- who may see it -----------------------------------------------------------------------
 
@@ -247,7 +248,7 @@ export function personNumbers(
 }
 
 /** Ticket stages that count as done for "Done this week". */
-export const DONE_TICKET_STAGES = ["done", "authorized", "invoiced", "closed"] as const;
+export const DONE_TICKET_STAGES = FINISHED_STAGES;
 
 export interface DoneTicketIn {
   technician_id: string | null;

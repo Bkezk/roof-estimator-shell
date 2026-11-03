@@ -61,6 +61,7 @@ import {
 } from "@/lib/travel-estimate";
 import { routedDrive } from "@/lib/drive-route";
 import { parseStreetAddress } from "@/lib/aerial-address";
+import { isFinishedStage, WORK_STAGES } from "@/lib/ticket-stages";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -449,7 +450,7 @@ export const clockOnJob = createServerFn({ method: "GET" })
   });
 
 /** The stages a technician's clock can still be closed at (ticket_open_for_tech's list). */
-const CLOCKABLE_STAGES: readonly string[] = ["open", "scheduled", "done"];
+const CLOCKABLE_STAGES: readonly string[] = WORK_STAGES;
 /**
  * A clock with its ticket's number and customer; null when the ticket is gone — or past Done
  * (Oct 28 audit, defensive: the office's closing stages stop the clock themselves,
@@ -659,7 +660,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       patch = { field_status: null };
       await note({ kind: "field", note: "left site" });
     } else if (data.to === "done") {
-      const finished = ["done", "authorized", "invoiced", "closed"].includes(job.stage);
+      const finished = isFinishedStage(job.stage);
       // Owner, Oct 5 (RoAnna closed #6004 from the stage picker, then completed its close-out and
       // "the status didn't move"): a ticket the office already set Done / Invoiced / Closed keeps
       // that stage, but its close-out is still recorded — completed_at is stamped once, so the
@@ -791,7 +792,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           assigneeId: row.technician_id,
           title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
           url: `/service?id=${row.id}`,
-          closing: ["done", "authorized", "invoiced", "closed"].includes(row.stage),
+          closing: isFinishedStage(row.stage),
           closeReason: `stage ${row.stage}`,
           dueDate: row.scheduled_date,
           actorId: context.userId,
@@ -1492,7 +1493,7 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
     const itemKeys = registrationItemKeys(data);
     if (itemKeys.length && (data.role !== "other" || data.repair_id))
       throw new Error(
-        "Only a loose ticket photo (not a repair's or the signature) goes on a checklist item",
+        "Only a ticket photo that is not on a repair (and not the signature) goes on a checklist item",
       );
     const { data: row, error } = await context.supabase
       .from("service_job_photos")
@@ -1660,7 +1661,7 @@ async function applyPhotoItems(
   const keys = data.item_keys.filter((k, i, a) => a.indexOf(k) === i);
   if (keys.length && (photo.role !== "other" || photo.repair_id))
     throw new Error(
-      "Only a loose ticket photo (not a repair's, the signature or an aerial) goes on a checklist item",
+      "Only a ticket photo that is not on a repair (and not the signature or an aerial) goes on a checklist item",
     );
   const current = await photoLinks(sb, [photo.id]);
   const gone = current.map((l) => l.item_key).filter((k) => !keys.includes(k));

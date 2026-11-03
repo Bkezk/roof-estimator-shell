@@ -8,6 +8,7 @@
  * A ticket with no crew rows at all is an old-style ticket: it keeps billing from helper_count
  * exactly as before (invoice-labor.ts). Pure, no I/O.
  */
+import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 export interface CrewRow {
   technician_id: string;
@@ -137,7 +138,7 @@ export function effectiveBillRate(
 }
 
 /** Stages at which the close-out no longer waits for the crew answer. */
-const FINISHED = ["done", "authorized", "invoiced", "closed"];
+const FINISHED: readonly string[] = FINISHED_STAGES;
 
 /**
  * Whether "Who is on this job with you?" still needs an answer before the rest of the field

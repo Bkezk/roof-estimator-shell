@@ -187,6 +187,26 @@ const VIEWS: Record<string, (tables: Record<string, Row[]>) => Row[]> = {
     (t["catalog_item_numbers"] ?? []).map((r) =>
       pick(r, ["item_no", "screen_id", "row_label", "price_col", "dl_description"]),
     ),
+  // inventory_stock_cells (20261103200000): one row per cell and location, summed, the newest
+  // entry's unit (order by created_at desc, id desc) and time.
+  inventory_stock_cells: (t) => {
+    const cells = new Map<string, Row[]>();
+    for (const m of t["inventory_movements"] ?? []) {
+      const key = [m["location_id"], m["screen_id"], m["row_label"], m["price_col"]].join("\u0000");
+      (cells.get(key) ?? cells.set(key, []).get(key)!).push(m);
+    }
+    return [...cells.values()].map((rows) => {
+      const newest = [...rows].sort((x, y) => {
+        const at = String(y["created_at"] ?? "").localeCompare(String(x["created_at"] ?? ""));
+        return at !== 0 ? at : String(y["id"] ?? "").localeCompare(String(x["id"] ?? ""));
+      })[0]!;
+      return {
+        ...pick(newest, ["location_id", "screen_id", "row_label", "price_col", "unit"]),
+        on_hand: rows.reduce((n, r) => n + Number(r["qty"] ?? 0), 0),
+        last_at: newest["created_at"] ?? null,
+      };
+    });
+  },
   company_settings_public: (t) =>
     (t["company_settings"] ?? []).map((r) =>
       pick(r, [

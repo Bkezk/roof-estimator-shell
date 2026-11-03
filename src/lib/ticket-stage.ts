@@ -20,18 +20,19 @@
  */
 import { isOffice, managesTickets, type AccessLike } from "@/lib/access";
 import type { ServiceStage } from "@/lib/service.functions";
+import { OFFICE_STAGES as ALL_OFFICE_STAGES, WORK_STAGES } from "@/lib/ticket-stages";
 
 /** The stages a technician may set. */
-export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
+export const TECH_STAGES: readonly ServiceStage[] = WORK_STAGES;
 /**
  * The stages only a manager or an admin sets (an invoice sets Invoiced through its own path).
  * Authorized (owner, Oct 5): the owner reviews a Done ticket; "the manager can move it past
  * authorize if need be".
  */
-export const OFFICE_STAGES: readonly ServiceStage[] = ["authorized", "invoiced", "closed"];
+export const OFFICE_STAGES: readonly ServiceStage[] = ALL_OFFICE_STAGES;
 
 /** The stages a ticket may be invoiced at: Authorized and after (a Done ticket is reviewed first). */
-export const INVOICE_STAGES: readonly string[] = ["authorized", "invoiced", "closed"];
+export const INVOICE_STAGES: readonly string[] = ALL_OFFICE_STAGES;
 export const INVOICE_NEEDS_AUTH =
   "Authorize the ticket first: a Done ticket is reviewed before it is invoiced";
 /** Every stage, in board order (the same as SERVICE_STAGES). */

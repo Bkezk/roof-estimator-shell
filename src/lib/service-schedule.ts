@@ -3,6 +3,7 @@
  * page's "Awaiting invoice" queue (docs/service-module-design.md §5.1 step 4, §5.2, §5.4). Days
  * are local calendar days (YYYY-MM-DD), never UTC midnight.
  */
+import { FINISHED_STAGES as ALL_FINISHED_STAGES, WORK_STAGES } from "@/lib/ticket-stages";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const toYmd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -34,7 +35,7 @@ export function nextDays(today: Date, count = 7): GridDay[] {
 }
 
 /** The stages that still take a technician's day (Invoiced / Closed are past). */
-export const LOAD_STAGES: readonly string[] = ["open", "scheduled", "done"];
+export const LOAD_STAGES: readonly string[] = WORK_STAGES;
 
 interface LoadJob {
   id: string;
@@ -149,7 +150,7 @@ export function sortUnassigned<T extends RailJob>(jobs: readonly T[]): T[] {
 }
 
 /** The stages after the work is done: the board files these by the day they were completed. */
-export const FINISHED_STAGES: readonly string[] = ["done", "authorized", "invoiced", "closed"];
+export const FINISHED_STAGES: readonly string[] = ALL_FINISHED_STAGES;
 
 /**
  * The Tech Board's "Finished, no technician" group (owner, Nov 3, review item 9): tickets past

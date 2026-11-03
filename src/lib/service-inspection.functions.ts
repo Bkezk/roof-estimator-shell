@@ -33,6 +33,7 @@ import {
   type ChecklistItem,
   type Inspection,
 } from "@/lib/inspection";
+import { isOfficeStage } from "@/lib/ticket-stages";
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 type JobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
@@ -261,7 +262,7 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
       if (job.technician_id !== context.userId)
         throw new Error("This ticket is assigned to someone else");
       // Authorized is still under review (owner, Oct 6): the message says which it is.
-      if (["authorized", "invoiced", "closed"].includes(job.stage))
+      if (isOfficeStage(job.stage))
         throw new Error(`${officeStageMessage(job.stage)}; ask the office to change it`);
     }
     const ins: Inspection = {

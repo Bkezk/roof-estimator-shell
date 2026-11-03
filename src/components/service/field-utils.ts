@@ -11,8 +11,10 @@ import { createAutosave, type AutosaveState } from "@/lib/autosave";
 
 import { supabase } from "@/integrations/supabase/client";
 import { SERVICE_BUCKET } from "@/lib/service-field.functions";
+import { plainErrText } from "@/lib/plain-error";
 
-export const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** What went wrong, in plain English (lib/plain-error.ts; Nov 3, review item 49). */
+export const errText = plainErrText;
 
 /**
  * A failure the tech must not miss (on a roof, in the sun): red, and it stays a while. With
