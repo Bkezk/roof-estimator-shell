@@ -93,6 +93,7 @@ export function orderListTotal(lines: readonly OrderLine[]): { total: number; un
  * bag, ARP / T-Patch per package, stripping in feet, everything else per piece.
  */
 export function accessoryLineUnit(screen: string, name: string): string {
+  screen = orderScreen(screen);
   const n = name.toLowerCase();
   if (screen === "Term Bar") return "ft";
   if (/^Fascia Bar|^Drip Edge$|^Gravel Stop$/.test(screen)) return /corner/.test(n) ? "each" : "ft";
@@ -101,6 +102,20 @@ export function accessoryLineUnit(screen: string, name: string): string {
   if (screen === "Panduit Straps") return "bag";
   if (screen === "Membrane Acc.") return /^stripping/.test(n) ? "ft" : "package";
   return "each";
+}
+
+/**
+ * The engine tags drip edge, gravel stop and fascia lines with the size in the screen label
+ * ('4" Drip Edge', '2" Gravel Stop', '1-3/4" Fascia', '4" Fascia'); the unit and catalog tables
+ * here go by the plain screen name. Left as the engine wrote it, those lines read "each" and
+ * "(no stock match)" (Knox County BOE CTC Test 2, 2026-11-03).
+ */
+export function orderScreen(screen: string): string {
+  const m = /^\d+"\s+(Drip Edge|Gravel Stop)$/.exec(screen);
+  if (m) return m[1]!;
+  if (screen === '1-3/4" Fascia') return 'Fascia Bar 3"';
+  if (screen === '4" Fascia') return 'Fascia Bar 4"';
+  return screen;
 }
 
 const SCREEN = {
@@ -117,7 +132,8 @@ const ACCESSORY_SCREENS: Record<string, string[]> = {
   'Fascia Bar 4"': ["duro_last:facia_bars_vinyl_covers"],
   "Drip Edge": ["duro_last:drip_edge"],
   "Gravel Stop": ["duro_last:gravel_stops"],
-  "Base & Snap Cover": ["duro_last:facia_bars_vinyl_covers"],
+  // Base & Snap Cover is priced from the Exceptional Metals › Two-Piece Metals grid, which
+  // Inventory does not stock — no screen, so its lines list without a stock column.
   Corners: ["duro_last:corners"],
   "Pipe Stacks": ["duro_last:pipe_stacks"],
   "Conduit Washers": ["duro_last:conduit_washers"],
@@ -133,7 +149,13 @@ const ACCESSORY_SCREENS: Record<string, string[]> = {
   Sealants: ["duro_last:sealants"],
 };
 
-const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+/** Lower-case, one space; a hyphenated fraction ("1-3/4"") reads like the catalog's ("1 3/4""). */
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/(\d)-(\d+\/\d+)/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
 /** A row key `label [Subtype|Part #]` → its label. */
 const labelOf = (rowKey: string) => rowKey.replace(/\s*\[[^\]]*\]\s*$/, "");
 /** A row key `label [Subtype|Part #]` → the bracketed disambiguator ("" when none). */
@@ -175,9 +197,13 @@ export function matchAccessoryCell(
   line: Pick<AccessoryReviewLine, "screen" | "name">,
   targets: readonly PriceTarget[],
 ): OrderCell | undefined {
-  const screens = ACCESSORY_SCREENS[line.screen];
+  const screenName = orderScreen(line.screen);
+  const screens = ACCESSORY_SCREENS[screenName];
   if (!screens) return undefined;
-  const name = norm(line.name);
+  let name = norm(line.name);
+  // Fascia parts are named after their bar ('4" Fascia Bar White Vinyl Covers'); the bar's own
+  // row would tie with the cover's, so the part is matched without the bar prefix.
+  if (/^Fascia Bar/.test(screenName)) name = name.replace(/^(?:1 3\/4"|4") fascia bar (?=\S)/, "");
   let best: { cell: OrderCell; len: number } | undefined;
   for (const t of targets) {
     if (!screens.includes(t.screen_id)) continue;
@@ -187,7 +213,7 @@ export function matchAccessoryCell(
       // Ties (a label repeated on the screen, e.g. the 3" and 4" fascia vinyl covers): the 4"
       // screens take the later row, the 3" the earlier.
       if (best && label.length < best.len) continue;
-      if (best && label.length === best.len && !/4"/.test(line.screen)) continue;
+      if (best && label.length === best.len && !/4"/.test(screenName)) continue;
       let col = t.price_cols[0] ?? "";
       if (t.price_cols.length > 1) {
         const hit = t.price_cols.find((c) => {
@@ -380,7 +406,9 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
   // Every other Accessories line, matched to its catalog row by name.
   for (const l of i.build.accessories?.lines ?? []) {
     if (l.screen === "Fasteners" || l.qty <= 0) continue;
-    if (/labor only|reuse ring/i.test(l.name)) continue;
+    // Labor-only rows the legacy summary carries (a "4\" Drip Edge Labor" row with the measured
+    // length, "Stripping (labor only)", "Reuse Ring"): hours, nothing to buy.
+    if (/\bLabor$|labor only|reuse ring/i.test(l.name)) continue;
     add(
       "Accessories",
       `${l.screen} — ${l.name}`,
