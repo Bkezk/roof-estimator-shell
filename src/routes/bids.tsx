@@ -32,6 +32,7 @@ import {
   setBidStatus,
   listDeletedBids,
   purgeBid,
+  renameBid,
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
@@ -320,6 +321,21 @@ function BidsPage() {
   // Marking Won asks for the day it was won (bids.won_on; owner, Oct 21: "a way to adjust the
   // date the bid was won to ensure the data appears correctly"), today's office day to start.
   const [wonFor, setWonFor] = useState<{ id: string; name: string; day: string } | null>(null);
+  // Rename (owner, Nov 3): the job name, changed from the list without opening the bid.
+  const [renameFor, setRenameFor] = useState<{ id: string; name: string; newName: string } | null>(
+    null,
+  );
+  const renameFn = useServerFn(renameBid);
+  const renameName = useMutation({
+    mutationFn: (v: { id: string; name: string }) => renameFn({ data: v }),
+    onSuccess: (b) => {
+      setRenameFor(null);
+      toast.success(`Renamed to "${b.name}"`);
+      refresh();
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Could not rename the bid"),
+  });
   // The copy popup (owner, Nov 3): the copy's job name is typed before the copy is made.
   const [copyFor, setCopyFor] = useState<{ id: string; name: string; newName: string } | null>(
     null,
@@ -559,7 +575,25 @@ function BidsPage() {
             onChange={() => toggleCombine(bid.id)}
           />
           <div>
-            <p className="font-medium">{bid.name}</p>
+            <p className="flex items-center gap-1 font-medium">
+              <span>{bid.name}</span>
+              {/* Rename (owner, Nov 3): the job name, without opening the bid. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                title="Rename this bid"
+                data-action="rename-bid"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenameFor({ id: bid.id, name: bid.name, newName: bid.name });
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="sr-only">Rename</span>
+              </Button>
+            </p>
             <p className="text-sm text-muted-foreground">
               Customer: {customerOf(bid) || "—"} · Estimator: {estimatorOf(bid) || "—"} · Created{" "}
               {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
@@ -1395,6 +1429,62 @@ function BidsPage() {
                 </Button>
                 <Button type="submit" disabled={setStatus.isPending}>
                   Mark won
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+      {/* Rename (owner, Nov 3): "a way to edit the job name of a bid on the project bid menu
+          without having to open the bid". Refused while the bid is open in the estimator. */}
+      {renameFor && (
+        <Dialog open onOpenChange={(o) => !o && !renameName.isPending && setRenameFor(null)}>
+          <DialogContent className="sm:max-w-md" data-dialog="rename-bid">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = renameFor.newName.trim();
+                if (!name) {
+                  toast.error("Give the bid a job name.");
+                  return;
+                }
+                if (renameName.isPending) return;
+                if (name === renameFor.name) {
+                  setRenameFor(null);
+                  return;
+                }
+                renameName.mutate({ id: renameFor.id, name });
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>Rename bid</DialogTitle>
+                <DialogDescription>
+                  The job name shown here and in the estimator's Setup. Documents already made from
+                  the bid keep the name they were made with.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1 py-3">
+                <Label htmlFor="rename-bid-name">Job name</Label>
+                <Input
+                  id="rename-bid-name"
+                  autoFocus
+                  maxLength={200}
+                  value={renameFor.newName}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => setRenameFor({ ...renameFor, newName: e.target.value })}
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={renameName.isPending}
+                  onClick={() => setRenameFor(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={renameName.isPending}>
+                  {renameName.isPending ? "Saving…" : "Save name"}
                 </Button>
               </DialogFooter>
             </form>

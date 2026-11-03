@@ -9,7 +9,7 @@
  * pick, so the surrounding form (a ticket) keeps its state.
  * Used by tickets, bids, takeoffs, opportunities, the PlanSwift import and tasks.
  *
- * `allowFreeText` (the estimator's Setup › Customer Name and Job Name): the input is a plain text
+ * `allowFreeText` (the estimator's Setup › Customer Name): the input is a plain text
  * field whose value the parent owns (`text` / `onText`); the dropdown only offers profiles to
  * link, nothing is highlighted until the arrow keys move, so typing a name and moving on never
  * links anything, and there is no quick-add row.

@@ -561,6 +561,50 @@ export const duplicateBid = createServerFn({ method: "POST" })
     return copy;
   });
 
+/**
+ * Rename a bid from the Bids list (owner, Nov 3: "a way to edit the job name of a bid on the
+ * project bid menu without having to open the bid"). A filing change, like a folder move: it
+ * stamps "Last saved … by" and leaves content_saved_at alone, so an open estimator tab is not
+ * told its copy is stale. Refused while someone has the bid open in the estimator (bid-locks):
+ * that tab sends the name with every save and would put the old one back.
+ */
+export const renameBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        name: z.string().trim().min(1, "Give the bid a job name.").max(200),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const other = await liveLockHeldElsewhere(context.supabase, data.id, undefined);
+    if (other)
+      throw new Error(
+        `Read only: ${other.holderName} is currently editing this bid — rename it there, or wait until they close it.`,
+      );
+    const { data: me } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const { data: bid, error } = await context.supabase
+      .from("bids")
+      .update({
+        name: data.name,
+        updated_at: new Date().toISOString(),
+        updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
+      })
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .select("id, name, updated_at, updated_by_name")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!bid) throw new Error("Bid not found (it may have been deleted).");
+    return bid;
+  });
+
 /** Bring a soft-deleted bid back to the list. */
 export const restoreBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

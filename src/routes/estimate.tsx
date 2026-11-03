@@ -9,7 +9,6 @@ import {
   Trash2,
   AlertTriangle,
   Save,
-  Copy,
   Bell,
   BellRing,
   Download,
@@ -170,7 +169,6 @@ import {
   BUILDING_TYPES,
   MAX_WIND_OPTIONS,
   buildBidInput,
-  cityStZip,
   effectiveHighWind,
   emptyCustomer,
   markupTypeToMode,
@@ -222,16 +220,11 @@ import { LinkedAccountChip } from "@/components/crm/linked-account-chip";
 import { SiteSelect } from "@/components/crm/site-select";
 import { getAccount, saveAccount, type AccountHit } from "@/lib/crm.functions";
 import {
-  FILL_LABELS,
   accountFromBid,
   applyProfileFill,
   blankFieldsOnly,
-  clientAddressForJobSite,
-  fillConflicts,
   profileDifferences,
   profileFill,
-  type FillKey,
-  type ProfileFill,
 } from "@/lib/bid-account-link";
 import { buildReviewRows, toCsv, type ReviewData } from "@/lib/review-export";
 import {
@@ -253,7 +246,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import {
   Select,
@@ -946,21 +938,6 @@ function EstimatePage() {
     return pickSeq.current;
   };
   const unlinkAccount = () => void setLink(null, null, "", true);
-  // The latest customer fields, for a pick that resolves after its profile fetch.
-  const customerRef = useRef(customer);
-  customerRef.current = customer;
-  // A pick whose profile would overwrite text the bid already has waits here for "Replace?".
-  const [pendingFill, setPendingFill] = useState<{ fill: ProfileFill; fields: FillKey[] } | null>(
-    null,
-  );
-  const pendingFillRef = useRef(pendingFill);
-  const resolvePendingFill = (replace: boolean) => {
-    const p = pendingFillRef.current;
-    if (!p) return;
-    pendingFillRef.current = null;
-    setPendingFill(null);
-    setCustomer((c) => applyProfileFill(c, p.fill, replace));
-  };
   const pickAccount = async (hit: AccountHit | null) => {
     if (!hit) {
       unlinkAccount();
@@ -979,14 +956,9 @@ function EstimatePage() {
       });
       if (seq !== pickSeq.current) return; // picked again (or unlinked) meanwhile
       const site = hit.site_id ? (detail.sites.find((x) => x.id === hit.site_id) ?? null) : null;
-      const fill = profileFill(detail.account, site);
-      const fields = fillConflicts(customerRef.current, fill);
-      if (fields.length) {
-        pendingFillRef.current = { fill, fields };
-        setPendingFill({ fill, fields });
-      } else {
-        setCustomer((c) => applyProfileFill(c, fill, false));
-      }
+      // The profile's fields replace the bid's (owner, Nov 3: the Client and Job Site tabs are
+      // gone — the customer page holds that information, so a pick takes it as it is there).
+      setCustomer((c) => applyProfileFill(c, profileFill(detail.account, site), true));
     } catch (e) {
       toast.error(
         `Linked, but the profile could not be read to fill the bid: ${e instanceof Error ? e.message : String(e)}`,
@@ -3113,515 +3085,276 @@ function EstimatePage() {
           data-bid-step="setup"
           {...ro}
         >
-          {/* Legacy frmHome: "Setup" panel (Bid Info | Client | Job Site) on the left, the
-              "Defaults" panel on the right (docs §17). */}
+          {/* Legacy frmHome: "Setup" panel on the left, the "Defaults" panel on the right (docs
+              §17). The legacy Client and Job Site tabs are gone (owner, Nov 3: "we really don't
+              need the client and job site tabs now that we have it integrated into the customers
+              pages"): the bid's client and job-site fields are filled from the linked customer
+              and site, and the proposal reads them from the bid as before. */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Setup</CardTitle>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="bidinfo">
-                <TabsList>
-                  <TabsTrigger value="bidinfo">Bid Info</TabsTrigger>
-                  <TabsTrigger value="client">Client</TabsTrigger>
-                  <TabsTrigger value="jobsite">Job Site</TabsTrigger>
-                </TabsList>
-                <TabsContent value="bidinfo" className="space-y-3 pt-2">
-                  <LegacyGroup title="1. General Info">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Customer Name">
-                        {/* Typing sets the name as before; picking a profile links the bid. */}
-                        <AccountPicker
-                          id="bid-customer"
-                          allowFreeText
-                          value={null}
-                          text={customer.name}
-                          onText={(v) => setCustomer((c) => ({ ...c, name: v }))}
-                          onChange={(hit) => void pickAccount(hit)}
-                        />
-                        {customerMissing && (
-                          <p
-                            className="text-[11px] font-medium text-destructive"
-                            data-line="bid-customer-missing"
-                          >
-                            Pick the customer from the list, or choose &ldquo;Add &hellip; as a new
-                            customer&rdquo; if they are not in the system.
-                          </p>
-                        )}
-                        {accountChip}
-                        {siteBox}
-                      </Field>
-                      {/* Portalled: takes no grid cell. Closing it any other way keeps the bid's text. */}
-                      <AlertDialog
-                        open={!!pendingFill}
-                        onOpenChange={(o) => {
-                          if (!o) resolvePendingFill(false);
-                        }}
-                      >
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>
-                              Replace the client and job-site fields with the profile&apos;s?
-                            </AlertDialogTitle>
-                            <AlertDialogDescription>
-                              The bid is linked either way. These fields already hold different
-                              text; &ldquo;Keep mine&rdquo; leaves them and fills only the blank
-                              ones.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <ul className="space-y-1 text-sm">
-                            {(pendingFill?.fields ?? []).map((k) => (
-                              <li key={k}>
-                                <span className="text-muted-foreground">{FILL_LABELS[k]}:</span>{" "}
-                                <span className="line-through decoration-muted-foreground/60">
-                                  {String(customer[k] ?? "")}
-                                </span>{" "}
-                                &rarr; <span className="font-medium">{pendingFill?.fill[k]}</span>
-                              </li>
-                            ))}
-                          </ul>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel onClick={() => resolvePendingFill(false)}>
-                              Keep mine
-                            </AlertDialogCancel>
-                            <AlertDialogAction onClick={() => resolvePendingFill(true)}>
-                              Yes
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                      <Field label="Job Name">
-                        {/* Some estimators type the customer here: picking a profile links it and
-                            fills the customer fields like Customer Name; the job name stays as
-                            typed. The chip lives under Customer Name; this is only a hint. */}
-                        <AccountPicker
-                          allowFreeText
-                          value={null}
-                          text={bidName}
-                          onText={setBidName}
-                          onChange={(hit) => void pickAccount(hit)}
-                          onBlur={() => {
-                            // Legacy txtEstimateTitle_LostFocus: "Bid Title cannot be left blank."
-                            if (bidName.trim() === "") {
-                              toast.error("Bid Title cannot be left blank.");
-                              setBidName("Untitled bid");
-                            }
-                          }}
-                        />
-                        {linkedAccountId && (
-                          <p
-                            className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
-                            title="Linked to a customer profile; see Customer Name"
-                          >
-                            <Link2 className="h-3 w-3 shrink-0" />
-                            <span className="truncate">linked: {linkedLabel || "customer"}</span>
-                          </p>
-                        )}
-                      </Field>
-                      <Field label="Estimator's Name">
-                        <PickOne
-                          value={customer.estimatorName ?? ""}
-                          // Roster from admin General → Estimators; a saved bid whose estimator
-                          // is no longer on it keeps showing that name.
-                          options={[
-                            ...(estimatorNames ?? []),
-                            ...(customer.estimatorName &&
-                            !(estimatorNames ?? []).includes(customer.estimatorName)
-                              ? [customer.estimatorName]
-                              : []),
-                          ]}
-                          onChange={(v) => setCustomer((c) => ({ ...c, estimatorName: v }))}
-                        />
-                      </Field>
-                      <Field label="Date Created">
-                        <Input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                        />
-                      </Field>
-                      <Field label="Status">
-                        <Select value={bidStatus} onValueChange={changeStatus}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {BID_STATUSES.map((st) => (
-                              <SelectItem key={st} value={st}>
-                                {STATUS_LABELS[st]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Building Type">
-                        <PickOne
-                          value={buildingType}
-                          options={
-                            (BUILDING_TYPES as readonly string[]).includes(buildingType)
-                              ? BUILDING_TYPES
-                              : [buildingType, ...BUILDING_TYPES]
+              <div className="space-y-3" data-panel="bid-info">
+                <LegacyGroup title="1. General Info">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Customer Name">
+                      {/* Typing sets the name as before; picking a profile links the bid. */}
+                      <AccountPicker
+                        id="bid-customer"
+                        allowFreeText
+                        value={null}
+                        text={customer.name}
+                        onText={(v) => setCustomer((c) => ({ ...c, name: v }))}
+                        onChange={(hit) => void pickAccount(hit)}
+                      />
+                      {customerMissing && (
+                        <p
+                          className="text-[11px] font-medium text-destructive"
+                          data-line="bid-customer-missing"
+                        >
+                          Pick the customer from the list, or choose &ldquo;Add &hellip; as a new
+                          customer&rdquo; if they are not in the system.
+                        </p>
+                      )}
+                      {accountChip}
+                      {siteBox}
+                    </Field>
+                    <Field label="Job Name">
+                      {/* A plain box (owner, Nov 3: "the job name really shouldn't search the
+                            customer list … only the customer name should do that"). */}
+                      <Input
+                        id="bid-name"
+                        value={bidName}
+                        onChange={(e) => setBidName(e.target.value)}
+                        onBlur={() => {
+                          // Legacy txtEstimateTitle_LostFocus: "Bid Title cannot be left blank."
+                          if (bidName.trim() === "") {
+                            toast.error("Bid Title cannot be left blank.");
+                            setBidName("Untitled bid");
                           }
-                          onChange={setBuildingType}
-                        />
-                      </Field>
-                      {/* Owner, Oct 13 (Bid Advantage saved bids "in a file, so Bell County
+                        }}
+                      />
+                    </Field>
+                    <Field label="Estimator's Name">
+                      <PickOne
+                        value={customer.estimatorName ?? ""}
+                        // Roster from admin General → Estimators; a saved bid whose estimator
+                        // is no longer on it keeps showing that name.
+                        options={[
+                          ...(estimatorNames ?? []),
+                          ...(customer.estimatorName &&
+                          !(estimatorNames ?? []).includes(customer.estimatorName)
+                            ? [customer.estimatorName]
+                            : []),
+                        ]}
+                        onChange={(v) => setCustomer((c) => ({ ...c, estimatorName: v }))}
+                      />
+                    </Field>
+                    <Field label="Date Created">
+                      <Input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Status">
+                      <Select value={bidStatus} onValueChange={changeStatus}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BID_STATUSES.map((st) => (
+                            <SelectItem key={st} value={st}>
+                              {STATUS_LABELS[st]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Building Type">
+                      <PickOne
+                        value={buildingType}
+                        options={
+                          (BUILDING_TYPES as readonly string[]).includes(buildingType)
+                            ? BUILDING_TYPES
+                            : [buildingType, ...BUILDING_TYPES]
+                        }
+                        onChange={setBuildingType}
+                      />
+                    </Field>
+                    {/* Owner, Oct 13 (Bid Advantage saved bids "in a file, so Bell County
                           Schools could be saved under a folder"): the folder this bid is filed
                           under on the Bids page's By folder view — a label you assign; the
                           customer's name is only suggested. Type a new one or pick one in use;
                           blank = Unfiled. */}
-                      <Field label="Folder">
-                        <Input
-                          id="bid-folder"
-                          list="bid-folder-options"
-                          value={bidFolder}
-                          maxLength={FOLDER_MAX}
-                          placeholder={suggestFolder(customer.name) ?? UNFILED}
-                          disabled={readOnly}
-                          onChange={(e) => setBidFolder(e.target.value)}
-                          title="Where this bid is filed on the Bids page (By folder). Blank = Unfiled."
-                        />
-                        <datalist id="bid-folder-options">
-                          {(bidFolderNames ?? []).map((f) => (
-                            <option key={f} value={f} />
-                          ))}
-                        </datalist>
-                      </Field>
-                    </div>
-                  </LegacyGroup>
-                  <LegacyGroup title="2. Labor &amp; Markup Setup">
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                      <span>
-                        Labor: <span className="font-semibold">{money(laborRate)} per hour</span>
-                      </span>
-                      <span>
-                        Markup:{" "}
-                        <span className="font-semibold">
-                          {markupMode === 1
-                            ? `${money(markup)} per day`
-                            : markupMode === 2
-                              ? `${markup}% (Gross)`
-                              : `${markup}%`}
-                        </span>
-                      </span>
-                      <Button variant="outline" size="sm" onClick={() => setShowLaborMarkup(true)}>
-                        Click here to edit
-                      </Button>
-                    </div>
-                  </LegacyGroup>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <LegacyGroup title="3. Labor Template">
-                      <PickOne
-                        value={laborTemplateName || "None"}
-                        options={laborTemplateOptions}
-                        onChange={(v) => {
-                          // Legacy cboTemplate_SelectedIndexChanged warning on an existing bid.
-                          if (
-                            bidId &&
-                            laborTemplateName !== (v === "None" ? "" : v) &&
-                            !window.confirm(
-                              "Are you sure you want to change your labor template? This will override all manually entered labor settings.",
-                            )
-                          )
-                            return;
-                          applyTemplate(v === "None" ? "" : v);
-                        }}
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Selecting a template writes its % adjustments into every item&apos;s labor
-                        (sections, underlayment, tear-off, parapets, curbs, accessories, setup,
-                        inspection) — edit any of them afterwards.
-                      </p>
-                    </LegacyGroup>
-                    <LegacyGroup title="4. Estimator Commission">
-                      <Field label="Commission Rate (%)">
-                        <NumberField
-                          step="0.1"
-                          value={commission}
-                          onChange={(v) => setCommission(v)}
-                        />
-                      </Field>
-                    </LegacyGroup>
-                  </div>
-                  <LegacyGroup title="5. Tax Exempt">
-                    <div className="flex flex-wrap items-end gap-4">
-                      <label className="flex items-center gap-2 pb-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={taxExempt}
-                          onChange={(e) => {
-                            // Legacy chkTaxExempt_CheckedChanged: exempt → SalesTax 0 and the
-                            // tax controls disabled; un-exempt → back to the company Settings.
-                            const on = e.target.checked;
-                            setTaxExempt(on);
-                            if (on) setSalesTaxRate(0);
-                            else {
-                              setSalesTaxRate(null);
-                              setTaxMaterialOnly(null);
-                            }
-                          }}
-                        />
-                        Tax Exempt
-                      </label>
-                      <Field label="Sales Tax (%)">
-                        <NumberField
-                          step="0.01"
-                          className="w-[120px]"
-                          disabled={taxExempt}
-                          value={taxExempt ? 0 : Math.round(effSalesTaxRate * 100 * 10000) / 10000}
-                          onChange={(v) => setSalesTaxRate(v / 100)}
-                        />
-                      </Field>
-                      <label className="flex items-center gap-2 pb-2 text-xs">
-                        <input
-                          type="checkbox"
-                          disabled={taxExempt}
-                          checked={effTaxMaterialOnly}
-                          onChange={(e) => setTaxMaterialOnly(e.target.checked)}
-                        />
-                        Only Tax Material
-                      </label>
-                      <span className="pb-2 text-xs text-muted-foreground">
-                        {salesTaxRate === null && taxMaterialOnly === null
-                          ? "Using Admin › General defaults for this bid."
-                          : "Bid-level override (Admin › General is the default)."}
-                      </span>
-                    </div>
-                  </LegacyGroup>
-                  <LegacyGroup title="6. Notes">
-                    <AutoTextarea
-                      rows={3}
-                      placeholder="Shown on the proposal…"
-                      value={customer.notes}
-                      onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
-                    />
-                    {customer.perDiemChart ? (
-                      <div className="mt-2">
-                        <PerDiemChartEditor
-                          chart={normalizePerDiemChart(customer.perDiemChart)}
-                          onChange={(chart) => setCustomer((c) => ({ ...c, perDiemChart: chart }))}
-                          onRemove={() =>
-                            setCustomer((c) => {
-                              const { perDiemChart: _drop, ...rest } = c;
-                              return rest;
-                            })
-                          }
-                          disabled={readOnly}
-                        />
-                        {/* Owner, Oct 7: the chart's total joins the Review's Per-Diem Charge. */}
-                        <div className="mt-2 flex items-center gap-2">
-                          <Switch
-                            id="pd-from-chart"
-                            checked={perDiemFromChart}
-                            onCheckedChange={setPerDiemFromChart}
-                            disabled={readOnly}
-                          />
-                          <Label htmlFor="pd-from-chart" className="text-xs">
-                            Add the chart&apos;s total to the Per-Diem Charge on Review
-                          </Label>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="mt-2"
+                    <Field label="Folder">
+                      <Input
+                        id="bid-folder"
+                        list="bid-folder-options"
+                        value={bidFolder}
+                        maxLength={FOLDER_MAX}
+                        placeholder={suggestFolder(customer.name) ?? UNFILED}
                         disabled={readOnly}
-                        onClick={() =>
-                          setCustomer((c) => ({ ...c, perDiemChart: emptyPerDiemChart() }))
-                        }
-                        title="Adds a 'Per diem based on N men N days' chart with a checklist of job costs and prices"
-                      >
-                        Add per diem chart
-                      </Button>
-                    )}
-                  </LegacyGroup>
-                </TabsContent>
-                <TabsContent value="client" className="pt-2">
-                  <LegacyGroup title="Client Information">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Company Name">
-                        <Input
-                          value={customer.name}
-                          onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
-                        />
-                        {accountChip}
-                      </Field>
-                      <Field label="Contact Person">
-                        <Input
-                          value={customer.contact}
-                          onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="Address 1">
-                        <Input
-                          value={customer.clientAddress ?? ""}
-                          onChange={(e) =>
-                            setCustomer((c) => ({ ...c, clientAddress: e.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Address 2">
-                        <Input
-                          value={customer.clientAddress2 ?? ""}
-                          onChange={(e) =>
-                            setCustomer((c) => ({ ...c, clientAddress2: e.target.value }))
-                          }
-                        />
-                      </Field>
-                      <div className="sm:col-span-2">
-                        <Field label="City St, Zip">
-                          <div className="grid grid-cols-[minmax(0,1fr)_70px_110px] gap-2">
-                            <Input
-                              placeholder="City"
-                              value={customer.clientCity ?? ""}
-                              onChange={(e) =>
-                                setCustomer((c) => ({ ...c, clientCity: e.target.value }))
-                              }
-                            />
-                            <Input
-                              placeholder="ST"
-                              value={customer.clientState ?? ""}
-                              onChange={(e) =>
-                                setCustomer((c) => ({ ...c, clientState: e.target.value }))
-                              }
-                            />
-                            <Input
-                              placeholder="Zip"
-                              value={customer.clientZip ?? ""}
-                              onChange={(e) =>
-                                setCustomer((c) => ({ ...c, clientZip: e.target.value }))
-                              }
-                            />
-                          </div>
-                        </Field>
-                      </div>
-                      <Field label="Phone x Ext">
-                        <div className="grid grid-cols-[minmax(0,1fr)_80px] gap-2">
-                          <Input
-                            value={customer.phone ?? ""}
-                            onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
-                          />
-                          <Input
-                            placeholder="ext"
-                            value={customer.phoneExt ?? ""}
-                            onChange={(e) =>
-                              setCustomer((c) => ({ ...c, phoneExt: e.target.value }))
-                            }
-                          />
-                        </div>
-                      </Field>
-                      <Field label="Fax">
-                        <Input
-                          value={customer.fax ?? ""}
-                          onChange={(e) => setCustomer((c) => ({ ...c, fax: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="E-Mail">
-                        <Input
-                          value={customer.email ?? ""}
-                          onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
-                        />
-                      </Field>
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      The legacy client list (Edit Client Information) is not carried over; the
-                      client lives on this bid.
+                        onChange={(e) => setBidFolder(e.target.value)}
+                        title="Where this bid is filed on the Bids page (By folder). Blank = Unfiled."
+                      />
+                      <datalist id="bid-folder-options">
+                        {(bidFolderNames ?? []).map((f) => (
+                          <option key={f} value={f} />
+                        ))}
+                      </datalist>
+                    </Field>
+                  </div>
+                </LegacyGroup>
+                <LegacyGroup title="2. Labor &amp; Markup Setup">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                    <span>
+                      Labor: <span className="font-semibold">{money(laborRate)} per hour</span>
+                    </span>
+                    <span>
+                      Markup:{" "}
+                      <span className="font-semibold">
+                        {markupMode === 1
+                          ? `${money(markup)} per day`
+                          : markupMode === 2
+                            ? `${markup}% (Gross)`
+                            : `${markup}%`}
+                      </span>
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => setShowLaborMarkup(true)}>
+                      Click here to edit
+                    </Button>
+                  </div>
+                </LegacyGroup>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <LegacyGroup title="3. Labor Template">
+                    <PickOne
+                      value={laborTemplateName || "None"}
+                      options={laborTemplateOptions}
+                      onChange={(v) => {
+                        // Legacy cboTemplate_SelectedIndexChanged warning on an existing bid.
+                        if (
+                          bidId &&
+                          laborTemplateName !== (v === "None" ? "" : v) &&
+                          !window.confirm(
+                            "Are you sure you want to change your labor template? This will override all manually entered labor settings.",
+                          )
+                        )
+                          return;
+                        applyTemplate(v === "None" ? "" : v);
+                      }}
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Selecting a template writes its % adjustments into every item&apos;s labor
+                      (sections, underlayment, tear-off, parapets, curbs, accessories, setup,
+                      inspection) — edit any of them afterwards.
                     </p>
                   </LegacyGroup>
-                </TabsContent>
-                <TabsContent value="jobsite" className="space-y-3 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() =>
-                      // Legacy llbCopyClient: Address 1/2, City, State, Zip from the client —
-                      // split out of a one-box address when City / State / Zip are blank.
-                      setCustomer((c) => ({ ...c, ...clientAddressForJobSite(c) }))
-                    }
-                  >
-                    <Copy className="mr-1 h-3 w-3" /> Copy Client Address
-                  </Button>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Address 1">
-                      <Input
-                        value={customer.projectAddress}
-                        onChange={(e) =>
-                          setCustomer((c) => ({ ...c, projectAddress: e.target.value }))
-                        }
+                  <LegacyGroup title="4. Estimator Commission">
+                    <Field label="Commission Rate (%)">
+                      <NumberField
+                        step="0.1"
+                        value={commission}
+                        onChange={(v) => setCommission(v)}
                       />
                     </Field>
-                    <Field label="Address 2">
-                      <Input
-                        value={customer.projectAddress2 ?? ""}
-                        onChange={(e) =>
-                          setCustomer((c) => ({ ...c, projectAddress2: e.target.value }))
-                        }
+                  </LegacyGroup>
+                </div>
+                <LegacyGroup title="5. Tax Exempt">
+                  <div className="flex flex-wrap items-end gap-4">
+                    <label className="flex items-center gap-2 pb-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={taxExempt}
+                        onChange={(e) => {
+                          // Legacy chkTaxExempt_CheckedChanged: exempt → SalesTax 0 and the
+                          // tax controls disabled; un-exempt → back to the company Settings.
+                          const on = e.target.checked;
+                          setTaxExempt(on);
+                          if (on) setSalesTaxRate(0);
+                          else {
+                            setSalesTaxRate(null);
+                            setTaxMaterialOnly(null);
+                          }
+                        }}
+                      />
+                      Tax Exempt
+                    </label>
+                    <Field label="Sales Tax (%)">
+                      <NumberField
+                        step="0.01"
+                        className="w-[120px]"
+                        disabled={taxExempt}
+                        value={taxExempt ? 0 : Math.round(effSalesTaxRate * 100 * 10000) / 10000}
+                        onChange={(v) => setSalesTaxRate(v / 100)}
                       />
                     </Field>
-                    <div className="sm:col-span-2">
-                      <Field label="City St, Zip">
-                        {!customer.jobCity &&
-                        !customer.jobState &&
-                        !customer.jobZip &&
-                        customer.jobCityStZip ? (
-                          <Input
-                            title="Older bid: combined city / state / zip line"
-                            value={customer.jobCityStZip}
-                            onChange={(e) =>
-                              setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))
-                            }
-                          />
-                        ) : (
-                          <div className="grid grid-cols-[minmax(0,1fr)_70px_110px] gap-2">
-                            {(
-                              [
-                                ["jobCity", "City"],
-                                ["jobState", "ST"],
-                                ["jobZip", "Zip"],
-                              ] as const
-                            ).map(([key, ph]) => (
-                              <Input
-                                key={key}
-                                placeholder={ph}
-                                value={customer[key] ?? ""}
-                                onChange={(e) =>
-                                  setCustomer((c) => {
-                                    const nx = { ...c, [key]: e.target.value };
-                                    return {
-                                      ...nx,
-                                      jobCityStZip: cityStZip(nx.jobCity, nx.jobState, nx.jobZip),
-                                    };
-                                  })
-                                }
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </Field>
-                    </div>
-                    <Field label="Job #">
-                      <Input
-                        value={customer.jobNumber ?? ""}
-                        onChange={(e) => setCustomer((c) => ({ ...c, jobNumber: e.target.value }))}
+                    <label className="flex items-center gap-2 pb-2 text-xs">
+                      <input
+                        type="checkbox"
+                        disabled={taxExempt}
+                        checked={effTaxMaterialOnly}
+                        onChange={(e) => setTaxMaterialOnly(e.target.checked)}
                       />
-                    </Field>
-                    <Field label="Ship Via">
-                      <Input
-                        value={customer.shipVia ?? ""}
-                        onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Ship To">
-                      <Input
-                        value={customer.shipTo ?? ""}
-                        onChange={(e) => setCustomer((c) => ({ ...c, shipTo: e.target.value }))}
-                      />
-                    </Field>
+                      Only Tax Material
+                    </label>
+                    <span className="pb-2 text-xs text-muted-foreground">
+                      {salesTaxRate === null && taxMaterialOnly === null
+                        ? "Using Admin › General defaults for this bid."
+                        : "Bid-level override (Admin › General is the default)."}
+                    </span>
                   </div>
-                </TabsContent>
-              </Tabs>
+                </LegacyGroup>
+                <LegacyGroup title="6. Notes">
+                  <AutoTextarea
+                    rows={3}
+                    placeholder="Shown on the proposal…"
+                    value={customer.notes}
+                    onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
+                  />
+                  {customer.perDiemChart ? (
+                    <div className="mt-2">
+                      <PerDiemChartEditor
+                        chart={normalizePerDiemChart(customer.perDiemChart)}
+                        onChange={(chart) => setCustomer((c) => ({ ...c, perDiemChart: chart }))}
+                        onRemove={() =>
+                          setCustomer((c) => {
+                            const { perDiemChart: _drop, ...rest } = c;
+                            return rest;
+                          })
+                        }
+                        disabled={readOnly}
+                      />
+                      {/* Owner, Oct 7: the chart's total joins the Review's Per-Diem Charge. */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <Switch
+                          id="pd-from-chart"
+                          checked={perDiemFromChart}
+                          onCheckedChange={setPerDiemFromChart}
+                          disabled={readOnly}
+                        />
+                        <Label htmlFor="pd-from-chart" className="text-xs">
+                          Add the chart&apos;s total to the Per-Diem Charge on Review
+                        </Label>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2"
+                      disabled={readOnly}
+                      onClick={() =>
+                        setCustomer((c) => ({ ...c, perDiemChart: emptyPerDiemChart() }))
+                      }
+                      title="Adds a 'Per diem based on N men N days' chart with a checklist of job costs and prices"
+                    >
+                      Add per diem chart
+                    </Button>
+                  )}
+                </LegacyGroup>
+              </div>
             </CardContent>
           </Card>
 
