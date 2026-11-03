@@ -96,13 +96,7 @@ import {
   seesInvoices,
 } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
-import {
-  canCloseOut,
-  stageChoices,
-  stageLocked,
-  endsAtDone,
-  stagesForType,
-} from "@/lib/ticket-stage";
+import { canCloseOut, stageChoices, stageLocked, stagesForType } from "@/lib/ticket-stage";
 import { FIELD_DETAILS_NOTE, fieldNotesInput, isFieldTicketPage } from "@/lib/field-ticket-page";
 import {
   deleteServiceJob,
@@ -1456,8 +1450,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // Owner, Oct 1: Invoiced and Closed are a manager's. Anyone else is offered them only as the
   // ticket's current stage, and then the picker is read-only (the server and the database
   // refuse the same; an invoice sets them through its own path).
-  // An inspection ends at Done (owner, Nov 3): its picker, strip and column stop there.
-  const inspectionTicket = endsAtDone(job?.service_type);
+  // An inspection ends at Authorized (owner, Nov 3): its picker and strip stop there.
   const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage, job?.service_type);
   const lockedStage = stageLocked(profile, jobStage);
 
@@ -2656,7 +2649,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {/* Owner, Oct 9: at Done the "Needs authorization" card leads the column — the next
               step on the ticket, not the last block to scroll to. Marking authorized and making
               the invoice stay two steps, done by different people (invoice-block.tsx). */}
-              {jobStage === "done" && !inspectionTicket && <InvoiceBlock job={job} />}
+              {jobStage === "done" && <InvoiceBlock job={job} />}
               <AerialSection job={job} canEdit={canEdit} />
               <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
               <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
@@ -2668,7 +2661,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   (Oct 26) moved to the header's icon the same day (ticket-header-actions.tsx) —
                   "instead of it being a whole new row menu". */}
               <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
-              {jobStage !== "done" && !inspectionTicket && <InvoiceBlock job={job} />}
+              {jobStage !== "done" && <InvoiceBlock job={job} />}
               {/* History, at the very bottom under a thin heading: what happened at this property
                   before (owner, Oct 21: starts closed; the strip under the property opens it, and
                   ?open=history centres it — the same element id), and for admins and managers

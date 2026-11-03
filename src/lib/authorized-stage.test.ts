@@ -107,7 +107,7 @@ describe("the ticket page at Done", () => {
   const block = read("src/components/service/invoice-block.tsx");
   it("shows Needs authorization instead of Make the invoice", () => {
     expect(block).toContain(
-      'if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} />;',
+      'if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} signOff={signOff} />;',
     );
     expect(block).toContain("Needs authorization");
   });

@@ -152,13 +152,13 @@ describe("the office column's order (service-page.tsx)", () => {
   };
   it("runs Needs authorization → Aerial → Inspection → Photos & repairs → Materials & POs → Work → Invoice → History", () => {
     const order = [
-      '{jobStage === "done" && !inspectionTicket && <InvoiceBlock job={job} />}',
+      '{jobStage === "done" && <InvoiceBlock job={job} />}',
       "<AerialSection job={job} canEdit={canEdit} />",
       "<InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />",
       "<TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />",
       "{materials}", // Materials & POs (materials-pos-fold.tsx)
       "<TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />", // Work
-      '{jobStage !== "done" && !inspectionTicket && <InvoiceBlock job={job} />}',
+      '{jobStage !== "done" && <InvoiceBlock job={job} />}',
       'aria-label="History"',
       "<HistoryFold job={job} open={historyOpen} onOpenChange={setHistoryOpen} />",
       '<AuditHistory\n                    entity="ticket"',

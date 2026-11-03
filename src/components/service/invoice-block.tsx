@@ -33,7 +33,7 @@ import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, ShieldCheck, Trash2 } 
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets, seesInvoices } from "@/lib/access";
-import { INVOICE_STAGES } from "@/lib/ticket-stage";
+import { INVOICE_STAGES, endsAtAuthorized } from "@/lib/ticket-stage";
 import { setServiceStage } from "@/lib/service.functions";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
@@ -74,8 +74,12 @@ export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
   const { profile } = useAuth();
   // Invoices are a manager's and sales' / PMs' (owner, Oct 1): nobody else sees the card.
   if (!profile || !seesInvoices(profile)) return null;
-  // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced.
-  if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} />;
+  // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced. An
+  // inspection ends at that sign-off (owner, Nov 3: "the authorized step just so the owner can
+  // see it was completed and signed off on it"): the card asks for it, and nothing is invoiced.
+  const signOff = endsAtAuthorized(job.service_type);
+  if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} signOff={signOff} />;
+  if (signOff) return null;
   if (!INVOICE_STAGES.includes(job.stage) && !job.invoice_id) return null;
   return <InvoiceCard job={job} />;
 }
@@ -84,14 +88,18 @@ export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
  * At Done: "Needs authorization". A manager (the owner reviews; "the manager can move it past
  * authorize if need be") marks it Authorized here; a sales / project manager sees that it waits.
  */
-function AuthorizeCard({ job }: { job: ServiceJobWithTech }) {
+function AuthorizeCard({ job, signOff }: { job: ServiceJobWithTech; signOff: boolean }) {
   const { profile } = useAuth();
   const qc = useQueryClient();
   const stageFn = useServerFn(setServiceStage);
   const authorize = useMutation({
     mutationFn: () => stageFn({ data: { id: job.id, stage: "authorized" } }),
     onSuccess: () => {
-      toast.success(`Ticket #${job.number} authorized — ready to invoice`);
+      toast.success(
+        signOff
+          ? `Inspection #${job.number} authorized — complete`
+          : `Ticket #${job.number} authorized — ready to invoice`,
+      );
       void qc.invalidateQueries({ queryKey: ["service-job", job.id] });
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
       void qc.invalidateQueries({ queryKey: ["service-job-events", job.id] });
@@ -107,8 +115,9 @@ function AuthorizeCard({ job }: { job: ServiceJobWithTech }) {
         <ShieldCheck className="h-4 w-4" /> Needs authorization
       </h2>
       <p className="text-sm text-muted-foreground">
-        The work is done. Once it is reviewed and authorized, the invoice is made from the
-        ticket&apos;s time and materials.
+        {signOff
+          ? "The inspection is done. Once it is reviewed and authorized, it is complete — nothing is invoiced."
+          : "The work is done. Once it is reviewed and authorized, the invoice is made from the ticket's time and materials."}
       </p>
       {managesTickets(profile) ? (
         <Button disabled={authorize.isPending} onClick={() => authorize.mutate()}>

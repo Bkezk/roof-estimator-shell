@@ -195,7 +195,7 @@ export function stageActors(
 export function ticketStageStrip(
   current: string | null | undefined,
   events: readonly StageEventLike[],
-  /** The ticket's stages (ticket-stage.ts stagesForType: an inspection ends at Done). */
+  /** The ticket's stages (ticket-stage.ts stagesForType: an inspection ends at Authorized). */
   stages: readonly ServiceStage[] = SERVICE_STAGES,
 ): StripCell[] {
   const dates = stageDates(events);

@@ -117,9 +117,7 @@ describe("the ticket page's Documents icon (Oct 27: the header, not a fold)", ()
       service.indexOf("<aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE}"),
       service.indexOf("</aside>"),
     );
-    expect(aside).toContain(
-      '{jobStage !== "done" && !inspectionTicket && <InvoiceBlock job={job} />}',
-    );
+    expect(aside).toContain('{jobStage !== "done" && <InvoiceBlock job={job} />}');
     expect(aside).not.toMatch(/<TicketDocumentsFold|<DocumentsList|storageKey="documents"/);
     expect(service).not.toContain("TicketDocumentsFold");
     expect(service).toContain("const officeOrAdmin = !isTech;");

@@ -150,19 +150,15 @@ describe("B4. a failed background refetch keeps the ticket on screen", () => {
 describe("S7. at Done the Needs authorization card leads the right column; two steps stay apart", () => {
   const aside = page.slice(page.indexOf('aria-label="Ticket sections"'), page.indexOf("</aside>"));
   it("InvoiceBlock first while Done, last otherwise", () => {
-    const first = aside.indexOf(
-      '{jobStage === "done" && !inspectionTicket && <InvoiceBlock job={job} />}',
-    );
-    const last = aside.indexOf(
-      '{jobStage !== "done" && !inspectionTicket && <InvoiceBlock job={job} />}',
-    );
+    const first = aside.indexOf('{jobStage === "done" && <InvoiceBlock job={job} />}');
+    const last = aside.indexOf('{jobStage !== "done" && <InvoiceBlock job={job} />}');
     expect(first).toBeGreaterThan(0);
     expect(first).toBeLessThan(aside.indexOf("<AerialSection"));
     expect(last).toBeGreaterThan(aside.indexOf("<TicketFieldSections"));
   });
   it("Mark authorized (AuthorizeCard) and Make the invoice (InvoiceCard) are separate buttons in separate cards", () => {
     expect(block).toContain(
-      'if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} />;',
+      'if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} signOff={signOff} />;',
     );
     const auth = block.slice(
       block.indexOf("function AuthorizeCard("),

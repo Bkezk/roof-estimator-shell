@@ -39,13 +39,20 @@ const ALL_STAGES: readonly ServiceStage[] = [...TECH_STAGES, ...OFFICE_STAGES];
 
 /**
  * An inspection's stages (owner, Nov 3: "inspections just need the steps open, scheduled, and
- * done"): it ends at Done — no review, no invoice, no Closed. Everything else has them all.
+ * done", then "we may need the authorized step just so the owner can see it was completed and
+ * signed off on it"): Open, Scheduled, Done, Authorized — the sign-off is the end. No invoice,
+ * no Closed. Everything else has them all.
  */
-export const INSPECTION_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
-export const endsAtDone = (serviceType: string | null | undefined): boolean =>
+export const INSPECTION_STAGES: readonly ServiceStage[] = [
+  "open",
+  "scheduled",
+  "done",
+  "authorized",
+];
+export const endsAtAuthorized = (serviceType: string | null | undefined): boolean =>
   serviceType === "inspection";
 export const stagesForType = (serviceType: string | null | undefined): readonly ServiceStage[] =>
-  endsAtDone(serviceType) ? INSPECTION_STAGES : ALL_STAGES;
+  endsAtAuthorized(serviceType) ? INSPECTION_STAGES : ALL_STAGES;
 
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";

@@ -856,7 +856,7 @@ describe("5. the Done notice for an inspection", () => {
       "Ticket #6012 Acme — Annual inspection is done — ready for your review",
     );
   });
-  it("afterTicketStage sends it once, as ticket_done, to the authorizers; no Authorize timer for an inspection", async () => {
+  it("afterTicketStage sends it once, as ticket_done, to the authorizers; the Authorize follow-up still says Ticket", async () => {
     const tables: Record<string, Row[]> = {
       profiles,
       crm_followups: [],
@@ -890,21 +890,20 @@ describe("5. the Done notice for an inspection", () => {
     expect(msg.title).toBe(
       "Inspection #6012 Acme is done — 1 issue found, recommends repairs — ready for your review",
     );
-    // The body asks for the next step, not "mark it Authorized" (owner, Nov 3: an inspection
-    // ends at Done).
+    // The body: the sign-off completes it, no invoice after (owner, Nov 3: an inspection ends
+    // at Authorized).
     expect(msg.body).toBe(
-      "Ted Tech marked it done. Look it over and pick what happens next on the ticket: create a repair ticket, or no action needed.",
+      "Ted Tech marked it done. Review it and mark it Authorized; that completes the inspection.",
     );
-    // No Authorize timer for an inspection (syncFollowup is stubbed here): the follow-up closes
-    // with its reason; the single-notice rule still holds (quiet on the step it became Done).
+    // The Authorize follow-up (syncFollowup is stubbed here) keeps the ticket title and the
+    // single-notice rule (quiet on the step the ticket became Done).
     expect(vi.mocked(syncFollowup)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(syncFollowup).mock.calls[0]![0]).toMatchObject({
       kind: "invoice",
       itemId: "job-1",
-      assigneeId: null,
+      assigneeId: MANAGER,
       title: "Authorize Ticket #6012 Acme — Annual inspection",
-      closing: true,
-      closeReason: "an inspection ends at Done",
+      closing: false,
       quiet: true,
     });
   });

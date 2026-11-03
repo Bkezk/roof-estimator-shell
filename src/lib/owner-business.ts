@@ -20,8 +20,6 @@ export interface BizTicket {
   invoice_id?: string | null;
   /** Null: nobody's — Unassigned on Work Overview, never Past due (owner, Oct 12, item 6). */
   technician_id?: string | null;
-  /** An inspection ends at Done (owner, Nov 3): never "awaiting authorization". */
-  service_type?: string | null;
 }
 export interface BizInvoice {
   status: string;
@@ -146,10 +144,7 @@ export const UNPAID_STATUSES: readonly string[] = ["final", "sent"];
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);
   const waiting = i.tickets.filter((t) => TO_INVOICE_STAGES.includes(t.stage) && !t.invoice_id);
-  const reviewing = i.tickets.filter(
-    (t) =>
-      TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id && t.service_type !== "inspection",
-  );
+  const reviewing = i.tickets.filter((t) => TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id);
   const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));
   const sumBy = <T>(rows: readonly T[], f: (r: T) => number) =>
     round2(rows.reduce((s, r) => s + f(r), 0));
