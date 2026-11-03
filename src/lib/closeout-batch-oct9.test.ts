@@ -213,6 +213,9 @@ describe("B3 mergeSaved: a save merges only the fields it sent", () => {
       "checked_out_with",
       "recommend_new_roof",
       "signed_by",
+      // The close-out's marks, on the ticket since Nov 3 (review item 24).
+      "nothing_used_at",
+      "notes_skipped_at",
       "updated_at",
       "updated_by_name",
     ]);
@@ -395,8 +398,8 @@ describe("S5 the repair picker: matches under the search box, chips hidden while
 // S13
 
 describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets seeds the ticket", () => {
-  it("every fieldKeys.* read on the close-out is fresh for 30 s", () => {
-    const stale = (s: string) => (s.match(/staleTime: 30_000,/g) ?? []).length;
+  it("every fieldKeys.* read on the close-out is fresh — five minutes and never on focus since Nov 3 (FIELD_READ; it was 30 s)", () => {
+    const stale = (s: string) => (s.match(/\.\.\.FIELD_READ,/g) ?? []).length;
     // closeout: repairsQ, photosQ, timeQ, materialsQ (the steps' state, closeout-steps.ts) in
     // the form + repairs, photos in the section.
     expect(stale(closeout)).toBe(6);
@@ -414,8 +417,9 @@ describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets
   });
   it("Open ticket plants the row as the ticket (the loader's key and shape) before navigating", () => {
     // service-page.tsx's TicketLoader reads ["service-job", id] = fieldKeys.job(id) as ServiceJobWithTech.
+    // Nov 3 (review item 36): the loader's read is the one bundle, whose job is the ticket.
     expect(read("src/components/service-page.tsx")).toMatch(
-      /queryKey: \["service-job", id\],\s*queryFn: \(\) => getFn\(\{ data: \{ id \} \}\)/,
+      /queryKey: \["service-job", id\],\s*queryFn: async \(\) => \{\s*const b = await bundleFn\(\{ data: \{ id \} \}\);/,
     );
     expect(read("src/components/service/field-utils.ts")).toContain(
       'job: (id: string) => ["service-job", id] as const,',
@@ -475,7 +479,8 @@ describe("tap targets (owner, Oct 9)", () => {
       closeout.indexOf("function TagChip("),
       closeout.indexOf("type PhotoRole"),
     );
-    expect(tagChip).toContain('className="h-10 rounded-full px-3 text-sm"');
+    // h-11 since Nov 3 (review item 33: a fingertip is 44 px).
+    expect(tagChip).toContain('className="h-[44px] rounded-full px-3 text-sm"');
     expect(tagChip).not.toContain("h-8");
     expect(closeout).toContain(
       'className="h-11 px-2 text-xs text-destructive hover:text-destructive"',

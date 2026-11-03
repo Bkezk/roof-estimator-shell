@@ -139,6 +139,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Box, PhotoThumb } from "@/components/service/field-shared";
 import {
   errText,
+  FIELD_READ,
   fieldKeys,
   loudError,
   removeFromServiceBucket,
@@ -177,6 +178,7 @@ export function AerialSection({
     queryKey: fieldKeys.photos(job.id),
     queryFn: () => photosFn({ data: { id: job.id } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   if (!(job.site_address ?? "").trim() && !job.site_id) return null;
   const saved = (photos.data ?? [])

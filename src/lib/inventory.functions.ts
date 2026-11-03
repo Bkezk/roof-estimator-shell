@@ -754,20 +754,42 @@ export const undoMovement = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: row, error } = await sb
       .from("inventory_movements")
-      .select("id, created_by, created_at, pair_id")
+      .select("id, created_by, created_at, pair_id, service_job_id")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error("That entry is already gone");
     const { data: me } = await sb
       .from("profiles")
-      .select("role")
+      .select("role, access, technician")
       .eq("id", context.userId)
       .maybeSingle();
     const mine = row.created_by === context.userId;
     const fresh = Date.now() - Date.parse(row.created_at) < 24 * 3600 * 1000;
-    if (me?.role !== "admin" && !(mine && fresh))
-      throw new Error("Only your own entries from the last 24 hours can be undone");
+    // Owner, Nov 3 (review item 25): your own entry on a ticket you may still edit (Open,
+    // Scheduled or Done and yours — field-edit-lock.ts) can be undone whatever its age; the
+    // 24-hour window stays for entries off a ticket. It used to be a cliff: after a day the "−"
+    // wrote a return row and the ledger carried a used + returned pair for Reconcile to read.
+    let stillMine = false;
+    if (mine && !fresh && row.service_job_id) {
+      const { data: job } = await sb
+        .from("service_jobs")
+        .select("id, stage, technician_id")
+        .eq("id", row.service_job_id)
+        .maybeSingle();
+      if (job) {
+        const onTicket =
+          job.technician_id === context.userId ||
+          (await readCrew(sb, job.id, { rates: false })).some(
+            (c) => c.technician_id === context.userId,
+          );
+        stillMine = fieldEditProblem(me, job.stage, onTicket) === null;
+      }
+    }
+    if (me?.role !== "admin" && !(mine && (fresh || stillMine)))
+      throw new Error(
+        "Only your own entries can be undone — from the last 24 hours, or on a ticket you can still edit",
+      );
     const del = sb.from("inventory_movements").delete({ count: "exact" });
     const { error: delErr, count } = await (row.pair_id
       ? del.eq("pair_id", row.pair_id)

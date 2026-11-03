@@ -62,6 +62,7 @@ import {
 import {
   dragHasFiles,
   errText,
+  FIELD_READ,
   fieldKeys,
   loudError,
   takePickedFiles,
@@ -235,6 +236,7 @@ function useTimeRows(jobId: string) {
     queryKey: fieldKeys.time(jobId),
     queryFn: () => listFn({ data: { id: jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
 }
 
@@ -402,11 +404,13 @@ function RepairsReadOnly({
     queryKey: fieldKeys.repairs(jobId),
     queryFn: () => repairsFn({ data: { id: jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   const photos = useQuery({
     queryKey: fieldKeys.photos(jobId),
     queryFn: () => photosFn({ data: { id: jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   // Owner, Oct 26: the office adds pictures to a ticket from its page, not only through the
   // technician's close-out — loose "other" photos (ticket-picture-upload.ts; the Inspection

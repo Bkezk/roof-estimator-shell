@@ -81,7 +81,13 @@ import {
   type InspectionDraftState,
 } from "@/components/service/inspection-draft";
 import { ItemPhotoTools } from "@/components/service/inspection-item-photos";
-import { errText, fieldKeys, localYmd, whenShort } from "@/components/service/field-utils";
+import {
+  errText,
+  FIELD_READ,
+  fieldKeys,
+  localYmd,
+  whenShort,
+} from "@/components/service/field-utils";
 
 /** The Inspection section; only on a ticket of type Inspection. */
 export function InspectionSection({
@@ -128,6 +134,7 @@ function InspectionBody({
     queryKey: fieldKeys.photos(job.id),
     queryFn: () => photosFn({ data: { id: job.id } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   if (draft.error)
     return (
@@ -747,7 +754,7 @@ export function InspectionNextStep({
     queryKey: inspectionKey(job.id),
     queryFn: () => getFn({ data: { id: job.id } }),
     enabled: !!session && applies,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   if (!applies || !q.data || q.data.outcome) return null;
   return (

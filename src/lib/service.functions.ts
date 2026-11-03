@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { readProfile } from "@/lib/profile-cache.server";
 import {
   CLAIM_NEEDS_TICK,
   CLAIM_TAKEN,
@@ -138,13 +139,10 @@ export type ServiceJobListRow = Pick<ServiceJobRow, ListJobColumn> & {
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 
+// The caller's profile, once a minute per user rather than once per call (Nov 3, review item 36;
+// lib/profile-cache.server.ts).
 async function me(ctx: Ctx) {
-  const { data } = await ctx.supabase
-    .from("profiles")
-    .select("role, access, technician, full_name, email")
-    .eq("id", ctx.userId)
-    .maybeSingle();
-  return data;
+  return readProfile(ctx.supabase, ctx.userId);
 }
 async function serviceAccess(ctx: Ctx) {
   const p = await me(ctx);
@@ -1056,6 +1054,8 @@ export interface JobMaterialRow {
   qty: number;
   unit: string;
   counted_note: string | null;
+  /** Who logged it (the "−" undoes your own entries by id, not by name — Nov 3). */
+  created_by: string | null;
   created_by_name: string | null;
   created_at: string;
 }
@@ -1067,7 +1067,7 @@ export const listServiceJobMaterials = createServerFn({ method: "GET" })
     const { data: rows, error } = await context.supabase
       .from("inventory_movements")
       .select(
-        "id, location_id, screen_id, row_label, price_col, qty, unit, counted_note, created_by_name, created_at",
+        "id, location_id, screen_id, row_label, price_col, qty, unit, counted_note, created_by, created_by_name, created_at",
       )
       .eq("service_job_id", data.id)
       .order("created_at", { ascending: false });

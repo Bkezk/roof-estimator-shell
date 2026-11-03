@@ -44,7 +44,7 @@ import {
   type TimelineIcon,
 } from "@/lib/ticket-timeline";
 import { LogContactButtons } from "@/components/crm/contact-log";
-import { errText, fieldKeys, whenShort } from "@/components/service/field-utils";
+import { errText, FIELD_READ, fieldKeys, whenShort } from "@/components/service/field-utils";
 
 const ICONS: Record<TimelineIcon, typeof Phone> = {
   called: Phone,
@@ -79,6 +79,7 @@ export function TicketActivity({ jobId }: { jobId: string }) {
     queryKey: fieldKeys.events(jobId),
     queryFn: () => eventsFn({ data: { id: jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   const entries = contacts.data && events.data ? mergeTimeline(contacts.data, events.data) : null;
   return (

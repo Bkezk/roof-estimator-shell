@@ -108,7 +108,7 @@ function PendingThumb({
         <div className="flex gap-1">
           <button
             type="button"
-            className="min-h-9 px-1 text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+            className="min-h-[44px] px-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
             aria-label={`Retry ${entry.fileName || "this picture"}`}
             onClick={() => onRetry(entry.id)}
           >
@@ -117,7 +117,7 @@ function PendingThumb({
           </button>
           <button
             type="button"
-            className="min-h-9 px-1 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            className="min-h-[44px] px-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
             aria-label={`Discard ${entry.fileName || "this picture"}`}
             onClick={() => onDiscard(entry.id)}
           >

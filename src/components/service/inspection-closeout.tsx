@@ -27,7 +27,7 @@
  * ticket page's Repairs fold under "Other photos" (ticket-field-sections.tsx lists every photo
  * that is not a signature, loose ones under that heading).
  */
-import { Camera, Check, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { Camera, Check, CheckCircle2, Images, Loader2, RefreshCw } from "lucide-react";
 
 import type { ServiceJobRow } from "@/lib/service.functions";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
@@ -166,6 +166,15 @@ function PhotoRoll({
       {!heading && (
         <div className="flex flex-wrap items-center gap-2">
           {button}
+          <button
+            type="button"
+            className="inline-flex min-h-[44px] items-center gap-1 px-1 text-sm text-primary underline-offset-2 hover:underline"
+            data-line="from-my-photos"
+            onClick={camera.onPick}
+          >
+            <Images className="h-4 w-4" aria-hidden />
+            From my photos
+          </button>
           <UploadBadge n={camera.uploading} />
           {itemKey && (
             <FromTicketPhotosButton

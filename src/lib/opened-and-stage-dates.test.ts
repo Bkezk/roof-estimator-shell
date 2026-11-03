@@ -427,7 +427,9 @@ describe("the ticket page: the stage strip under the header carries the opened d
   it("imports the helpers, the strip and the timeline's reader", () => {
     expect(src).toContain('import { shortDate, ticketStageStrip } from "@/lib/stage-dates";');
     expect(src).toContain('import { StageStrip } from "@/components/stage-strip";');
-    expect(src).toContain('import { listJobEvents } from "@/lib/service-field.functions";');
+    expect(src).toContain(
+      'import { getTicketBundle, listJobEvents } from "@/lib/service-field.functions";',
+    );
   });
   it("the timeline's query (shared with the Timeline section) dates the strip", () => {
     expect(flat(src)).toContain(

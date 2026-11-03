@@ -42,6 +42,8 @@ const jsonSchema: z.ZodType<JsonValue> = z.lazy(() =>
 export const historyPhotoSchema = z.object({
   id: z.string(),
   storage_path: z.string(),
+  /** The small copy (Nov 3, review item 34); absent from a JSON made before then. */
+  thumb_path: text.optional(),
   file_name: text,
   role: z.string(),
   repair_id: text,
@@ -105,8 +107,14 @@ export const siteHistorySummarySchema = z.object({
 
 export type HistoryRepair = z.output<typeof historyRepairSchema>;
 export type HistoryItem = z.output<typeof historyItemSchema>;
-/** A photo as the server function returns it: the row plus its signed link (null when signing failed). */
-export type HistoryPhoto = z.output<typeof historyPhotoSchema> & { url: string | null };
+/**
+ * A photo as the server function returns it: the row plus its signed links (null when signing
+ * failed) — `url` the full picture, `thumb_url` the small copy when the photo has one.
+ */
+export type HistoryPhoto = z.output<typeof historyPhotoSchema> & {
+  url: string | null;
+  thumb_url?: string | null;
+};
 export type SiteHistoryTicket = Omit<z.output<typeof historyTicketSchema>, "photos"> & {
   photos: HistoryPhoto[];
 };

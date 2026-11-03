@@ -163,7 +163,10 @@ describe("the two narrowed read policies", () => {
 describe("the app's twin", () => {
   it("the server functions call exactly these two functions by name and sign the photo paths from the private bucket", () => {
     const src = read("src/lib/service-history.functions.ts");
-    expect(src).toContain('rawRpc(context.supabase, "site_history", { p_job_id: data.id })');
+    // Nov 3 (review item 46): the same function, capped to the newest N when the fold asks.
+    expect(src).toMatch(
+      /rawRpc\(\s*context\.supabase,\s*"site_history",\s*data\.limit \? \{ p_job_id: data\.id, p_limit: data\.limit \} : \{ p_job_id: data\.id \},\s*\)/,
+    );
     expect(src).toContain(
       'rawRpc(context.supabase, "site_history_summary", { p_job_id: data.id })',
     );

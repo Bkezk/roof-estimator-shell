@@ -61,22 +61,46 @@ async function signAll(sb: Client, paths: string[]): Promise<Map<string, string>
 
 const idInput = (d: unknown) => z.object({ id: z.string().uuid() }).parse(d);
 
+/** How many earlier tickets the fold shows at first (Nov 3, review item 46); "Show more" asks for all. */
+export const HISTORY_FIRST_TICKETS = 10;
+
 /**
  * The earlier tickets at this ticket's property, newest first, each with its repairs,
- * inspection items and ALL its photos (signed). The database decides who may ask.
+ * inspection items and ALL its photos (signed). The database decides who may ask. `limit`
+ * (Nov 3): the newest N only — the fold opens on ten and asks for the rest on "Show more"; the
+ * whole history used to be built and every photo signed on every open.
  */
 export const siteHistory = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator(idInput)
+  .validator((d: unknown) =>
+    z
+      .object({ id: z.string().uuid(), limit: z.number().int().min(1).max(500).optional() })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<SiteHistoryTicket[]> => {
-    const r = await rawRpc(context.supabase, "site_history", { p_job_id: data.id });
+    const r = await rawRpc(
+      context.supabase,
+      "site_history",
+      data.limit ? { p_job_id: data.id, p_limit: data.limit } : { p_job_id: data.id },
+    );
     if (r.error) throw new Error(r.error.message);
     const rows = siteHistorySchema.parse(r.data ?? []);
-    const paths = [...new Set(rows.flatMap((t) => t.photos.map((p) => p.storage_path)))];
+    // The small copies for the squares (thumb_path, Nov 3) and the full pictures for the viewer.
+    const paths = [
+      ...new Set(
+        rows.flatMap((t) =>
+          t.photos.flatMap((p) => [p.storage_path, ...(p.thumb_path ? [p.thumb_path] : [])]),
+        ),
+      ),
+    ];
     const urls = await signAll(context.supabase, paths);
     return rows.map((t) => ({
       ...t,
-      photos: t.photos.map((p) => ({ ...p, url: urls.get(p.storage_path) ?? null })),
+      photos: t.photos.map((p) => ({
+        ...p,
+        url: urls.get(p.storage_path) ?? null,
+        thumb_url: p.thumb_path ? (urls.get(p.thumb_path) ?? null) : null,
+      })),
     }));
   });
 

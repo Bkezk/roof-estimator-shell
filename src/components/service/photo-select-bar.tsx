@@ -29,7 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { inspectionKey } from "@/components/service/inspection-draft";
-import { errText, loudError } from "@/components/service/field-utils";
+import { errText, FIELD_READ, loudError } from "@/components/service/field-utils";
 import { useDeleteJobPhoto, useSetPhotoItem } from "@/components/service/item-photo-mutations";
 import { downloadPhoto } from "@/components/service/photo-export";
 
@@ -55,7 +55,7 @@ function AttachToItemDialog({
     queryKey: inspectionKey(jobId),
     queryFn: () => getFn({ data: { id: jobId } }),
     enabled: !!session && open,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const items = q.data ? visibleChecklist(mergeChecklist(q.data.inspection, q.data.checklist)) : [];
   return (

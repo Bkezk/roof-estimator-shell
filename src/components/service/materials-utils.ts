@@ -90,6 +90,8 @@ export interface LedgerRow extends LocatedCell {
   qty: number;
   unit: string;
   counted_note: string | null;
+  /** Who logged it: the "−" undoes your own entries by this id (Nov 3), not by display name. */
+  created_by?: string | null | undefined;
   created_by_name: string | null;
   created_at: string;
 }
@@ -131,18 +133,21 @@ export function ownFreshEntries(
   rows: readonly LedgerRow[],
   cell: LocatedCell,
   piece: PieceDef | null | undefined,
-  myName: string | null,
+  /** My user id (Nov 3: by id, not by display name — two people may share a name). */
+  myId: string | null,
   now = Date.now(),
+  /** The ticket is still mine to edit (Nov 3, review item 25): my entries of any age count. */
+  opts: { ticketOpen?: boolean } = {},
 ): OwnEntry[] {
-  if (!myName) return [];
+  if (!myId) return [];
   return rows
     .filter(
       (r) =>
         sameCell(r, cell) &&
         Number(r.qty) < 0 &&
         r.id > 0 &&
-        r.created_by_name === myName &&
-        now - Date.parse(r.created_at) < 24 * 3600_000 - 5 * 60_000,
+        r.created_by === myId &&
+        (opts.ticketOpen === true || now - Date.parse(r.created_at) < 24 * 3600_000 - 5 * 60_000),
     )
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id)
     .map((r) => ({ id: r.id, units: packsToUnits(-Number(r.qty), piece) }));

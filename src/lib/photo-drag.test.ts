@@ -42,9 +42,7 @@ describe("the wiring", () => {
     expect(src).toContain("const draggable = !!url.data && !select?.on && !(select && touch);");
     expect(src).toContain("draggable={draggable}");
     expect(src).toContain("setPhotoDrag(");
-    expect(src).toContain(
-      "photoDragData(url.data, ticketNumber, photo.role, n, photo.storage_path)",
-    );
+    expect(src).toContain("photoDragData(full, ticketNumber, photo.role, n, photo.storage_path)");
     expect(src).toContain("drag it to your desktop to save it");
   });
 });

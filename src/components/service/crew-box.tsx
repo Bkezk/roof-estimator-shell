@@ -20,7 +20,7 @@ import { CREW_FIELDS, mergeSaved } from "@/lib/job-cache";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SavedIndicator } from "@/components/service/field-shared";
-import { errText, fieldKeys, useAutosave } from "@/components/service/field-utils";
+import { errText, FIELD_READ, fieldKeys, useAutosave } from "@/components/service/field-utils";
 
 type Mode = "alone" | "others" | null;
 
@@ -49,7 +49,7 @@ export function CrewBox({
     queryKey: fieldKeys.crew(job.id),
     queryFn: () => crewFn({ data: { id: job.id } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -154,7 +154,7 @@ export function CrewBox({
             <Users className="h-5 w-5 text-muted-foreground" /> Who is on this job with you?
           </h2>
         )}
-        <SavedIndicator state={autosave.state} />
+        <SavedIndicator state={autosave.state} onRetry={() => void autosave.flush()} />
       </div>
       {pending && (
         <p className="text-sm text-muted-foreground">

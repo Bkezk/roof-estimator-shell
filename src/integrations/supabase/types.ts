@@ -3186,6 +3186,7 @@ export type Database = {
           service_job_id: string;
           storage_path: string;
           taken_at: string | null;
+          thumb_path: string | null;
         };
         Insert: {
           annotations?: Json | null;
@@ -3202,6 +3203,7 @@ export type Database = {
           service_job_id: string;
           storage_path: string;
           taken_at?: string | null;
+          thumb_path?: string | null;
         };
         Update: {
           annotations?: Json | null;
@@ -3218,6 +3220,7 @@ export type Database = {
           service_job_id?: string;
           storage_path?: string;
           taken_at?: string | null;
+          thumb_path?: string | null;
         };
         Relationships: [
           {
@@ -3500,6 +3503,8 @@ export type Database = {
           job_number: string | null;
           labor_rate_kind: string;
           notes: string | null;
+          nothing_used_at: string | null;
+          notes_skipped_at: string | null;
           number: number;
           on_site_at: string | null;
           po_number: string | null;
@@ -3555,6 +3560,8 @@ export type Database = {
           job_number?: string | null;
           labor_rate_kind?: string;
           notes?: string | null;
+          nothing_used_at?: string | null;
+          notes_skipped_at?: string | null;
           number?: number;
           on_site_at?: string | null;
           po_number?: string | null;
@@ -3610,6 +3617,8 @@ export type Database = {
           job_number?: string | null;
           labor_rate_kind?: string;
           notes?: string | null;
+          nothing_used_at?: string | null;
+          notes_skipped_at?: string | null;
           number?: number;
           on_site_at?: string | null;
           po_number?: string | null;

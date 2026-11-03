@@ -6,7 +6,7 @@
  */
 import { sectionTone } from "@/components/service/section-tones";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
@@ -33,12 +33,13 @@ import { useAuth } from "@/lib/auth-store";
 import { listJobCrew } from "@/lib/service.functions";
 import { billedCrewLine } from "@/lib/service-crew";
 import {
-  TIME_END_BEFORE_START,
   deleteTimeEntry,
   estimateTravel,
+  type JobPhotoRow,
   listTimeEntries,
   saveTimeEntry,
-  type JobPhotoRow,
+  setPhotoThumb,
+  TIME_END_BEFORE_START,
   type TimeEntryInput,
   type TimeEntryRow,
 } from "@/lib/service-field.functions";
@@ -58,20 +59,68 @@ import {
   clock,
   coarsePointer,
   errText,
+  FIELD_READ,
   fieldKeys,
   localYmd,
   loudError,
+  makeThumb,
   shortDay,
+  thumbPathFor,
+  uploadToServiceBucket,
   useSignedUrl,
 } from "@/components/service/field-utils";
 
 // ---------------------------------------------------------------------------------------------
+// The small copy of a photo (Nov 3, review item 34): made on the phone when a picture goes up
+// (picture-queue.ts), or here for a photo from before — from the full picture the browser
+// downloaded for the thumbnail anyway — once per photo per session, by a viewer who may touch
+// the ticket. The full picture is never changed.
+
+const backfilled = new Set<string>();
+async function backfillThumb(photo: JobPhotoRow, fullUrl: string, qc: QueryClient) {
+  if (backfilled.has(photo.id)) return;
+  backfilled.add(photo.id);
+  try {
+    const res = await fetch(fullUrl);
+    if (!res.ok) return;
+    const small = await makeThumb(await res.blob());
+    if (!small) return;
+    const path = thumbPathFor(photo.storage_path);
+    await uploadToServiceBucket(path, small.blob, small.type);
+    const row = await setPhotoThumb({
+      data: { id: photo.id, service_job_id: photo.service_job_id, thumb_path: path },
+    });
+    qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(photo.service_job_id), (old) =>
+      old?.map((p) => (p.id === row.id ? { ...p, thumb_path: row.thumb_path } : p)),
+    );
+  } catch {
+    // Best effort: the full picture still shows; the next viewer may manage it.
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Auto-save status: subtle while all is well (a failure also raises a loud toast).
 
-export function SavedIndicator({ state }: { state: AutosaveState }) {
+export function SavedIndicator({
+  state,
+  onRetry,
+}: {
+  state: AutosaveState;
+  /** "Not saved" becomes a button that tries the save again (Nov 3, review item 23). */
+  onRetry?: (() => void) | undefined;
+}) {
   if (state === "idle") return null;
   if (state === "error")
-    return (
+    return onRetry ? (
+      <button
+        type="button"
+        className="inline-flex min-h-[44px] items-center gap-1 rounded-md px-2 text-xs font-medium text-destructive underline-offset-2 hover:underline"
+        onClick={onRetry}
+        data-line="not-saved-retry"
+      >
+        <AlertTriangle className="h-3.5 w-3.5" /> Not saved — try again
+      </button>
+    ) : (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
         <AlertTriangle className="h-3.5 w-3.5" /> Not saved
       </span>
@@ -296,9 +345,29 @@ export function PhotoThumb({
   /** The strip picks several (the Photos & repairs fold, the close-out's strips). */
   select?: ThumbSelect | undefined;
 }) {
-  const url = useSignedUrl(photo.storage_path);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  // The small copy for the square (Nov 3, review item 34; thumb_path) and the full picture for
+  // the lightbox. The list read signed both in one call (JobPhotoWithItems url / thumb_url,
+  // review item 35); a row a write handed back has neither, so the thumbnail signs its own.
+  const listed = photo as JobPhotoRow & { url?: string | null; thumb_url?: string | null };
+  const smallPath = photo.thumb_path ?? photo.storage_path;
+  const ownSmall = useSignedUrl(
+    listed.thumb_url || (!photo.thumb_path && listed.url) ? null : smallPath,
+  );
+  const ownFull = useSignedUrl(
+    (open || !photo.thumb_path) && !listed.url ? photo.storage_path : null,
+  );
+  const url = {
+    data: (photo.thumb_path ? listed.thumb_url : listed.url) || ownSmall.data || null,
+    error: ownSmall.error,
+  };
+  const fullUrl = listed.url || ownFull.data || (!photo.thumb_path ? url.data : null);
+  // A photo without a small copy yet (taken before Nov 3): the first viewer who may touch the
+  // ticket makes one from the picture it downloaded anyway, once (backfillThumb).
+  useEffect(() => {
+    if (!photo.thumb_path && canAnnotate && fullUrl) void backfillThumb(photo, fullUrl, qc);
+  }, [photo, canAnnotate, fullUrl, qc]);
   // A long press (LONG_PRESS_MS) with a finger enters the select mode; the click that follows
   // the release must not then open the lightbox or toggle the photo back.
   const pressTimer = useRef<number | null>(null);
@@ -347,11 +416,12 @@ export function PhotoThumb({
       // Owner, Oct 7: drag a photo out onto the desktop to save it (Chrome / Edge: DownloadURL).
       draggable={draggable}
       onDragStart={(e) => {
-        if (!url.data || !draggable) return;
+        const full = fullUrl ?? url.data;
+        if (!full || !draggable) return;
         setPhotoDrag(
           e.dataTransfer,
-          photoDragData(url.data, ticketNumber, photo.role, n, photo.storage_path),
-          url.data,
+          photoDragData(full, ticketNumber, photo.role, n, photo.storage_path),
+          full,
         );
       }}
       // A long press must not open the browser's own image menu while a strip can pick.
@@ -427,10 +497,10 @@ export function PhotoThumb({
           <Check className="h-4 w-4" />
         </span>
       )}
-      {open && url.data && (
+      {open && fullUrl && (
         <PhotoLightbox
           photo={photo}
-          url={url.data}
+          url={fullUrl}
           open={open}
           onOpenChange={setOpen}
           canAnnotate={canAnnotate}
@@ -538,7 +608,7 @@ export function TimeEntries({
     queryKey: fieldKeys.time(jobId),
     queryFn: () => listFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const hasTravel = (q.data ?? []).some((r) => r.kind === "travel");
   // Read only where it is offered and only while no Travel line exists; the office and the
@@ -558,7 +628,7 @@ export function TimeEntries({
     queryKey: fieldKeys.crew(jobId),
     queryFn: () => crewFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const [adding, setAdding] = useState(false);
   const rows = q.data ?? [];
@@ -831,9 +901,9 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
       );
       setVals(valsOf(row));
     },
-    onError: (e) => {
+    onError: (e, v) => {
       setVals(valsOf(entry));
-      loudError("Could not save the time", e);
+      loudError("Could not save the time", e, () => save.mutate(v));
     },
   });
   const remove = useMutation({
@@ -844,7 +914,7 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
       );
       toast.success("Time line deleted");
     },
-    onError: (e) => loudError("Could not delete the time", e),
+    onError: (e) => loudError("Could not delete the time", e, () => remove.mutate()),
   });
   const commit = (v: TimeVals) => {
     if (sameVals(v, valsOf(entry))) return;
@@ -945,7 +1015,7 @@ function NewTimeRow({
       toast.success(row.kind === "travel" ? "Travel added" : "Time added");
       onClose();
     },
-    onError: (e) => loudError("Could not add the time", e),
+    onError: (e) => loudError("Could not add the time", e, () => save.mutate()),
   });
   return (
     <div className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-2">

@@ -1352,7 +1352,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <SavedIndicator state={autosave.state} />
+        <SavedIndicator state={autosave.state} onRetry={() => void autosave.flush()} />
         {problem && (
           <span className="text-xs text-muted-foreground" aria-live="polite">
             {problem} — not saved yet

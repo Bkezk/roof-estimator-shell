@@ -307,20 +307,18 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     // Signature: nextStepLabel is null, so the condition above renders nothing for it.
     expect(nextStepLabel("signature")).toBeNull();
   });
-  it("Nothing used and Skip — nothing to add only mark; they no longer advance (the Next step button enables)", () => {
-    expect(form).toMatch(
-      /const markNothingUsed = \(on: boolean\) => \{\s*setNothingUsed\(on\);\s*writeNothingUsed\(job\.id, on\);\s*\};/,
-    );
-    expect(form).toMatch(
-      /const markNotesSkipped = \(on: boolean\) => \{\s*setNotesSkipped\(on\);\s*writeNotesSkipped\(job\.id, on\);\s*\};/,
-    );
-    // Their keys and the mark helpers are unchanged.
+  it("Nothing used and Skip — nothing to add are the draft's marks and, pressed, ARE the step's Next (owner, Nov 3, review item 18)", () => {
+    // Oct 9 – Nov 3 the marks only enabled the Next step button; the owner then chose to let
+    // them move on (they are the tech saying "this step is finished"). Undo keeps the step.
     expect(form).toContain(
-      "const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));",
+      "const markNothingUsed = (on: boolean) => update({ nothing_used: on });",
     );
     expect(form).toContain(
-      "const [notesSkipped, setNotesSkipped] = useState(() => readNotesSkipped(job.id));",
+      "const markNotesSkipped = (on: boolean) => update({ notes_skipped: on });",
     );
+    expect(form).toMatch(/markNothingUsed\(true\);\s*goNext\("materials"\);/);
+    expect(form).toMatch(/markNotesSkipped\(true\);\s*goNext\("notes"\);/);
+    expect(form).not.toContain("useState(() => readNothingUsed(job.id))");
   });
   it("Edit on a folded done step expands it in place and does not move onStep", () => {
     expect(form).toContain("onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),");

@@ -294,7 +294,9 @@ describe("1. the draft saves itself (invoice-editor.tsx)", () => {
     expect(draft).not.toMatch(/[>}]\s*Save\s*</);
     expect(draft).not.toContain("Unsaved changes");
     expect(draft).not.toContain('"save"');
-    expect(actions).toContain("<SavedIndicator state={autosave.state} />");
+    expect(actions).toContain(
+      "<SavedIndicator state={autosave.state} onRetry={() => void autosave.flush()} />",
+    );
     expect(ed).toContain('import { SavedIndicator } from "@/components/service/field-shared";');
     expect(ed).toContain(
       'import { fieldKeys, useAutosave } from "@/components/service/field-utils";',

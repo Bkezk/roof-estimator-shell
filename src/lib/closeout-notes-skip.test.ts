@@ -114,8 +114,9 @@ describe("the Skip button on the screen", () => {
       /\{!draft\.closing_notes\.trim\(\) &&\s*\(notesSkipped \? \(\s*<div[^>]*>\s*<span className="flex items-center gap-2">\s*<CheckCircle2[^>]*\/>\s*Skipped — nothing to add/,
     );
     expect(notes).toContain("onClick={() => markNotesSkipped(false)}");
+    // Nov 3 (review item 18): pressed, the mark is also the step's Next.
     expect(notes).toMatch(
-      /onClick=\{\(\) => markNotesSkipped\(true\)\}\s*>\s*Skip — nothing to add/,
+      /onClick=\{\(\) => \{\s*markNotesSkipped\(true\);\s*goNext\("notes"\);\s*\}\}\s*>\s*Skip — nothing to add, next step/,
     );
     expect(notes.match(/markNotesSkipped\(/g)).toHaveLength(2);
     // The optional boxes stay in the step.
@@ -126,23 +127,17 @@ describe("the Skip button on the screen", () => {
     ])
       expect(notes).toContain(s);
   });
-  it("lives in localStorage per ticket (notesSkippedKey), read like Nothing used, feeds the step state, cleared on Complete", () => {
+  it("lives on the ticket (notes_skipped_at) through the text draft since Nov 3; an old phone mark is read once and cleared on Complete", () => {
     expect(src).toContain(
-      "const readNotesSkipped = (id: string) => readMark(notesSkippedKey(id));",
+      "notes_skipped: !!j.notes_skipped_at || readMark(notesSkippedKey(j.id)),",
     );
-    expect(src).toContain(
-      "const writeNotesSkipped = (id: string, on: boolean) => writeMark(notesSkippedKey(id), on);",
-    );
-    expect(form).toContain(
-      "const [notesSkipped, setNotesSkipped] = useState(() => readNotesSkipped(job.id));",
-    );
+    expect(form).toContain("const notesSkipped = draft.notes_skipped;");
     expect(form).toMatch(/closingNotes: draft\.closing_notes,\s*notesSkipped,/);
     expect(form).toMatch(
-      /clearDraft\(job\.id\);\s*clearNothingUsed\(job\.id\);\s*clearNotesSkipped\(job\.id\);/,
+      /clearDraft\(job\.id\);\s*clearMark\(nothingUsedKey\(job\.id\)\);\s*clearMark\(notesSkippedKey\(job\.id\)\);/,
     );
-    // Owner, Oct 9 (later): the mark only makes the step done; nothing advances on its own — the
-    // Next step button does (closeout-next-step.test.ts).
-    expect(form).toMatch(/writeNotesSkipped\(job\.id, on\);\s*\};/);
+    // Owner, Nov 3 (review item 18): pressed, the mark moves to the next step (closeout-next-step.test.ts).
+    expect(form).toMatch(/markNotesSkipped\(true\);\s*goNext\("notes"\);/);
     expect(form).not.toContain("leave()");
   });
 });

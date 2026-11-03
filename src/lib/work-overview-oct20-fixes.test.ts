@@ -208,9 +208,16 @@ describe("1. claimOpportunity reads technician: a ticked office person claims", 
     for (const f of files) {
       const src = read(f);
       expect(src, f).toMatch(/canClaim|isFieldOnly|isOffice|dispatchesTickets/);
-      // The profile read the rule is fed from (the first `me`-style select of the file).
+      // The profile read the rule is fed from (the first `me`-style select of the file) — or,
+      // since Nov 3, the shared cached read (lib/profile-cache.server.ts readProfile).
       const first = /\.from\("profiles"\)\s*\.select\(\s*"([^"]+)"/.exec(src);
-      expect(first?.[1], f).toContain("technician");
+      if (first) expect(first[1], f).toContain("technician");
+      else {
+        expect(src, f).toContain("readProfile(ctx.supabase, ctx.userId)");
+        expect(read("src/lib/profile-cache.server.ts")).toContain(
+          'export const PROFILE_COLUMNS = "role, access, technician, full_name, email" as const;',
+        );
+      }
     }
     // Files that read a profile without `technician` use no rule that needs it.
     for (const f of [

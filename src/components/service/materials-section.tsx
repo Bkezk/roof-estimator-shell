@@ -86,7 +86,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Box } from "@/components/service/field-shared";
-import { errText, fieldKeys, loudError } from "@/components/service/field-utils";
+import { errText, FIELD_READ, fieldKeys, loudError } from "@/components/service/field-utils";
 import {
   EPS,
   amountText,
@@ -157,6 +157,18 @@ export function MaterialsSection({
   const qc = useQueryClient();
   const userId = profile?.id ?? "";
   const myName = profile ? profile.full_name?.trim() || profile.email : null;
+  // The ticket is still mine to edit (Nov 3, review item 25): my own entries of any age can be
+  // taken back with "−" (the server says the same, inventory.functions.ts undoMovement). Read
+  // from the ticket already on screen; a stage past Done, or someone else's ticket, keeps the
+  // 24-hour rule.
+  const ticketRow = qc.getQueryData<{
+    stage: string;
+    technician_id: string | null;
+  }>(["service-job", jobId]);
+  const ticketOpen =
+    !!ticketRow &&
+    ["open", "scheduled", "done"].includes(ticketRow.stage) &&
+    (ticketRow.technician_id === userId || can("service"));
   const canLog = can("service") || can("inventory") || can("estimate");
   // Putting a piece back against this ticket is allowed for any login that may log material
   // (the server caps it at what the ticket took).
@@ -177,13 +189,13 @@ export function MaterialsSection({
     queryKey: fieldKeys.materials(jobId),
     queryFn: () => materialsFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const truck = useQuery({
     queryKey: truckKey(userId),
     queryFn: () => truckFn({ data: {} }),
     enabled: !!session && !!userId && canLog,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   // Shared with Inventory's "Take from" defaults and location list (same functions, same keys).
   const defaults = useQuery({
@@ -375,7 +387,9 @@ export function MaterialsSection({
       try {
         await run();
       } catch (e) {
-        loudError(what, e);
+        // "Try again" sends the same tap once more (Nov 3, review item 22): a tap that failed
+        // for want of signal used to be gone.
+        loudError(what, e, () => enqueue(key, delta, what, run));
       } finally {
         bump(key, -delta);
         inFlight.current -= 1;
@@ -405,6 +419,7 @@ export function MaterialsSection({
               qty: res.qty,
               unit: res.unit,
               counted_note: note,
+              created_by: userId || null,
               created_by_name: myName,
               created_at: new Date().toISOString(),
             },
@@ -525,10 +540,14 @@ export function MaterialsSection({
     enqueue(r.key, -units, `Could not take back ${cellName(r)}`, async () => {
       // Planned when its turn comes, so it sees the entries the taps before it made.
       const now = qc.getQueryData<JobMaterialRow[]>(fieldKeys.materials(jobId)) ?? [];
-      const plan = planReduce(ownFreshEntries(now, r, r.piece, myName), units, canRelease);
+      const plan = planReduce(
+        ownFreshEntries(now, r, r.piece, userId || null, Date.now(), { ticketOpen }),
+        units,
+        canRelease,
+      );
       if (!plan)
         throw new Error(
-          "only your own entries from the last 24 hours can be taken back here; ask the office to correct the ticket",
+          "only your own entries can be taken back here (any age while the ticket is still yours to edit, else from the last 24 hours); ask the office to correct the ticket",
         );
       for (const step of plan) {
         if (step.kind === "undo") await undo(r, step.id);

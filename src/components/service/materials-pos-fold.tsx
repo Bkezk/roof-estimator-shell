@@ -19,7 +19,7 @@ import { listServiceJobMaterials } from "@/lib/service.functions";
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Box } from "@/components/service/field-shared";
-import { fieldKeys } from "@/components/service/field-utils";
+import { FIELD_READ, fieldKeys } from "@/components/service/field-utils";
 import {
   MATERIALS_TAB_KEY,
   materialsPosSummary,
@@ -67,12 +67,13 @@ export function MaterialsPosFold({
     queryKey: fieldKeys.materials(jobId),
     queryFn: () => materialsFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const pos = useQuery({
     queryKey: fieldKeys.pos(jobId),
     queryFn: () => posFn({ data: { jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   const [tab, setTab] = useState<MaterialsTab>(initialMaterialsTab);
   const summary =

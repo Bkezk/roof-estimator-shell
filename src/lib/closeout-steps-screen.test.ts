@@ -58,7 +58,7 @@ describe("the step strip", () => {
     expect(form).toContain("closingNotes: draft.closing_notes,");
     expect(form).toContain("signaturePath: job.signature_path,");
     expect(form).toContain("const open = firstOpenStep(stepState);");
-    expect(form).toMatch(/queryKey: fieldKeys\.materials\(job\.id\),[\s\S]*?staleTime: 30_000,/);
+    expect(form).toMatch(/queryKey: fieldKeys\.materials\(job\.id\),[\s\S]*?\.\.\.FIELD_READ,/);
   });
 });
 
@@ -170,21 +170,19 @@ describe("the Nothing used mark (step 4)", () => {
     // an inspection at all (inspection-flow.test.ts), so the mark is the repair flow's alone.
     expect(form).toMatch(/\{\(materialsQ\.data \?\? \[\]\)\.length === 0 &&\s*\(nothingUsed \? \(/);
     expect(form).toMatch(/\{!inspection && \(\s*<StepCard\s+\{\.\.\.card\("materials"\)\}/);
-    expect(form).toContain("onClick={() => markNothingUsed(true)}");
+    // Pressed, the mark is also the step's Next (Nov 3, review item 18).
+    expect(form).toMatch(/markNothingUsed\(true\);\s*goNext\("materials"\);/);
     expect(form).toContain("onClick={() => markNothingUsed(false)}");
     expect(form.match(/Nothing used on this ticket/g)).toHaveLength(2);
   });
-  it("lives in localStorage per ticket (no column), read like the text draft, cleared on Complete", () => {
-    expect(src).toContain(
-      "const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));",
-    );
-    // Owner, Oct 9 (later): one pair of mark helpers serves this and step 6's Skip mark.
+  it("lives on the ticket (nothing_used_at) through the text draft's save since Nov 3; an old phone mark is read once and cleared on Complete", () => {
+    expect(src).toContain("nothing_used: !!j.nothing_used_at || readMark(nothingUsedKey(j.id)),");
+    expect(src).toContain("const nothingUsed = draft.nothing_used;");
+    expect(src).toContain("nothing_used: d.nothing_used,");
+    // The old localStorage mark is read as a fallback only, and removed when the ticket completes.
     expect(src).toContain('window.localStorage.getItem(key) === "1"');
-    expect(src).toContain('window.localStorage.setItem(key, "1")');
-    expect(src).toContain("window.localStorage.removeItem(key)");
-    expect(src).toContain("const readNothingUsed = (id: string) => readMark(nothingUsedKey(id));");
-    expect(form).toMatch(/clearDraft\(job\.id\);\s*clearNothingUsed\(job\.id\);/);
-    expect(src).toMatch(/No column holds either, so each lives in localStorage per ticket/);
+    expect(src).not.toContain('window.localStorage.setItem(key, "1")');
+    expect(form).toMatch(/clearDraft\(job\.id\);\s*clearMark\(nothingUsedKey\(job\.id\)\);/);
   });
 });
 

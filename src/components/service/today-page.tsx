@@ -506,7 +506,7 @@ function JobCard({
 
       {/* What happened here before (owner, Oct 21): one line, a tap opens the ticket with its
           History fold open. Left out when this is the first ticket here — the card stays short. */}
-      {j.site_id && <HistoryLink jobId={j.id} whenNone="hide" />}
+      {j.site_id && <HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />}
 
       {j.description && <p className="text-base">{j.description}</p>}
 

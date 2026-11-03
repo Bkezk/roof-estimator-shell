@@ -32,10 +32,12 @@ import { Link } from "@tanstack/react-router";
 import { History, Loader2, MapPinned, PenLine } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { Button } from "@/components/ui/button";
 import { isFieldOnly } from "@/lib/access";
 import { OUTCOME_LABELS, type InspectionOutcome } from "@/lib/inspection";
 import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
+import type { SiteHistorySummary } from "@/lib/service-history";
 import {
   FIRST_TICKET,
   HISTORY_OPEN_PARAM,
@@ -52,7 +54,11 @@ import {
   type HistoryPhoto,
   type SiteHistoryTicket,
 } from "@/lib/service-history";
-import { siteHistory, siteHistorySummary } from "@/lib/service-history.functions";
+import {
+  HISTORY_FIRST_TICKETS,
+  siteHistory,
+  siteHistorySummary,
+} from "@/lib/service-history.functions";
 import {
   STAGE_LABELS,
   TYPE_LABELS,
@@ -77,23 +83,28 @@ const ROLE_LABEL: Record<string, string> = {
 
 // ── The reads ──────────────────────────────────────────────────────────────────────────────
 
-function useHistorySummary(jobId: string) {
+function useHistorySummary(jobId: string, enabled = true) {
   const { session } = useAuth();
   const fn = useServerFn(siteHistorySummary);
   return useQuery({
     queryKey: fieldKeys.historySummary(jobId),
     queryFn: () => fn({ data: { id: jobId } }),
-    enabled: !!session,
+    enabled: !!session && enabled,
     staleTime: 5 * 60_000,
   });
 }
 
-function useHistory(jobId: string, enabled: boolean) {
+/**
+ * The fold's rows: the newest HISTORY_FIRST_TICKETS at first (Nov 3, review item 46), every
+ * ticket once "Show more" is pressed (`all`). Two cache entries, so going back to the short
+ * list costs nothing.
+ */
+function useHistory(jobId: string, enabled: boolean, all = false) {
   const { session } = useAuth();
   const fn = useServerFn(siteHistory);
   return useQuery({
-    queryKey: fieldKeys.history(jobId),
-    queryFn: () => fn({ data: { id: jobId } }),
+    queryKey: all ? [...fieldKeys.history(jobId), "all"] : fieldKeys.history(jobId),
+    queryFn: () => fn({ data: all ? { id: jobId } : { id: jobId, limit: HISTORY_FIRST_TICKETS } }),
     enabled: !!session && enabled,
     // The photo links are signed for an hour: fresh enough until then, re-read after.
     staleTime: 45 * 60_000,
@@ -144,10 +155,20 @@ export function HistoryStrip({ jobId, onOpen }: { jobId: string; onOpen: () => v
  * the card stays short when there is nothing before) and the close-out's header (whenNone
  * "say": the muted first-ticket line).
  */
-export function HistoryLink({ jobId, whenNone }: { jobId: string; whenNone: "hide" | "say" }) {
-  const q = useHistorySummary(jobId);
-  if (!q.data) return null;
-  if (q.data.count === 0) {
+export function HistoryLink({
+  jobId,
+  whenNone,
+  summary,
+}: {
+  jobId: string;
+  whenNone: "hide" | "say";
+  /** The numbers when the page already has them (My tickets reads them with the day, Nov 3). */
+  summary?: SiteHistorySummary | null | undefined;
+}) {
+  const own = useHistorySummary(jobId, !summary);
+  const data = summary ?? own.data;
+  if (!data) return null;
+  if (data.count === 0) {
     if (whenNone === "hide") return null;
     return (
       <p
@@ -167,7 +188,7 @@ export function HistoryLink({ jobId, whenNone }: { jobId: string; whenNone: "hid
       data-line="history-strip"
     >
       <History className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
-      <span>{historyStrip(q.data)}</span>
+      <span>{historyStrip(data)}</span>
     </Link>
   );
 }
@@ -193,11 +214,14 @@ export function HistoryFold({
   // while it loaded).
   const canOpen = !!profile && !isFieldOnly(profile);
   const summary = useHistorySummary(job.id);
-  const q = useHistory(job.id, open);
+  // The newest ten first; "Show more" reads every earlier ticket (Nov 3, review item 46).
+  const [all, setAll] = useState(false);
+  const q = useHistory(job.id, open, all);
   const rows = useMemo(
     () => (q.data ? orderHistory(q.data, job.location_id) : []),
     [q.data, job.location_id],
   );
+  const more = !all && (summary.data?.count ?? 0) > rows.length && rows.length > 0;
   // The viewer asks for fresh links when the signed ones are near their end.
   const refresh = () => {
     if (q.data && Date.now() - q.dataUpdatedAt > LINKS_FRESH_MS) void q.refetch();
@@ -231,17 +255,30 @@ export function HistoryFold({
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{FIRST_TICKET}</p>
         ) : (
-          <ol className="space-y-3" aria-label="Earlier tickets at this property">
-            {rows.map((t) => (
-              <HistoryRow
-                key={t.id}
-                ticket={t}
-                sameSpot={isSameSpot(t, job.location_id)}
-                canOpen={canOpen}
-                refresh={refresh}
-              />
-            ))}
-          </ol>
+          <>
+            <ol className="space-y-3" aria-label="Earlier tickets at this property">
+              {rows.map((t) => (
+                <HistoryRow
+                  key={t.id}
+                  ticket={t}
+                  sameSpot={isSameSpot(t, job.location_id)}
+                  canOpen={canOpen}
+                  refresh={refresh}
+                />
+              ))}
+            </ol>
+            {more && (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 h-11 w-full"
+                data-line="history-more"
+                onClick={() => setAll(true)}
+              >
+                Show all {summary.data?.count} earlier tickets
+              </Button>
+            )}
+          </>
         )}
       </Box>
     </div>
@@ -343,6 +380,7 @@ const asPhotoRow = (
   repair_id: p.repair_id,
   role: p.role,
   storage_path: p.storage_path,
+  thumb_path: p.thumb_path ?? null,
   file_name: p.file_name,
   file_size: null,
   taken_at: p.taken_at,
@@ -407,9 +445,11 @@ function PhotoGrid({
 
 /** A square thumbnail with the photo's marks drawn over it; a tap opens the viewer. */
 function HistoryThumb({ photo, onOpen }: { photo: HistoryPhoto; onOpen: () => void }) {
-  // The server signed the link; when that failed, the browser asks for its own.
-  const own = useSignedUrl(photo.url ? null : photo.storage_path);
-  const url = photo.url ?? own.data ?? null;
+  // The small copy for the square when the photo has one (Nov 3); the server signed the links,
+  // and when that failed the browser asks for its own.
+  const small = photo.thumb_url ?? photo.url;
+  const own = useSignedUrl(small ? null : (photo.thumb_path ?? photo.storage_path));
+  const url = small ?? own.data ?? null;
   const { marks, rotation } = useMemo(
     () => parsePhotoMarkup(photo.annotations),
     [photo.annotations],

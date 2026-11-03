@@ -40,10 +40,10 @@ describe("any line on the ticket can be corrected", () => {
   });
   it("a tech may only undo their own entries from the last 24 hours; the refusal says so", () => {
     expect(src).toContain(
-      "const plan = planReduce(ownFreshEntries(now, r, r.piece, myName), units, canRelease);",
+      "ownFreshEntries(now, r, r.piece, userId || null, Date.now(), { ticketOpen }),",
     );
     expect(src).toContain(
-      "only your own entries from the last 24 hours can be taken back here; ask the office to correct the ticket",
+      "only your own entries can be taken back here (any age while the ticket is still yours to edit, else from the last 24 hours); ask the office to correct the ticket",
     );
   });
   it("lines nobody may correct (returns with nothing used) stay read-only rows of the same list", () => {

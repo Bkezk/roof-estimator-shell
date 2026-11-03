@@ -69,10 +69,11 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Clock,
   ClipboardCheck,
   ClipboardList,
+  Clock,
   Hammer,
+  Images,
   Loader2,
   Lock,
   LogOut,
@@ -80,8 +81,8 @@ import {
   MapPinCheck,
   Minus,
   Package,
-  PenLine,
   Pencil,
+  PenLine,
   Plus,
   RefreshCw,
   Search,
@@ -203,6 +204,7 @@ import {
   clock,
   coarsePointer,
   errText,
+  FIELD_READ,
   fieldKeys,
   localYmd,
   loudError,
@@ -240,6 +242,14 @@ interface TextDraft {
   checked_out_with: string;
   recommend_new_roof: boolean;
   signed_by: string;
+  /**
+   * The marks (owner, Nov 3, review item 24): "Nothing used on this ticket" (step 4) and
+   * "Skip — nothing to add" (step 6) ride the same draft and save as the text, so they live on
+   * the ticket (nothing_used_at / notes_skipped_at) — not on the phone, where switching devices
+   * locked the steps again and the office could not tell skipped from forgotten.
+   */
+  nothing_used: boolean;
+  notes_skipped: boolean;
 }
 const fromJob = (j: ServiceJobRow): TextDraft => ({
   closing_notes: j.closing_notes ?? "",
@@ -247,6 +257,9 @@ const fromJob = (j: ServiceJobRow): TextDraft => ({
   checked_out_with: j.checked_out_with ?? "",
   recommend_new_roof: j.recommend_new_roof,
   signed_by: j.signed_by ?? "",
+  // A mark this phone made before the column existed (localStorage) still counts once.
+  nothing_used: !!j.nothing_used_at || readMark(nothingUsedKey(j.id)),
+  notes_skipped: !!j.notes_skipped_at || readMark(notesSkippedKey(j.id)),
 });
 const sameDraft = (a: TextDraft, b: TextDraft) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -264,6 +277,8 @@ function readDraft(id: string): TextDraft | null {
       checked_out_with: typeof d.checked_out_with === "string" ? d.checked_out_with : "",
       recommend_new_roof: d.recommend_new_roof === true,
       signed_by: typeof d.signed_by === "string" ? d.signed_by : "",
+      nothing_used: d.nothing_used === true,
+      notes_skipped: d.notes_skipped === true,
     };
   } catch {
     return null;
@@ -284,10 +299,11 @@ function clearDraft(id: string) {
   }
 }
 
-// The phone's marks: "Nothing used on this ticket" (step 4) and "Skip — nothing to add" (step 6;
-// owner, Oct 9). No column holds either, so each lives in localStorage per ticket like the text
-// draft (closeout-steps.ts nothingUsedKey / notesSkippedKey). They record nothing on the server;
-// they only mark the step done (Next step then enables), and Complete clears them.
+// The phone's marks from before Nov 3 ("Nothing used on this ticket", "Skip — nothing to add";
+// owner, Oct 9) lived in localStorage per ticket (closeout-steps.ts nothingUsedKey /
+// notesSkippedKey). Since Nov 3 (review item 24) they are the ticket's (nothing_used_at /
+// notes_skipped_at, saved with the text draft); an old key is read once as a fallback and
+// removed when the ticket is completed.
 function readMark(key: string): boolean {
   try {
     return typeof window !== "undefined" && window.localStorage.getItem(key) === "1";
@@ -295,20 +311,13 @@ function readMark(key: string): boolean {
     return false;
   }
 }
-function writeMark(key: string, on: boolean) {
+function clearMark(key: string) {
   try {
-    if (on) window.localStorage.setItem(key, "1");
-    else window.localStorage.removeItem(key);
+    window.localStorage.removeItem(key);
   } catch {
-    // Storage blocked (private mode): the mark lives only in this screen.
+    // Nothing to clear.
   }
 }
-const readNothingUsed = (id: string) => readMark(nothingUsedKey(id));
-const writeNothingUsed = (id: string, on: boolean) => writeMark(nothingUsedKey(id), on);
-const clearNothingUsed = (id: string) => writeNothingUsed(id, false);
-const readNotesSkipped = (id: string) => readMark(notesSkippedKey(id));
-const writeNotesSkipped = (id: string, on: boolean) => writeMark(notesSkippedKey(id), on);
-const clearNotesSkipped = (id: string) => writeNotesSkipped(id, false);
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
 const FINISHED = ["done", "authorized", "invoiced", "closed"];
@@ -427,7 +436,7 @@ function StepStrip({
                   status === "locked" ? ` — locked: ${step.unlocks}` : ""
                 }`}
                 title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                className={`flex h-[44px] w-[44px] items-center justify-center rounded-full text-sm font-semibold ${
                   status === "current"
                     ? "bg-primary text-primary-foreground"
                     : status === "done"
@@ -451,7 +460,7 @@ function StepStrip({
           type="button"
           aria-expanded={listOpen}
           aria-label={listOpen ? "Hide the step list" : "Show all steps"}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+          className="flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
           onClick={() => setListOpen((v) => !v)}
         >
           {listOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -603,7 +612,7 @@ function StepCard({
               type="button"
               variant={folded ? "outline" : "ghost"}
               size="sm"
-              className="h-9"
+              className="h-[44px]"
               aria-expanded={!folded}
               onClick={onToggle}
             >
@@ -697,7 +706,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       ])
         void qc.invalidateQueries({ queryKey: k });
     },
-    onError: (e) => loudError("The clock did not stop", e),
+    onError: (e) => loudError("The clock did not stop", e, () => leave.mutate()),
   });
 
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
@@ -717,6 +726,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     checked_out_with: orNull(d.checked_out_with),
     recommend_new_roof: d.recommend_new_roof,
     signed_by: orNull(d.signed_by),
+    nothing_used: d.nothing_used,
+    notes_skipped: d.notes_skipped,
   });
   // Owner, Oct 9: only the fields this save sent go into the cache (job-cache.ts) — the whole
   // row landing after a signature save used to blank the signature.
@@ -772,8 +783,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
         old ? { ...old, ...row } : old,
       );
       clearDraft(job.id);
-      clearNothingUsed(job.id);
-      clearNotesSkipped(job.id);
+      clearMark(nothingUsedKey(job.id));
+      clearMark(notesSkippedKey(job.id));
       clearInspectionDraft(job.id);
       for (const k of [
         fieldKeys.today,
@@ -824,23 +835,26 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const photosFn = useServerFn(listJobPhotos);
   // Owner, Oct 9 (S13): fresh for 30 s, so coming back from the camera does not re-read
   // everything; a save still invalidates what it changed.
+  // Fresh for FIELD_STALE_MS and never re-read on focus (Nov 3, review item 37): the camera and
+  // a phone call take longer than the old 30 s all the time; a save still invalidates what it
+  // changed, and the ticket's one bundle read (getTicketBundle) seeds these on open.
   const repairsQ = useQuery({
     queryKey: fieldKeys.repairs(job.id),
     queryFn: () => repairsFn({ data: { id: job.id } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const photosQ = useQuery({
     queryKey: fieldKeys.photos(job.id),
     queryFn: () => photosFn({ data: { id: job.id } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const timeQ = useQuery({
     queryKey: fieldKeys.time(job.id),
     queryFn: () => timeFn({ data: { id: job.id } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const [missing, setMissing] = useState<string[]>([]);
   const [unread, setUnread] = useState(false);
@@ -902,20 +916,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     queryKey: fieldKeys.materials(job.id),
     queryFn: () => materialsFn({ data: { id: job.id } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
-  // The marks only make their step done; the tech still presses Next step (owner, Oct 9).
-  const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));
-  const markNothingUsed = (on: boolean) => {
-    setNothingUsed(on);
-    writeNothingUsed(job.id, on);
-  };
-  // Step 6's "Skip — nothing to add" (owner, Oct 9): the same kind of mark.
-  const [notesSkipped, setNotesSkipped] = useState(() => readNotesSkipped(job.id));
-  const markNotesSkipped = (on: boolean) => {
-    setNotesSkipped(on);
-    writeNotesSkipped(job.id, on);
-  };
+  // The marks are the draft's (saved on the ticket, Nov 3) and, pressed, they ARE the step's
+  // Next (owner, Nov 3, review item 18: "Nothing used" and "Skip — nothing to add" are the tech
+  // saying "this step is finished", so the screen moves on; Undo keeps the step where it is).
+  const nothingUsed = draft.nothing_used;
+  const markNothingUsed = (on: boolean) => update({ nothing_used: on });
+  const notesSkipped = draft.notes_skipped;
+  const markNotesSkipped = (on: boolean) => update({ notes_skipped: on });
   const stepState: StepState = {
     finished,
     crewAnswered: !waiting,
@@ -1206,9 +1215,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     type="button"
                     variant="outline"
                     className="h-11 w-full text-base"
-                    onClick={() => markNothingUsed(true)}
+                    onClick={() => {
+                      markNothingUsed(true);
+                      goNext("materials");
+                    }}
                   >
-                    Nothing used on this ticket
+                    Nothing used on this ticket — next step
                   </Button>
                 ))}
             </StepCard>
@@ -1281,9 +1293,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                       type="button"
                       variant="outline"
                       className="h-11 w-full text-base"
-                      onClick={() => markNotesSkipped(true)}
+                      onClick={() => {
+                        markNotesSkipped(true);
+                        goNext("notes");
+                      }}
                     >
-                      Skip — nothing to add
+                      Skip — nothing to add, next step
                     </Button>
                   ))}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1359,7 +1374,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <div className="mb-2 flex min-h-4 items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>Everything saves as you go.</span>
-              <SavedIndicator state={autosave.state} />
+              <SavedIndicator state={autosave.state} onRetry={() => void autosave.flush()} />
             </div>
             <Button
               type="button"
@@ -1417,7 +1432,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     Retry
                   </Button>
                 )}
-                {manager ? (
+                {/* A technician's footer is Go back (and Retry): the greyed-out Complete that
+                    could never be pressed is gone (owner, Nov 3, review item 20). */}
+                {manager && (
                   <AlertDialogAction
                     className="h-12"
                     onClick={() => {
@@ -1427,16 +1444,6 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   >
                     Complete anyway
                   </AlertDialogAction>
-                ) : (
-                  <Button
-                    type="button"
-                    className="h-12"
-                    disabled
-                    title={missing.join("; ")}
-                    data-action="complete-blocked"
-                  >
-                    Complete
-                  </Button>
                 )}
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1465,7 +1472,7 @@ function Chip({
     <Button
       type="button"
       variant={tone}
-      className="h-10 max-w-full justify-start rounded-full px-4 text-sm"
+      className="h-[44px] max-w-full justify-start rounded-full px-4 text-sm"
       disabled={disabled}
       onClick={onClick}
     >
@@ -1491,7 +1498,7 @@ function TagChip({
       size="sm"
       variant={active ? "default" : "outline"}
       aria-pressed={active}
-      className="h-10 rounded-full px-3 text-sm"
+      className="h-[44px] rounded-full px-3 text-sm"
       onClick={onClick}
     >
       {children}
@@ -1530,18 +1537,18 @@ function RepairsSection({
   const templatesFn = useServerFn(listRepairTemplates);
   const saveFn = useServerFn(saveJobRepair);
 
-  // Owner, Oct 9 (S13): fresh for 30 s — a return from the camera is not a re-read of all.
+  // Fresh for FIELD_STALE_MS, never re-read on focus (Nov 3; it was 30 s since Oct 9).
   const repairs = useQuery({
     queryKey: fieldKeys.repairs(jobId),
     queryFn: () => repairsFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   const photos = useQuery({
     queryKey: fieldKeys.photos(jobId),
     queryFn: () => photosFn({ data: { id: jobId } }),
     enabled: !!session,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
   // The picker's reads belong to step 2 only.
   const recent = useQuery({
@@ -1617,7 +1624,7 @@ function RepairsSection({
       setPickerOpen(false);
       setAllChips(false);
     },
-    onError: (e) => loudError("Could not add the repair", e),
+    onError: (e, t) => loudError("Could not add the repair", e, () => add.mutate(t)),
   });
 
   // The ticket's usual repairs are not re-fetched per chip: hide the ones outside it here.
@@ -1851,6 +1858,8 @@ interface PhotoControls {
    */
   pending: QueuedPicture[];
   onPhoto: (role: PhotoRole) => void;
+  /** Pictures already on the phone (the library, no camera; owner, Nov 3, review item 21). */
+  onPick: (role: PhotoRole) => void;
   onRetry: (id: string) => void;
   onDiscard: (id: string) => void;
 }
@@ -1880,6 +1889,10 @@ function useRepairCamera(jobId: string): RepairCamera {
   const pictures = usePictures({ jobId });
   const beforeRef = useRef<HTMLInputElement | null>(null);
   const afterRef = useRef<HTMLInputElement | null>(null);
+  // The same two roles from the phone's photo library (no `capture`, several at once; owner,
+  // Nov 3, review item 21: a tech who shot the roof with the camera app could not attach them).
+  const beforePickRef = useRef<HTMLInputElement | null>(null);
+  const afterPickRef = useRef<HTMLInputElement | null>(null);
   const aim = useRef<string | null>(null);
   const [shot, setShot] = useState<(FreshShot & { role: PhotoRole; repairId: string }) | null>(
     null,
@@ -1887,6 +1900,10 @@ function useRepairCamera(jobId: string): RepairCamera {
   const takePhoto = (repairId: string, role: PhotoRole) => {
     aim.current = repairId;
     (role === "before" ? beforeRef : afterRef).current?.click();
+  };
+  const pickPhotos = (repairId: string, role: PhotoRole) => {
+    aim.current = repairId;
+    (role === "before" ? beforePickRef : afterPickRef).current?.click();
   };
   const pick = (role: PhotoRole) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -1906,6 +1923,7 @@ function useRepairCamera(jobId: string): RepairCamera {
   const photoControls = (r: JobRepairRow): PhotoControls => ({
     pending: pictures.entries.filter((p) => p.target.repairId === r.id),
     onPhoto: (role) => takePhoto(r.id, role),
+    onPick: (role) => pickPhotos(r.id, role),
     onRetry: pictures.retry,
     onDiscard: pictures.discard,
   });
@@ -1926,6 +1944,24 @@ function useRepairCamera(jobId: string): RepairCamera {
         accept="image/*"
         capture="environment"
         className="hidden"
+        onChange={pick("after")}
+      />
+      <input
+        ref={beforePickRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        data-library="before"
+        onChange={pick("before")}
+      />
+      <input
+        ref={afterPickRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        data-library="after"
         onChange={pick("after")}
       />
       {shot && (
@@ -1963,7 +1999,7 @@ function PhotoButtons({
   roles: readonly PhotoRole[];
   compact?: boolean | undefined;
 }) {
-  const { onPhoto, onRetry, onDiscard } = camera;
+  const { onPhoto, onPick, onRetry, onDiscard } = camera;
   const count = (role: PhotoRole) => photos.filter((p) => p.role === role).length;
   const pending = pendingFor(camera, roles);
   const uploading = pending.filter((p) => p.status !== "held" && p.status !== "failed").length;
@@ -1979,7 +2015,7 @@ function PhotoButtons({
             key={role}
             type="button"
             variant="outline"
-            className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+            className={compact ? "h-[44px] px-3 text-sm" : "h-[44px] text-base"}
             onClick={() => onPhoto(role)}
           >
             <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
@@ -1988,6 +2024,20 @@ function PhotoButtons({
           </Button>
         ))}
         <UploadBadge n={uploading} />
+      </div>
+      {/* Pictures already on the phone (owner, Nov 3, review item 21). */}
+      <div className="flex flex-wrap gap-x-3" data-line="from-my-photos">
+        {roles.map((role) => (
+          <button
+            key={role}
+            type="button"
+            className="inline-flex min-h-[44px] items-center gap-1 text-sm text-primary underline-offset-2 hover:underline"
+            onClick={() => onPick(role)}
+          >
+            <Images className="h-4 w-4" aria-hidden />
+            {ROLE_WORD[role]} from my photos
+          </button>
+        ))}
       </div>
       <WaitingForSignalLine n={waiting} />
       {failed.map((p) => (
@@ -2370,7 +2420,8 @@ function SignatureSection({ job }: { job: ServiceJobWithTech }) {
       setSignAgain(false);
       toast.success("Signature saved");
     },
-    onError: (e) => loudError("The signature did not save; check your signal and save again", e),
+    onError: (e, png) =>
+      loudError("The signature did not save; check your signal", e, () => saveSig.mutate(png)),
   });
 
   if (job.signature_path && !signAgain)

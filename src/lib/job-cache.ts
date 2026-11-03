@@ -20,6 +20,9 @@ export const CLOSEOUT_TEXT_FIELDS = [
   "checked_out_with",
   "recommend_new_roof",
   "signed_by",
+  // The close-out's marks (Nov 3, review item 24): on the ticket, not the phone.
+  "nothing_used_at",
+  "notes_skipped_at",
   "updated_at",
   "updated_by_name",
 ] as const satisfies readonly (keyof ServiceJobRow)[];
@@ -70,6 +73,8 @@ const UNREAD_COLUMNS: Omit<ServiceJobRow, TodayJobColumn> = {
   notes: null,
   site_city: null,
   site_state: null,
+  nothing_used_at: null,
+  notes_skipped_at: null,
   po_number: null,
 };
 

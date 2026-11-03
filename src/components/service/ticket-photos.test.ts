@@ -127,12 +127,14 @@ describe("the ticket page's Photos & repairs fold (ticket-field-sections.tsx)", 
     const queue = readFileSync("src/components/service/picture-queue.ts", "utf8");
     expect(queue).toMatch(/shrink: shrinkPhoto,/);
     expect(queue).toMatch(
-      /upload: \(path, p\) => uploadToServiceBucket\(path, p\.blob, p\.type\),/,
+      // Nov 3 (review item 34): the small copy is made and uploaded beside the picture.
+      /upload: async \(path, p\) => \{\s*await uploadToServiceBucket\(path, p\.blob, p\.type\);/,
     );
     expect(queue).toMatch(/pathFor: \(jobId, p\) => uploadPlan\(\[p\], jobId\)\[0\]!\.path,/);
-    expect(queue).toMatch(/register: \(data\) => registerJobPhoto\(\{ data \}\),/);
-    // A row the server refused leaves no orphan in the bucket.
-    expect(queue).toMatch(/removeUpload: removeFromServiceBucket,/);
+    // Nov 3 (review item 34): the register names the small copy when it landed.
+    expect(queue).toMatch(/register: \(data\) =>\s*registerJobPhoto\(\{\s*data: \{\s*\.\.\.data,/);
+    // A row the server refused leaves no orphan in the bucket (nor a forgotten small copy).
+    expect(queue).toMatch(/removeUpload: \(path\) => \{\s*thumbs\.delete\(path\);/);
     const core = readFileSync("src/lib/photo-upload-queue.ts", "utf8");
     expect(core).toMatch(/await this\.deps\.removeUpload\(w\.uploadedPath\)/);
   });

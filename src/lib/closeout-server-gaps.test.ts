@@ -184,14 +184,12 @@ describe("setFieldStatus 'done' on the server", () => {
 
 describe("the screen", () => {
   const src = read("src/components/service/closeout.tsx");
-  it("Complete anyway is a manager's; a technician sees Complete disabled with the reasons and what to do", () => {
+  it("Complete anyway is a manager's; a technician sees Go back with the reasons and what to do (the greyed-out Complete is gone, Nov 3)", () => {
     expect(src).toContain("const manager = managesTickets(profile);");
     expect(src).toMatch(
-      /\{manager \? \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\) : \(/,
+      /\{manager && \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\)\}/,
     );
-    expect(src).toMatch(
-      /<Button[^>]*\n\s*type="button"\n\s*className="h-12"\n\s*disabled\n\s*title=\{missing\.join\("; "\)\}\n\s*data-action="complete-blocked"/,
-    );
+    expect(src).not.toContain('data-action="complete-blocked"');
     expect(src).toContain("{!manager && (");
     expect(src).toContain("{CLOSEOUT_ADD_MISSING}");
     expect(src).toContain('import { isOffice, managesTickets } from "@/lib/access";');

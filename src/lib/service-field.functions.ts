@@ -21,8 +21,10 @@ import { closeoutGaps, closeoutRefusal } from "@/lib/closeout-check";
 import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import { REPAIR_TAG_VALUES } from "@/lib/repair-tags";
-import type { ServiceJobRow } from "@/lib/service.functions";
+import type { ServiceJobRow, ServiceJobWithTech } from "@/lib/service.functions";
 import { SERVICE_DONE_METHOD } from "@/lib/contact-log.functions";
+import { readProfile } from "@/lib/profile-cache.server";
+import { siteHistorySummarySchema, type SiteHistorySummary } from "@/lib/service-history";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
 import { easternYmd, resolveFieldDay } from "@/lib/field-day";
@@ -71,16 +73,23 @@ export type JobPhotoRow = Database["public"]["Tables"]["service_job_photos"]["Ro
  * registerJobPhoto, savePhotoAnnotations and setJobPhotoItems hand back, so the ticket's photo
  * list (fieldKeys.photos) always carries the links.
  */
-export type JobPhotoWithItems = JobPhotoRow & { item_keys: string[] };
+export type JobPhotoWithItems = JobPhotoRow & {
+  item_keys: string[];
+  /**
+   * Signed links (an hour), made in ONE call for the whole list by listJobPhotos (Nov 3,
+   * review item 35; the thumbnails used to ask for one each). Absent on a row a write handed
+   * back: the thumbnail then signs its own.
+   */
+  url?: string | null;
+  thumb_url?: string | null;
+};
 export type JobEventRow = Database["public"]["Tables"]["service_job_events"]["Row"];
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
+// The caller's profile, once a minute per user rather than once per call (Nov 3, review item 36;
+// lib/profile-cache.server.ts) — opening a ticket used to read it fifteen times.
 async function me(ctx: Ctx) {
-  const { data } = await ctx.supabase
-    .from("profiles")
-    .select("role, access, technician, full_name, email")
-    .eq("id", ctx.userId)
-    .maybeSingle();
+  const data = await readProfile(ctx.supabase, ctx.userId);
   if (!data || !canAccess(data, "service")) throw new Error("Forbidden: Service access required");
   return data;
 }
@@ -245,6 +254,12 @@ export interface TodayJob extends TodayJobRow {
   crew_names: string[];
   /** The site's roof warranties in force today ("Duro-Last 15 NDL · to Mar 2031"; M5). */
   warranty_badges: string[];
+  /**
+   * The "History here" strip's numbers (Nov 3, review item 45): read with the day in one call
+   * (site_history_summaries) instead of one call per card; null when the ticket has no property
+   * or the read failed (the card then asks for its own).
+   */
+  history: SiteHistorySummary | null;
 }
 
 /**
@@ -326,6 +341,9 @@ export const myDay = createServerFn({ method: "GET" })
     ]);
     // The crew's names (the roster rpc) only when a crew row needs one (Oct 28 audit).
     const techs = crewRows?.length ? (await sb.rpc("technician_options")).data : [];
+    // The history strips, one call for every card with a property (Nov 3, review item 45).
+    const withSite = (jobs ?? []).filter((j) => !!j.site_id).map((j) => j.id);
+    const histories = withSite.length ? await historySummaries(sb, withSite) : new Map();
     const today = easternYmd();
     const warrantiesOf = new Map<string, Warranty[]>();
     for (const w of warrantyRes.error ? [] : (warrantyRes.data ?? []))
@@ -352,9 +370,37 @@ export const myDay = createServerFn({ method: "GET" })
         account_phone: j.account_id ? (accountMap.get(j.account_id) ?? null) : null,
         crew_names: crewOf.get(j.id) ?? [],
         warranty_badges: j.site_id ? warrantyBadges(warrantiesOf.get(j.site_id) ?? [], today) : [],
+        history: histories.get(j.id) ?? null,
       };
     });
   });
+
+/**
+ * site_history_summaries(uuid[]) — one call for several tickets' strips (the generated types do
+ * not list it; the same PostgREST call as service-history.functions.ts rawRpc). A failure signs
+ * nothing: the cards fall back to their own read.
+ */
+async function historySummaries(
+  sb: Ctx["supabase"],
+  jobIds: string[],
+): Promise<Map<string, SiteHistorySummary>> {
+  const out = new Map<string, SiteHistorySummary>();
+  const r = await (
+    sb as unknown as {
+      rpc: (
+        fn: string,
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    }
+  ).rpc("site_history_summaries", { p_job_ids: jobIds });
+  if (r.error) return out;
+  const rows = z
+    .array(z.object({ job_id: z.string(), summary: siteHistorySummarySchema }))
+    .safeParse(r.data ?? []);
+  if (!rows.success) return out;
+  for (const row of rows.data) out.set(row.job_id, row.summary);
+  return out;
+}
 
 /** The caller's running clock with the ticket it is on (the Today banner, the close-out line). */
 export interface MyClock extends Clock {
@@ -1247,13 +1293,147 @@ export const listJobPhotos = createServerFn({ method: "GET" })
       .order("created_at");
     if (error) throw new Error(error.message);
     const photos = rows ?? [];
-    return withItemKeys(
-      photos,
-      await photoLinks(
+    const [links, urls] = await Promise.all([
+      photoLinks(
         context.supabase,
         photos.map((p) => p.id),
       ),
-    );
+      signPhotoPaths(context.supabase, photos),
+    ]);
+    return withItemKeys(photos, links).map((p) => ({
+      ...p,
+      url: urls.get(p.storage_path) ?? null,
+      thumb_url: p.thumb_path ? (urls.get(p.thumb_path) ?? null) : null,
+    }));
+  });
+
+/** How long a signed photo link lasts: an hour, as the thumbnails' own (field-utils useSignedUrl). */
+export const PHOTO_LINK_SECONDS = 3600;
+/**
+ * Signed links for a list's photos and their small copies in ONE storage call (Nov 3, review
+ * item 35): a ticket with 31 photos used to make 31 signing round trips from the phone. A
+ * failure signs nothing; the thumbnails then sign their own, as before.
+ */
+async function signPhotoPaths(
+  sb: Ctx["supabase"],
+  photos: readonly { storage_path: string; thumb_path: string | null }[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const paths = [
+    ...new Set(photos.flatMap((p) => [p.storage_path, ...(p.thumb_path ? [p.thumb_path] : [])])),
+  ];
+  if (!paths.length) return out;
+  const { data, error } = await sb.storage
+    .from(SERVICE_BUCKET)
+    .createSignedUrls(paths, PHOTO_LINK_SECONDS);
+  if (error || !data) return out;
+  for (const d of data) if (d.path && d.signedUrl && !d.error) out.set(d.path, d.signedUrl);
+  return out;
+}
+
+/**
+ * The small copy's row (Nov 3, review item 34): set by the phone right after the picture goes
+ * up, or later by the first viewer who may touch the ticket and finds a photo without one (the
+ * office page, the close-out). The full picture is never changed.
+ */
+export const setPhotoThumb = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        service_job_id: z.string().uuid(),
+        thumb_path: z.string().min(1).max(300),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<JobPhotoWithItems> => {
+    const job = await ownJob(context, data.service_job_id);
+    if (!data.thumb_path.startsWith(`${job.id}/`))
+      throw new Error("The small copy must be stored under the ticket's own folder");
+    const { data: row, error } = await context.supabase
+      .from("service_job_photos")
+      .update({ thumb_path: data.thumb_path })
+      .eq("id", data.id)
+      .eq("service_job_id", job.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return photoWithItems(context.supabase, row);
+  });
+
+/**
+ * Everything the ticket page and the close-out read on open, in ONE round trip (Nov 3, review
+ * item 36): the ticket with its technician's name, its repairs, photos (with signed links),
+ * time and timeline — five reads that each re-checked the caller. The page seeds the five
+ * caches from it (fieldKeys), and each section's own read stays fresh for FIELD_STALE_MS, so
+ * nothing is asked twice. Crew, materials and purchase orders keep their own reads (they are
+ * folded away until opened).
+ */
+export interface TicketBundle {
+  job: ServiceJobWithTech;
+  repairs: JobRepairRow[];
+  photos: JobPhotoWithItems[];
+  time: TimeEntryRow[];
+  events: JobEventRow[];
+}
+export const getTicketBundle = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<TicketBundle> => {
+    await me(context);
+    const sb = context.supabase;
+    const [jobRes, repairs, photos, time, events, techs] = await Promise.all([
+      sb.from("service_jobs").select("*").eq("id", data.id).maybeSingle(),
+      sb
+        .from("service_job_repairs")
+        .select("*")
+        .eq("service_job_id", data.id)
+        .order("sort")
+        .order("created_at"),
+      sb.from("service_job_photos").select("*").eq("service_job_id", data.id).order("created_at"),
+      sb
+        .from("service_time_entries")
+        .select("*")
+        .eq("service_job_id", data.id)
+        .order("on_date")
+        .order("id"),
+      sb
+        .from("service_job_events")
+        .select("*")
+        .eq("service_job_id", data.id)
+        .order("at", { ascending: false })
+        .limit(200),
+      sb.rpc("technician_options"),
+    ]);
+    if (jobRes.error) throw new Error(jobRes.error.message);
+    if (!jobRes.data) throw new Error("Ticket not found");
+    for (const r of [repairs, photos, time, events]) if (r.error) throw new Error(r.error.message);
+    const names = new Map<string, string>();
+    for (const t of techs.data ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+    const job = jobRes.data;
+    const rows = photos.data ?? [];
+    const [links, urls] = await Promise.all([
+      photoLinks(
+        sb,
+        rows.map((p) => p.id),
+      ),
+      signPhotoPaths(sb, rows),
+    ]);
+    return {
+      job: {
+        ...job,
+        technician_name: job.technician_id ? (names.get(job.technician_id) ?? null) : null,
+      },
+      repairs: repairs.data ?? [],
+      photos: withItemKeys(rows, links).map((p) => ({
+        ...p,
+        url: urls.get(p.storage_path) ?? null,
+        thumb_url: p.thumb_path ? (urls.get(p.thumb_path) ?? null) : null,
+      })),
+      time: time.data ?? [],
+      events: events.data ?? [],
+    };
   });
 
 /** Safe object name inside the bucket: <job id>/<time>-<random>.<ext>. */
@@ -1280,6 +1460,8 @@ const photoSchema = z.object({
    */
   item_keys: z.array(z.string().min(1).max(60)).max(ITEM_LINKS_MAX).optional(),
   storage_path: z.string().min(1).max(300),
+  /** The small copy made beside it on the phone (Nov 3, review item 34); none when it could not be. */
+  thumb_path: z.string().min(1).max(300).nullable().optional(),
   file_name: z.string().max(200).nullable().optional(),
   file_size: z.number().int().nonnegative().nullable().optional(),
   taken_at: z.string().datetime({ offset: true }).nullable().optional(),
@@ -1305,6 +1487,8 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
     const job = await ownJob(context, data.service_job_id);
     if (!data.storage_path.startsWith(`${job.id}/`))
       throw new Error("The photo must be stored under the ticket's own folder");
+    if (data.thumb_path && !data.thumb_path.startsWith(`${job.id}/`))
+      throw new Error("The small copy must be stored under the ticket's own folder");
     const itemKeys = registrationItemKeys(data);
     if (itemKeys.length && (data.role !== "other" || data.repair_id))
       throw new Error(
@@ -1318,6 +1502,7 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
         role: data.role,
         item_key: itemKeys[0] ?? null,
         storage_path: data.storage_path,
+        thumb_path: data.thumb_path ?? null,
         file_name: data.file_name ?? null,
         file_size: data.file_size ?? null,
         taken_at: data.taken_at ?? null,
@@ -1373,12 +1558,16 @@ export const deleteJobPhoto = createServerFn({ method: "POST" })
     await ownJob(context, data.service_job_id);
     const { data: row } = await context.supabase
       .from("service_job_photos")
-      .select("storage_path")
+      .select("storage_path, thumb_path")
       .eq("id", data.id)
       .eq("service_job_id", data.service_job_id)
       .maybeSingle();
     if (!row) return;
-    await context.supabase.storage.from(SERVICE_BUCKET).remove([row.storage_path]);
+    // The picture and its small copy (Nov 3): a delete that left the copy behind was caught on
+    // the temporary ticket the thumbnail change was checked on.
+    await context.supabase.storage
+      .from(SERVICE_BUCKET)
+      .remove([row.storage_path, ...(row.thumb_path ? [row.thumb_path] : [])]);
     const { error } = await context.supabase.from("service_job_photos").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
   });
@@ -1534,6 +1723,13 @@ const closeoutSchema = z.object({
   recommend_new_roof: z.boolean().optional(),
   helper_count: z.number().int().min(0).max(9).optional(),
   signed_by: z.string().trim().max(200).nullable().optional(),
+  /**
+   * The close-out's marks (Nov 3, review item 24): "Nothing used on this ticket" and "Skip —
+   * nothing to add", on the ticket (nothing_used_at / notes_skipped_at) instead of the phone.
+   * true stamps now (an earlier stamp stays), false clears; left out = as it is.
+   */
+  nothing_used: z.boolean().optional(),
+  notes_skipped: z.boolean().optional(),
 });
 /** The close-out screen's text fields (repairs, photos, materials and time are their own calls). */
 export const saveCloseout = createServerFn({ method: "POST" })
@@ -1553,6 +1749,11 @@ export const saveCloseout = createServerFn({ method: "POST" })
       patch.recommend_new_roof = fields.recommend_new_roof;
     if (fields.helper_count !== undefined) patch.helper_count = fields.helper_count;
     if (fields.signed_by !== undefined) patch.signed_by = fields.signed_by;
+    const now = new Date().toISOString();
+    if (fields.nothing_used !== undefined)
+      patch.nothing_used_at = fields.nothing_used ? (job.nothing_used_at ?? now) : null;
+    if (fields.notes_skipped !== undefined)
+      patch.notes_skipped_at = fields.notes_skipped ? (job.notes_skipped_at ?? now) : null;
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update(patch)

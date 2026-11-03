@@ -43,7 +43,7 @@ import {
   type InspectionGrade,
   type InspectionItem,
 } from "@/lib/inspection";
-import { fieldKeys, useAutosave } from "@/components/service/field-utils";
+import { FIELD_READ, fieldKeys, useAutosave } from "@/components/service/field-utils";
 
 export const inspectionKey = (jobId: string) => ["service-inspection", jobId] as const;
 
@@ -157,7 +157,7 @@ export function useInspectionDraft(
     queryKey: inspectionKey(job.id),
     queryFn: () => getFn({ data: { id: job.id } }),
     enabled: !!session && opts.enabled,
-    staleTime: 30_000,
+    ...FIELD_READ,
   });
 
   const [draft, setDraft] = useState<InspectionDraft | null>(null);

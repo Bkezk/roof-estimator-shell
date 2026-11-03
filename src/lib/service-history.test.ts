@@ -429,7 +429,8 @@ describe("on the screens", () => {
     expect(comp).toMatch(
       /<Box[\s\S]*?collapsible[\s\S]*?open=\{open\}[\s\S]*?defaultOpen=\{false\}/,
     );
-    expect(comp).toMatch(/useHistory\(job\.id, open\)/);
+    // Nov 3 (review item 46): the newest ten first, every ticket after "Show more" (`all`).
+    expect(comp).toMatch(/useHistory\(job\.id, open, all\)/);
   });
   it("ALL photos: the grid maps the whole list, nothing sliced or capped", () => {
     expect(comp).toContain("{photos.map((p, i) => (");
@@ -437,7 +438,10 @@ describe("on the screens", () => {
     expect(comp).not.toMatch(/photos\.slice\(|\.slice\(0, \d\)|photos\.length > [1-9]/);
   });
   it("My tickets: the strip under the address, a tap opens the ticket with the fold open; left out when none", () => {
-    expect(today).toContain('{j.site_id && <HistoryLink jobId={j.id} whenNone="hide" />}');
+    // Nov 3 (review item 45): the card's numbers come with the day (myDay), not one call per card.
+    expect(today).toContain(
+      '{j.site_id && <HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />}',
+    );
     expect(comp).toContain("search={{ id: jobId, open: HISTORY_OPEN_PARAM }}");
     expect(comp).toContain('if (whenNone === "hide") return null;');
     // The close-out, where the technician works the ticket, carries the same line.

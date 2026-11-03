@@ -28,6 +28,8 @@ export interface InspectionPhotoControls {
   /** This item's pictures in flight (placeholders in the roll). */
   pending: QueuedPicture[];
   onPhoto: () => void;
+  /** Pictures already on the phone (the library, no camera; owner, Nov 3, review item 21). */
+  onPick: () => void;
   onRetry: (id: string) => void;
   onDiscard: (id: string) => void;
 }
@@ -40,11 +42,16 @@ export interface InspectionCamera {
 export function useInspectionCamera(jobId: string): InspectionCamera {
   const pictures = usePictures({ jobId, repairId: null, role: "other" });
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const libraryRef = useRef<HTMLInputElement | null>(null);
   const aim = useRef<{ itemKey: string | null; label: string }>({ itemKey: null, label: "Photo" });
   const [shot, setShot] = useState<(FreshShot & { itemKey: string | null }) | null>(null);
   const open = (itemKey: string | null, label: string) => {
     aim.current = { itemKey, label };
     inputRef.current?.click();
+  };
+  const openLibrary = (itemKey: string | null, label: string) => {
+    aim.current = { itemKey, label };
+    libraryRef.current?.click();
   };
   const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -72,6 +79,7 @@ export function useInspectionCamera(jobId: string): InspectionCamera {
       waitingForSignal: mine.filter((p) => p.status === "held").length,
       pending: mine,
       onPhoto: () => open(itemKey, label),
+      onPick: () => openLibrary(itemKey, label),
       onRetry: pictures.retry,
       onDiscard: pictures.discard,
     };
@@ -87,6 +95,15 @@ export function useInspectionCamera(jobId: string): InspectionCamera {
       className: "hidden",
       onChange: pick,
       "data-camera": "inspection",
+    }),
+    createElement("input", {
+      ref: libraryRef,
+      type: "file",
+      accept: "image/*",
+      multiple: true,
+      className: "hidden",
+      onChange: pick,
+      "data-library": "inspection",
     }),
     shot
       ? createElement(AfterShotEditor, {

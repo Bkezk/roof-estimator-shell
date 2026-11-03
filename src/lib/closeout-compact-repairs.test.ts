@@ -106,7 +106,8 @@ describe("the close-out's Repairs section", () => {
     // goes in line while the last one uploads (a "2 uploading" badge beside them).
     expect(card).toContain("<PhotoButtons photos={photos} camera={camera} roles={roles} />");
     expect(src).toMatch(
-      /className=\{compact \? "h-10 px-3 text-sm" : "h-11 text-base"\}\s*onClick=\{\(\) => onPhoto\(role\)\}/,
+      // 44 px since Nov 3 (review item 33).
+      /className=\{compact \? "h-\[44px\] px-3 text-sm" : "h-\[44px\] text-base"\}\s*onClick=\{\(\) => onPhoto\(role\)\}/,
     );
     expect(src).not.toMatch(/disabled=\{uploading === role\}/);
   });

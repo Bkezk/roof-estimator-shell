@@ -49,6 +49,7 @@ import { Box } from "@/components/service/field-shared";
 import { useVendors } from "@/components/crm/use-vendors";
 import {
   errText,
+  FIELD_READ,
   fieldKeys,
   localYmd,
   loudError,
@@ -75,6 +76,7 @@ export function PurchaseOrdersSection({
     queryKey: fieldKeys.pos(jobId),
     queryFn: () => listFn({ data: { jobId } }),
     enabled: !!session,
+    ...FIELD_READ,
   });
   // null = no form open; "new" = adding; an id = editing that PO.
   const [editing, setEditing] = useState<string | null>(null);

@@ -26,6 +26,7 @@ const row = (id: number, qty: number, extra: Partial<LedgerRow> = {}): LedgerRow
   qty,
   unit: "case",
   counted_note: null,
+  created_by: "sam",
   created_by_name: "Sam Tech",
   created_at: new Date(now - id * 60_000).toISOString(),
   ...extra,
@@ -62,11 +63,11 @@ describe("materials utils", () => {
     const rows = [
       row(3, -0.25),
       row(1, -1 / 12),
-      row(2, -1 / 12, { created_by_name: "Someone Else" }),
+      row(2, -1 / 12, { created_by: "else", created_by_name: "Someone Else" }),
       row(5, -1 / 12, { created_at: new Date(now - 25 * 3600_000).toISOString() }),
       row(4, 1 / 12),
     ];
-    expect(ownFreshEntries(rows, cell, cart, "Sam Tech", now)).toEqual([
+    expect(ownFreshEntries(rows, cell, cart, "sam", now)).toEqual([
       { id: 1, units: 1 },
       { id: 3, units: 3 },
     ]);

@@ -37,8 +37,10 @@ import {
   fieldKeys,
   getPosition,
   loudError,
+  makeThumb,
   removeFromServiceBucket,
   shrinkPhoto,
+  thumbPathFor,
   uploadPlan,
   uploadToServiceBucket,
 } from "@/components/service/field-utils";
@@ -71,11 +73,36 @@ export function getPictureQueue(qc: QueryClient): PhotoUploadQueue<JobPhotoRow> 
   }
   const opened = openPictureStore();
   const ready = opened.then((o) => o.store);
+  // The small copy (Nov 3, review item 34): made from the shrunk picture and uploaded beside it,
+  // best effort — a copy that could not be made or sent leaves the row without one (the full
+  // picture serves the square, and the first office viewer makes the copy later). The register
+  // names the copy only when it landed.
+  const thumbs = new Set<string>();
   const queue = new PhotoUploadQueue<JobPhotoRow>({
     shrink: shrinkPhoto,
-    upload: (path, p) => uploadToServiceBucket(path, p.blob, p.type),
-    removeUpload: removeFromServiceBucket,
-    register: (data) => registerJobPhoto({ data }),
+    upload: async (path, p) => {
+      await uploadToServiceBucket(path, p.blob, p.type);
+      try {
+        const small = await makeThumb(p.blob);
+        if (small) {
+          await uploadToServiceBucket(thumbPathFor(path), small.blob, small.type);
+          thumbs.add(path);
+        }
+      } catch {
+        // The full picture is up; the copy can be made later.
+      }
+    },
+    removeUpload: (path) => {
+      thumbs.delete(path);
+      return removeFromServiceBucket(path);
+    },
+    register: (data) =>
+      registerJobPhoto({
+        data: {
+          ...data,
+          ...(thumbs.has(data.storage_path) ? { thumb_path: thumbPathFor(data.storage_path) } : {}),
+        },
+      }),
     saveMarks: async (row, marks) => {
       const saved = await savePhotoAnnotations({
         data: { id: row.id, service_job_id: row.service_job_id, annotations: marks },

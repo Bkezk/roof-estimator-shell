@@ -126,7 +126,7 @@ import { getAccount, listContacts, siteAddressLine, type AccountHit } from "@/li
 import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.functions";
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
-import { listJobEvents } from "@/lib/service-field.functions";
+import { getTicketBundle, listJobEvents } from "@/lib/service-field.functions";
 import { shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
@@ -206,7 +206,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RateBox } from "@/components/service/rate-box";
-import { fieldKeys } from "@/components/service/field-utils";
+import { FIELD_READ, fieldKeys } from "@/components/service/field-utils";
 import { defaultBillRate, MAX_HELPERS, othersOf } from "@/lib/service-crew";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -972,11 +972,25 @@ function TicketListRow({
 
 function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
   const { session, profile } = useAuth();
-  const getFn = useServerFn(getServiceJob);
+  const qc = useQueryClient();
+  const bundleFn = useServerFn(getTicketBundle);
+  // One round trip (owner, Nov 3, review item 36): the ticket with its repairs, photos (links
+  // signed in one call), time and timeline — five reads that each re-checked the caller. The
+  // other four land in their own caches (fieldKeys), fresh for FIELD_STALE_MS, so the sections
+  // below ask for nothing on open; a later refetch of the ticket re-reads the bundle. Not
+  // re-read when the portal comes to the front (review item 37).
   const job = useQuery({
     queryKey: ["service-job", id],
-    queryFn: () => getFn({ data: { id } }),
+    queryFn: async () => {
+      const b = await bundleFn({ data: { id } });
+      qc.setQueryData(fieldKeys.repairs(id), b.repairs);
+      qc.setQueryData(fieldKeys.photos(id), b.photos);
+      qc.setQueryData(fieldKeys.time(id), b.time);
+      qc.setQueryData(fieldKeys.events(id), b.events);
+      return b.job;
+    },
     enabled: !!session,
+    refetchOnWindowFocus: false,
   });
   // Nothing to show yet: the error (or the spinner) is the page.
   if (!job.data) {
@@ -1508,6 +1522,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     queryKey: fieldKeys.crew(job?.id ?? "new"),
     queryFn: () => crewFn({ data: { id: job!.id } }),
     enabled: !!session && !!job,
+    ...FIELD_READ,
   });
   const [crew, setCrew] = useState<CrewDraft | null>(() =>
     job ? null : { lead_rate: null, others: [] },
@@ -1608,6 +1623,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     queryKey: fieldKeys.events(job?.id ?? "new"),
     queryFn: () => eventsFn({ data: { id: job!.id } }),
     enabled: !!session && !!job,
+    ...FIELD_READ,
   });
   // A stage set elsewhere (the close-out, an invoice) arrives with the ticket: re-read its dates.
   const seenStage = useRef(job?.stage);

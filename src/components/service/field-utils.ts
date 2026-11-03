@@ -14,10 +14,25 @@ import { SERVICE_BUCKET } from "@/lib/service-field.functions";
 
 export const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** A failure the tech must not miss (on a roof, in the sun): red, and it stays a while. */
-export function loudError(what: string, e: unknown) {
-  toast.error(`${what}: ${errText(e)}`, { duration: 12_000 });
+/**
+ * A failure the tech must not miss (on a roof, in the sun): red, and it stays a while. With
+ * `retry` (Nov 3, review item 22) the toast carries a "Try again" that sends the same thing
+ * once more — a tap that failed for want of signal is not lost.
+ */
+export function loudError(what: string, e: unknown, retry?: () => void) {
+  toast.error(`${what}: ${errText(e)}`, {
+    duration: 12_000,
+    ...(retry ? { action: { label: "Try again", onClick: retry } } : {}),
+  });
 }
+
+/**
+ * How long a field read stays fresh (Nov 3, review item 37): five minutes, and never re-read
+ * just because the portal came back to the front — a technician is in the camera or on a call
+ * longer than the old 30 s all the time, and every change already refreshes what it touched.
+ */
+export const FIELD_STALE_MS = 5 * 60_000;
+export const FIELD_READ = { staleTime: FIELD_STALE_MS, refetchOnWindowFocus: false } as const;
 
 /** Query keys of the field flow, shared so each screen refreshes the others. */
 export const fieldKeys = {
@@ -79,6 +94,26 @@ export function useAutosave<T>(
     },
     [saver],
   );
+  // The signal coming back, or the portal coming to the front (Nov 3, review item 23): a save
+  // that failed is tried again on its own, as the picture queue does — it used to wait for the
+  // next keystroke.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const again = () => {
+      if (saver.state === "error" && navigator.onLine !== false) void saver.flush();
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible") again();
+    };
+    window.addEventListener("online", again);
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.removeEventListener("online", again);
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [saver]);
   return { push: saver.push, flush: saver.flush, cancel: saver.cancel, state };
 }
 
@@ -101,6 +136,36 @@ export async function shrinkPhoto(file: File): Promise<{ blob: Blob; type: strin
     return { blob, type: "image/jpeg", name: file.name.replace(/\.[^.]+$/, "") + ".jpg" };
   } catch {
     return keep; // A format the browser cannot decode (e.g. HEIC): upload it as taken.
+  }
+}
+
+/** The small copy's object beside the picture's: `<path without extension>-thumb.jpg`. */
+export const thumbPathFor = (path: string) => `${path.replace(/\.[^./]+$/, "")}-thumb.jpg`;
+
+/** The small copy's long side, in pixels: a square of 80 px on a 3× phone needs no more. */
+export const THUMB_PX = 320;
+
+/**
+ * A small JPEG copy of a picture for the thumbnails (Nov 3, review item 34): the full picture
+ * is untouched and still what opens on a tap. Null where the browser cannot decode the file
+ * (an old Safari with a HEIC) — the full picture then serves the square, as before.
+ */
+export async function makeThumb(blob: Blob): Promise<{ blob: Blob; type: string } | null> {
+  if (typeof createImageBitmap === "undefined" || typeof document === "undefined") return null;
+  try {
+    const img = await createImageBitmap(blob);
+    const scale = Math.min(1, THUMB_PX / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    img.close();
+    const out = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.8));
+    return out ? { blob: out, type: "image/jpeg" } : null;
+  } catch {
+    return null;
   }
 }
 

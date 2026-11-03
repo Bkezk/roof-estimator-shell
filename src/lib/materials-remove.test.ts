@@ -84,7 +84,7 @@ describe("the screen", () => {
       "const reduce = (r: ListRow, units: number, onDone?: () => void) => {",
     );
     expect(reduce).toContain(
-      "const plan = planReduce(ownFreshEntries(now, r, r.piece, myName), units, canRelease);",
+      "ownFreshEntries(now, r, r.piece, userId || null, Date.now(), { ticketOpen }),",
     );
     expect(reduce).toMatch(/if \(step\.kind === "undo"\) await undo\(r, step\.id\);/);
     expect(reduce).toMatch(
@@ -118,7 +118,8 @@ describe("the server and RLS let a technician take it back (no assumption)", () 
     expect(inv).toContain(
       "const fresh = Date.now() - Date.parse(row.created_at) < 24 * 3600 * 1000;",
     );
-    expect(inv).toContain('if (me?.role !== "admin" && !(mine && fresh))');
+    // Nov 3 (review item 25): any age while the ticket is still mine to edit.
+    expect(inv).toContain('if (me?.role !== "admin" && !(mine && (fresh || stillMine)))');
     const policy = readFileSync(
       "supabase/migrations/20260924080000_inventory_undo_own.sql",
       "utf8",
