@@ -38,9 +38,8 @@ describe("invoiceSearch (the /service/invoices route's search)", () => {
   it("is the route's validateSearch, and the route passes the id to the Invoices page", () => {
     const route = read("src/routes/service.invoices.tsx");
     expect(route).toContain("validateSearch: invoiceSearch,");
-    expect(route).toContain(
-      '<InvoicesPage toInvoice={tab === "to-invoice"} invoiceId={id} status={status} />',
-    );
+    // Nov 3: the whole parsed search (id, tab, and the list's filters) goes to the page.
+    expect(route).toContain("<InvoicesPage search={search} />");
   });
 });
 
@@ -49,7 +48,10 @@ describe("the full-width invoice page", () => {
   it("invoice-editor.tsx holds the editor: the page, the draft and final views, History", () => {
     expect(existsSync(editorPath)).toBe(true);
     const ed = read(editorPath);
-    expect(ed).toContain("export function InvoiceEditorPage({ id }: { id: string })");
+    // Nov 3: the page also takes the list's filters, for its "← Invoices" link (review item 11).
+    expect(ed).toContain("export function InvoiceEditorPage({");
+    expect(ed).toContain("listSearch?: InvoiceListSearch;");
+    expect(ed).toMatch(/to="\/service\/invoices"\s+search=\{listSearch\}/);
     expect(ed).toContain("function DraftInvoice(");
     expect(ed).toContain("function FinalInvoice(");
     expect(ed).toContain("interface LineDraft {");
@@ -81,14 +83,17 @@ describe("the full-width invoice page", () => {
     );
     const fn = page.slice(page.indexOf("export function InvoicesPage"));
     const gate = fn.indexOf("if (!seesInvoices(profile))");
-    const editor = fn.indexOf("if (invoiceId) return <InvoiceEditorPage id={invoiceId} />;");
+    const editor = fn.indexOf(
+      "if (invoiceId) return <InvoiceEditorPage id={invoiceId} listSearch={invoiceListSearch(search)} />;",
+    );
     expect(gate).toBeGreaterThan(0);
     expect(editor).toBeGreaterThan(gate);
   });
   it("a list row opens the invoice's page, not the ticket", () => {
     const page = read("src/components/service/invoices-page.tsx");
     expect(page).toContain("onClick={() => openInvoice(r.id)}");
-    expect(page).toMatch(/to="\/service\/invoices"\s+search=\{\{ id: r\.id \}\}/);
+    // The row's link carries the list's filters along with the id (Nov 3, review item 11).
+    expect(page).toMatch(/to="\/service\/invoices"\s+search=\{\{ \.\.\.filters, id: r\.id \}\}/);
   });
 });
 

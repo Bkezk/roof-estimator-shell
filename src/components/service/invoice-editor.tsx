@@ -112,6 +112,7 @@ import {
   type InvoiceWithLines,
 } from "@/lib/invoices.functions";
 import { getServiceJob, type ServiceJobWithTech } from "@/lib/service.functions";
+import type { InvoiceListSearch } from "@/lib/invoice-search";
 import {
   asInvoiceStatus,
   deleteDraftNote,
@@ -226,7 +227,14 @@ interface Ctx {
 // ---- The page -------------------------------------------------------------------------------
 
 /** `/service/invoices?id=<uuid>`: one invoice, full width (rendered by the Invoices page). */
-export function InvoiceEditorPage({ id }: { id: string }) {
+export function InvoiceEditorPage({
+  id,
+  listSearch = {},
+}: {
+  id: string;
+  /** The Invoices list's filters the invoice was opened from: "← Invoices" returns to them. */
+  listSearch?: InvoiceListSearch;
+}) {
   const { session } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -288,7 +296,7 @@ export function InvoiceEditorPage({ id }: { id: string }) {
   const backToList = (
     <Link
       to="/service/invoices"
-      search={{}}
+      search={listSearch}
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
     >
       <ArrowLeft className="h-4 w-4" /> Invoices

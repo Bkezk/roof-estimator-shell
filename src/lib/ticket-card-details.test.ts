@@ -35,10 +35,12 @@ describe("the ticket list card", () => {
     expect(card).toContain('j.technician_name ?? "Unassigned",');
     expect(card).not.toMatch(/total|amount|\$\{.*cost|grand_total/i);
   });
-  it("the list attaches each property's city and state", () => {
-    expect(read("src/lib/service.functions.ts")).toContain(
-      "return withPlaces(context.supabase, await withTechNames(context.supabase, data ?? []));",
-    );
+  it("the list reads each property's city and state from the ticket itself (Nov 3: snapshotted, no second query)", () => {
+    const svc = read("src/lib/service.functions.ts");
+    expect(svc).not.toContain("withPlaces(");
+    expect(svc).toMatch(/LIST_JOB_COLUMNS =\s+"[^"]*site_city, site_state[^"]*"/);
+    expect(svc).toContain("site_city = s.city;");
+    expect(svc).toContain("site_state = s.state;");
   });
   it("the stage date is the database's, filled in for existing tickets", () => {
     const p = "supabase/migrations/20261006180000_ticket_stage_date.sql";

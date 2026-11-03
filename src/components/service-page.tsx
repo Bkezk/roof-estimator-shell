@@ -116,6 +116,7 @@ import {
   TYPE_LABELS,
   type CrewMemberView,
   type ServiceJobInput,
+  type ServiceJobListRow,
   type ServiceJobWithTech,
   type ServiceStage,
   type ServiceType,
@@ -482,7 +483,7 @@ function ServiceList({ filters }: { filters: ListFilters }) {
   const [mineOn, setMineOn] = useState(false);
   const mine = !isTech && mineOn;
   const [showDeleted, setShowDeleted] = useState(false);
-  const [toDelete, setToDelete] = useState<ServiceJobWithTech | null>(null);
+  const [toDelete, setToDelete] = useState<ServiceJobListRow | null>(null);
   const [collapsed, setCollapsed] = useState<ServiceStage[]>(readCollapsed);
   const toggleGroup = (stage: ServiceStage) =>
     setCollapsed((prev) => {
@@ -877,7 +878,7 @@ function TicketListRow({
   today,
   onDelete,
 }: {
-  row: ServiceJobWithTech;
+  row: ServiceJobListRow;
   /** The list's day (the Overdue filter's): an open ticket whose day has passed shows "Overdue". */
   today: string;
   /** Assigned with no contact logged and not started (listUntouched). */

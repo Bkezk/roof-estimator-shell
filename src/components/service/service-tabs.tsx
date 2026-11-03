@@ -15,7 +15,7 @@ import { CalendarDays, Receipt, Wrench } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import { isFieldOnly, managesTickets, seesInvoices, type AccessLike } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
-import { AWAITING_INVOICE_KEY, listAwaitingInvoice } from "@/lib/service.functions";
+import { AWAITING_INVOICE_COUNT_KEY, countAwaitingInvoice } from "@/lib/service.functions";
 import { cn } from "@/lib/utils";
 
 const everyone = () => true;
@@ -35,14 +35,15 @@ const TABS: readonly {
 export function ServiceTabs() {
   const { profile, session } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // The Invoices tab's "awaiting invoice" count — the database's count of Done tickets with no
-  // finalised invoice — read here so every page that shows the tabs shows it (owner, Oct 5: the
-  // 1 "disappears when I go to the Tech Board and Invoices page"; it used to be passed in by
-  // the ticket list alone). Only for those who see invoices; a stage change or finalised
-  // invoice invalidates it through the "service-jobs" prefix.
-  const awaitingFn = useServerFn(listAwaitingInvoice);
+  // The Invoices tab's "awaiting invoice" count — the database's count of Authorized tickets
+  // (no finalised invoice yet) — read here so every page that shows the tabs shows it (owner,
+  // Oct 5: the 1 "disappears when I go to the Tech Board and Invoices page"; it used to be
+  // passed in by the ticket list alone). The count alone (Nov 3, review item 40: it used to
+  // read the whole queue, up to 1,000 rows, on every page). Only for those who see invoices; a
+  // stage change or finalised invoice invalidates it through the "service-jobs" prefix.
+  const awaitingFn = useServerFn(countAwaitingInvoice);
   const awaiting = useQuery({
-    queryKey: AWAITING_INVOICE_KEY,
+    queryKey: AWAITING_INVOICE_COUNT_KEY,
     queryFn: () => awaitingFn(),
     enabled: !!session && seesInvoices(profile),
   });

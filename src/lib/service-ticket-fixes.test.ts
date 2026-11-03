@@ -45,6 +45,7 @@ vi.mock("@/lib/service-crew.server", () => ({
 import { createRepairFromInspection } from "@/lib/service-inspection.functions";
 import {
   AWAITING_INVOICE_LIMIT,
+  countAwaitingInvoice,
   listAwaitingInvoice,
   saveServiceJob,
 } from "@/lib/service.functions";
@@ -377,17 +378,25 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     deleted_at: null,
     technician_id: null,
   });
-  it("counts with count: 'exact', head: true on Authorized, live tickets", async () => {
+  it("counts with count: 'exact' on Authorized, live tickets — the rows and the count in one read (Nov 3)", async () => {
     env = fakeDb({ profiles: [manager], service_jobs: [done(1), done(2)] });
     const r = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
+    const counted = env.queries.find((q) => q.selectOpts?.["count"] === "exact");
+    expect(counted).toMatchObject({ table: "service_jobs", selectOpts: { count: "exact" } });
+    expect(counted!.filters).toEqual(["eq stage=authorized", "is deleted_at=null"]);
+    expect(r.count).toBe(2);
+    expect(r.rows.map((j) => j["id"])).toEqual(["job-1", "job-2"]);
+  });
+  it("the tabs' badge is a count alone: count: 'exact', head: true, no rows (Nov 3, review item 40)", async () => {
+    env = fakeDb({ profiles: [manager], service_jobs: [done(1), done(2)] });
+    const r = await call<{ count: number }>(countAwaitingInvoice);
     const counted = env.queries.find((q) => q.selectOpts?.["head"] === true);
     expect(counted).toMatchObject({
       table: "service_jobs",
       selectOpts: { count: "exact", head: true },
     });
     expect(counted!.filters).toEqual(["eq stage=authorized", "is deleted_at=null"]);
-    expect(r.count).toBe(2);
-    expect(r.rows.map((j) => j["id"])).toEqual(["job-1", "job-2"]);
+    expect(r).toEqual({ count: 2 });
   });
   it("more than 1,000 Authorized tickets: the count is the database's 1,350, the rows are capped", async () => {
     const rows = Array.from({ length: AWAITING_INVOICE_LIMIT + 5 }, (_, i) => done(i));
@@ -416,7 +425,7 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     // Owner, Oct 5: the tabs read the count themselves, so it shows on every Service page.
     const tabs = readFileSync("src/components/service/service-tabs.tsx", "utf8");
     expect(tabs).toContain("const toInvoice = awaiting.data?.count ?? 0;");
-    expect(tabs).toContain("queryKey: AWAITING_INVOICE_KEY,");
+    expect(tabs).toContain("queryKey: AWAITING_INVOICE_COUNT_KEY,");
     const svc = readFileSync("src/components/service-page.tsx", "utf8");
     expect(svc).not.toContain('jobs.filter((j) => asStage(j.stage) === "done").length');
   });

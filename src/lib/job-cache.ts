@@ -68,6 +68,8 @@ const UNREAD_COLUMNS: Omit<ServiceJobRow, TodayJobColumn> = {
   invoice_id: null,
   job_number: null,
   notes: null,
+  site_city: null,
+  site_state: null,
   po_number: null,
 };
 

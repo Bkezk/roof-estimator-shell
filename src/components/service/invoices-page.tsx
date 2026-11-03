@@ -19,7 +19,7 @@
  * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); technicians
  * never see money (the server refuses them too). Every change is logged (audit_log).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -29,8 +29,14 @@ import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
-import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
 import {
+  AWAITING_INVOICE_TITLE,
+  invoiceListSearch,
+  type InvoiceListSearch,
+  type InvoiceSearch,
+} from "@/lib/invoice-search";
+import {
+  invoiceDue,
   invoiceMatches,
   sortInvoices,
   type InvoiceSort,
@@ -39,7 +45,7 @@ import {
 import {
   AWAITING_INVOICE_KEY,
   listAwaitingInvoice,
-  type ServiceJobWithTech,
+  type ServiceJobListRow,
 } from "@/lib/service.functions";
 import { daysSince, toInvoice as toInvoiceRows, waitingSince } from "@/lib/service-schedule";
 import {
@@ -59,6 +65,7 @@ import {
   stampDay,
   STATUS_LABELS,
   thisMonth,
+  todayYmd,
 } from "@/components/service/invoice-utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -73,18 +80,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function InvoicesPage({
-  toInvoice = false,
-  invoiceId,
-  status,
-}: {
-  toInvoice?: boolean;
-  /** ?id=: that invoice, full width. */
-  invoiceId?: string | undefined;
-  /** ?status=: the chip the list opens on ("unpaid" = final + sent; the Owner view's tile). */
-  status?: StatusFilter | undefined;
-}) {
+export function InvoicesPage({ search }: { search: InvoiceSearch }) {
   const { profile } = useAuth();
+  // ?id=: that invoice, full width; the list's filters ride along so its Back returns to them
+  // (owner, Nov 3, review item 11). Without an id: the list on the URL's chip, dates, search
+  // text and sort (?status= "unpaid" = final + sent, the Owner view's tile).
+  const invoiceId = search.id;
+  const toInvoice = search.tab === "to-invoice";
   if (!seesInvoices(profile))
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
@@ -95,9 +97,12 @@ export function InvoicesPage({
         </Button>
       </div>
     );
-  if (invoiceId) return <InvoiceEditorPage id={invoiceId} />;
-  return <InvoiceList toInvoice={toInvoice} initialStatus={status ?? "all"} />;
+  if (invoiceId) return <InvoiceEditorPage id={invoiceId} listSearch={invoiceListSearch(search)} />;
+  return <InvoiceList toInvoice={toInvoice} filters={invoiceListSearch(search)} />;
 }
+
+/** How long the search box waits before writing what was typed into the URL. */
+const SEARCH_URL_DELAY_MS = 300;
 
 type StatusFilter = "all" | InvoiceStatus | "unpaid";
 
@@ -122,34 +127,69 @@ function Chip(props: {
   );
 }
 
-function InvoiceList({
-  toInvoice,
-  initialStatus,
-}: {
-  toInvoice: boolean;
-  initialStatus: StatusFilter;
-}) {
+function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: InvoiceListSearch }) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listInvoices);
   const awaitingFn = useServerFn(listAwaitingInvoice);
-  // The invoice status chips; the Awaiting invoice chip is the URL's (?tab=to-invoice) so the
-  // Invoices tab's count lands on it.
-  const [status, setStatusState] = useState<StatusFilter>(initialStatus);
-  const setStatus = (s: StatusFilter) => {
-    setStatusState(s);
-    if (toInvoice) void navigate({ to: "/service/invoices", search: {}, replace: true });
+  // The filters are the URL's (owner, Nov 3, review item 11: "Unpaid → open → Mark paid → back"
+  // used to land on All): each change rewrites /service/invoices's search params in place, so
+  // opening an invoice and pressing Back, or its "← Invoices" link, lands on the same chip,
+  // dates, search text and sort. The Awaiting invoice chip is ?tab=to-invoice, as before.
+  const status: StatusFilter = filters.status ?? "all";
+  const from = filters.from ?? "";
+  const to = filters.to ?? "";
+  const sort: InvoiceSort = filters.sort
+    ? {
+        key: filters.sort.split(":")[0] as InvoiceSortKey,
+        dir: filters.sort.endsWith(":asc") ? "asc" : "desc",
+      }
+    : { key: "date", dir: "desc" };
+  const writeFilters = (next: InvoiceListSearch) =>
+    void navigate({ to: "/service/invoices", search: next, replace: true });
+  const patchFilters = (patch: Partial<Record<keyof InvoiceListSearch, unknown>>) => {
+    const next: InvoiceListSearch = { ...filters };
+    delete next.tab;
+    for (const [k, v] of Object.entries(patch) as [keyof InvoiceListSearch, unknown][]) {
+      if (v === undefined || v === null || v === "" || v === "all") delete next[k];
+      else (next as Record<string, unknown>)[k] = v;
+    }
+    writeFilters(next);
   };
-  const showToInvoice = () =>
-    void navigate({ to: "/service/invoices", search: { tab: "to-invoice" }, replace: true });
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState<InvoiceSort>({ key: "date", dir: "desc" });
+  const setStatus = (s: StatusFilter) => patchFilters({ status: s });
+  const setFrom = (v: string) => patchFilters({ from: v });
+  const setTo = (v: string) => patchFilters({ to: v });
+  const showToInvoice = () => writeFilters({ ...filters, tab: "to-invoice" });
   // A click on a heading sorts by it (A–Z, oldest, smallest first); a second click reverses.
-  const sortBy = (key: InvoiceSortKey) =>
-    setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
+  // The list's own order (newest first) is left out of the URL.
+  const sortBy = (key: InvoiceSortKey) => {
+    const dir = sort.key === key && sort.dir === "asc" ? "desc" : "asc";
+    patchFilters({ sort: key === "date" && dir === "desc" ? undefined : `${key}:${dir}` });
+  };
+  // The search box types locally and lands in the URL a moment later (a URL write per
+  // keystroke would fight the caret); a q arriving from the URL (Back) refills the box.
+  const [q, setQ] = useState(filters.q ?? "");
+  const sentQ = useRef(filters.q ?? "");
+  useEffect(() => {
+    const next = filters.q ?? "";
+    if (next !== sentQ.current) {
+      sentQ.current = next;
+      setQ(next);
+    }
+  }, [filters.q]);
+  useEffect(() => {
+    const next = q.trim();
+    if (next === sentQ.current) return;
+    const t = setTimeout(() => {
+      sentQ.current = next;
+      patchFilters({ q: next });
+    }, SEARCH_URL_DELAY_MS);
+    return () => clearTimeout(t);
+    // patchFilters closes over the current filters; the timer re-arms on each keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
   const [exportOpen, setExportOpen] = useState(false);
+  const today = todayYmd();
 
   const list = useQuery({
     queryKey: ["invoices", status, from, to],
@@ -186,8 +226,9 @@ function InvoiceList({
   // The ticket's Back link returns to this queue (owner, Oct 9).
   const open = (serviceJobId: string) =>
     void navigate({ to: "/service", search: { id: serviceJobId, from: "invoices" } });
+  // The invoice's URL carries the list's filters, so its "← Invoices" returns to them.
   const openInvoice = (invoiceId: string) =>
-    void navigate({ to: "/service/invoices", search: { id: invoiceId } });
+    void navigate({ to: "/service/invoices", search: { ...filters, id: invoiceId } });
 
   return (
     <div className="space-y-6">
@@ -276,10 +317,9 @@ function InvoiceList({
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setStatus("all");
-                  setFrom("");
-                  setTo("");
                   setQ("");
+                  sentQ.current = "";
+                  writeFilters({});
                 }}
               >
                 Clear filters
@@ -317,8 +357,10 @@ function InvoiceList({
             : "No invoices yet. Make one from an Authorized ticket's invoice card (Make the invoice)."}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[1040px] text-sm">
+        // min-w-0 (Nov 3): the table's minimum width used to push the page itself wider on a
+        // phone, which then zoomed the whole page out; now the table scrolls inside its box.
+        <div className="min-w-0 overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[1140px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <SortHead label="#" k="number" sort={sort} onSort={sortBy} />
@@ -329,6 +371,7 @@ function InvoiceList({
                 <SortHead label="Job #" k="job" sort={sort} onSort={sortBy} />
                 <SortHead label="Total" k="total" sort={sort} onSort={sortBy} right />
                 <SortHead label="Status" k="status" sort={sort} onSort={sortBy} />
+                <SortHead label="Due" k="due" sort={sort} onSort={sortBy} />
                 <th className="px-3 py-2 font-medium">Paid</th>
                 <SortHead label="Sent" k="sent" sort={sort} onSort={sortBy} />
                 <th className="px-3 py-2 font-medium">Sage</th>
@@ -337,16 +380,20 @@ function InvoiceList({
             <tbody>
               {shown.map((r) => {
                 const s = asInvoiceStatus(r.status);
+                // Due and how late (owner, Nov 3, review item 12): a late open invoice is tinted.
+                const due = invoiceDue(r, today);
+                const late = due.lateDays > 0;
                 return (
                   <tr
                     key={r.id}
-                    className={`cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40 ${s === "void" ? "text-muted-foreground" : ""}`}
+                    className={`cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40 ${s === "void" ? "text-muted-foreground" : ""} ${late ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
+                    data-late={late ? due.lateDays : undefined}
                     onClick={() => openInvoice(r.id)}
                   >
                     <td className="px-3 py-2 font-medium tabular-nums">
                       <Link
                         to="/service/invoices"
-                        search={{ id: r.id }}
+                        search={{ ...filters, id: r.id }}
                         className="underline-offset-2 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -371,6 +418,14 @@ function InvoiceList({
                     </td>
                     <td className="px-3 py-2">
                       <InvoiceStatusBadge status={r.status} />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {due.due ? shortDay(due.due) : due.open ? "On receipt" : "—"}
+                      {late && (
+                        <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
+                          {due.lateDays} day{due.lateDays === 1 ? "" : "s"} late
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {r.paid_on ? (
@@ -405,7 +460,7 @@ function InvoiceList({
                   {rows.length !== live.length ? " (void left out)" : ""}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{money(totalSum)}</td>
-                <td className="px-3 py-2 text-xs font-normal text-muted-foreground" colSpan={4}>
+                <td className="px-3 py-2 text-xs font-normal text-muted-foreground" colSpan={5}>
                   Paid {money(paidSum)} · Open {money(openSum)}
                 </td>
               </tr>
@@ -448,7 +503,7 @@ function SortHead(props: {
 
 /** The Awaiting invoice queue: Authorized tickets, longest waiting first; a row opens its ticket. */
 function ToInvoiceTable(props: {
-  rows: ServiceJobWithTech[];
+  rows: ServiceJobListRow[];
   /** Every Authorized ticket (the database's count); more than rows when the list is capped. */
   count: number;
   loading: boolean;
@@ -475,7 +530,7 @@ function ToInvoiceTable(props: {
     );
   const now = new Date();
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="min-w-0 overflow-x-auto rounded-lg border">
       <table className="w-full min-w-[720px] text-sm">
         <thead>
           <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">

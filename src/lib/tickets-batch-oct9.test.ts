@@ -298,7 +298,8 @@ describe("S9. the list's filters live in the URL; Back returns where you came fr
   });
   it("the Board's chips and the Awaiting queue's rows link with from", () => {
     expect(board).toContain('search={{ id: j.id, from: "board", week: props.week }}');
-    expect(board.match(/week=\{(days|props\.days)\[0\]!\}/g)?.length).toBe(2);
+    // Three since Nov 3: the rail, the "Finished, no technician" group under it, and the cells.
+    expect(board.match(/week=\{(days|props\.days)\[0\]!\}/g)?.length).toBe(3);
     expect(invoices).toContain('search={{ id: j.id, from: "invoices" }}');
     expect(invoices).toContain(
       'void navigate({ to: "/service", search: { id: serviceJobId, from: "invoices" } });',

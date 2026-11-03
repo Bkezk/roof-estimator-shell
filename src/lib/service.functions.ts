@@ -44,7 +44,7 @@ import {
   techStageLocked,
 } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
-import { assignedStage } from "@/lib/service-schedule";
+import { assignedStage, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
@@ -89,9 +89,51 @@ export const TYPE_LABELS: Record<ServiceType, string> = {
 /** A job row with the technician's display name joined. */
 export type ServiceJobWithTech = ServiceJobRow & {
   technician_name: string | null;
-  /** The property's city and state, on the ticket list (owner, Oct 6: "at a glance"). */
-  site_city?: string | null;
-  site_state?: string | null;
+};
+
+/**
+ * The columns the ticket LIST, the Tech Board and the Awaiting invoice queue read (Nov 3, review
+ * item 39): what their cards, chips and filters show — not the checklist JSON, the notes, the
+ * closing notes or the signature, which only the ticket page needs (`getServiceJob` still reads
+ * the whole row). The property's city and state are the ticket's own columns since
+ * 20261103170000 (item 41: they used to be a second query on every read).
+ */
+export const LIST_JOB_COLUMNS =
+  "id, number, stage, service_type, scheduled_date, arrival_window, technician_id, account_id, site_id, customer_name, site_name, site_address, site_city, site_state, location_id, location_name, description, po_number, job_number, centerpoint_ticket, centerpoint_invoice, labor_rate_kind, field_status, stage_changed_at, completed_at, created_at, updated_at, updated_by_name, deleted_at, helper_count" as const;
+type ListJobColumn =
+  | "id"
+  | "number"
+  | "stage"
+  | "service_type"
+  | "scheduled_date"
+  | "arrival_window"
+  | "technician_id"
+  | "account_id"
+  | "site_id"
+  | "customer_name"
+  | "site_name"
+  | "site_address"
+  | "site_city"
+  | "site_state"
+  | "location_id"
+  | "location_name"
+  | "description"
+  | "po_number"
+  | "job_number"
+  | "centerpoint_ticket"
+  | "centerpoint_invoice"
+  | "labor_rate_kind"
+  | "field_status"
+  | "stage_changed_at"
+  | "completed_at"
+  | "created_at"
+  | "updated_at"
+  | "updated_by_name"
+  | "deleted_at"
+  | "helper_count";
+/** One ticket as the lists read it (LIST_JOB_COLUMNS), with its technician's name. */
+export type ServiceJobListRow = Pick<ServiceJobRow, ListJobColumn> & {
+  technician_name: string | null;
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
@@ -125,10 +167,10 @@ async function withTechName(
   const [r] = await withTechNames(sb, [row]);
   return r as ServiceJobWithTech;
 }
-async function withTechNames(
+async function withTechNames<T extends { technician_id: string | null }>(
   sb: SupabaseClient<Database>,
-  rows: ServiceJobRow[],
-): Promise<ServiceJobWithTech[]> {
+  rows: T[],
+): Promise<(T & { technician_name: string | null })[]> {
   const { data: techs } = await sb.rpc("technician_options");
   const names = new Map<string, string>();
   for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
@@ -138,34 +180,19 @@ async function withTechNames(
   }));
 }
 
-/** Each ticket's property city and state (one read of the properties the list names). */
-async function withPlaces(
-  sb: SupabaseClient<Database>,
-  rows: ServiceJobWithTech[],
-): Promise<ServiceJobWithTech[]> {
-  const ids = [...new Set(rows.map((r) => r.site_id).filter((x): x is string => !!x))];
-  if (!ids.length) return rows;
-  const { data } = await sb.from("crm_sites").select("id, city, state").in("id", ids);
-  const by = new Map((data ?? []).map((s) => [s.id, s]));
-  return rows.map((r) => {
-    const s = r.site_id ? by.get(r.site_id) : undefined;
-    return s ? { ...r, site_city: s.city, site_state: s.state } : r;
-  });
-}
-
 /** Every ticket for the office; a technician's own tickets only (RLS filters the rows). */
 export const listServiceJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<ServiceJobWithTech[]> => {
+  .handler(async ({ context }): Promise<ServiceJobListRow[]> => {
     await serviceAccess(context);
     const { data, error } = await context.supabase
       .from("service_jobs")
-      .select("*")
+      .select(LIST_JOB_COLUMNS)
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
-    return withPlaces(context.supabase, await withTechNames(context.supabase, data ?? []));
+    return withTechNames(context.supabase, data ?? []);
   });
 
 /**
@@ -190,16 +217,18 @@ export const listBoardJobs = createServerFn({ method: "GET" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<ServiceJobWithTech[]> => {
+  .handler(async ({ data, context }): Promise<ServiceJobListRow[]> => {
     await serviceAccess(context);
     const sb = context.supabase;
     // A finished ticket is filed by its completed day (boardDay), which may fall in this week
     // while its scheduled date does not (owner, Oct 15): read those too, a day wide each side
-    // so the viewer's calendar day never falls outside the UTC bounds.
-    const [week, finished, rail] = await Promise.all([
+    // so the viewer's calendar day never falls outside the UTC bounds. The fourth read (Nov 3,
+    // review item 9): finished tickets with no technician — Done, Authorized or Invoiced without
+    // anyone's name on them — which sat in no cell and not in the rail, so the board hid them.
+    const [week, finished, rail, finishedUnassigned] = await Promise.all([
       sb
         .from("service_jobs")
-        .select("*")
+        .select(LIST_JOB_COLUMNS)
         .is("deleted_at", null)
         .not("technician_id", "is", null)
         .gte("scheduled_date", data.from)
@@ -208,7 +237,7 @@ export const listBoardJobs = createServerFn({ method: "GET" })
         .limit(BOARD_WEEK_LIMIT),
       sb
         .from("service_jobs")
-        .select("*")
+        .select(LIST_JOB_COLUMNS)
         .is("deleted_at", null)
         .not("technician_id", "is", null)
         .in("stage", ["done", "authorized", "invoiced", "closed"])
@@ -218,21 +247,33 @@ export const listBoardJobs = createServerFn({ method: "GET" })
         .limit(BOARD_WEEK_LIMIT),
       sb
         .from("service_jobs")
-        .select("*")
+        .select(LIST_JOB_COLUMNS)
         .is("deleted_at", null)
         .in("stage", ["open", "scheduled"])
         .or("technician_id.is.null,scheduled_date.is.null")
         .order("created_at", { ascending: true })
         .limit(BOARD_WEEK_LIMIT),
+      sb
+        .from("service_jobs")
+        .select(LIST_JOB_COLUMNS)
+        .is("deleted_at", null)
+        .is("technician_id", null)
+        .in("stage", [...FINISHED_UNASSIGNED_STAGES])
+        .order("stage_changed_at", { ascending: true, nullsFirst: false })
+        .limit(BOARD_WEEK_LIMIT),
     ]);
     if (week.error) throw new Error(week.error.message);
     if (finished.error) throw new Error(finished.error.message);
     if (rail.error) throw new Error(rail.error.message);
+    if (finishedUnassigned.error) throw new Error(finishedUnassigned.error.message);
     const seen = new Set<string>();
-    const rows = [...(week.data ?? []), ...(finished.data ?? []), ...(rail.data ?? [])].filter(
-      (r) => (seen.has(r.id) ? false : (seen.add(r.id), true)),
-    );
-    return withPlaces(sb, await withTechNames(sb, rows));
+    const rows = [
+      ...(week.data ?? []),
+      ...(finished.data ?? []),
+      ...(rail.data ?? []),
+      ...(finishedUnassigned.data ?? []),
+    ].filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+    return withTechNames(sb, rows);
   });
 
 /**
@@ -244,7 +285,7 @@ export const listBoardJobs = createServerFn({ method: "GET" })
  */
 export interface AwaitingInvoice {
   count: number;
-  rows: ServiceJobWithTech[];
+  rows: ServiceJobListRow[];
 }
 export const AWAITING_INVOICE_LIMIT = 1000;
 /** Its query key: under "service-jobs", so invalidating the ticket list refreshes it too. */
@@ -254,27 +295,39 @@ export const listAwaitingInvoice = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<AwaitingInvoice> => {
     await serviceAccess(context);
     const sb = context.supabase;
-    const [counted, listed] = await Promise.all([
-      sb
-        .from("service_jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("stage", "authorized")
-        .is("deleted_at", null),
-      sb
-        .from("service_jobs")
-        .select("*")
-        .eq("stage", "authorized")
-        .is("deleted_at", null)
-        .order("completed_at", { ascending: true, nullsFirst: false })
-        .order("updated_at", { ascending: true })
-        .limit(AWAITING_INVOICE_LIMIT),
-    ]);
-    if (counted.error) throw new Error(counted.error.message);
-    if (listed.error) throw new Error(listed.error.message);
+    // One read (Nov 3): the rows and the database's exact count together.
+    const { data, count, error } = await sb
+      .from("service_jobs")
+      .select(LIST_JOB_COLUMNS, { count: "exact" })
+      .eq("stage", "authorized")
+      .is("deleted_at", null)
+      .order("completed_at", { ascending: true, nullsFirst: false })
+      .order("updated_at", { ascending: true })
+      .limit(AWAITING_INVOICE_LIMIT);
+    if (error) throw new Error(error.message);
     return {
-      count: counted.count ?? 0,
-      rows: await withTechNames(sb, listed.data ?? []),
+      count: count ?? data?.length ?? 0,
+      rows: await withTechNames(sb, data ?? []),
     };
+  });
+
+/**
+ * The Invoices tab's badge (Nov 3, review item 40): the count alone. Every page with the Service
+ * tabs used to read the whole Authorized queue (up to 1,000 rows with names) to show a number.
+ * Under the same key family as the queue, so a stage change refreshes both.
+ */
+export const AWAITING_INVOICE_COUNT_KEY = ["service-jobs", "awaiting-invoice", "count"] as const;
+export const countAwaitingInvoice = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ count: number }> => {
+    await serviceAccess(context);
+    const { count, error } = await context.supabase
+      .from("service_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("stage", "authorized")
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+    return { count: count ?? 0 };
   });
 
 export const getServiceJob = createServerFn({ method: "GET" })
@@ -388,6 +441,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     let customer_name = fields.customer_name ?? "";
     let site_name: string | null = null;
     let site_address: string | null = null;
+    let site_city: string | null = null;
+    let site_state: string | null = null;
     if (fields.account_id) {
       const { data: a, error } = await sb
         .from("crm_accounts")
@@ -407,6 +462,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
           throw new Error("That property does not belong to the customer");
         site_name = s.name;
         site_address = siteAddressLine(s) || null;
+        site_city = s.city;
+        site_state = s.state;
       } else {
         // A customer with more than one site: the ticket names which (owner, Oct 1).
         const { count, error: cErr } = await sb
@@ -452,6 +509,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       customer_name,
       site_name,
       site_address,
+      site_city,
+      site_state,
       ...(fields.location_id !== undefined
         ? { location_id: fields.location_id, location_name }
         : {}),
@@ -973,16 +1032,16 @@ export const restoreServiceJob = createServerFn({ method: "POST" })
 
 export const listDeletedServiceJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<ServiceJobRow[]> => {
+  .handler(async ({ context }): Promise<ServiceJobListRow[]> => {
     await serviceAccess(context);
     const { data, error } = await context.supabase
       .from("service_jobs")
-      .select("*")
+      .select(LIST_JOB_COLUMNS)
       .not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false })
       .limit(200);
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return withTechNames(context.supabase, data ?? []);
   });
 
 /** Material logged against a ticket (the inventory ledger rows that name it). */

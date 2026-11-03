@@ -27,6 +27,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { csvMoney, csvNumber, pctLabel, pdfMoney } from "@/lib/invoice-format";
 import { invoiceLabel } from "@/lib/invoice-numbering";
 import { pdfLineRows, propertyLines } from "@/lib/invoice-pdf-rows";
 import {
@@ -360,7 +361,8 @@ export function totals(
 // ---------------------------------------------------------------------------------------------
 // PDF
 
-const money = (n: number) => `$${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+// -$25.00 for a credit, as on screen (Nov 3, review item 15; it printed $-25.00).
+const money = (n: number) => pdfMoney(n);
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return "";
   const [y, m, day] = d.slice(0, 10).split("-");
@@ -665,11 +667,7 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   doc.y -= 14;
   const tot: [string, string, boolean][] = [
     ["Subtotal", money(Number(invoice.subtotal)), false],
-    [
-      `Tax (${(Number(invoice.tax_rate) * 100).toFixed(2)}%)`,
-      money(Number(invoice.tax_amount)),
-      false,
-    ],
+    [`Tax (${pctLabel(invoice.tax_rate)})`, money(Number(invoice.tax_amount)), false],
     ["Grand Total", money(Number(invoice.total)), true],
   ];
   for (const [k, v, bold] of tot) {
@@ -1145,12 +1143,12 @@ export function sageCsv(bundles: { invoice: InvoiceRow; lines: InvoiceLineRow[] 
       "",
       "",
       "",
-      String(invoice.subtotal),
-      String(invoice.tax_amount),
-      String(invoice.total),
+      csvMoney(invoice.subtotal),
+      csvMoney(invoice.tax_amount),
+      csvMoney(invoice.total),
       invoice.status,
       invoice.paid_on ?? "",
-      String(invoice.paid_amount),
+      csvMoney(invoice.paid_amount),
     ]);
     for (const l of lines) {
       rows.push([
@@ -1164,10 +1162,10 @@ export function sageCsv(bundles: { invoice: InvoiceRow; lines: InvoiceLineRow[] 
         invoice.job_code ?? "",
         l.kind,
         l.description,
-        String(l.qty),
+        csvNumber(l.qty),
         l.unit,
-        String(l.rate),
-        String(l.total),
+        csvNumber(l.rate),
+        csvMoney(l.total),
         l.taxable ? "Y" : "N",
         "",
         "",

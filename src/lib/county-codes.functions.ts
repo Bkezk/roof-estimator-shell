@@ -27,6 +27,38 @@ export const listCountyCodes = createServerFn({ method: "GET" })
     return [...(data ?? [])].sort(compareCountyCodes);
   });
 
+/**
+ * One code by id (Nov 3, review item 38): the ticket page prints "County code 0001 · Laurel, KY"
+ * for the property, and used to load the whole list (~40 KB) to find that one row. The picker
+ * still reads the list.
+ */
+export const getCountyCode = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<CountyCode | null> => {
+    const { data: row, error } = await context.supabase
+      .from("county_codes")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return row ?? null;
+  });
+
+/** A few codes by id (the property picker's rows): never the whole list for a short dropdown. */
+export const getCountyCodes = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ ids: z.array(z.string().uuid()).max(200) }).parse(d))
+  .handler(async ({ data, context }): Promise<CountyCode[]> => {
+    if (!data.ids.length) return [];
+    const { data: rows, error } = await context.supabase
+      .from("county_codes")
+      .select("*")
+      .in("id", data.ids);
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
 export const countyCodeSchema = z.object({
   id: z.string().uuid().optional(),
   code: z.string().trim().min(1, "The code is required").max(20),

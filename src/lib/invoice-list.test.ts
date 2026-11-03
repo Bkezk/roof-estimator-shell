@@ -118,7 +118,7 @@ describe("the Invoices list: sortable headings, Customer PO and Job # columns", 
     expect(page).toContain("<SortHead");
     for (const h of ['label="Customer PO"', 'label="Job #"']) expect(page).toContain(h);
   });
-  it("the default is newest first, as before", () => {
-    expect(page).toContain('useState<InvoiceSort>({ key: "date", dir: "desc" })');
+  it("the default is newest first, as before (Nov 3: read from the URL, newest first when it says nothing)", () => {
+    expect(page).toContain(': { key: "date", dir: "desc" };');
   });
 });

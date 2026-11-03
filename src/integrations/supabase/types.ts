@@ -3510,6 +3510,8 @@ export type Database = {
           signed_at: string | null;
           signed_by: string | null;
           site_address: string | null;
+          site_city: string | null;
+          site_state: string | null;
           site_id: string | null;
           site_name: string | null;
           stage: string;
@@ -3563,6 +3565,8 @@ export type Database = {
           signed_at?: string | null;
           signed_by?: string | null;
           site_address?: string | null;
+          site_city?: string | null;
+          site_state?: string | null;
           site_id?: string | null;
           site_name?: string | null;
           stage?: string;
@@ -3616,6 +3620,8 @@ export type Database = {
           signed_at?: string | null;
           signed_by?: string | null;
           site_address?: string | null;
+          site_city?: string | null;
+          site_state?: string | null;
           site_id?: string | null;
           site_name?: string | null;
           stage?: string;

@@ -89,7 +89,9 @@ function AuthedShell({ children }: { children: ReactNode }) {
       <NarrowMenuDefault />
       <div className="flex min-h-svh w-full">
         <AppSidebar />
-        <div className="flex flex-1 flex-col">
+        {/* min-w-0 (Nov 3): a wide table inside (the Invoices list) used to grow this flex
+            column past the phone's width, so the whole page zoomed out; now it scrolls inside. */}
+        <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
             <span className="font-semibold">JBK Portal</span>
@@ -101,7 +103,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
               <NotificationsBell />
             </div>
           </header>
-          <SidebarInset className="p-4 sm:p-6">{children}</SidebarInset>
+          <SidebarInset className="min-w-0 p-4 sm:p-6">{children}</SidebarInset>
         </div>
       </div>
     </SidebarProvider>

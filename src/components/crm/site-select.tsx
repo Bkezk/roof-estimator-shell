@@ -20,7 +20,7 @@ import { Plus } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import { getAccount, siteAddressLine, type AccountDetail, type SiteRow } from "@/lib/crm.functions";
 import { siteOptionLabel } from "@/lib/county-codes";
-import { useCountyCodes } from "@/components/crm/use-county-codes";
+import { useCountyCodesByIds } from "@/components/crm/use-county-codes";
 import { SiteForm, type SiteAddressPrefill } from "@/components/crm/site-form";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,8 +75,9 @@ export function SiteSelect(props: {
           zip: account.zip ?? "",
         }
       : undefined;
-  // The site's JBK county code after the address (the shared, cached list).
-  const codes = useCountyCodes().data;
+  // The site's JBK county code after the address: the codes these properties name (Nov 3,
+  // review item 38 — the whole list, ~40 KB, used to load for every ticket page).
+  const codes = useCountyCodesByIds(sites.map((s) => s.county_code_id));
   // The whole code row: "0108 Kenton, KY" (0108 alone is Kenton, KY or Putman, TN).
   const codeOf = (id: string | null) => (id ? codes?.find((c) => c.id === id) : undefined);
   // Who adds a site here: Customers access (admins and managers have it).

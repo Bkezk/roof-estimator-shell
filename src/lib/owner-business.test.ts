@@ -370,14 +370,15 @@ describe("the click-throughs", () => {
     });
   });
   it("the list honours it: the chip, the page prop and the server's final + sent", () => {
+    // Nov 3: the chip is the URL's (?status=), not page state (review item 11).
     expect(read("src/components/service/invoices-page.tsx")).toContain(
-      "useState<StatusFilter>(initialStatus)",
+      'const status: StatusFilter = filters.status ?? "all";',
     );
     expect(read("src/components/service/invoices-page.tsx")).toContain("> Unpaid </Chip>");
     expect(read("src/lib/invoices.functions.ts")).toContain(
       'if (data.status === "unpaid") q = q.in("status", ["final", "sent"]);',
     );
-    expect(read("src/routes/service.invoices.tsx")).toContain("status={status}");
+    expect(read("src/routes/service.invoices.tsx")).toContain("<InvoicesPage search={search} />");
   });
   it("every tile goes to the list filtered to what it counts", () => {
     expect(BUSINESS_HREFS).toEqual({

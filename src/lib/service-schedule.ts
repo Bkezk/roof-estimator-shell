@@ -152,6 +152,31 @@ export function sortUnassigned<T extends RailJob>(jobs: readonly T[]): T[] {
 export const FINISHED_STAGES: readonly string[] = ["done", "authorized", "invoiced", "closed"];
 
 /**
+ * The Tech Board's "Finished, no technician" group (owner, Nov 3, review item 9): tickets past
+ * the work with nobody's name on them — Done waiting for authorization, Authorized waiting for
+ * an invoice, Invoiced waiting to be closed. They sat in no cell (no technician) and not in the
+ * Unassigned rail (Open / Scheduled only), so the board hid them: seven of thirteen live
+ * tickets on Nov 3. Closed is left out — it is over, and the group would only grow.
+ */
+export const FINISHED_UNASSIGNED_STAGES: readonly string[] = ["done", "authorized", "invoiced"];
+
+interface FinishedJob {
+  stage: string;
+  technician_id: string | null;
+  stage_changed_at: string | null;
+  updated_at: string;
+}
+
+/** Those tickets, the one waiting longest in its stage first. */
+export function finishedUnassigned<T extends FinishedJob>(jobs: readonly T[]): T[] {
+  return jobs
+    .filter((j) => !j.technician_id && FINISHED_UNASSIGNED_STAGES.includes(j.stage))
+    .sort((a, b) =>
+      (a.stage_changed_at ?? a.updated_at).localeCompare(b.stage_changed_at ?? b.updated_at),
+    );
+}
+
+/**
  * The day a ticket sits on the Tech Board (owner, Oct 15: "if the due date is 10/22 but they
  * completed it on 10/15, have it show up on 10/15 instead of the due date so we can move it
  * forward easier"): a finished ticket with a close-out stamp goes on the day it was completed

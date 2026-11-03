@@ -26,6 +26,8 @@ describe("the customer card on a phone", () => {
     expect(page).toContain('className="min-w-0 break-words text-base font-semibold sm:truncate"');
   });
   it("the page padding is 16 px on a phone, 24 px from sm up", () => {
-    expect(read("src/components/auth-gate.tsx")).toContain('<SidebarInset className="p-4 sm:p-6">');
+    expect(read("src/components/auth-gate.tsx")).toContain(
+      '<SidebarInset className="min-w-0 p-4 sm:p-6">',
+    );
   });
 });

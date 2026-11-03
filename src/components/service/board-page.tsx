@@ -50,13 +50,19 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets } from "@/lib/access";
 import { weekLabel } from "@/lib/board-week";
-import { assignedStage, boardDay, shiftDays, sortUnassigned } from "@/lib/service-schedule";
+import {
+  assignedStage,
+  boardDay,
+  finishedUnassigned,
+  shiftDays,
+  sortUnassigned,
+} from "@/lib/service-schedule";
 import {
   assignServiceJob,
   listBoardJobs,
   SERVICE_STAGES,
   STAGE_LABELS,
-  type ServiceJobWithTech,
+  type ServiceJobListRow as ServiceJobWithTech,
   type ServiceStage,
 } from "@/lib/service.functions";
 import { listTechnicians } from "@/lib/auth.functions";
@@ -256,6 +262,18 @@ function Board({ week }: { week?: string | undefined }) {
   const unassignedTotal = jobs.filter(
     (j) => movable(j) && (!j.technician_id || !j.scheduled_date),
   ).length;
+  // Finished with nobody's name on them (owner, Nov 3, review item 9): Done, Authorized or
+  // Invoiced tickets with no technician sat in no cell and not in the rail, so the board hid
+  // them. Listed under the rail, longest in their stage first; the search narrows them too.
+  const finished = finishedUnassigned(jobs).filter((j) => {
+    if (!q) return true;
+    return [`#${j.number}`, j.customer_name, j.site_name, j.site_address, j.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+  const finishedTotal = finishedUnassigned(jobs).length;
 
   // ---- Drag and drop ---------------------------------------------------------------------------
   const dragged = dragId ? jobs.find((j) => j.id === dragId) : undefined;
@@ -459,6 +477,39 @@ function Board({ week }: { week?: string | undefined }) {
                     onDragEnd={endDrag}
                   />
                 ))
+              )}
+              {finishedTotal > 0 && (
+                <section
+                  className="space-y-1.5 border-t pt-2"
+                  aria-label="Finished tickets with no technician"
+                  data-rail="finished-unassigned"
+                >
+                  <h3 className="text-xs font-semibold">
+                    Finished, no technician
+                    <span className="ml-1 font-normal text-muted-foreground">{finishedTotal}</span>
+                  </h3>
+                  <p className="text-[11px] text-muted-foreground">
+                    Waiting on the office: authorize, invoice or close. Click one to open it.
+                  </p>
+                  {finished.length === 0 ? (
+                    <p className="py-2 text-center text-xs text-muted-foreground">
+                      No finished tickets match.
+                    </p>
+                  ) : (
+                    finished.map((j) => (
+                      <TicketChip
+                        key={j.id}
+                        job={j}
+                        detail
+                        week={days[0]!}
+                        drag={false}
+                        dragging={false}
+                        onDragStart={startDrag}
+                        onDragEnd={endDrag}
+                      />
+                    ))
+                  )}
+                </section>
               )}
             </div>
           </aside>
