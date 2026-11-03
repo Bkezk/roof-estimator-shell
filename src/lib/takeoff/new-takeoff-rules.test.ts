@@ -12,38 +12,35 @@ import { canCreateTakeoff, newTakeoffBlocker } from "./new-takeoff-rules";
 const read = (p: string) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8");
 
 describe("canCreateTakeoff: the customer is never required", () => {
-  it("PDF / screenshot need a name and a file", () => {
-    expect(canCreateTakeoff({ mode: "pdf", name: "Smith roof", file: {}, aerial: null })).toBe(
+  it("Upload a file (a PDF or a screenshot, one option since Nov 3) needs a name and a file", () => {
+    expect(canCreateTakeoff({ mode: "file", name: "Smith roof", file: {}, aerial: null })).toBe(
       true,
     );
-    expect(canCreateTakeoff({ mode: "image", name: "Smith roof", file: {}, aerial: null })).toBe(
+    expect(canCreateTakeoff({ mode: "file", name: "Smith roof", file: {}, aerial: null })).toBe(
       true,
     );
-    expect(canCreateTakeoff({ mode: "pdf", name: "   ", file: {}, aerial: null })).toBe(false);
-    expect(canCreateTakeoff({ mode: "pdf", name: "Smith roof", file: null, aerial: null })).toBe(
+    expect(canCreateTakeoff({ mode: "file", name: "   ", file: {}, aerial: null })).toBe(false);
+    expect(canCreateTakeoff({ mode: "file", name: "Smith roof", file: null, aerial: null })).toBe(
       false,
     );
-    expect(canCreateTakeoff({ mode: "image", name: "", file: null, aerial: {} })).toBe(false);
+    expect(canCreateTakeoff({ mode: "file", name: "", file: null, aerial: {} })).toBe(false);
   });
   it("From an address needs the address picture; the name is optional", () => {
     expect(canCreateTakeoff({ mode: "address", name: "", file: null, aerial: {} })).toBe(true);
     expect(canCreateTakeoff({ mode: "address", name: "x", file: {}, aerial: null })).toBe(false);
   });
   it("the blocker names what is missing", () => {
-    expect(newTakeoffBlocker({ mode: "pdf", name: "", file: {}, aerial: null })).toBe(
+    expect(newTakeoffBlocker({ mode: "file", name: "", file: {}, aerial: null })).toBe(
       "Give the takeoff a name — the job or building, not the file.",
     );
-    expect(newTakeoffBlocker({ mode: "pdf", name: "A", file: null, aerial: null })).toBe(
-      "Choose the plan-set PDF first.",
-    );
-    expect(newTakeoffBlocker({ mode: "image", name: "A", file: null, aerial: null })).toBe(
-      "Choose the screenshot first.",
+    expect(newTakeoffBlocker({ mode: "file", name: "A", file: null, aerial: null })).toBe(
+      "Choose the plan-set PDF or the screenshot first.",
     );
     expect(newTakeoffBlocker({ mode: "address", name: "", file: null, aerial: null })).toBe(
       "Find the address (or pick the building on the map) first.",
     );
     expect(newTakeoffBlocker({ mode: "address", name: "", file: null, aerial: {} })).toBeNull();
-    expect(newTakeoffBlocker({ mode: "pdf", name: "A", file: {}, aerial: null })).toBeNull();
+    expect(newTakeoffBlocker({ mode: "file", name: "A", file: {}, aerial: null })).toBeNull();
   });
 });
 

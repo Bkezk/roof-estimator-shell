@@ -46,15 +46,19 @@ describe("1. the satellite picture is the obvious choice", () => {
   const dialog = read("src/components/takeoff-page.tsx");
   const picker = read("src/components/takeoff/aerial-pick.tsx");
   it("is the first pill and the default when the dialog opens (and after a reset)", () => {
-    expect(dialog).toContain('const TAKEOFF_SOURCES = ["address", "pdf", "image"] as const;');
+    expect(dialog).toContain('const TAKEOFF_SOURCES = ["address", "file"] as const;');
     expect(dialog).toContain('const DEFAULT_SOURCE: TakeoffSource = "address";');
     expect(dialog).toContain("useState<TakeoffSource>(DEFAULT_SOURCE)");
     expect(dialog).toContain("setSource(DEFAULT_SOURCE);");
     expect(dialog).not.toContain('useState<TakeoffSource>("pdf")');
   });
-  it("is named for what it is, and the screenshot pill for what it is", () => {
+  it("is named for what it is; the PDF and the screenshot are one Upload a file pill (owner, Nov 3)", () => {
     expect(dialog).toContain('address: "Satellite picture",');
-    expect(dialog).toContain('image: "Screenshot you took",');
+    expect(dialog).toContain('file: "Upload a file",');
+    expect(dialog).toContain('const SOURCE_ACCEPT = "application/pdf,image/png,image/jpeg";');
+    expect(dialog).toContain("Plan-set PDF or screenshot <span");
+    expect(dialog).not.toContain('"Plan-set PDF",');
+    expect(dialog).not.toContain('"Screenshot you took"');
     expect(dialog).not.toContain('"From an address"');
     expect(dialog).not.toContain('"Aerial screenshot"');
     expect(dialog).toContain(
@@ -74,9 +78,17 @@ describe("1. the satellite picture is the obvious choice", () => {
     expect(dialog).toContain(
       "<AerialAddressPicker\n              disabled={!!busy}\n              autoFocus\n              onChange={setAerial}\n              onSuggestion={pickSuggestion}\n            />",
     );
-    // The customer box takes the focus only on the other two options.
+    // The customer box takes the focus only on the file option.
     expect(dialog).toContain('autoFocus={source !== "address"}');
     expect(picker).toContain("autoFocus={autoFocus}");
+  });
+});
+
+describe("1b. one dialog shape whichever option is open (owner, Nov 3)", () => {
+  it("the content is the wide, scrolling card for both options", () => {
+    const dialog = read("src/components/takeoff-page.tsx");
+    expect(dialog).toContain('className="max-h-[92vh] overflow-y-auto sm:max-w-3xl"');
+    expect(dialog).not.toContain('"sm:max-w-md"');
   });
 });
 

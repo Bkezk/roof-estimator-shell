@@ -22,6 +22,7 @@ import {
   MapPin,
   Plus,
   RotateCcw,
+  Upload,
   Ruler,
   Trash2,
 } from "lucide-react";
@@ -90,30 +91,27 @@ const MAX_BYTES = 100 * 1024 * 1024;
 const ACCEPT = ["application/pdf", "image/png", "image/jpeg"];
 
 /**
- * Where a new takeoff's underlay comes from (the New takeoff dialog's three options). The
+ * Where a new takeoff's underlay comes from (the New takeoff dialog's two options). The
  * satellite picture comes first and is the default (owner, Nov 3: "when you want a satelitte
  * picture theres no easy way to search an address from the new takeoff prompt" — it used to be
- * the third pill, named From an address, behind a PDF default).
+ * the third pill, named From an address, behind a PDF default). The plan-set PDF and the
+ * screenshot are one "Upload a file" option (owner, Nov 3: "combine plan-set PDF and screenshots
+ * as those are both file uploads"): the file's type decides how it opens (a PDF's sheets become
+ * pages; a PNG / JPEG is one page).
  */
-const TAKEOFF_SOURCES = ["address", "pdf", "image"] as const;
+const TAKEOFF_SOURCES = ["address", "file"] as const;
 type TakeoffSource = (typeof TAKEOFF_SOURCES)[number];
 const DEFAULT_SOURCE: TakeoffSource = "address";
 const SOURCE_LABELS: Record<TakeoffSource, string> = {
   address: "Satellite picture",
-  pdf: "Plan-set PDF",
-  image: "Screenshot you took",
+  file: "Upload a file",
 };
 const SOURCE_HELP: Record<TakeoffSource, string> = {
   address:
     "Search an address: the satellite picture comes up (Kentucky and Tennessee), frame the roof and use it. It opens scaled, ready to measure.",
-  pdf: "A plan-set PDF (every sheet becomes a page), up to 100 MB. Set the scale from a known dimension.",
-  image:
-    "An aerial screenshot you took (PNG or JPEG), up to 100 MB. Set the scale from a known dimension.",
+  file: "A plan-set PDF (every sheet becomes a page) or an aerial screenshot (PNG or JPEG), up to 100 MB. Set the scale from a known dimension.",
 };
-const SOURCE_ACCEPT: Record<Exclude<TakeoffSource, "address">, string> = {
-  pdf: "application/pdf",
-  image: "image/png,image/jpeg",
-};
+const SOURCE_ACCEPT = "application/pdf,image/png,image/jpeg";
 
 export function TakeoffPage({ id }: { id?: string | undefined }) {
   return id ? <TakeoffEditor id={id} /> : <TakeoffList />;
@@ -845,9 +843,9 @@ function NewTakeoffDialog(props: {
       }}
     >
       <DialogContent
-        className={
-          source === "address" ? "max-h-[92vh] overflow-y-auto sm:max-w-3xl" : "sm:max-w-md"
-        }
+        // One shape whichever option is open (owner, Nov 3: "the pop up card changes shape based
+        // on which one you select").
+        className="max-h-[92vh] overflow-y-auto sm:max-w-3xl"
       >
         <DialogHeader>
           <DialogTitle>New takeoff</DialogTitle>
@@ -872,10 +870,8 @@ function NewTakeoffDialog(props: {
                 disabled={!!busy}
                 onClick={() => pickSource(s)}
               >
-                {s === "pdf" ? (
-                  <FileText className="mr-1 h-4 w-4" />
-                ) : s === "image" ? (
-                  <FileImage className="mr-1 h-4 w-4" />
+                {s === "file" ? (
+                  <Upload className="mr-1 h-4 w-4" />
                 ) : (
                   <MapPin className="mr-1 h-4 w-4" />
                 )}
@@ -939,14 +935,12 @@ function NewTakeoffDialog(props: {
           {source !== "address" && (
             <div className="space-y-1">
               <Label htmlFor="takeoff-file">
-                {source === "pdf" ? "Plan file" : "Screenshot"}{" "}
-                <span className="text-destructive">*</span>
+                Plan-set PDF or screenshot <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="takeoff-file"
-                key={source}
                 type="file"
-                accept={SOURCE_ACCEPT[source]}
+                accept={SOURCE_ACCEPT}
                 disabled={!!busy}
                 onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
               />

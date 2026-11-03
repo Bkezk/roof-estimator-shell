@@ -2,11 +2,13 @@
  * When the New takeoff dialog may create (owner, Oct 27: "customer shouldn't be required on
  * takeoff please remove that, just make it the name and plan file or aerial screenshot or
  * address"). The customer is optional for everyone; what is needed is:
- *   - Plan-set PDF / aerial screenshot: a name and the file;
- *   - Satellite picture (an address): the address picture (the name is optional — it defaults to the address).
+ *   - Upload a file (a plan-set PDF or a screenshot — one option since Nov 3): a name and the
+ *     file;
+ *   - Satellite picture (an address): the address picture (the name is optional — it defaults to
+ *     the address).
  * Pure.
  */
-export type NewTakeoffMode = "pdf" | "image" | "address";
+export type NewTakeoffMode = "file" | "address";
 
 export interface NewTakeoffForm {
   mode: NewTakeoffMode;
@@ -28,7 +30,6 @@ export function newTakeoffBlocker(form: NewTakeoffForm): string | null {
   if (form.mode === "address")
     return form.aerial ? null : "Find the address (or pick the building on the map) first.";
   if (!form.name.trim()) return "Give the takeoff a name — the job or building, not the file.";
-  if (!form.file)
-    return form.mode === "pdf" ? "Choose the plan-set PDF first." : "Choose the screenshot first.";
+  if (!form.file) return "Choose the plan-set PDF or the screenshot first.";
   return null;
 }

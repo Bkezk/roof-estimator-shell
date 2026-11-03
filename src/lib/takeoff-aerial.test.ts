@@ -353,11 +353,10 @@ describe("the ticket aerial shares the lookup", () => {
 
 describe("the New takeoff dialog's address option", () => {
   const src = read("src/components/takeoff-page.tsx");
-  it('offers "Satellite picture" (first, the default since Nov 3) beside the PDF and the screenshot', () => {
-    expect(src).toContain('const TAKEOFF_SOURCES = ["address", "pdf", "image"] as const;');
+  it('offers "Satellite picture" (first, the default since Nov 3) beside the file upload', () => {
+    expect(src).toContain('const TAKEOFF_SOURCES = ["address", "file"] as const;');
     expect(src).toContain('address: "Satellite picture",');
-    expect(src).toContain('pdf: "Plan-set PDF",');
-    expect(src).toContain('image: "Screenshot you took",');
+    expect(src).toContain('file: "Upload a file",');
     expect(src).toContain("<AerialAddressPicker\n              disabled={!!busy}");
   });
   it('"Use this picture": the imagery alone to a PNG, takeoffFromAerial, the same upload as a screenshot', () => {
