@@ -468,6 +468,67 @@ export const setBidStatus = createServerFn({ method: "POST" })
   });
 
 /**
+ * The bid's due date on its own (owner, Nov 4: Status and the due date save as soon as they
+ * change in the estimator, without the bid's whole body). The same rule as saveBid: a day
+ * replaces the stored one; clearing it is allowed only on a won / lost bid (bidDueDateProblem).
+ * Stamps updated_at / updated_by_name but not content_saved_at, so an estimator tab's next full
+ * save is not told its copy is stale. Returns the row's id, due_date and updated_at.
+ */
+export const setBidDueDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        dueDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "The bid due date must be a day (YYYY-MM-DD)")
+          .nullable(),
+      })
+      .parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ id: string; due_date: string | null; updated_at: string }> => {
+      const [{ data: me }, { data: cur, error: cErr }] = await Promise.all([
+        context.supabase
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", context.userId)
+          .maybeSingle(),
+        context.supabase
+          .from("bids")
+          .select("status, due_date, deleted_at")
+          .eq("id", data.id)
+          .maybeSingle(),
+      ]);
+      if (cErr) throw new Error(cErr.message);
+      if (!cur || cur.deleted_at) throw new Error("Bid not found (it may have been deleted).");
+      const problem = bidDueDateProblem({
+        isNew: false,
+        dueDate: data.dueDate,
+        status: cur.status,
+        hadDueDate: !!cur.due_date,
+      });
+      if (problem) throw new Error(problem);
+      const { data: bid, error } = await context.supabase
+        .from("bids")
+        .update({
+          due_date: data.dueDate,
+          updated_at: new Date().toISOString(),
+          updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
+        })
+        .eq("id", data.id)
+        .select("id, due_date, updated_at")
+        .single();
+      if (error) throw new Error(error.message);
+      return bid;
+    },
+  );
+
+/**
  * Move the day a won bid was won (bids.won_on; owner, Oct 21: "a way to adjust the date the bid
  * was won to ensure the data appears correctly") — the Margin report's inline Won-on box. Admins
  * and managers only (the role from the caller's own profile row); a bid that is not won has no

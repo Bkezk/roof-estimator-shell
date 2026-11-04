@@ -80,3 +80,24 @@ a rename alone showed "Unsaved changes" and the dialog, Leave without saving kep
 name; a due-date change alone asked too. Test: `src/lib/estimate-next-and-leave-nov4.test.ts`
 (6; 4 fail on the old code). Pins updated: `technician-quick-add`, `bid-reminders`,
 `bids-folders`.
+
+## 4. Status and due date save at change (owner, later the same day)
+
+"can we have the status box and due date auto save at change?" — on a saved bid they do, the
+header alone: the Status picker (and the lost reason from its dialog, and the Won on day) through
+the Bids list's own `setBidStatus`; the due date through the new `setBidDueDate` (same rule as
+Save: a day replaces the stored one, clearing it is allowed only on a won / lost bid). A new bid
+keeps them for its first Save. The saved-changes baseline is now two: the body (sections, pricing,
+customer link, name) and the header, so a status saved alone leaves a pending section edit
+pending and the leave dialog still asks about it. The due date and the won day save when the
+typing stops (0.9 s) or the box is left, never a half-typed year. A refusal (a date cleared on a
+draft) is said and the change stays here for the next Save. Neither call stamps
+`content_saved_at`, so the tab's next full Save is not told its copy is stale; the bid's cached
+row is updated too, so reopening it in the same tab shows what was saved.
+
+Browser check (temporary bid, removed afterwards): Draft, Won (today filled in), a won day,
+Lost with its reason, Submitted — one save each, "Status saved: …", the Unsaved marker clear;
+the due date saved after the pause (and when typed segment by segment); clearing it on a draft
+was refused with Save's words and stayed pending; a rename stayed pending through a status
+save and the leave dialog asked for it; reopened, the bid showed the saved status and date.
+Test: `src/lib/bid-header-autosave-nov4.test.ts` (6; all fail on the old code).

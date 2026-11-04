@@ -296,7 +296,7 @@ describe("the estimator", () => {
     expect(src).toMatch(/<Label htmlFor="bid-won-on"[^>]*>\s*Won on\s*<\/Label>/);
     expect(src).toContain('bidStatus === "won" && (');
     expect(src).toContain('setWonOnDay(loadedBid.won_on ?? "");');
-    expect(src).toContain('if (st === "won" && !wonOnDay) setWonOnDay(bidOfficeToday());');
+    expect(src).toContain('if (st === "won" && !wonOnDay) setWonOnDay(wonOn);');
   });
   it("sends wonOn with the save when the status or the day changed in the tab (bidHeaderPatch: null unless Won)", () => {
     const save = src.indexOf("const tabHeader: BidHeader = {");

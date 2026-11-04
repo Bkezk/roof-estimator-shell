@@ -40,15 +40,18 @@ describe("Setup › Customer Name adds a new customer through the popup", () => 
 });
 
 describe("a renamed bid, a changed status or due date count as unsaved changes", () => {
-  it("the baseline carries the name and the header beside the saved body and the link", () => {
-    expect(page).toContain("const savedJsonOf = (h: BidHeader, name: string) =>");
+  it("the baselines carry the name (body) and the header beside the saved body and the link", () => {
+    expect(page).toContain("const bodyJsonOf = (name: string) =>");
     expect(page).toContain(
-      '|${name.trim()}|${h.status}|${h.lostReason ?? ""}|${h.wonOn}|${h.dueDate}|${normalizeFolder(h.folder) ?? ""}|',
+      '`${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;',
     );
-    expect(page).toContain("const savedJson = savedJsonOf(tabHeader, bidName);");
+    expect(page).toContain("const headerJsonOf = (h: BidHeader) =>");
+    expect(page).toContain(
+      '`${h.status}|${h.status === "lost" ? (h.lostReason ?? "") : ""}|${h.status === "won" ? h.wonOn : ""}|${h.dueDate}|${normalizeFolder(h.folder) ?? ""}|',
+    );
     // After a save whose header was partly kept from elsewhere, the baseline is the row's header.
     expect(page).toContain(
-      "row && kept.length ? savedJsonOf(bidHeaderOfRow(row), bidName) : savedJson;",
+      "lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;",
     );
   });
 });

@@ -34,6 +34,8 @@ import {
   getBid,
   listBidFolders,
   saveBid,
+  setBidDueDate as setBidDueDateFn,
+  setBidStatus as setBidStatusFn,
   getWarrantyData,
   getMarkupPresets,
 } from "@/lib/bids.functions";
@@ -438,6 +440,8 @@ function EstimatePage() {
   const getBidFn = useServerFn(getBid);
   const listEstimatorsFn = useServerFn(listEstimatorNames);
   const saveBidFn = useServerFn(saveBid);
+  const statusSaveFn = useServerFn(setBidStatusFn);
+  const dueDateSaveFn = useServerFn(setBidDueDateFn);
   // "Start a bid" from an opportunity (?opportunity=<id>): the first save links it back.
   const linkBidFn = useServerFn(linkBid);
   const navigate = useNavigate();
@@ -753,9 +757,11 @@ function EstimatePage() {
       return;
     }
     // Switched to Won now: today is the won day until the user picks another (owner, Oct 21).
-    if (st === "won" && !wonOnDay) setWonOnDay(bidOfficeToday());
+    const wonOn = st === "won" ? wonOnDay || bidOfficeToday() : "";
+    if (st === "won" && !wonOnDay) setWonOnDay(wonOn);
     setBidStatus(st);
     setLostReason(null);
+    void autoSaveStatus(st, null, wonOn);
   };
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
@@ -2010,15 +2016,116 @@ function EstimatePage() {
     reminderOn: bidReminderOn,
     reminderNote: bidReminderNote,
   };
-  const savedJsonOf = (h: BidHeader, name: string) =>
-    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}|${h.status}|${h.lostReason ?? ""}|${h.wonOn}|${h.dueDate}|${normalizeFolder(h.folder) ?? ""}|${h.reminderOn}|${h.reminderOn ? h.reminderNote.trim() : ""}`;
-  const savedJson = savedJsonOf(tabHeader, bidName);
-  const lastSavedJson = useRef<string | null>(null);
+  // Two baselines, because the header can be saved on its own (autoSaveStatus / autoSaveDueDate
+  // below) while the body still has edits pending.
+  const bodyJsonOf = (name: string) =>
+    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;
+  // The won day counts only while Won and the lost reason only while Lost (the save sends them
+  // that way; a day left behind by an earlier Won is not a change).
+  const headerJsonOf = (h: BidHeader) =>
+    `${h.status}|${h.status === "lost" ? (h.lostReason ?? "") : ""}|${h.status === "won" ? h.wonOn : ""}|${h.dueDate}|${normalizeFolder(h.folder) ?? ""}|${h.reminderOn}|${h.reminderOn ? h.reminderNote.trim() : ""}`;
+  const lastSavedBody = useRef<string | null>(null);
+  const lastSavedHeader = useRef<BidHeader | null>(null);
   useEffect(() => {
-    lastSavedJson.current = savedJson;
+    lastSavedBody.current = bodyJsonOf(bidName);
+    lastSavedHeader.current = tabHeader;
     if (loadFill.current) loadFill.current.baselined = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline only at mount / hydration
   }, [hydrationStamp]);
+  // Owner, Nov 4: Status (with its lost reason and won day) and the due date save the moment
+  // they change on a SAVED bid — the header alone, through the Bids list's own calls — so a
+  // status or due date is never lost to an unsaved page. A new bid keeps them for its first Save.
+  // The header baseline moves with them; the body's own edits stay pending. A refusal (a date
+  // cleared on a draft, a bid gone) is said, and the change stays here for the next Save.
+  const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  // Bumped after a header save so the "Unsaved changes" marker is recomputed against the moved
+  // baseline (the refs alone do not re-render).
+  const [, setHeaderStamp] = useState(0);
+  const headerSaved = (
+    patch: Partial<BidHeader>,
+    cols: Record<string, unknown>,
+    updatedAt: string | null | undefined,
+  ) => {
+    if (updatedAt) loadedUpdatedAt.current = updatedAt;
+    if (lastSavedHeader.current) lastSavedHeader.current = { ...lastSavedHeader.current, ...patch };
+    if (loadedHeader.current) loadedHeader.current = { ...loadedHeader.current, ...patch };
+    // The bid's own cached row carries the saved columns, so reopening it in this tab (within
+    // the cache's life) shows what was saved, not the row as first loaded.
+    if (bidId)
+      qc.setQueryData(["bid", bidId], (old: Record<string, unknown> | undefined) =>
+        old ? { ...old, ...cols, ...(updatedAt ? { updated_at: updatedAt } : {}) } : old,
+      );
+    setHeaderStamp((n) => n + 1);
+    qc.invalidateQueries({ queryKey: ["bids"] });
+    qc.invalidateQueries({ queryKey: ["my-work"] });
+  };
+  const autoSaveStatus = async (status: BidStatus, reason: string | null, wonOn: string) => {
+    if (!bidId || readOnly) return;
+    try {
+      const row = await statusSaveFn({
+        data: {
+          id: bidId,
+          status,
+          ...(status === "lost" ? { lostReason: reason } : {}),
+          ...(status === "won" && wonOn ? { wonOn } : {}),
+        },
+      });
+      const day = row.won_on ?? "";
+      if (status === "won" && day !== wonOn) setWonOnDay(day);
+      headerSaved(
+        { status, lostReason: status === "lost" ? reason : null, wonOn: day },
+        {
+          status,
+          lost_reason: status === "lost" ? reason : null,
+          won_on: row.won_on ?? null,
+          submitted_at: row.submitted_at ?? null,
+        },
+        row.updated_at,
+      );
+      toast.success(`Status saved: ${STATUS_LABELS[status]}`);
+    } catch (e) {
+      toast.error(`The status is not saved yet (${errText(e)}) — Save the bid to keep it.`);
+    }
+  };
+  // The due date and the won day are typed: wait until the typing stops (or the box is left),
+  // and never save a half-typed year.
+  const dayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const DAY_SAVE_MS = 900;
+  const completeDay = (v: string) => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && v >= "2000");
+  const autoSaveDueDate = async (v: string) => {
+    if (!bidId || readOnly || !completeDay(v)) return;
+    const problem = bidDueDateProblem({
+      isNew: false,
+      dueDate: v || null,
+      status: bidStatus,
+      hadDueDate: !!lastSavedHeader.current?.dueDate,
+    });
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    try {
+      const row = await dueDateSaveFn({ data: { id: bidId, dueDate: v || null } });
+      headerSaved(
+        { dueDate: row.due_date ?? "" },
+        { due_date: row.due_date ?? null },
+        row.updated_at,
+      );
+      toast.success(v ? "Due date saved" : "Due date cleared");
+    } catch (e) {
+      toast.error(`The due date is not saved yet (${errText(e)}) — Save the bid to keep it.`);
+    }
+  };
+  const dayTyped = (save: () => void) => {
+    if (dayTimer.current) clearTimeout(dayTimer.current);
+    dayTimer.current = setTimeout(save, DAY_SAVE_MS);
+  };
+  const dayLeft = (save: () => void) => {
+    if (!dayTimer.current) return;
+    clearTimeout(dayTimer.current);
+    dayTimer.current = null;
+    save();
+  };
   // Membrane-mil check on load (owner, Sep 30): the bid's saved snapshot is the pricing in force;
   // a mil its system does not offer there (an imported bid, a bid saved before the guard) would
   // price at $0. Runs once per hydrate, after the baseline above, so a correction leaves the bid
@@ -2088,7 +2195,11 @@ function EstimatePage() {
     const fill = profileFill(linkedDetail.account, site);
     setCustomer((c) => applyProfileFill(c, blankFieldsOnly(c, fill), false));
   }, [linkedDetail, readOnly, hydrationStamp]);
-  const dirty = lastSavedJson.current !== null && savedJson !== lastSavedJson.current;
+  const dirty =
+    lastSavedBody.current !== null &&
+    lastSavedHeader.current !== null &&
+    (bodyJsonOf(bidName) !== lastSavedBody.current ||
+      headerJsonOf(tabHeader) !== headerJsonOf(lastSavedHeader.current));
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
   // Leaving the page with unsaved changes asks (owner, Nov 4: Next no longer saves — "when you
@@ -2644,6 +2755,8 @@ function EstimatePage() {
       toast.success(savedToastText(kept));
       setDueDateMissing(false);
       if (row?.updated_at) loadedUpdatedAt.current = row.updated_at;
+      // The saved row into the bid's own cache (reopening it in this tab shows this save).
+      if (row) qc.setQueryData(["bid", row.id], row);
       if (row) {
         const h = bidHeaderOfRow(row);
         loadedHeader.current = h;
@@ -2657,8 +2770,8 @@ function EstimatePage() {
           setBidReminderNote(h.reminderNote);
         }
       }
-      lastSavedJson.current =
-        row && kept.length ? savedJsonOf(bidHeaderOfRow(row), bidName) : savedJson;
+      lastSavedBody.current = bodyJsonOf(bidName);
+      lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
       if (row && !bidId) {
@@ -6716,8 +6829,14 @@ function EstimatePage() {
               className={`h-9 w-full ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
               value={bidDueDate}
               onChange={(e) => {
-                setBidDueDate(e.target.value);
-                if (e.target.value) setDueDateMissing(false);
+                const v = e.target.value;
+                setBidDueDate(v);
+                if (v) setDueDateMissing(false);
+                dayTyped(() => void autoSaveDueDate(v));
+              }}
+              onBlur={(e) => {
+                const v = e.target.value;
+                dayLeft(() => void autoSaveDueDate(v));
               }}
               disabled={readOnly}
               required={!bidId}
@@ -6761,7 +6880,15 @@ function EstimatePage() {
                   type="date"
                   className="h-8 w-[9.5rem] text-xs"
                   value={wonOnDay}
-                  onChange={(e) => setWonOnDay(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setWonOnDay(v);
+                    if (completeDay(v) && v) dayTyped(() => void autoSaveStatus("won", null, v));
+                  }}
+                  onBlur={(e) => {
+                    const v = e.target.value;
+                    if (completeDay(v) && v) dayLeft(() => void autoSaveStatus("won", null, v));
+                  }}
                   disabled={readOnly}
                   title="The day the bid was won. The Margin report counts it on this day."
                 />
@@ -6797,6 +6924,7 @@ function EstimatePage() {
                   setBidStatus("lost");
                   setLostReason(reason);
                   setAskLost(false);
+                  void autoSaveStatus("lost", reason, "");
                 }}
               />
             )}
