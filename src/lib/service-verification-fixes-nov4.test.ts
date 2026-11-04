@@ -5,16 +5,15 @@
  *   1  the material row's + / −, the two "next step" marks and the checklist's OK / Issue / N/A
  *      are 44 px tall
  *   2  a material logged clears the "Nothing used" mark (the close-out's draft and the server)
- *   3  Setup makes the small copies for pictures from before Nov 3
+ *   3  the small copies for pictures from before Nov 3 (a one-time card, since removed)
  *   4  the Inventory page reads the item-number keys, not the 700 KB of full rows
  *   5  Setup names the "Recommend repairs" row the phone turns into a switch
  *   6  the signature's link rides in the ticket bundle
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { itemNumberKeyLine, parseItemNumberKeyLine } from "@/lib/admin-item-numbers.functions";
-import { PHOTO_COPY_BATCH } from "@/lib/service-field.functions";
 
 const read = (p: string) => readFileSync(p, "utf8");
 const materials = read("src/components/service/materials-section.tsx");
@@ -24,7 +23,6 @@ const inventoryFns = read("src/lib/inventory.functions.ts");
 const fieldFns = read("src/lib/service-field.functions.ts");
 const shared = read("src/components/service/field-shared.tsx");
 const utils = read("src/components/service/field-utils.ts");
-const card = read("src/components/service/picture-copies-card.tsx");
 const setup = read("src/routes/setup.tsx");
 
 describe("1. finger-sized buttons (44 px; the root font is 13 px, so Tailwind's h-11 is 36 px)", () => {
@@ -87,24 +85,16 @@ describe("2. a material logged clears the 'Nothing used' mark", () => {
   });
 });
 
-describe("3. Setup makes the small copies for older pictures", () => {
-  it("listPhotosWithoutThumb: a manager's, a batch of rows without a copy (before/after/other), their links signed in one call, the total", () => {
-    expect(PHOTO_COPY_BATCH).toBe(25);
-    const fn = fieldFns.slice(
-      fieldFns.indexOf("export const listPhotosWithoutThumb"),
-      fieldFns.indexOf("export function photoObjectPath"),
-    );
-    expect(fn).toContain(
-      'if (!managesTickets(p)) throw new Error("Only a manager makes the small copies");',
-    );
-    expect(fn).toContain(
-      '.select("id, service_job_id, storage_path, thumb_path", { count: "exact" })',
-    );
-    expect(fn).toContain('.is("thumb_path", null)');
-    expect(fn).toContain('.in("role", ["before", "after", "other"])');
-    expect(fn).toContain(".limit(PHOTO_COPY_BATCH);");
-    expect(fn).toContain("const urls = await signPhotoPaths(context.supabase, rows);");
-    expect(fn).toContain("total: count ?? rows.length,");
+describe("3. the small copies for older pictures", () => {
+  // The one-time Setup card (listPhotosWithoutThumb + picture-copies-card.tsx) made the 72 copies
+  // on Nov 4 and was then removed (owner: "get rid of that button now since its no longer
+  // necessary"). What stays is the shared makeSmallCopy and the viewer's backfill for any photo
+  // that ever turns up without one.
+  it("the card and its server function are gone", () => {
+    expect(existsSync("src/components/service/picture-copies-card.tsx")).toBe(false);
+    expect(fieldFns).not.toContain("listPhotosWithoutThumb");
+    expect(fieldFns).not.toContain("PHOTO_COPY_BATCH");
+    expect(setup).not.toContain("PictureCopiesCard");
   });
   it("makeSmallCopy: download, shrink, upload beside the picture (a copy already there is fine), record; the viewer's backfill uses it", () => {
     const fn = read("src/components/service/small-copy.ts");
@@ -118,16 +108,6 @@ describe("3. Setup makes the small copies for older pictures", () => {
     expect(fn).toContain("const row = await setPhotoThumb({");
     expect(shared).toContain("const path = await makeSmallCopy(photo, fullUrl);");
     expect(shared).toContain('import { makeSmallCopy } from "@/components/service/small-copy";');
-  });
-  it("the card: counts what is left, runs the batches, skips a picture that failed, reports; on Setup for managers and admins", () => {
-    expect(card).toContain("const batch = await listFn();");
-    expect(card).toContain("const todo = batch.photos.filter((ph) => !tried.current.has(ph.id));");
-    expect(card).toContain("const path = await makeSmallCopy(ph, ph.url);");
-    expect(card).toContain("Every picture has its small copy.");
-    expect(card).toContain("no small copy yet.");
-    expect(card).toContain("Make the small copies");
-    expect(card).toContain("The full pictures are not changed.");
-    expect(setup).toContain("{canSetDrivers && <PictureCopiesCard />}");
   });
 });
 

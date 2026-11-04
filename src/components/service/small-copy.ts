@@ -1,10 +1,11 @@
 /**
  * The small copy of one picture, made in the browser from the full picture (field-utils
  * makeThumb), uploaded beside it and recorded on its row (setPhotoThumb). Null when this browser
- * cannot decode the file; throws when the download, the upload or the record fails. Shared by
- * the viewer's backfill (field-shared.tsx backfillThumb) and Setup's "Small copies for older
- * pictures" card (picture-copies-card.tsx; the Nov 4 check, finding 3). A copy that already sits
- * in the bucket (an earlier run that stopped before the row was written) is simply recorded.
+ * cannot decode the file; throws when the download, the upload or the record fails. Used by the
+ * viewer's backfill (field-shared.tsx backfillThumb); Setup's one-time "Small copies for older
+ * pictures" card ran through it on Nov 4 (72 pictures, then removed — owner: "get rid of that
+ * button now since its no longer necessary"). A copy that already sits in the bucket is simply
+ * recorded.
  */
 import { makeThumb, thumbPathFor, uploadToServiceBucket } from "@/components/service/field-utils";
 import { setPhotoThumb } from "@/lib/service-field.functions";

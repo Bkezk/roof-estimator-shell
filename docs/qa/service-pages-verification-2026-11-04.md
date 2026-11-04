@@ -197,3 +197,10 @@ prev?.stage → prev.stage, the PreviewPane line, the saveCrew line, the TicketE
 
 Tests: sage-export.test.ts (10; 6 fail on the code before — the pure fillSageIds / summary tests
 pass either way). Chain: prettier, eslint 0 errors, tsc, vitest 486 files / 6,255 tests, build.
+
+## The small copies: done, the card removed (Nov 4, evening)
+
+The owner pressed "Make the small copies": all 72 older pictures now have a small copy in the
+bucket (none recorded without its object), the last at 16:01 UTC. The one-time Setup card and its
+server function (listPhotosWithoutThumb) are removed as no longer necessary; the shared
+makeSmallCopy and the viewer's backfill stay for any photo that ever turns up without one.

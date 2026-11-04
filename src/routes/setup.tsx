@@ -10,7 +10,6 @@ import { ServiceRatesSettings } from "@/components/service-rates-settings";
 import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
 import { MaterialPricingSettings } from "@/components/service/material-pricing-settings";
 import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
-import { PictureCopiesCard } from "@/components/service/picture-copies-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
@@ -107,8 +106,6 @@ function SetupPage() {
           </TabsContent>
         )}
       </Tabs>
-      {/* Housekeeping (the Nov 4 check, finding 3): the small copies for pictures from before Nov 3. */}
-      {canSetDrivers && <PictureCopiesCard />}
     </div>
   );
 }
