@@ -146,6 +146,7 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
       "voidInvoice",
       "listInvoices",
       "exportSageCsv",
+      "markSageExported",
     ])
       expect(serverFn(inv, fn), fn).toMatch(/await office\(context\)/);
   });

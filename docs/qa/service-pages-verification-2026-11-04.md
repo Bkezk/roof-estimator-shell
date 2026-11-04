@@ -179,3 +179,21 @@ Not done, by the owner's choice: 6 (the Sage export stamps invoices before the f
 Tests: service-review-bugs-nov4.test.ts (19; 16 fail on the code before — the three pure
 draftConflict / constant tests pass either way). Older pins moved (ownJob → editableJob,
 prev?.stage → prev.stage, the PreviewPane line, the saveCrew line, the TicketExtras X).
+
+## Bugs 6 and 7, done (Nov 4, later; owner: "go ahead and implement 6 and 7")
+
+6. Export to Sage no longer stamps invoices inside the request. The server builds the file and
+   answers with the ids; the dialog downloads it, THEN calls markSageExported, which stamps only
+   rows with no stamp yet — an invoice exported before keeps its first date, and a dropped
+   connection on the way down stamps nothing. The toast says how many were stamped today and how
+   many kept an earlier date. If the stamp itself fails after the download, the dialog says so
+   and how to find those invoices again.
+7. Vendors carry a "Sage customer #" (vendors.sage_customer_id, 20261104150000, applied live;
+   typed on the Vendors section). The invoice's Bill To snapshot copies it (vendorBillTo). Before
+   the CSV is built the export fills a blank CustomerId from the vendor's or the ticket's
+   customer's CURRENT number (lib/sage-export.ts fillSageIds), so a number typed after the invoice
+   was made counts too; what is still blank holds the file behind a warning that names each
+   invoice and who it is billed to, with Back or Download anyway.
+
+Tests: sage-export.test.ts (10; 6 fail on the code before — the pure fillSageIds / summary tests
+pass either way). Chain: prettier, eslint 0 errors, tsc, vitest 486 files / 6,255 tests, build.

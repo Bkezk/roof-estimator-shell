@@ -45,6 +45,12 @@ import {
   type InvoiceShareState,
 } from "@/lib/invoice-share";
 import type { InvoiceBundle } from "@/lib/invoices.server";
+import {
+  fillSageIds,
+  missingSageIds,
+  type MissingSageId,
+  type SageLookups,
+} from "@/lib/sage-export";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
@@ -1166,7 +1172,14 @@ export const listInvoices = createServerFn({ method: "GET" })
     });
   });
 
-/** The Sage CSV for a date range (finals and later); stamps sage_exported_at. */
+/**
+ * The Sage CSV for a date range (finals and later). Nothing is stamped here (Nov 4, bug 6 of the
+ * Nov 3 review): the file used to be stamped exported inside this request, before it reached the
+ * browser, so a dropped connection marked every invoice exported with no file — and "only new"
+ * then hid them on the retry. The dialog downloads the file, then calls markSageExported with
+ * the ids. Blank Sage customer numbers are filled from the current vendor / customer records
+ * (lib/sage-export.ts; bug 7) and what is still blank comes back as `missing` for the warning.
+ */
 export const exportSageCsv = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -1179,7 +1192,16 @@ export const exportSageCsv = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(
-    async ({ data, context }): Promise<{ csv: string; count: number; file_name: string }> => {
+    async ({
+      data,
+      context,
+    }): Promise<{
+      csv: string;
+      count: number;
+      file_name: string;
+      ids: string[];
+      missing: MissingSageId[];
+    }> => {
       await office(context);
       const sb = context.supabase;
       let q = sb
@@ -1197,25 +1219,87 @@ export const exportSageCsv = createServerFn({ method: "POST" })
       const { data: lines } = ids.length
         ? await sb.from("invoice_lines").select("*").in("invoice_id", ids).order("sort")
         : { data: [] as InvoiceLineRow[] };
+      const filled = fillSageIds(invs ?? [], await sageLookups(sb, invs ?? []));
       const { sageCsv } = await import("@/lib/invoices.server");
       const csv = sageCsv(
-        (invs ?? []).map((invoice) => ({
+        filled.map((invoice) => ({
           invoice,
           lines: (lines ?? []).filter((l) => l.invoice_id === invoice.id),
         })),
       );
-      if (ids.length) {
-        const now = new Date().toISOString();
-        // Logged by the database as "Invoice 6012 exported to Sage".
-        const { error: xErr } = await sb
-          .from("invoices")
-          .update({ sage_exported_at: now })
-          .in("id", ids);
-        if (xErr) console.error("Could not stamp the Sage export", xErr.message);
-      }
-      return { csv, count: ids.length, file_name: `sage-invoices-${data.from}-to-${data.to}.csv` };
+      return {
+        csv,
+        count: ids.length,
+        file_name: `sage-invoices-${data.from}-to-${data.to}.csv`,
+        ids,
+        missing: missingSageIds(filled),
+      };
     },
   );
+
+/** The current Sage numbers for the invoices whose snapshot has none (the vendor's, or the ticket's customer's). */
+async function sageLookups(sb: Ctx["supabase"], invs: readonly InvoiceRow[]): Promise<SageLookups> {
+  const blank = invs.filter(
+    (i) => !((i.bill_to ?? {}) as { external_id?: string }).external_id?.trim(),
+  );
+  const vendorIds = [
+    ...new Set(blank.map((i) => i.bill_to_vendor_id).filter((v): v is string => !!v)),
+  ];
+  const jobIds = [
+    ...new Set(blank.filter((i) => !i.bill_to_vendor_id).map((i) => i.service_job_id)),
+  ];
+  const [vendors, jobs] = await Promise.all([
+    vendorIds.length
+      ? // sage_customer_id (20261104150000) is newer than the generated types: a loose read.
+        (sb as unknown as SupabaseClient)
+          .from("vendors")
+          .select("id, sage_customer_id")
+          .in("id", vendorIds)
+      : Promise.resolve({ data: [] as { id: string; sage_customer_id: string | null }[] }),
+    jobIds.length
+      ? sb.from("service_jobs").select("id, account_id").in("id", jobIds)
+      : Promise.resolve({ data: [] as { id: string; account_id: string | null }[] }),
+  ]);
+  const accountIds = [
+    ...new Set((jobs.data ?? []).map((j) => j.account_id).filter((a): a is string => !!a)),
+  ];
+  const accounts = accountIds.length
+    ? await sb.from("crm_accounts").select("id, external_id").in("id", accountIds)
+    : { data: [] as { id: string; external_id: string | null }[] };
+  const byAccount = new Map((accounts.data ?? []).map((a) => [a.id, a.external_id]));
+  return {
+    vendorIds: new Map(
+      ((vendors.data ?? []) as { id: string; sage_customer_id: string | null }[]).map((v) => [
+        v.id,
+        v.sage_customer_id,
+      ]),
+    ),
+    accountIdsByJob: new Map(
+      (jobs.data ?? []).map((j) => [j.id, j.account_id ? byAccount.get(j.account_id) : null]),
+    ),
+  };
+}
+
+/**
+ * Stamp the invoices of a downloaded Sage file as exported (Nov 4, bug 6): called by the dialog
+ * once the file is in the browser's hands. Only rows with no stamp yet are stamped — an invoice
+ * exported before keeps its first date. Logged by the database as "Invoice 6012 exported to Sage".
+ */
+export const markSageExported = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ ids: z.array(z.string().uuid()).max(5000) }).parse(d))
+  .handler(async ({ data, context }): Promise<{ stamped: number }> => {
+    await office(context);
+    if (!data.ids.length) return { stamped: 0 };
+    const { data: rows, error } = await context.supabase
+      .from("invoices")
+      .update({ sage_exported_at: new Date().toISOString() })
+      .in("id", data.ids)
+      .is("sage_exported_at", null)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return { stamped: (rows ?? []).length };
+  });
 
 /**
  * The Service rates tab of Setup (was Admin › Service Rates): ticket money, so an admin's or a manager's

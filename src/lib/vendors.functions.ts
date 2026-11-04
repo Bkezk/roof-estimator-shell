@@ -23,7 +23,11 @@ import {
 } from "@/lib/vendors";
 import { parseInput } from "@/lib/crm-account";
 
-export type VendorRow = Database["public"]["Tables"]["vendors"]["Row"];
+/** A vendor row; sage_customer_id (20261104150000) is newer than the generated types. */
+export type VendorRow = Database["public"]["Tables"]["vendors"]["Row"] & {
+  sage_customer_id?: string | null;
+};
+type VendorInsert = Database["public"]["Tables"]["vendors"]["Insert"];
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 
@@ -130,6 +134,8 @@ export const vendorSchema = z.object({
     .pipe(z.string().email().max(200).nullable()), // "Email looks wrong" (parseInput)
   terms: optText(120),
   account_number: optText(60),
+  /** The Sage customer # (Nov 4, bug 7 of the Nov 3 review): the export's CustomerId column. */
+  sage_customer_id: optText(40),
   notes: optText(10_000),
   billable: z.boolean().default(true),
 });
@@ -151,7 +157,7 @@ export const saveVendor = createServerFn({ method: "POST" })
     if (!id) {
       const { data: row, error } = await sb
         .from("vendors")
-        .insert({ ...fields, created_by: context.userId })
+        .insert({ ...fields, created_by: context.userId } as VendorInsert)
         .select("*")
         .single();
       if (error)
@@ -161,7 +167,7 @@ export const saveVendor = createServerFn({ method: "POST" })
     await vendorRow(context, id);
     const { data: row, error } = await sb
       .from("vendors")
-      .update(fields)
+      .update(fields as VendorInsert)
       .eq("id", id)
       .select("*")
       .maybeSingle();

@@ -31,6 +31,8 @@ export interface VendorLike {
   email?: string | null;
   terms?: string | null;
   account_number?: string | null;
+  /** The vendor's customer number in Sage (Nov 4, bug 7 of the Nov 3 review). */
+  sage_customer_id?: string | null;
   billable?: boolean | null;
   archived_at?: string | null;
 }
@@ -71,9 +73,9 @@ export function vendorAddressLine(v: VendorLike): string {
 }
 
 /**
- * The invoice's Bill To taken from a vendor: the same shape as from the customer account. A
- * vendor has no Sage customer # (external_id) and no billing instructions of ours, so both are
- * blank.
+ * The invoice's Bill To taken from a vendor: the same shape as from the customer account. The
+ * Sage customer # is the vendor's (sage_customer_id; blank until the office types it — Nov 4,
+ * bug 7 of the Nov 3 review); a vendor has no billing instructions of ours.
  */
 export function vendorBillTo(v: VendorLike): BillToSnapshot {
   return {
@@ -84,7 +86,7 @@ export function vendorBillTo(v: VendorLike): BillToSnapshot {
     state: t(v.state),
     zip: t(v.zip),
     instructions: "",
-    external_id: "",
+    external_id: t(v.sage_customer_id),
   };
 }
 
@@ -157,6 +159,7 @@ export interface VendorDraft {
   email: string;
   terms: string;
   account_number: string;
+  sage_customer_id: string;
   notes: string;
   billable: boolean;
 }
@@ -175,6 +178,7 @@ export function vendorDraftOf(v?: (VendorLike & { notes?: string | null }) | nul
     email: v?.email ?? "",
     terms: v?.terms ?? "",
     account_number: v?.account_number ?? "",
+    sage_customer_id: v?.sage_customer_id ?? "",
     notes: v?.notes ?? "",
     billable: v?.billable ?? true,
   };

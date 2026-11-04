@@ -50,6 +50,7 @@ import {
 import { daysSince, toInvoice as toInvoiceRows, waitingSince } from "@/lib/service-schedule";
 import {
   exportSageCsv,
+  markSageExported,
   INVOICE_STATUSES,
   listInvoices,
   type InvoiceStatus,
@@ -79,6 +80,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { exportedSummary } from "@/lib/sage-export";
 
 export function InvoicesPage({ search }: { search: InvoiceSearch }) {
   const { profile } = useAuth();
@@ -595,17 +597,46 @@ function ToInvoiceTable(props: {
   );
 }
 
+type SageFile = Awaited<ReturnType<ReturnType<typeof useServerFn<typeof exportSageCsv>>>>;
+
+/**
+ * Export to Sage (Nov 4, bugs 6 and 7 of the Nov 3 review): the server builds the file; when an
+ * invoice would go out with a blank CustomerId the dialog says which and offers Download anyway;
+ * the file downloads; THEN the invoices are stamped exported (markSageExported, which never
+ * overwrites an earlier stamp). A dropped connection on the way down stamps nothing.
+ */
 function ExportDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const exportFn = useServerFn(exportSageCsv);
+  const stampFn = useServerFn(markSageExported);
   const month = thisMonth();
   const [from, setFrom] = useState(month.from);
   const [to, setTo] = useState(month.to);
   const [onlyNew, setOnlyNew] = useState(true);
+  // A file waiting on the blank-CustomerId warning.
+  const [held, setHeld] = useState<SageFile | null>(null);
+  const stamp = useMutation({
+    mutationFn: (r: SageFile) => stampFn({ data: { ids: r.ids } }),
+    onSuccess: ({ stamped }, r) => {
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      toast.success(exportedSummary(r.count, stamped));
+      onClose();
+    },
+    onError: (e) => {
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      toast.error(
+        `The file downloaded, but the invoices could not be marked exported: ${errText(e)}. Export again with "Only invoices not yet exported" to see them.`,
+      );
+      onClose();
+    },
+  });
+  const download = (r: SageFile) => {
+    downloadBlob(new Blob([r.csv], { type: "text/csv;charset=utf-8" }), r.file_name);
+    stamp.mutate(r);
+  };
   const run = useMutation({
     mutationFn: () => exportFn({ data: { from, to, only_unexported: onlyNew } }),
     onSuccess: (r) => {
-      void qc.invalidateQueries({ queryKey: ["invoices"] });
       if (r.count === 0) {
         toast.info(
           onlyNew
@@ -614,73 +645,124 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
         );
         return;
       }
-      downloadBlob(new Blob([r.csv], { type: "text/csv;charset=utf-8" }), r.file_name);
-      toast.success(`Exported ${r.count} invoice${r.count === 1 ? "" : "s"} for Sage`);
-      onClose();
+      if (r.missing.length) {
+        setHeld(r);
+        return;
+      }
+      download(r);
     },
     onError: (e) => toast.error(`Could not export to Sage: ${errText(e)}`),
   });
+  const busy = run.isPending || stamp.isPending;
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
   return (
     <Dialog
       open
       onOpenChange={(o) => {
-        if (!o && !run.isPending) onClose();
+        if (!o && !busy) onClose();
       }}
     >
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Export to Sage</DialogTitle>
-          <DialogDescription>
-            A CSV of the final, sent and paid invoices dated in this range (one row per invoice and
-            one per line) for the bookkeeper to import. Those invoices are stamped exported.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          id="sage-export"
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!valid) {
-              toast.error("Pick a from and to date (from on or before to)");
-              return;
-            }
-            run.mutate();
-          }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="sage-from">From</Label>
-              <Input
-                id="sage-from"
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="sage-to">To</Label>
-              <Input id="sage-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            </div>
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <Checkbox checked={onlyNew} onCheckedChange={(v) => setOnlyNew(v === true)} />
-            Only invoices not yet exported
-          </label>
-        </form>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" disabled={run.isPending} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form="sage-export" disabled={run.isPending || !valid}>
-            {run.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <FileDown className="mr-2 h-4 w-4" />
-            )}
-            Export CSV
-          </Button>
-        </DialogFooter>
+        {held ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>
+                {held.missing.length === 1
+                  ? "One invoice has no Sage customer #"
+                  : `${held.missing.length} invoices have no Sage customer #`}
+              </DialogTitle>
+              <DialogDescription>
+                Their CustomerId column would be blank, so the bookkeeper has to look the account
+                up. Add the number — on the customer&apos;s page, or on the vendor in the Vendors
+                section — and export again, or download the file as it is.
+              </DialogDescription>
+            </DialogHeader>
+            <ul className="max-h-60 space-y-1 overflow-y-auto text-sm" data-line="sage-missing">
+              {held.missing.map((m) => (
+                <li key={m.label}>
+                  <span className="font-medium">#{m.label}</span> — {m.bill_to || "(no name)"}{" "}
+                  <span className="text-muted-foreground">
+                    ({m.vendor ? "vendor" : "customer"})
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" disabled={busy} onClick={() => setHeld(null)}>
+                Back
+              </Button>
+              <Button disabled={busy} onClick={() => download(held)} data-action="download-anyway">
+                {stamp.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileDown className="mr-2 h-4 w-4" />
+                )}
+                Download anyway
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Export to Sage</DialogTitle>
+              <DialogDescription>
+                A CSV of the final, sent and paid invoices dated in this range (one row per invoice
+                and one per line) for the bookkeeper to import. Once the file has downloaded, those
+                invoices are stamped exported; one exported before keeps its first date.
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              id="sage-export"
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!valid) {
+                  toast.error("Pick a from and to date (from on or before to)");
+                  return;
+                }
+                run.mutate();
+              }}
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="sage-from">From</Label>
+                  <Input
+                    id="sage-from"
+                    type="date"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="sage-to">To</Label>
+                  <Input
+                    id="sage-to"
+                    type="date"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                  />
+                </div>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox checked={onlyNew} onCheckedChange={(v) => setOnlyNew(v === true)} />
+                Only invoices not yet exported
+              </label>
+            </form>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" disabled={busy} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" form="sage-export" disabled={busy || !valid}>
+                {busy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileDown className="mr-2 h-4 w-4" />
+                )}
+                Export CSV
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

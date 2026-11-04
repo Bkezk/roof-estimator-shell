@@ -190,6 +190,8 @@ const FIELDS: {
   { key: "email", label: "Email", max: 200, type: "email" },
   { key: "terms", label: "Terms (e.g. Net 30)", max: 120 },
   { key: "account_number", label: "Our account #", max: 60 },
+  // Nov 4 (bug 7 of the Nov 3 review): the Sage export's CustomerId for an invoice billed to the vendor.
+  { key: "sage_customer_id", label: "Sage customer #", max: 40 },
 ];
 
 /** Every field of a vendor: editable for admins and managers, read-only for everyone else. */
