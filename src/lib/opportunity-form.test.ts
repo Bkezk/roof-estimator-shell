@@ -163,7 +163,7 @@ describe("the opportunity page (owner, Oct 1)", () => {
     const rowOpen = editor.slice(editor.lastIndexOf("<div", at), at);
     expect(rowOpen).toContain("grid-cols-2");
     expect(rowOpen).toContain("@2xl:grid-cols-4");
-    const row = editor.slice(at, editor.indexOf("{!deleted && (", at));
+    const row = editor.slice(at, editor.indexOf("{!readOnly && (", at));
     const order = ["opp-assignee", "opp-close", "opp-source", "opp-value"].map((id) =>
       row.indexOf(`htmlFor="${id}"`),
     );

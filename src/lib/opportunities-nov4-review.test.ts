@@ -249,7 +249,7 @@ describe("the page (src/components/opportunities-page.tsx)", () => {
   it("the Assignee box saves at change on a saved opportunity and is left out of Save's baseline", () => {
     expect(page).toContain("const assigneeFn = useServerFn(setOpportunityAssignee);");
     expect(page).toMatch(
-      /const changeAssignee = \(v: string\) => \{\s*if \(!v \|\| v === draft\.assignee_id\) return;\s*if \(opp && !deleted\) assigneeMut\.mutate\(\{ assignee_id: v, before: draft\.assignee_id \}\);\s*else set\("assignee_id", v\);\s*\};/,
+      /const changeAssignee = \(v: string\) => \{\s*if \(!v \|\| v === draft\.assignee_id\) return;\s*if \(opp && !readOnly\) assigneeMut\.mutate\(\{ assignee_id: v, before: draft\.assignee_id \}\);\s*else set\("assignee_id", v\);\s*\};/,
     );
     expect(page).toContain("onValueChange={changeAssignee}");
     expect(page).toContain('onMutate: (v) => set("assignee_id", v.assignee_id),');

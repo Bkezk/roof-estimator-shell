@@ -536,7 +536,8 @@ describe("A. what the pages read", () => {
     );
     expect(bids).toContain("{fromOpportunityLine(bid.opportunity.title)}");
     const est = src("src/routes/estimate.tsx");
-    expect(est).toContain("const fromOpportunityId = loadedBid?.opportunity_id ?? null;");
+    // Since Nov 4 the id this tab linked on the first save counts too (linkedOppId).
+    expect(est).toContain("const fromOpportunityId = loadedBid?.opportunity_id ?? linkedOppId;");
     expect(est).toContain('queryKey: ["opportunity", fromOpportunityId],');
     expect(est).toContain(
       '<Link to="/opportunities" search={{ id: fromOpportunity.data.id }} className="hover:underline"',

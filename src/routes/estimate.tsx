@@ -1100,7 +1100,9 @@ function EstimatePage() {
   // opportunity: <title>" under the Status select, linking back. Read under the opportunity's own
   // RLS (Estimate access reads them all).
   const getOppFn = useServerFn(getOpportunity);
-  const fromOpportunityId = loadedBid?.opportunity_id ?? null;
+  // The opportunity this tab linked on the first save (linkOpportunity), until the row says so.
+  const [linkedOppId, setLinkedOppId] = useState<string | null>(null);
+  const fromOpportunityId = loadedBid?.opportunity_id ?? linkedOppId;
   const fromOpportunity = useQuery({
     queryKey: ["opportunity", fromOpportunityId],
     queryFn: () => getOppFn({ data: { id: fromOpportunityId! } }),
@@ -2797,6 +2799,9 @@ function EstimatePage() {
   const linkOpportunity = (opportunityId: string, newBidId: string) => {
     linkBidFn({ data: { opportunityId, bidId: newBidId } })
       .then(() => {
+        // "From opportunity: …" shows at once (audit, Nov 4: the saved row was read before the
+        // link was written, so the line waited for the bid to be reopened).
+        setLinkedOppId(opportunityId);
         void qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
         void qc.invalidateQueries({ queryKey: ["opportunities"] });
       })

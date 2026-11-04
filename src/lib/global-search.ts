@@ -8,6 +8,35 @@
  * security decides what each role sees — a technician finds their own tickets and nothing else.
  */
 import { ilikePattern, orIlike } from "@/lib/account-search";
+import { STATUS_LABELS as BID_STATUS_LABELS, type BidStatus } from "@/lib/bid-status";
+
+/** Invoice statuses as the Invoices page names them (components/service/invoice-utils.ts). */
+const INVOICE_STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  final: "Final",
+  sent: "Sent",
+  paid: "Paid",
+  void: "Void",
+};
+const OPP_STATUS_LABELS: Record<string, string> = {
+  open: "Open",
+  contacted: "Contacted",
+  quoted: "Quoted",
+  won: "Won",
+  lost: "Lost",
+  no_response: "No response",
+};
+
+/**
+ * A result's status in words — "Lost", "Won", "Paid" — not the stored key ("lost", "no_response";
+ * audit, Nov 4). A key the page does not name is shown as it is.
+ */
+export function searchStatusLabel(kind: "opportunity" | "bid" | "invoice", status: string): string {
+  if (!status) return "";
+  if (kind === "opportunity") return OPP_STATUS_LABELS[status] ?? status;
+  if (kind === "bid") return BID_STATUS_LABELS[status as BidStatus] ?? status;
+  return INVOICE_STATUS_LABELS[status] ?? status;
+}
 
 /** Fewer characters than this: nothing is searched. */
 export const SEARCH_MIN = 2;

@@ -76,3 +76,36 @@ Every step above ran with no page errors except the one in finding 2.
 - A non-manager moving a stored expected close (refused: `dateMoveProblem`, covered by
   `bid-drives-opportunity.test.ts` and `followup-rules` tests) — the test login is an admin.
 - Mentions on a Comment (the `mention-*` tests) — not sent, to tell nobody.
+
+## The fixes (owner: "fix all please")
+
+One push, each finding with a test that fails on the code before it
+(`src/lib/opportunities-audit-fixes-nov4.test.ts`, 11; 10 fail on the old code — the migration
+pin is new either way).
+
+1. Save refreshes the timeline: the page's `invalidate` covers `["contact-log", "opportunity",
+id]`. Browser: right after a Save that moved the date, the Timeline read "Note · … Expected
+   close moved from Dec 4, 2026 to Nov 16, 2026", no reload.
+2. The header's tags line is a `div` on the opportunity page and the ticket page. Browser: the
+   element is a DIV on both, and an opportunity reopened with an Overdue badge logged no error;
+   a real ticket opened read-only logged none.
+3. Global search says the status in words (`searchStatusLabel`: opportunities, bids, invoices;
+   an unknown key as it is). Browser: "… Customer · Open".
+4. The estimator keeps the opportunity id it linked on the first save (`linkedOppId`), so "From
+   opportunity: <title>" shows at once. Browser: the line was there right after the first Save
+   of a bid started from the opportunity.
+5. The write rule on the page (`opportunity-form.ts assigneeChoices`, `mayWriteOpportunity`): a
+   user without Customers access gets an Assignee box with only themselves and the line "Without
+   Customers access you can only assign it to yourself."; an opportunity that is not theirs opens
+   read-only (fieldset, status select and Save off) under "Only Customers access or the assignee
+   can change this opportunity." The follow-up read policy admits Estimate access
+   (`20261104200000_followups_read_estimate.sql`, applied live and read back from `pg_policies`:
+   `customers or estimate or assignee`), so their list carries holds and next reminders like the
+   office's. As the admin test login nothing changed: 9 assignee choices, no hint, no read-only
+   line (there is no Estimate-only user to sign in as; the rule is unit-tested).
+6. The page's header comment says the deleted view's status select is disabled, not gone.
+
+Pins updated: `opened-and-stage-dates`, `opportunity-deleted`, `opportunities-nov4-review`,
+`opportunity-customer-required`, `opportunity-form`, `bid-drives-opportunity`. Chain: lint clean,
+types clean, 492 files / 6,306 tests, build OK. The temporary rows of this check were removed
+afterwards.

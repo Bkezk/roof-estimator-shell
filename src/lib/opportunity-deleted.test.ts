@@ -222,12 +222,14 @@ describe("the Opportunities page on a deleted opportunity (source)", () => {
     expect(page).toContain("Deleted on {when(opp.deleted_at)}.");
   });
   it("makes the form read-only: a disabled fieldset, no Save, no submit", () => {
-    expect(page).toMatch(/<fieldset\s+disabled=\{deleted\}/);
-    expect(page).toContain("if (!deleted) submit();");
+    // `readOnly` = deleted, or not the viewer's to change (audit, Nov 4).
+    expect(page).toMatch(/<fieldset\s+disabled=\{readOnly\}/);
+    expect(page).toContain("const readOnly = deleted || !mayWrite;");
+    expect(page).toContain("if (!readOnly) submit();");
     expect(page).toMatch(
-      /\{!deleted && \(\s*<div className="flex flex-wrap items-center gap-3">\s*<Button\s+type="submit"/,
+      /\{!readOnly && \(\s*<div className="flex flex-wrap items-center gap-3">\s*<Button\s+type="submit"/,
     );
-    expect(page).toContain("disabled={statusMut.isPending || deleted}");
+    expect(page).toContain("disabled={statusMut.isPending || readOnly}");
   });
   it("hides Start a bid, Delete, the follow-up strip and the contact-log buttons", () => {
     expect(page).toMatch(/\{opp &&\s+!deleted &&[^]*?Start a bid/);

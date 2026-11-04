@@ -13,6 +13,7 @@ import {
   parseGlobalQuery,
   rankHits,
   searchFilter,
+  searchStatusLabel,
   SEARCH_LIMIT,
   SEARCH_MAX_LEN,
   type SearchHit,
@@ -223,7 +224,7 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "opportunity",
         id: s(r["id"]),
         title: s(r["title"]),
-        subtitle: joinParts(nameOf(r), s(r["status"])),
+        subtitle: joinParts(nameOf(r), searchStatusLabel("opportunity", s(r["status"]))),
         ...hitRoute("opportunity", { id: s(r["id"]) }),
       });
     for (const r of bids)
@@ -231,7 +232,7 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "bid",
         id: s(r["id"]),
         title: s(r["name"]),
-        subtitle: joinParts(nameOf(r), s(r["status"])),
+        subtitle: joinParts(nameOf(r), searchStatusLabel("bid", s(r["status"]))),
         ...hitRoute("bid", { id: s(r["id"]) }),
       });
     for (const r of invoices)
@@ -239,7 +240,11 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "invoice",
         id: s(r["id"]),
         title: `Invoice ${s(r["display_number"]) || String(r["number"] ?? "")}`,
-        subtitle: joinParts(jsonName(r["bill_to"]), jsonName(r["property"]), s(r["status"])),
+        subtitle: joinParts(
+          jsonName(r["bill_to"]),
+          jsonName(r["property"]),
+          searchStatusLabel("invoice", s(r["status"])),
+        ),
         ...hitRoute("invoice", { id: s(r["id"]) }),
       });
     for (const r of vendors)

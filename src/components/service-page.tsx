@@ -2580,8 +2580,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             </div>
           )}
         </div>
+        {/* A div, not a p: the badges are divs (audit, Nov 4: React's hydration warning). */}
         {job && (
-          <p
+          <div
             className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
             data-line="tags"
           >
@@ -2597,7 +2598,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               )}
               what="Was due"
             />
-          </p>
+          </div>
         )}
         {job?.from_opportunity_id && <FromOpportunityNote id={job.from_opportunity_id} />}
         {job && (

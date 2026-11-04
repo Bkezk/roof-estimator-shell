@@ -452,8 +452,9 @@ describe("the ticket page: the stage strip under the header carries the opened d
     expect(h1).toBeGreaterThan(0);
     expect(tags).toBeGreaterThan(h1);
     expect(tags).toBeLessThan(numbers);
+    // A div since Nov 4 (the badges are divs; a p logged React's hydration warning).
     expect(src).toMatch(
-      /<p\s+className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"\s+data-line="tags"\s*>/,
+      /<div\s+className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"\s+data-line="tags"\s*>/,
     );
   });
   it("the strip closes the header, on every width; the stage picker stays", () => {

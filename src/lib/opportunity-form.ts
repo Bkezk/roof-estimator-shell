@@ -43,6 +43,38 @@ export function assigneeProblem(_input: {
   return null;
 }
 
+/**
+ * Who the Assignee box offers (audit, Nov 4). The write rule is the database's
+ * (crm_opportunities_write: Customers access, or the assignee), so a user without Customers
+ * access — an Estimate-only user, who reads every opportunity — can only make or keep an
+ * opportunity their own: the box offers themselves alone (and the current assignee, so a saved
+ * one still reads), instead of a refusal after the form is filled. Admins and managers have
+ * Customers access by the rule itself.
+ */
+export function assigneeChoices<T extends { id: string }>(
+  options: readonly T[],
+  who: {
+    me: string | null | undefined;
+    mayAssignOthers: boolean;
+    current?: string | null | undefined;
+  },
+): T[] {
+  if (who.mayAssignOthers) return [...options];
+  return options.filter((o) => o.id === who.me || (!!who.current && o.id === who.current));
+}
+/** Under the Assignee box for a user who may only assign to themselves. */
+export const ASSIGNEE_ONLY_SELF = "Without Customers access you can only assign it to yourself.";
+/** The read-only line for an opportunity the viewer may not change. */
+export const OPP_READ_ONLY = "Only Customers access or the assignee can change this opportunity.";
+/** May this viewer change the opportunity? New ones: yes (the server decides the assignee). */
+export function mayWriteOpportunity(
+  viewer: { id?: string | null | undefined; hasCustomers: boolean },
+  opp: { assignee_id: string | null } | null,
+): boolean {
+  if (!opp || viewer.hasCustomers) return true;
+  return !!viewer.id && opp.assignee_id === viewer.id;
+}
+
 export const OPP_CUSTOMER_REQUIRED = "Pick or add the customer";
 export const OPP_SITE_NEEDED = "Add a property to this customer first";
 /** The customer rule (hasContactMethod) for a customer saved before it (older data). */

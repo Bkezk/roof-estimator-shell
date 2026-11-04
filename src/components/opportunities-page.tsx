@@ -28,9 +28,15 @@
  * the page, not in the header.
  *
  * A deleted opportunity (an old `?id=` link) opens read-only under a "Deleted on <date>" banner:
- * the form is disabled, and the status select, Start a bid, Delete, the follow-up strip and the
- * contact-log buttons are gone (the server refuses them too: OPP_DELETED). Admins and managers
- * get Restore (restoreOpportunity).
+ * the form and the status select are disabled, and Start a bid, Start a ticket, Delete, the
+ * follow-up strip and the contact-log buttons are gone (the server refuses them too:
+ * OPP_DELETED). Admins and managers get Restore (restoreOpportunity).
+ *
+ * Who may change one (audit, Nov 4): the write rule is the database's — Customers access, or
+ * the assignee (crm_opportunities_write). An Estimate-only user reads every opportunity and may
+ * make one for themselves; their Assignee box offers only themselves (assigneeChoices), and an
+ * opportunity that is not theirs opens read-only with a line saying who may change it, instead
+ * of a refusal after the form is filled.
  */
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +64,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import {
+  canAccess,
   dispatchesTickets,
   managesTickets,
   seesEveryone,
@@ -67,8 +74,12 @@ import { hasContactMethod, NO_CONTACT_ON_FILE } from "@/lib/crm-account";
 import { canManageFollowup, isFollowupOverdue } from "@/lib/followup-rules";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
+  ASSIGNEE_ONLY_SELF,
+  assigneeChoices,
   assigneeProblem,
   autoSiteId,
+  mayWriteOpportunity,
+  OPP_READ_ONLY,
   bidPrefillFromOpportunity,
   createReminderHint,
   opportunityProblem,
@@ -803,6 +814,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   // Deleted (an old link): read-only, with Restore for admins and managers.
   const deleted = !!opp?.deleted_at;
   const canRestore = seesEveryone(profile);
+  // The write rule (crm_opportunities_write): Customers access, or the assignee. Without it
+  // the page is read-only and says so (audit, Nov 4), and the Assignee box offers only me.
+  const hasCustomers = canAccess(profile, "customers");
+  const mayWrite = mayWriteOpportunity({ id: profile?.id, hasCustomers }, opp);
+  const readOnly = deleted || !mayWrite;
 
   // Every user (crm_user_options), not the Service roster: a Customers-only user got an empty
   // box from technician_options (audit, Oct 2).
@@ -817,8 +833,12 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     // Keep the current assignee listed even if they are no longer on the list.
     if (opp?.assignee_id && !all.some((t) => t.id === opp.assignee_id))
       all.unshift({ id: opp.assignee_id, name: opp.assignee_name ?? "Former assignee" });
-    return all;
-  }, [people.data, opp?.assignee_id, opp?.assignee_name]);
+    return assigneeChoices(all, {
+      me: profile?.id,
+      mayAssignOthers: hasCustomers,
+      current: opp?.assignee_id,
+    });
+  }, [people.data, opp?.assignee_id, opp?.assignee_name, profile?.id, hasCustomers]);
   // Owner, Oct 1: "Opened <date> by <name>" under the title and the status strip, each status
   // with the date it was last entered — from the opportunity's log, which the database writes
   // (crm_opportunity_events; lib/stage-dates.ts).
@@ -876,6 +896,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     void qc.invalidateQueries({ queryKey: ["opportunity", id] });
     void qc.invalidateQueries({ queryKey: ["opportunity-events", id] });
     void qc.invalidateQueries({ queryKey: ["followups"] });
+    // The timeline too (audit, Nov 4: Save logs an expected-close move as a note, and the
+    // Timeline showed it only after a reload).
+    void qc.invalidateQueries({ queryKey: ["contact-log", "opportunity", id] });
   };
 
   const save = useMutation({
@@ -948,7 +971,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   });
   const changeAssignee = (v: string) => {
     if (!v || v === draft.assignee_id) return;
-    if (opp && !deleted) assigneeMut.mutate({ assignee_id: v, before: draft.assignee_id });
+    if (opp && !readOnly) assigneeMut.mutate({ assignee_id: v, before: draft.assignee_id });
     else set("assignee_id", v);
   };
 
@@ -1013,7 +1036,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const statusSelect = (
     <Select
       value={status}
-      disabled={statusMut.isPending || deleted}
+      disabled={statusMut.isPending || readOnly}
       onValueChange={(v) =>
         opp ? statusMut.mutate(v as OppStatus) : set("status", v as OppStatus)
       }
@@ -1091,14 +1114,15 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!deleted) submit();
+        if (!readOnly) submit();
       }}
     >
-      {/* A deleted opportunity's form is read-only: every field in the fieldset is disabled. */}
+      {/* A deleted opportunity's form, or one the viewer may not change, is read-only: every
+          field in the fieldset is disabled. */}
       <fieldset
-        disabled={deleted}
+        disabled={readOnly}
         className="min-w-0 space-y-5"
-        data-readonly={deleted || undefined}
+        data-readonly={readOnly || undefined}
       >
         <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
           <div className="min-w-0 space-y-4">
@@ -1158,6 +1182,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   </p>
                 )}
                 {assigneeMessage && <p className="text-xs text-destructive">{assigneeMessage}</p>}
+                {!hasCustomers && !readOnly && (
+                  <p className="text-xs text-muted-foreground" data-hint="assignee-self">
+                    {ASSIGNEE_ONLY_SELF}
+                  </p>
+                )}
               </div>
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="opp-close">Expected close</Label>
@@ -1211,7 +1240,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
 
         {/* No Notes box (owner, Nov 4): what the next person should know goes on the timeline
             (Comment, with @mentions). Notes saved before stay on the row, untouched by Save. */}
-        {!deleted && (
+        {!readOnly && (
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="submit"
@@ -1335,8 +1364,14 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )}
           </div>
         )}
+        {opp && !deleted && !mayWrite && (
+          <p role="status" data-banner="read-only" className="text-sm text-muted-foreground">
+            {OPP_READ_ONLY}
+          </p>
+        )}
+        {/* A div, not a p: the badges are divs (audit, Nov 4: React's hydration warning). */}
         {opp && (
-          <p
+          <div
             className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
             data-line="tags"
           >
@@ -1349,7 +1384,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               what="Expected to close"
             />
             <HoldBadge holdUntil={opp.hold_until} today={localYmd(new Date())} />
-          </p>
+          </div>
         )}
         {opp && (
           <p className="text-xs text-muted-foreground">
