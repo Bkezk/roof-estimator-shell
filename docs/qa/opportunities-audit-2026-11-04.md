@@ -109,3 +109,14 @@ Pins updated: `opened-and-stage-dates`, `opportunity-deleted`, `opportunities-no
 `opportunity-customer-required`, `opportunity-form`, `bid-drives-opportunity`. Chain: lint clean,
 types clean, 492 files / 6,306 tests, build OK. The temporary rows of this check were removed
 afterwards.
+
+## Standing (owner, Nov 4: "so now the opportunity page has been audited correct?")
+
+Yes: the sixteen behaviours above are proven live, the six findings are fixed, tested and
+pushed (285bd30). Taken on the strength of tests rather than a live run, as "Not exercised"
+says: the reminder sends themselves, Claim / Assign to… from Work Overview, a non-manager's
+date move and an Estimate-only user's view. The page changed a great deal on Nov 4 (the popup's
+property, the leave dialog, the Assignee box saving at change, the contact line on the list,
+these six); every change was checked on temporary rows the same day. The first real
+opportunities the office enters are the test that matters — read this table once against what
+they see, and anything that differs is a bug to report.
