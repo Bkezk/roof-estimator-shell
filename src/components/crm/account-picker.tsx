@@ -10,9 +10,9 @@
  * Used by tickets, bids, takeoffs, opportunities, the PlanSwift import and tasks.
  *
  * `allowFreeText` (the estimator's Setup › Customer Name): the input is a plain text
- * field whose value the parent owns (`text` / `onText`); the dropdown only offers profiles to
- * link, nothing is highlighted until the arrow keys move, so typing a name and moving on never
- * links anything, and there is no quick-add row.
+ * field whose value the parent owns (`text` / `onText`); the dropdown offers profiles to link
+ * and the same "Add … as a new customer" row (owner, Nov 4), nothing is highlighted until the
+ * arrow keys move, so typing a name and moving on never links or adds anything.
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -116,7 +116,9 @@ export function AccountPicker(props: {
     staleTime: 30_000,
   });
   const hits = search.data ?? [];
-  const addLabel = free || !allowAdd ? "" : typed.trim();
+  // The estimator's free-text box offers it too (owner, Nov 4: a new customer from the bid form,
+  // "similar to the service side with a popup"); the picked (or added) profile links the bid.
+  const addLabel = allowAdd ? typed.trim() : "";
   // Rows: the hits, then (when something is typed, and adding is allowed) the "add as new
   // customer" row.
   const rowCount = hits.length + (addLabel ? 1 : 0);
@@ -229,7 +231,10 @@ export function AccountPicker(props: {
             </p>
           ) : free && hits.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">
-              No saved customer matches. The name stays as typed.
+              No saved customer matches.{" "}
+              {addLabel
+                ? "Add them below, or the name stays as typed."
+                : "The name stays as typed."}
             </p>
           ) : free ? (
             <p className="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">

@@ -1998,11 +1998,21 @@ function EstimatePage() {
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
   // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
-  // The profile link, the folder and the reminder live on the row, not in `saved`; they count as
-  // edits all the same.
-  const savedJsonOf = (folder: string, reminderOn: string, reminderNote: string) =>
-    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${normalizeFolder(folder) ?? ""}|${reminderOn}|${reminderOn ? reminderNote.trim() : ""}`;
-  const savedJson = savedJsonOf(bidFolder, bidReminderOn, bidReminderNote);
+  // The profile link, the name and the header (status, won / lost, due date, folder, reminder)
+  // live on the row, not in `saved`; they count as edits all the same (owner, Nov 4: Next no
+  // longer saves, so a renamed bid or a changed status must ask before the page is left).
+  const tabHeader: BidHeader = {
+    status: bidStatus,
+    lostReason,
+    wonOn: wonOnDay,
+    dueDate: bidDueDate,
+    folder: bidFolder,
+    reminderOn: bidReminderOn,
+    reminderNote: bidReminderNote,
+  };
+  const savedJsonOf = (h: BidHeader, name: string) =>
+    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}|${h.status}|${h.lostReason ?? ""}|${h.wonOn}|${h.dueDate}|${normalizeFolder(h.folder) ?? ""}|${h.reminderOn}|${h.reminderOn ? h.reminderNote.trim() : ""}`;
+  const savedJson = savedJsonOf(tabHeader, bidName);
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
@@ -2081,12 +2091,23 @@ function EstimatePage() {
   const dirty = lastSavedJson.current !== null && savedJson !== lastSavedJson.current;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
-  useBlocker({
-    shouldBlockFn: () =>
-      dirtyRef.current &&
-      !window.confirm("This bid has unsaved changes. Leave without saving them?"),
+  // Leaving the page with unsaved changes asks (owner, Nov 4: Next no longer saves — "when you
+  // leave the page it asks if you want to save the changes"): Save and leave, Leave without
+  // saving, or Stay. Closing the tab keeps the browser's own warning.
+  const blocker = useBlocker({
+    shouldBlockFn: () => dirtyRef.current,
+    withResolver: true,
     enableBeforeUnload: () => dirtyRef.current,
   });
+  // True while "Save and leave" is saving (or asking about unusual numbers): the leave dialog
+  // steps aside; a failed save brings it back (stayHere).
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  leavingRef.current = leaving;
+  const stayHere = () => {
+    setLeaving(false);
+    if (blocker.status === "blocked") blocker.reset();
+  };
   // The Non-DL TPO and EPDM accessory groups, computed from their own state against their own
   // pricing ref (lib/accessory-families.ts); absent on a snapshot that predates the families.
   // Only the bid's ACTIVE family (by roof system) counts from the roof; the others bill typed
@@ -2509,6 +2530,8 @@ function EstimatePage() {
     acknowledge?: SanityWarning[];
     /** What to do after a save that the warning dialog interrupted. */
     after?: () => void;
+    /** Called when the warning dialog opens instead of saving (the answer comes later). */
+    onPrompt?: () => void;
   }): Promise<boolean> => {
     if (readOnly) {
       toast.error(`Read only: ${bidLock.holder?.name ?? "another user"} is editing this bid.`);
@@ -2556,6 +2579,7 @@ function EstimatePage() {
       const open = unacknowledged(sanityWarnings, sanityAcknowledged);
       if (open.length) {
         setSanityPrompt({ warnings: open, after: opts?.after });
+        opts?.onPrompt?.();
         return false;
       }
     }
@@ -2583,15 +2607,6 @@ function EstimatePage() {
               pricingAsOf: snap.asOf,
             }
           : {}),
-      };
-      const tabHeader: BidHeader = {
-        status: bidStatus,
-        lostReason,
-        wonOn: wonOnDay,
-        dueDate: bidDueDate,
-        folder: bidFolder,
-        reminderOn: bidReminderOn,
-        reminderNote: bidReminderNote,
       };
       const row = await saveBidFn({
         data: {
@@ -2643,9 +2658,7 @@ function EstimatePage() {
         }
       }
       lastSavedJson.current =
-        row && kept.length
-          ? savedJsonOf(row.folder ?? "", row.reminder_on ?? "", row.reminder_note ?? "")
-          : savedJson;
+        row && kept.length ? savedJsonOf(bidHeaderOfRow(row), bidName) : savedJson;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
       if (row && !bidId) {
@@ -2680,10 +2693,20 @@ function EstimatePage() {
         ),
       );
   };
-  // Previous / Next save the bid before moving (every step is a checkpoint); a failed save
-  // stays put.
-  const saveAndGo = async (target: number) => {
-    if (await handleSave({ after: () => goStep(target) })) goStep(target);
+  // "Save and leave" on the leave dialog: saved, the navigation goes on; the unusual-numbers
+  // dialog answers for it later (after / stayHere); any other failure keeps the user here.
+  const saveAndLeave = async () => {
+    if (blocker.status !== "blocked") return;
+    setLeaving(true);
+    let prompted = false;
+    const ok = await handleSave({
+      after: () => blocker.proceed(),
+      onPrompt: () => {
+        prompted = true;
+      },
+    });
+    if (ok) blocker.proceed();
+    else if (!prompted) stayHere();
   };
 
   // Estimate Review figures (legacy "Export To Excel"): the same figures as the Bid-total panel.
@@ -3924,7 +3947,11 @@ function EstimatePage() {
           {/* Unusual numbers before a save (owner, Oct 7): ask, show each one, never block. */}
           <AlertDialog
             open={sanityPrompt !== null}
-            onOpenChange={(o) => !o && setSanityPrompt(null)}
+            onOpenChange={(o) => {
+              if (o) return;
+              setSanityPrompt(null);
+              if (leavingRef.current) stayHere();
+            }}
           >
             <AlertDialogContent className="sm:max-w-lg">
               <AlertDialogHeader>
@@ -3946,7 +3973,14 @@ function EstimatePage() {
                 ))}
               </ul>
               <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setSanityPrompt(null)}>Go back</AlertDialogCancel>
+                <AlertDialogCancel
+                  onClick={() => {
+                    setSanityPrompt(null);
+                    if (leavingRef.current) stayHere();
+                  }}
+                >
+                  Go back
+                </AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
                     const p = sanityPrompt;
@@ -3954,10 +3988,46 @@ function EstimatePage() {
                     if (!p) return;
                     void handleSave({ acknowledge: p.warnings }).then((ok) => {
                       if (ok) p.after?.();
+                      else if (leavingRef.current) stayHere();
                     });
                   }}
                 >
                   Save anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          {/* Leaving with unsaved changes (owner, Nov 4): save them, drop them, or stay. */}
+          <AlertDialog
+            open={blocker.status === "blocked" && !leaving}
+            onOpenChange={(o) => !o && stayHere()}
+          >
+            <AlertDialogContent data-dialog="leave-bid">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Save changes to this bid?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This bid has changes that are not saved. Save them before you leave, or leave
+                  without saving — those changes are then lost.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={stayHere}>Stay</AlertDialogCancel>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (blocker.status === "blocked") blocker.proceed();
+                  }}
+                >
+                  Leave without saving
+                </Button>
+                <AlertDialogAction
+                  onClick={(e) => {
+                    // Not the dialog's own close: it closes once the save has gone through.
+                    e.preventDefault();
+                    void saveAndLeave();
+                  }}
+                >
+                  Save and leave
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -6572,14 +6642,15 @@ function EstimatePage() {
         </div>
 
         <div className="flex items-center justify-between border-t pt-4">
+          {/* Previous / Next only move between steps (owner, Nov 4: "just be next"); the bid is
+              saved with Save, or when leaving the page with changes. */}
           <Button
             variant="outline"
-            disabled={step === 0 || saving}
-            title={readOnly ? "Goes back (read only)" : "Saves the bid, then goes back"}
-            onClick={() => (readOnly ? goStep(step - 1) : saveAndGo(step - 1))}
+            disabled={step === 0}
+            title="Goes back a step"
+            onClick={() => goStep(step - 1)}
           >
-            <ChevronLeft className="mr-1 h-4 w-4" />{" "}
-            {saving ? "Saving…" : readOnly ? "Previous" : "Save & Previous"}
+            <ChevronLeft className="mr-1 h-4 w-4" /> Previous
           </Button>
           <span className="hidden text-xs text-muted-foreground sm:inline">
             Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
@@ -6592,13 +6663,8 @@ function EstimatePage() {
           <div className="flex items-center gap-2">
             {STEPS[step]?.key === "review" && exportMenu({})}
             {step < STEPS.length - 1 && (
-              <Button
-                onClick={() => (readOnly ? goStep(step + 1) : saveAndGo(step + 1))}
-                disabled={saving}
-                title={readOnly ? "Moves on (read only)" : "Saves the bid, then moves on"}
-              >
-                {saving ? "Saving…" : readOnly ? "Next" : "Save & Next"}{" "}
-                <ChevronRight className="ml-1 h-4 w-4" />
+              <Button onClick={() => goStep(step + 1)} title="Moves on a step">
+                Next <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             )}
           </div>

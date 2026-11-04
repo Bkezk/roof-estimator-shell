@@ -11,7 +11,7 @@
  * The pick is stored on the choice (`PlanSwiftChoice.pick`) and the seed uses it. Pure rules.
  */
 import type { MetalsCatalogItem } from "@/lib/engine/adapters";
-import type { ClassifiedRow, PlanSwiftTarget } from "./classify";
+import { downspoutDetailsFor, type ClassifiedRow, type PlanSwiftTarget } from "./classify";
 import { inchToken, matchDrainPicks } from "./drain-picks";
 
 export interface PickLists {
@@ -57,6 +57,28 @@ export function elbowRows(
   );
 }
 
+/**
+ * The elbow row a name picks by itself — its angle (`45's`, `80°`, `90`) and its style (`A
+ * style`, `B-Style`): "6 A style 45's" → the `45° A-Style Elbow` row (owner's Activity & Fitness
+ * Center file, Nov 4). Undefined when the name lacks either, or the catalog has no such row.
+ */
+export function namedElbowRow(
+  name: string,
+  rows: readonly MetalsCatalogItem[],
+): MetalsCatalogItem | undefined {
+  const deg = /\b45\b/.test(name) ? "45" : /\b80\b|\b90\b/.test(name) ? "80" : null;
+  const style = /\bb[\s-]*style|\bb\b/i.test(name)
+    ? "B"
+    : /\ba[\s-]*style|\ba\b/i.test(name)
+      ? "A"
+      : null;
+  if (!deg || !style) return undefined;
+  return rows.find(
+    (i) =>
+      i.description.includes(`${deg}°`) && new RegExp(`\\b${style}-Style`, "i").test(i.description),
+  );
+}
+
 /** A gutter pick: `LX-Style|A = 6" B = 4" C = 4"` → the style and the size. */
 export function parseGutterPick(v: string | undefined): { style: string; size: string } | null {
   if (!v) return null;
@@ -86,7 +108,8 @@ export function pickFor(
   lists: PickLists,
   sheetSizes: readonly string[] = [],
 ): RowPick | null {
-  const d = c.details;
+  // A row moved to Downspout by hand is read by its unit (classify.ts downspoutDetailsFor).
+  const d = target === "downspout" ? downspoutDetailsFor(c) : c.details;
   if (target === "gutter") {
     const styles = lists.gutterSizesByStyle ?? {};
     const options: PickOption[] = [];
@@ -103,6 +126,9 @@ export function pickFor(
     const sizes = catalogDownspoutSizes(lists.metalsCatalog);
     if (!sizes.length) return null;
     if (d.dsPart === "elbow") {
+      // A sized elbow whose name says the angle and the style needs no pick.
+      if (d.dsSize && namedElbowRow(c.row.name, elbowRows(lists.metalsCatalog, d.dsSize)))
+        return null;
       const pool = d.dsSize ? [d.dsSize] : sheetSizes.length ? [...sheetSizes] : sizes;
       const deg = /\b45\b/.test(c.row.name) ? "45" : /\b80\b|\b90\b/.test(c.row.name) ? "80" : null;
       const options: PickOption[] = [];

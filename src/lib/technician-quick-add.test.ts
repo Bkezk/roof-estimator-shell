@@ -115,7 +115,7 @@ describe("the picker (components/crm/account-picker.tsx)", () => {
   it("takes allowAdd (default on) and offers no add row without it", () => {
     expect(picker).toContain("allowAdd?: boolean;");
     expect(picker).toContain("const allowAdd = props.allowAdd !== false;");
-    expect(picker).toContain('const addLabel = free || !allowAdd ? "" : typed.trim();');
+    expect(picker).toContain('const addLabel = allowAdd ? typed.trim() : "";');
     // The add row is still rendered only from addLabel.
     expect(picker).toMatch(/\{addLabel && \(\s*<div\s+role="option"/);
     expect(picker).toContain("as a new customer");

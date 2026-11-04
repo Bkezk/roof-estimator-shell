@@ -437,9 +437,18 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                     const pickMissing =
                       !!pick && !(r.pick && pick.options.some((o) => o.value === r.pick));
                     return (
-                      <tr key={c.row.sheetRow} className={r.target === "skip" ? "opacity-60" : ""}>
+                      <tr
+                        key={`${c.row.sheetRow}:${c.row.part ?? 0}`}
+                        className={r.target === "skip" ? "opacity-60" : ""}
+                      >
                         <td className="max-w-[280px] px-2 py-1.5 align-top">
                           <p className="break-words font-medium">{c.row.name}</p>
+                          {/* A part split off a compound name (classify.ts splitCompoundRow). */}
+                          {c.row.part !== undefined && (
+                            <p className="text-xs text-muted-foreground">
+                              part of sheet row {c.row.sheetRow}
+                            </p>
+                          )}
                           {c.row.description && (
                             <p className="text-xs text-muted-foreground">{c.row.description}</p>
                           )}

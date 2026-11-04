@@ -29,6 +29,11 @@ export interface PlanSwiftRow {
   linearTotal: number | null;
   wallHeight: number | null;
   wallArea: number | null;
+  /**
+   * Set on a row split off a compound name (classify.ts splitCompoundRow: `4" X 5" Down Souts,
+   * 2 Drops, 6 A style 45's` is three rows), 1-based; absent on a row as the sheet has it.
+   */
+  part?: number;
 }
 
 export interface PlanSwiftSheet {

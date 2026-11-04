@@ -3019,7 +3019,8 @@ pre-drill; the labor lookup's WallType-4-fixed rule for adhered walls, §8.5, is
 Layout (no money): the estimate header keeps only the title — the bid name is the Setup › Bid
 Info "Job Name"; the Proposal button is removed for now; Status and Export sit above the Bid
 total card on the right; the footer holds Save & Previous | Save | Save & Next (Save alone on
-the last step).
+the last step). (Nov 4: the footer's buttons are Previous | Next and do not save; the header's
+Save does, and leaving the page with unsaved changes asks whether to save them.)
 
 Addendum (same day): "Apply To Existing Roof Sections" also pushes the "2. Wall Type" default
 onto every parapet. Legacy `RoofSections.OverwriteWithDefault` copies attachment systems,

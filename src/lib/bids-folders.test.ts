@@ -308,7 +308,7 @@ describe("the wiring", () => {
     expect(est).toContain("folder: bidFolder,");
     expect(est).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
     // A folder change is an unsaved change like a link change.
-    expect(est).toContain('|${normalizeFolder(folder) ?? ""}|');
+    expect(est).toContain('|${normalizeFolder(h.folder) ?? ""}|');
   });
   it("the server stores it: saveBid takes folder, setBidFolder / renameBidFolder / listBidFolders exist, listBids returns the row", () => {
     const fns = here("./bids.functions.ts");

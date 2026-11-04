@@ -37,7 +37,7 @@ import {
   type DownspoutEntryState,
   type GutterEntryState,
 } from "@/lib/engine/metals";
-import { bootPickSize, parseElbowPick, parseGutterPick } from "./picks";
+import { bootPickSize, namedElbowRow, parseElbowPick, parseGutterPick } from "./picks";
 import { defaultEdges } from "@/lib/engine/edges";
 import type { NonDlCustomRow, NonDlGroup } from "@/lib/engine/nondl";
 import { bidSeedFromTakeoff, type TakeoffBidSeed } from "@/lib/takeoff/create-bid";
@@ -53,6 +53,7 @@ import { newBidFromSeed, type SeedFactories } from "@/lib/takeoff/seed-to-bid";
 import type { SavedBidState } from "@/lib/proposal-bid";
 import {
   describeTarget,
+  downspoutDetailsFor,
   formatInches,
   parseInchNumber,
   PLANSWIFT_TARGET_LABELS,
@@ -159,6 +160,8 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 const num = (x: number) =>
   x.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
+/** A row's id for seeded things: the sheet row, and the part when split off a compound name. */
+const rowId = (r: PlanSwiftRow) => `${r.sheetRow}${r.part ? `-${r.part}` : ""}`;
 
 // ── Section geometry ─────────────────────────────────────────────────────────────────────────
 
@@ -536,8 +539,10 @@ export function planSwiftSeed(
   for (const ch of choices) {
     const c = ch.row;
     const r = c.row;
-    const d = c.details;
-    const id = `planswift-row-${r.sheetRow}`;
+    // A row moved to Downspout by hand has its part read from its unit (owner's Activity &
+    // Fitness Center file, Nov 4: a 22.99 ft "gutter" moved there became 23 elbows).
+    const d = ch.target === "downspout" ? downspoutDetailsFor(c) : c.details;
+    const id = `planswift-row-${rowId(r)}`;
     switch (ch.target) {
       case "section":
       case "skip":
@@ -711,21 +716,9 @@ export function planSwiftSeed(
           e.accQty[row.description] = (e.accQty[row.description] ?? 0) + Math.round(r.qty);
         } else {
           // An elbow: the catalog has 45° / 80°, A / B styles — only a name that says which is placed.
-          const deg = /45/.test(r.name) ? "45" : /80/.test(r.name) ? "80" : null;
-          const style = /\bb[\s-]*style|\bb\b/i.test(r.name)
-            ? "B"
-            : /\ba[\s-]*style|\ba\b/i.test(r.name)
-              ? "A"
-              : null;
           const row = elbowPick
             ? rows.find((i) => i.description === elbowPick.description)
-            : deg && style
-              ? rows.find(
-                  (i) =>
-                    i.description.includes(`${deg}°`) &&
-                    new RegExp(`\\b${style}-Style`, "i").test(i.description),
-                )
-              : undefined;
+            : namedElbowRow(r.name, rows);
           if (!row) {
             unmapped.push({
               label: rowLabel(c),
@@ -880,7 +873,7 @@ export function planSwiftSeed(
     const quoteLayer: UnderlaymentLayer = {
       ...layerOf(board, "mechanical"),
       quote: {
-        id: `planswift-${r.sheetRow}${idSuffix}`,
+        id: `planswift-${rowId(r)}${idSuffix}`,
         name: `${collapse(r.name)} — ${num(r.qty)} sq ft (PlanSwift)`,
       },
     };

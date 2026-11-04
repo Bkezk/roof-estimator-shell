@@ -833,9 +833,9 @@ describe("Setup › Bid Info: the custom reminder", () => {
     expect(src).toContain("reminderNote: bidReminderNote,");
     expect(src).toContain("...bidHeaderPatch(bidId ? loadedHeader.current : null, tabHeader),");
     expect(src).toContain(
-      '|${normalizeFolder(folder) ?? ""}|${reminderOn}|${reminderOn ? reminderNote.trim() : ""}`;',
+      '|${normalizeFolder(h.folder) ?? ""}|${h.reminderOn}|${h.reminderOn ? h.reminderNote.trim() : ""}`;',
     );
-    expect(src).toContain("savedJsonOf(bidFolder, bidReminderOn, bidReminderNote)");
+    expect(src).toContain("savedJsonOf(tabHeader, bidName)");
     expect(src.match(/setBidReminderOn\(""\);/g)).toHaveLength(3);
     expect(src.match(/setBidReminderNote\(""\);/g)).toHaveLength(4); // the three resets + clearing the date
     expect(src).not.toMatch(/reminderOn:\s*saved\./);

@@ -383,8 +383,15 @@ const SHEET_METALS = "Non-DL › Sheet Metals";
 const METALS_DOWNSPOUTS = "Metals › Downspouts";
 const SNAP_COVER = "Accessories › Base & Snap Cover";
 
-/** Downspout words: "Downspouts", "Down spouts", "D.S.". */
-const DOWNSPOUT_RE = /down\s*spouts?|\bd\.?s\.?\b/i;
+/**
+ * Downspout words: "Downspouts", "Down spouts", "D.S." — and "Down Souts" (owner's Activity &
+ * Fitness Center file, Nov 4), so a letter dropped in typing does not make it a gutter.
+ */
+const DOWNSPOUT_RE = /down\s*sp?ou?ts?\b|\bd\.?s\.?\b/i;
+/** Downspout / gutter straps: counted by hand on Metals › Downspouts (the sheet has no count). */
+const STRAP_RE = /\bstraps?\b/i;
+const STRAP_REASON =
+  "straps are counted by hand on Metals › Downspouts (Downspout Straps) — the sheet does not say how many";
 /** Elbows by name or by angle: "Elbows", "45's", "45s", "90°", "45 degree" (owner's Pineville file: `45's` ×72). */
 const ELBOW_RE = /\belbows?\b|\b(?:45|80|90)\s*(?:°|deg(?:ree)?s?\b|'?s\b)/i;
 /** Counted downspout parts: drops / outlets, elbows. */
@@ -414,6 +421,28 @@ export function twoPieceSize(name: string): number | undefined {
   );
   const n = Number(before?.[1] ?? after?.[1]);
   return n > 0 ? n : undefined;
+}
+
+/** Which counted downspout part an EA name is: elbows by name or angle, drops / outlets, else a count. */
+function countedDownspoutPart(name: string): NonNullable<RowDetails["dsPart"]> {
+  return has(ELBOW_RE, name)
+    ? "elbow"
+    : has(/\bdrops?\b|\boutlets?\b/i, name)
+      ? "Drop/Outlet"
+      : "count";
+}
+
+/**
+ * The details a row has under the Downspout target, whatever the classifier called it (owner's
+ * Activity & Fitness Center file, Nov 4: a 22.99 ft row read as a gutter and moved to Downspout
+ * by hand had no part, so the seeder took it for an elbow and wrote 23 of them). A row the
+ * classifier already read as a downspout is returned as it is; any other is read by its unit —
+ * feet are a length, a count is drops / elbows / downspouts by its name.
+ */
+export function downspoutDetailsFor(c: ClassifiedRow): RowDetails {
+  if (c.details.dsPart) return c.details;
+  const part = c.row.unitKind === "ft" ? "length" : countedDownspoutPart(c.row.name);
+  return downspoutDetails(c.row.name, c.details, part);
 }
 
 /** A downspout row's details: its size (if the name has one) and which Metals row it is. */
@@ -543,6 +572,8 @@ function classifyTarget(
         kind: "Coping",
         where: SHEET_METALS,
       });
+    // `10' of Gutter strap` (owner's Activity & Fitness Center file): a strap, not a gutter.
+    if (has(STRAP_RE, n)) return out("unmatched", "low", STRAP_REASON);
     if (has(/gutter/i, n))
       return out("gutter", "high", "the name says gutter", { where: "Metals › Gutters" });
     if (has(WALK_PAD_RE, n))
@@ -593,12 +624,9 @@ function classifyTarget(
         kind: "Expansion joint",
         where: SHEET_METALS,
       });
+    if (has(STRAP_RE, n)) return out("unmatched", "low", STRAP_REASON);
     if (!has(/boot/i, n) && (has(DOWNSPOUT_PART_RE, n) || has(DOWNSPOUT_RE, n))) {
-      const part: NonNullable<RowDetails["dsPart"]> = has(ELBOW_RE, n)
-        ? "elbow"
-        : has(/\bdrops?\b|\boutlets?\b/i, n)
-          ? "Drop/Outlet"
-          : "count";
+      const part = countedDownspoutPart(n);
       const dd = downspoutDetails(n, d, part);
       const what =
         part === "count"
@@ -694,8 +722,70 @@ export function classifyRow(row: PlanSwiftRow): ClassifiedRow {
   };
 }
 
+/** `^2 Drops`, `^6 A style 45's`: a counted downspout part at the head of a clause. */
+const COUNT_CLAUSE_RE = /^(\d+)\s+([a-z].*)$/i;
+/** `^10' of Gutter strap`, `^12 ft strap`: a length at the head of a clause. */
+const LENGTH_CLAUSE_RE = /^(\d+(?:\.\d+)?)\s*(?:'|ft\b\.?|feet\b|lf\b)\s*(?:of\s+)?([a-z].*)$/i;
+
+/**
+ * One sheet row that names several things (owner's Activity & Fitness Center file, Nov 4:
+ * `4" X 5" Down Souts, 2 Drops, 6 A style 45's, 10' of Gutter strap` at 22.99 ft) becomes one
+ * row per thing, so each lands where it belongs on the review screen: the first clause keeps
+ * the row's quantity and unit; a later clause that starts with a count and names a downspout
+ * part (drops, outlets, elbows, `45's`) becomes an EA row of that count, carrying the first
+ * clause's downspout size (`4" X 5"`) so it needs no pick; a clause that starts with a length
+ * (`10' of …`) becomes a FT row. Any other clause stays in the first row's name. Only FT and EA
+ * rows split — a roof area's name lists its layers by the inch (`2" ISO, 1/2" HD ISO`). The
+ * split-off rows share the sheet row (for messages) and are numbered by `part`.
+ */
+export function splitCompoundRow(row: PlanSwiftRow): PlanSwiftRow[] {
+  if (row.unitKind !== "ft" && row.unitKind !== "ea") return [row];
+  const clauses = row.name
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return [row];
+  let main = clauses[0]!;
+  const dims = parseDims(main);
+  const size =
+    dims && dims.c === undefined && dims.a <= 8 && dims.b <= 8
+      ? `${formatInches(dims.a)}" X ${formatInches(dims.b)}" `
+      : "";
+  const extra: Array<Pick<PlanSwiftRow, "name" | "qty" | "units" | "unitKind">> = [];
+  for (const clause of clauses.slice(1)) {
+    const count = COUNT_CLAUSE_RE.exec(clause);
+    if (count && has(DOWNSPOUT_PART_RE, count[2]!)) {
+      extra.push({
+        name: `${size}${count[2]!.trim()}`,
+        qty: Number(count[1]),
+        units: "EA",
+        unitKind: "ea",
+      });
+      continue;
+    }
+    const length = LENGTH_CLAUSE_RE.exec(clause);
+    if (length && /[a-z]{3,}/i.test(length[2]!)) {
+      extra.push({ name: length[2]!.trim(), qty: Number(length[1]), units: "FT", unitKind: "ft" });
+      continue;
+    }
+    main = `${main}, ${clause}`;
+  }
+  if (!extra.length) return [row];
+  return [
+    { ...row, name: main },
+    ...extra.map((e, i) => ({
+      ...row,
+      ...e,
+      linearTotal: null,
+      wallHeight: null,
+      wallArea: null,
+      part: i + 1,
+    })),
+  ];
+}
+
 export function classifyRows(rows: readonly PlanSwiftRow[]): ClassifiedRow[] {
-  return rows.map(classifyRow);
+  return rows.flatMap(splitCompoundRow).map(classifyRow);
 }
 
 const num = (x: number) =>
@@ -707,7 +797,7 @@ const num = (x: number) =>
  * HD ISO".
  */
 export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.target): string {
-  const d = c.details;
+  const d = target === "downspout" ? downspoutDetailsFor(c) : c.details;
   const r = c.row;
   const unit = r.unitKind === "sqft" ? "sq ft" : r.unitKind === "ft" ? "ft" : r.units || "";
   const q = `${num(r.qty)} ${unit}`.trim();
