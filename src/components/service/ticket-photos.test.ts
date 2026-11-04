@@ -189,12 +189,14 @@ describe("the server keeps its guard (service-field.functions.ts)", () => {
   };
   it("registerJobPhoto: the caller's own ticket (office: any), stored under the ticket's folder", () => {
     const body = fn("registerJobPhoto");
-    expect(body).toMatch(/const job = await ownJob\(context, data\.service_job_id\);/);
+    // Nov 4 (bug 9 of the Nov 3 review): the field edit lock (editableJob), as repairs and time.
+    expect(body).toMatch(/const \{ job \} = await editableJob\(context, data\.service_job_id\);/);
     expect(body).toMatch(/if \(!data\.storage_path\.startsWith\(`\$\{job\.id\}\/`\)\)/);
   });
   it("deleteJobPhoto: the caller's own ticket, the row's own ticket", () => {
     const body = fn("deleteJobPhoto");
-    expect(body).toMatch(/await ownJob\(context, data\.service_job_id\);/);
+    // Nov 4 (bug 9 of the Nov 3 review): the field edit lock (editableJob), as repairs and time.
+    expect(body).toMatch(/await editableJob\(context, data\.service_job_id\);/);
     expect(body).toMatch(/\.eq\("service_job_id", data\.service_job_id\)/);
   });
   it("ownJob lets the office touch any ticket and a technician only their own", () => {

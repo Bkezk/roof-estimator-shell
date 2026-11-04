@@ -50,6 +50,9 @@ export const INSPECTION_STAGES: readonly ServiceStage[] = [
   "done",
   "authorized",
 ];
+/** The server's refusal when an inspection is pushed past Authorized (Nov 4, bug 16). */
+export const INSPECTION_STAGE_MESSAGE =
+  "An inspection ends at Authorized — it is not invoiced or closed";
 export const endsAtAuthorized = (serviceType: string | null | undefined): boolean =>
   serviceType === "inspection";
 export const stagesForType = (serviceType: string | null | undefined): readonly ServiceStage[] =>

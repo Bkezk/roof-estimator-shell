@@ -135,6 +135,7 @@ import {
   todayYmd,
   toPct,
   toYmd,
+  invoicePhotosKey,
 } from "@/components/service/invoice-utils";
 import {
   AlertDialog,
@@ -175,6 +176,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { getInvoicePhotos } from "@/lib/invoice-photos.functions";
 
 /** An invoice made before 20261006150000_invoice_markup.sql had the markup of the day: 75 %. */
 const DEFAULT_MARKUP = 0.75;
@@ -572,8 +574,11 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
   bill_to_vendor_id: inv.bill_to_vendor_id ?? null,
   send_to: sendToOf(inv.bill_to as Record<string, unknown> | null),
 });
+// `orig` (the server's rate and cost on a line) is not something the user edits: with it in the
+// key a new line (orig null) made the page "dirty" forever, so Finalise always saved first
+// (Nov 4, bug 14 of the Nov 3 review).
 const editKey = (h: HeadDraft, lines: LineDraft[]) =>
-  JSON.stringify([h, lines.map(({ key: _k, ...rest }) => rest)]);
+  JSON.stringify([h, lines.map(({ key: _k, orig: _o, ...rest }) => rest)]);
 
 /**
  * A number box that can be blank (null): a new line's quantity and rate start empty, and a
@@ -949,6 +954,16 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
   // The PDF preview is a pane under the lines (owner, Oct 14), open or closed as last left.
   const [previewOpen, setPreviewOpen] = useState(false);
+  // The chosen pictures are part of the PDF (Nov 4, bug 13 of the Nov 3 review): a change on
+  // the Pictures card redraws the pane, like a saved edit does. The card owns the read; this
+  // only listens to its cache entry.
+  const getPhotosFn = useServerFn(getInvoicePhotos);
+  const photoPick = useQuery({
+    queryKey: invoicePhotosKey(inv.id),
+    queryFn: () => getPhotosFn({ data: { id: inv.id } }),
+    enabled: false,
+  });
+  const photoPickVersion = (photoPick.data?.chosen ?? []).join(",");
   useEffect(() => {
     try {
       if (localStorage.getItem(PREVIEW_OPEN_KEY) === "1") setPreviewOpen(true);
@@ -1368,7 +1383,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         )}
       </div>
 
-      {previewOpen && <PreviewPane invoiceId={inv.id} version={inv.updated_at} />}
+      {previewOpen && (
+        <PreviewPane invoiceId={inv.id} version={`${inv.updated_at}|${photoPickVersion}`} />
+      )}
 
       <AlertDialog
         open={confirm !== null}
@@ -2114,7 +2131,8 @@ function FinalInvoice({
             <AlertDialogDescription>
               Use this for a mistake. The invoice stays on record as Void (it cannot be un-voided)
               and is left out of the Sage export; its number is free for the next invoice on this
-              ticket. The ticket goes back to Done unless another of its invoices is still live.
+              ticket. The ticket goes back to Authorized unless another of its invoices is still
+              live.
               {inv.sent_at ? " The customer already has the emailed copy; let them know." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -2528,8 +2546,8 @@ function PaidDialog(props: {
             {again ? "Edit the payment" : "Mark paid"} · invoice #{invoiceLabel(inv)}
           </DialogTitle>
           <DialogDescription>
-            Records the payment here (Sage stays the ledger) and closes the ticket. Total{" "}
-            {money(inv.total)}.
+            Records the payment here (Sage stays the ledger). The ticket&apos;s stage does not
+            change — close it from the stage picker when it is finished. Total {money(inv.total)}.
           </DialogDescription>
         </DialogHeader>
         <form

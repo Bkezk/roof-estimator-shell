@@ -15,6 +15,8 @@ export const oneInvoiceKey = (jobId: string, id: string) => ["ticket-invoice", j
 export const ticketInvoicesKey = (jobId: string) => ["ticket-invoices", jobId] as const;
 /** One invoice on the full-width page. */
 export const invoicePageKey = (id: string) => ["invoice-page", id] as const;
+/** An invoice's chosen pictures (the Pictures card; the editor's preview listens to it). */
+export const invoicePhotosKey = (invoiceId: string) => ["invoice-photos", invoiceId] as const;
 
 /** The Delete draft confirmation's text (the page and the ticket's card say the same). */
 export const deleteDraftNote = (ticketNumber: number, label: string) =>

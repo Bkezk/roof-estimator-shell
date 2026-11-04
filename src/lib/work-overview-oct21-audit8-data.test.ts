@@ -558,7 +558,7 @@ describe("9. setServiceStage Done → Scheduled: the technician hears 'reopened'
       svc.indexOf("export const assignServiceJob"),
     );
     expect(fn).toMatch(
-      /await syncTicketFollowup\(\s*row,\s*\{ id: context\.userId, name: nameOf\(p\) \},\s*context\.supabase,\s*prev\?\.stage \?\? null,\s*undefined,\s*\{ reopened \},\s*\);/,
+      /await syncTicketFollowup\(\s*row,\s*\{ id: context\.userId, name: nameOf\(p\) \},\s*context\.supabase,\s*prev\.stage,\s*undefined,\s*\{ reopened \},\s*\);/,
     );
     expect(svc).toContain("...(opts.reopened ? { reopened: true } : {}),");
     const opps = read("src/lib/opportunities.functions.ts");

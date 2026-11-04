@@ -57,6 +57,12 @@ describe("saveServiceMaterials", () => {
   const A = "11111111-1111-4111-8111-111111111111";
   const B = "22222222-2222-4222-8222-222222222222";
   const sb = {
+    // Nov 4 (bug 12 of the Nov 3 review): the writes go through save_service_materials in one
+    // transaction; the fake records what the function would insert.
+    rpc: async (_fn: string, args: { p_inserts: Row[] }) => {
+      inserts.push(...args.p_inserts);
+      return { error: null };
+    },
     from: (table: string) => {
       const b = {
         select: () => b,

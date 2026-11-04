@@ -43,6 +43,7 @@ import {
   type InspectionGrade,
   type InspectionItem,
 } from "@/lib/inspection";
+import { DRAFT_CONFLICT_CHECKLIST, DRAFT_CONFLICT_MS, draftConflict } from "@/lib/draft-conflict";
 import { FIELD_READ, fieldKeys, useAutosave } from "@/components/service/field-utils";
 
 export const inspectionKey = (jobId: string) => ["service-inspection", jobId] as const;
@@ -83,9 +84,19 @@ function readInspectionDraft(id: string): InspectionDraft | null {
     return null;
   }
 }
-function writeInspectionDraft(id: string, d: InspectionDraft) {
+/** The record's saved_at the draft was answered against (lib/draft-conflict.ts; Nov 4, bug 4). */
+const baseKey = (id: string) => `${draftKey(id)}:base`;
+function readInspectionDraftBase(id: string): string | null {
+  try {
+    return window.localStorage.getItem(baseKey(id));
+  } catch {
+    return null;
+  }
+}
+function writeInspectionDraft(id: string, d: InspectionDraft, base: string | null) {
   try {
     window.localStorage.setItem(draftKey(id), JSON.stringify(d));
+    if (base) window.localStorage.setItem(baseKey(id), base);
   } catch {
     // Storage blocked (private mode): the draft lives only in this screen.
   }
@@ -93,6 +104,7 @@ function writeInspectionDraft(id: string, d: InspectionDraft) {
 export function clearInspectionDraft(id: string) {
   try {
     window.localStorage.removeItem(draftKey(id));
+    window.localStorage.removeItem(baseKey(id));
   } catch {
     // Nothing to clear.
   }
@@ -167,8 +179,11 @@ export function useInspectionDraft(
   // Whether the server holds any inspection JSON (the read's answer, then true once a save lands).
   const [hasRecord, setHasRecord] = useState(false);
 
+  // The server stamp the draft is typed against (saved_at), for the conflict check on restore.
+  const baseRef = useRef<string | null>(null);
   const landed = (ins: Inspection) => {
     setHasRecord(true);
+    baseRef.current = ins.saved_at ?? null;
     const data = q.data;
     if (data) {
       const next: TicketInspection = { ...data, inspection: ins };
@@ -193,33 +208,54 @@ export function useInspectionDraft(
     { what: "The checklist" },
   );
 
-  // The first answer of the read starts the draft: the phone's copy when it has one (restored
-  // and saved when it differs from the server's), else the server's.
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current || !q.data) return;
-    started.current = true;
-    const server = fromServer(q.data);
-    setSnapshot(server);
-    setHasRecord(q.data.inspection !== null);
-    const stored = opts.readOnly ? null : readInspectionDraft(job.id);
-    const first = stored ?? server;
-    latest.current = first;
-    setDraft(first);
-    if (stored && !sameDraft(stored, server)) {
-      toast.info("Restored the checklist answers you gave here before; saving them now.");
-      autosave.push(stored);
-    }
-  }, [q.data, job.id, opts.readOnly, autosave]);
-
   const update = (patch: Partial<InspectionDraft>) => {
     if (opts.readOnly || !latest.current) return;
     const next = { ...latest.current, ...patch };
     latest.current = next;
     setDraft(next);
-    writeInspectionDraft(job.id, next);
+    writeInspectionDraft(job.id, next, baseRef.current);
     autosave.push(next);
   };
+
+  // The first answer of the read starts the draft: the phone's copy when it has one (restored
+  // and saved when it differs from the server's), else the server's. A copy answered against an
+  // older record than the server now holds is a conflict (Nov 4, bug 4; lib/draft-conflict.ts):
+  // the server's answers stay and the toast offers "Use mine".
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !q.data) return;
+    started.current = true;
+    const server = fromServer(q.data);
+    baseRef.current = q.data.inspection?.saved_at ?? null;
+    setSnapshot(server);
+    setHasRecord(q.data.inspection !== null);
+    const stored = opts.readOnly ? null : readInspectionDraft(job.id);
+    const differs = !!stored && !sameDraft(stored, server);
+    const conflict =
+      !!stored && draftConflict(readInspectionDraftBase(job.id), baseRef.current, differs);
+    const first = stored && !conflict ? stored : server;
+    latest.current = first;
+    setDraft(first);
+    if (!stored || !differs) return;
+    if (conflict) {
+      toast.warning(DRAFT_CONFLICT_CHECKLIST, {
+        duration: DRAFT_CONFLICT_MS,
+        action: {
+          label: "Use mine",
+          onClick: () => {
+            latest.current = stored;
+            setDraft(stored);
+            writeInspectionDraft(job.id, stored, baseRef.current);
+            autosave.push(stored);
+          },
+        },
+        cancel: { label: "Keep theirs", onClick: () => clearInspectionDraft(job.id) },
+      });
+      return;
+    }
+    toast.info("Restored the checklist answers you gave here before; saving them now.");
+    autosave.push(stored);
+  }, [q.data, job.id, opts.readOnly, autosave]);
 
   return {
     data: q.data,

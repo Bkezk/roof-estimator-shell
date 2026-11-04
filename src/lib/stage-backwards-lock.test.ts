@@ -97,7 +97,7 @@ describe("the server", () => {
   const svc = read("src/lib/service.functions.ts");
   it("setServiceStage asks stageProblem with the ticket's current stage", () => {
     expect(serverFn(svc, "setServiceStage")).toMatch(
-      /const problem = stageProblem\(p, data\.stage, prev\?\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
+      /const problem = stageProblem\(p, data\.stage, prev\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
     );
   });
   it("saveServiceJob refuses a technician's edit of an Authorized / Invoiced / Closed ticket", () => {

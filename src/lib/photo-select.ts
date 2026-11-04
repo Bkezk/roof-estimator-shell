@@ -15,6 +15,12 @@ export interface SelectState {
 export const NO_SELECTION: SelectState = { on: false, ids: [] };
 
 /** How long a finger rests on a thumbnail before it is a long press (ms). */
+/**
+ * How long after a long press entered the select mode the "swallow the next click" flag is let
+ * go on its own (Nov 4, bug 17 of the Nov 3 review): iOS can end a long press with no click, and
+ * the flag used to wait for the next tap — which it then swallowed.
+ */
+export const LONG_PRESS_RESET_MS = 600;
 export const LONG_PRESS_MS = 500;
 
 export const enterSelect = (id: string): SelectState => ({ on: true, ids: [id] });

@@ -429,8 +429,9 @@ describe("savePhotoAnnotations: validation and access", () => {
     // ownJob is the photo rule: a technician only on their own ticket.
     const own = src.slice(src.indexOf("async function ownJob"), src.indexOf("/** Hours between"));
     expect(own).toMatch(/if \(!isOffice\(p\) && job\.technician_id !== ctx\.userId\)/);
+    // Nov 4 (bug 9 of the Nov 3 review): recording a photo is under the field edit lock too.
     expect(serverFn(src, "registerJobPhoto")).toMatch(
-      /await ownJob\(context, data\.service_job_id\)/,
+      /await editableJob\(context, data\.service_job_id\)/,
     );
   });
 });

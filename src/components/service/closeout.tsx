@@ -234,6 +234,8 @@ import {
 } from "@/components/service/picture-queue-ui";
 import { PhotoSelectBar } from "@/components/service/photo-select-bar";
 import { FINISHED_STAGES } from "@/lib/ticket-stages";
+import { DRAFT_CONFLICT_MS, DRAFT_CONFLICT_NOTES, draftConflict } from "@/lib/draft-conflict";
+import { fieldEditProblem } from "@/lib/field-edit-lock";
 
 // ---------------------------------------------------------------------------------------------
 // The text fields and their local draft.
@@ -286,9 +288,19 @@ function readDraft(id: string): TextDraft | null {
     return null;
   }
 }
-function writeDraft(id: string, d: TextDraft) {
+/** The ticket's updated_at the draft was typed against (lib/draft-conflict.ts; Nov 4, bug 4). */
+const baseKey = (id: string) => `${draftKey(id)}:base`;
+function readDraftBase(id: string): string | null {
+  try {
+    return window.localStorage.getItem(baseKey(id));
+  } catch {
+    return null;
+  }
+}
+function writeDraft(id: string, d: TextDraft, base: string | null) {
   try {
     window.localStorage.setItem(draftKey(id), JSON.stringify(d));
+    if (base) window.localStorage.setItem(baseKey(id), base);
   } catch {
     // Storage blocked (private mode): the draft lives only in this screen.
   }
@@ -296,6 +308,7 @@ function writeDraft(id: string, d: TextDraft) {
 function clearDraft(id: string) {
   try {
     window.localStorage.removeItem(draftKey(id));
+    window.localStorage.removeItem(baseKey(id));
   } catch {
     // Nothing to clear.
   }
@@ -674,6 +687,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { profile, session } = useAuth();
+  // The loose pictures' X follows the field edit lock (Nov 4, bug 9 of the Nov 3 review): a
+  // technician on an Authorized ticket could still delete them from here.
+  const extrasEditable =
+    fieldEditProblem(profile, job.stage, job.technician_id === profile?.id) === null;
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
   const timeFn = useServerFn(listTimeEntries);
@@ -712,7 +729,16 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   });
 
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
-  const [draft, setDraft] = useState<TextDraft>(() => stored ?? fromJob(job));
+  // The ticket changed since the draft was typed (Nov 4, bug 4; lib/draft-conflict.ts): the
+  // server's text stays on the screen and the toast below offers "Use mine".
+  const [conflict] = useState(
+    () =>
+      !!stored &&
+      draftConflict(readDraftBase(job.id), job.updated_at, !sameDraft(stored, fromJob(job))),
+  );
+  const [draft, setDraft] = useState<TextDraft>(() =>
+    stored && !conflict ? stored : fromJob(job),
+  );
   const latest = useRef(draft);
   // Owner, Oct 12: an inspection takes its own six steps (closeout-steps.ts closeoutSteps); its
   // checklist draft saves as it is answered (inspection-draft.ts) and its photos have their own
@@ -752,18 +778,27 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     const next = { ...latest.current, ...patch };
     latest.current = next;
     setDraft(next);
-    writeDraft(job.id, next);
+    writeDraft(job.id, next, job.updated_at);
     autosave.push(next);
   };
   const told = useRef(false);
   useEffect(() => {
     if (told.current || !stored) return;
     told.current = true;
-    if (!sameDraft(stored, fromJob(job))) {
-      toast.info("Restored the notes you typed here before; saving them now.");
-      autosave.push(stored);
+    if (sameDraft(stored, fromJob(job))) return;
+    if (conflict) {
+      toast.warning(DRAFT_CONFLICT_NOTES, {
+        duration: DRAFT_CONFLICT_MS,
+        action: { label: "Use mine", onClick: () => update(stored) },
+        cancel: { label: "Keep theirs", onClick: () => clearDraft(job.id) },
+      });
+      return;
     }
-  }, [stored, job, autosave]);
+    toast.info("Restored the notes you typed here before; saving them now.");
+    autosave.push(stored);
+    // `update` closes over the draft and is new each render; `told` runs this once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stored, job, autosave, conflict]);
 
   const complete = useMutation({
     mutationFn: async () => {
@@ -1154,7 +1189,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                 icon={Wrench}
                 aside={repairRows.length > 0 ? <span>{repairRows.length} added</span> : undefined}
               >
-                <TicketExtras job={job} canEdit />
+                <TicketExtras job={job} canEdit={extrasEditable} />
                 <RepairsSection
                   jobId={job.id}
                   ticketNumber={job.number}

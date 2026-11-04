@@ -84,6 +84,16 @@ export function newMaterialSort(current: readonly { sort: number }[], adding = 1
 }
 
 /** Save the list: changed rows update, rows without an id are added (at the top, in order). */
+/** A row save_service_materials writes (an update names its id; an insert carries its sort). */
+interface MaterialWrite {
+  id?: string;
+  name: string;
+  unit: string;
+  cost: number;
+  active: boolean;
+  category: string | null;
+}
+
 export const saveServiceMaterials = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -110,17 +120,19 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
       own.set(it.name, (own.get(it.name) ?? 0) + 1);
     }
     for (const [name, n] of own) if (n > 1) throw new Error(NAME_TAKEN(name));
-    if (data.markup !== undefined) {
-      const { error } = await sb
-        .from("service_settings")
-        .update({ material_markup: data.markup, updated_at: new Date().toISOString() })
-        .eq("id", 1);
-      if (error) throw new Error(error.message);
-    }
     let sort = newMaterialSort(current, data.items.filter((it) => !it.id).length);
+    const updates: MaterialWrite[] = [];
+    const inserts: (MaterialWrite & { sort: number })[] = [];
     for (const it of data.items) {
       const was = it.id ? byId.get(it.id) : undefined;
       if (it.id && !was) throw new Error("That material is no longer on the list — reload");
+      const row = {
+        name: it.name,
+        unit: it.unit,
+        cost: it.cost,
+        active: it.active,
+        category: it.category ?? null,
+      };
       if (was) {
         if (
           was.name === it.name &&
@@ -130,28 +142,21 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
           (was.category ?? null) === (it.category ?? null)
         )
           continue;
-        const { error } = await sb
-          .from("service_materials")
-          .update({
-            name: it.name,
-            unit: it.unit,
-            cost: it.cost,
-            active: it.active,
-            category: it.category ?? null,
-          })
-          .eq("id", was.id);
-        if (error) throw new Error(error.message);
+        updates.push({ id: was.id, ...row });
       } else {
-        const { error } = await sb.from("service_materials").insert({
-          name: it.name,
-          unit: it.unit,
-          cost: it.cost,
-          active: it.active,
-          category: it.category ?? null,
-          sort: sort++,
-        });
-        if (error) throw new Error(error.message);
+        inserts.push({ ...row, sort: sort++ });
       }
+    }
+    // One transaction for the whole list and the markup (Nov 4, bug 12 of the Nov 3 review):
+    // row-by-row writes left half the list saved when one failed. save_service_materials
+    // (20261104120000) is not in the generated types yet, so the call is through a loose client.
+    if (updates.length || inserts.length || data.markup !== undefined) {
+      const { error } = await (sb as unknown as SupabaseClient).rpc("save_service_materials", {
+        p_updates: updates,
+        p_inserts: inserts,
+        p_markup: data.markup ?? null,
+      });
+      if (error) throw new Error(error.message);
     }
     return loadServiceMaterials(sb);
   });

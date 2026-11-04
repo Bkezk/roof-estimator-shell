@@ -1052,6 +1052,9 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
+    // The screen never offers Void on a paid invoice; the server says the same (Nov 4, bug 8).
+    if (inv.status === "paid")
+      throw new Error("A paid invoice cannot be voided — edit the payment first");
     // The ticket's stage before this, for the stage automation (audit, Oct 2: a hard-coded
     // "invoiced" re-sent "done — invoice ready" when a draft was deleted on a Done ticket).
     const { data: jobBefore, error: jErr } = await sb

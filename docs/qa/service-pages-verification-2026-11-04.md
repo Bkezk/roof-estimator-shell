@@ -145,3 +145,37 @@ Owner: "go ahead and fix 1-6."
 
 Tests: service-verification-fixes-nov4.test.ts (13; all fail on the code before). The
 field-edit-lock test's fake learned `.not(col, "is", null)`; the quantity-box pin moved to 44 px.
+
+## The Nov 3 review's bugs, fixed (Nov 4; owner: "fix the rest" — all but 6 and 7)
+
+1. The office's ticket save re-leads the crew: every save goes through saveCrew; a manager's
+   carries the form's crew and rates, anyone else's moves the lead row to the new technician
+   (set_job_crew). The crew, is_on_crew and the invoice follow a reassignment.
+2. Unticking the last helper saves the lead alone (the crew box pushes the empty list).
+3. A timeline row goes in only from someone who works on that ticket (works_on_ticket) and only
+   of the kinds the app writes; 20261104120000, applied live.
+4. A phone draft typed against an older ticket is a choice: the server's text stays and a toast
+   offers "Use mine" / "Keep theirs" (lib/draft-conflict.ts; the close-out's notes carry the
+   ticket's updated_at, the checklist its saved_at). A draft against the current row restores as
+   before.
+5. Void says the ticket goes back to Authorized; Mark paid says the stage does not change.
+8. The server refuses to void a paid invoice ("edit the payment first").
+9. Recording and deleting a photo follow the field edit lock on the server (editableJob); the
+   close-out's loose pictures get the X only while the ticket may be edited.
+10. "Usual here" samples the newest 50 tickets.
+11. The short-stock dialog says inventory keeps a note for the next count.
+12. The pricing list saves in one transaction (save_service_materials, 20261104120000, applied
+    live): the markup, the updates and the inserts land together or not at all.
+13. The PDF preview redraws when the invoice's pictures change (the pane's version carries them).
+14. Adding a line no longer leaves the editor "dirty" forever (the dirty key ignores `orig`).
+15. A failed read of the ticket's stage is an error, not a blind stage write.
+16. The server refuses Invoiced / Closed on an inspection ("An inspection ends at Authorized").
+17. The long-press flag lets go after 600 ms; a time row takes a background re-read unless it is
+    being edited.
+
+Not done, by the owner's choice: 6 (the Sage export stamps invoices before the file exists) and
+7 (vendor-billed invoices export with a blank Sage customer id).
+
+Tests: service-review-bugs-nov4.test.ts (19; 16 fail on the code before — the three pure
+draftConflict / constant tests pass either way). Older pins moved (ownJob → editableJob,
+prev?.stage → prev.stage, the PreviewPane line, the saveCrew line, the TicketExtras X).

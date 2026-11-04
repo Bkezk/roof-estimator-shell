@@ -860,8 +860,8 @@ export function MaterialsSection({
                     </AlertDialogTitle>
                     <AlertDialogDescription>
                       If it came from somewhere else, cancel and pick that place. If it really came
-                      from {locName(short.r.location_id)}, log it here and the count there gets
-                      corrected with your entry.
+                      from {locName(short.r.location_id)}, log it here — inventory keeps a note that
+                      the count there needs fixing, so it is set right at the next count.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

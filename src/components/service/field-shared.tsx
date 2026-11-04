@@ -26,7 +26,12 @@ import {
 import type { AutosaveState } from "@/lib/autosave";
 import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
 import { photoDragData, setPhotoDrag } from "@/lib/photo-drag";
-import { LONG_PRESS_MS, thumbPress, type ThumbPress } from "@/lib/photo-select";
+import {
+  LONG_PRESS_MS,
+  LONG_PRESS_RESET_MS,
+  thumbPress,
+  type ThumbPress,
+} from "@/lib/photo-select";
 import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
@@ -441,6 +446,11 @@ export function PhotoThumb({
             pressTimer.current = window.setTimeout(() => {
               pressTimer.current = null;
               longPressed.current = true;
+              // Let go on its own (Nov 4, bug 17): a press that ends with no click must not
+              // swallow the next tap.
+              window.setTimeout(() => {
+                longPressed.current = false;
+              }, LONG_PRESS_RESET_MS);
               select.onPress("enter");
             }, LONG_PRESS_MS);
           }}
@@ -882,6 +892,13 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
   const saveFn = useServerFn(saveTimeEntry);
   const deleteFn = useServerFn(deleteTimeEntry);
   const [vals, setVals] = useState<TimeVals>(() => valsOf(entry));
+  // A background re-read hands the row new values (Nov 4, bug 17 of the Nov 3 review): take
+  // them unless this row is being edited (its boxes differ from the entry they opened from).
+  const [seen, setSeen] = useState(entry);
+  if (seen !== entry) {
+    setSeen(entry);
+    if (sameVals(vals, valsOf(seen))) setVals(valsOf(entry));
+  }
   const save = useMutation({
     mutationFn: (v: TimeVals) =>
       saveFn({ data: { id: entry.id, service_job_id: jobId, ...timePayload(v) } }),

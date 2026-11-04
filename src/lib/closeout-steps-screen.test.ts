@@ -68,7 +68,8 @@ describe("the sections in step order", () => {
       '{...card("crew")}',
       "<CrewBox job={job} embedded />",
       '{...card("before")}',
-      "<TicketExtras job={job} canEdit />",
+      // Nov 4 (bug 9 of the Nov 3 review): the X follows the field edit lock.
+      "<TicketExtras job={job} canEdit={extrasEditable} />",
       'phase="before"',
       '{...card("work")}',
       'phase="work"',

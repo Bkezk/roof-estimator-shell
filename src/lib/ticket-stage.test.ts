@@ -121,7 +121,7 @@ describe("the server functions apply stageProblem", () => {
   });
   it("setServiceStage refuses with the rule's message", () => {
     expect(serverFn(svc, "setServiceStage")).toMatch(
-      /const problem = stageProblem\(p, data\.stage, prev\?\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
+      /const problem = stageProblem\(p, data\.stage, prev\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
     );
   });
   it("the old technician-only rule is gone", () => {

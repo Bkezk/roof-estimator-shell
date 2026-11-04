@@ -1526,7 +1526,8 @@ export const registerJobPhoto = createServerFn({ method: "POST" })
   .validator((d: unknown) => photoSchema.parse(d))
   .handler(async ({ data, context }): Promise<JobPhotoWithItems> => {
     const p = await me(context);
-    const job = await ownJob(context, data.service_job_id);
+    // The field edit lock, as repairs, time and materials (Nov 4, bug 9 of the Nov 3 review).
+    const { job } = await editableJob(context, data.service_job_id);
     if (!data.storage_path.startsWith(`${job.id}/`))
       throw new Error("The photo must be stored under the ticket's own folder");
     if (data.thumb_path && !data.thumb_path.startsWith(`${job.id}/`))
@@ -1597,7 +1598,7 @@ export const deleteJobPhoto = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), service_job_id: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }): Promise<void> => {
-    await ownJob(context, data.service_job_id);
+    await editableJob(context, data.service_job_id); // the field edit lock (Nov 4, bug 9)
     const { data: row } = await context.supabase
       .from("service_job_photos")
       .select("storage_path, thumb_path")
@@ -1946,6 +1947,8 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
       .select("id")
       .is("deleted_at", null)
       .neq("id", data.id)
+      // The newest 50 (Nov 4, bug 10 of the Nov 3 review: with no order the sample was arbitrary).
+      .order("created_at", { ascending: false })
       .limit(50);
     jobsQ = job.site_id
       ? jobsQ.eq("site_id", job.site_id)

@@ -17,7 +17,10 @@ describe("Invoice: Preview shows the PDF in the page", () => {
     expect(src).toContain("function PreviewPane(");
     expect(src).not.toContain("function PdfPreviewDialog(");
     expect(src).toContain("setView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });");
-    expect(src).toContain("<PreviewPane invoiceId={inv.id} version={inv.updated_at} />");
+    // Nov 4 (bug 13 of the Nov 3 review): the chosen pictures ride in the version.
+    expect(src).toContain(
+      "<PreviewPane invoiceId={inv.id} version={`${inv.updated_at}|${photoPickVersion}`} />",
+    );
     expect(src).toContain("const u = URL.createObjectURL(view.blob);");
     expect(src).toContain("return () => URL.revokeObjectURL(u);");
     expect(src).toContain("<PdfPages blob={view.blob} title={view.fileName} />");

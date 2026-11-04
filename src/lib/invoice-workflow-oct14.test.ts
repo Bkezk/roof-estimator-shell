@@ -463,8 +463,9 @@ describe("3. one primary action, a menu, a collapsible preview (invoice-editor.t
     expect(actions).toMatch(
       /aria-expanded=\{previewOpen\}\s*aria-controls="invoice-preview"\s*onClick=\{togglePreview\}\s*>\s*<Eye [^>]*\/> Preview/,
     );
+    // Nov 4 (bug 13 of the Nov 3 review): the chosen pictures are part of the pane's version.
     expect(draft).toContain(
-      "{previewOpen && <PreviewPane invoiceId={inv.id} version={inv.updated_at} />}",
+      "<PreviewPane invoiceId={inv.id} version={`${inv.updated_at}|${photoPickVersion}`} />",
     );
     const pane = ed.slice(
       ed.indexOf("function PreviewPane("),

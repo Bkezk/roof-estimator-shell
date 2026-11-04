@@ -282,7 +282,8 @@ describe("dispatch is the office's and a manager's (dispatchesTickets, Oct 9); i
     expect(svc).toContain("const crew = manager ? fields.crew : undefined;");
     expect(svc).toContain("if (!dispatcher) patch.technician_id = cur.technician_id;");
     expect(svc).toContain("fields.labor_rate_kind && manager ?");
-    expect(svc).toContain("const saved = manager ? await saveCrew(sb, row, crew) : row;");
+    // Nov 4 (bug 1 of the Nov 3 review): everyone's save re-leads the crew; only a manager's writes the rates.
+    expect(svc).toContain("const saved = await saveCrew(sb, row, manager ? crew : undefined);");
   });
   it("setJobCrew: the lead technician or a manager", () => {
     const fn = serverFn(read("src/lib/service-field.functions.ts"), "setJobCrew");

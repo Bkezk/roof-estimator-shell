@@ -127,7 +127,9 @@ export function CrewBox({
   const toggle = (id: string, on: boolean) => {
     const next = on ? [...picked.filter((x) => x !== id), id] : picked.filter((x) => x !== id);
     setPicked(next);
-    if (next.length) autosave.push(next);
+    // An empty list is the lead alone (Nov 4, bug 2 of the Nov 3 review: unticking the last
+    // helper used to save nothing, so the database kept the removed helper).
+    autosave.push(next);
   };
 
   const leadName =

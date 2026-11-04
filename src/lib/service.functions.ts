@@ -40,8 +40,10 @@ import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
+  INSPECTION_STAGE_MESSAGE,
   reopensTicket,
   stageProblem,
+  stagesForType,
   TECH_LOCKED_MESSAGE,
   techStageLocked,
 } from "@/lib/ticket-stage";
@@ -598,9 +600,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         id: context.userId,
         name: nameOf(p),
       });
-      // Crew rows are a manager's to write (RLS service_job_techs_manage); nobody else's save
-      // touches them (the technician did not change either).
-      const saved = manager ? await saveCrew(sb, row, crew) : row;
+      // The crew: a manager's save writes what the form sent; anyone else's save (the office
+      // dispatching — Nov 4, bug 1 of the Nov 3 review) still moves the lead row to the new
+      // technician through set_job_crew, so the crew, is_on_crew and the invoice follow.
+      const saved = await saveCrew(sb, row, manager ? crew : undefined);
       await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
       return withTechName(sb, saved);
     }
@@ -743,17 +746,25 @@ export const setServiceStage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
-    const { data: prev } = await context.supabase
+    // A failed read is an error, not a stage write with the clock and the reopen rules skipped
+    // (Nov 4, bug 15 of the Nov 3 review).
+    const { data: prev, error: prevErr } = await context.supabase
       .from("service_jobs")
-      .select("stage, number")
+      .select("stage, number, service_type")
       .eq("id", data.id)
       .maybeSingle();
+    if (prevErr) throw new Error(prevErr.message);
+    if (!prev) throw new Error("Ticket not found");
     // A technician: Open / Scheduled / Done; Invoiced and Closed: a manager's (ticket-stage.ts;
     // the database trigger service_jobs_stage_rule says the same).
-    const problem = stageProblem(p, data.stage, prev?.stage);
+    const problem = stageProblem(p, data.stage, prev.stage);
     if (problem) throw new Error(problem);
+    // An inspection ends at Authorized (ticket-stage.ts stagesForType) — the picker knew, the
+    // server did not (Nov 4, bug 16).
+    if (!stagesForType(prev.service_type).includes(data.stage))
+      throw new Error(INSPECTION_STAGE_MESSAGE);
     const { stopped } =
-      prev && prev.stage !== data.stage
+      prev.stage !== data.stage
         ? await stopClocksForOffice(
             context.supabase,
             { id: data.id, number: prev.number },
@@ -763,7 +774,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
         : { stopped: 0 };
     // Back to Open / Scheduled from Done (or an office stage): the ticket is reopened, so the
     // first visit's close-out stamp goes with the move (ticket-stage.ts reopensTicket, Oct 21).
-    const reopened = reopensTicket(prev?.stage, data.stage);
+    const reopened = reopensTicket(prev.stage, data.stage);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({
@@ -787,7 +798,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
       row,
       { id: context.userId, name: nameOf(p) },
       context.supabase,
-      prev?.stage ?? null,
+      prev.stage,
       undefined,
       { reopened },
     );

@@ -367,7 +367,8 @@ describe("every gate switched to dispatchesTickets; every money gate kept", () =
       /dateMoveProblem\(\{\s*profile: p,\s*oldYmd: cur\.scheduled_date,\s*newYmd: fields\.scheduled_date,\s*kind: "ticket",/,
     );
     expect(save).toContain("const crew = manager ? fields.crew : undefined;");
-    expect(save).toContain("const saved = manager ? await saveCrew(sb, row, crew) : row;");
+    // Nov 4 (bug 1 of the Nov 3 review): everyone's save re-leads the crew; only a manager's writes the rates.
+    expect(save).toContain("const saved = await saveCrew(sb, row, manager ? crew : undefined);");
     const assign = serverFn(svc, "assignServiceJob");
     expect(assign).toContain(
       'if (!dispatchesTickets(p)) throw new Error("Only the office or a manager dispatches tickets");',
