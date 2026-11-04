@@ -19,15 +19,23 @@
  * bid and opens the new-ticket form prefilled; a ticket started here shows as "Ticket #6004".
  * Marking it Won only records the win (the status log and the strip show it).
  *
+ * Owner, Nov 4 (the Opportunities review): "Add … as a new customer" with an address makes the
+ * customer's first property too, so the form is ready to create at once (crm.functions.ts
+ * quickCreateAccount); the Assignee box saves at change on a saved opportunity, as the Status
+ * does (setOpportunityAssignee); leaving with unsaved changes asks (Stay / Leave without saving /
+ * Save and leave) in place of losing them; the Notes box is gone — the timeline's Comment is the
+ * place to write (stored notes stay, untouched by Save); on a phone Delete sits at the foot of
+ * the page, not in the header.
+ *
  * A deleted opportunity (an old `?id=` link) opens read-only under a "Deleted on <date>" banner:
  * the form is disabled, and the status select, Start a bid, Delete, the follow-up strip and the
  * contact-log buttons are gone (the server refuses them too: OPP_DELETED). Admins and managers
  * get Restore (restoreOpportunity).
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -101,6 +109,7 @@ import {
   OPP_STATUSES,
   restoreOpportunity,
   saveOpportunity,
+  setOpportunityAssignee,
   setOpportunityStatus,
   type OppStatus,
   type OpportunityInput,
@@ -145,7 +154,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
-import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { DocumentsList } from "@/components/documents/documents-panel";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -656,7 +664,6 @@ interface Draft {
   /** 0 = blank (no estimate). */
   est_value: number;
   description: string;
-  notes: string;
 }
 
 const draftFrom = (o: OpportunityWithNames | null): Draft =>
@@ -676,7 +683,6 @@ const draftFrom = (o: OpportunityWithNames | null): Draft =>
         lead_source: o.lead_source ?? "",
         est_value: o.est_value ?? 0,
         description: o.description ?? "",
-        notes: o.notes ?? "",
       }
     : {
         title: "",
@@ -688,13 +694,18 @@ const draftFrom = (o: OpportunityWithNames | null): Draft =>
         lead_source: "",
         est_value: 0,
         description: "",
-        notes: "",
       };
-const draftKey = (d: Draft) =>
+/**
+ * What Save compares against the last save. On a saved opportunity the status and the assignee
+ * are left out: each saves the moment it changes (the header's select; the Assignee box, owner
+ * Nov 4), never through Save. A new one carries both into Create.
+ */
+const draftKey = (d: Draft, saved: boolean) =>
   JSON.stringify({
     ...d,
     customer: d.customer ? [d.customer.account_id, d.customer.site_id] : null,
     status: null,
+    assignee_id: saved ? null : d.assignee_id,
   });
 
 function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
@@ -712,11 +723,30 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const ticketsFn = useServerFn(listOpportunityTickets);
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(opp));
-  const [savedKey, setSavedKey] = useState(() => draftKey(draft));
+  const [savedKey, setSavedKey] = useState(() => draftKey(draft, !!opp));
   // Once an opportunity has an expected close, only an admin or a manager moves it (owner, Oct 1;
   // the server refuses anyone else with "Only a manager can move the date").
   const closeLocked = !!opp?.expected_close && !seesEveryone(profile);
-  const dirty = draftKey(draft) !== savedKey;
+  const dirty = draftKey(draft, !!opp) !== savedKey;
+  // Leaving with unsaved changes asks (owner, Nov 4): Stay / Leave without saving / Save and
+  // leave — a list row, Start a bid, Start a ticket and the sidebar all go through the router.
+  // Closing the tab keeps the browser's own warning. The ref is what the blocker reads, and it
+  // is cleared by hand before the page navigates itself (created → its id; deleted → the list).
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const blocker = useBlocker({
+    shouldBlockFn: () => dirtyRef.current,
+    withResolver: true,
+    enableBeforeUnload: () => dirtyRef.current,
+  });
+  // True from "Save and leave" until the save answers: the dialog is hidden meanwhile.
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  leavingRef.current = leaving;
+  const stayHere = () => {
+    setLeaving(false);
+    if (blocker.status === "blocked") blocker.reset();
+  };
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
   // The × on the customer block: the search box comes back, focused.
@@ -813,8 +843,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         lead_source: draft.lead_source,
         est_value: draft.est_value > 0 ? draft.est_value : null,
         description: draft.description,
-        notes: draft.notes,
-        // No bid_id: the link is written by /estimate (linkBid); left out, the server keeps it.
+        // No notes (the box is gone; left out, the server keeps what was saved) and no bid_id:
+        // the link is written by /estimate (linkBid); left out, the server keeps it.
       };
       return saveFn({ data: input });
     },
@@ -822,8 +852,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       invalidate(row.id);
       if (row.account_id) void qc.invalidateQueries({ queryKey: ["account", row.account_id] });
       qc.setQueryData(["opportunity", row.id], row);
+      // Saved: nothing is pending any more, whichever way the page goes next.
+      dirtyRef.current = false;
       if (opp) {
-        setSavedKey(draftKey(draft));
+        setSavedKey(draftKey(draft, true));
         // A moved date clears a running snooze (followups.server.ts): say so.
         const saved = row.followup_note
           ? `Opportunity saved — ${row.followup_note}`
@@ -831,13 +863,46 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         toast.success(`${saved}${toldSuffix(row.mentioned ?? 0)}`);
       } else {
         toast.success(`Opportunity created${toldSuffix(row.mentioned ?? 0)}`);
-        void navigate({ to: "/opportunities", search: { id: row.id }, replace: true });
       }
       // The opportunity is saved; say loudly when the people named in Notes were not told.
       if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
+      if (leavingRef.current) {
+        // "Save and leave": on to where the person was going (a new one is created on the way).
+        setLeaving(false);
+        if (blocker.status === "blocked") blocker.proceed();
+      } else if (!opp) {
+        void navigate({ to: "/opportunities", search: { id: row.id }, replace: true });
+      }
     },
-    onError: (e) => toast.error(`Could not save the opportunity: ${errText(e)}`),
+    onError: (e) => {
+      toast.error(`Could not save the opportunity: ${errText(e)}`);
+      if (leavingRef.current) stayHere();
+    },
   });
+
+  // The Assignee box on a saved opportunity saves at change (owner, Nov 4), as the Status does:
+  // the box shows the pick at once, the server hands the opportunity over (their timer starts,
+  // they are told), and a refusal puts the one before back. A new opportunity keeps it for Create.
+  const assigneeFn = useServerFn(setOpportunityAssignee);
+  const assigneeMut = useMutation({
+    mutationFn: (v: { assignee_id: string; before: string }) =>
+      assigneeFn({ data: { id: opp!.id, assignee_id: v.assignee_id } }),
+    onMutate: (v) => set("assignee_id", v.assignee_id),
+    onSuccess: (_r, v) => {
+      const who = assigneeOptions.find((t) => t.id === v.assignee_id)?.name ?? "them";
+      toast.success(v.assignee_id === profile?.id ? "Assigned to you" : `Assigned to ${who}`);
+      invalidate(opp!.id);
+    },
+    onError: (e, v) => {
+      set("assignee_id", v.before);
+      toast.error(`Could not change the assignee: ${errText(e)}`, { duration: 12_000 });
+    },
+  });
+  const changeAssignee = (v: string) => {
+    if (!v || v === draft.assignee_id) return;
+    if (opp && !deleted) assigneeMut.mutate({ assignee_id: v, before: draft.assignee_id });
+    else set("assignee_id", v);
+  };
 
   const statusMut = useMutation({
     mutationFn: (s: OppStatus) => statusFn({ data: { id: opp!.id, status: s } }),
@@ -856,6 +921,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       toast.success("Opportunity deleted");
       void qc.invalidateQueries({ queryKey: ["opportunities"] });
       void qc.invalidateQueries({ queryKey: ["followups"] });
+      // Gone: pending edits are moot, and the way to the list is not blocked by them.
+      dirtyRef.current = false;
       void navigate({ to: "/opportunities" });
     },
     onError: (e) => toast.error(`Could not delete the opportunity: ${errText(e)}`),
@@ -870,17 +937,25 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     onError: (e) => toast.error(`Could not restore the opportunity: ${errText(e)}`),
   });
 
-  const submit = () => {
-    if (save.isPending) return;
+  /** Save (Create). Returns false when the form is refused before any request. */
+  const submit = (): boolean => {
+    if (save.isPending) return true;
     if (!draft.title.trim()) {
       toast.error("Give the opportunity a title first");
-      return;
+      return false;
     }
     if (assigneeMessage || customerMessage) {
       toast.error(assigneeMessage ?? customerMessage);
-      return;
+      return false;
     }
     save.mutate();
+    return true;
+  };
+  // The leave dialog's "Save and leave": a form refused on the spot keeps the person here with
+  // the usual message; the save's own success / failure answers for the leave (above).
+  const saveAndLeave = () => {
+    setLeaving(true);
+    if (!submit()) stayHere();
   };
 
   // Owner, Oct 1: the status lives in the header only — a new opportunity's select sets the
@@ -1008,7 +1083,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             <div className="grid grid-cols-2 gap-4 @2xl:grid-cols-4" data-row="opp-four-fields">
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="opp-assignee">Assignee</Label>
-                <Select value={draft.assignee_id} onValueChange={(v) => set("assignee_id", v)}>
+                <Select
+                  value={draft.assignee_id}
+                  disabled={assigneeMut.isPending}
+                  onValueChange={changeAssignee}
+                >
                   <SelectTrigger
                     id="opp-assignee"
                     aria-invalid={!!assigneeMessage || undefined}
@@ -1082,19 +1161,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           </div>
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="opp-notes">Notes</Label>
-          <MentionTextarea
-            grow
-            id="opp-notes"
-            rows={2}
-            value={draft.notes}
-            maxLength={10000}
-            placeholder={`Anything the next person should know — ${MENTION_HINT}`}
-            onValueChange={(v) => set("notes", v)}
-          />
-        </div>
-
+        {/* No Notes box (owner, Nov 4): what the next person should know goes on the timeline
+            (Comment, with @mentions). Notes saved before stay on the row, untouched by Save. */}
         {!deleted && (
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -1181,10 +1249,13 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   </Link>
                 </Button>
               ))}
+            {/* Delete: in the header on a desktop; on a phone, at the foot of the page instead
+                (owner, Nov 4), so the header's wrap stays Status / Start a bid / Start a ticket. */}
             {opp && !deleted && can("customers") && (
               <Button
                 variant="outline"
-                className="text-destructive hover:text-destructive"
+                className="hidden text-destructive hover:text-destructive sm:inline-flex"
+                data-delete="header"
                 onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="mr-1 h-4 w-4" /> Delete
@@ -1290,6 +1361,53 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       ) : (
         oppForm
       )}
+
+      {opp && !deleted && can("customers") && (
+        <div className="border-t pt-4 sm:hidden" data-delete="phone">
+          <Button
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> Delete this opportunity
+          </Button>
+        </div>
+      )}
+
+      <AlertDialog
+        open={blocker.status === "blocked" && !leaving}
+        onOpenChange={(o) => !o && stayHere()}
+      >
+        <AlertDialogContent data-dialog="leave-opportunity">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes to this opportunity?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This opportunity has changes that are not saved. Save them before you leave, or leave
+              without saving — those changes are then lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={stayHere}>Stay</AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (blocker.status === "blocked") blocker.proceed();
+              }}
+            >
+              Leave without saving
+            </Button>
+            <AlertDialogAction
+              onClick={(e) => {
+                // Not the dialog's own close: it closes once the save has gone through.
+                e.preventDefault();
+                saveAndLeave();
+              }}
+            >
+              {opp ? "Save and leave" : "Create and leave"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {opp && (
         <AlertDialog

@@ -436,8 +436,8 @@ export function QuickAddCustomerDialog(props: {
             {props.requireAddress
               ? "The name, the address and one way to reach them (email or a phone) are required."
               : "The name and one way to reach them (email or a phone) are required."}{" "}
-            The contact typed here becomes the customer&apos;s primary contact. Properties are added
-            on the customer after it is saved.
+            The contact typed here becomes the customer&apos;s primary contact, and the physical
+            address its first property.
           </DialogDescription>
         </DialogHeader>
         <form

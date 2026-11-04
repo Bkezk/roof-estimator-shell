@@ -186,10 +186,12 @@ describe("the shared box", () => {
     );
     expect(c).toContain("Type @ to tell someone.");
   });
-  it("an opportunity's Notes uses it (growing) and the toast says who was told", () => {
+  it("an opportunity's mentions live on its timeline (Comment); the save toast still says who was told", () => {
     const o = read("src/components/opportunities-page.tsx");
-    expect(o).toContain('<MentionTextarea\n            grow\n            id="opp-notes"');
-    expect(o).toContain('onValueChange={(v) => set("notes", v)}');
+    // The Notes box is gone (owner, Nov 4): the timeline's Comment (contact-log.tsx) is the one
+    // place to write, @mentions included. Save leaves stored notes alone (notes left out = kept).
+    expect(o).not.toContain('id="opp-notes"');
+    expect(o).toContain('<ContactLogList kind="opportunity" itemId={opp.id} />');
     expect(o).toContain("toast.success(`${saved}${toldSuffix(row.mentioned ?? 0)}`);");
     expect(o).toContain("toast.success(`Opportunity created${toldSuffix(row.mentioned ?? 0)}`);");
     expect(o).toContain(

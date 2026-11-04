@@ -467,7 +467,7 @@ describe("Est. value starts blank (owner: number boxes start blank, never a plac
   const page = read("src/components/opportunities-page.tsx");
   const box = page.slice(
     page.indexOf('<Label htmlFor="opp-value">'),
-    page.indexOf('htmlFor="opp-notes"'),
+    page.indexOf("{!deleted && (", page.indexOf('<Label htmlFor="opp-value">')),
   );
   it("the box shows nothing for 0 / null: no value, no placeholder 0", async () => {
     const { numberFieldView } = await import("@/lib/number-field-view");

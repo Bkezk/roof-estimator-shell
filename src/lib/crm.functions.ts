@@ -826,8 +826,12 @@ export const saveSite = createServerFn({ method: "POST" })
   });
 
 /**
- * The one-step "new customer" from the Customers page or a ticket's / bid's customer search: the
- * account only, no site (owner, Sep 30: sites are added under the account afterwards). Needs an
+ * The one-step "new customer" from the Customers page or a ticket's / bid's / opportunity's
+ * customer search. The account, its primary contact row and — when a physical address was typed
+ * — its first property at that address, named after the customer (owner, Nov 4: the opportunity
+ * form asked for the address and then for "Add property", the same address a second time; a
+ * ticket needs the property too). No address: the account only (owner, Sep 30: sites are added
+ * under the account afterwards). Needs an
  * email, a cell phone or an office phone. Not a technician-only user's (Oct 21, the sixth
  * audit, OFFICE_ADDS_CUSTOMERS): the office owns the customer book — and a row they created was
  * unreadable to their own token under 20261020122000's fence (no ticket links it yet), so the
@@ -864,18 +868,51 @@ export const quickCreateAccount = createServerFn({ method: "POST" })
         throw new Error(`Could not save the contact: ${cErr.message}`);
       }
     }
+    // The first property, from the physical address typed (owner, Nov 4). Should the row fail,
+    // the customer just made is taken back, so a retry cannot make a second one.
+    const site = firstSiteFromAccount(account);
+    let siteRow: SiteRow | null = null;
+    if (site) {
+      const { data: s, error: sErr } = await sb.from("crm_sites").insert(site).select("*").single();
+      if (sErr) {
+        await sb.from("crm_accounts").delete().eq("id", account.id);
+        throw new Error(`Could not save the property: ${sErr.message}`);
+      }
+      siteRow = s;
+    }
     return {
       account_id: account.id,
       account_name: account.name,
       kind: data.kind,
-      site_id: null,
-      site_name: null,
-      site_address: "",
-      site_count: 0,
+      site_id: siteRow?.id ?? null,
+      site_name: siteRow?.name ?? null,
+      site_address: siteRow ? siteAddressLine(siteRow) : "",
+      site_count: siteRow ? 1 : 0,
       contact_name: account.contact_name,
       phone: account.phone ?? account.mobile,
     };
   });
+
+/**
+ * A new customer's first property from its physical address: the customer's name as the
+ * property's, the street, city, state and zip as typed. Null when no address was typed (a
+ * state alone is not an address — normalizeAddress drops it).
+ */
+export function firstSiteFromAccount(
+  a: Pick<AccountRow, "id" | "name" | "address1" | "address2" | "city" | "state" | "zip">,
+): Database["public"]["Tables"]["crm_sites"]["Insert"] | null {
+  const has = (v: string | null) => !!v && v.trim() !== "";
+  if (!has(a.address1) && !has(a.city) && !has(a.zip)) return null;
+  return {
+    account_id: a.id,
+    name: a.name,
+    address1: a.address1,
+    address2: a.address2,
+    city: a.city,
+    state: a.state,
+    zip: a.zip,
+  };
+}
 
 /** A user who can be a customer's account manager. */
 export interface CrmUserOption {

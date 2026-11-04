@@ -303,7 +303,15 @@ const oppSchema = z.object({
   lead_source: optText(120),
   est_value: z.number().finite().nonnegative().nullable().optional(),
   bid_id: z.string().uuid().nullable().optional(),
-  notes: optText(10000),
+  // Left out = kept (owner, Nov 4: the form has no Notes box any more — what the next person
+  // should know goes on the timeline; notes saved before stay as they are).
+  notes: z
+    .string()
+    .trim()
+    .max(10000)
+    .nullable()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === null || v === "" ? null : v)),
 });
 export type OpportunityInput = z.input<typeof oppSchema>;
 
@@ -425,7 +433,7 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       // Left out = kept: the bid link is written by /estimate (linkBid), and a form opened
       // before it was linked must not clear it.
       ...(fields.bid_id === undefined ? {} : { bid_id: fields.bid_id }),
-      notes: fields.notes ?? null,
+      ...(fields.notes === undefined ? {} : { notes: fields.notes }),
       updated_by_name: nameOf(p),
     };
     let row: OpportunityRow;
@@ -601,6 +609,34 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Opportunity not found, or not yours to change");
     await syncOppFollowup(row, prevStatus, context, nameOf(p));
+  });
+
+/**
+ * The Assignee box on a saved opportunity saves at change (owner, Nov 4), the way the Status
+ * does: handing it to someone is an action — their follow-up timer starts and they are told
+ * "assigned to you" (never the person making the change), the one before loses theirs — and
+ * the rest of the form stays pending for Save. Whoever may edit the opportunity (RLS) hands it
+ * over; the status log (crm_opportunity_events, the database's) says who.
+ */
+export const setOpportunityAssignee = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), assignee_id: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ id: string; assignee_id: string | null }> => {
+    const p = await me(context);
+    await assertLiveOpportunity(context.supabase, data.id);
+    const { data: row, error } = await context.supabase
+      .from("crm_opportunities")
+      .update({ assignee_id: data.assignee_id, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Opportunity not found, or not yours to change");
+    await syncOppFollowup(row, row.status, context, nameOf(p));
+    return { id: row.id, assignee_id: row.assignee_id };
   });
 
 /**

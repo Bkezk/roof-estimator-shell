@@ -163,7 +163,7 @@ describe("the opportunity page (owner, Oct 1)", () => {
     const rowOpen = editor.slice(editor.lastIndexOf("<div", at), at);
     expect(rowOpen).toContain("grid-cols-2");
     expect(rowOpen).toContain("@2xl:grid-cols-4");
-    const row = editor.slice(at, editor.indexOf('htmlFor="opp-notes"'));
+    const row = editor.slice(at, editor.indexOf("{!deleted && (", at));
     const order = ["opp-assignee", "opp-close", "opp-source", "opp-value"].map((id) =>
       row.indexOf(`htmlFor="${id}"`),
     );
@@ -172,10 +172,10 @@ describe("the opportunity page (owner, Oct 1)", () => {
     expect(row).toMatch(/<LeadSourcePicker\s+id="opp-source"/);
   });
 
-  it("Description and Notes grow as typed (two rows to start)", () => {
+  it("Description grows as typed (two rows to start); no Notes box (owner, Nov 4)", () => {
     expect(editor).toMatch(/<AutoTextarea\s+id="opp-description"\s+rows=\{2\}/);
-    // Notes is the @mention box since Oct 14 (mention-textarea.tsx); `grow` makes it auto-grow.
-    expect(editor).toMatch(/<MentionTextarea\s+grow\s+id="opp-notes"\s+rows=\{2\}/);
+    // Notes was the @mention box (Oct 14); since Nov 4 the timeline's Comment is the one place.
+    expect(editor).not.toContain('id="opp-notes"');
     expect(page).not.toMatch(/<Textarea\b/);
   });
 
