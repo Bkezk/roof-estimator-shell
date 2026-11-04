@@ -12,6 +12,7 @@ import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import { listChecklistItems, saveChecklistItems } from "@/lib/service-inspection.functions";
 import { hiddenChecklistItem, ITEM_LABEL_MAX } from "@/lib/inspection";
+import { useSetupForm } from "@/lib/setup-forms";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,6 +74,8 @@ export function InspectionChecklistSettings() {
     },
     onError: (e) => toast.error(`Could not save the checklist: ${errText(e)}`),
   });
+  // The page's leave dialog and tab marker (Nov 4, review item 1).
+  useSetupForm("inspection", dirty, () => save.mutateAsync());
 
   const move = (i: number, d: -1 | 1) => {
     if (!rows) return;
@@ -131,11 +134,11 @@ export function InspectionChecklistSettings() {
           <>
             <ol className="space-y-1.5">
               {rows.map((r, i) => (
-                <li key={r.key} className="flex items-center gap-1.5">
+                <li key={r.key} className="flex flex-wrap items-center gap-1.5">
                   <span className="w-6 text-right text-xs text-muted-foreground">{i + 1}.</span>
                   <Input
                     aria-label={`Item ${i + 1}`}
-                    className="h-9 max-w-md"
+                    className="h-9 min-w-0 max-w-md flex-1"
                     maxLength={ITEM_LABEL_MAX}
                     value={r.label}
                     onChange={(e) =>
@@ -143,7 +146,11 @@ export function InspectionChecklistSettings() {
                     }
                   />
                   {hiddenChecklistItem(r.label) && (
-                    <span className="text-xs text-muted-foreground" data-line="findings-switch">
+                    // Under the box on a phone (review item 4), beside it on a wide screen.
+                    <span
+                      className="order-last basis-full pl-7 text-xs text-muted-foreground md:order-none md:basis-auto md:pl-0"
+                      data-line="findings-switch"
+                    >
                       asked as the switch in Findings — not a row on the phone
                     </span>
                   )}

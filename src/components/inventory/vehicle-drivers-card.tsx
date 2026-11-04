@@ -7,6 +7,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
@@ -18,6 +19,7 @@ import {
   type InventoryLocation,
   type VehicleDriverRow,
 } from "@/lib/inventory.functions";
+import { useSetupForm } from "@/lib/setup-forms";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -80,7 +82,11 @@ export function VehicleDriversCard(props: { locations: InventoryLocation[] }) {
         <CardDescription>
           Up to two drivers per vehicle; a person may drive two. A driver&apos;s &ldquo;Take from
           inventory&rdquo; starts on their vehicle. Changes apply from today and the history is
-          kept.
+          kept. Vehicles are added and named on{" "}
+          <Link to="/inventory" className="underline underline-offset-2">
+            Inventory
+          </Link>
+          .
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -186,7 +192,7 @@ function VehicleRow(props: {
 
   const save = () => {
     setSaving(true);
-    void setFn({ data: { location_id: props.vehicle.id, user_ids: chosen } })
+    return setFn({ data: { location_id: props.vehicle.id, user_ids: chosen } })
       .then(() => {
         toast.success(
           chosen.length
@@ -197,9 +203,14 @@ function VehicleRow(props: {
         // The admin or manager may have put themselves on (or off) a vehicle.
         void qc.invalidateQueries({ queryKey: ["inventory-my-defaults"] });
       })
-      .catch((e: unknown) => toast.error(errText(e, "Could not save the drivers")))
+      .catch((e: unknown) => {
+        toast.error(errText(e, "Could not save the drivers"));
+        throw e;
+      })
       .finally(() => setSaving(false));
   };
+  // A row left with drivers picked but not saved joins the page's leave dialog (Nov 4).
+  useSetupForm(`vehicles:${props.vehicle.id}`, dirty, save);
 
   const picker = (value: string, onChange: (v: string) => void, other: string, n: number) => (
     <div className="space-y-1">
@@ -229,7 +240,12 @@ function VehicleRow(props: {
       </p>
       {picker(first, setFirst, second, 1)}
       {picker(second, setSecond, first, 2)}
-      <Button size="sm" className="mb-0.5" disabled={!dirty || saving} onClick={save}>
+      <Button
+        size="sm"
+        className="mb-0.5"
+        disabled={!dirty || saving}
+        onClick={() => void save().catch(() => {})}
+      >
         {saving ? "Saving…" : "Save"}
       </Button>
     </li>

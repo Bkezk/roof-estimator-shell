@@ -1375,6 +1375,30 @@ const ratesSchema = z.object({
     .partial(),
 });
 export const AUTHORIZER_NOT_MANAGER = "Pick an admin or a manager to authorize tickets";
+
+/**
+ * "These rates are confirmed" (Setup › Service rates; owner, Nov 4): the CenterPoint note on the
+ * page stays until an admin or a manager presses it, which stamps who and when
+ * (20261104220000_rates_confirmed.sql). Nothing else changes.
+ */
+export const confirmServiceRates = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ rates_confirmed_at: string; by: string }> => {
+    await ratesManager(context);
+    const { data: p } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const by = p ? nameOf(p) : "";
+    const at = new Date().toISOString();
+    const { error } = await context.supabase
+      .from("service_settings")
+      .update({ rates_confirmed_at: at, rates_confirmed_by_name: by, updated_at: at })
+      .eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { rates_confirmed_at: at, by };
+  });
 export type ServiceRatesInput = z.input<typeof ratesSchema>;
 export const setServiceRates = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

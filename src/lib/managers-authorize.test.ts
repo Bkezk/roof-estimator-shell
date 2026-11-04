@@ -599,14 +599,13 @@ describe("4. the words", () => {
     expect(page).toContain("authorize={!!q.data?.authorizer}");
   });
   it("Setup › Service rates no longer says one person authorizes", () => {
-    const ui = read("src/components/service-rates-settings.tsx");
+    // Flattened: the hint sits under a section heading since Nov 4 and wraps differently.
+    const ui = read("src/components/service-rates-settings.tsx").replace(/\s+/g, " ");
     expect(ui).toContain(
-      "Owns the &quot;Authorize ticket&quot; reminder when a ticket is Done. Every admin",
+      "Owns the &quot;Authorize ticket&quot; reminder when a ticket is Done. Every admin " +
+        "and manager is told the ticket is done, sees it under Needs authorization on Work " +
+        "Overview and can mark it Authorized.",
     );
-    expect(ui).toContain(
-      "and manager is told the ticket is done, sees it under Needs authorization on Work",
-    );
-    expect(ui).toContain("Overview and can mark it Authorized.");
     expect(ui).not.toContain("Any manager can still mark a ticket");
     // The Reminders page says nothing about who authorizes (nothing to keep accurate there).
     expect(read("src/components/reminders-settings.tsx")).not.toMatch(/authoriz/i);

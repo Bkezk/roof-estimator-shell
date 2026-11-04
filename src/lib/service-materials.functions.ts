@@ -112,8 +112,12 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
     const { error: probe } = await sb.from("service_materials").select("id").limit(1);
     if (probe) throw new Error(MATERIALS_NOT_SET_UP);
     const byId = new Map(current.map((m) => [m.id, m]));
-    // A material with no bid-catalog twin is stocked under its name: one per name.
+    // A material with no bid-catalog twin is stocked under its name: one per name. The page
+    // sends only the rows that changed (Nov 4), so the rows it left out count too.
+    const sent = new Set(data.items.map((it) => it.id).filter((id): id is string => !!id));
     const own = new Map<string, number>();
+    for (const m of current)
+      if (!m.stock_screen_id && !sent.has(m.id)) own.set(m.name, (own.get(m.name) ?? 0) + 1);
     for (const it of data.items) {
       const linked = it.id ? !!byId.get(it.id)?.stock_screen_id : false;
       if (linked) continue;

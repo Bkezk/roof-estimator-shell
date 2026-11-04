@@ -98,7 +98,7 @@ describe("Setup › Material pricing", () => {
   it("shows that cost read-only, with where to change it", () => {
     const tab = read("src/components/service/material-pricing-settings.tsx").replace(/\s+/g, " ");
     expect(tab).toContain("readOnly={!!r.source}");
-    expect(tab).toContain("title={r.source ? `From ${r.source} — change it there` : undefined}");
+    expect(tab).toContain("title={ r.source ? `From ${r.source} — change it there` : undefined }");
     expect(tab).toContain("source: priceSource(m),");
     expect(tab).toContain(
       "takes its price from there (grey box: change it on Estimate Pricing and it follows)",

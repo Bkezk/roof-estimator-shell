@@ -41,46 +41,65 @@ describe("the rates are a compact table", () => {
     const body = ui.slice(ui.indexOf("<tbody>"), ui.indexOf("</tbody>"));
     expect(body).not.toContain("py-1.5");
     expect(body).toMatch(/<td className="[^"]*\bpy-1\b/);
-    expect(body).toMatch(/<NumberField[^>]*className="[^"]*\bh-8 w-24 text-right\b/);
+    // The box is drawn by rateBox (Nov 4: the phone layout shares it) with the table's classes.
+    expect(body).toContain('rateBox(kind, role.key, c, "ml-auto h-8 w-24 text-right")');
+    expect(ui).toMatch(/<NumberField\s+value=\{draft\[c\.field\]\}/);
     expect(body).not.toContain("blankZero={false}");
   });
 });
 
-describe("the settings below the table", () => {
-  const grid = ui.slice(ui.indexOf('<div className="grid'), ui.indexOf("<Button"));
-  it("are a two-column grid on md+, no field spanning both columns", () => {
-    expect(grid).toMatch(/^<div className="grid [^"]*\bmd:grid-cols-2\b/);
-    expect(grid).not.toContain("col-span-2");
+describe("the settings below the table (three headings since Nov 4: Hourly rates / Invoices / Authorizing)", () => {
+  const invoices = ui.slice(
+    ui.indexOf('id="rates-h-invoices"'),
+    ui.indexOf('id="rates-h-authorizing"'),
+  );
+  const authorizing = ui.slice(
+    ui.indexOf('id="rates-h-authorizing"'),
+    ui.indexOf("</section>", ui.indexOf('id="rates-h-authorizing"')),
+  );
+  it("the headings, in order", () => {
+    const order = ["rates-h-hourly", "rates-h-invoices", "rates-h-authorizing"].map((id) =>
+      ui.indexOf(`<h3 id="${id}"`),
+    );
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
-  it("pair authorizer / tax, terms / contact line, subject / message, in that order", () => {
+  it("are two-column grids on md+, no field spanning both columns", () => {
+    expect(invoices).toMatch(/<div className="grid [^"]*\bmd:grid-cols-2\b/);
+    expect(authorizing).toMatch(/<div className="grid [^"]*\bmd:grid-cols-2\b/);
+    expect(invoices).not.toContain("col-span-2");
+  });
+  it("Invoices: tax, terms, contact line, subject, message, in that order; the authorizer under Authorizing", () => {
     const order = [
-      "Authorizes Done tickets",
       "Tax rate %",
       "Payment terms",
       "Invoice contact line",
       "Email subject",
       "Email message",
-    ].map((l) => grid.indexOf(`>${l}</Label>`));
+    ].map((l) => invoices.indexOf(`>${l}</Label>`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(authorizing).toContain(">Authorizes Done tickets</Label>");
+    expect(invoices).not.toContain("Authorizes Done tickets");
   });
   it("the message is a 3-row textarea; every hint is still there", () => {
-    expect(grid).toMatch(/<Textarea[^>]*rows=\{3\}/);
+    expect(invoices).toMatch(/<Textarea[^>]*rows=\{3\}/);
     for (const hint of [
-      "On the taxable lines of new invoices; a tax-exempt customer gets 0.",
+      "On the taxable lines of new invoices; blank means no tax, and a tax-exempt customer gets 0 either way.",
       "Printed on the invoice PDF.",
       '{"{number}"} is replaced with the invoice number.',
       "The default message in the Send dialog; it can be changed per send.",
     ])
-      expect(grid.replace(/\s+/g, " ")).toContain(hint);
+      expect(invoices.replace(/\s+/g, " ")).toContain(hint);
   });
 });
 
 describe("the CenterPoint note", () => {
-  it("is kept, on one line", () => {
+  it("is kept, on one line, until the rates are confirmed (Nov 4)", () => {
     expect(flat).toMatch(
       /<p className="[^"]*\btruncate\b[^"]*">\s*Defaults came from the CenterPoint invoices in the report; confirm the helper travel rates with the office\.\s*<\/p>/,
     );
+    expect(ui).toContain("{!q.data.settings.rates_confirmed_at ? (");
   });
 });
 

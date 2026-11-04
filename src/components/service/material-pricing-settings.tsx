@@ -7,16 +7,43 @@
  * untouched. Edit, add (at the top), hide (a hidden material is kept for tickets and stock that
  * already name it). Group: where a material with no bid-catalog twin sits on the Inventory page
  * (Underlayment, Sealants, Cleaning Supplies …); a twin sits under the catalog's own group.
+ *
+ * Nov 4 (review item 2): the rows read as one line of text each under group headings that fold
+ * (closed to start; a search opens them all); a row opens its boxes when clicked (one at a time;
+ * edits are kept when another is opened); Show stays a live checkbox on the text row. "Priced
+ * here only" keeps the rows whose cost is typed on this page. The count follows the search. Add
+ * material puts a new, open row at the top with the cursor in its name. A save sends only the
+ * rows that changed (lib/material-pricing-view.ts), and the page's leave dialog knows about
+ * unsaved edits (lib/setup-forms.ts).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Loader2, Plus, Save, Search } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  Plus,
+  Save,
+  Search,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listServiceMaterials, saveServiceMaterials } from "@/lib/service-materials.functions";
 import { sellPrice, type ServiceMaterial, priceSource } from "@/lib/service-materials";
+import {
+  changedMaterials,
+  filterMaterials,
+  groupMaterials,
+  groupOpen,
+  isFiltering,
+  materialCountLine,
+  type MaterialView,
+} from "@/lib/material-pricing-view";
+import { useSetupForm } from "@/lib/setup-forms";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,9 +53,9 @@ import { plainErrText } from "@/lib/plain-error";
 const errText = plainErrText;
 const KEY = ["service-materials"] as const;
 const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const GRID = "md:grid-cols-[minmax(0,1fr)_6rem_6.5rem_6rem_10rem_3.5rem]";
+const GRID = "md:grid-cols-[minmax(0,1fr)_6rem_6.5rem_6rem_10rem_3.5rem_4rem]";
 
-interface Row {
+interface Row extends MaterialView {
   key: string;
   id?: string;
   name: string;
@@ -39,6 +66,7 @@ interface Row {
   category: string;
   /** Counted in the bid catalog's stock (its group is the catalog's): no Group field. */
   shared: boolean;
+  screen: string | null;
   /**
    * The Estimate Pricing cell a shared material takes its cost from (owner, Oct 8: "have the
    * service materials pull through the prices from the estimate pricing"); the cost box is
@@ -55,6 +83,7 @@ const toRow = (m: ServiceMaterial): Row => ({
   active: m.active,
   category: m.category ?? "",
   shared: !!m.stock_screen_id,
+  screen: m.stock_screen_id,
   source: priceSource(m),
 });
 const costOf = (r: Row) => {
@@ -72,6 +101,11 @@ export function MaterialPricingSettings() {
   const [dirty, setDirty] = useState(false);
   const [filter, setFilter] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [pricedHere, setPricedHere] = useState(false);
+  /** The row whose boxes are open. */
+  const [editing, setEditing] = useState<string | null>(null);
+  /** The group headings the user opened (a search opens them all). */
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   /** The markup, percent, as typed. */
   const [markupText, setMarkupText] = useState("");
   useEffect(() => {
@@ -80,6 +114,10 @@ export function MaterialPricingSettings() {
       setMarkupText(String(Math.round(q.data.markup * 100000) / 1000));
     }
   }, [q.data, dirty]);
+  const loaded = useMemo(
+    () => new Map<string, MaterialView>((q.data?.items ?? []).map((m) => [m.id, toRow(m)])),
+    [q.data],
+  );
   const markupPct = Number(markupText);
   const markupOk =
     markupText.trim() !== "" && Number.isFinite(markupPct) && markupPct >= 0 && markupPct <= 1000;
@@ -97,25 +135,30 @@ export function MaterialPricingSettings() {
     setDirty(true);
   };
   const addRow = () => {
+    const key = `new-${Date.now()}-${rows?.length ?? 0}`;
     // New rows go first, so the one just added is in view.
     setRows((rs) => [
       {
-        key: `new-${Date.now()}-${rs?.length ?? 0}`,
+        key,
         name: filter.trim(),
         unit: "Each",
         cost: "",
         active: true,
         category: "",
         shared: false,
+        screen: null,
         source: null,
       },
       ...(rs ?? []),
     ]);
     setDirty(true);
+    setEditing(key);
   };
   const save = useMutation({
     mutationFn: () => {
-      const items = (rows ?? []).map((r) => {
+      // Only the rows that changed go (and only they are checked), so an error names a row the
+      // user touched.
+      const items = changedMaterials(rows ?? [], loaded).map((r) => {
         const cost = costOf(r);
         if (!r.name.trim()) throw new Error("Every material needs a name");
         if (!r.unit.trim()) throw new Error(`"${r.name}" needs a unit`);
@@ -135,22 +178,37 @@ export function MaterialPricingSettings() {
     onSuccess: (saved) => {
       qc.setQueryData(KEY, { items: saved, markup });
       setDirty(false);
+      setEditing(null);
       setRows(saved.map(toRow));
       toast.success("Material pricing saved");
     },
     onError: (e) => toast.error(`Could not save: ${errText(e)}`),
   });
+  useSetupForm("materials", dirty, () => save.mutateAsync());
 
-  const shown = useMemo(() => {
-    const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
-    return (rows ?? []).filter(
-      (r) =>
-        !r.id ||
-        ((showHidden || r.active) &&
-          words.every((w) => `${r.name} ${r.unit} ${r.category}`.toLowerCase().includes(w))),
-    );
-  }, [rows, filter, showHidden]);
+  const filters = useMemo(
+    () => ({ search: filter, showHidden, pricedHere }),
+    [filter, showHidden, pricedHere],
+  );
+  const shown = useMemo(() => filterMaterials(rows ?? [], filters), [rows, filters]);
+  const grouped = useMemo(() => groupMaterials(shown), [shown]);
+  /** The rows with unsaved edits: their groups stay open. */
+  const changedKeys = useMemo(
+    () => new Set(changedMaterials(rows ?? [], loaded).map((r) => r.key)),
+    [rows, loaded],
+  );
+  const searching = filter.trim() !== "";
   const hiddenCount = (rows ?? []).filter((r) => !r.active && r.id).length;
+  const ownCount = (rows ?? []).filter((r) => r.id && !r.shared).length;
+  const total = (rows ?? []).filter((r) => r.id && (showHidden || r.active)).length;
+  const shownSaved = shown.filter((r) => r.id).length;
+  const toggleGroup = (label: string) =>
+    setOpened((o) => {
+      const next = new Set(o);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
 
   const saveButton = (
     <Button
@@ -177,7 +235,7 @@ export function MaterialPricingSettings() {
           its price from there (grey box: change it on Estimate Pricing and it follows). Cost is per
           unit; Bills at is the cost plus the material markup (cost ×{" "}
           {Math.round((1 + markup) * 1000) / 1000}). A draft invoice can use its own markup. Bids
-          are priced on Estimate Pricing — nothing here changes them.
+          are priced on Estimate Pricing — nothing here changes them. Click a material to change it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -224,9 +282,13 @@ export function MaterialPricingSettings() {
                   onChange={(e) => setFilter(e.target.value)}
                 />
               </div>
-              <span className="text-sm text-muted-foreground">
-                {rows.filter((r) => r.active).length} materials
+              <span className="text-sm text-muted-foreground" data-line="count">
+                {materialCountLine(shownSaved, total, isFiltering(filters))}
               </span>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={pricedHere} onCheckedChange={(v) => setPricedHere(v === true)} />
+                Priced here only ({ownCount})
+              </label>
               {hiddenCount > 0 && (
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -248,78 +310,159 @@ export function MaterialPricingSettings() {
                 <option key={g} value={g} />
               ))}
             </datalist>
-            <div
-              className={`hidden gap-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground md:grid ${GRID}`}
-            >
-              <span>Material</span>
-              <span>Unit</span>
-              <span>Cost</span>
-              <span>Bills at</span>
-              <span>Group</span>
-              <span>Show</span>
-            </div>
-            <ul className="space-y-2 md:space-y-1">
-              {shown.map((r) => {
-                const cost = costOf(r);
+            <div className="space-y-2">
+              {grouped.map((g) => {
+                const open = groupOpen(
+                  g.label,
+                  opened,
+                  searching,
+                  g.rows.some((r) => changedKeys.has(r.key)),
+                );
                 return (
-                  <li
-                    key={r.key}
-                    className={`grid grid-cols-2 items-center gap-2 rounded-md border p-2 md:border-0 md:p-1 ${GRID} ${r.active ? "" : "opacity-60"} ${r.id ? "" : "bg-primary/5"}`}
-                  >
-                    <Input
-                      aria-label="Material name"
-                      className="col-span-2 h-9 md:col-span-1"
-                      maxLength={200}
-                      value={r.name}
-                      onChange={(e) => edit(r.key, { name: e.target.value })}
-                    />
-                    <Input
-                      aria-label={`Unit of ${r.name || "material"}`}
-                      className="h-9"
-                      maxLength={30}
-                      value={r.unit}
-                      onChange={(e) => edit(r.key, { unit: e.target.value })}
-                    />
-                    <Input
-                      aria-label={`Cost of ${r.name || "material"}`}
-                      className={`h-9 tabular-nums ${r.source ? "bg-muted text-muted-foreground" : ""}`}
-                      inputMode="decimal"
-                      value={r.cost}
-                      readOnly={!!r.source}
-                      title={r.source ? `From ${r.source} — change it there` : undefined}
-                      onChange={(e) => edit(r.key, { cost: e.target.value })}
-                    />
-                    <span className="text-sm tabular-nums text-muted-foreground">
-                      <span className="md:hidden">Bills at </span>
-                      {cost === null ? "—" : USD.format(sellPrice(cost, markup))}
-                    </span>
-                    {r.shared ? (
-                      <span className="hidden md:block" />
-                    ) : (
-                      <Input
-                        aria-label={`Group of ${r.name || "material"}`}
-                        className="h-9"
-                        list="material-groups"
-                        maxLength={80}
-                        placeholder="Group"
-                        value={r.category}
-                        onChange={(e) => edit(r.key, { category: e.target.value })}
-                      />
+                  <section key={g.label} data-group={g.label}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-1.5 rounded-md px-1 py-1.5 text-left text-sm font-medium hover:bg-muted"
+                      aria-expanded={open}
+                      onClick={() => toggleGroup(g.label)}
+                    >
+                      {open ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+                      )}
+                      {g.label}
+                      <span className="font-normal text-muted-foreground">({g.rows.length})</span>
+                    </button>
+                    {open && (
+                      <ul className="space-y-1 pl-1 md:pl-5">
+                        {g.rows.map((r) => {
+                          const cost = costOf(r);
+                          const bills = cost === null ? "—" : USD.format(sellPrice(cost, markup));
+                          const isEditing = editing === r.key;
+                          return (
+                            <li
+                              key={r.key}
+                              data-row={r.key}
+                              data-editing={isEditing || undefined}
+                              className={`rounded-md border md:border-0 ${r.active ? "" : "opacity-60"} ${r.id ? "" : "bg-primary/5"}`}
+                            >
+                              {isEditing ? (
+                                <div
+                                  className={`grid grid-cols-2 items-center gap-2 p-2 md:p-1 ${GRID}`}
+                                >
+                                  <Input
+                                    aria-label="Material name"
+                                    className="col-span-2 h-9 md:col-span-1"
+                                    maxLength={200}
+                                    autoFocus
+                                    value={r.name}
+                                    onChange={(e) => edit(r.key, { name: e.target.value })}
+                                  />
+                                  <Input
+                                    aria-label={`Unit of ${r.name || "material"}`}
+                                    className="h-9"
+                                    maxLength={30}
+                                    value={r.unit}
+                                    onChange={(e) => edit(r.key, { unit: e.target.value })}
+                                  />
+                                  <Input
+                                    aria-label={`Cost of ${r.name || "material"}`}
+                                    className={`h-9 tabular-nums ${r.source ? "bg-muted text-muted-foreground" : ""}`}
+                                    inputMode="decimal"
+                                    value={r.cost}
+                                    readOnly={!!r.source}
+                                    title={
+                                      r.source ? `From ${r.source} — change it there` : undefined
+                                    }
+                                    onChange={(e) => edit(r.key, { cost: e.target.value })}
+                                  />
+                                  <span className="text-sm tabular-nums text-muted-foreground">
+                                    <span className="md:hidden">Bills at </span>
+                                    {bills}
+                                  </span>
+                                  {r.shared ? (
+                                    <span className="hidden md:block" />
+                                  ) : (
+                                    <Input
+                                      aria-label={`Group of ${r.name || "material"}`}
+                                      className="h-9"
+                                      list="material-groups"
+                                      maxLength={80}
+                                      placeholder="Group"
+                                      value={r.category}
+                                      onChange={(e) => edit(r.key, { category: e.target.value })}
+                                    />
+                                  )}
+                                  <label className="flex items-center gap-2 text-sm">
+                                    <Checkbox
+                                      aria-label={`Show ${r.name || "material"} on tickets`}
+                                      checked={r.active}
+                                      onCheckedChange={(v) => edit(r.key, { active: v === true })}
+                                    />
+                                    <span className="md:hidden">Show on tickets</span>
+                                  </label>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-9"
+                                    onClick={() => setEditing(null)}
+                                  >
+                                    <Check className="mr-1 h-4 w-4" aria-hidden /> Done
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 px-2 py-1 md:px-1 md:py-0.5">
+                                  <button
+                                    type="button"
+                                    className="min-w-0 flex-1 rounded-sm text-left hover:bg-muted"
+                                    aria-label={`Change ${r.name || "material"}`}
+                                    onClick={() => setEditing(r.key)}
+                                  >
+                                    <span className="block truncate text-sm">{r.name}</span>
+                                    <span className="block text-xs text-muted-foreground">
+                                      {r.unit} · cost {cost === null ? "—" : USD.format(cost)}
+                                      {r.source ? " (from Estimate Pricing)" : ""} · bills at{" "}
+                                      {bills}
+                                      {!r.shared && r.category.trim()
+                                        ? ` · ${r.category.trim()}`
+                                        : ""}
+                                    </span>
+                                  </button>
+                                  <label className="flex shrink-0 items-center gap-2 text-sm">
+                                    <Checkbox
+                                      aria-label={`Show ${r.name || "material"} on tickets`}
+                                      checked={r.active}
+                                      onCheckedChange={(v) => edit(r.key, { active: v === true })}
+                                    />
+                                    <span className="text-xs text-muted-foreground">Show</span>
+                                  </label>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 shrink-0"
+                                    aria-label={`Edit ${r.name || "material"}`}
+                                    onClick={() => setEditing(r.key)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     )}
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        aria-label={`Show ${r.name || "material"} on tickets`}
-                        checked={r.active}
-                        onCheckedChange={(v) => edit(r.key, { active: v === true })}
-                      />
-                      <span className="md:hidden">Show on tickets</span>
-                    </label>
-                  </li>
+                  </section>
                 );
               })}
-            </ul>
+            </div>
             {!shown.length && (
-              <p className="text-sm text-muted-foreground">No material matches “{filter}”.</p>
+              <p className="text-sm text-muted-foreground">
+                {searching ? `No material matches “${filter}”.` : "No material to show."}
+              </p>
             )}
             {dirty && <div className="flex justify-end">{saveButton}</div>}
           </>

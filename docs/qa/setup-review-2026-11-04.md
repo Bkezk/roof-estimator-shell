@@ -61,3 +61,46 @@ set today; one driver row ever).
 The place in the menu (Customers › Setup, owner Oct 5) and the four-tab shape are the owner's
 decisions and work; the arrows on the checklist do the job for 11 rows (drag and drop is not
 worth its weight here).
+
+## The changes (owner: "go on 1, 2, 3, 4, and 5")
+
+One push, every item with a test that fails on the code before it
+(`src/lib/setup-review-nov4.test.ts`: 22, of which 19 fail on the old code; the three that pass
+are pure rules in a new file). Checked in the browser as the test login with every write
+refused (the page's saves would change the office's real settings), at 1440 px and 390 px, no
+console errors.
+
+1. **Unsaved edits survive, and leaving asks.** A tab's card stays mounted (hidden) once opened,
+   so a tab switch keeps every edit; a tab with unsaved edits carries an amber dot; leaving the
+   page opens "Save changes to Setup?" naming the tabs (Stay / Leave without saving / Save and
+   leave, which saves every dirty card). Service rates has a dirty state: Save is off until
+   something is typed, "Unsaved changes" beside it, and a refetch never overwrites edits. Browser:
+   typed 56 in a rate and 9.99 on a material, switched tabs twice, both still there and both tabs
+   dotted; the Opportunities link opened the dialog ("Service rates, Material pricing have changes
+   that are not saved"); Stay kept the page; Save and leave with the writes refused showed the two
+   cards' error toasts and stayed; Leave without saving went to /opportunities.
+2. **Material pricing reads as text under headings.** 20 group headings, folded to start (the
+   page is 1,050 px instead of 5,769, 54 inputs instead of 461): the groups priced here A–Z, then
+   "From Estimate Pricing › <screen>". A search opens them all and matches the heading too
+   ("pipe" finds the Pipe Stacks); a group holding an unsaved edit never folds away. Click a row
+   (or its pencil) to open its boxes, Done to close them; Show stays a live checkbox on the text
+   row. "Priced here only (48)" keeps the rows whose cost is typed here. The count follows the
+   filters ("15 of 137 materials"). Add material opens the new row at the top with the cursor in
+   its name. A save sends only the rows that changed, and the server now checks a renamed row's
+   name against the rows left out of the payload (`NAME_TAKEN`).
+3. **Service rates in three sections.** Hourly rates / Invoices (tax, terms, contact line, email)
+   / Authorizing Done tickets. The CenterPoint note stays until "These rates are confirmed" is
+   pressed, which stamps who and when (`confirmServiceRates`; `20261104220000_rates_confirmed.sql`,
+   applied live). Not pressed here: that is the office's call. The tax hint says blank means no
+   tax.
+4. **Phones.** The rates table is for wide screens; below `md` the four boxes of each role stack
+   under it, labelled, the same draft behind both (24 boxes, no sideways scroll). The checklist
+   box shrinks so the number, the box and its three buttons share one line, and the "asked as the
+   switch" note sits under the box.
+5. **Small things.** `?tab=vehicles` waits for the profile (no rates paint, no rates request);
+   the vehicle list loads with the Vehicles tab only; the card says "Vehicles are added and named
+   on Inventory" with a link; the material save payload is the changed rows (item 2).
+
+Pins updated: `service-rates-layout` (the three sections), `managers-authorize` and
+`service-material-sync` (wrapping), `setup-page` / `inventory-batch-oct9` unchanged. Chain: lint
+clean, types clean, 493 files / 6,329 tests, build OK.

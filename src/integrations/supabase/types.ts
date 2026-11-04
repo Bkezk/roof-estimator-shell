@@ -3817,6 +3817,8 @@ export type Database = {
           invoice_contact: string | null;
           material_markup: number;
           payment_terms: string;
+          rates_confirmed_at: string | null;
+          rates_confirmed_by_name: string | null;
           tax_rate: number;
           updated_at: string;
         };
@@ -3828,6 +3830,8 @@ export type Database = {
           invoice_contact?: string | null;
           material_markup?: number;
           payment_terms?: string;
+          rates_confirmed_at?: string | null;
+          rates_confirmed_by_name?: string | null;
           tax_rate?: number;
           updated_at?: string;
         };
@@ -3839,6 +3843,8 @@ export type Database = {
           invoice_contact?: string | null;
           material_markup?: number;
           payment_terms?: string;
+          rates_confirmed_at?: string | null;
+          rates_confirmed_by_name?: string | null;
           tax_rate?: number;
           updated_at?: string;
         };
