@@ -23,7 +23,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canAccess, canClaim, seesEveryone } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
-import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
+import { CONTACT_METHODS, LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 import { assigneeProblem, OPP_CUSTOMER_REQUIRED, opportunityProblem } from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
@@ -47,6 +47,14 @@ export const OPP_CLOSING: readonly OppStatus[] = ["won", "lost", "no_response"];
 /** The plain refusal for any change to a deleted opportunity. */
 export const OPP_DELETED = "This opportunity was deleted";
 
+/** One contact from the log, as the list row shows it. */
+export interface LastContact {
+  method: string;
+  at: string;
+  by_name: string | null;
+  note: string | null;
+}
+
 export type OpportunityWithNames = OpportunityRow & {
   assignee_name: string | null;
   account_name: string | null;
@@ -65,6 +73,10 @@ export type OpportunityWithNames = OpportunityRow & {
    * (work-counts.ts isOppHeld). Null when there is no hold or the caller cannot read follow-ups.
    */
   hold_until: string | null;
+  /** The open follow-up's next reminder (owner, Nov 4: the list row); null without one. */
+  next_remind_at: string | null;
+  /** The latest contact logged (called / texted / emailed / visited / other), or null. */
+  last_contact: LastContact | null;
   /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
   followup_note?: string | null;
   /** After a save: how many people the Notes' @mentions told (owner, Oct 14). */
@@ -166,28 +178,58 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   for (const x of sites ?? []) siteNames.set(x.id, x.name);
   const bidRows = new Map<string, LinkedBid>();
   for (const b of bids ?? []) bidRows.set(b.id, b);
-  // The holds (owner, Oct 13): each opportunity's open follow-up with a snoozed_until. Best
-  // effort — a caller who cannot read follow-ups sees no hold, never an error.
+  // The open follow-ups: each opportunity's hold (snoozed_until; owner, Oct 13) and next
+  // reminder (owner, Nov 4: the list row says when the assignee is next reminded). Best effort —
+  // a caller who cannot read follow-ups sees neither, never an error.
   const holds = new Map<string, string>();
+  const nextRemind = new Map<string, string>();
+  // The latest contact per opportunity (owner, Nov 4: "Last contact: Called Nov 4 …" on the
+  // list row — the one question the list is for is who still needs a call). Contacts only
+  // (called / texted / emailed / visited / other), not notes, comments or "Service done".
+  const lastContact = new Map<string, LastContact>();
   if (rows.length) {
-    const { data: held } = await sb
-      .from("crm_followups")
-      .select("item_id, snoozed_until")
-      .eq("kind", "opportunity")
-      .eq("status", "open")
-      .not("snoozed_until", "is", null)
-      .in(
-        "item_id",
-        rows.map((r) => r.id),
-      )
-      .limit(1000);
-    for (const h of held ?? []) if (h.snoozed_until) holds.set(h.item_id, h.snoozed_until);
+    const ids = rows.map((r) => r.id);
+    const [{ data: open }, { data: contacts }] = await Promise.all([
+      sb
+        .from("crm_followups")
+        .select("item_id, snoozed_until, next_remind_at")
+        .eq("kind", "opportunity")
+        .eq("status", "open")
+        .in("item_id", ids)
+        .limit(1000),
+      sb
+        .from("crm_contact_log")
+        .select("item_id, method, at, by_name, note")
+        .eq("kind", "opportunity")
+        .in("method", [...CONTACT_METHODS])
+        .in("item_id", ids)
+        .order("at", { ascending: false })
+        .limit(2000),
+    ]);
+    for (const h of open ?? []) {
+      if (h.snoozed_until) holds.set(h.item_id, h.snoozed_until);
+      if (h.next_remind_at) nextRemind.set(h.item_id, h.next_remind_at);
+    }
+    // The newest row per item (the read is newest first, so the cap keeps the recent ones; the
+    // comparison does not lean on the order).
+    for (const c of contacts ?? []) {
+      const prev = lastContact.get(c.item_id);
+      if (!prev || c.at > prev.at)
+        lastContact.set(c.item_id, {
+          method: c.method,
+          at: c.at,
+          by_name: c.by_name,
+          note: c.note,
+        });
+    }
   }
   return rows.map((r) => {
     const bid = r.bid_id ? bidRows.get(r.bid_id) : undefined;
     return {
       ...r,
       hold_until: holds.get(r.id) ?? null,
+      next_remind_at: nextRemind.get(r.id) ?? null,
+      last_contact: lastContact.get(r.id) ?? null,
       assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
       account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
       site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,

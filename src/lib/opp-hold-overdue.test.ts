@@ -99,7 +99,9 @@ describe("the screens carry the hold", () => {
   it("every opportunity row carries hold_until from its open follow-up", () => {
     expect(fns).toContain("hold_until: string | null;");
     expect(fns).toContain('.eq("kind", "opportunity")');
-    expect(fns).toContain('.not("snoozed_until", "is", null)');
+    // Since Nov 4 the one open-follow-up read also carries the next reminder (the list row).
+    expect(fns).toContain('.select("item_id, snoozed_until, next_remind_at")');
+    expect(fns).toContain("if (h.snoozed_until) holds.set(h.item_id, h.snoozed_until);");
     expect(fns).toContain("hold_until: holds.get(r.id) ?? null,");
   });
   it("the list row, the Overdue filter and the header pass the hold; an On hold tag replaces the red one", () => {

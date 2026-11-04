@@ -130,7 +130,7 @@ import {
   UntouchedBadge,
   untouchedKey,
 } from "@/components/crm/contact-log";
-import { listUntouched, type UntouchedRow } from "@/lib/contact-log.functions";
+import { contactMethodLabel, listUntouched, type UntouchedRow } from "@/lib/contact-log.functions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,6 +177,31 @@ const day = (ymd: string | null) => {
     year: "numeric",
   });
 };
+/** A moment as the list row says it: "Nov 4, 5:41 PM" (this year's) or "Nov 4, 2025". */
+const whenShort = (iso: string) => {
+  const d = new Date(iso);
+  return d.getFullYear() === new Date().getFullYear()
+    ? d.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+/** A day as the list row says it: "Nov 7" (this year's) or "Jan 7, 2027". */
+const dayShort = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString(
+    "en-US",
+    d.getFullYear() === new Date().getFullYear()
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" },
+  );
+};
+const NOTE_CUT = 90;
+const cutNote = (note: string) =>
+  note.length > NOTE_CUT ? `${note.slice(0, NOTE_CUT).trimEnd()}…` : note;
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const asStatus = (s: string): OppStatus =>
@@ -605,6 +630,29 @@ function OppListRow({
           {meta.join(" · ")} · Updated {when(o.updated_at)}
           {o.updated_by_name ? ` by ${o.updated_by_name}` : ""}
         </p>
+        {/* Owner, Nov 4: who still needs a call, at a glance — the latest contact logged (or
+            "No contact yet" while open) and, on an open one with a timer, the next reminder.
+            On hold, the badge above says until when; the reminder waits, so it is left out. */}
+        {(o.last_contact || isOpenOppStatus(status)) && (
+          <p className="text-sm text-muted-foreground" data-line="contact">
+            {o.last_contact ? (
+              <>
+                Last contact:{" "}
+                <span className="font-medium text-foreground">
+                  {contactMethodLabel(o.last_contact.method)}
+                </span>{" "}
+                {whenShort(o.last_contact.at)}
+                {o.last_contact.by_name ? ` by ${o.last_contact.by_name}` : ""}
+                {o.last_contact.note ? ` — ${cutNote(o.last_contact.note)}` : ""}
+              </>
+            ) : (
+              "No contact yet"
+            )}
+            {isOpenOppStatus(status) && o.next_remind_at && !isOppHeld(o, today)
+              ? ` · Next reminder ${dayShort(o.next_remind_at)}`
+              : ""}
+          </p>
+        )}
       </div>
     </div>
   );

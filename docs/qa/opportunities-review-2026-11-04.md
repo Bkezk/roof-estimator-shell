@@ -71,3 +71,20 @@ Delete was at the foot, on a desktop the reverse. No page errors.
 
 Test: `src/lib/opportunities-nov4-review.test.ts` (11; 10 fail on the old code). Pins updated:
 `opportunity-form`, `opportunity-customer-required`, `mention-everywhere`.
+
+## Item 5, afterwards ("go with item 5")
+
+Each list row now ends with a contact line: **Last contact: Called Nov 4, 7:01 PM by Claude —
+left a message** (the latest contact logged — called, texted, emailed, visited, other; never a
+note, a comment or "Service done"; the note cut at 90 characters), or **No contact yet** while
+the opportunity is open; and, on an open one with a running timer, **· Next reminder Nov 7**
+(left out while on hold — the On hold badge says until when). A closed one with no contact
+shows no line. Both come with the list in one read: `listOpportunities` → `withNames` makes one
+follow-up query (holds and next reminders together, where the holds query was) and one
+contact-log query for every row, never one request per row. `getOpportunity` carries the same.
+
+Browser check (temporary rows, removed afterwards): a fresh opportunity assigned to me read
+"No contact yet · Next reminder Nov 7"; after Called with a note, "Last contact: Called Nov 4,
+7:01 PM by Claude — Claude temp check: left a message · Next reminder Nov 7". Test:
+`src/lib/opportunities-last-contact.test.ts` (4; all fail on the old code). Pin updated:
+`opp-hold-overdue`.
