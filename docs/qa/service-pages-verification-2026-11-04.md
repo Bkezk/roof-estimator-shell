@@ -118,3 +118,30 @@ office page, with the guard relaxed, the take-back went through.
 ## Still open from the Nov 3 review
 The 17 bugs in §1 of `service-pages-review-2026-11-03` (fixes await the owner's go-ahead),
 item 16 (smaller PDF photos — declined) and the "Not exported" chip (declined).
+
+## The six findings, fixed (Nov 4, later the same day)
+
+Owner: "go ahead and fix 1-6."
+
+1. Finger sizes: the material row's − and + are 44 × 44 px (the count box, Remove and a search
+   source 44 px tall), the two "next step" marks and their Undo 44 px, the inspection checklist's
+   OK / Issue / N/A 44 px. Measured on the phone: the Done repair's + / − read 44 × 44.
+2. A material logged clears the "Nothing used" mark: the close-out turns its own draft off
+   (and saves) as soon as a material is on the ticket, and the server clears `nothing_used_at`
+   on any consumed movement against a ticket (the office page's path too).
+3. Setup carries a "Small copies for older pictures" card (managers and admins): it counts the
+   pictures without a small copy (72 at the time of writing), makes them in the browser the way
+   the phone does — each full picture downloaded once, shrunk to 320 px, uploaded beside it,
+   recorded — and reports what could not be made. The full pictures are never changed. **The
+   owner presses the button**: the check here could not run it against the real tickets.
+4. The Inventory page reads the item-number keys as compact lines (`listItemNumberKeys`),
+   not the full rows: the item numbers went from 475 KB to 84 KB. The page's other catalog read,
+   the price targets list (267 KB), was left as it was.
+5. Setup's checklist marks the "Recommend repairs" row "asked as the switch in Findings — not a
+   row on the phone", and its description says why the phone shows one row fewer.
+6. The ticket bundle signs the signature's link with the photos (`signature_url`); the screens
+   use it while it names the row's path, else sign their own. The office ticket page now makes
+   no signing call from the browser (measured: 0).
+
+Tests: service-verification-fixes-nov4.test.ts (13; all fail on the code before). The
+field-edit-lock test's fake learned `.not(col, "is", null)`; the quantity-box pin moved to 44 px.

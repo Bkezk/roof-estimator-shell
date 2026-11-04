@@ -250,6 +250,23 @@ export async function removeFromServiceBucket(path: string) {
 }
 
 /** A one-hour signed URL for a private object (photos, the signature). */
+/**
+ * The signature image's link: the one the bundle signed (ServiceJobWithTech.signature_url) while
+ * it still names the row's path, else signed here (a signature saved since; a row from another
+ * read) — the Nov 4 check, finding 6.
+ */
+export function useSignatureUrl(job: {
+  signature_path: string | null;
+  signature_url?: string | null | undefined;
+}): { data: string | null; error: unknown } {
+  const bundled =
+    job.signature_url && job.signature_path && job.signature_url.includes(job.signature_path)
+      ? job.signature_url
+      : null;
+  const own = useSignedUrl(bundled ? null : job.signature_path);
+  return { data: bundled ?? own.data ?? null, error: own.error };
+}
+
 export function useSignedUrl(path: string | null | undefined) {
   return useQuery({
     queryKey: ["service-signed-url", path],

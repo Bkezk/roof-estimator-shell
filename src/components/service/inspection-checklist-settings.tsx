@@ -11,7 +11,7 @@ import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listChecklistItems, saveChecklistItems } from "@/lib/service-inspection.functions";
-import { ITEM_LABEL_MAX } from "@/lib/inspection";
+import { hiddenChecklistItem, ITEM_LABEL_MAX } from "@/lib/inspection";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,7 +113,9 @@ export function InspectionChecklistSettings() {
         <CardTitle>Inspection checklist</CardTitle>
         <CardDescription>
           What an Inspection ticket asks the technician about, in this order: each item is marked
-          OK, Issue or N/A with a note. Inspections already done keep their own answers.
+          OK, Issue or N/A with a note. Inspections already done keep their own answers. One row is
+          different: &ldquo;Recommend repairs&rdquo; is asked as a switch in the Findings step, not
+          as a checklist row, so the phone shows one row fewer than this list.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -140,6 +142,11 @@ export function InspectionChecklistSettings() {
                       edit(rows.map((x) => (x.key === r.key ? { ...x, label: e.target.value } : x)))
                     }
                   />
+                  {hiddenChecklistItem(r.label) && (
+                    <span className="text-xs text-muted-foreground" data-line="findings-switch">
+                      asked as the switch in Findings — not a row on the phone
+                    </span>
+                  )}
                   <Button
                     type="button"
                     size="icon"

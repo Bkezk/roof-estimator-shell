@@ -28,6 +28,41 @@ export const listItemNumbers = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+/**
+ * The mapping keys alone — which item number belongs to which product cell — for the Inventory
+ * page's product list (the Nov 4 check, finding 4): the full rows, with their descriptions,
+ * prices and import stamps, were 700 KB on every open of the page. One line per mapping,
+ * "<screen>|<row>|<col>\t<item no>" (itemNumberKeyLine / parseItemNumberKeyLine), because the
+ * transport writes every object's keys out again for every row — 1,250 small objects were
+ * 200 KB, the lines are under half that. The Item numbers screen still reads the full rows
+ * (listItemNumbers).
+ */
+export type ItemNumberKey = Pick<
+  ItemNumberRow,
+  "item_no" | "screen_id" | "row_label" | "price_col"
+>;
+export const itemNumberKeyLine = (k: ItemNumberKey): string =>
+  `${k.screen_id}|${k.row_label}|${k.price_col}\t${k.item_no}`;
+export function parseItemNumberKeyLine(line: string): { key: string; item_no: string } {
+  const tab = line.lastIndexOf("\t");
+  return tab < 0
+    ? { key: line, item_no: "" }
+    : { key: line.slice(0, tab), item_no: line.slice(tab + 1) };
+}
+export const listItemNumberKeys = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<string[]> => {
+    await assertPricingRead(context.supabase, context.userId);
+    const { data, error } = await context.supabase
+      .from("catalog_item_numbers")
+      .select("item_no, screen_id, row_label, price_col")
+      .order("screen_id")
+      .order("row_label")
+      .order("price_col");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map(itemNumberKeyLine);
+  });
+
 export type { PriceTarget } from "@/lib/price-targets";
 
 import { labelColOf } from "@/lib/catalog-row-key";

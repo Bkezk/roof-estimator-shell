@@ -30,6 +30,7 @@ import { LONG_PRESS_MS, thumbPress, type ThumbPress } from "@/lib/photo-select";
 import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
+import { makeSmallCopy } from "@/components/service/small-copy";
 import { listJobCrew } from "@/lib/service.functions";
 import { billedCrewLine } from "@/lib/service-crew";
 import {
@@ -38,7 +39,6 @@ import {
   type JobPhotoRow,
   listTimeEntries,
   saveTimeEntry,
-  setPhotoThumb,
   TIME_END_BEFORE_START,
   type TimeEntryInput,
   type TimeEntryRow,
@@ -63,10 +63,7 @@ import {
   fieldKeys,
   localYmd,
   loudError,
-  makeThumb,
   shortDay,
-  thumbPathFor,
-  uploadToServiceBucket,
   useSignedUrl,
 } from "@/components/service/field-utils";
 
@@ -81,17 +78,10 @@ async function backfillThumb(photo: JobPhotoRow, fullUrl: string, qc: QueryClien
   if (backfilled.has(photo.id)) return;
   backfilled.add(photo.id);
   try {
-    const res = await fetch(fullUrl);
-    if (!res.ok) return;
-    const small = await makeThumb(await res.blob());
-    if (!small) return;
-    const path = thumbPathFor(photo.storage_path);
-    await uploadToServiceBucket(path, small.blob, small.type);
-    const row = await setPhotoThumb({
-      data: { id: photo.id, service_job_id: photo.service_job_id, thumb_path: path },
-    });
+    const path = await makeSmallCopy(photo, fullUrl);
+    if (!path) return;
     qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(photo.service_job_id), (old) =>
-      old?.map((p) => (p.id === row.id ? { ...p, thumb_path: row.thumb_path } : p)),
+      old?.map((p) => (p.id === photo.id ? { ...p, thumb_path: path } : p)),
     );
   } catch {
     // Best effort: the full picture still shows; the next viewer may manage it.

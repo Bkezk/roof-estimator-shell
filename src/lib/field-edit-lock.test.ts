@@ -152,6 +152,11 @@ function fakeDb(tables: Record<string, Row[]>, rpcs: Record<string, () => unknow
       eq: (c: string, v: unknown) => (preds.push((r) => r[c] === v), q),
       in: (c: string, v: unknown[]) => (preds.push((r) => v.includes(r[c])), q),
       is: (c: string, v: unknown) => (preds.push((r) => (r[c] ?? null) === v), q),
+      // `.not(col, "is", null)` (Nov 4: addMovement clears a set nothing_used_at).
+      not: (c: string, o: string, v: unknown) => (
+        preds.push((r) => (o === "is" && v === null ? (r[c] ?? null) !== null : true)),
+        q
+      ),
       order: () => q,
       limit: () => q,
       single: async () => one(true),

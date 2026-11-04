@@ -575,6 +575,17 @@ export const addMovement = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (insErr) throw new Error(insErr.message);
+    // A material on the ticket clears its "Nothing used" mark (the Nov 4 check, finding 2): the
+    // close-out clears its own draft too; this covers the office page and any other path.
+    if (data.service_job_id && data.reason === "consumed") {
+      const { error: markErr } = await sb
+        .from("service_jobs")
+        .update({ nothing_used_at: null })
+        .eq("id", data.service_job_id)
+        .not("nothing_used_at", "is", null);
+      if (markErr)
+        console.error(`addMovement: could not clear nothing_used_at — ${markErr.message}`);
+    }
     if (correction && data.service_job_id) {
       // The same row shape as service-field.functions.ts logEvent (kind "edit" on the Timeline).
       const signed = `${qty < 0 ? "−" : "+"}${Math.round(Math.abs(qty) * 1000) / 1000}`;

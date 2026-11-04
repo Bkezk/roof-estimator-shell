@@ -23,7 +23,8 @@ describe("TruckRow", () => {
     expect(row).toContain('inputMode="decimal"');
     expect(row).toContain("min={0}");
     expect(row).toContain('step="any"');
-    expect(row).toContain("h-12 w-16 px-1 text-center");
+    // Nov 4 (the behaviour check, finding 1): a 44 px box between 44 px buttons.
+    expect(row).toContain("h-[44px] w-16 px-1 text-center");
     expect(row).toContain("value={text ?? shown}");
   });
   it("commits on blur and on Enter through onSet, rounded to 3 dp, loud on a non-number", () => {

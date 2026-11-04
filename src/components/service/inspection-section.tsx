@@ -289,7 +289,7 @@ export function ChecklistRows({
                   aria-label={`${item.label}: OK`}
                   title="Tick OK (optional — a row with nothing flagged reads as OK)"
                   disabled={readOnly}
-                  className={`h-9 w-9 p-0 ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60"}`}
+                  className={`h-[44px] w-[44px] p-0 ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60"}`}
                   onClick={() => set("ok")}
                 >
                   <Check className="h-4 w-4" aria-hidden />
@@ -301,7 +301,7 @@ export function ChecklistRows({
                   aria-pressed={flagged}
                   aria-label={`${item.label}: issue`}
                   disabled={readOnly}
-                  className={`h-9 px-2.5 ${flagged ? "border-transparent bg-red-600 text-white hover:bg-red-600/90" : ""}`}
+                  className={`h-[44px] px-2.5 ${flagged ? "border-transparent bg-red-600 text-white hover:bg-red-600/90" : ""}`}
                   onClick={() => set("issue")}
                 >
                   <Flag className="mr-1 h-3.5 w-3.5" aria-hidden /> Issue
@@ -313,7 +313,7 @@ export function ChecklistRows({
                   aria-pressed={na}
                   aria-label={`${item.label}: not applicable`}
                   disabled={readOnly}
-                  className={`h-9 px-2 text-xs ${na ? "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500" : "text-muted-foreground"}`}
+                  className={`h-[44px] px-2 text-xs ${na ? "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500" : "text-muted-foreground"}`}
                   onClick={() => set("na")}
                 >
                   N/A

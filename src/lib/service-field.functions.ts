@@ -1419,12 +1419,17 @@ export const getTicketBundle = createServerFn({ method: "GET" })
         sb,
         rows.map((p) => p.id),
       ),
-      signPhotoPaths(sb, rows),
+      // The signature's link rides in the same signing call (the Nov 4 check, finding 6).
+      signPhotoPaths(sb, [
+        ...rows,
+        ...(job.signature_path ? [{ storage_path: job.signature_path, thumb_path: null }] : []),
+      ]),
     ]);
     return {
       job: {
         ...job,
         technician_name: job.technician_id ? (names.get(job.technician_id) ?? null) : null,
+        signature_url: job.signature_path ? (urls.get(job.signature_path) ?? null) : null,
       },
       repairs: repairs.data ?? [],
       photos: withItemKeys(rows, links).map((p) => ({
@@ -1434,6 +1439,42 @@ export const getTicketBundle = createServerFn({ method: "GET" })
       })),
       time: time.data ?? [],
       events: events.data ?? [],
+    };
+  });
+
+/** How many older pictures Setup's "Small copies" card takes per round (listPhotosWithoutThumb). */
+export const PHOTO_COPY_BATCH = 25;
+/**
+ * Pictures with no small copy yet (the Nov 4 check, finding 3: everything from before Nov 3,
+ * 75 pictures on 17 tickets), newest first, a batch at a time with their links signed in one
+ * call — for Setup's "Small copies for older pictures" card (picture-copies-card.tsx), which
+ * makes the copies in the browser the way the phone does and records them (setPhotoThumb). A
+ * manager's or an admin's. The signature and aerial rows are never shown as thumbnails and are
+ * left alone.
+ */
+export const listPhotosWithoutThumb = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const p = await me(context);
+    if (!managesTickets(p)) throw new Error("Only a manager makes the small copies");
+    const { data, count, error } = await context.supabase
+      .from("service_job_photos")
+      .select("id, service_job_id, storage_path, thumb_path", { count: "exact" })
+      .is("thumb_path", null)
+      .in("role", ["before", "after", "other"])
+      .order("created_at", { ascending: false })
+      .limit(PHOTO_COPY_BATCH);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    const urls = await signPhotoPaths(context.supabase, rows);
+    return {
+      total: count ?? rows.length,
+      photos: rows.map((r) => ({
+        id: r.id,
+        service_job_id: r.service_job_id,
+        storage_path: r.storage_path,
+        url: urls.get(r.storage_path) ?? null,
+      })),
     };
   });
 

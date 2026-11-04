@@ -71,8 +71,12 @@ import {
   type NegativeCell,
   type Reconciliation,
 } from "@/lib/inventory-reconcile";
-import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
-import type { ItemNumberRow, PriceTarget } from "@/lib/admin-item-numbers.functions";
+import {
+  listItemNumberKeys,
+  listPriceTargets,
+  parseItemNumberKeyLine,
+} from "@/lib/admin-item-numbers.functions";
+import type { PriceTarget } from "@/lib/admin-item-numbers.functions";
 import { listServiceMaterialNames } from "@/lib/service-materials.functions";
 import { serviceStockTargets } from "@/lib/service-materials";
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
@@ -183,11 +187,11 @@ interface ProductOption {
   piece: PieceDef | null;
 }
 
-function productOptions(targets: PriceTarget[], itemNumbers: ItemNumberRow[]): ProductOption[] {
+function productOptions(targets: PriceTarget[], itemNumberLines: string[]): ProductOption[] {
   const nos = new Map<string, string[]>();
-  for (const m of itemNumbers) {
-    const k = `${m.screen_id}|${m.row_label}|${m.price_col}`;
-    nos.set(k, [...(nos.get(k) ?? []), m.item_no]);
+  for (const line of itemNumberLines) {
+    const { key: k, item_no } = parseItemNumberKeyLine(line);
+    if (item_no) nos.set(k, [...(nos.get(k) ?? []), item_no]);
   }
   const out: ProductOption[] = [];
   for (const t of targets) {
@@ -239,7 +243,8 @@ export function InventoryPage(props: {
   const movesFn = useServerFn(listMovements);
   const targetsFn = useServerFn(listPriceTargets);
   const serviceNamesFn = useServerFn(listServiceMaterialNames);
-  const itemNosFn = useServerFn(listItemNumbers);
+  // The keys alone (the Nov 4 check, finding 4), not the 700 KB of full rows.
+  const itemNosFn = useServerFn(listItemNumberKeys);
   const jobsFn = useServerFn(listJobOptions);
   const defaultsFn = useServerFn(myServiceDefaults);
   const locationsFn = useServerFn(listLocations);
@@ -269,7 +274,11 @@ export function InventoryPage(props: {
     queryKey: ["service-material-names"],
     queryFn: () => serviceNamesFn(),
   });
-  const itemNosQ = useQuery({ queryKey: ["item-numbers"], queryFn: () => itemNosFn() });
+  const itemNosQ = useQuery({
+    queryKey: ["item-number-keys"],
+    queryFn: () => itemNosFn(),
+    staleTime: 5 * 60_000,
+  });
   const jobsQ = useQuery({ queryKey: ["inventory-jobs"], queryFn: () => jobsFn() });
   // The vehicle(s) I drive today and my open tickets: what "Take from" starts on.
   const defaultsQ = useQuery({

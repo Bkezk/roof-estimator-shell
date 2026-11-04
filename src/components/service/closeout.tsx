@@ -213,7 +213,7 @@ import {
   takePickedFiles,
   uploadToServiceBucket,
   useAutosave,
-  useSignedUrl,
+  useSignatureUrl,
   whenShort,
 } from "@/components/service/field-utils";
 import { shouldMarkUpAfterShot, type QueuedPicture } from "@/lib/photo-upload-queue";
@@ -925,6 +925,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // saying "this step is finished", so the screen moves on; Undo keeps the step where it is).
   const nothingUsed = draft.nothing_used;
   const markNothingUsed = (on: boolean) => update({ nothing_used: on });
+  // A material logged clears the mark (the Nov 4 check, finding 2): the step's summary already
+  // preferred the items; the ticket's nothing_used_at now follows, so no report sees both.
+  const materialsLogged = (materialsQ.data ?? []).length > 0;
+  useEffect(() => {
+    if (materialsLogged && nothingUsed) update({ nothing_used: false });
+    // `update` closes over the draft and is new each render; the two flags decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialsLogged, nothingUsed]);
   const notesSkipped = draft.notes_skipped;
   const markNotesSkipped = (on: boolean) => update({ notes_skipped: on });
   const stepState: StepState = {
@@ -1206,7 +1214,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     <Button
                       type="button"
                       variant="ghost"
-                      className="h-10"
+                      className="h-[44px]"
                       onClick={() => markNothingUsed(false)}
                     >
                       Undo
@@ -1216,7 +1224,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 w-full text-base"
+                    className="h-[44px] w-full text-base"
                     onClick={() => {
                       markNothingUsed(true);
                       goNext("materials");
@@ -1284,7 +1292,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                       <Button
                         type="button"
                         variant="ghost"
-                        className="h-10"
+                        className="h-[44px]"
                         onClick={() => markNotesSkipped(false)}
                       >
                         Undo
@@ -1294,7 +1302,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-11 w-full text-base"
+                      className="h-[44px] w-full text-base"
                       onClick={() => {
                         markNotesSkipped(true);
                         goNext("notes");
@@ -1696,7 +1704,7 @@ function RepairsSection({
         <Button
           type="button"
           variant="outline"
-          className="h-11 w-full text-base"
+          className="h-[44px] w-full text-base"
           onClick={() => setPickerOpen(true)}
         >
           <Plus className="mr-2 h-5 w-5" /> Add another repair
@@ -2391,7 +2399,7 @@ function RepairCard({
 function SignatureSection({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const registerFn = useServerFn(registerJobPhoto);
-  const url = useSignedUrl(job.signature_path);
+  const url = useSignatureUrl(job);
   const [signAgain, setSignAgain] = useState(false);
   const saveSig = useMutation({
     mutationFn: async (png: Blob) => {

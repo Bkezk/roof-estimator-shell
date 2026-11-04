@@ -65,7 +65,7 @@ import {
   fieldKeys,
   loudError,
   takePickedFiles,
-  useSignedUrl,
+  useSignatureUrl,
   whenShort,
 } from "@/components/service/field-utils";
 import { useTicketPictureUpload } from "@/components/service/ticket-picture-upload";
@@ -629,7 +629,7 @@ function RepairsReadOnly({
 
 /** The Work fold's Close-out tab: what the technician recorded at the end, or why there is nothing. */
 function CloseoutBody({ job }: { job: ServiceJobWithTech }) {
-  const sig = useSignedUrl(job.signature_path);
+  const sig = useSignatureUrl(job);
   const { any, officeStage } = closeoutInfo(job);
   return (
     <div className="space-y-3" data-tab="closeout">

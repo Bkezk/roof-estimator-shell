@@ -826,7 +826,7 @@ export function MaterialsSection({
                                     key={src.location_id}
                                     type="button"
                                     variant="outline"
-                                    className={`h-10 max-w-full justify-start rounded-full px-3 text-sm ${
+                                    className={`h-[44px] max-w-full justify-start rounded-full px-3 text-sm ${
                                       none ? "border-dashed text-muted-foreground" : ""
                                     }`}
                                     aria-label={`One ${unitLabel(1, res.piece, res.unit)} of ${cellName(res)} from ${src.location_name}`}
@@ -1273,7 +1273,7 @@ function TruckRow({
             type="button"
             variant="outline"
             size="icon"
-            className="h-12 w-12"
+            className="h-[44px] w-[44px]"
             aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${cellName(row)} fewer`}
             disabled={used <= EPS}
             onClick={() => onReduce(Math.min(1, used))}
@@ -1287,7 +1287,7 @@ function TruckRow({
               inputMode="decimal"
               min={0}
               step="any"
-              className="h-12 w-16 px-1 text-center text-lg font-semibold tabular-nums"
+              className="h-[44px] w-16 px-1 text-center text-lg font-semibold tabular-nums"
               aria-label={`Used on this ticket, ${unitLabel(2, row.piece, row.unit)} of ${cellName(row)}`}
               value={text ?? shown}
               onFocus={(e) => {
@@ -1311,7 +1311,7 @@ function TruckRow({
             type="button"
             variant={used > EPS ? "default" : "outline"}
             size="icon"
-            className="h-12 w-12"
+            className="h-[44px] w-[44px]"
             aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${cellName(row)} more`}
             onClick={() => onAdd(1)}
           >
@@ -1325,7 +1325,7 @@ function TruckRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-10 px-2 text-xs text-destructive hover:text-destructive"
+            className="h-[44px] px-2 text-xs text-destructive hover:text-destructive"
             aria-label={removeLabel(cellName(row))}
             onClick={onRemove}
           >

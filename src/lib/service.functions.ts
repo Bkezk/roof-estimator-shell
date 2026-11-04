@@ -92,6 +92,13 @@ export const TYPE_LABELS: Record<ServiceType, string> = {
 /** A job row with the technician's display name joined. */
 export type ServiceJobWithTech = ServiceJobRow & {
   technician_name: string | null;
+  /**
+   * The signature image's signed link, when the row came from getTicketBundle (the Nov 4 check,
+   * finding 6: the browser signed it on its own, one more round trip on every ticket page). A
+   * signature saved since has a new path, so the screens use this only while it names
+   * `signature_path`; otherwise they sign their own, as before.
+   */
+  signature_url?: string | null;
 };
 
 /**
