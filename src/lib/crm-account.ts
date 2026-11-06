@@ -26,7 +26,7 @@ export function hasContactMethod(a: {
 }
 
 /** The warning on a customer saved before the rule (no email or phone on file). */
-export const NO_CONTACT_ON_FILE = `${CONTACT_REQUIRED}: this customer has no email or phone on file. Edit to add one.`;
+export const NO_CONTACT_ON_FILE = `${CONTACT_REQUIRED}: this customer has no email or phone on file. Add a contact under Contacts and mark it primary.`;
 
 /**
  * A technician-only user asked to add a customer (Oct 21, the sixth audit): the office owns the
@@ -108,6 +108,26 @@ function normalizeAccountAddresses<T extends Parameters<typeof normalizeMailing>
 const contactCheck = (a: Parameters<typeof hasContactMethod>[0], ctx: z.RefinementCtx) => {
   if (!hasContactMethod(a))
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["email"], message: CONTACT_REQUIRED });
+};
+
+/** Was any of the three contact fields sent (null = cleared counts; missing does not)? */
+export const contactFieldsSent = (a: {
+  email?: string | null | undefined;
+  phone?: string | null | undefined;
+  mobile?: string | null | undefined;
+}): boolean => a.email !== undefined || a.phone !== undefined || a.mobile !== undefined;
+
+/**
+ * saveAccount's contact rule (audit, Nov 6, finding 1): a new customer needs an email or a phone;
+ * an update is checked only when one of the three is sent. The Edit form sends none of them
+ * since Nov 2 (they are the primary contact row's, changed under Contacts), and the rule read
+ * the missing fields as "no contact", so every Edit save was refused.
+ */
+const accountContactCheck = (
+  a: { id?: string | undefined } & Parameters<typeof contactFieldsSent>[0],
+  ctx: z.RefinementCtx,
+) => {
+  if (!a.id || contactFieldsSent(a)) contactCheck(a, ctx);
 };
 
 /**
@@ -268,7 +288,7 @@ export const accountSchema = z
     source: z.enum(["manual", "prospect", "import"]).optional(),
     ...newFields,
   })
-  .superRefine(contactCheck)
+  .superRefine(accountContactCheck)
   .transform(normalizeAccountAddresses);
 export type AccountInput = z.input<typeof accountSchema>;
 
@@ -421,6 +441,8 @@ export function mailingLines(
 
 /** A second Delete on a customer already deleted: nothing is written. */
 export const ACCOUNT_ALREADY_DELETED = "This customer was already deleted";
+/** Restore on a customer that was merged into another (audit, Nov 6, finding 4). */
+export const ACCOUNT_MERGED = "This customer was merged into another one and cannot be restored";
 /** Any change to a deleted customer, its sites or its contacts. */
 export const ACCOUNT_DELETED = "This customer was deleted; an admin or a manager can restore it";
 /**

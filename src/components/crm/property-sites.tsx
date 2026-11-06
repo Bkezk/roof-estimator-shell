@@ -28,10 +28,11 @@ import {
   NO_AERIAL_PREFIX,
 } from "@/lib/aerial-cover";
 import { coverButtonLabel, MAX_SITE_COVER_BYTES, siteCoverKey } from "@/lib/site-photo";
+import { plainErrText } from "@/lib/plain-error";
 import { Button } from "@/components/ui/button";
 import { shrinkPhoto } from "@/components/service/field-utils";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 
 export const propertySitesKey = (propertyId: string) => ["property-sites", propertyId] as const;
 /** As site-warranties.tsx WARRANTIES_STALE_MS: the customer's page fills the cache first. */

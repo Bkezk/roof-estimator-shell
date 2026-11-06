@@ -459,6 +459,7 @@ export type Database = {
           mailing_same: boolean;
           mailing_state: string | null;
           mailing_zip: string | null;
+          merged_into: string | null;
           mobile: string | null;
           name: string;
           notes: string | null;
@@ -492,6 +493,7 @@ export type Database = {
           mailing_same?: boolean;
           mailing_state?: string | null;
           mailing_zip?: string | null;
+          merged_into?: string | null;
           mobile?: string | null;
           name: string;
           notes?: string | null;
@@ -525,6 +527,7 @@ export type Database = {
           mailing_same?: boolean;
           mailing_state?: string | null;
           mailing_zip?: string | null;
+          merged_into?: string | null;
           mobile?: string | null;
           name?: string;
           notes?: string | null;

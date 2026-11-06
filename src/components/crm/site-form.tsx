@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Building2, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { plainErrText } from "@/lib/plain-error";
 import { saveSite, type SiteRow } from "@/lib/crm.functions";
 import { CRM_MAX, sitePayload } from "@/lib/crm-account";
 import { listPropertySites, savePropertySites } from "@/lib/property-sites.functions";
@@ -31,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 
 type SiteFields = {
   name: string;

@@ -28,6 +28,7 @@ import { compactName, LOOKALIKE_MIN_CHARS, lookalikeCustomers } from "@/lib/cust
 import {
   ACCOUNT_ALREADY_DELETED,
   ACCOUNT_DELETED,
+  ACCOUNT_MERGED,
   OFFICE_ADDS_CUSTOMERS,
   OPEN_OPPORTUNITY_STATUSES,
   OPEN_TICKET_STAGES,
@@ -685,6 +686,9 @@ export const saveAccount = createServerFn({ method: "POST" })
   .validator((d: unknown) => parseInput(accountSchema, d))
   .handler(async ({ data, context }): Promise<AccountRow & MentionOutcome> => {
     const p = await writeAccess(context);
+    // Audit, Nov 6, finding 7: the office adds customers (quickCreateAccount says so; this path
+    // did not).
+    if (!data.id && isFieldOnly(p)) throw new Error(OFFICE_ADDS_CUSTOMERS);
     const sb = context.supabase;
     const { id, source, ...fields } = data;
     const patch = { ...defined(fields), updated_by_name: nameOf(p) };
@@ -1014,13 +1018,16 @@ export const restoreAccount = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: account, error: aErr } = await sb
       .from("crm_accounts")
-      .select("id, deleted_at")
+      .select("id, deleted_at, merged_into")
       .eq("id", data.id)
       .maybeSingle();
     if (aErr) throw new Error(aErr.message);
     if (!account) throw new Error("Customer not found");
     const stamp = account.deleted_at;
     if (!stamp) throw new Error("This customer is not deleted");
+    // Audit, Nov 6, finding 4: everything on a merged customer moved to the kept one; bringing
+    // the shell back would make an empty duplicate beside it.
+    if (account.merged_into) throw new Error(ACCOUNT_MERGED);
     const { error } = await sb
       .from("crm_accounts")
       .update({ deleted_at: null, updated_by_name: nameOf(p) })

@@ -335,7 +335,7 @@ describe("the Customers page on a deleted customer (source)", () => {
     expect(page).toContain("{!readOnly && linking && (");
   });
   it("offers Restore to admins and managers only", () => {
-    expect(page).toContain("const canRestore = seesEveryone(profile);");
+    expect(page).toContain("const canRestore = seesEveryone(profile) && !mergedInto;");
     expect(page).toMatch(/\{canRestore && \(\s*<Button[^]*?restore\.mutate\(\)[^]*?Restore/);
     expect(page).toContain("useServerFn(restoreAccount)");
   });

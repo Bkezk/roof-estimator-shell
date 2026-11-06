@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { plainErrText } from "@/lib/plain-error";
 import { linkBidToAccount, suggestBidsForAccount, type LinkedBidRow } from "@/lib/crm.functions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,7 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 

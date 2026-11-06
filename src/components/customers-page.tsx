@@ -66,6 +66,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { plainErrText } from "@/lib/plain-error";
 import { dispatchesTickets, isAdmin, seesEveryone, seesOpportunitiesList } from "@/lib/access";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
@@ -171,7 +172,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const shortDate = (iso: string) =>
@@ -208,6 +209,9 @@ function CustomersTabs({ tab }: { tab?: CustomersTab | undefined }) {
             key={t.title}
             to="/customers"
             search={t.tab ? { tab: t.tab } : {}}
+            // Audit, Nov 6, finding 5: without `exact` the router marked the Customers link
+            // current on the Vendors tab too (same path), so both tabs read as current.
+            activeOptions={{ exact: true }}
             aria-current={active ? "page" : undefined}
             className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${
               active
@@ -640,7 +644,10 @@ function AccountDetailPane({ id }: { id: string }) {
   const d = detail.data;
   // Deleted (an old link, a ticket's customer chip): read-only, Restore for admins / managers.
   const deleted = !!d.account.deleted_at;
-  const canRestore = seesEveryone(profile);
+  // A merged customer (audit, Nov 6, finding 4): everything on it moved to the kept one; the
+  // banner points there and offers no Restore (restoreAccount refuses it too).
+  const mergedInto = d.account.merged_into;
+  const canRestore = seesEveryone(profile) && !mergedInto;
   return (
     <div className="space-y-6">
       {d.account.deleted_at && (
@@ -652,8 +659,27 @@ function AccountDetailPane({ id }: { id: string }) {
           <Trash2 className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
           <span className="min-w-0 flex-1">
             <span className="font-medium">{deletedLine(d.account.deleted_at, d.deleted_by)}.</span>{" "}
-            It is out of the list and the searches, with its properties and contacts, and read-only.
-            {canRestore ? "" : " An admin or a manager can restore it."}
+            {mergedInto ? (
+              <>
+                It was merged into{" "}
+                <Link
+                  to="/customers/$id"
+                  params={{ id: mergedInto }}
+                  className="underline underline-offset-2"
+                  data-link="merged-into"
+                >
+                  another customer
+                </Link>
+                : its properties, contacts, tickets and bids are there now, and it cannot be
+                restored.
+              </>
+            ) : (
+              <>
+                It is out of the list and the searches, with its properties and contacts, and
+                read-only.
+                {canRestore ? "" : " An admin or a manager can restore it."}
+              </>
+            )}
           </span>
           {canRestore && (
             <Button

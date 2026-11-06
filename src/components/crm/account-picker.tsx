@@ -28,6 +28,7 @@ import {
   type SimilarAccount,
 } from "@/lib/crm.functions";
 import { LOOKALIKE_MIN_CHARS, compactName } from "@/lib/customer-lookalike";
+import { plainErrText } from "@/lib/plain-error";
 import {
   CONTACT_REQUIRED,
   CRM_MAX,
@@ -62,7 +63,7 @@ export interface AccountPickerValue {
   label: string;
 }
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = plainErrText;
 
 export function AccountPicker(props: {
   value: AccountPickerValue | null;

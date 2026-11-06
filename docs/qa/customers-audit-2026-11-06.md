@@ -107,3 +107,33 @@ the task, the opportunity and every audit row of theirs were deleted by SQL; cou
 table. Seventeen orphaned audit rows from the Nov 4 opportunities audit's temporary rows (their
 customers, contacts and properties long gone) were found by the same check and removed too, so
 the customer audit rows now stand at 2,503.
+
+## The fixes (owner: "fix all please")
+
+All seven, each with a test that fails on the old code (`src/lib/customers-audit-fixes-nov6.test.ts`,
+19 tests, 13 of them red before the change), the database part applied live
+(`supabase/migrations/20261106230000_customers_audit_fixes.sql`), and the page run again in the
+browser on two fresh temporary customers.
+
+1. **Edit saves.** `accountSchema`'s contact rule checks a new customer always and an update only
+   when one of the three contact fields is sent (`contactFieldsSent`); the Edit payload passes,
+   a create without a contact and an update that clears the contact are still refused. Browser:
+   billing instructions and a Sage # saved, "Customer saved", both still there after a reload,
+   the primary contact and its phone untouched.
+2. **The line** on a customer with no email or phone now reads "… Add a contact under Contacts
+   and mark it primary."
+3. **Restore keeps the primary.** The contacts' before-trigger no longer clears `is_primary` on a
+   soft-deleted row (the mirror and the one-primary index already ignore deleted rows). Proven in
+   SQL, rolled back: the flag true while deleted and after the restore, the mirrored name kept, a
+   new primary still unmarks the old one; and in the browser: delete, Restore, the Primary badge
+   and the header's name back.
+4. **A merged customer is not restored.** `merge_accounts` writes `crm_accounts.merged_into`; the
+   page's banner says it was merged into another customer, with a link to it, and offers no
+   Restore; `restoreAccount` refuses with "This customer was merged into another one and cannot
+   be restored". No real customer had been merged yet, so nothing to backfill.
+5. **One current tab.** The tab links match the search exactly (`activeOptions`), so only the
+   Vendors tab reads as current on `?tab=vendors`.
+6. **Plain words.** The Customers page, the property form, the New customer dialog, the property
+   cards and the bid-link dialog go through `plainErrText` ("No signal…" for a lost connection).
+7. **The office adds customers** on `saveAccount`'s create path too (`OFFICE_ADDS_CUSTOMERS`),
+   before any write.

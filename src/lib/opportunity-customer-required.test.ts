@@ -307,7 +307,7 @@ describe("2. the site: SiteSelect's Add site opens the Customers page's site for
 describe("3. contact: the Customers page's warning on the opportunity", () => {
   it("one shared line", () => {
     expect(crmAccount.NO_CONTACT_ON_FILE).toBe(
-      "Add an email or a phone number: this customer has no email or phone on file. Edit to add one.",
+      "Add an email or a phone number: this customer has no email or phone on file. Add a contact under Contacts and mark it primary.",
     );
     const customers = read("src/components/customers-page.tsx");
     expect(customers).toContain("{NO_CONTACT_ON_FILE}");
