@@ -173,7 +173,11 @@ describe("7. the small things", () => {
     expect(read("src/components/global-search.tsx")).toContain("[@media(pointer:coarse)]:hidden");
     const gate = read("src/components/auth-gate.tsx");
     expect(gate).toContain("function NarrowMenuDefault()");
-    expect(gate).toContain("if (isNarrow(window.innerWidth)) setOpen(false);");
+    // Once per arrival since Nov 6 (lib/narrow-menu.ts): the fold used to run again at every
+    // attempt to open the menu on a half-screen window.
+    expect(gate).toContain(
+      "useEffect(() => foldMenuOnArrival(done, window.innerWidth, setOpen), [setOpen]);",
+    );
     expect(gate).toContain("<NarrowMenuDefault />");
   });
 });

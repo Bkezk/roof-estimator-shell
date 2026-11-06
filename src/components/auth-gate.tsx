@@ -20,17 +20,20 @@ import { NotificationsBell } from "@/components/notifications-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { StalledNotice } from "@/components/stalled-sign-in";
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from "@/components/ui/sidebar";
-import { isNarrow } from "@/components/takeoff/touch";
+import { foldMenuOnArrival } from "@/lib/narrow-menu";
 
 /**
  * On a narrow screen (an iPad; owner, Nov 3) the app menu starts folded so the page has the
  * width; its button opens it for the visit. (Wider screens start open, as before.)
+ *
+ * Once, on arrival (owner, Nov 6: "on half screen i cant open the nav bar, it stays collapsed"):
+ * the sidebar's setOpen is remade on every open or close, and an effect keyed on it ran the
+ * fold again at each attempt to open the menu between 768 and 1099 px.
  */
-function NarrowMenuDefault() {
+export function NarrowMenuDefault() {
   const { setOpen } = useSidebar();
-  useEffect(() => {
-    if (isNarrow(window.innerWidth)) setOpen(false);
-  }, [setOpen]);
+  const done = useRef(false);
+  useEffect(() => foldMenuOnArrival(done, window.innerWidth, setOpen), [setOpen]);
   return null;
 }
 
