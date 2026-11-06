@@ -91,12 +91,12 @@ Every step ran with no page errors.
 
 ## Not exercised
 
-- The cover photo and the aerial (an outside imagery server, refused by the guard), @mentions in
-  Notes, the Vendors tab's own forms, and the opportunity and task rows' click-through.
+- @mentions in Notes, and the opportunity and task rows' click-through.
 - Other users in the browser: only in SQL.
 
 (The bid links, the Takeoffs section, the Documents list and the property's own page were left
-out of the first pass and done in the second pass below.)
+out of the first pass and done in the second pass below; the Vendors tab's forms, the cover photo
+and the aerial in the third.)
 
 ## Cleanup
 
@@ -186,4 +186,53 @@ was removed from the storage bucket as the Claude login through the app's own st
 once, deleted, listed again: empty). A sweep over every uuid column in `public` and `storage`
 found no row naming any of the five ids afterwards. Counts: 636 live customers, 1,137 properties,
 707 contacts, 2,503 customer audit rows, 22 live bids (11 unlinked), 2 takeoffs, 7 documents, no
+"ZZ" row anywhere.
+
+## Third pass (owner: "fix all three please. can you drive the cover photo, aerial and vendors tabs forms?")
+
+### The fixes
+
+8. **A bid is moved, never unlinked.** The row's Unlink icon is now "Move" (`data-action="move-bid"`):
+   a dialog "Move “<bid>” to another customer" with the customer search; picking one moves the
+   bid there (toast "Moved “<bid>” to <customer>"), picking the same customer again does nothing,
+   and both customers' pages refresh. `linkBidToAccount` refuses a null customer with the
+   estimator's own words (BID_CUSTOMER_REQUIRED) before any write, so nothing can make a bid
+   with no customer any more. The "Link a bid" search and the suggestion strip stay, for the bids
+   from before Oct 26 that have none (11 live).
+9. **One name rule for the customer pick.** `customerLabel(account, site, sep)` in
+   takeoff/address-suggest.ts: the property's name is added only when it is not the customer's
+   own (the address suggestions already did this). The New takeoff dialog's pick uses it, and so
+   does the estimator's "Linked to" line, which doubled the name the same way ("ZZ Movetarget
+   Claude · ZZ Movetarget Claude").
+10. **The estimator's chip says "(deleted)".** LinkedAccountChip takes `deleted`; the estimator
+    passes the profile's `deleted_at`. The mark's title says the customer was deleted on the
+    Customers page, that the bid keeps its name, and that an admin or a manager can restore it.
+
+Tests: `src/lib/customers-audit-fixes-nov6b.test.ts` (7 tests; every one fails on the old code
+and passes after). Chain: prettier, eslint (0 errors, the 16 baseline warnings), tsc, vitest
+(497 files, 6,365 tests), build.
+
+### Proven in the browser (temporary rows: two customers, a bid, a vendor)
+
+| #   | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Proof                                                        |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 27  | Fix 8: the Bids row offers Move and no Unlink; the dialog names the bid; picking the same customer leaves it open and moves nothing; picking the other customer closes it with "Moved “ZZ Movefrom Claude Roof” to ZZ Movetarget Claude", the first customer's Bids go to 0 with no suggestion strip, the second's to 1, and the estimator's Setup reads "Linked to ZZ Movetarget Claude".                                                                      | Browser.                                                     |
+| 28  | Fix 10: with the second customer deleted, the estimator's chip reads "Linked to ZZ Movetarget Claude (deleted)" with the title; after Restore the mark is gone.                                                                                                                                                                                                                                                                                                 | Browser.                                                     |
+| 29  | Fix 9: the New takeoff dialog, with the customer picked, suggests "ZZ Movetarget Claude" (no takeoff was made).                                                                                                                                                                                                                                                                                                                                                 | Browser.                                                     |
+| 30  | Vendors: New vendor (name, city, "ky" saved as KY, email) adds with a toast and the row reads "Corbin, KY — zz.vendor@example.com — Yes"; the same name in another case is refused ("is already a vendor"); the row opens its form; Terms saved shows on the row; Archive hides the row with a toast, Show archived lists it with an Archived mark, Restore brings it back; adding an archived name shows the amber box with a Restore button that restores it. | Browser.                                                     |
+| 31  | The property's cover photo: Set cover photo takes a picture through the file chooser, the thumbnail (a signed link in the documents bucket) shows with Replace and Remove, the customer's property card shows it too, Remove takes it off ("Cover photo removed", "No cover photo") and the file with it.                                                                                                                                                       | Browser; `storage.objects` under the property: 0 afterwards. |
+| 32  | The aerial: the property card asks the imagery server on load and shows the answer in words, "No aerial: No building or 911 address point in our map data matches this address" (a made-up street); Try the aerial again asks once more and says the same. A real address was not tried (every real address is a customer's).                                                                                                                                   | Browser.                                                     |
+
+Observation, not fixed (11): after a move, the bid's own client fields still carry the first
+customer's name, so the chip says "differs from profile" and offers "Update profile", which would
+write the first customer's name over the second one's. The same was true of Link from the strip
+before this pass. Worth a look: after a move, either fill the bid's client fields from the new
+customer, or hide Update profile until the fields are edited.
+
+### Cleanup of the third pass
+
+The bid, the vendor, the two customers with their contacts and properties, and every audit row
+naming any of them (the vendor's two from the first run included) were deleted by SQL; the cover
+photo's file went with Remove. The uuid-column sweep found nothing afterwards; counts as before:
+636 live customers, 1,137 properties, 707 contacts, 2,503 customer audit rows, 22 live bids, no
 "ZZ" row anywhere.

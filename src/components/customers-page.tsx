@@ -2296,12 +2296,25 @@ function BidsSection({
     queryFn: () => suggestFn({ data: { account_id: accountId } }),
     enabled: !!session && !readOnly,
   });
+  // A bid is linked here, or moved to another customer; never unlinked (every bid belongs to a
+  // customer, owner Oct 26, and the estimator refuses to save one without — Customers audit
+  // Nov 6, finding 8).
+  const [moving, setMoving] = useState<LinkedBidRow | null>(null);
   const link = useMutation({
-    mutationFn: (v: { bid: LinkedBidRow; accountId: string | null }) =>
-      linkFn({ data: { bid_id: v.bid.id, account_id: v.accountId, site_id: null } }),
+    mutationFn: (v: {
+      bid: LinkedBidRow;
+      accountId: string;
+      siteId?: string | null;
+      /** Set when the bid is moved: the customer it goes to, for the toast. */
+      toName?: string;
+    }) =>
+      linkFn({ data: { bid_id: v.bid.id, account_id: v.accountId, site_id: v.siteId ?? null } }),
     onSuccess: (_r, v) => {
-      toast.success(v.accountId ? `Linked “${v.bid.name}”` : `Unlinked “${v.bid.name}”`);
-      void qc.invalidateQueries({ queryKey: ["account", accountId] });
+      toast.success(v.toName ? `Moved “${v.bid.name}” to ${v.toName}` : `Linked “${v.bid.name}”`);
+      setMoving(null);
+      // This customer's page and the one the bid went to (both read ["account", id]).
+      void qc.invalidateQueries({ queryKey: ["account"] });
+      void qc.invalidateQueries({ queryKey: ["property"] });
       void qc.invalidateQueries({ queryKey: ["unlinked-bids"] });
       void qc.invalidateQueries({ queryKey: ["bid-suggestions"] });
       void qc.invalidateQueries({ queryKey: ["bids"] });
@@ -2396,12 +2409,13 @@ function BidsSection({
                     <Button
                       size="sm"
                       variant="ghost"
-                      title="Unlink this bid from the customer"
-                      aria-label={`Unlink ${b.name}`}
+                      title="Move this bid to another customer"
+                      aria-label={`Move ${b.name} to another customer`}
+                      data-action="move-bid"
                       disabled={link.isPending}
-                      onClick={() => link.mutate({ bid: b, accountId: null })}
+                      onClick={() => setMoving(b)}
                     >
-                      <Unlink className="h-4 w-4" />
+                      <Unlink className="mr-1 h-4 w-4" /> Move
                     </Button>
                   )}
                 </div>
@@ -2459,6 +2473,46 @@ function BidsSection({
           )}
         </>
       )}
+      <Dialog open={!!moving} onOpenChange={(o) => !o && !link.isPending && setMoving(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move “{moving?.name}” to another customer</DialogTitle>
+            <DialogDescription>
+              Every bid belongs to a customer: pick the one this bid belongs to. It leaves this
+              customer and shows under that one.
+            </DialogDescription>
+          </DialogHeader>
+          {moving && (
+            <AccountPicker
+              id="move-bid-to"
+              value={null}
+              autoFocus
+              allowAdd={false}
+              disabled={link.isPending}
+              placeholder="Search customers…"
+              onChange={(hit) => {
+                if (hit && hit.account_id !== accountId)
+                  link.mutate({
+                    bid: moving,
+                    accountId: hit.account_id,
+                    siteId: hit.site_id,
+                    toName: hit.account_name,
+                  });
+              }}
+            />
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={link.isPending}
+              onClick={() => setMoving(null)}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

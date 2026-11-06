@@ -95,8 +95,22 @@ export function shapeSuggestions(
   return out.slice(0, limit);
 }
 
+/**
+ * The customer label a takeoff is named after: "Acme Foods — Plant 2", or just the customer when
+ * the property has no name of its own or is named after the customer (the New customer dialog
+ * names the first property so; Customers audit Nov 6, finding 9: "ZZ Co — ZZ Co · Nov 6").
+ */
+export const customerLabel = (
+  accountName: string,
+  siteName: string | null | undefined,
+  /** Between the two: the takeoff's " — ", the estimator's " · ". */
+  sep = " — ",
+): string => {
+  const a = accountName.trim();
+  const s = (siteName ?? "").trim();
+  return s && s.toLowerCase() !== a.toLowerCase() ? `${a}${sep}${s}` : a;
+};
+
 /** The takeoff's customer label from a suggestion: "Acme Foods — Plant 2". */
 export const suggestionLabel = (s: AddressSuggestion): string =>
-  s.site_name.trim() && s.site_name.trim() !== s.account_name.trim()
-    ? `${s.account_name} — ${s.site_name}`
-    : s.account_name;
+  customerLabel(s.account_name, s.site_name);

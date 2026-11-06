@@ -225,6 +225,7 @@ import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { AccountPicker } from "@/components/crm/account-picker";
 import { LinkedAccountChip } from "@/components/crm/linked-account-chip";
+import { customerLabel } from "@/lib/takeoff/address-suggest";
 import { SiteSelect } from "@/components/crm/site-select";
 import { getAccount, saveAccount, type AccountHit } from "@/lib/crm.functions";
 import {
@@ -914,7 +915,7 @@ function EstimatePage() {
   const linkedSite =
     linkedDetail && linkedSiteId ? linkedDetail.sites.find((x) => x.id === linkedSiteId) : null;
   const linkedLabel = linkedDetail
-    ? [linkedDetail.account.name, linkedSite?.name].filter(Boolean).join(" · ")
+    ? customerLabel(linkedDetail.account.name, linkedSite?.name, " · ")
     : linkedAccountLabel;
   // Cheap: nine trimmed string compares against the profile kept in the query cache.
   const profileDiffs = linkedDetail ? profileDifferences(customer, linkedDetail.account) : null;
@@ -958,7 +959,7 @@ function EstimatePage() {
     const seq = setLink(
       hit.account_id,
       hit.site_id,
-      [hit.account_name, hit.site_name].filter(Boolean).join(" · "),
+      customerLabel(hit.account_name, hit.site_name, " · "),
       true,
     );
     try {
@@ -1035,6 +1036,7 @@ function EstimatePage() {
       canUpdate={can("customers") || can("service")}
       canOpen={can("customers")}
       updating={updatingProfile}
+      deleted={!!linkedDetail?.account.deleted_at}
       onUnlink={unlinkAccount}
       onUpdateProfile={() => void updateProfile()}
     />

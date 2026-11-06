@@ -82,7 +82,7 @@ import { suggestTakeoffName } from "@/lib/takeoff/naming";
 import { canCreateTakeoff, newTakeoffBlocker } from "@/lib/takeoff/new-takeoff-rules";
 import { AerialAddressPicker, type AerialSelection } from "@/components/takeoff/aerial-pick";
 import type { AddressSuggestion } from "@/lib/takeoff-aerial.functions";
-import { suggestionLabel } from "@/lib/takeoff/address-suggest";
+import { customerLabel, suggestionLabel } from "@/lib/takeoff/address-suggest";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
@@ -680,7 +680,7 @@ function NewTakeoffDialog(props: {
       ? {
           account_id: hit.account_id,
           site_id: hit.site_id,
-          label: hit.site_name ? `${hit.account_name} — ${hit.site_name}` : hit.account_name,
+          label: customerLabel(hit.account_name, hit.site_name),
         }
       : null;
     setAccount(v);

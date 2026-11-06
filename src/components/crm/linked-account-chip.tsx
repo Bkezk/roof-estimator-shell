@@ -21,6 +21,8 @@ export function LinkedAccountChip(props: {
   /** Link the name to the Customers page (the user may open it). */
   canOpen: boolean;
   updating: boolean;
+  /** The customer was deleted on the Customers page (the bid keeps the link and the name). */
+  deleted?: boolean;
   onUnlink: () => void;
   onUpdateProfile: () => void;
 }) {
@@ -43,6 +45,15 @@ export function LinkedAccountChip(props: {
             </Link>
           ) : (
             <span className="font-medium text-foreground">{props.label || "customer"}</span>
+          )}
+          {props.deleted && (
+            <span
+              className="ml-1 font-medium text-destructive"
+              title="This customer was deleted on the Customers page; the bid keeps its name. An admin or a manager can restore the customer from its page."
+              data-chip="deleted"
+            >
+              (deleted)
+            </span>
           )}
         </span>
         <button

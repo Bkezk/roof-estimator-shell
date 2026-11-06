@@ -24,6 +24,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isAdmin, isFieldOnly, seesEveryone } from "@/lib/access";
+import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";
 import { compactName, LOOKALIKE_MIN_CHARS, lookalikeCustomers } from "@/lib/customer-lookalike";
 import {
   ACCOUNT_ALREADY_DELETED,
@@ -1064,7 +1065,12 @@ export const deleteSite = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
-/** Link a saved bid to an account (and optionally a site) — the reverse of the Setup typeahead. */
+/**
+ * Link a saved bid to an account (and optionally a site) — the reverse of the Setup typeahead;
+ * also how a bid is moved to another customer. Never unlinks: every bid belongs to a customer
+ * (owner, Oct 26), and the estimator refuses to save one without (Customers audit Nov 6,
+ * finding 8).
+ */
 export const linkBidToAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -1080,6 +1086,7 @@ export const linkBidToAccount = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
     if (!p || !canAccess(p, "estimate")) throw new Error("Forbidden: Estimate access required");
+    if (!data.account_id) throw new Error(BID_CUSTOMER_REQUIRED);
     const { error } = await context.supabase
       .from("bids")
       .update({ account_id: data.account_id, site_id: data.site_id ?? null })

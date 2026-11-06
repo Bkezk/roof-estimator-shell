@@ -1,0 +1,98 @@
+/**
+ * Customers audit, Nov 6, second pass (docs/qa/customers-audit-2026-11-06.md; owner: "fix all
+ * three please"):
+ * 8. a bid is moved to another customer, never unlinked (the estimator refuses to save a bid
+ *    without a customer, owner Oct 26);
+ * 9. the New takeoff dialog does not double the name when the property is named after the
+ *    customer;
+ * 10. the estimator's customer chip says when the customer was deleted.
+ */
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";
+import { customerLabel, suggestionLabel } from "@/lib/takeoff/address-suggest";
+
+const read = (p: string) => readFileSync(p, "utf8");
+const page = read("src/components/customers-page.tsx");
+const server = read("src/lib/crm.functions.ts");
+
+describe("8. a bid is moved, never unlinked", () => {
+  const section = page.slice(
+    page.indexOf("function BidsSection("),
+    page.indexOf("function DocumentsSection("),
+  );
+  it("the row's button opens Move to another customer; nothing sends account_id null", () => {
+    expect(section).toContain('data-action="move-bid"');
+    expect(section).toContain("aria-label={`Move ${b.name} to another customer`}");
+    expect(section).toContain('id="move-bid-to"');
+    expect(section).toContain("Every bid belongs to a customer");
+    expect(section).not.toContain("accountId: null");
+    expect(section).not.toContain("Unlink this bid");
+    expect(section).not.toContain("Unlinked “");
+  });
+  it("the move names the customer it went to, and refreshes both customers' pages", () => {
+    expect(section).toContain("toName: hit.account_name,");
+    expect(section).toContain("`Moved “${v.bid.name}” to ${v.toName}`");
+    expect(section).toContain('void qc.invalidateQueries({ queryKey: ["account"] });');
+    // Picking the same customer again is a no-op, not a move.
+    expect(section).toContain("if (hit && hit.account_id !== accountId)");
+  });
+  it("the server refuses to unlink, in the estimator's own words, before any write", () => {
+    const fn = server.slice(
+      server.indexOf("export const linkBidToAccount"),
+      server.indexOf("export const listUnlinkedBids"),
+    );
+    expect(fn).toContain("if (!data.account_id) throw new Error(BID_CUSTOMER_REQUIRED);");
+    expect(fn.indexOf("BID_CUSTOMER_REQUIRED")).toBeLessThan(fn.indexOf('.from("bids")'));
+    expect(server).toContain('import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";');
+    expect(BID_CUSTOMER_REQUIRED).toMatch(/^Pick the customer before saving/);
+  });
+});
+
+describe("9. the takeoff's customer label", () => {
+  it("names the property only when it is not the customer's own name", () => {
+    expect(customerLabel("Acme Foods", "Plant 2")).toBe("Acme Foods — Plant 2");
+    expect(customerLabel("ZZ Linktest Claude", "ZZ Linktest Claude")).toBe("ZZ Linktest Claude");
+    expect(customerLabel("Acme Foods", " acme foods ")).toBe("Acme Foods");
+    expect(customerLabel("Acme Foods", null)).toBe("Acme Foods");
+    expect(customerLabel("Acme Foods", "")).toBe("Acme Foods");
+    expect(customerLabel(" Acme Foods ", undefined)).toBe("Acme Foods");
+  });
+  it("the address suggestions and the customer pick share the rule", () => {
+    expect(
+      suggestionLabel({
+        account_id: "a",
+        account_name: "Acme Foods",
+        site_id: "s",
+        site_name: "Acme Foods",
+        address: "1 Main St",
+        lat: null,
+        lng: null,
+      }),
+    ).toBe("Acme Foods");
+    expect(customerLabel("Acme Foods", "Plant 2", " · ")).toBe("Acme Foods · Plant 2");
+    expect(customerLabel("Acme Foods", "Acme Foods", " · ")).toBe("Acme Foods");
+    const dialog = read("src/components/takeoff-page.tsx");
+    expect(dialog).toContain("label: customerLabel(hit.account_name, hit.site_name),");
+    expect(dialog).not.toContain("`${hit.account_name} — ${hit.site_name}`");
+  });
+  it("the estimator's Linked to line follows it too (the pick and the loaded profile)", () => {
+    const estimate = read("src/routes/estimate.tsx");
+    expect(estimate).toContain('customerLabel(linkedDetail.account.name, linkedSite?.name, " · ")');
+    expect(estimate).toContain('customerLabel(hit.account_name, hit.site_name, " · ")');
+    expect(estimate).not.toContain('.filter(Boolean).join(" · ")');
+  });
+});
+
+describe("10. the estimator's chip on a deleted customer", () => {
+  it("says (deleted), with the way back", () => {
+    const chip = read("src/components/crm/linked-account-chip.tsx");
+    expect(chip).toContain("deleted?: boolean;");
+    expect(chip).toContain('data-chip="deleted"');
+    expect(chip).toContain("(deleted)");
+    expect(chip).toContain("An admin or a manager can restore the customer from its page.");
+    const estimate = read("src/routes/estimate.tsx");
+    expect(estimate).toContain("deleted={!!linkedDetail?.account.deleted_at}");
+  });
+});
