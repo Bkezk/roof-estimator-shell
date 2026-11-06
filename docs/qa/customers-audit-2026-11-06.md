@@ -105,4 +105,5 @@ The three temporary customers with their contacts, properties, the property's si
 the task, the opportunity and every audit row of theirs were deleted by SQL; counts afterwards:
 636 live customers, 1,137 properties, 707 contacts, 2,520 customer audit rows, no "ZZ" row in any
 table. Seventeen orphaned audit rows from the Nov 4 opportunities audit's temporary rows (their
-customers, contacts and properties long gone) were found by the same check and removed.
+customers, contacts and properties long gone) were found by the same check and removed too, so
+the customer audit rows now stand at 2,503.
