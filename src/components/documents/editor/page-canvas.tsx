@@ -560,12 +560,19 @@ function Sheet(props: {
         />
       ) : null}
       {props.guide !== null ? (
+        // The band under the page break is the printed page's own empty bottom (the footer
+        // sits at the foot of the paper): shaded with its name (owner, Nov 6: "visually why
+        // not just start a new page there"), so it reads as margin, not as room to type.
         <div
-          className="pointer-events-none absolute left-0 right-0 border-t-2 border-dotted border-sky-400"
+          className="pointer-events-none absolute bottom-0 left-0 right-0 border-t-2 border-dotted border-sky-400 bg-neutral-100 dark:bg-neutral-100"
           style={{ top: props.guide }}
-          title="Page break"
+          title="Page break: nothing prints below this line but the footer"
+          data-footer-area
         >
           <span className="absolute right-2 -top-4 text-[10px] text-sky-500">page break</span>
+          <span className="absolute left-1/2 top-2 -translate-x-1/2 text-[10px] uppercase tracking-wide text-neutral-400">
+            footer area · nothing prints here
+          </span>
         </div>
       ) : null}
       <div ref={columnRef} className="flex flex-col" style={{ gap: MODULE_GAP_PX }}>

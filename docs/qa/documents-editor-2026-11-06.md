@@ -97,6 +97,10 @@ Tests: `editor-helpers.test.ts` (chipText, mostUsedVariables, the search words),
   scheduled date that made the order look random (`inStageSince`, service-schedule.ts).
   Proven read-only on the live board: Oct 14, Oct 14, Oct 14, Oct 26, Oct 28, Nov 3.
 
+- The band under the page-break line is shaded grey and labelled "footer area · nothing
+  prints here" (owner: "visually why not just start a new page there"): it is the printed
+  page's own empty bottom, with the footer at the foot of the paper.
+
 ## Open
 
 - **9** — office data ("test template" in the picker); the owner handles it.

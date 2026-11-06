@@ -126,6 +126,12 @@ describe("the canvas", () => {
     );
     expect(canvas).toContain("pageBreakPx(props.options)");
     expect(canvas).toContain("border-dotted");
+    // Nov 6: the band under the line is shaded and named, so it reads as the page's margin.
+    expect(canvas).toContain("data-footer-area");
+    expect(canvas).toContain("footer area · nothing prints here");
+    expect(canvas).toContain(
+      "bottom-0 left-0 right-0 border-t-2 border-dotted border-sky-400 bg-neutral-100",
+    );
   });
   it("inserts a PDF from the library and uploads one", () => {
     expect(canvas).toContain("listDocumentAssets");
