@@ -86,6 +86,17 @@ Tests: `src/lib/documents-editor-fixes-nov6.test.ts` (1, 2, 3, 8 — reducer und
 Tests: `editor-helpers.test.ts` (chipText, mostUsedVariables, the search words),
 `documents-editor-fixes-nov6.test.ts` (pins). They fail on the previous code.
 
+## Third commit (owner, Nov 6)
+
+- **Delete document… in the editor's Save menu** (document mode only): the same confirm as the
+  Documents panel, then back to the ticket or bid the document was started from, with no
+  "Leave without saving?" on the way even with unsaved edits. Proven on a temp bid: the menu
+  shows it, the confirm names the document, the editor lands on the bid, the panel is empty.
+- Tech Board (same commit): the "Finished, no technician" chips print "since <date>" — the day
+  the ticket entered its stage, which is what the group is ordered by — instead of the
+  scheduled date that made the order look random (`inStageSince`, service-schedule.ts).
+  Proven read-only on the live board: Oct 14, Oct 14, Oct 14, Oct 26, Oct 28, Nov 3.
+
 ## Open
 
 - **9** — office data ("test template" in the picker); the owner handles it.

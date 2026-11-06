@@ -42,8 +42,8 @@ const loaded = (): EditorState =>
 describe("1. leaving the editor with unsaved edits asks", () => {
   it("the shell blocks in-app navigation while dirty (Save and leave / Leave without saving / Stay); the Back button no longer confirm()s", () => {
     expect(route).toContain("useBlocker({");
-    expect(route).toContain("shouldBlockFn: () => dirtyRef.current,");
-    expect(route).toContain("enableBeforeUnload: () => dirtyRef.current,");
+    expect(route).toContain("shouldBlockFn: () => dirtyRef.current && !leaveFreely?.current,");
+    expect(route).toContain("enableBeforeUnload: () => dirtyRef.current && !leaveFreely?.current,");
     expect(route).toContain("Leave without saving?");
     expect(route).toContain(">Stay</AlertDialogCancel>");
     expect(route).toContain("Leave without saving\n");
@@ -215,5 +215,26 @@ describe("4 and 7 (owner, Nov 6): a blank chip is a faint placeholder; the most-
     expect(route).toContain("const folded = !filter.trim() && !open[g.group];");
     expect(route).toContain("aria-expanded={!props.folded}");
     expect(route).toContain("mostUsedVariables(defs)");
+  });
+});
+
+describe("Delete document… in the Save menu (owner, Nov 6): back to the ticket or bid it was started from", () => {
+  it("the menu item confirms through the shared action; the editor leaves for the record without the leave dialog", () => {
+    expect(route).toContain("Delete document…");
+    expect(route).toContain("onDelete={actions.confirmDelete}");
+    expect(route).toContain("leaveFreely.current = true;");
+    expect(route).toContain("void router.navigate({ href: backHref(bundle.backTo) });");
+    expect(route).toContain("shouldBlockFn: () => dirtyRef.current && !leaveFreely?.current,");
+    // Document mode only: the template editor passes no onDelete.
+    const tpl = route.slice(
+      route.indexOf("function TemplateEditor("),
+      route.indexOf(
+        "// ------------------------------------------------------------------------- the shell",
+      ),
+    );
+    expect(tpl).not.toContain("onDelete=");
+    expect(read("src/components/documents/document-actions.tsx")).toContain(
+      "Delete this document?",
+    );
   });
 });

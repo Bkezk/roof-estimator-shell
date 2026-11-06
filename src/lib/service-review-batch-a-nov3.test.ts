@@ -18,7 +18,11 @@ import { describe, expect, it } from "vitest";
 import { csvMoney, csvNumber, pctLabel, pdfMoney } from "@/lib/invoice-format";
 import { invoiceDue, sortInvoices } from "@/lib/invoice-list";
 import { invoiceListSearch, invoiceSearch } from "@/lib/invoice-search";
-import { finishedUnassigned, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
+import {
+  finishedUnassigned,
+  FINISHED_UNASSIGNED_STAGES,
+  inStageSince,
+} from "@/lib/service-schedule";
 import { LIST_JOB_COLUMNS } from "@/lib/service.functions";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -59,6 +63,23 @@ describe("9. Tech Board: finished tickets with no technician", () => {
     expect(board).toContain('data-rail="finished-unassigned"');
     expect(board).toContain("Finished, no technician");
     expect(board).toContain("const finished = finishedUnassigned(jobs)");
+  });
+  it("the chip prints the date the group is ordered by — when the ticket entered its stage (owner, Nov 6), not its scheduled date", () => {
+    expect(
+      inStageSince({
+        stage_changed_at: "2026-10-14T10:00:00Z",
+        updated_at: "2026-11-03T10:00:00Z",
+      }),
+    ).toBe("2026-10-14T10:00:00Z");
+    expect(inStageSince({ stage_changed_at: null, updated_at: "2026-11-03T10:00:00Z" })).toBe(
+      "2026-11-03T10:00:00Z",
+    );
+    expect(board).toContain("`since ${openedOn(inStageSince(j))} · no technician`");
+    const rail = board.slice(
+      board.indexOf('data-rail="finished-unassigned"'),
+      board.indexOf("Week grid"),
+    );
+    expect(rail).toMatch(/detail\s+since\s+week=/);
   });
 });
 

@@ -54,6 +54,7 @@ import {
   assignedStage,
   boardDay,
   finishedUnassigned,
+  inStageSince,
   shiftDays,
   sortUnassigned,
 } from "@/lib/service-schedule";
@@ -502,6 +503,7 @@ function Board({ week }: { week?: string | undefined }) {
                         key={j.id}
                         job={j}
                         detail
+                        since
                         week={days[0]!}
                         drag={false}
                         dragging={false}
@@ -709,6 +711,8 @@ function TicketChip(props: {
   job: ServiceJobWithTech;
   /** The rail's chips also say what is already set (a technician without a day, or the reverse). */
   detail?: boolean;
+  /** The Finished group: the chip prints when the ticket entered its stage — the date the group is ordered by (owner, Nov 6: the scheduled date made the order look random). */
+  since?: boolean;
   /** The week on the board (its Monday): the ticket's Back link returns here (owner, Oct 9). */
   week: string;
   /** May this viewer drag it (a manager or the office)? */
@@ -722,13 +726,15 @@ function TicketChip(props: {
   const canDrag = props.drag && (stage === "open" || stage === "scheduled");
   const toneKey = ticketToneKey({ stage, field_status: j.field_status });
   const mark = stageMark(stage);
-  const partial = props.detail
-    ? j.technician_id
-      ? `${j.technician_name ?? "Assigned"} · no day`
-      : j.scheduled_date
-        ? `${shortDay(j.scheduled_date)} · no technician`
-        : null
-    : null;
+  const partial = props.since
+    ? `since ${openedOn(inStageSince(j))} · no technician`
+    : props.detail
+      ? j.technician_id
+        ? `${j.technician_name ?? "Assigned"} · no day`
+        : j.scheduled_date
+          ? `${shortDay(j.scheduled_date)} · no technician`
+          : null
+      : null;
   // The card's lines (owner, Oct 13: "more details on the items shown on the calendar week"):
   // the property, then Type · Urgent/Emergency · arrival window, then the description.
   const place = chipPlace(j);

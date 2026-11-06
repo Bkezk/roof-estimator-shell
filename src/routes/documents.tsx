@@ -364,11 +364,17 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
     onError: (e) => toast.error(`Could not refresh the data: ${errText(e)}`),
   });
 
+  // Deleted from the Save menu (owner, Nov 6): back to the ticket or bid it was started from,
+  // with no "Leave without saving?" on the way.
+  const leaveFreely = useRef(false);
   const actions = useDocumentActions(
     { id: doc.id, title: state.title, shared: !!doc.share_token, contacts: bundle.contacts },
     {
       onChanged: () => void qc.invalidateQueries({ queryKey: documentKey(doc.id) }),
-      onDeleted: () => void router.navigate({ href: backHref(bundle.backTo) }),
+      onDeleted: () => {
+        leaveFreely.current = true;
+        void router.navigate({ href: backHref(bundle.backTo) });
+      },
       // Export prints what is on screen: save first when there are edits.
       beforeExport: async () => {
         if (!state.dirty) return true;
@@ -409,6 +415,8 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
       onRefreshVariables={() => refresh.mutate()}
       refreshing={refresh.isPending}
       onOpenRevisions={() => setRevisionsOpen(true)}
+      onDelete={actions.confirmDelete}
+      leaveFreelyRef={leaveFreely}
       headerExtra={
         <>
           <Button
@@ -644,6 +652,10 @@ function EditorShell(props: {
   onRefreshVariables?: (() => void) | undefined;
   refreshing?: boolean | undefined;
   onOpenRevisions?: (() => void) | undefined;
+  /** "Delete document…" in the Save menu (document mode; owner, Nov 6): the confirm, then back to the record. */
+  onDelete?: (() => void) | undefined;
+  /** Set true before leaving on purpose (the document was deleted): the leave dialog stays away. */
+  leaveFreelyRef?: React.MutableRefObject<boolean> | undefined;
   headerExtra?: React.ReactNode;
   /** Mode-specific content under the Title on the Document tab (the template picker). */
   documentTab?: React.ReactNode;
@@ -657,10 +669,11 @@ function EditorShell(props: {
   // close keeps the browser's own warning.
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const leaveFreely = props.leaveFreelyRef;
   const blocker = useBlocker({
-    shouldBlockFn: () => dirtyRef.current,
+    shouldBlockFn: () => dirtyRef.current && !leaveFreely?.current,
     withResolver: true,
-    enableBeforeUnload: () => dirtyRef.current,
+    enableBeforeUnload: () => dirtyRef.current && !leaveFreely?.current,
   });
   const [leaving, setLeaving] = useState(false);
   const activeEditorRef = useRef<Editor | null>(null);
@@ -902,6 +915,14 @@ function EditorShell(props: {
                       <LayoutTemplate className="h-4 w-4" /> Manage Templates
                     </a>
                   </DropdownMenuItem>
+                  {props.onDelete ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive" onClick={props.onDelete}>
+                        <Trash2 className="h-4 w-4" /> Delete document…
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

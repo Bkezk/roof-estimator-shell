@@ -168,13 +168,15 @@ interface FinishedJob {
   updated_at: string;
 }
 
+/** When a ticket entered its stage — what the "Finished, no technician" group is ordered by, and the date its chip prints (owner, Nov 6). */
+export const inStageSince = (j: Pick<FinishedJob, "stage_changed_at" | "updated_at">): string =>
+  j.stage_changed_at ?? j.updated_at;
+
 /** Those tickets, the one waiting longest in its stage first. */
 export function finishedUnassigned<T extends FinishedJob>(jobs: readonly T[]): T[] {
   return jobs
     .filter((j) => !j.technician_id && FINISHED_UNASSIGNED_STAGES.includes(j.stage))
-    .sort((a, b) =>
-      (a.stage_changed_at ?? a.updated_at).localeCompare(b.stage_changed_at ?? b.updated_at),
-    );
+    .sort((a, b) => inStageSince(a).localeCompare(inStageSince(b)));
 }
 
 /**
