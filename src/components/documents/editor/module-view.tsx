@@ -6,6 +6,7 @@
  * saves or deletes it.
  */
 import { Fragment, useState } from "react";
+import { toast } from "sonner";
 import {
   AlignCenter,
   AlignLeft,
@@ -33,14 +34,19 @@ import {
 } from "@/lib/documents/editor-helpers";
 import {
   CONTENT_WIDTH,
+  photoGridKey,
   repairItemData,
+  repairItemKey,
   repairListData,
+  repairListKey,
   repairThumbBox,
 } from "@/lib/documents/pdf-layout";
 import { storedInspection } from "@/lib/documents/server-pure";
 import {
+  addModule,
   type DocModule,
   duplicateModule,
+  MODULE_LABELS,
   type FullPhotoModule,
   type ImageRef,
   type LetterheadModule,
@@ -90,18 +96,30 @@ import { RichText } from "./rich-text";
 
 export function ModuleView(props: {
   module: DocModule;
-  /** Its place on the page, for the toolbar's ▲ ▼. */
+  /** Its place on the page, for the toolbar's ▲ ▼ and for Undo after a delete. */
   index: number;
   count: number;
+  pageIndex: number;
 }) {
   const env = useEditorEnv();
   const m = props.module;
-  const set = (patch: (cur: DocModule) => DocModule) =>
-    env.dispatch({ type: "setPages", op: (pages) => updateModule(pages, m.id, patch) });
+  // `text`: a keystroke in one of the module's text boxes — one undo step per box (editor-state).
+  const set = (patch: (cur: DocModule) => DocModule, text = false) =>
+    env.dispatch({
+      type: "setPages",
+      op: (pages) => updateModule(pages, m.id, patch),
+      ...(text ? { text: m.id } : {}),
+    });
   return (
-    <div className="group/module relative" data-module-id={m.id} data-module-type={m.type}>
+    // tabIndex: a tap (no hover on a phone, Nov 6) focuses the module and shows its toolbar.
+    <div
+      className="group/module relative outline-none"
+      data-module-id={m.id}
+      data-module-type={m.type}
+      tabIndex={-1}
+    >
       <div
-        className="absolute -top-3 right-0 z-10 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md group-hover/module:flex"
+        className="absolute -top-3 right-0 z-10 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md group-focus-within/module:flex group-hover/module:flex"
         role="toolbar"
         aria-label="Module"
       >
@@ -129,7 +147,18 @@ export function ModuleView(props: {
         <IconButton
           title="Delete"
           className="text-destructive"
-          onClick={() => env.dispatch({ type: "setPages", op: (p) => removeModule(p, m.id) })}
+          onClick={() => {
+            env.dispatch({ type: "setPages", op: (p) => removeModule(p, m.id) });
+            // Nov 6: a delete used to be final. Undo puts the module back where it was.
+            const { pageIndex, index } = props;
+            toast(`${MODULE_LABELS[m.type]} deleted`, {
+              action: {
+                label: "Undo",
+                onClick: () =>
+                  env.dispatch({ type: "setPages", op: (p) => addModule(p, pageIndex, m, index) }),
+              },
+            });
+          }}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </IconButton>
@@ -161,7 +190,7 @@ function IconButton(props: {
   );
 }
 
-type Setter = (patch: (cur: DocModule) => DocModule) => void;
+type Setter = (patch: (cur: DocModule) => DocModule, text?: boolean) => void;
 
 function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
   const env = useEditorEnv();
@@ -191,7 +220,7 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
           key={m.id}
           value={m.text}
           placeholder="Type here, or / for a variable"
-          onChange={(text) => set((c) => ({ ...c, text }) as DocModule)}
+          onChange={(text) => set((c) => ({ ...c, text }) as DocModule, true)}
         />
       );
     case "twoColumns":
@@ -336,6 +365,7 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
             <div key={i} className="group/cell relative" data-break="">
               <ImageSlot
                 image={cell.image}
+                sizeKey={photoGridKey(m.id, i)}
                 // The cell's 4:3 box, or the owner's size (Oct 28) at screen scale.
                 className={cn("bg-transparent", photoHeightOf(m) === 0 && "aspect-[1.33]")}
                 heightPx={photoHeightOf(m) > 0 ? Math.round(photoHeightOf(m) * IN_PX) : undefined}
@@ -541,7 +571,7 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
                         className="border border-t-0 border-neutral-300 px-2 py-1.5"
                       >
                         <div className="flex flex-wrap gap-2" data-repair-photos={r}>
-                          {ids.map((photoId) => (
+                          {ids.map((photoId, pi) => (
                             // A fixed box, so the marks overlay sits on the picture, not the cell:
                             // 1.6 × 1.2 in, or the owner's size (Oct 28; pdf-layout repairThumbBox).
                             <div
@@ -560,6 +590,7 @@ function RepairList({ m, set }: { m: RepairListModule; set: Setter }) {
                               >
                                 <DocImage
                                   image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                                  sizeKey={repairListKey(m.id, r, pi)}
                                   className="h-full w-full rounded-sm"
                                 />
                               </MarkUpAffordance>
@@ -730,7 +761,7 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
       />
       {env.options.photos && data.photoIds.length ? (
         <div className="mt-1 flex flex-wrap gap-2" data-item-photos>
-          {data.photoIds.map((photoId) => (
+          {data.photoIds.map((photoId, pi) => (
             // A fixed box, as the Repair List's: the marks overlay sits on the picture.
             // Each thumbnail line may start a new sheet (the ones of one line share a top).
             <div key={photoId} style={thumbStyle} data-item-photo={photoId} data-break="">
@@ -742,6 +773,7 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
               >
                 <DocImage
                   image={{ kind: "ticketPhoto", photoId, marks: env.options.marks }}
+                  sizeKey={repairItemKey(m.id, pi)}
                   className="h-full w-full rounded-sm"
                 />
               </MarkUpAffordance>
@@ -837,7 +869,12 @@ function Letterhead({ m, set }: { m: LetterheadModule; set: Setter }) {
     <div className="flex items-start gap-6">
       <div className="group/logo relative w-56 shrink-0">
         {m.logo ? (
-          <DocImage image={{ kind: "logo" }} className="h-20 w-full object-left" alt="JBK logo" />
+          <DocImage
+            image={{ kind: "logo" }}
+            sizeKey={`${m.id}:0`}
+            className="h-20 w-full object-left"
+            alt="JBK logo"
+          />
         ) : (
           <div className="h-20 w-full rounded-sm border border-dashed border-neutral-300 text-center text-xs leading-[5rem] text-neutral-400">
             No logo
@@ -857,7 +894,7 @@ function Letterhead({ m, set }: { m: LetterheadModule; set: Setter }) {
           key={m.id}
           value={m.text}
           placeholder="Company block"
-          onChange={(text) => set((c) => ({ ...c, text }) as DocModule)}
+          onChange={(text) => set((c) => ({ ...c, text }) as DocModule, true)}
         />
       </div>
     </div>
@@ -871,13 +908,13 @@ function TwoColumns({ m, set }: { m: TwoColumnsModule; set: Setter }) {
         key={`${m.id}-l`}
         value={m.left}
         placeholder="Left column"
-        onChange={(left) => set((c) => ({ ...c, left }) as DocModule)}
+        onChange={(left) => set((c) => ({ ...c, left }) as DocModule, true)}
       />
       <RichText
         key={`${m.id}-r`}
         value={m.right}
         placeholder="Right column"
-        onChange={(right) => set((c) => ({ ...c, right }) as DocModule)}
+        onChange={(right) => set((c) => ({ ...c, right }) as DocModule, true)}
       />
     </div>
   );
@@ -889,6 +926,7 @@ function FullPhoto({ m, set }: { m: FullPhotoModule; set: Setter }) {
     <div className="group/photo">
       <ImageSlot
         image={m.image}
+        sizeKey={`${m.id}:0`}
         heightPx={heightPx}
         onChange={(image) => set((c) => ({ ...c, image }) as DocModule)}
       />
@@ -938,7 +976,7 @@ function PhotoText({
           key={m.id}
           value={m.text}
           placeholder="Text beside the photo"
-          onChange={(t) => set((c) => ({ ...c, text: t }) as DocModule)}
+          onChange={(t) => set((c) => ({ ...c, text: t }) as DocModule, true)}
         />
       </div>
     );
@@ -946,6 +984,7 @@ function PhotoText({
     <div className="group/photo w-[45%] shrink-0">
       <ImageSlot
         image={m.image}
+        sizeKey={`${m.id}:0`}
         heightPx={heightPx}
         onChange={(image) => set((c) => ({ ...c, image }) as DocModule)}
       />
@@ -964,7 +1003,7 @@ function PhotoText({
         key={m.id}
         value={m.text}
         placeholder="Text beside the photo"
-        onChange={(t) => set((c) => ({ ...c, text: t }) as DocModule)}
+        onChange={(t) => set((c) => ({ ...c, text: t }) as DocModule, true)}
       />
     </div>
   );
@@ -1011,6 +1050,7 @@ function TwoPhotos({ m, set }: { m: TwoPhotosModule; set: Setter }) {
           <div key={i}>
             <ImageSlot
               image={m.images[i]}
+              sizeKey={`${m.id}:${i}`}
               heightPx={heightPx}
               onChange={(img) => setImage(i, img)}
             />

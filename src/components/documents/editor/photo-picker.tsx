@@ -12,7 +12,7 @@
  * saves on the ticket's row (savePhotoAnnotations), as the ticket page does — the document only
  * draws the ticket's marks. Nothing is saved until Done is pressed.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -28,7 +28,12 @@ import {
 } from "@/lib/documents/editor-helpers";
 import type { ImageRef } from "@/lib/documents/model";
 import { documentImageUrl, uploadDocumentImage } from "@/lib/documents.functions";
-import { type PhotoMark, type Rotation, serializePhotoMarks } from "@/lib/photo-annotations";
+import {
+  type PhotoMark,
+  type Rotation,
+  rotatedBox,
+  serializePhotoMarks,
+} from "@/lib/photo-annotations";
 import { savePhotoAnnotations } from "@/lib/service-field.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -57,10 +62,12 @@ export function DocImage(props: {
   className?: string | undefined;
   style?: React.CSSProperties | undefined;
   alt?: string | undefined;
+  /** The layout's key for this picture (`${module id}:${slot}`): its size is reported under it, as shown (turned), for the sheets to follow the PDF (Nov 6). */
+  sizeKey?: string | undefined;
 }) {
   const env = useEditorEnv();
   const urlFn = useServerFn(documentImageUrl);
-  const { image } = props;
+  const { image, sizeKey } = props;
   const upload = image.kind === "upload" ? image : null;
   const q = useQuery({
     queryKey: imageUrlKey(upload?.path ?? ""),
@@ -84,6 +91,12 @@ export function DocImage(props: {
     src = q.data ?? null;
     label ||= image.name ?? "Picture";
   }
+  const report = env.reportImageSize;
+  const noSrc = !src;
+  const failed = q.isError;
+  useEffect(() => {
+    if (sizeKey && (noSrc || failed)) report(sizeKey, null);
+  }, [sizeKey, noSrc, failed, report]);
   if (!src)
     return (
       <div
@@ -118,6 +131,14 @@ export function DocImage(props: {
         className={props.className}
         style={props.style}
         draggable={false}
+        onNaturalSize={
+          sizeKey
+            ? (s) => {
+                const box = rotatedBox(s.w, s.h, rotation);
+                report(sizeKey, { width: box.w, height: box.h });
+              }
+            : undefined
+        }
       />
     </span>
   );
@@ -131,6 +152,8 @@ export function ImageSlot(props: {
   /** Fixed height in px (fullPhoto's inches); undefined keeps the picture's shape. */
   heightPx?: number | undefined;
   title?: string | undefined;
+  /** See DocImage. */
+  sizeKey?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const style: React.CSSProperties | undefined = props.heightPx
@@ -152,6 +175,7 @@ export function ImageSlot(props: {
         {props.image ? (
           <DocImage
             image={props.image}
+            sizeKey={props.sizeKey}
             className={cn("w-full", props.heightPx ? "h-full" : "max-h-[7in]")}
           />
         ) : (
@@ -161,6 +185,9 @@ export function ImageSlot(props: {
           >
             <ImagePlus className="h-6 w-6" />
             <span className="text-sm">Choose photo</span>
+            <span className="text-xs text-neutral-400">
+              prints nothing until a picture is chosen
+            </span>
           </div>
         )}
       </button>

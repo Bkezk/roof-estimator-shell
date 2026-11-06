@@ -161,6 +161,13 @@ export type Piece =
       height: number;
       line: LaidLine;
       keepWithNext?: boolean | undefined;
+      /**
+       * Which rich-text block (richBlocks' index) and which of its wrapped lines this is, so the
+       * editor can cut a text module on screen where the PDF cuts it (Nov 6). Absent on plain
+       * lines (captions, signature labels).
+       */
+      block?: number | undefined;
+      lineIndex?: number | undefined;
     }
   | { kind: "gap"; height: number }
   | { kind: "rule"; x: number; width: number; height: number; thickness: number }
@@ -565,6 +572,8 @@ export function layoutRich(
         x,
         width,
         height: lineHeightOf(size),
+        block: bi,
+        lineIndex: li,
         line: {
           segments: placeLine(l, width, b.indent, b.align),
           width: l.width,
@@ -1210,17 +1219,43 @@ export function layoutRepairItem(
  * new page there, unless it is at the top of one already).
  */
 export function layoutModules(modules: readonly DocModule[], ctx: LayoutContext): Piece[] {
+  return layoutModulesWithOwners(modules, ctx).pieces;
+}
+
+/**
+ * layoutModules, with which module each piece came from (the editor draws the sheets from the
+ * same pagination the PDF prints, Nov 6). The gaps between modules and the page breaks belong to
+ * no module; a piece the paginator makes while splitting a row of columns is not listed either.
+ */
+export function layoutModulesWithOwners(
+  modules: readonly DocModule[],
+  ctx: LayoutContext,
+): { pieces: Piece[]; owner: Map<Piece, string> } {
   const out: Piece[] = [];
+  const owner = new Map<Piece, string>();
   for (const m of modules) {
     const pieces = layoutModule(m, 0, ctx.width, ctx);
     if (!pieces.length) continue;
     const first = !out.length;
     if (m.type === "repairItem" && ctx.itemPerPage) out.push({ kind: "pageBreak", height: 0 });
     if (!first) out.push({ kind: "gap", height: MODULE_GAP });
+    for (const p of pieces) owner.set(p, m.id);
     out.push(...pieces);
   }
-  return out;
+  return { pieces: out, owner };
 }
+
+/**
+ * pdf-lib's standard fonts cover WinAnsi only: the few characters that break are swapped (the
+ * bullet is in WinAnsi). The drawer and the measure use it on the server; the editor's measure
+ * uses it too, so both wrap the same text.
+ */
+export const pdfSafeText = (s: string) =>
+  s
+    .replace(/[–—]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[^ -ÿ•\n\r\t]/g, "?");
 
 /** A page's modules cut at its inserted PDFs: flows of modules and whole PDFs, in order. */
 export function splitAtPdf(

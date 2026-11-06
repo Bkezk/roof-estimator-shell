@@ -45,9 +45,11 @@ describe("the /documents route", () => {
     );
     expect(route).toContain("PAGE_BREAK_HINT");
   });
-  it("has Save Template As, Manage Templates and Revisions", () => {
+  it("has Save Template As, Manage Templates and Revisions — in the Save menu only (Nov 6: the Document tab had the same three buttons again)", () => {
     expect(route).toContain("Save Template As…");
-    expect(route).toContain("Save Template As\n");
+    expect(route).not.toContain("Save Template As\n");
+    expect(route).not.toContain('title="Save these pages as a template"');
+    expect(route).not.toContain('title="Earlier saves of this document"');
     expect(route).toContain("Manage Templates");
     expect(route).toContain("Revisions…");
     expect(route).toContain("RevisionsSheet");

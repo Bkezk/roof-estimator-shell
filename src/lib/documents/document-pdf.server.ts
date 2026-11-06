@@ -53,6 +53,7 @@ import {
   type ImageSize,
   type LayoutContext,
   layoutModules,
+  pdfSafeText,
   type Measure,
   pageLabel,
   paginate,
@@ -94,13 +95,7 @@ const HEADER_SHADE = rgb(0.88, 0.88, 0.88);
 const ZEBRA_SHADE = rgb(0.955, 0.955, 0.955);
 const PLACEHOLDER_FILL = rgb(0.93, 0.93, 0.93);
 
-/** pdf-lib's standard fonts cover WinAnsi only; swap the few characters that break (the bullet is in WinAnsi). */
-const clean = (s: string) =>
-  s
-    .replace(/[–—]/g, "-")
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[^ -ÿ•\n\r\t]/g, "?");
+const clean = pdfSafeText;
 
 export interface LoadedImage {
   image: PDFImage;

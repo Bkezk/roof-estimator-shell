@@ -125,17 +125,20 @@ describe("breakOffsets", () => {
 describe("the editor wires it", () => {
   const canvas = read("src/components/documents/editor/page-canvas.tsx");
   const views = read("src/components/documents/editor/module-view.tsx");
-  it("measures the cut points and packs into segments", () => {
+  it("measures the cut points and packs into segments (Nov 6: only until the PDF's metrics load; then the sheets are the PDF's own pages, screen-pagination.test.ts)", () => {
     expect(canvas).toContain('target.querySelectorAll<HTMLElement>("[data-break]")');
     expect(canvas).toContain("const offs = breakOffsets(box.top, tops, scale);");
-    expect(canvas).toContain("const groups = packIntoSegments(");
+    expect(canvas).toContain("      packIntoSegments(");
     expect(canvas).toContain("breaks: breaks[m.id],");
     expect(canvas).not.toContain("packIntoSheets(");
+    expect(canvas).toContain(
+      "paginatePage(props.page.modules, ctx, contentHeightFor(env.options))",
+    );
   });
   it("draws a cut part as a clipped window, measuring only the first part", () => {
     expect(canvas).toContain('data-segment={from > 0 ? "continued" : undefined}');
     expect(canvas).toContain(
-      'style={cut ? { height: seg.to! - from, overflow: "hidden" } : undefined}',
+      'style={cut ? { height: seg.to! - from, overflow: "clip" } : undefined}',
     );
     expect(canvas).toContain("transform: `translateY(-${from}px)`");
     expect(canvas).toContain("ref={from === 0 ? props.measureRef(m.id) : undefined}");

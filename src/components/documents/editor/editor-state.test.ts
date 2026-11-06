@@ -201,7 +201,9 @@ describe("start over from a template (Oct 28: the label and the saved template_i
     expect(loaded().template).toBeNull();
     const pages = [newPage([newModule("body")])];
     const next = editorReducer(s, { type: "startOver", pages, template: tpl });
-    expect(next).toEqual(applyStartOver(s, pages, tpl));
+    // (Nov 6: the reducer also records the step for Undo.)
+    expect({ ...next, past: [] }).toEqual(applyStartOver(s, pages, tpl));
+    expect(next.past).toHaveLength(1);
     expect(next.template?.name).toBe("Inspection report");
   });
   it("buildSavePayload sends the template the pages come from now (null for blank)", () => {

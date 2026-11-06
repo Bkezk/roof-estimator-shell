@@ -457,12 +457,15 @@ export function RotatedPhoto({
   title,
   loading,
   draggable,
+  onNaturalSize,
 }: {
   url: string;
   alt: string;
   marks: PhotoMark[];
   rotation: Rotation;
   fit: "cover" | "contain";
+  /** The picture's own pixel size once it has loaded (the Documents editor lays pages out with it). */
+  onNaturalSize?: ((size: { w: number; h: number }) => void) | undefined;
   /** The natural size when the caller measures it (null until it knows); omit to measure here. */
   size?: { w: number; h: number } | null | undefined;
   /** Classes for the picture element (the <img> and the <svg> alike), e.g. "h-full w-full". */
@@ -491,7 +494,10 @@ export function RotatedPhoto({
           draggable={draggable}
           onLoad={(e) => {
             const s = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight };
-            if (s.w > 0 && s.h > 0) setMeasured(s);
+            if (s.w > 0 && s.h > 0) {
+              setMeasured(s);
+              onNaturalSize?.(s);
+            }
           }}
         />
         {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit={fit} />}

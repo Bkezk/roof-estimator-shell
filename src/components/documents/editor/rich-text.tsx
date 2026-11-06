@@ -6,10 +6,11 @@
  * one unit. Typing "/" opens the variable list (the kind's defs filtered by what follows; Enter
  * or a click inserts). A small toolbar shows while the box has focus.
  *
- * The editor is created once per mounted box (the content prop is read on mount only; the
- * module id keys the component), and onChange emits editor.getJSON() as the module's RichDoc.
+ * The editor is created once per mounted box (the module id keys the component), and onChange
+ * emits editor.getJSON() as the module's RichDoc. A `value` that differs from what the box
+ * last emitted (Undo / Redo on the document, a restored revision — Nov 6) is put into the box.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   type Editor,
@@ -369,6 +370,8 @@ export function RichText(props: {
   envRef.current = env;
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [focused, setFocused] = useState(false);
+  // The JSON the box last emitted or was given, so a value that is our own echo is left alone.
+  const lastJson = useRef(JSON.stringify(props.value));
 
   const extensions = useMemo(
     () => [
@@ -400,7 +403,11 @@ export function RichText(props: {
       editorProps: {
         attributes: { class: "doc-prose min-h-[1.5em] outline-none" },
       },
-      onUpdate: ({ editor: e }) => onChangeRef.current(e.getJSON() as RichDoc),
+      onUpdate: ({ editor: e }) => {
+        const json = e.getJSON() as RichDoc;
+        lastJson.current = JSON.stringify(json);
+        onChangeRef.current(json);
+      },
       onFocus: ({ editor: e }) => {
         setFocused(true);
         envRef.current?.setActiveEditor(e);
@@ -410,6 +417,15 @@ export function RichText(props: {
     // Created once per mounted box: the parent re-renders on every keystroke elsewhere.
     [],
   );
+
+  // The document's Undo / Redo (or a reload) changed this module's text under the box.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const next = JSON.stringify(props.value);
+    if (next === lastJson.current) return;
+    lastJson.current = next;
+    editor.commands.setContent(props.value as unknown as JSONContent, { emitUpdate: false });
+  }, [editor, props.value]);
 
   const empty = editor ? editor.isEmpty : false;
   return (

@@ -13,7 +13,7 @@
  * save by someone else is refused with a message naming them; the toast offers Reload.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useBlocker, useRouter } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import type { Editor } from "@tiptap/react";
@@ -37,6 +37,8 @@ import {
   LayoutTemplate,
   ListChecks,
   ListTodo,
+  Redo2,
+  Undo2,
   Link2,
   Loader2,
   Mail,
@@ -75,6 +77,7 @@ import {
 } from "@/lib/documents/editor-helpers";
 import {
   addModule,
+  addPage,
   cloneModule,
   DEFAULT_OPTIONS,
   type DocKind,
@@ -91,6 +94,7 @@ import {
   newPage,
   removePage,
 } from "@/lib/documents/model";
+import type { ImageSize } from "@/lib/documents/pdf-layout";
 import { flaggedItemsNotShown, notOnPageNote, storedInspection } from "@/lib/documents/server-pure";
 import { sampleVariables, variableDefs } from "@/lib/documents/variables";
 import {
@@ -130,6 +134,7 @@ import {
   selectedPageIndex,
 } from "@/components/documents/editor/editor-state";
 import { scrollToPage } from "@/components/documents/editor/editor-dom";
+import { usePdfMeasure } from "@/components/documents/editor/screen-measure";
 import { PageCanvas } from "@/components/documents/editor/page-canvas";
 import { insertVariable } from "@/components/documents/editor/rich-text";
 import {
@@ -269,18 +274,6 @@ function useSaveShortcut(save: () => void) {
   }, [save]);
 }
 
-/** Warn before the tab closes with unsaved edits. */
-function useLeaveGuard(dirty: boolean) {
-  useEffect(() => {
-    if (!dirty) return;
-    const onLeave = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
-  }, [dirty]);
-}
-
 function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<void> }) {
   const { bundle } = props;
   const doc = bundle.document;
@@ -335,7 +328,22 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
     if (state.dirty && !save.isPending) save.mutate();
   }, [state.dirty, save]);
   useSaveShortcut(doSave);
-  useLeaveGuard(state.dirty);
+  // "Save and leave" on the leave dialog: the same save, awaited; false when it was refused.
+  const saveAsync = useCallback(async () => {
+    try {
+      const r = await saveFn({ data: buildSavePayload(state, doc.id, version) });
+      setVersion(r.version);
+      dispatch({ type: "markSaved" });
+      void qc.invalidateQueries({ queryKey: ["documents"] });
+      return true;
+    } catch (e) {
+      toast.error(errText(e), {
+        duration: 15_000,
+        action: { label: "Reload", onClick: () => void reload() },
+      });
+      return false;
+    }
+  }, [saveFn, state, doc.id, version, qc, reload, dispatch]);
 
   const refreshFn = useServerFn(refreshDocumentVariables);
   const refresh = useMutation({
@@ -395,6 +403,7 @@ function DocumentEditor(props: { bundle: DocumentBundle; reload: () => Promise<v
       back={backHref(bundle.backTo)}
       saving={save.isPending}
       onSave={doSave}
+      onSaveAsync={saveAsync}
       onRefreshVariables={() => refresh.mutate()}
       refreshing={refresh.isPending}
       onOpenRevisions={() => setRevisionsOpen(true)}
@@ -532,7 +541,14 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
     if (dirty && !save.isPending) save.mutate();
   }, [dirty, save]);
   useSaveShortcut(doSave);
-  useLeaveGuard(dirty);
+  const saveAsync = useCallback(async () => {
+    try {
+      await save.mutateAsync();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [save]);
 
   return (
     <EditorShell
@@ -548,6 +564,7 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
       saving={save.isPending}
       dirtyOverride={dirty}
       onSave={doSave}
+      onSaveAsync={saveAsync}
       documentTab={
         <div className="space-y-2">
           <div className="space-y-1">
@@ -574,6 +591,14 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
 }
 
 // ------------------------------------------------------------------------- the shell
+
+/** Where Ctrl+Z belongs to the field itself: a text box (TipTap), an input or a textarea. */
+export function inOwnUndoField(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(".ProseMirror")) return true;
+  if (target.closest("input, textarea, [contenteditable=true]")) return true;
+  return false;
+}
 
 const TILE_ICONS: Record<ModuleType, React.ComponentType<{ className?: string }>> = {
   body: AlignLeft,
@@ -612,6 +637,8 @@ function EditorShell(props: {
   /** The template editor adds its description to the dirty rule. */
   dirtyOverride?: boolean | undefined;
   onSave: () => void;
+  /** The save awaited (the leave dialog's "Save and leave"); false when it was refused. */
+  onSaveAsync: () => Promise<boolean>;
   onRefreshVariables?: (() => void) | undefined;
   refreshing?: boolean | undefined;
   onOpenRevisions?: (() => void) | undefined;
@@ -623,12 +650,51 @@ function EditorShell(props: {
   const qc = useQueryClient();
   const router = useRouter();
   const dirty = props.dirtyOverride ?? state.dirty;
+  // Leaving with unsaved edits asks (Nov 6: a sidebar click used to drop them silently; only
+  // Back and closing the tab warned): Save and leave, Leave without saving, or Stay. The tab
+  // close keeps the browser's own warning.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const blocker = useBlocker({
+    shouldBlockFn: () => dirtyRef.current,
+    withResolver: true,
+    enableBeforeUnload: () => dirtyRef.current,
+  });
+  const [leaving, setLeaving] = useState(false);
   const activeEditorRef = useRef<Editor | null>(null);
+  // Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) undo and redo the document's own history —
+  // modules and pages added, moved, deleted, options — unless the keys land in a text box or an
+  // input, which keep their own undo (TipTap's, the browser's).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      if (inOwnUndoField(e.target)) return;
+      e.preventDefault();
+      dispatch({ type: k === "y" || e.shiftKey ? "redo" : "undo" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dispatch]);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveModule, setSaveModule] = useState<DocModule | null>(null);
 
   const savedFn = useServerFn(listSavedModules);
   const savedModules = useQuery({ queryKey: savedModulesKey, queryFn: () => savedFn() });
+
+  // The sheets follow the PDF's own pagination (Nov 6): its text metrics, loaded once, and the
+  // size of every picture as the canvas loads it.
+  const measure = usePdfMeasure();
+  const [imageSizes, setImageSizes] = useState<Record<string, ImageSize | null>>({});
+  const reportImageSize = useCallback((key: string, size: ImageSize | null) => {
+    setImageSizes((cur) => {
+      const was = cur[key];
+      if (was === size) return cur;
+      if (was && size && was.width === size.width && was.height === size.height) return cur;
+      return { ...cur, [key]: size };
+    });
+  }, []);
 
   const saveModuleFn = useServerFn(saveSavedModule);
   const saveModuleMut = useMutation({
@@ -658,8 +724,14 @@ function EditorShell(props: {
       },
       onSaveModule: (m) => setSaveModule(m),
       snippets: savedModules.data ?? EMPTY_SNIPPETS,
+      measure,
+      imageSizes,
+      reportImageSize,
     }),
     [
+      measure,
+      imageSizes,
+      reportImageSize,
       kind,
       mode,
       props.variables,
@@ -674,7 +746,9 @@ function EditorShell(props: {
     ],
   );
 
+  const [toolsOpen, setToolsOpen] = useState(false);
   const addToSelected = (m: DocModule) => {
+    setToolsOpen(false);
     const i = selectedPageIndex(state);
     dispatch({ type: "setPages", op: (pages) => addModule(pages, i, m) });
     const page = state.pages[i];
@@ -682,6 +756,49 @@ function EditorShell(props: {
   };
 
   const title = state.title || (mode === "template" ? "New template" : "Untitled");
+
+  // The Document / Modules / Variables tabs: a side panel from md up; on a phone (Nov 6: the
+  // panel was simply hidden, so nothing could be added or set) the same tabs in a sheet the
+  // header's Tools button opens. Adding a module closes the sheet so the page is seen.
+  const panelTabs = (
+    <Tabs defaultValue="document" className="w-full">
+      <TabsList className="m-3 grid w-auto grid-cols-3">
+        <TabsTrigger value="document">Document</TabsTrigger>
+        <TabsTrigger value="modules">Modules</TabsTrigger>
+        <TabsTrigger value="variables">Variables</TabsTrigger>
+      </TabsList>
+      <TabsContent value="document" className="space-y-5 px-3 pb-6">
+        <DocumentTab
+          mode={mode}
+          state={state}
+          dispatch={dispatch}
+          savedModules={savedModules.data ?? []}
+        >
+          {props.documentTab}
+        </DocumentTab>
+      </TabsContent>
+      <TabsContent value="modules" className="space-y-4 px-3 pb-6">
+        <ModulesTab
+          savedModules={savedModules.data ?? []}
+          savedError={savedModules.isError ? errText(savedModules.error) : null}
+          onAdd={(type) => addToSelected(newModule(type))}
+          onAddSaved={(m) => addToSelected(cloneModule(m))}
+        />
+      </TabsContent>
+      <TabsContent value="variables" className="space-y-3 px-3 pb-6">
+        <VariablesTab
+          kind={kind}
+          variables={props.variables}
+          onInsert={(key) => {
+            if (!insertVariable(activeEditorRef.current, key))
+              toast.info("Click into a text box first, then click the variable.");
+          }}
+          onRefresh={props.onRefreshVariables}
+          refreshing={props.refreshing ?? false}
+        />
+      </TabsContent>
+    </Tabs>
+  );
 
   return (
     <EditorEnvContext.Provider value={env}>
@@ -693,11 +810,7 @@ function EditorShell(props: {
             variant="ghost"
             size="sm"
             title={mode === "template" ? "Back to the templates" : "Back to the record"}
-            onClick={() => {
-              if (dirty && !window.confirm("Leave without saving? Your edits will be lost."))
-                return;
-              void router.navigate({ href: props.back });
-            }}
+            onClick={() => void router.navigate({ href: props.back })}
           >
             <ArrowLeft className="h-4 w-4" />
             Back
@@ -708,7 +821,43 @@ function EditorShell(props: {
             <span className="font-medium">{title}</span>
             {dirty ? <span className="ml-2 text-xs text-muted-foreground">(unsaved)</span> : null}
           </div>
-          <div className="flex items-center gap-1">
+          {/* flex-wrap: on a phone the row would widen the page (and the Tools sheet) past it. */}
+          <div className="flex flex-wrap items-center justify-end gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="md:hidden"
+              title="Title, options, modules, variables and pages"
+              onClick={() => setToolsOpen(true)}
+            >
+              <PanelLeft className="h-4 w-4" />
+              Tools
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+              disabled={state.past.length === 0}
+              onClick={() => dispatch({ type: "undo" })}
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+              disabled={state.future.length === 0}
+              onClick={() => dispatch({ type: "redo" })}
+            >
+              <Redo2 className="h-4 w-4" />
+            </Button>
             <div className="flex items-center">
               <Button
                 type="button"
@@ -764,46 +913,17 @@ function EditorShell(props: {
             className="sticky top-14 hidden w-[480px] shrink-0 self-start overflow-y-auto border-r bg-background md:block"
             style={{ maxHeight: "calc(100svh - 7rem)" }}
           >
-            <Tabs defaultValue="document" className="w-full">
-              <TabsList className="m-3 grid w-auto grid-cols-3">
-                <TabsTrigger value="document">Document</TabsTrigger>
-                <TabsTrigger value="modules">Modules</TabsTrigger>
-                <TabsTrigger value="variables">Variables</TabsTrigger>
-              </TabsList>
-              <TabsContent value="document" className="space-y-5 px-3 pb-6">
-                <DocumentTab
-                  mode={mode}
-                  state={state}
-                  dispatch={dispatch}
-                  savedModules={savedModules.data ?? []}
-                  onSaveAs={() => setSaveAsOpen(true)}
-                  onOpenRevisions={props.onOpenRevisions}
-                >
-                  {props.documentTab}
-                </DocumentTab>
-              </TabsContent>
-              <TabsContent value="modules" className="space-y-4 px-3 pb-6">
-                <ModulesTab
-                  savedModules={savedModules.data ?? []}
-                  savedError={savedModules.isError ? errText(savedModules.error) : null}
-                  onAdd={(type) => addToSelected(newModule(type))}
-                  onAddSaved={(m) => addToSelected(cloneModule(m))}
-                />
-              </TabsContent>
-              <TabsContent value="variables" className="space-y-3 px-3 pb-6">
-                <VariablesTab
-                  kind={kind}
-                  variables={props.variables}
-                  onInsert={(key) => {
-                    if (!insertVariable(activeEditorRef.current, key))
-                      toast.info("Click into a text box first, then click the variable.");
-                  }}
-                  onRefresh={props.onRefreshVariables}
-                  refreshing={props.refreshing ?? false}
-                />
-              </TabsContent>
-            </Tabs>
+            {panelTabs}
           </aside>
+          <Sheet open={toolsOpen} onOpenChange={setToolsOpen}>
+            <SheetContent side="left" className="w-full overflow-y-auto p-0 sm:max-w-md md:hidden">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Tools</SheetTitle>
+                <SheetDescription>Title, options, modules, variables and pages.</SheetDescription>
+              </SheetHeader>
+              {panelTabs}
+            </SheetContent>
+          </Sheet>
           <main className="min-w-0 flex-1">
             <PageCanvas
               pages={state.pages}
@@ -814,6 +934,50 @@ function EditorShell(props: {
         </div>
       </div>
 
+      <AlertDialog
+        open={blocker.status === "blocked"}
+        onOpenChange={(o) => {
+          if (!o && blocker.status === "blocked" && !leaving) blocker.reset();
+        }}
+      >
+        <AlertDialogContent data-leave-dialog>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {mode === "template" ? "This template" : "This document"} has edits that are not saved
+              yet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={leaving}>Stay</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={leaving}
+              onClick={() => {
+                if (blocker.status === "blocked") blocker.proceed();
+              }}
+            >
+              Leave without saving
+            </Button>
+            <AlertDialogAction
+              disabled={leaving}
+              onClick={async (e) => {
+                e.preventDefault();
+                setLeaving(true);
+                const ok = await props.onSaveAsync();
+                setLeaving(false);
+                if (blocker.status !== "blocked") return;
+                if (ok) blocker.proceed();
+                else blocker.reset();
+              }}
+            >
+              {leaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save and leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <SaveTemplateAsDialog
         open={saveAsOpen}
         onOpenChange={setSaveAsOpen}
@@ -847,8 +1011,6 @@ function DocumentTab(props: {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
   savedModules: ReadonlyArray<{ name: string; module: DocModule }>;
-  onSaveAs: () => void;
-  onOpenRevisions?: (() => void) | undefined;
   children?: React.ReactNode;
 }) {
   const { state, dispatch } = props;
@@ -936,34 +1098,6 @@ function DocumentTab(props: {
         <p className="text-xs text-muted-foreground">{PAGE_BREAK_HINT}</p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          title="Save these pages as a template"
-          onClick={props.onSaveAs}
-        >
-          <LayoutTemplate className="h-4 w-4" />
-          Save Template As
-        </Button>
-        <Button asChild variant="outline" size="sm" title="The templates list under Admin">
-          <a href={TEMPLATES_ADMIN_PATH}>Manage Templates</a>
-        </Button>
-        {props.onOpenRevisions ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            title="Earlier saves of this document"
-            onClick={props.onOpenRevisions}
-          >
-            <History className="h-4 w-4" />
-            Revisions
-          </Button>
-        ) : null}
-      </div>
-
       <div className="space-y-1">
         <div className="text-sm font-medium">Pages ({state.pages.length})</div>
         <ul className="divide-y rounded-md border">
@@ -1039,7 +1173,15 @@ function DocumentTab(props: {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => op((p) => removePage(p, page.id))}
+                        onClick={() => {
+                          op((p) => removePage(p, page.id));
+                          toast(`Page ${i + 1} deleted`, {
+                            action: {
+                              label: "Undo",
+                              onClick: () => op((p) => addPage(p, i, page)),
+                            },
+                          });
+                        }}
                       >
                         <Trash2 className="h-4 w-4" /> Delete
                       </DropdownMenuItem>

@@ -9,6 +9,7 @@ import { createContext, type Dispatch, useContext } from "react";
 import type { Editor } from "@tiptap/react";
 
 import type { DocKind, DocModule, DocOptions } from "@/lib/documents/model";
+import type { ImageSize, Measure } from "@/lib/documents/pdf-layout";
 
 import type { DocumentPhoto } from "../document-types";
 import type { EditorAction } from "./editor-state";
@@ -32,6 +33,14 @@ export interface EditorEnv {
   onSaveModule: (module: DocModule) => void;
   /** The saved snippets the Modules tab lists; a row dragged onto a sheet drops a fresh copy. */
   snippets: ReadonlyArray<{ id: string; name: string; module: DocModule }>;
+  /**
+   * The PDF's text metrics once loaded (screen-measure.ts), so the sheets follow the PDF's own
+   * pagination (Nov 6); null until then.
+   */
+  measure: Measure | null;
+  /** The natural size every picture on the canvas reported as it loaded (null: it could not load), by the layout's key. */
+  imageSizes: Readonly<Record<string, ImageSize | null>>;
+  reportImageSize: (key: string, size: ImageSize | null) => void;
 }
 
 export const EditorEnvContext = createContext<EditorEnv | null>(null);

@@ -304,10 +304,16 @@ export function parsePageBreak(text: string): number {
   return clampPageBreak(n);
 }
 
-/** How far the sheet shrinks to fit a canvas of `available` px (never grows past 1:1). */
+/** The smallest the sheet is drawn: 3/4 keeps 10.5 pt text readable; a phone scrolls sideways. */
+export const SHEET_SCALE_MIN = 0.75;
+
+/**
+ * How far the sheet shrinks to fit a canvas of `available` px (never grows past 1:1, never below
+ * SHEET_SCALE_MIN — Nov 6: a phone shrank the sheet to 44 %, the text to about 6 px).
+ */
 export function sheetScale(available: number, gutter = 32): number {
   if (!Number.isFinite(available) || available <= 0) return 1;
-  return Math.min(1, Math.max(0.3, (available - gutter) / SHEET.width));
+  return Math.min(1, Math.max(SHEET_SCALE_MIN, (available - gutter) / SHEET.width));
 }
 
 /**

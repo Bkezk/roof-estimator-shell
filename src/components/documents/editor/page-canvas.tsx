@@ -9,7 +9,7 @@
  * (drop-index.ts). HTML5 drag does not fire on most phones; the tab's + buttons stay the touch
  * path and add to the bottom of the selected page.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -23,11 +23,28 @@ import {
   type SheetSegment,
   pageBreakPx,
   pageDomId,
+  pageTabLabel,
+  pricingSourceFromVariables,
   SHEET,
   sheetContentLimit,
   sheetScale,
   SNIPPET_DRAG_TYPE,
 } from "@/lib/documents/editor-helpers";
+import {
+  CONTENT_WIDTH,
+  contentHeightFor,
+  type LayoutContext,
+  MODULE_GAP,
+} from "@/lib/documents/pdf-layout";
+import {
+  cutPx,
+  type ModuleCut,
+  paginatePage,
+  printedPages,
+  type ScreenSheet,
+} from "@/lib/documents/screen-pagination";
+import { displayVariables, pricingSource, storedInspection } from "@/lib/documents/server-pure";
+import { variableLabel } from "@/lib/documents/variables";
 import {
   addModule,
   addPage,
@@ -64,14 +81,16 @@ import { ModuleView } from "./module-view";
 
 /** The print styles the rich text boxes need (Tailwind's preflight strips them). */
 const DOC_PROSE_CSS = `
-.document-sheet { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.35; }
-.document-sheet .doc-prose p { margin: 0 0 0.35em; min-height: 1.35em; }
-.document-sheet .doc-prose h1 { font-size: 20pt; font-weight: 700; margin: 0 0 0.3em; line-height: 1.2; }
-.document-sheet .doc-prose h2 { font-size: 15pt; font-weight: 700; margin: 0 0 0.3em; line-height: 1.2; }
-.document-sheet .doc-prose h3 { font-size: 12.5pt; font-weight: 700; margin: 0 0 0.3em; line-height: 1.2; }
-.document-sheet .doc-prose ul { list-style: disc; padding-left: 1.4em; margin: 0 0 0.35em; }
-.document-sheet .doc-prose ol { list-style: decimal; padding-left: 1.4em; margin: 0 0 0.35em; }
-.document-sheet .doc-prose li p { margin: 0; }
+.document-sheet { font-family: Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.35; }
+.document-sheet .doc-prose p { margin: 0 0 4pt; min-height: 1.35em; }
+.document-sheet .doc-prose p:has(> br:only-child) { min-height: 0; height: 6pt; line-height: 6pt; margin: 0; }
+.document-sheet .doc-prose h1 { font-size: 18pt; font-weight: 700; margin: 6pt 0 3pt; line-height: 1.35; }
+.document-sheet .doc-prose h2 { font-size: 14pt; font-weight: 700; margin: 6pt 0 3pt; line-height: 1.35; }
+.document-sheet .doc-prose h3 { font-size: 12pt; font-weight: 700; margin: 6pt 0 3pt; line-height: 1.35; }
+.document-sheet .doc-prose > :first-child { margin-top: 0; }
+.document-sheet .doc-prose ul { list-style: disc; padding-left: 18pt; margin: 0; }
+.document-sheet .doc-prose ol { list-style: decimal; padding-left: 18pt; margin: 0; }
+.document-sheet .doc-prose li p { margin: 0 0 4pt; }
 .document-sheet .doc-prose u { text-decoration: underline; }
 .document-sheet .doc-prose .ProseMirror-selectednode { outline: 2px solid #60a5fa; }
 .document-sheet .doc-prose strong { font-weight: 700; }
@@ -105,7 +124,12 @@ export function PageCanvas(props: {
   const guide = pageBreakPx(props.options);
   let running = 0;
   return (
-    <div ref={hostRef} className="min-h-full bg-muted/40 px-4 py-4" data-document-canvas>
+    <div
+      ref={hostRef}
+      // overflow-x: below SHEET_SCALE_MIN the sheet is wider than a phone and scrolls sideways.
+      className="min-h-full overflow-x-auto bg-muted/40 px-4 py-4"
+      data-document-canvas
+    >
       <style>{DOC_PROSE_CSS}</style>
       <div
         className="mx-auto flex flex-col items-center gap-6"
@@ -183,8 +207,8 @@ export function PageCanvas(props: {
   );
 }
 
-/** The gap between modules on a sheet (the flex column's gap-3), in px. */
-const MODULE_GAP_PX = 12;
+/** The gap between modules on a sheet, in px: the PDF's MODULE_GAP (10 pt) at 96 dpi. */
+const MODULE_GAP_PX = (MODULE_GAP * 4) / 3;
 
 /**
  * One page's sheets: its modules are measured as they render and packed up to the page break
@@ -258,21 +282,78 @@ function PageSheets(props: {
   }, []);
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  const limit = sheetContentLimit(env.options);
-  const groups = packIntoSegments(
-    props.page.modules.map((m) => ({
-      id: m.id,
-      height: heights[m.id],
-      breaks: breaks[m.id],
-      // "One checklist item per page": every Checklist item starts a sheet (the PDF, a page).
-      breakBefore: m.type === "repairItem" && env.options.itemPerPage,
-    })),
-    limit,
-    MODULE_GAP_PX,
+  // The PDF's own pagination (Nov 6, screen-pagination.ts) once its text metrics have loaded:
+  // the same layout context the server builds — the variables, the pictures' sizes as the
+  // canvas reported them, the pricing and inspection sources, the options.
+  const ctx = useMemo<LayoutContext | null>(() => {
+    if (!env.measure) return null;
+    const measure = env.measure;
+    return {
+      width: CONTENT_WIDTH,
+      measure,
+      vars: displayVariables(env.variables),
+      labelOf: variableLabel,
+      image: (_ref, key) => env.imageSizes[key] ?? null,
+      pricing:
+        env.mode === "template"
+          ? pricingSourceFromVariables(env.variables, true)
+          : pricingSource(env.variables),
+      inspection: storedInspection(env.variables),
+      marks: env.options.marks,
+      photos: env.options.photos,
+      itemPerPage: env.options.itemPerPage,
+    };
+  }, [env.measure, env.variables, env.imageSizes, env.mode, env.options]);
+  const screen = useMemo(
+    () => (ctx ? paginatePage(props.page.modules, ctx, contentHeightFor(env.options)) : null),
+    [ctx, props.page.modules, env.options],
   );
+
+  const limit = sheetContentLimit(env.options);
+  /** A part's cut, from points in the PDF to pixels in the module as drawn (cutPx). */
+  const px = (id: string, cut: ModuleCut): number => {
+    const el = elements.current.get(id);
+    const h = heights[id] ?? el?.offsetHeight ?? 0;
+    return cutPx(cut, screen?.totals[id] ?? 0, h, el ? locateCut(el, cut, props.scale) : {});
+  };
+  const sheets: ScreenSheet[] = screen
+    ? screen.sheets
+    : // Until the metrics load: packed by the heights measured on screen, as before.
+      packIntoSegments(
+        props.page.modules.map((m) => ({
+          id: m.id,
+          height: heights[m.id],
+          breaks: breaks[m.id],
+          // "One checklist item per page": every Checklist item starts a sheet (the PDF, a page).
+          breakBefore: m.type === "repairItem" && env.options.itemPerPage,
+        })),
+        limit,
+        MODULE_GAP_PX,
+      ).map((segs) => ({ parts: segs.map((seg) => ({ id: seg.id, px: seg })) }));
+  const groups: SheetSegment[][] = sheets.map((sheet) =>
+    sheet.parts.map((part) => {
+      if (part.px) return part.px;
+      if (part.from === undefined && part.to === undefined) return { id: part.id };
+      const h = heights[part.id] ?? elements.current.get(part.id)?.offsetHeight ?? 0;
+      return {
+        id: part.id,
+        from: part.from ? px(part.id, part.from) : 0,
+        to: part.to ? px(part.id, part.to) : h,
+      };
+    }),
+  );
+  const printed = printedPages(sheets);
+  const { onSheetCount } = props;
+  const pageId = props.page.id;
   useEffect(() => {
-    props.onSheetCount(props.page.id, groups.length);
-  }, [groups.length, props.page.id, props.onSheetCount]);
+    onSheetCount(pageId, printed);
+  }, [printed, pageId, onSheetCount]);
+  /** The printed page number each sheet starts at (an inserted PDF takes its own pages). */
+  const numbers: number[] = [];
+  sheets.reduce((n, sheet) => {
+    numbers.push(n);
+    return n + (sheet.pdfPages ?? 1);
+  }, props.startNumber);
 
   return (
     <>
@@ -290,7 +371,9 @@ function PageSheets(props: {
               title="Select this page (the Modules tab adds here)"
               onClick={() => env.dispatch({ type: "selectPage", pageId: props.page.id })}
             >
-              {continuedTabLabel(props.index, part)}
+              {sheets[part]?.pdfPages
+                ? `${pageTabLabel(props.index)} · inserted PDF`
+                : continuedTabLabel(props.index, part)}
             </button>
             {part === 0 && props.page.modules.length === 0 ? (
               <span className="pb-1 text-xs text-muted-foreground">
@@ -305,7 +388,7 @@ function PageSheets(props: {
               part={part}
               segments={segments}
               measureRef={measureRef}
-              printedNumber={props.startNumber + part}
+              printedNumber={numbers[part] ?? props.startNumber + part}
               selected={props.selected}
               guide={props.guide}
             />
@@ -314,6 +397,36 @@ function PageSheets(props: {
       ))}
     </>
   );
+}
+
+/**
+ * Where a PDF cut falls inside a module as drawn (layout px from the module's top; the sheet is
+ * shown scaled, so client rects are divided by `scale`): a text cut names a block and a wrapped
+ * line, found in the one text box the module draws; rows that may start a sheet (`[data-break]`)
+ * give their tops for the nearest-row rule (screen-pagination.ts cutPx).
+ */
+function locateCut(
+  el: HTMLElement,
+  cut: ModuleCut,
+  scale: number,
+): { linePx?: number | undefined; rowTops?: number[] | undefined } {
+  const k = scale > 0 ? scale : 1;
+  const top = el.getBoundingClientRect().top;
+  const out: { linePx?: number | undefined; rowTops?: number[] | undefined } = {};
+  const boxes = el.querySelectorAll(".ProseMirror");
+  if (cut.block !== undefined && boxes.length === 1) {
+    const blocks = boxes[0]!.querySelectorAll<HTMLElement>("p, h1, h2, h3, hr");
+    const block = blocks[cut.block];
+    if (block) {
+      const lineH = parseFloat(getComputedStyle(block).lineHeight) || 0;
+      out.linePx = (block.getBoundingClientRect().top - top) / k + (cut.line ?? 0) * lineH;
+    }
+  }
+  const rows = Array.from(el.querySelectorAll<HTMLElement>("[data-break]")).map(
+    (r) => (r.getBoundingClientRect().top - top) / k,
+  );
+  if (rows.length) out.rowTops = rows;
+  return out;
 }
 
 /** A scaled sheet still lays out at its full height; this wrapper takes the scaled height instead. */
@@ -455,7 +568,7 @@ function Sheet(props: {
           <span className="absolute right-2 -top-4 text-[10px] text-sky-500">page break</span>
         </div>
       ) : null}
-      <div ref={columnRef} className="flex flex-col gap-3">
+      <div ref={columnRef} className="flex flex-col" style={{ gap: MODULE_GAP_PX }}>
         {placed.map(({ seg, i }) => {
           const m = props.page.modules[i]!;
           const from = seg.from ?? 0;
@@ -468,14 +581,21 @@ function Sheet(props: {
               key={`${m.id}:${from}`}
               data-module-id={m.id}
               data-segment={from > 0 ? "continued" : undefined}
-              style={cut ? { height: seg.to! - from, overflow: "hidden" } : undefined}
+              // overflow: clip, not hidden — a hidden box still scrolls to keep the caret in
+              // view while typing, which showed the module's tail in its first part (Nov 6).
+              style={cut ? { height: seg.to! - from, overflow: "clip" } : undefined}
             >
               <div
                 ref={from === 0 ? props.measureRef(m.id) : undefined}
                 data-measure-id={from === 0 ? m.id : undefined}
                 style={from > 0 ? { transform: `translateY(-${from}px)` } : undefined}
               >
-                <ModuleView module={m} index={i} count={props.page.modules.length} />
+                <ModuleView
+                  module={m}
+                  index={i}
+                  count={props.page.modules.length}
+                  pageIndex={props.index}
+                />
               </div>
             </div>
           );

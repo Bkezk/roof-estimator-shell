@@ -97,7 +97,7 @@ describe("D2. Mark up from the Repair List's thumbnails", () => {
   it("each repair-photo box carries the Mark up launcher, with double-click, around the untouched DocImage", () => {
     expect(repairList).toContain("data-repair-photo={photoId}");
     expect(repairList).toMatch(
-      /<MarkUpAffordance\s+image=\{\{ kind: "ticketPhoto", photoId, marks: env\.options\.marks \}\}\s+onChange=\{\(\) => \{\}\}\s+doubleClick\s+className="h-full w-full"\s*>\s*<DocImage\s+image=\{\{ kind: "ticketPhoto", photoId, marks: env\.options\.marks \}\}\s+className="h-full w-full rounded-sm"\s*\/>\s*<\/MarkUpAffordance>/,
+      /<MarkUpAffordance\s+image=\{\{ kind: "ticketPhoto", photoId, marks: env\.options\.marks \}\}\s+onChange=\{\(\) => \{\}\}\s+doubleClick\s+className="h-full w-full"\s*>\s*<DocImage\s+image=\{\{ kind: "ticketPhoto", photoId, marks: env\.options\.marks \}\}\s+sizeKey=\{repairListKey\(m\.id, r, pi\)\}\s+className="h-full w-full rounded-sm"\s*\/>\s*<\/MarkUpAffordance>/,
     );
     expect(moduleView).toContain(
       'import { DocImage, ImageSlot, MarkUpAffordance, PhotoPicker } from "./photo-picker";',

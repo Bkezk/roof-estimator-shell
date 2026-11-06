@@ -197,9 +197,11 @@ describe("the sheet", () => {
   it("shrinks to the canvas but never grows past 1:1", () => {
     expect(sheetScale(2000)).toBe(1);
     expect(sheetScale(848)).toBe(1);
-    expect(sheetScale(440)).toBeCloseTo(0.5);
+    // Nov 6: never below 3/4 (a phone scrolls sideways instead of showing 6 px text).
+    expect(sheetScale(440)).toBe(0.75);
     expect(sheetScale(0)).toBe(1);
-    expect(sheetScale(100)).toBe(0.3);
+    expect(sheetScale(100)).toBe(0.75);
+    expect(sheetScale(700)).toBeCloseTo((700 - 32) / 816);
   });
   it("labels", () => {
     expect(pageTabLabel(0)).toBe("Page 1");

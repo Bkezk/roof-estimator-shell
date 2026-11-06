@@ -34,7 +34,25 @@ export interface EditorState extends EditorDoc {
   dirty: boolean;
   /** The page the Modules tab's "+" adds to (the last clicked; the first by default). */
   selectedPageId: string | null;
+  /**
+   * Undo (Nov 6: deleting a module or a page was instant and final): the pages and options as
+   * they were before each change, newest last, and what Redo puts back. A load clears both.
+   * Typing in one text box is one step however many keystrokes it took (TipTap keeps its own
+   * undo inside the box); every other change is a step of its own. Capped at HISTORY_MAX.
+   */
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  /** The module whose text the newest step is, so the next keystroke in it joins that step. */
+  lastText: string | null;
 }
+
+/** One undo step: the pages and the options before a change. */
+export interface HistoryEntry {
+  pages: DocPage[];
+  options: DocOptions;
+}
+
+export const HISTORY_MAX = 100;
 
 export type EditorAction =
   /** The server's copy arrived (first load, reload after a refused save, a restored revision). */
@@ -42,8 +60,11 @@ export type EditorAction =
   /** "Start over from template…": the pages replaced, and the template they now come from. */
   | { type: "startOver"; pages: DocPage[]; template: EditorTemplate }
   | { type: "setTitle"; title: string }
-  /** A page or module operation from model.ts, applied to the current pages. */
-  | { type: "setPages"; op: (pages: readonly DocPage[]) => DocPage[] }
+  /**
+   * A page or module operation from model.ts, applied to the current pages. `text` names the
+   * module whose rich text a keystroke changed: one undo step per box, not per keystroke.
+   */
+  | { type: "setPages"; op: (pages: readonly DocPage[]) => DocPage[]; text?: string | undefined }
   /** The options checkboxes: flipping prices is applied to the pricing tables at once; the rest are view switches. */
   | { type: "setOptions"; patch: Partial<DocOptions> }
   /**
@@ -53,7 +74,9 @@ export type EditorAction =
   | { type: "splitRepairList"; moduleId: string; inspection: InspectionSnapshot }
   | { type: "selectPage"; pageId: string }
   /** A save went through: the current copy becomes the saved one. */
-  | { type: "markSaved" };
+  | { type: "markSaved" }
+  | { type: "undo" }
+  | { type: "redo" };
 
 export const EMPTY_EDITOR: EditorState = {
   title: "",
@@ -70,6 +93,9 @@ export const EMPTY_EDITOR: EditorState = {
   template: null,
   dirty: false,
   selectedPageId: null,
+  past: [],
+  future: [],
+  lastText: null,
 };
 
 /** Deep equality of what a save writes (ids included: a moved module is a change). */
@@ -98,6 +124,18 @@ function finish(next: Omit<EditorState, "dirty">): EditorState {
   return { ...next, dirty: isDirty(next.saved, docOf(next)) };
 }
 
+/**
+ * The state with the current pages and options pushed as an undo step (Redo is emptied: a new
+ * change after an undo forks the history). A text keystroke in the module the newest step
+ * already belongs to pushes nothing — the step covers the whole typing in that box.
+ */
+function pushHistory(state: EditorState, text: string | null = null): EditorState {
+  if (text !== null && state.lastText === text && state.past.length) return state;
+  const entry: HistoryEntry = { pages: state.pages, options: state.options };
+  const past = [...state.past, entry].slice(-HISTORY_MAX);
+  return { ...state, past, future: [], lastText: text };
+}
+
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "load": {
@@ -108,15 +146,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         saved: doc,
         template: action.template ?? null,
         selectedPageId: fixSelection(pages, state.selectedPageId),
+        past: [],
+        future: [],
+        lastText: null,
       });
     }
     case "startOver":
-      return applyStartOver(state, action.pages, action.template);
+      return applyStartOver(pushHistory(state), action.pages, action.template);
     case "setTitle":
       return finish({ ...state, title: action.title });
     case "setPages": {
       const pages = action.op(state.pages);
-      return finish({ ...state, pages, selectedPageId: fixSelection(pages, state.selectedPageId) });
+      if (pages === state.pages) return state;
+      const base = pushHistory(state, action.text ?? null);
+      return finish({ ...base, pages, selectedPageId: fixSelection(pages, state.selectedPageId) });
     }
     case "setOptions": {
       const options = { ...state.options, ...action.patch };
@@ -124,16 +167,44 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // read where the pages are drawn (Oct 28: Marks off used to delete an upload's marks).
       const flipped = options.prices !== state.options.prices;
       const pages = flipped ? applyOptionsToPages(state.pages, options) : state.pages;
-      return finish({ ...state, options, pages });
+      return finish({ ...pushHistory(state), options, pages });
     }
     case "splitRepairList": {
       const pages = splitRepairListModule(state.pages, action.moduleId, action.inspection);
-      return finish({ ...state, pages });
+      return finish({ ...pushHistory(state), pages });
     }
     case "selectPage":
       return { ...state, selectedPageId: fixSelection(state.pages, action.pageId) };
     case "markSaved":
       return finish({ ...state, saved: docOf(state) });
+    case "undo": {
+      const entry = state.past[state.past.length - 1];
+      if (!entry) return state;
+      const now: HistoryEntry = { pages: state.pages, options: state.options };
+      return finish({
+        ...state,
+        pages: entry.pages,
+        options: entry.options,
+        past: state.past.slice(0, -1),
+        future: [...state.future, now],
+        lastText: null,
+        selectedPageId: fixSelection(entry.pages, state.selectedPageId),
+      });
+    }
+    case "redo": {
+      const entry = state.future[state.future.length - 1];
+      if (!entry) return state;
+      const now: HistoryEntry = { pages: state.pages, options: state.options };
+      return finish({
+        ...state,
+        pages: entry.pages,
+        options: entry.options,
+        past: [...state.past, now].slice(-HISTORY_MAX),
+        future: state.future.slice(0, -1),
+        lastText: null,
+        selectedPageId: fixSelection(entry.pages, state.selectedPageId),
+      });
+    }
   }
 }
 
