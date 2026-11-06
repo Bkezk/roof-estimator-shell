@@ -91,13 +91,12 @@ Every step ran with no page errors.
 
 ## Not exercised
 
-- Link a bid, Unlink, the "Bids that look like this customer" strip and the offer after a new
-  customer: they change real bids, none of which are mine.
-- The Takeoffs section (nothing linked), the Documents list (its read goes by POST and the guard
-  refused it), the property's own page, the cover photo and the aerial (an outside imagery
-  server, refused by the guard), @mentions in Notes (Edit cannot save, finding 1), the Vendors
-  tab's own forms, and the opportunity and task rows' click-through.
+- The cover photo and the aerial (an outside imagery server, refused by the guard), @mentions in
+  Notes, the Vendors tab's own forms, and the opportunity and task rows' click-through.
 - Other users in the browser: only in SQL.
+
+(The bid links, the Takeoffs section, the Documents list and the property's own page were left
+out of the first pass and done in the second pass below.)
 
 ## Cleanup
 
@@ -137,3 +136,54 @@ browser on two fresh temporary customers.
    cards and the bid-link dialog go through `plainErrText` ("No signal…" for a lost connection).
 7. **The office adds customers** on `saveAccount`'s create path too (`OFFICE_ADDS_CUSTOMERS`),
    before any write.
+
+## Second pass (owner: "you can make fake items as long as you delete them after")
+
+Temporary rows of my own, all made through the app as the Claude login: a customer ("ZZ Linktest
+Claude", with the first property the New customer dialog makes), a bid saved in the estimator
+with that customer picked under Setup › Customer Name, a document made from that bid's Documents
+button (the default Proposal template), and a takeoff made from an uploaded picture with the
+customer picked in the New takeoff dialog. The write guard let through only the bid, document and
+takeoff functions, and a storage write under the temp takeoff's own id.
+
+| #   | Behaviour                                                                                                                                                                                                                                                          | Proof                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| 19  | A bid saved with the customer picked lists under Bids (count 1) with a link to the estimator (`/estimate?bid=…`), its status and total.                                                                                                                            | Browser.                                                                                               |
+| 20  | Unlink takes the bid off the list (count 0) with a toast; the "Bids that look like this customer" strip then offers it, by its name; Link from the strip puts it back and the strip goes.                                                                          | Browser.                                                                                               |
+| 21  | "Link a bid" lists the saved bids linked to no customer (the live ones: 11), narrows as typed, and Link puts the row back; the search box stays open until Done.                                                                                                   | Browser.                                                                                               |
+| 22  | The Documents section lists the bid's document with its version line ("v1 · Nov 6, 11:21 AM by Claude") and "For <bid name>", and its title opens the editor (`/documents?id=…`).                                                                                  | Browser.                                                                                               |
+| 23  | The Takeoffs section lists the takeoff linked in the New takeoff dialog, with its status, page count, "Updated … by Claude" and a link to `/takeoff?id=…`.                                                                                                         | Browser.                                                                                               |
+| 24  | The property's own page: name, address, the customer link, New ticket, Edit (opens the property form in place, Cancel closes it), Tickets with "No tickets", Opportunities, Bids (0, with the line saying where a bid is linked to a property), Tasks and History. | Browser.                                                                                               |
+| 25  | A customer with a draft bid can be deleted (the dialog says bids keep the name); its page then lists the bid read-only: no Unlink, no Link a bid, no strip. Restore brings it back.                                                                                | Browser.                                                                                               |
+| 26  | Who sees the temp customer's bid, document and takeoff: the technician (Service only) none of them, nor the customer; the office user and the manager all three.                                                                                                   | SQL impersonation: `tech: account 0 bids 0 documents 0 takeoffs 0; office: 1 1 1 1; manager: 1 1 1 1`. |
+
+### Findings of the second pass (not fixed)
+
+8. **Unlink leaves a bid the estimator refuses to save.** Since Oct 26 every bid must have a
+   customer, and the estimator's Save says so. Unlink on the customer's page is now the one way
+   to make a bid with none: after it, the bid opened in the estimator still shows the customer's
+   name in the Customer Name box, and Save answers "Pick the customer before saving — type the
+   name under Setup › Customer Name…" until the customer is picked again from the list. Nothing
+   on the customer's page says this. Suggested: either replace Unlink with "Move to another
+   customer" (pick one), or keep it with a line saying the bid will need its customer picked again
+   before the estimator saves it. The owner's call.
+9. **The New takeoff dialog doubles the name.** With the customer picked, the suggested name was
+   "ZZ Linktest Claude — ZZ Linktest Claude · Nov 6, 2026": the customer, a dash, then the
+   property's name, which the New customer dialog sets to the customer's own name. Most customers
+   have such a property, so most takeoffs made this way start with the name twice. Fix: leave the
+   property out of the suggestion when it is named after the customer (takeoff-page.tsx
+   `pickAccount`).
+10. **A bid's Setup chip does not say its customer is deleted.** After the delete in row 25 the
+    estimator still reads "Linked to ZZ Linktest Claude" and "Open customer" lands on the deleted
+    page. The delete dialog promises only that the name is kept, so this is an observation rather
+    than a bug; a "(deleted)" on the chip would spare a surprise.
+
+### Cleanup of the second pass
+
+The document's revision, the document, the takeoff, the bid, the customer's contact and property,
+the customer and every audit row naming any of them were deleted by SQL; the takeoff's picture
+was removed from the storage bucket as the Claude login through the app's own storage API (listed
+once, deleted, listed again: empty). A sweep over every uuid column in `public` and `storage`
+found no row naming any of the five ids afterwards. Counts: 636 live customers, 1,137 properties,
+707 contacts, 2,503 customer audit rows, 22 live bids (11 unlinked), 2 takeoffs, 7 documents, no
+"ZZ" row anywhere.
