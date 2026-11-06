@@ -167,7 +167,7 @@ describe("the editor wires it", () => {
     expect(canvas).toContain("image: (_ref, key) => env.imageSizes[key] ?? null");
     expect(canvas).toContain("pricingSource(env.variables)");
     expect(canvas).toContain("inspection: storedInspection(env.variables)");
-    expect(canvas).toContain("props.onSheetCount(props.page.id, printed)");
+    expect(canvas).toContain("onSheetCount(pageId, printed);");
     expect(canvas).toContain("· inserted PDF");
     // The cut: a text line located in the box, the rows, else the share (cutPx).
     expect(canvas).toContain('querySelectorAll<HTMLElement>("p, h1, h2, h3, hr")');
