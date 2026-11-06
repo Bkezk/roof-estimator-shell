@@ -59,11 +59,13 @@ import {
 
 import {
   backHref,
+  BLANK_VARIABLE_HINT,
   chipText,
   documentSearch,
   filterVariables,
   groupVariables,
   MODULE_DRAG_TYPE,
+  mostUsedVariables,
   OPTION_HINTS,
   PAGE_BREAK_HINT,
   PAGE_BREAK_MAX,
@@ -96,7 +98,7 @@ import {
 } from "@/lib/documents/model";
 import type { ImageSize } from "@/lib/documents/pdf-layout";
 import { flaggedItemsNotShown, notOnPageNote, storedInspection } from "@/lib/documents/server-pure";
-import { sampleVariables, variableDefs } from "@/lib/documents/variables";
+import { sampleVariables, type VariableDef, variableDefs } from "@/lib/documents/variables";
 import {
   deleteSavedModule,
   getDocument,
@@ -1449,8 +1451,11 @@ function VariablesTab(props: {
   refreshing: boolean;
 }) {
   const [filter, setFilter] = useState("");
+  // Which groups are unfolded (all fold by default; a typed filter shows every match).
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const defs = useMemo(() => variableDefs(props.kind), [props.kind]);
   const groups = useMemo(() => groupVariables(filterVariables(filter, defs)), [filter, defs]);
+  const mostUsed = useMemo(() => mostUsedVariables(defs), [defs]);
   return (
     <>
       <p className="text-xs text-muted-foreground">
@@ -1484,37 +1489,97 @@ function VariablesTab(props: {
       {groups.length === 0 ? (
         <p className="text-xs text-muted-foreground">No variable matches "{filter}".</p>
       ) : null}
-      {groups.map((g) => (
-        <div key={g.group} className="space-y-0.5">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {g.group}
-          </div>
-          <ul className="divide-y rounded-md border">
-            {g.defs.map((d) => (
+      {mostUsed.length && !filter.trim() ? (
+        <VariableRows
+          title="Most used"
+          defs={mostUsed}
+          variables={props.variables}
+          onInsert={props.onInsert}
+        />
+      ) : null}
+      {groups.map((g) => {
+        // Folded unless a filter is typed (Nov 6: 45 rows buried the ones people need).
+        const folded = !filter.trim() && !open[g.group];
+        return (
+          <VariableRows
+            key={g.group}
+            title={g.group}
+            defs={g.defs}
+            variables={props.variables}
+            onInsert={props.onInsert}
+            folded={folded}
+            onToggle={
+              filter.trim() ? undefined : () => setOpen({ ...open, [g.group]: !open[g.group] })
+            }
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** One titled list of variable rows: label, value (a dash for a blank), click to insert. */
+function VariableRows(props: {
+  title: string;
+  defs: readonly VariableDef[];
+  variables: Record<string, string>;
+  onInsert: (key: string) => void;
+  folded?: boolean | undefined;
+  /** Given: the title is a button that folds / unfolds the list. */
+  onToggle?: (() => void) | undefined;
+}) {
+  const heading = (
+    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {props.title}
+    </span>
+  );
+  return (
+    <div className="space-y-0.5" data-variable-group={props.title}>
+      {props.onToggle ? (
+        <button
+          type="button"
+          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-accent/50"
+          title={props.folded ? "Show these variables" : "Hide these variables"}
+          aria-expanded={!props.folded}
+          onClick={props.onToggle}
+        >
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 text-muted-foreground", props.folded && "-rotate-90")}
+          />
+          {heading}
+          <span className="text-xs text-muted-foreground">({props.defs.length})</span>
+        </button>
+      ) : (
+        <div className="px-1">{heading}</div>
+      )}
+      {props.folded ? null : (
+        <ul className="divide-y rounded-md border">
+          {props.defs.map((d) => {
+            const blank = !props.variables[d.key];
+            return (
               <li key={d.key}>
                 <button
                   type="button"
                   className="flex w-full items-baseline gap-2 px-2 py-1 text-left text-sm hover:bg-accent/50"
-                  title={`Insert ${d.label} (${d.key}) at the cursor; prints "${chipText(d.key, props.variables)}"`}
+                  title={
+                    blank
+                      ? `Insert ${d.label} (${d.key}) at the cursor. ${BLANK_VARIABLE_HINT}`
+                      : `Insert ${d.label} (${d.key}) at the cursor; prints "${chipText(d.key, props.variables)}"`
+                  }
                   onClick={() => props.onInsert(d.key)}
                 >
                   <span className="w-40 shrink-0 truncate">{d.label}</span>
                   <span className="text-muted-foreground">:</span>
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate",
-                      !props.variables[d.key] && "text-muted-foreground",
-                    )}
-                  >
+                  <span className={cn("min-w-0 flex-1 truncate", blank && "text-muted-foreground")}>
                     {variableRowValue(props.variables[d.key])}
                   </span>
                 </button>
               </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -68,10 +68,24 @@ Tests: `src/lib/documents-editor-fixes-nov6.test.ts` (1, 2, 3, 8 — reducer und
 `sheet-segments.test.ts`, `repair-list-ui.test.ts`, `editor-state.test.ts`,
 `editor-helpers.test.ts`. All of them fail on the previous code.
 
-## Open (the owner decides)
+## Second commit (owner: "For 4 just make it a faint placeholder … Go with 7")
 
-- **4** — how to assess: see the reply of Nov 6 (count the blank chips a template leaves on
-  real documents; make the New document dialog list the template's fields with the blanks to
-  fill; show blank chips as faint placeholders, as the PDF prints nothing for them).
-- **6, 7** — vocabulary and the variable list: proposals in the reply of Nov 6.
-- **9** — office data.
+4. **A blank chip is a faint placeholder**: the label in a dashed grey box, no amber, no
+   brackets, with the tooltip "Blank: the record has no value here, so nothing prints" (the PDF
+   prints nothing for it). Proven on a fresh temp Proposal: 5 blank chips drawn faint with the
+   hint.
+7. **Most used first.** The Variables tab opens with a "Most used" list (customer name, contact
+   and phone, the property's address, today's date, the total price and the bid name — the
+   ticket number on a ticket) and every other group folded with its count; a group unfolds on
+   its title; a typed filter shows every match unfolded. The search (and the "/" menu, the same
+   function) also answers to "customer" / "client" for the Company group and "jbk" for the
+   Account group, which is the one place the CenterPoint vocabulary bit (6 stays otherwise, at
+   the owner's choice). Proven: Most used 8 rows, the groups at 0 until unfolded (11), "cust"
+   → the Company group alone.
+
+Tests: `editor-helpers.test.ts` (chipText, mostUsedVariables, the search words),
+`documents-editor-fixes-nov6.test.ts` (pins). They fail on the previous code.
+
+## Open
+
+- **9** — office data ("test template" in the picker); the owner handles it.

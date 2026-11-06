@@ -199,3 +199,21 @@ describe("8. no duplicated buttons on the Document tab", () => {
     expect(menu).toContain("Manage Templates");
   });
 });
+
+describe("4 and 7 (owner, Nov 6): a blank chip is a faint placeholder; the most-used variables first, the rest folded", () => {
+  it("a blank chip shows the label faint and dashed with 'prints nothing', never amber brackets", () => {
+    expect(richText).toContain('data-blank={blank ? "" : undefined}');
+    expect(richText).toContain("border border-dashed border-neutral-300 text-neutral-400");
+    expect(richText).not.toContain("bg-amber-100");
+    expect(richText).toContain("BLANK_VARIABLE_HINT");
+    expect(read("src/lib/documents/editor-helpers.ts")).toContain(
+      'export const BLANK_VARIABLE_HINT = "Blank: the record has no value here, so nothing prints";',
+    );
+  });
+  it("Most used leads the Variables tab; every group folds by default and a typed filter unfolds them all; the search answers to 'customer'", () => {
+    expect(route).toContain('title="Most used"');
+    expect(route).toContain("const folded = !filter.trim() && !open[g.group];");
+    expect(route).toContain("aria-expanded={!props.folded}");
+    expect(route).toContain("mostUsedVariables(defs)");
+  });
+});

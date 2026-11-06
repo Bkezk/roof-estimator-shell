@@ -18,6 +18,7 @@ import {
   emailDefaults,
   filterVariables,
   groupVariables,
+  mostUsedVariables,
   moduleFingerprint,
   newDocumentTitle,
   pageBreakPx,
@@ -94,11 +95,11 @@ describe("groupVariables", () => {
 });
 
 describe("chipText / variableRowValue / variableNodeJson", () => {
-  it("prints the value, or the label in brackets when blank", () => {
+  it("shows the value, or the label (a faint placeholder, no brackets — Nov 6) when blank", () => {
     expect(chipText("company.name", { "company.name": "City of Corbin" })).toBe("City of Corbin");
-    expect(chipText("company.name", { "company.name": "" })).toBe("[Company Name]");
-    expect(chipText("company.name", {})).toBe("[Company Name]");
-    expect(chipText("made.up", {})).toBe("[made.up]");
+    expect(chipText("company.name", { "company.name": "" })).toBe("Company Name");
+    expect(chipText("company.name", {})).toBe("Company Name");
+    expect(chipText("made.up", {})).toBe("made.up");
   });
   it("the Variables tab shows a dash for a blank", () => {
     expect(variableRowValue("")).toBe("—");
@@ -383,5 +384,31 @@ describe("pictures and the photo grid (phase 2)", () => {
     expect(photoGridCaption({ itemKey: "c-gone" }, insp)).toBe("");
     expect(photoGridCaption({ itemKey: null }, insp)).toBe("");
     expect(photoGridCaption({ itemKey: "c-seams" }, null)).toBe("");
+  });
+});
+
+describe("the most-used variables and the search's other words (Nov 6)", () => {
+  it("mostUsedVariables: the customer, the property, the date, the money — in order, only what the kind has", () => {
+    expect(mostUsedVariables(variableDefs("bid")).map((d) => d.key)).toEqual([
+      "company.name",
+      "company.contact",
+      "company.phone",
+      "property.address1",
+      "property.address2",
+      "today",
+      "opportunity.price",
+      "opportunity.name",
+    ]);
+    expect(mostUsedVariables(variableDefs("ticket")).map((d) => d.key)).toContain("ticket.number");
+    expect(mostUsedVariables(variableDefs("ticket")).map((d) => d.key)).not.toContain(
+      "opportunity.price",
+    );
+  });
+  it("filterVariables finds the customer under 'customer' and JBK under 'jbk'", () => {
+    const defs = variableDefs("bid");
+    expect(filterVariables("cust", defs).map((d) => d.key)).toContain("company.name");
+    expect(filterVariables("customer phone", defs).map((d) => d.key)).toEqual(["company.phone"]);
+    expect(filterVariables("jbk", defs).map((d) => d.key)).toContain("account.name");
+    expect(filterVariables("cust", defs).every((d) => d.group === "Company")).toBe(true);
   });
 });

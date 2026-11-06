@@ -41,7 +41,12 @@ import {
   Underline as UnderlineIcon,
 } from "lucide-react";
 
-import { chipText, filterVariables, variableNodeJson } from "@/lib/documents/editor-helpers";
+import {
+  BLANK_VARIABLE_HINT,
+  chipText,
+  filterVariables,
+  variableNodeJson,
+} from "@/lib/documents/editor-helpers";
 import { type RichDoc, VARIABLE_NODE } from "@/lib/documents/model";
 import { type VariableDef, variableDefs, variableLabel } from "@/lib/documents/variables";
 import { cn } from "@/lib/utils";
@@ -58,13 +63,15 @@ function VariableChip({ node }: ReactNodeViewProps) {
   return (
     <NodeViewWrapper
       as="span"
+      // A blank is a faint dashed placeholder (Nov 6): the PDF prints nothing for it.
       className={cn(
         "doc-chip inline rounded-sm px-0.5 align-baseline",
         blank
-          ? "bg-amber-100 text-amber-900 dark:bg-amber-100 dark:text-amber-900"
+          ? "border border-dashed border-neutral-300 text-neutral-400 dark:border-neutral-300 dark:text-neutral-400"
           : "bg-sky-100 dark:bg-sky-100",
       )}
-      title={variableLabel(key)}
+      data-blank={blank ? "" : undefined}
+      title={blank ? `${variableLabel(key)} — ${BLANK_VARIABLE_HINT}` : variableLabel(key)}
       data-variable-key={key}
       contentEditable={false}
     >

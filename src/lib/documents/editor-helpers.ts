@@ -54,15 +54,46 @@ export function documentSearch(s: Record<string, unknown>): DocumentSearch {
 
 // -------------------------------------------------------------------------- the variables
 
-/** The Variables tab filter and the slash command: label or key contains the query (any case). */
+/**
+ * Words the search also answers to, by group (Nov 6: "/cust" found nothing — the variables
+ * keep CenterPoint's names, where the customer is the "Company" and JBK the "Account").
+ */
+export const GROUP_SEARCH_WORDS: Partial<Record<VariableGroup, string>> = {
+  Company: "customer client",
+  Account: "jbk our company",
+};
+
+/** The Variables tab filter and the slash command: label, key, group or its other words contain the query (any case). */
 export function filterVariables(query: string, defs: readonly VariableDef[]): VariableDef[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...defs];
   const words = q.split(/\s+/);
   return defs.filter((d) => {
-    const hay = `${d.label} ${d.key} ${d.group}`.toLowerCase();
+    const hay = `${d.label} ${d.key} ${d.group} ${GROUP_SEARCH_WORDS[d.group] ?? ""}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   });
+}
+
+/**
+ * The variables most letters need, first on the Variables tab (owner, Nov 6: "the five people
+ * need are buried" among 45): the customer, where the work is, the date, the money. In this
+ * order; a key the kind does not have is left out.
+ */
+export const MOST_USED_VARIABLES = [
+  "company.name",
+  "company.contact",
+  "company.phone",
+  "property.address1",
+  "property.address2",
+  "today",
+  "opportunity.price",
+  "opportunity.name",
+  "ticket.number",
+] as const;
+
+export function mostUsedVariables(defs: readonly VariableDef[]): VariableDef[] {
+  const byKey = new Map(defs.map((d) => [d.key, d]));
+  return MOST_USED_VARIABLES.map((k) => byKey.get(k)).filter((d): d is VariableDef => !!d);
 }
 
 /** The defs in VARIABLE_GROUPS order, empty groups left out. */
@@ -75,11 +106,18 @@ export function groupVariables(
   })).filter((g) => g.defs.length > 0);
 }
 
-/** What a variable chip prints: the value, or the label in brackets when the record has none. */
+/**
+ * What a variable chip shows: the value, or the label when the record has none (a faint
+ * placeholder on screen, Nov 6 — it used to read "[Label]" in amber, as if that would print;
+ * the PDF prints nothing for a blank).
+ */
 export function chipText(key: string, vars: Record<string, string>): string {
   const v = vars[key];
-  return v ? v : `[${variableLabel(key)}]`;
+  return v ? v : variableLabel(key);
 }
+
+/** The tooltip on a blank chip and a blank Variables row. */
+export const BLANK_VARIABLE_HINT = "Blank: the record has no value here, so nothing prints";
 
 /** The value column on the Variables tab: a blank shows "—". */
 export const variableRowValue = (v: string | undefined): string => (v ? v : "—");
