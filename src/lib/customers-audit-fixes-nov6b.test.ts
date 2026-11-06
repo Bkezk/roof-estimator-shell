@@ -10,7 +10,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { bidDataForCustomer } from "@/lib/bid-account-link";
 import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";
+import type { CustomerInfo } from "@/lib/proposal-bid";
 import { customerLabel, suggestionLabel } from "@/lib/takeoff/address-suggest";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -94,5 +96,80 @@ describe("10. the estimator's chip on a deleted customer", () => {
     expect(chip).toContain("An admin or a manager can restore the customer from its page.");
     const estimate = read("src/routes/estimate.tsx");
     expect(estimate).toContain("deleted={!!linkedDetail?.account.deleted_at}");
+  });
+});
+
+describe("11. a move fills the bid's fields from the new customer (owner, Nov 6)", () => {
+  const account = {
+    name: "New Customer LLC",
+    contact_name: "",
+    phone: "606-555-0200",
+    email: "new@example.com",
+    address1: "2 New St",
+    address2: null,
+    city: "London",
+    state: "KY",
+    zip: "40741",
+  };
+  const data = {
+    customer: {
+      name: "Old Customer",
+      contact: "Pat Old",
+      phone: "1",
+      projectAddress: "",
+      notes: "keep these",
+    },
+    items: [{ id: 1 }],
+    grandTotal: 5,
+  };
+  it("replaces the client fields the new customer has, keeps what it lacks and the rest of the data", () => {
+    const out = bidDataForCustomer(data, account) as typeof data;
+    expect(out.customer).toMatchObject({
+      name: "New Customer LLC",
+      contact: "Pat Old",
+      phone: "606-555-0200",
+      email: "new@example.com",
+      clientAddress: "2 New St",
+      clientCity: "London",
+      clientState: "KY",
+      clientZip: "40741",
+      notes: "keep these",
+    });
+    expect(out.items).toEqual([{ id: 1 }]);
+    expect(out.grandTotal).toBe(5);
+    expect(data.customer.name).toBe("Old Customer"); // the input is left alone
+  });
+  it("a property named on the move fills the job-site fields and the printed line", () => {
+    const out = bidDataForCustomer(data, account, {
+      address1: "9 Plant Rd",
+      address2: "",
+      city: "Corbin",
+      state: "KY",
+      zip: "40701",
+    }) as { customer: CustomerInfo };
+    expect(out.customer.projectAddress).toBe("9 Plant Rd");
+    expect(out.customer.jobCity).toBe("Corbin");
+    expect(out.customer.jobCityStZip).toBe("Corbin, KY 40701");
+  });
+  it("a bid with no customer block, or no data, gets one", () => {
+    expect(
+      (bidDataForCustomer(null, account) as { customer: { name: string } }).customer.name,
+    ).toBe("New Customer LLC");
+    expect((bidDataForCustomer({ x: 1 }, account) as { x: number }).x).toBe(1);
+  });
+  it("the server fills on a move or first link only, after the lock check, and stamps the contents", () => {
+    const fn = server.slice(
+      server.indexOf("export const linkBidToAccount"),
+      server.indexOf("export const listUnlinkedBids"),
+    );
+    expect(fn).toContain("if (cur.account_id !== data.account_id) {");
+    expect(fn).toContain("await liveLockHeldElsewhere(sb, cur.id, undefined);");
+    expect(fn).toContain("has this bid open in the estimator; move it when they are done");
+    expect(fn).toContain("patch.data = bidDataForCustomer(cur.data, acct, site) as Json;");
+    expect(fn).toContain("patch.content_saved_at = new Date().toISOString();");
+    expect(fn.indexOf("liveLockHeldElsewhere")).toBeLessThan(fn.indexOf("bidDataForCustomer("));
+    expect(fn.indexOf("bidDataForCustomer(")).toBeLessThan(fn.indexOf(".update(patch)"));
+    // The property must belong to the customer the bid goes to.
+    expect(fn).toContain('.eq("account_id", data.account_id)');
   });
 });

@@ -236,3 +236,28 @@ naming any of them (the vendor's two from the first run included) were deleted b
 photo's file went with Remove. The uuid-column sweep found nothing afterwards; counts as before:
 636 live customers, 1,137 properties, 707 contacts, 2,503 customer audit rows, 22 live bids, no
 "ZZ" row anywhere.
+
+## Fourth pass (owner: "also go ahead and fill the bids fields from the new customer on a move")
+
+11. **A move fills the bid from the new customer.** `linkBidToAccount`, when the bid's customer
+    changes (a move, or a first link of an older bid), takes the new customer's name, contact,
+    phone, email and address onto the bid's client fields — and, when the move named a property,
+    its address onto the job-site fields — exactly as a pick in the estimator does
+    (`bidDataForCustomer` in bid-account-link.ts, pure, tested: a blank profile value leaves the
+    bid's text, the rest of the bid's data is untouched). The contents stamp moves with it, so an
+    estimator tab that loaded the bid before the move refuses to save the old fields back over it;
+    and the move itself is refused while someone has the bid open in the estimator ("<name> has
+    this bid open in the estimator; move it when they are done").
+
+| #   | Behaviour                                                                                                                                                                                                                               | Proof    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 33  | A bid saved under customer A, moved to customer B from A's page: the estimator then shows B's name in the Customer Name box, "Linked to ZZ Fillto Claude", B's address under it, and neither "differs from profile" nor Update profile. | Browser. |
+| 34  | With the bid open in the estimator in one tab, the move from the customer's page in another is refused with "Claude has this bid open in the estimator; move it when they are done"; the dialog stays open and the bid stays put.       | Browser. |
+
+Also in this pass, from a Work Overview screenshot the owner sent: the Bid chip (sky) and the
+Ticket chip (blue) read "a bit too similar". The Bid chip, its dot and its calendar bar are
+orange now, on Work Overview and the Owner view (the customer page's Bids tint is orange too);
+Ticket stays blue. Proven: the first six chips on Work Overview read Bid/orange, Ticket/blue.
+
+Cleanup: the bid (and its lock row), the two customers with their contacts and properties, and
+every audit row naming them were deleted by SQL; the uuid sweep found nothing afterwards.

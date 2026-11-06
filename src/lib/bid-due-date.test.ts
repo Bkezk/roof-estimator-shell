@@ -567,20 +567,21 @@ describe("4. Work Overview — listMyWork (the server)", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("4. the page and the Owner view", () => {
-  it("the Bid chip has its own colour (sky) in the kind palette, dot and calendar bar, dark-paired", () => {
+  it("the Bid chip has its own colour (orange since Nov 6; sky read too close to the blue Ticket) in the kind palette, dot and calendar bar, dark-paired", () => {
     const page = read("src/components/my-work-page.tsx");
     const cls = page.slice(page.indexOf("const KIND_CLASS"), page.indexOf("const KIND_DOT"));
     expect(cls).toContain(
-      'bid: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",',
+      'bid: "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200",',
     );
     expect(cls).not.toMatch(/bid:[^\n]*rose/);
+    expect(cls).not.toMatch(/bid:[^\n]*(sky|blue)/);
     const dot = page.slice(page.indexOf("const KIND_DOT"), page.indexOf("const KIND_BAR"));
-    expect(dot).toContain('bid: "bg-sky-500",');
+    expect(dot).toContain('bid: "bg-orange-500",');
     const bar = page.slice(page.indexOf("const KIND_BAR"), page.indexOf("const GRID_COLS"));
-    expect(bar).toContain('bid: "border-l-sky-500",');
+    expect(bar).toContain('bid: "border-l-orange-500",');
     // The row's chip reads the label table, so "Bid" shows without a special case.
     expect(page).toContain("{KIND_LABELS[item.kind]}");
-    expect(read("src/components/owner-view.tsx")).toMatch(/bid:\s*"border-sky-300[^"]*dark:/);
+    expect(read("src/components/owner-view.tsx")).toMatch(/bid:\s*"border-orange-300[^"]*dark:/);
   });
   it("the Owner view counts draft bids (owner, later Oct 12): Due today / Overdue and the detail groups", () => {
     const late = bidItem(bid({ due_date: "2026-10-01" }))!;

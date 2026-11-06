@@ -172,6 +172,25 @@ export function accountFromBid(
   };
 }
 
+/**
+ * A bid moved to another customer from the Customers page (owner, Nov 6: "fill the bid's fields
+ * from the new customer on a move"): its saved data with the client fields — and, when the move
+ * named a property, the job-site fields — taken from the new customer as a pick in the estimator
+ * takes them (every filled field replaced; a blank profile value leaves the bid's text alone).
+ * The rest of the data is untouched. Pure: the server function reads and writes the row.
+ */
+export function bidDataForCustomer(
+  data: unknown,
+  account: AccountLike,
+  site?: SiteLike | null,
+): Record<string, unknown> {
+  const d = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const raw =
+    d["customer"] && typeof d["customer"] === "object" ? (d["customer"] as CustomerInfo) : null;
+  const customer: CustomerInfo = { name: "", contact: "", projectAddress: "", notes: "", ...raw };
+  return { ...d, customer: applyProfileFill(customer, profileFill(account, site), true) };
+}
+
 /** How each filled field is named in the "replace?" question. */
 export const FILL_LABELS: Record<FillKey, string> = {
   name: "Customer name",

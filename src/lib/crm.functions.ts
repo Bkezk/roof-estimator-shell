@@ -25,6 +25,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isAdmin, isFieldOnly, seesEveryone } from "@/lib/access";
 import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";
+import { bidDataForCustomer } from "@/lib/bid-account-link";
+import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { compactName, LOOKALIKE_MIN_CHARS, lookalikeCustomers } from "@/lib/customer-lookalike";
 import {
   ACCOUNT_ALREADY_DELETED,
@@ -1087,10 +1089,56 @@ export const linkBidToAccount = createServerFn({ method: "POST" })
     const p = await me(context);
     if (!p || !canAccess(p, "estimate")) throw new Error("Forbidden: Estimate access required");
     if (!data.account_id) throw new Error(BID_CUSTOMER_REQUIRED);
-    const { error } = await context.supabase
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
       .from("bids")
-      .update({ account_id: data.account_id, site_id: data.site_id ?? null })
-      .eq("id", data.bid_id);
+      .select("id, account_id, data, deleted_at")
+      .eq("id", data.bid_id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("That bid was not found");
+    if (cur.deleted_at) throw new Error("That bid is deleted");
+    const patch: Database["public"]["Tables"]["bids"]["Update"] = {
+      account_id: data.account_id,
+      site_id: data.site_id ?? null,
+    };
+    if (cur.account_id !== data.account_id) {
+      // A move, or a first link: the bid's client fields (and the job-site fields when a
+      // property was named) follow the new customer, as a pick in the estimator does (owner,
+      // Nov 6). Refused while someone has the bid open in the estimator: their tab would save
+      // the old fields back over it.
+      const other = await liveLockHeldElsewhere(sb, cur.id, undefined);
+      if (other)
+        throw new Error(
+          `${other.holderName} has this bid open in the estimator; move it when they are done`,
+        );
+      const { data: acct, error: aErr } = await sb
+        .from("crm_accounts")
+        .select("name, contact_name, phone, email, address1, address2, city, state, zip")
+        .eq("id", data.account_id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (aErr) throw new Error(aErr.message);
+      if (!acct) throw new Error("That customer was not found, or is deleted");
+      let site: Pick<SiteRow, "address1" | "address2" | "city" | "state" | "zip"> | null = null;
+      if (data.site_id) {
+        const { data: s, error: sErr } = await sb
+          .from("crm_sites")
+          .select("address1, address2, city, state, zip")
+          .eq("id", data.site_id)
+          .eq("account_id", data.account_id)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (sErr) throw new Error(sErr.message);
+        site = s ?? null;
+      }
+      patch.data = bidDataForCustomer(cur.data, acct, site) as Json;
+      // The contents changed: a tab that loaded the bid before this refuses to save over it
+      // (bid-stale-save.ts), and the Bids list says who changed it.
+      patch.content_saved_at = new Date().toISOString();
+      patch.updated_by_name = (p.full_name ?? "").trim() || p.email || null;
+    }
+    const { error } = await sb.from("bids").update(patch).eq("id", data.bid_id);
     if (error) throw new Error(error.message);
   });
 

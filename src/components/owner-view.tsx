@@ -451,7 +451,7 @@ const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
     "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
   // Draft bids due today / overdue (owner, Oct 12): sky, the same chip as Work Overview's
   // (my-work-page.tsx KIND_CLASS), dark-paired; the row's link opens the estimator (`href`).
-  bid: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
+  bid: "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200",
 };
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (a calendar day, no time zone shift). */

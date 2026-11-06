@@ -571,7 +571,7 @@ describe("draft bids count (owner, later Oct 12): Due today, Overdue, the detail
       "Today: 1 ticket, 0 tasks, 0 follow-ups, 3 bids due · 1 overdue across the team · 0 open opportunities",
     );
   });
-  it("the component shows the bids part, adds them to the Total row and wears the sky Bid chip", () => {
+  it("the component shows the bids part, adds them to the Total row and wears the orange Bid chip (orange since Nov 6; sky read too close to the blue Ticket)", () => {
     const view = read("src/components/owner-view.tsx");
     expect(view).toContain('if (d.bids) parts.push(`${d.bids} bid${d.bids === 1 ? "" : "s"}`);');
     expect(view).toContain(
@@ -583,7 +583,7 @@ describe("draft bids count (owner, later Oct 12): Due today, Overdue, the detail
       view.indexOf('/** "Wed, Sep 30"'),
     );
     expect(cls).toMatch(
-      /bid:\s*"border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",/,
+      /bid:\s*"border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200",/,
     );
     expect(cls).not.toContain("Never shown");
     expect(read("src/lib/owner-view.ts")).not.toContain("OWNER_VIEW_SKIPS_KIND");
