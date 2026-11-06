@@ -26,6 +26,7 @@ import {
   type ServiceRateRow,
 } from "@/lib/invoices.functions";
 import { authorizerFallbackLabel } from "@/lib/default-authorizer";
+import { plainErrText } from "@/lib/plain-error";
 import { useSetupForm } from "@/lib/setup-forms";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,7 +42,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// Plain words for a failed save (audit, Nov 6, finding 2): as the other cards.
+const errText = plainErrText;
 const toPct = (frac: number | string) => Number((Number(frac) * 100).toFixed(4));
 const fromPct = (pct: number) => Number((pct / 100).toFixed(6));
 

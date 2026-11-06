@@ -33,6 +33,17 @@ export function useSetupForm(key: string, dirty: boolean, save: () => Promise<un
   }, [registry, key]);
 }
 
+/**
+ * A `?tab=` value the page knows, else nothing (audit, Nov 6, finding 1: the route's
+ * validateSearch drops an unknown value, but the router keeps the raw key, so "bogus" reached
+ * the Tabs component and no tab was active — a blank page under the tab list).
+ */
+export function knownTab<T extends string>(raw: unknown, tabs: readonly T[]): T | undefined {
+  return typeof raw === "string" && (tabs as readonly string[]).includes(raw)
+    ? (raw as T)
+    : undefined;
+}
+
 /** The tab a form key belongs to ("vehicle:<id>" → "vehicles"; a plain key is its tab). */
 export const tabOfFormKey = (key: string): string => key.split(":")[0] ?? key;
 

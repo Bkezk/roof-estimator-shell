@@ -70,3 +70,21 @@ drivers the one Oct 9 row only.
 - Signing in as a manager (the test login is an admin): a manager's writes are proven at the
   database (row 22), not through the page.
 - The browser's own `beforeunload` wording (the browser's, not the page's).
+
+## The fixes (owner: "fix all please")
+
+One push, each finding with a test that fails on the code before it
+(`src/lib/setup-audit-fixes-nov6.test.ts`: 6, all failing on the old code). Checked in the browser
+as the test login with every write refused; no console errors.
+
+1. An unknown `?tab=` value opens the rates: the page reads its tab through `knownTab` (a value
+   outside `SETUP_TABS` is nothing). Browser: `/setup?tab=bogus` → "Service rates" active, its
+   card shown; the next tab click went to `?tab=materials`.
+2. The rates and drivers cards word a failed save with `plainErrText`, as the other cards.
+   Browser: a refused confirm and a refused rates save read "Could not … : No signal. Check your
+   connection and try again."
+3. A materials save sends the markup only when it changed (`markupToSend`). Browser: with the
+   markup at 75 the payload carried `items` alone; typed 80, it carried `items` and `markup`
+   0.8 (refused).
+
+Chain: lint clean, types clean, 494 files / 6,335 tests, build OK.

@@ -138,3 +138,12 @@ export function groupOpen(
 ): boolean {
   return searching || hasEdits || label === NEW_GROUP || opened.has(label);
 }
+
+/**
+ * The markup a save sends: the typed percent as a fraction when it differs from the loaded one,
+ * else nothing (audit, Nov 6, finding 3: sending it unchanged re-stamped service_settings).
+ */
+export function markupToSend(typedPct: number, loaded: number): number | undefined {
+  const next = typedPct / 100;
+  return Math.abs(next - loaded) < 1e-9 ? undefined : next;
+}

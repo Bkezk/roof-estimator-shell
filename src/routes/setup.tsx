@@ -8,6 +8,7 @@ import { seesEveryone } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { listLocations } from "@/lib/inventory.functions";
 import {
+  knownTab,
   SetupFormsContext,
   shouldBlockLeaving,
   tabOfFormKey,
@@ -73,7 +74,8 @@ const TAB_TITLES: Record<SetupTab, string> = {
 function SetupPage() {
   const { profile } = useAuth();
   const navigate = useNavigate({ from: "/setup" });
-  const { tab } = Route.useSearch();
+  // The raw value can be anything a link carried (audit, Nov 6): only a known tab counts.
+  const tab = knownTab(Route.useSearch().tab, SETUP_TABS);
   // Admins and managers set the drivers (owner, Oct 9); the gate already keeps everyone else off
   // the page, so this only guards a stale profile.
   const canSetDrivers = seesEveryone(profile);

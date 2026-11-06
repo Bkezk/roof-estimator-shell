@@ -19,6 +19,7 @@ import {
   type InventoryLocation,
   type VehicleDriverRow,
 } from "@/lib/inventory.functions";
+import { plainErrText } from "@/lib/plain-error";
 import { useSetupForm } from "@/lib/setup-forms";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,7 +41,8 @@ import {
 } from "@/components/ui/table";
 
 const NONE = "__none__";
-const errText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+// Plain words for a failed load or save (audit, Nov 6, finding 2): as the other Setup cards.
+const errText = (e: unknown, fallback: string) => (e instanceof Error ? plainErrText(e) : fallback);
 /** "2026-09-26" as a local date (new Date("2026-09-26") is UTC midnight — the day before here). */
 const fmtDay = (d: string) => {
   const [y, m, day] = d.split("-").map(Number);

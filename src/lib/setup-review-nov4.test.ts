@@ -227,7 +227,11 @@ describe("2. Material pricing: text rows under headings, click to edit, the filt
     ];
     expect(changedMaterials(rows, loaded).map((r) => r.key)).toEqual(["b", "n"]);
     expect(materials).toContain("const items = changedMaterials(rows ?? [], loaded).map((r) => {");
-    expect(materials).toContain("saveFn({ data: { items, markup: markupPct / 100 } })");
+    // The markup goes with the items when it changed (audit, Nov 6, finding 3).
+    expect(materials).toContain("const markup = markupToSend(markupPct, q.data?.markup ?? 0.75);");
+    expect(materials).toContain(
+      "saveFn({ data: { items, ...(markup === undefined ? {} : { markup }) } })",
+    );
   });
   it("the server: a renamed row sent alone is checked against the rows left out (NAME_TAKEN)", async () => {
     const env = fakeSupabase({

@@ -72,7 +72,11 @@ describe("the wiring", () => {
   it("the default markup is set on Material pricing, not Service rates", () => {
     const tab = read("src/components/service/material-pricing-settings.tsx");
     expect(tab).toContain('aria-label="Material markup %"');
-    expect(tab).toContain("saveFn({ data: { items, markup: markupPct / 100 } })");
+    // The markup goes with the items when it changed (audit, Nov 6, finding 3).
+    expect(tab).toContain("const markup = markupToSend(markupPct, q.data?.markup ?? 0.75);");
+    expect(tab).toContain(
+      "saveFn({ data: { items, ...(markup === undefined ? {} : { markup }) } })",
+    );
     expect(read("src/components/service-rates-settings.tsx")).not.toContain("Material markup %");
   });
 });

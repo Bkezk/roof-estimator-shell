@@ -40,6 +40,7 @@ import {
   groupMaterials,
   groupOpen,
   isFiltering,
+  markupToSend,
   materialCountLine,
   type MaterialView,
 } from "@/lib/material-pricing-view";
@@ -173,7 +174,9 @@ export function MaterialPricingSettings() {
         };
       });
       if (!markupOk) throw new Error("Type the material markup as a percent (0 to 1000)");
-      return saveFn({ data: { items, markup: markupPct / 100 } });
+      // The markup only when it changed (audit, Nov 6, finding 3).
+      const markup = markupToSend(markupPct, q.data?.markup ?? 0.75);
+      return saveFn({ data: { items, ...(markup === undefined ? {} : { markup }) } });
     },
     onSuccess: (saved) => {
       qc.setQueryData(KEY, { items: saved, markup });
