@@ -32,6 +32,37 @@ export interface TotalsLine {
   rate: number | null;
   cost_rate: number;
   taxable: boolean;
+  /** Where the line came from ("time:<id>", "time:<id>:helper1", "po:<id>", …); a hand line has none. */
+  source?: string | null;
+}
+
+/**
+ * The hours the crew was on site (owner, Nov 9: "clock time"): a ticket's time entry counts once
+ * however many lines it made — the technician's line and the helper's (or a second tech's)
+ * are the same hours on the clock — so a 3.5-hour visit with a helper is 3.5 h, not 7. The
+ * entry's lead line (source exactly "time:<id>") gives the hours; with the lead removed by hand
+ * the largest of its other lines does. A labor or travel line typed by hand counts as typed.
+ */
+export function clockHours(lines: readonly TotalsLine[]): number {
+  const lead = new Map<string, number>();
+  const other = new Map<string, number>();
+  let hand = 0;
+  for (const l of lines) {
+    if (l.kind !== "labor" && l.kind !== "travel") continue;
+    const qty = l.qty ?? 0;
+    const m = l.source?.match(/^time:([^:]+)/);
+    if (!m) {
+      hand += qty;
+      continue;
+    }
+    const id = m[1]!;
+    if (l.source === `time:${id}`) lead.set(id, qty);
+    else other.set(id, Math.max(other.get(id) ?? 0, qty));
+  }
+  let hours = hand;
+  for (const id of new Set([...lead.keys(), ...other.keys()]))
+    hours += lead.get(id) ?? other.get(id) ?? 0;
+  return hours;
 }
 
 export interface InvoiceTotals {
@@ -43,7 +74,7 @@ export interface InvoiceTotals {
   /** The lines' cost plus po_cost. */
   cost_total: number;
   margin: number;
-  /** Travel + labor hours on the lines. */
+  /** The hours on site: each time entry once, hand labor / travel lines as typed (clockHours). */
   hours: number;
   perHour: number | null;
 }
@@ -57,15 +88,14 @@ export function computeTotals(
   let subtotal = 0;
   let taxable = 0;
   let cost = 0;
-  let hours = 0;
   for (const l of lines) {
     const qty = l.qty ?? 0;
     const amount = r2(qty * (l.rate ?? 0));
     subtotal += amount;
     if (l.taxable) taxable += amount;
     cost += r2(qty * l.cost_rate);
-    if (l.kind === "labor" || l.kind === "travel") hours += qty;
   }
+  const hours = clockHours(lines);
   subtotal = r2(subtotal);
   const tax = r2(r2(taxable) * taxRate);
   const total = r2(subtotal + tax);

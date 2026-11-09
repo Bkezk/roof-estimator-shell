@@ -57,7 +57,7 @@ removed with the rest.
   finalised then voided: "Void", kept on record under 6059.2, the ticket stayed Invoiced because
   #6059 was still live, the list's Void group counted it and the sums left it out.
 
-## Findings (owner, Nov 9: "fix 1 … 6 is not an issue"; 2–5 proposed, awaiting the choice)
+## Findings (owner, Nov 9: fix 1; then "go with 2, go with 3 clock time, go with 4, dont go with 5"; 6 is not an issue)
 
 **Fix 1 (done, same day).** The lines and the Totals box sit side by side only when the content
 is at least 1,420 px wide — a container query (`@min-[1420px]`, so the sidebar's width counts),
@@ -67,6 +67,34 @@ in its own strip (`data-lines-scroll`). Proven read-only on the real draft #6024
 after scrolling the strip 50 px), the box is beside the lines from 1680 up. The first attempt
 built the class names from a template and Tailwind never generated them — written out in full,
 `invoice-editor-layout.test.ts` pins that. Full chain green (504 files / 6,428 tests).
+
+**Fixes 2, 3 and 4 (done, same day; 5 declined — "let them have the option to take off time and
+PO's but removing it automatically may cause a miss").**
+
+- **2.** The Awaiting invoice group follows the search box (ticket number, customer, property,
+  PO #, Job #) and the date range (the day the ticket was authorized), and its header reads
+  "1 of 4 tickets" while narrowed; no match hides the group (`invoice-list.ts awaitingMatches`,
+  `invoice-awaiting-filter.test.ts`). Proven on a temporary Authorized ticket: "ZZ Audit Fix",
+  its PO #, its number → "1 of 4 tickets"; a nonsense word → no group; today ↔ today → "2 of 4";
+  October → the ticket left out.
+- **3.** Margin / hour counts the hours on the clock: a time entry once however many lines it
+  made (the technician's and the helper's are the same hours), hand labor / travel lines as
+  typed (`invoice-totals.ts clockHours`, `invoice-clock-hours.test.ts`); the label reads
+  "(3.5 h on site)". Proven: 2.5 h labor + 1 h travel with a helper → "3.5 h on site", $10.00/h
+  on a $35.00 margin (was 7 h, $5.00).
+- **4.** Paid means paid in full (`invoice-payment.ts`, `invoice-payment.test.ts`, a server case
+  in `invoice-finalize-rules.test.ts`): a payment that covers the total marks the invoice Paid;
+  a smaller one is recorded and the invoice stays Final with "Partly paid $500.00 on Nov 9, 2026
+  by Check · ref … — balance due $125.00", Edit payment instead of Mark paid, no Void (the
+  server refuses too: "A payment is recorded on this invoice, so it cannot be voided"). The
+  list's footer Paid sums every payment and Open sums the finals' balances; a partly paid row
+  shows "balance $125.00"; the Owner view's unpaid tile counts what is still owed. Proven on a
+  $625.00 temporary invoice: $500 → Final, toast "Payment of $500.00 recorded on invoice #6061;
+  balance due $125.00, so it stays Final", footer "Paid $500.00 · Open $125.00"; Edit payment
+  reopened with $500 and the reference; $625 → Paid, "Paid $625.00 · Open $0.00".
+
+Everything temporary (customer, ticket #6061, time, PO, invoice, its PDF, the one notification,
+the audit rows) was removed; the sweep is empty.
 
 1. **Lines table under the Totals box (office view, 1280–1536 px wide).** With the Cost column,
    the line grid is 1,096 px wide at minimum and the two-column layout (`xl:grid-cols-[minmax(0,1fr)_300px]`)

@@ -25,6 +25,8 @@ export interface BizInvoice {
   status: string;
   total: number | string | null;
   invoice_date: string | null;
+  /** A payment recorded short of the total (owner, Nov 9): the tile counts what is still owed. */
+  paid_amount?: number | string | null;
 }
 /** A won or lost bid (bids; owner, Oct 21: the Won / Lost tile counts bids, not opportunities). */
 export interface BizBid {
@@ -190,7 +192,7 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
     },
     unpaid: {
       count: unpaid.length,
-      total: sumBy(unpaid, (v) => num(v.total)),
+      total: sumBy(unpaid, (v) => Math.max(0, num(v.total) - num(v.paid_amount))),
       oldestDays: oldest(
         unpaid.map((v) => v.invoice_date),
         i.now,

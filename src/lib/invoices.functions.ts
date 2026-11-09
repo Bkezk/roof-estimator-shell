@@ -22,6 +22,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
+import { hasPayment, paidStatusFor } from "@/lib/invoice-payment";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
@@ -1025,16 +1026,18 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     // it has no stored PDF and never went through the finalise rules (finalizeDraft).
     const { data: cur, error: rErr } = await sb
       .from("invoices")
-      .select("id, status")
+      .select("id, status, total")
       .eq("id", data.id)
       .maybeSingle();
     if (rErr) throw new Error(rErr.message);
     if (!cur || cur.status === "void") throw new Error("Invoice not found, or void");
     if (cur.status === "draft") throw new Error("Finalize the invoice first");
+    // Paid means paid in full (owner, Nov 9): a smaller amount is recorded and the invoice stays
+    // Final with the balance due (invoice-payment.ts).
     const { data: inv, error } = await sb
       .from("invoices")
       .update({
-        status: "paid",
+        status: paidStatusFor(cur.total, data.amount),
         paid_on: data.paid_on,
         paid_amount: data.amount,
         paid_method: data.method ?? null,
@@ -1068,6 +1071,9 @@ export const voidInvoice = createServerFn({ method: "POST" })
     // The screen never offers Void on a paid invoice; the server says the same (Nov 4, bug 8).
     if (inv.status === "paid")
       throw new Error("A paid invoice cannot be voided — edit the payment first");
+    // Nor one with a payment recorded on it (a partial payment, Nov 9): the money is on record.
+    if (hasPayment(inv))
+      throw new Error("A payment is recorded on this invoice, so it cannot be voided");
     // The ticket's stage before this, for the stage automation (audit, Oct 2: a hard-coded
     // "invoiced" re-sent "done — invoice ready" when a draft was deleted on a Done ticket).
     const { data: jobBefore, error: jErr } = await sb

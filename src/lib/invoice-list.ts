@@ -24,6 +24,47 @@ export function invoiceMatches(r: InvoiceSearchable, query: string): boolean {
   return words.every((w) => hay.includes(w));
 }
 
+/**
+ * An Authorized ticket in the Awaiting invoice group, read by the same box (Nov 9 audit,
+ * finding 2: the group ignored the search and the dates and sat above one matching invoice).
+ */
+export interface AwaitingSearchable {
+  number: number;
+  customer_name?: string | null;
+  site_name?: string | null;
+  site_address?: string | null;
+  po_number?: string | null;
+  job_number?: string | null;
+}
+
+/**
+ * Does the ticket match the search words (number, customer, property, PO #, Job #) and sit in
+ * the date range by the day it was authorized (inclusive both ends; a bound left blank is open;
+ * no day known = out of any range)?
+ */
+export function awaitingMatches(
+  j: AwaitingSearchable,
+  query: string,
+  sinceYmd: string | null,
+  from: string,
+  to: string,
+): boolean {
+  const hit = invoiceMatches(
+    {
+      label: String(j.number),
+      customer_name: j.customer_name ?? "",
+      site_name: [j.site_name, j.site_address].filter(Boolean).join(" ") || null,
+      po_number: j.po_number ?? null,
+      job_code: j.job_number ?? null,
+    },
+    query,
+  );
+  if (!hit) return false;
+  if (from && (!sinceYmd || sinceYmd < from)) return false;
+  if (to && (!sinceYmd || sinceYmd > to)) return false;
+  return true;
+}
+
 /** The columns the list sorts by (a click on the heading; again reverses). */
 export type InvoiceSortKey =
   "number" | "date" | "customer" | "property" | "po" | "job" | "total" | "status" | "due" | "sent";

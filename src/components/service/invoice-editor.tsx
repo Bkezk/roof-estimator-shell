@@ -74,6 +74,7 @@ import {
   storedTotals,
   type InvoiceTotals,
 } from "@/lib/invoice-totals";
+import { balanceDue, hasPayment, partlyPaid } from "@/lib/invoice-payment";
 import { poTotal } from "@/lib/purchase-orders";
 import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
 import { sendToEdited, sendToOf, type SendTo } from "@/lib/invoice-send-to";
@@ -1855,7 +1856,7 @@ function Totals({
                 <dd className="tabular-nums">{money(t.margin)}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt>Margin / hour{hrs > 0 ? ` (${hrs} h travel + labor)` : ""}</dt>
+                <dt>Margin / hour{hrs > 0 ? ` (${hrs} h on site)` : ""}</dt>
                 <dd className="tabular-nums">{t.perHour === null ? "—" : money(t.perHour)}</dd>
               </div>
             </dl>
@@ -1943,8 +1944,11 @@ function FinalInvoice({
       setDialog(null);
       ctx.applied(r, { stage: r.ticket_closed });
       // Owner, Oct 5: a manager closes the ticket by hand (its stage); paid no longer does.
+      // Nov 9: a payment short of the total is recorded and the invoice stays Final.
       toast.success(
-        `Invoice #${invoiceLabel(r.invoice)} marked paid; close the ticket from its stage when it is finished`,
+        r.invoice.status === "paid"
+          ? `Invoice #${invoiceLabel(r.invoice)} marked paid; close the ticket from its stage when it is finished`
+          : `Payment of ${money(r.invoice.paid_amount)} recorded on invoice #${invoiceLabel(r.invoice)}; balance due ${money(balanceDue(r.invoice))}, so it stays Final`,
       );
     },
     onError: (e) => toast.error(`Could not mark the invoice paid: ${errText(e)}`),
@@ -1982,10 +1986,16 @@ function FinalInvoice({
           export. To bill this ticket, open it (the title above) and choose Make the invoice.
         </p>
       )}
-      {status === "final" && (
+      {status === "final" && !hasPayment(inv) && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
           This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change
           it, Void it below and make a new invoice from the ticket.
+        </p>
+      )}
+      {status === "final" && hasPayment(inv) && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This invoice is final with a payment recorded, so it can't be edited or voided. A
+          correction goes through Sage.
         </p>
       )}
       {status === "paid" && (
@@ -2080,6 +2090,16 @@ function FinalInvoice({
               {inv.paid_ref ? ` · ref ${inv.paid_ref}` : ""}
             </p>
           )}
+          {/* Paid means paid in full (owner, Nov 9): a smaller payment is on record and the
+              invoice stays Final, with what is still owed. */}
+          {partlyPaid(inv) && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+              <CircleDollarSign className="mr-1 inline h-4 w-4" />
+              Partly paid {money(inv.paid_amount)} on {shortDay(inv.paid_on)}
+              {inv.paid_method ? ` by ${inv.paid_method}` : ""}
+              {inv.paid_ref ? ` · ref ${inv.paid_ref}` : ""} — balance due {money(balanceDue(inv))}
+            </p>
+          )}
         </div>
         <Totals
           t={stored}
@@ -2106,17 +2126,18 @@ function FinalInvoice({
             <Send className="mr-2 h-4 w-4" /> {inv.sent_at ? "Send again" : "Send"}
           </Button>
         )}
-        {status === "final" && (
+        {status === "final" && !hasPayment(inv) && (
           <Button onClick={() => setDialog("paid")}>
             <CircleDollarSign className="mr-2 h-4 w-4" /> Mark paid
           </Button>
         )}
-        {status === "paid" && (
+        {(status === "paid" || (status === "final" && hasPayment(inv))) && (
           <Button variant="outline" onClick={() => setDialog("paid")}>
             <CircleDollarSign className="mr-2 h-4 w-4" /> Edit payment
           </Button>
         )}
-        {status === "final" && (
+        {/* Void only while no payment is on record (the server says the same). */}
+        {status === "final" && !hasPayment(inv) && (
           <Button
             variant="outline"
             className="text-destructive hover:text-destructive"
@@ -2549,7 +2570,8 @@ function PaidDialog(props: {
   onSave: (v: { paid_on: string; amount: number; method: string; ref: string }) => void;
 }) {
   const inv = props.inv;
-  const again = asInvoiceStatus(inv.status) === "paid";
+  // Editing: a payment is on record (paid in full, or a partial one on a Final invoice).
+  const again = hasPayment(inv);
   const [paidOn, setPaidOn] = useState(again && inv.paid_on ? inv.paid_on : todayYmd());
   const [amount, setAmount] = useState(again ? Number(inv.paid_amount) : Number(inv.total));
   const [method, setMethod] = useState(inv.paid_method ?? "Check");
@@ -2576,6 +2598,8 @@ function PaidDialog(props: {
           <DialogDescription>
             Records the payment here (Sage stays the ledger). The ticket&apos;s stage does not
             change — close it from the stage picker when it is finished. Total {money(inv.total)}.
+            An amount that covers the total marks it paid; a smaller one is recorded and the invoice
+            stays final with the balance due.
           </DialogDescription>
         </DialogHeader>
         <form

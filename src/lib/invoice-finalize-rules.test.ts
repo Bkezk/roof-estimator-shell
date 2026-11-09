@@ -359,6 +359,19 @@ describe("(c) Mark paid: a draft is refused; a final invoice is paid, the ticket
     expect(stageRpcs()).toEqual([]);
     expect(env.tables["service_jobs"]![0]!["stage"]).toBe("invoiced");
   });
+  it("a payment short of the total is recorded and the invoice stays final (owner, Nov 9: paid means paid in full)", async () => {
+    setup({ inv: { status: "final", finalized_at: "2026-10-01T00:00:00Z" }, stage: "invoiced" });
+    const r = await call<{ invoice: Row }>(markInvoicePaid, { ...paid, amount: 300 });
+    expect(r.invoice).toMatchObject({ status: "final", paid_on: "2026-10-02", paid_amount: 300 });
+    // The rest comes in: the same dialog, the full amount → paid.
+    const r2 = await call<{ invoice: Row }>(markInvoicePaid, { ...paid, amount: 391 });
+    expect(r2.invoice).toMatchObject({ status: "paid", paid_amount: 391 });
+    // Edited back down → final again; a cent's rounding is forgiven.
+    const r3 = await call<{ invoice: Row }>(markInvoicePaid, { ...paid, amount: 390.996 });
+    expect(r3.invoice["status"]).toBe("paid");
+    const r4 = await call<{ invoice: Row }>(markInvoicePaid, { ...paid, amount: 390.99 });
+    expect(r4.invoice["status"]).toBe("final");
+  });
   it("a void invoice is still refused", async () => {
     setup({ inv: { status: "void" } });
     await expect(call(markInvoicePaid, paid)).rejects.toThrow("Invoice not found, or void");

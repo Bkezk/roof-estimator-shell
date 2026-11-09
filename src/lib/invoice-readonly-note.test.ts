@@ -15,7 +15,11 @@ const final = ed
 describe("a finished invoice says why it cannot be edited", () => {
   it("final / sent: only a draft is edited; void it and make a new one", () => {
     // Nov 9: Sent is a stamp, so the note is the final invoice's alone.
-    expect(final).toContain('{status === "final" && (');
+    // Nov 9 (paid means paid in full): the Void wording only while no payment is on record.
+    expect(final).toContain('{status === "final" && !hasPayment(inv) && (');
+    expect(final).toContain(
+      "This invoice is final with a payment recorded, so it can't be edited or voided.",
+    );
     expect(final).toContain("<li>Not sent yet</li>");
     expect(final).toContain(
       "This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change it, Void it below and make a new invoice from the ticket.",

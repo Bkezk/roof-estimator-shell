@@ -130,7 +130,11 @@ describe("Awaiting invoice (was: To invoice)", () => {
   it("the Awaiting invoice group on the Invoices list counts the server's tickets, with the tooltip (Nov 9: a group, not a chip)", () => {
     const page = read("src/components/service/invoices-page.tsx");
     // The count is the server's (listAwaitingInvoice), not the loaded list's length.
-    expect(page).toContain('{waitingCount} ticket{waitingCount === 1 ? "" : "s"}');
+    // Nov 9 (audit, finding 2): "1 of 3 tickets" while the search or the dates narrow the list.
+    expect(page).toContain(
+      "{narrowed ? `${waiting.length} of ${waitingCount}` : waitingCount} ticket",
+    );
+    expect(page).toContain('{waitingCount === 1 ? "" : "s"}');
     expect(page).toContain("title={AWAITING_INVOICE_TITLE}");
     expect(page).toContain("Awaiting invoice\n");
     expect(page).not.toMatch(/>\s*To invoice/);

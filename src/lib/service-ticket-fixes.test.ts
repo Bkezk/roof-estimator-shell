@@ -422,7 +422,10 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     const page = readFileSync("src/components/service/invoices-page.tsx", "utf8");
     expect(page).toContain("const waitingCount = jobsQ.data?.count ?? 0;");
     // Nov 9: the count heads the Awaiting invoice group (a group of the one table, not a chip).
-    expect(page).toContain('{waitingCount} ticket{waitingCount === 1 ? "" : "s"}');
+    // Nov 9 (audit, finding 2): "1 of 3 tickets" while the search or the dates narrow the list.
+    expect(page).toContain(
+      "{narrowed ? `${waiting.length} of ${waitingCount}` : waitingCount} ticket",
+    );
     // Owner, Oct 5: the tabs read the count themselves, so it shows on every Service page.
     const tabs = readFileSync("src/components/service/service-tabs.tsx", "utf8");
     expect(tabs).toContain("const toInvoice = awaiting.data?.count ?? 0;");

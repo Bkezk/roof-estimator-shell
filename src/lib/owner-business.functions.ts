@@ -64,7 +64,7 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         .is("deleted_at", null)
         .in("stage", ["open", "scheduled", "done", "authorized"])
         .limit(LIMIT),
-      sb.from("invoices").select("status, total, invoice_date").limit(LIMIT),
+      sb.from("invoices").select("status, total, invoice_date, paid_amount").limit(LIMIT),
       sb
         .from("crm_opportunities")
         .select("status, est_value, expected_close, updated_at")

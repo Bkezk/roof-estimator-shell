@@ -53,14 +53,16 @@ import {
   type InvoiceSearch,
 } from "@/lib/invoice-search";
 import {
+  awaitingMatches,
   invoiceDue,
   invoiceMatches,
   sortInvoices,
   type InvoiceSort,
   type InvoiceSortKey,
 } from "@/lib/invoice-list";
+import { balanceDue, openSumOf, paidSumOf, partlyPaid } from "@/lib/invoice-payment";
 import { AWAITING_INVOICE_KEY, listAwaitingInvoice } from "@/lib/service.functions";
-import { daysSince, toInvoice as toInvoiceRows, waitingSince } from "@/lib/service-schedule";
+import { daysSince, toInvoice as toInvoiceRows, toYmd, waitingSince } from "@/lib/service-schedule";
 import {
   exportSageCsv,
   markSageExported,
@@ -230,7 +232,17 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
     queryFn: () => awaitingFn(),
     enabled: !!session,
   });
-  const waiting = toInvoiceRows(jobsQ.data?.rows ?? []);
+  // The Awaiting invoice rows follow the search box and the date range like the invoices do
+  // (Nov 9 audit, finding 2): a ticket is in by its number, customer, property, PO # and Job #,
+  // and by the day it was authorized; the header then reads "1 of 3 tickets".
+  const narrowed = !!q.trim() || !!from || !!to;
+  const waitingAll = toInvoiceRows(jobsQ.data?.rows ?? []);
+  const waiting = narrowed
+    ? waitingAll.filter((j) => {
+        const since = waitingSince(j);
+        return awaitingMatches(j, q, since ? toYmd(new Date(since)) : null, from, to);
+      })
+    : waitingAll;
   const waitingCount = jobsQ.data?.count ?? 0;
   // The search narrows the rows shown, and the footer sums what is shown.
   const rows = (list.data ?? []).filter((r) => invoiceMatches(r, q));
@@ -238,8 +250,10 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const live = rows.filter((r) => r.status !== "void");
   const sum = (f: (r: (typeof rows)[number]) => number) => live.reduce((n, r) => n + f(r), 0);
   const totalSum = sum((r) => Number(r.total));
-  const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
-  const openSum = sum((r) => (asInvoiceStatus(r.status) === "final" ? Number(r.total) : 0));
+  // Paid = every payment recorded (a partial one included); Open = what the finals still owe
+  // (owner, Nov 9: Paid means paid in full; invoice-payment.ts).
+  const paidSum = paidSumOf(live);
+  const openSum = openSumOf(live);
   const shown = sortInvoices(rows, sort.key, sort.dir);
   // One collapsible group per status, Draft → Final → Paid → Void, under the Awaiting invoice
   // queue (owner, Nov 9: "like on bids where each status is a collapsible row … make awaiting
@@ -376,6 +390,11 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
                 {money(r.paid_amount)}
                 {r.paid_ref ? ` · ${r.paid_ref}` : ""}
               </span>
+              {partlyPaid(r) && (
+                <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
+                  balance {money(balanceDue(r))}
+                </span>
+              )}
             </>
           ) : (
             "—"
@@ -538,9 +557,10 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
                         Awaiting invoice
                       </Badge>
                       <span className="text-sm text-muted-foreground">
-                        {waitingCount} ticket{waitingCount === 1 ? "" : "s"}
-                        {waitingCount > waiting.length
-                          ? ` · the ${waiting.length} waiting longest shown`
+                        {narrowed ? `${waiting.length} of ${waitingCount}` : waitingCount} ticket
+                        {waitingCount === 1 ? "" : "s"}
+                        {!narrowed && waitingCount > waitingAll.length
+                          ? ` · the ${waitingAll.length} waiting longest shown`
                           : ""}
                       </span>
                     </button>
