@@ -96,7 +96,7 @@ export function daysSince(iso: string | null, now = new Date()): number | null {
 }
 /** Past the admin limit: the row turns red and the reminder pass escalates it. */
 export function isPastLimit(
-  row: Pick<UntouchedRow, "assigned_at" | "limit_days">,
+  row: { assigned_at: string | null; limit_days: UntouchedRow["limit_days"] },
   now = new Date(),
 ) {
   const d = daysSince(row.assigned_at, now);

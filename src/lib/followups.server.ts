@@ -18,6 +18,7 @@
  * rules run here with direct writes, as before.
  */
 import type { Database } from "@/integrations/supabase/types";
+import { databaseRpc } from "@/lib/database-rpc";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
 type Settings = {
@@ -205,7 +206,7 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   }
 
   // Start / refresh / hand over through the database function.
-  const up = await admin.rpc("followup_sync_upsert", {
+  const up = await databaseRpc(admin)("followup_sync_upsert", {
     p_kind: a.kind,
     p_item_id: a.itemId,
     p_assignee_id: a.assigneeId,

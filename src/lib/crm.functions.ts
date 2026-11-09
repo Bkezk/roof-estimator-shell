@@ -23,6 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, isAdmin, isFieldOnly, seesEveryone } from "@/lib/access";
 import { BID_CUSTOMER_REQUIRED } from "@/lib/bid-status";
 import { bidDataForCustomer } from "@/lib/bid-account-link";
@@ -1367,7 +1368,7 @@ export const saveContact = createServerFn({ method: "POST" })
     await assertLiveAccount(sb, data.account_id);
     // Under the caller's RLS (security invoker); only the sites that changed are unlinked /
     // linked, so the audit log records "site 'X' linked / unlinked" for those alone.
-    const { data: saved, error } = await sb.rpc("save_contact_with_sites", saveContactArgs(data));
+    const { data: saved, error } = await databaseRpc(sb)("save_contact_with_sites", saveContactArgs(data));
     if (error) throw new Error(error.message);
     if (!saved) throw new Error("The contact was not saved");
     return saved as unknown as ContactWithSites;
