@@ -300,7 +300,7 @@ export async function clearFollowupHold(
   sb: SupabaseClient<Database>,
   followupId: string,
 ): Promise<void> {
-  const r = await sb.rpc("hold_followup", {
+  const r = await databaseRpc(sb)("hold_followup", {
     p_followup: followupId,
     p_until: null,
     p_reason: null,
