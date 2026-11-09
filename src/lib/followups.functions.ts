@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, seesEveryone } from "@/lib/access";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
@@ -255,7 +256,7 @@ export async function holdFollowup(
   const reasonProblem = holdReasonProblem(input.reason);
   if (reasonProblem) throw new Error(reasonProblem);
   const reason = input.reason.trim();
-  const r = await sb.rpc("hold_followup", {
+  const r = await databaseRpc(sb)("hold_followup", {
     p_followup: input.followupId,
     p_until: input.until,
     p_reason: reason,
@@ -423,7 +424,7 @@ export const setNotifyPrefs = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<NotifyPrefs> => {
-    const { data: rows, error } = await context.supabase.rpc("set_my_notify_prefs", {
+    const { data: rows, error } = await databaseRpc(context.supabase)("set_my_notify_prefs", {
       p_email: data.notify_email ?? null,
       p_push: data.notify_push ?? null,
       p_leads: data.notify_leads ?? null,

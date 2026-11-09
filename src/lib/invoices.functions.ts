@@ -19,6 +19,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
@@ -1118,7 +1119,7 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .eq("id", inv.service_job_id);
     if (uErr) throw ticketFailed(uErr.message);
     if (backToAuthorized) {
-      const { error: sErr } = await sb.rpc("set_ticket_stage_from_invoice", {
+      const { error: sErr } = await databaseRpc(sb)("set_ticket_stage_from_invoice", {
         p_job: inv.service_job_id,
         p_stage: "authorized",
         p_invoice: null,

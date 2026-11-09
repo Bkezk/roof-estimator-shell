@@ -54,6 +54,7 @@ const task = (over: Partial<TaskRow> = {}): TaskRow => ({
   notified_morning_at: null,
   notified_overdue_at: null,
   notify_error: null,
+  notify_failures: 0,
   ...over,
 });
 const kinds = (t: NoticeFields, now: Date) =>
