@@ -79,10 +79,23 @@ export const MARGIN_GROUP_LABELS: Record<MarginGroupBy, string> = {
 };
 
 /** The invoice statuses the report counts (invoices.functions.ts INVOICE_STATUSES less draft and void). */
-export const COUNTED_INVOICE_STATUSES = ["final", "sent", "paid"] as const;
+export const COUNTED_INVOICE_STATUSES = ["final", "paid"] as const;
 export type CountedInvoiceStatus = (typeof COUNTED_INVOICE_STATUSES)[number];
-/** A row's status: a counted invoice's, or "won" for a bid. */
-export type MarginRowStatus = CountedInvoiceStatus | "won";
+/**
+ * A row's bucket in the status split: paid; sent and unpaid; final, not yet sent; or "won" for a
+ * bid. Since Nov 9 Sent is a stamp, not a status: a final invoice is "sent" here when sent_at is
+ * set (marginBucket), so the split's tiles read as before.
+ */
+export type MarginRowStatus = CountedInvoiceStatus | "sent" | "won";
+
+/** The split's bucket of an invoice row: paid, else sent when it has gone, else final. */
+export function marginBucket(inv: {
+  status: string;
+  sent_at?: string | null | undefined;
+}): Exclude<MarginRowStatus, "won"> {
+  if (inv.status === "paid") return "paid";
+  return inv.sent_at || inv.status === "sent" ? "sent" : "final";
+}
 /** What a row is: a service invoice, or a won bid. */
 export type MarginRowKind = "service" | "bid";
 
@@ -507,8 +520,8 @@ export function aggregateMargin(
 
 // ---- the status split ---------------------------------------------------------------------
 
-/** The split's tiles in order: the three invoice statuses, then the won bids. */
-export const MARGIN_SPLIT_STATUSES = [...COUNTED_INVOICE_STATUSES, "won"] as const;
+/** The split's tiles in order: final not yet sent, sent, paid, then the won bids. */
+export const MARGIN_SPLIT_STATUSES = ["final", "sent", "paid", "won"] as const;
 /** `invoices` counts rows: invoices in the first three buckets, bids in `won`. */
 export type StatusSplit = Record<MarginRowStatus, { invoices: number; revenue: number }>;
 /** The words of the split's tiles (the component). */

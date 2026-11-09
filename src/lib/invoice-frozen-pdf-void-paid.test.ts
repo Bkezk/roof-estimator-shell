@@ -399,7 +399,7 @@ describe("3. Mark paid never closes the ticket (owner, Oct 5: a manager closes i
   it("another final invoice on the ticket is unpaid: paid, but the ticket stays Invoiced", async () => {
     setup({
       invoices: [
-        invoice({ status: "sent" }),
+        invoice({ status: "final", sent_at: "2026-10-02T00:00:00Z" }),
         invoice({ id: INV2, display_number: "6000.2", status: "final" }),
       ],
     });
@@ -412,7 +412,7 @@ describe("3. Mark paid never closes the ticket (owner, Oct 5: a manager closes i
   it("every other invoice is paid, void or a draft: paid, and the ticket still stays Invoiced", async () => {
     setup({
       invoices: [
-        invoice({ status: "sent" }),
+        invoice({ status: "final", sent_at: "2026-10-02T00:00:00Z" }),
         invoice({ id: INV2, display_number: "6000.2", status: "paid" }),
         invoice({ id: "99999999-9999-4999-8999-999999999999", status: "void" }),
         invoice({ id: "88888888-8888-4888-8888-888888888888", status: "draft" }),

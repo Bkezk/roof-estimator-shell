@@ -15,7 +15,7 @@ export const SHARE_TOKEN_BYTES = 32;
 /** The public path; the token follows it: /i/<token>. */
 export const SHARE_PATH = "/i";
 /** Statuses whose invoice may be shared: frozen, with a stored PDF. A draft or a void is not. */
-export const SHAREABLE_STATUSES = ["final", "sent", "paid"] as const;
+export const SHAREABLE_STATUSES = ["final", "paid"] as const;
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 

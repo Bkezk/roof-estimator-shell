@@ -130,11 +130,10 @@ describe("1. the pure helpers", () => {
     expect(shareBase(null)).toBeNull();
   });
   it("canShareInvoice: final / sent / paid yes; draft / void no; every status covered", () => {
-    expect(SHAREABLE_STATUSES).toEqual(["final", "sent", "paid"]);
+    expect(SHAREABLE_STATUSES).toEqual(["final", "paid"]);
     const expected: Record<string, boolean> = {
       draft: false,
       final: true,
-      sent: true,
       paid: true,
       void: false,
     };
@@ -146,7 +145,6 @@ describe("1. the pure helpers", () => {
   });
   it("shareProblem: plain words for a draft and a void; null when it can be shared", () => {
     expect(shareProblem("final")).toBeNull();
-    expect(shareProblem("sent")).toBeNull();
     expect(shareProblem("paid")).toBeNull();
     expect(shareProblem("draft")).toBe("A draft has no share link; finalise the invoice first");
     expect(shareProblem("void")).toBe("A void invoice has no share link");
@@ -414,7 +412,7 @@ describe("3. the public route, GET /i/<token>", () => {
     expect(env.writes).toEqual([]);
     expect(info).toHaveBeenCalledWith("Invoice share link: invoice #6012.2 — served");
   });
-  for (const status of ["sent", "paid"]) {
+  for (const status of ["final", "paid"]) {
     it(`a ${status} invoice's link works too`, async () => {
       setup({ invoices: [invoice({ status, share_token: TOKEN })] });
       expect((await get(TOKEN)).status).toBe(200);
@@ -534,7 +532,7 @@ describe("4. the server functions", () => {
     const b = await call<{ token: string }>(createInvoiceShareLink, { id: INV });
     expect(b.token).not.toBe(a.token);
   });
-  for (const status of ["sent", "paid"]) {
+  for (const status of ["final", "paid"]) {
     it(`a ${status} invoice can be shared`, async () => {
       setup({ invoices: [invoice({ status })] });
       const r = await call<{ token: string }>(createInvoiceShareLink, { id: INV });
@@ -617,7 +615,8 @@ describe("4b. Send carries the link", () => {
       `Thanks!\n\nInvoice #6012.2 for Main St: $391.00.\nDue on receipt\n\nView or download this invoice online: https://portal.example.com/i/${token}`,
     );
     expect(Array.from(emails[0]!.pdf)).toEqual(Array.from(STORED));
-    expect(r.invoice["status"]).toBe("sent");
+    expect(r.invoice["status"]).toBe("final");
+    expect(r.invoice["sent_at"]).toBeTruthy();
   });
   it("an existing token is reused on send (no new one)", async () => {
     vi.stubEnv("APP_URL", "https://portal.example.com");

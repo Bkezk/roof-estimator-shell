@@ -230,7 +230,9 @@ describe("a draft on an Authorized ticket", () => {
   it("sends as before", async () => {
     setup("authorized");
     const r = await call<{ invoice: Row }>(sendInvoice, { id: INV, to: ["ap@acme.example"] });
-    expect(r.invoice["status"]).toBe("sent");
+    // Nov 9: Sent is a stamp; the invoice stays final.
+    expect(r.invoice["status"]).toBe("final");
+    expect(r.invoice["sent_at"]).toBeTruthy();
     expect(emails).toHaveLength(1);
   });
 });

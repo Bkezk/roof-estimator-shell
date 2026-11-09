@@ -280,7 +280,8 @@ describe("(a) Send on a draft with no lines is refused like Finalize, and writes
 describe("(b) Send on a draft with lines finalises it exactly as Finalize does", () => {
   it("closes the ticket's open follow-up and moves the ticket through the rpc", async () => {
     const r = await call<{ invoice: Row }>(sendInvoice, sendData);
-    expect(r.invoice["status"]).toBe("sent");
+    expect(r.invoice["status"]).toBe("final");
+    expect(r.invoice["sent_at"]).toBeTruthy();
     // The technician's "Follow up: Ticket #…" is closed (it was left open before).
     expect(fu("ticket")).toMatchObject({ status: "closed", closed_reason: "stage invoiced" });
     // The office's "Invoice ticket #…" timer is closed by the stage automation, as before.
@@ -327,7 +328,8 @@ describe("(b) Send on a draft with lines finalises it exactly as Finalize does",
     setup({ profile: manager, inv: { status: "final", finalized_at: "2026-10-01T00:00:00Z" } });
     await call(sendInvoice, sendData);
     expect(stageRpcs()).toEqual([]);
-    expect(inv()["status"]).toBe("sent");
+    expect(inv()["status"]).toBe("final");
+    expect(inv()["sent_at"]).toBeTruthy();
     expect(inv()["finalized_at"]).toBe("2026-10-01T00:00:00Z");
   });
 });
@@ -343,7 +345,14 @@ describe("(c) Mark paid: a draft is refused; a final invoice is paid, the ticket
     expect(fu("ticket")["status"]).toBe("open");
   });
   it("a final invoice: paid; the ticket keeps its stage (owner, Oct 5: a manager closes it by hand)", async () => {
-    setup({ inv: { status: "sent", finalized_at: "2026-10-01T00:00:00Z" }, stage: "invoiced" });
+    setup({
+      inv: {
+        status: "final",
+        sent_at: "2026-10-02T00:00:00Z",
+        finalized_at: "2026-10-01T00:00:00Z",
+      },
+      stage: "invoiced",
+    });
     const r = await call<{ invoice: Row; ticket_closed: boolean }>(markInvoicePaid, paid);
     expect(r.invoice).toMatchObject({ status: "paid", paid_on: "2026-10-02", paid_amount: 391 });
     expect(r.ticket_closed).toBe(false);

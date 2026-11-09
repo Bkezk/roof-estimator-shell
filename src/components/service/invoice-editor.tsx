@@ -1958,7 +1958,7 @@ function FinalInvoice({
           export. To bill this ticket, open it (the title above) and choose Make the invoice.
         </p>
       )}
-      {(status === "final" || status === "sent") && (
+      {status === "final" && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
           This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change
           it, Void it below and make a new invoice from the ticket.
@@ -2036,12 +2036,16 @@ function FinalInvoice({
           )}
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {inv.finalized_at && <li>Finalised {stampDay(inv.finalized_at)}</li>}
-            {inv.sent_at && (
+            {/* Sent is a stamp, not a status (Nov 9): a final invoice says when, or that it is
+                not sent yet. */}
+            {inv.sent_at ? (
               <li>
                 Sent {stampDay(inv.sent_at)}
                 {sentTo.length ? ` to ${sentTo.join(", ")}` : ""}
               </li>
-            )}
+            ) : status === "final" || status === "paid" ? (
+              <li>Not sent yet</li>
+            ) : null}
             {inv.sage_exported_at && <li>Exported to Sage {stampDay(inv.sage_exported_at)}</li>}
           </ul>
           {status === "paid" && (
@@ -2078,7 +2082,7 @@ function FinalInvoice({
             <Send className="mr-2 h-4 w-4" /> {inv.sent_at ? "Send again" : "Send"}
           </Button>
         )}
-        {(status === "final" || status === "sent") && (
+        {status === "final" && (
           <Button onClick={() => setDialog("paid")}>
             <CircleDollarSign className="mr-2 h-4 w-4" /> Mark paid
           </Button>
@@ -2088,7 +2092,7 @@ function FinalInvoice({
             <CircleDollarSign className="mr-2 h-4 w-4" /> Edit payment
           </Button>
         )}
-        {(status === "final" || status === "sent") && (
+        {status === "final" && (
           <Button
             variant="outline"
             className="text-destructive hover:text-destructive"

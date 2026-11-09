@@ -56,7 +56,13 @@ export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
 export type ServiceRateRow = Database["public"]["Tables"]["service_rates"]["Row"];
 export type ServiceSettingsRow = Database["public"]["Tables"]["service_settings"]["Row"];
-export const INVOICE_STATUSES = ["draft", "final", "sent", "paid", "void"] as const;
+/**
+ * Draft → Final → Paid, with Void to the side (owner, Nov 9: "condense the invoice statuses").
+ * Sent is no longer a status: sending stamps sent_at / sent_to / sent_by_name on a final invoice
+ * (the editor's "Sent Oct 3 to …", the list's Sent column), and a legacy "sent" row reads as
+ * final (invoice-utils.ts asInvoiceStatus; 20261109090000 folds the stored rows).
+ */
+export const INVOICE_STATUSES = ["draft", "final", "paid", "void"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const RATE_KINDS = ["standard", "urgent", "emergency"] as const;
 export const RATE_KIND_LABELS: Record<(typeof RATE_KINDS)[number], string> = {
@@ -982,7 +988,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
     const { data: updated, error } = await stampSent(
       (patch) => sb.from("invoices").update(patch).eq("id", b.invoice.id).select("*").single(),
       {
-        status: b.invoice.status === "paid" ? "paid" : "sent",
+        // The status stays (final, or paid when sent again after payment): Sent is a stamp.
         sent_at: new Date().toISOString(),
         sent_to: data.to as unknown as Json,
         updated_by_name: nameOf(p),
@@ -1035,7 +1041,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
         updated_by_name: nameOf(p),
       })
       .eq("id", data.id)
-      .in("status", ["final", "sent", "paid"])
+      .in("status", ["final", "paid"])
       .select("*")
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -1153,8 +1159,8 @@ export const listInvoices = createServerFn({ method: "GET" })
       .order("invoice_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1000);
-    // "unpaid" (the Unpaid chip / the Owner view's tile): final or sent, not yet marked paid.
-    if (data.status === "unpaid") q = q.in("status", ["final", "sent"]);
+    // "unpaid" (the Unpaid chip / the Owner view's tile): final, not yet marked paid.
+    if (data.status === "unpaid") q = q.eq("status", "final");
     else if (data.status) q = q.eq("status", data.status);
     if (data.from) q = q.gte("invoice_date", data.from);
     if (data.to) q = q.lte("invoice_date", data.to);
@@ -1207,7 +1213,7 @@ export const exportSageCsv = createServerFn({ method: "POST" })
       let q = sb
         .from("invoices")
         .select("*")
-        .in("status", ["final", "sent", "paid"])
+        .in("status", ["final", "paid"])
         .gte("invoice_date", data.from)
         .lte("invoice_date", data.to)
         .order("invoice_date")

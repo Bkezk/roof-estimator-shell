@@ -66,6 +66,7 @@ export function invoiceDue(
   r: { status: string; invoice_date: string; due_date?: string | null },
   today: string,
 ): InvoiceDue {
+  // "sent" is the legacy spelling of a final invoice that was sent (statuses condensed Nov 9).
   const open = r.status === "final" || r.status === "sent";
   const due = r.due_date ?? null;
   if (!open) return { due, lateDays: 0, open };

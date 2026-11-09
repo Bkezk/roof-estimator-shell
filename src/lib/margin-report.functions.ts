@@ -65,6 +65,7 @@ import {
   type MarginPeriod,
   type MarginReportResult,
   type MarginSource,
+  marginBucket,
 } from "@/lib/margin-report";
 import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
 
@@ -123,7 +124,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
         sb
           .from("invoices")
           .select(
-            "id, number, display_number, status, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
+            "id, number, display_number, status, sent_at, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
           )
           .in("status", [...COUNTED_INVOICE_STATUSES])
           .gte("invoice_date", from)
@@ -235,8 +236,8 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       kind: "service",
       number: invoiceLabel(i),
       day: invoiceDay(i),
-      // The read filtered on these statuses; the cast only names the narrower type.
-      status: i.status as CountedInvoiceStatus,
+      // The split's bucket: paid, sent (the stamp; Nov 9), else final.
+      status: marginBucket(i),
       subtotal: Number(i.subtotal),
       customer,
       technician: technicianId ? (techName.get(technicianId) ?? null) : null,

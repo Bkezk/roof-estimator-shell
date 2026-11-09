@@ -58,6 +58,7 @@ import {
   type MarginInvoiceIn,
   type MarginInvoiceRow,
   type MarginReportResult,
+  marginBucket,
 } from "@/lib/margin-report";
 import { listMarginReport } from "@/lib/margin-report.functions";
 import { fakeSupabase, parseSelect } from "@/test/fake-supabase";
@@ -203,7 +204,12 @@ describe("toMarginInvoiceRow: the lean per-invoice row", () => {
 
 describe("aggregateMargin", () => {
   it("the statuses counted are final, sent and paid — never draft or void", () => {
-    expect([...COUNTED_INVOICE_STATUSES]).toEqual(["final", "sent", "paid"]);
+    expect([...COUNTED_INVOICE_STATUSES]).toEqual(["final", "paid"]);
+    // Nov 9: Sent is a stamp; the split buckets a final invoice by it.
+    expect(marginBucket({ status: "final", sent_at: "2026-10-03T00:00:00Z" })).toBe("sent");
+    expect(marginBucket({ status: "final", sent_at: null })).toBe("final");
+    expect(marginBucket({ status: "paid", sent_at: "2026-10-03T00:00:00Z" })).toBe("paid");
+    expect(marginBucket({ status: "sent" })).toBe("sent");
     expect([...MARGIN_GROUPS]).toEqual(["month", "customer", "technician"]);
   });
   it("by month: one row per month, newest first; revenue is the subtotal (before tax); hours and the average invoice", () => {
@@ -810,7 +816,8 @@ function world(opts: { maxRows?: number } = {}) {
         invoiceRow({
           id: "i2",
           display_number: "6000.2",
-          status: "sent",
+          status: "final",
+          sent_at: "2026-10-12T15:00:00Z",
           invoice_date: "2026-10-12",
           created_at: "2026-10-10T12:00:00Z",
           subtotal: 400,
@@ -1419,7 +1426,10 @@ describe("the component, pinned to its source", () => {
     expect(src).toContain("<Badge");
     expect(src).toMatch(/>\s*Bid\s*<\/Badge>/);
     expect(src).toContain('import { STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";');
-    expect(src).toContain('i.status === "won" ? BID_STATUS_LABELS.won : STATUS_LABELS[i.status]');
+    // Nov 9: a final invoice that has gone reads Sent (the stamp), the others their status label.
+    expect(src).toContain(
+      '? BID_STATUS_LABELS.won\n    : i.status === "sent"\n      ? "Sent"\n      : STATUS_LABELS[i.status]',
+    );
     expect(src).toContain('aria-label="Won on"');
     expect(src).toContain("setBidWonOn");
     expect(src).toContain('queryKey: ["margin-report"]');

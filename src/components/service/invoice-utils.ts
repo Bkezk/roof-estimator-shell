@@ -64,12 +64,16 @@ export const toPct = (frac: number | string) => Number((Number(frac) * 100).toFi
 /** A percent number (7.5) as a fraction (0.075). */
 export const fromPct = (pct: number) => Number((pct / 100).toFixed(6));
 
+/** A stored status as a known one; a legacy "sent" (before Nov 9) is a final invoice that was sent. */
 export const asInvoiceStatus = (s: string): InvoiceStatus =>
-  (INVOICE_STATUSES as readonly string[]).includes(s) ? (s as InvoiceStatus) : "draft";
+  s === "sent"
+    ? "final"
+    : (INVOICE_STATUSES as readonly string[]).includes(s)
+      ? (s as InvoiceStatus)
+      : "draft";
 export const STATUS_LABELS: Record<InvoiceStatus, string> = {
   draft: "Draft",
   final: "Final",
-  sent: "Sent",
   paid: "Paid",
   void: "Void",
 };
@@ -78,7 +82,6 @@ export const STATUS_CLASS: Record<InvoiceStatus, string> = {
     "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100",
   final:
     "border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100",
-  sent: "border-indigo-300 bg-indigo-50 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-100",
   paid: "border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-100",
   void: "border-border bg-muted text-muted-foreground line-through",
 };

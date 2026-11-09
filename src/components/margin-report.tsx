@@ -163,9 +163,13 @@ function MoneyCells({ t, c }: { t: MarginTotals; c: Compared | null | undefined 
   );
 }
 
-/** A row's status word: Won for a bid (lib/bid-status), the invoice labels otherwise. */
+/** A row's status word: Won for a bid (lib/bid-status), Sent for a final invoice that has gone, the invoice labels otherwise. */
 const rowStatus = (i: MarginInvoiceRow) =>
-  i.status === "won" ? BID_STATUS_LABELS.won : STATUS_LABELS[i.status];
+  i.status === "won"
+    ? BID_STATUS_LABELS.won
+    : i.status === "sent"
+      ? "Sent"
+      : STATUS_LABELS[i.status];
 
 /**
  * The invoices and won bids behind an expanded group, newest first. A bid links to the estimator
@@ -337,14 +341,14 @@ export function MarginReport() {
       <div>
         <h2 className="text-lg font-semibold">Margin</h2>
         <p className="text-sm text-muted-foreground">
-          Final, sent and paid invoices only. Revenue is the invoice subtotal, before tax. Cost =
-          material + labor &amp; travel + other lines + the ticket&apos;s purchase orders (each
-          counted once, on the ticket&apos;s first invoice). Margin = revenue − cost; Margin % =
-          margin ÷ revenue. Hours are the labor and travel hours on the invoices. Compare shows the
-          earlier period in grey and the change beside each figure. Won bids count too (Include):
-          revenue is the bid total before tax; cost is the bid&apos;s material, labor, subs and
-          services, warranty, shipping, per diem and commission; counted on its Won-on day (editable
-          here and in the estimator).
+          Final and paid invoices only. Revenue is the invoice subtotal, before tax. Cost = material
+          + labor &amp; travel + other lines + the ticket&apos;s purchase orders (each counted once,
+          on the ticket&apos;s first invoice). Margin = revenue − cost; Margin % = margin ÷ revenue.
+          Hours are the labor and travel hours on the invoices. Compare shows the earlier period in
+          grey and the change beside each figure. Won bids count too (Include): revenue is the bid
+          total before tax; cost is the bid&apos;s material, labor, subs and services, warranty,
+          shipping, per diem and commission; counted on its Won-on day (editable here and in the
+          estimator).
         </p>
       </div>
 

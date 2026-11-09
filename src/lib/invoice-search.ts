@@ -12,7 +12,7 @@
  * Anything else (a malformed id, an unknown tab) is dropped, so the list shows.
  */
 
-export const INVOICE_LIST_STATUSES = ["draft", "final", "sent", "paid", "void", "unpaid"] as const;
+export const INVOICE_LIST_STATUSES = ["draft", "final", "paid", "void", "unpaid"] as const;
 export type InvoiceListStatus = (typeof INVOICE_LIST_STATUSES)[number];
 
 /** The columns the list sorts by, as the URL spells them (`?sort=due:asc`). */

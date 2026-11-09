@@ -139,7 +139,7 @@ const oldest = (dates: readonly (string | null | undefined)[], now: string): num
 export const TO_INVOICE_STAGES: readonly string[] = ["authorized"];
 /** The tile's second line: Done tickets still to be reviewed (Work Overview's Needs authorization). */
 export const TO_AUTHORIZE_STAGES: readonly string[] = ["done"];
-export const UNPAID_STATUSES: readonly string[] = ["final", "sent"];
+export const UNPAID_STATUSES: readonly string[] = ["final"];
 
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);

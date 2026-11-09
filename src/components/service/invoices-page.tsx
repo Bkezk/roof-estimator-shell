@@ -2,7 +2,7 @@
  * The Invoices list (docs/service-module-design.md §5.4–§5.5): every ticket invoice, filtered by
  * status and invoice date, with footer totals for the rows shown; a row opens the invoice on its
  * own full-width page (`?id=<invoice uuid>`, invoice-editor.tsx; owner, Oct 1), where it is
- * edited. **Export to Sage** writes the bookkeeper's CSV for a date range (final, sent and paid
+ * edited. **Export to Sage** writes the bookkeeper's CSV for a date range (final and paid
  * invoices) and stamps them exported.
  *
  * The first chip, **Awaiting invoice** (`?tab=to-invoice`; owner, Oct 1, asked what "To
@@ -86,7 +86,7 @@ export function InvoicesPage({ search }: { search: InvoiceSearch }) {
   const { profile } = useAuth();
   // ?id=: that invoice, full width; the list's filters ride along so its Back returns to them
   // (owner, Nov 3, review item 11). Without an id: the list on the URL's chip, dates, search
-  // text and sort (?status= "unpaid" = final + sent, the Owner view's tile).
+  // text and sort (?status= "unpaid" = final, the Owner view's tile).
   const invoiceId = search.id;
   const toInvoice = search.tab === "to-invoice";
   if (!seesInvoices(profile))
@@ -222,7 +222,7 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const sum = (f: (r: (typeof rows)[number]) => number) => live.reduce((n, r) => n + f(r), 0);
   const totalSum = sum((r) => Number(r.total));
   const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
-  const openSum = sum((r) => (r.status === "final" || r.status === "sent" ? Number(r.total) : 0));
+  const openSum = sum((r) => (asInvoiceStatus(r.status) === "final" ? Number(r.total) : 0));
   const shown = sortInvoices(rows, sort.key, sort.dir);
   const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
   // The ticket's Back link returns to this queue (owner, Oct 9).
@@ -264,7 +264,7 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
           </Chip>
           <Chip
             active={!toInvoice && status === "unpaid"}
-            title="Final or sent, not yet marked paid"
+            title="Final, not yet marked paid"
             onClick={() => setStatus(!toInvoice && status === "unpaid" ? "all" : "unpaid")}
           >
             Unpaid
@@ -706,8 +706,8 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
             <DialogHeader>
               <DialogTitle>Export to Sage</DialogTitle>
               <DialogDescription>
-                A CSV of the final, sent and paid invoices dated in this range (one row per invoice
-                and one per line) for the bookkeeper to import. Once the file has downloaded, those
+                A CSV of the final and paid invoices dated in this range (one row per invoice and
+                one per line) for the bookkeeper to import. Once the file has downloaded, those
                 invoices are stamped exported; one exported before keeps its first date.
               </DialogDescription>
             </DialogHeader>

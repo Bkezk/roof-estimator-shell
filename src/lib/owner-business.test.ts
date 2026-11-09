@@ -84,7 +84,7 @@ describe("businessNumbers", () => {
     ],
     invoices: [
       { status: "final", total: "1200.50", invoice_date: "2026-10-02" },
-      { status: "sent", total: 800, invoice_date: "2026-09-10" },
+      { status: "final", sent_at: "2026-09-10T12:00:00Z", total: 800, invoice_date: "2026-09-10" },
       { status: "paid", total: 500, invoice_date: "2026-10-05" },
       { status: "paid", total: 2000, invoice_date: "2026-09-25" },
       { status: "draft", total: 999, invoice_date: "2026-10-06" },
@@ -360,23 +360,25 @@ describe("listOwnerBusiness (server)", () => {
 });
 
 describe("the click-throughs", () => {
-  it("?status= on the Invoices list: a status chip, or unpaid (final + sent); junk dropped", () => {
+  it("?status= on the Invoices list: a status chip, or unpaid (final); junk dropped", () => {
     expect(invoiceSearch({ status: "unpaid" })).toEqual({ status: "unpaid" });
     expect(invoiceSearch({ status: "paid" })).toEqual({ status: "paid" });
     expect(invoiceSearch({ status: "nope" })).toEqual({});
-    expect(invoiceSearch({ tab: "to-invoice", status: "sent" })).toEqual({
+    expect(invoiceSearch({ tab: "to-invoice", status: "final" })).toEqual({
       tab: "to-invoice",
-      status: "sent",
+      status: "final",
     });
+    // Nov 9: Sent is no longer a status; a stale ?status=sent is dropped.
+    expect(invoiceSearch({ status: "sent" })).toEqual({});
   });
-  it("the list honours it: the chip, the page prop and the server's final + sent", () => {
+  it("the list honours it: the chip, the page prop and the server's final", () => {
     // Nov 3: the chip is the URL's (?status=), not page state (review item 11).
     expect(read("src/components/service/invoices-page.tsx")).toContain(
       'const status: StatusFilter = filters.status ?? "all";',
     );
     expect(read("src/components/service/invoices-page.tsx")).toContain("> Unpaid </Chip>");
     expect(read("src/lib/invoices.functions.ts")).toContain(
-      'if (data.status === "unpaid") q = q.in("status", ["final", "sent"]);',
+      'if (data.status === "unpaid") q = q.eq("status", "final");',
     );
     expect(read("src/routes/service.invoices.tsx")).toContain("<InvoicesPage search={search} />");
   });
