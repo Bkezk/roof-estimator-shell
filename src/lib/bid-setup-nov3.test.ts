@@ -28,7 +28,10 @@ describe("Job Name and Customer Name", () => {
     );
     expect(job).toContain('id="bid-name"');
     expect(job).toContain("onChange={(e) => setBidName(e.target.value)}");
-    expect(job).toContain('toast.error("Bid Title cannot be left blank.");');
+    // Since Nov 9 a blank job name is named after the customer on save (bid-name.ts): the legacy
+    // "Bid Title cannot be left blank." toast and its reset are gone.
+    expect(job).not.toContain("Bid Title cannot be left blank.");
+    expect(job).toContain('placeholder="Named after the customer when saved"');
     expect(job).not.toContain("AccountPicker");
     expect(job).not.toContain("pickAccount");
   });

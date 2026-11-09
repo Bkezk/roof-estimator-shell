@@ -15,6 +15,7 @@ import {
   bidCustomerProblem,
 } from "@/lib/bid-status";
 import { bidFiguresSchema } from "@/lib/bid-figures";
+import { customerBidName, customerNamePrefix, isUntitledBid, UNTITLED_BID } from "@/lib/bid-name";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
@@ -293,8 +294,13 @@ export const saveBid = createServerFn({ method: "POST" })
       .eq("id", context.userId)
       .maybeSingle();
     const now = new Date().toISOString();
+    // A bid saved with no job name is named after its customer (bid-name.ts; owner, Nov 9):
+    // the linked customer, else the name typed on Setup; "(1)", "(2)"… when a live bid has it.
+    const name = isUntitledBid(data.name)
+      ? await nameAfterCustomer(context.supabase, data)
+      : data.name.trim();
     const payload = {
-      name: data.name,
+      name,
       data: data.data as Json,
       grand_total: data.grandTotal,
       ...(data.figures !== undefined ? { figures: data.figures } : {}),
@@ -415,6 +421,55 @@ export const saveBid = createServerFn({ method: "POST" })
     if (status !== "draft" && bid.opportunity_id) await syncOpportunityFromBid(context, bid.id);
     return bid;
   });
+
+/**
+ * The name for an untitled save (bid-name.ts customerBidName): the customer the save links or
+ * the bid already has (crm_accounts.name), else the customer typed on Setup; the placeholder
+ * when there is neither. Live bids starting with that name, this one excluded, are the taken
+ * names.
+ */
+async function nameAfterCustomer(
+  sb: Parameters<typeof liveLockHeldElsewhere>[0],
+  data: { id?: string | undefined; accountId?: string | null | undefined; data: unknown },
+): Promise<string> {
+  let accountId = data.accountId ?? null;
+  if (!accountId && data.id) {
+    const { data: cur } = await sb
+      .from("bids")
+      .select("account_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    accountId = cur?.account_id ?? null;
+  }
+  let customer: string | null = null;
+  if (accountId) {
+    const { data: acc } = await sb
+      .from("crm_accounts")
+      .select("name")
+      .eq("id", accountId)
+      .maybeSingle();
+    customer = acc?.name ?? null;
+  }
+  if (!customer) {
+    const typed = (data.data as { customer?: { name?: unknown } } | null)?.customer?.name;
+    customer = typeof typed === "string" ? typed : null;
+  }
+  if (!customer?.trim()) return UNTITLED_BID;
+  let q = sb
+    .from("bids")
+    .select("name")
+    .is("deleted_at", null)
+    .ilike("name", customerNamePrefix(customer));
+  if (data.id) q = q.neq("id", data.id);
+  const { data: rows, error } = await q;
+  if (error) throw new Error(error.message);
+  return (
+    customerBidName(
+      customer,
+      (rows ?? []).map((r) => r.name),
+    ) ?? UNTITLED_BID
+  );
+}
 
 const importBidsSchema = z.object({
   bids: z

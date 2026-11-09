@@ -49,6 +49,7 @@ import {
 import { FOLDER_MAX, normalizeFolder, suggestFolder, UNFILED } from "@/lib/bids-folders";
 import { bidFigures } from "@/lib/bid-figures";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
+import { UNTITLED_BID } from "@/lib/bid-name";
 import { getSourceInspection, linkBidToInspection } from "@/lib/service-inspection.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
@@ -2792,7 +2793,15 @@ function EstimatePage() {
       // The row as saved: a header field changed elsewhere since this tab opened the bid was
       // kept (bidHeaderPatch); it is shown here and said in the toast.
       const kept = row ? keptElsewhere(tabHeader, bidHeaderOfRow(row)) : [];
-      toast.success(savedToastText(kept));
+      // A bid saved with no job name comes back named after its customer (bid-name.ts; owner,
+      // Nov 9): the tab adopts the name, so the next save does not read as unsaved.
+      const renamed = !!row && row.name !== (bidName.trim() || UNTITLED_BID);
+      if (row && renamed) setBidName(row.name);
+      toast.success(
+        row && renamed
+          ? `${savedToastText(kept)} — named "${row.name}" after the customer`
+          : savedToastText(kept),
+      );
       setDueDateMissing(false);
       if (row?.updated_at) loadedUpdatedAt.current = row.updated_at;
       // The saved row into the bid's own cache (reopening it in this tab shows this save).
@@ -2810,7 +2819,7 @@ function EstimatePage() {
           setBidReminderNote(h.reminderNote);
         }
       }
-      lastSavedBody.current = bodyJsonOf(bidName);
+      lastSavedBody.current = bodyJsonOf(row?.name ?? bidName);
       lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
@@ -3331,13 +3340,9 @@ function EstimatePage() {
                         id="bid-name"
                         value={bidName}
                         onChange={(e) => setBidName(e.target.value)}
-                        onBlur={() => {
-                          // Legacy txtEstimateTitle_LostFocus: "Bid Title cannot be left blank."
-                          if (bidName.trim() === "") {
-                            toast.error("Bid Title cannot be left blank.");
-                            setBidName("Untitled bid");
-                          }
-                        }}
+                        // Left blank, the save names the bid after its customer (bid-name.ts;
+                        // owner, Nov 9); the legacy blur handler that refused a blank title is gone.
+                        placeholder="Named after the customer when saved"
                       />
                     </Field>
                     <Field label="Estimator's Name">

@@ -341,7 +341,9 @@ function NavGroup({
 
 export function AppSidebar() {
   const { state, toggleSidebar, isMobile, setOpenMobile } = useSidebar();
-  const collapsed = state === "collapsed";
+  // The desktop menu's collapsed flag is remembered in a cookie; the phone drawer is always full
+  // width, so it never hides the names (owner, Nov 9: "the names don't show on the nav bar").
+  const collapsed = !isMobile && state === "collapsed";
   // Owner, Oct 28: on a phone the drawer closes after a tap on a page link (sidebar-phone-close.ts).
   const onMenuClick = (e: MouseEvent<HTMLDivElement>) =>
     closeDrawerAfterLink(isMobile, e.target as Tapped, setOpenMobile);
