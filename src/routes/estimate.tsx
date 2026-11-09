@@ -49,6 +49,7 @@ import {
 import { FOLDER_MAX, normalizeFolder, suggestFolder, UNFILED } from "@/lib/bids-folders";
 import { bidFigures } from "@/lib/bid-figures";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
+import { getSourceInspection, linkBidToInspection } from "@/lib/service-inspection.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
 import {
@@ -216,6 +217,7 @@ import {
   bidDueDateProblem,
   bidOfficeToday,
   bidRemindedLine,
+  fromInspectionLine,
   fromOpportunityLine,
   STATUS_LABELS,
   type BidStatus,
@@ -451,6 +453,9 @@ function EstimatePage() {
   const dueDateSaveFn = useServerFn(setBidDueDateFn);
   // "Start a bid" from an opportunity (?opportunity=<id>): the first save links it back.
   const linkBidFn = useServerFn(linkBid);
+  // "Create bid" from an inspection ticket (?inspection=<id>; owner, Nov 9): the first save links
+  // the bid back to the ticket and records the inspection's outcome.
+  const linkInspectionFn = useServerFn(linkBidToInspection);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const search = Route.useSearch();
@@ -1117,6 +1122,16 @@ function EstimatePage() {
     queryKey: ["opportunity", fromOpportunityId],
     queryFn: () => getOppFn({ data: { id: fromOpportunityId! } }),
     enabled: authed && !!fromOpportunityId,
+  });
+  // The inspection ticket this bid was started from (bids.from_job_id; owner, Nov 9): "From
+  // inspection #6058 — Done, Nov 9" under the Status select, linking back to the ticket.
+  const getInspectionFn = useServerFn(getSourceInspection);
+  const [linkedInspectionId, setLinkedInspectionId] = useState<string | null>(null);
+  const fromInspectionId = loadedBid?.from_job_id ?? linkedInspectionId;
+  const fromInspection = useQuery({
+    queryKey: ["service-source-inspection", fromInspectionId],
+    queryFn: () => getInspectionFn({ data: { id: fromInspectionId! } }),
+    enabled: authed && !!fromInspectionId,
   });
   // The saved bid could not be read (a timed-out or cancelled query while the database is
   // busy, an expired session…) or the id matches nothing this user may see. The form below is
@@ -2803,6 +2818,7 @@ function EstimatePage() {
         setBidId(row.id);
         hydratedFor.current = row.id;
         if (search.opportunity) linkOpportunity(search.opportunity, row.id);
+        if (search.inspection) linkInspection(search.inspection, row.id);
         // The takeoff that built this bid is linked to it, and so locked.
         if (linkedTakeoffId) lockTakeoff(linkedTakeoffId, row.id, row.name);
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
@@ -2831,6 +2847,22 @@ function EstimatePage() {
       .catch((e: unknown) =>
         toast.error(
           `The bid is saved, but it could not be linked to the opportunity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+  };
+  // The inspection ticket this bid was started from gets the link and its outcome
+  // (service-inspection.functions.ts linkBidToInspection). Best effort, as the opportunity's.
+  const linkInspection = (inspectionId: string, newBidId: string) => {
+    linkInspectionFn({ data: { inspectionId, bidId: newBidId } })
+      .then(() => {
+        setLinkedInspectionId(inspectionId);
+        void qc.invalidateQueries({ queryKey: ["service-source-inspection", inspectionId] });
+        void qc.invalidateQueries({ queryKey: ["service-job", inspectionId] });
+        void qc.invalidateQueries({ queryKey: ["bids"] });
+      })
+      .catch((e: unknown) =>
+        toast.error(
+          `The bid is saved, but it could not be linked to the inspection: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
   };
@@ -6939,6 +6971,18 @@ function EstimatePage() {
                   title="Open the opportunity. Submitted / Won / Lost here move its status; its own status leaves this bid alone."
                 >
                   {fromOpportunityLine(fromOpportunity.data.title)}
+                </Link>
+              </p>
+            )}
+            {fromInspection.data && (
+              <p className="truncate text-[11px] text-muted-foreground" data-line="from-inspection">
+                <Link
+                  to="/service"
+                  search={{ id: fromInspection.data.id }}
+                  className="hover:underline"
+                  title="Open the inspection ticket this bid was started from."
+                >
+                  {fromInspectionLine(fromInspection.data)}
                 </Link>
               </p>
             )}

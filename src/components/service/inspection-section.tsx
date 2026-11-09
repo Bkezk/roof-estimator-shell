@@ -565,7 +565,7 @@ function OfficeActions({
     onError: (e) => toast.error(`Could not create the repair ticket: ${errText(e)}`),
   });
   const record = useMutation({
-    mutationFn: (outcome: "bid" | "none") => outcomeFn({ data: { id: job.id, outcome } }),
+    mutationFn: (outcome: "none") => outcomeFn({ data: { id: job.id, outcome } }),
     onSuccess: (o) => {
       landedOutcome(o);
       if (o.outcome === "none") toast.success("Recorded: no action needed");
@@ -595,7 +595,7 @@ function OfficeActions({
         ? `#${data.created[0].number}`
         : null
       : outcome?.outcome === "bid"
-        ? (bidPrefill?.pfName ?? null)
+        ? (data.bids.at(-1)?.name ?? bidPrefill?.pfName ?? null)
         : null;
   return (
     <div className="space-y-2 rounded-md border border-dashed p-3 text-sm">
@@ -685,10 +685,10 @@ function OfficeActions({
                 <Button asChild variant="outline" className="h-10">
                   <Link
                     to="/estimate"
-                    search={bidPrefill}
-                    // The outcome is recorded as the estimator opens (best effort: the bid is
-                    // the estimator's; a failure here is a toast, not a stop).
-                    onClick={() => record.mutate("bid")}
+                    // The ticket rides along (owner, Nov 9): the estimator's first save links the
+                    // bid back (bids.from_job_id) and records the outcome; backing out without
+                    // saving records nothing.
+                    search={{ ...bidPrefill, inspection: job.id }}
                   >
                     <Calculator className="mr-2 h-4 w-4" /> Create bid
                   </Link>
@@ -712,8 +712,8 @@ function OfficeActions({
           </div>
         </>
       )}
-      {data.created.length > 0 && (
-        <p>
+      {(data.created.length > 0 || data.bids.length > 0) && (
+        <p data-line="created-from-inspection">
           Created from this inspection:{" "}
           {data.created.map((t, i) => (
             <span key={t.id}>
@@ -721,6 +721,17 @@ function OfficeActions({
               <Link to="/service" search={{ id: t.id }} className="underline underline-offset-2">
                 #{t.number}
               </Link>
+            </span>
+          ))}
+          {/* Bids started from it (bids.from_job_id; owner, Nov 9), each with its status. */}
+          {data.bids.map((b, i) => (
+            <span key={b.id}>
+              {(i > 0 || data.created.length > 0) && ", "}
+              bid{" "}
+              <Link to="/estimate" search={{ bid: b.id }} className="underline underline-offset-2">
+                {b.name}
+              </Link>{" "}
+              ({b.status.charAt(0).toUpperCase() + b.status.slice(1)})
             </span>
           ))}
         </p>

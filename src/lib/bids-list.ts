@@ -24,6 +24,12 @@ export interface BidListRow {
   account: { id: string; name: string } | null;
   /** The opportunity the bid was started from (title null when it cannot be read), or null. */
   opportunity: { id: string; title: string | null } | null;
+  from_job_id: string | null;
+  /**
+   * The inspection ticket the bid was started from (bids.from_job_id; owner, Nov 9), or null when
+   * there is none, it is deleted, or the reader may not see tickets.
+   */
+  from_job: { id: string; number: number; stage: string; completed_at: string | null } | null;
   /** Estimator's Name as keyed on Setup › Bid Info (data.customer.estimatorName); "" when blank. */
   estimator_name: string;
   /** The customer's name as typed on Setup (data.customer.name); "" when blank. */

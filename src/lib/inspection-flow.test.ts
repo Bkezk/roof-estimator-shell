@@ -1087,7 +1087,8 @@ describe("6d. the office's After the inspection panel", () => {
     expect(section).toContain('<SelectItem value="warranty">Warranty</SelectItem>');
     expect(section).toContain("No action needed");
     expect(section).toContain('onClick={() => record.mutate("none")}');
-    expect(section).toContain('onClick={() => record.mutate("bid")}');
+    // Since Nov 9 the bid's outcome is recorded by the estimator's first save, not the click.
+    expect(section).not.toContain('record.mutate("bid")');
     expect(section).toContain('data-line="inspection-outcome"');
     expect(section).toContain("outcomeLine({");
     expect(section).toMatch(/type RepairType = "repair" \| "warranty" \| "other";/);

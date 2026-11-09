@@ -35,6 +35,12 @@ export interface EstimateSearch {
    * its id is written on that opportunity (opportunities.functions.ts linkBid).
    */
   opportunity?: string;
+  /**
+   * The inspection ticket "Create bid" came from (service_jobs.id; owner, Nov 9): once the new
+   * bid is saved, the ticket's id is written on the bid (bids.from_job_id) and the ticket's
+   * outcome is recorded as "bid" (service-inspection.functions.ts linkBidToInspection).
+   */
+  inspection?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,7 +52,7 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
     const v = s[k];
     return typeof v === "string" && v ? { [k]: v } : {};
   };
-  const uuid = (k: "pfAccount" | "pfSite" | "opportunity"): string | null => {
+  const uuid = (k: "pfAccount" | "pfSite" | "opportunity" | "inspection"): string | null => {
     const v = s[k];
     return typeof v === "string" && UUID.test(v) ? v : null;
   };
@@ -58,6 +64,7 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
   // A site only means something with its customer.
   const site = account ? uuid("pfSite") : null;
   const opportunity = uuid("opportunity");
+  const inspection = uuid("inspection");
   return {
     ...(typeof b === "string" ? { bid: b } : {}),
     // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
@@ -81,5 +88,6 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
     ...(site ? { pfSite: site } : {}),
     ...str("pfNotes"),
     ...(opportunity ? { opportunity } : {}),
+    ...(inspection ? { inspection } : {}),
   };
 }

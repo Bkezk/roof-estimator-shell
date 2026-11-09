@@ -3,8 +3,9 @@
  * admin keeps (inspection_checklist_items, Setup › Inspection checklist), the answers saved on the
  * ticket (service_jobs.inspection), and — from a completed inspection, at the office's choice —
  * a repair ticket linked back to it (service_jobs.from_job_id). "Create bid" is a link to the
- * estimator with the customer prefilled (bidPrefillFromInspection), so nothing is written here
- * for it. Nothing is created automatically.
+ * estimator with the customer prefilled (bidPrefillFromInspection) and the ticket's id in the URL;
+ * the estimator's first save links the new bid back (bids.from_job_id, linkBidToInspection), and
+ * only then is the outcome "bid" recorded (owner, Nov 9). Nothing is created automatically.
  *
  * Access: Service. A technician saves only their own ticket's inspection, not once the office
  * has invoiced or closed it; only the office creates the repair ticket.
@@ -137,6 +138,15 @@ export interface LinkedTicket {
   number: number;
   service_type: string;
   stage: string;
+  /** When the tech marked it Done, for "From inspection #6058 — Done, Nov 9" (owner, Nov 9). */
+  completed_at: string | null;
+}
+/** A bid started from this inspection (bids.from_job_id; owner, Nov 9). */
+export interface LinkedBid {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
 }
 /** What the office chose after the inspection, as the panel shows it. */
 export interface OutcomeRecord {
@@ -150,6 +160,8 @@ export interface TicketInspection {
   checklist: ChecklistItem[];
   /** Tickets created from this inspection (repair tickets). */
   created: LinkedTicket[];
+  /** Bids started from this inspection, oldest first (none when the reader lacks Estimate access). */
+  bids: LinkedBid[];
   /** The recorded outcome (service_jobs.inspection_outcome*), null until chosen. */
   outcome: OutcomeRecord | null;
   /** The site's address parts, for "Create bid". */
@@ -177,11 +189,11 @@ export const getTicketInspection = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!job) throw new Error("Ticket not found");
-    const [items, created, site, chooser] = await Promise.all([
+    const [items, created, site, chooser, bids] = await Promise.all([
       sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
       sb
         .from("service_jobs")
-        .select("id, number, service_type, stage")
+        .select("id, number, service_type, stage, completed_at")
         .eq("from_job_id", job.id)
         .is("deleted_at", null)
         .order("created_at"),
@@ -199,14 +211,24 @@ export const getTicketInspection = createServerFn({ method: "GET" })
             .eq("id", job.inspection_outcome_by)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      // Bids started from this inspection (bids.from_job_id; owner, Nov 9). Under the bids' own
+      // RLS: a Service user without Estimate access reads none, and the panel lists none.
+      sb
+        .from("bids")
+        .select("id, name, status, created_at")
+        .eq("from_job_id", job.id)
+        .is("deleted_at", null)
+        .order("created_at"),
     ]);
     if (items.error) throw new Error(items.error.message);
     if (created.error) throw new Error(created.error.message);
+    if (bids.error) throw new Error(bids.error.message);
     const outcome = asOutcome(job.inspection_outcome);
     return {
       inspection: parseInspection(job.inspection),
       checklist: items.data ?? [],
       created: created.data ?? [],
+      bids: bids.data ?? [],
       outcome: outcome
         ? {
             outcome,
@@ -474,9 +496,68 @@ export const getSourceInspection = createServerFn({ method: "GET" })
     await me(context);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
-      .select("id, number, service_type, stage")
+      .select("id, number, service_type, stage, completed_at")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     return row ?? null;
+  });
+
+/**
+ * The estimator's first save of a bid started with "Create bid" (owner, Nov 9: "make it to where
+ * there is a stored link to the inspection on the bid"): the bid remembers its inspection
+ * (bids.from_job_id) and only then is the inspection's outcome recorded as "bid" — backing out of
+ * the estimator without saving leaves the ticket as it was. The same pair again changes nothing;
+ * a bid already linked to another inspection is refused. More than one bid may come from one
+ * inspection (two options for the customer): each is listed on the ticket.
+ */
+export const linkBidToInspection = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ inspectionId: z.string().uuid(), bidId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ linked: boolean }> => {
+    const p = await me(context);
+    const sb = context.supabase;
+    const [{ data: job, error }, { data: bid, error: bErr }] = await Promise.all([
+      sb
+        .from("service_jobs")
+        .select("id, number, service_type, stage, deleted_at")
+        .eq("id", data.inspectionId)
+        .maybeSingle(),
+      sb
+        .from("bids")
+        .select("id, name, from_job_id, deleted_at")
+        .eq("id", data.bidId)
+        .maybeSingle(),
+    ]);
+    if (error) throw new Error(error.message);
+    if (bErr) throw new Error(bErr.message);
+    if (!job || job.deleted_at) throw new Error("Ticket not found");
+    if (!bid || bid.deleted_at) throw new Error("Bid not found");
+    if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+    if (!inspectionComplete(job.stage))
+      throw new Error("The inspection is not done yet; mark it Done first");
+    if (bid.from_job_id === job.id) return { linked: true };
+    if (bid.from_job_id) throw new Error("This bid is already linked to another inspection");
+    const { data: rows, error: uErr } = await sb
+      .from("bids")
+      .update({ from_job_id: job.id })
+      .eq("id", bid.id)
+      .is("from_job_id", null)
+      .select("id");
+    if (uErr) throw new Error(uErr.message);
+    // Two saves at once: the other one linked it first (the pair is the same, so it stands).
+    if (!rows?.length) return { linked: true };
+    const name = nameOf(p);
+    await recordOutcome(sb, job.id, "bid", context.userId, name);
+    await sb.from("service_job_events").insert({
+      service_job_id: job.id,
+      kind: "note",
+      note: `Bid "${bid.name}" started from this inspection`,
+      by_user: context.userId,
+      by_name: name,
+      meta: { inspection_outcome: "bid", bid_id: bid.id } as Json,
+    });
+    return { linked: true };
   });

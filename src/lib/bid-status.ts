@@ -3,6 +3,7 @@
  * Lost. The legacy Bid-Advantage pipeline (In Progress → Finished → Submitted → Review → Final →
  * Accepted / Denied) folds into these when an old value is read.
  */
+import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 
 export const BID_STATUSES = ["draft", "submitted", "won", "lost"] as const;
@@ -127,6 +128,28 @@ export const BID_DRIVES_OPP_NOTE =
   "Won/Lost on the bid updates this opportunity; closing the opportunity leaves the bid alone.";
 /** "From opportunity: <title>" on the Bids page and in the estimator (bids.opportunity_id). */
 export const fromOpportunityLine = (title: string) => `From opportunity: ${title}`;
+
+/**
+ * "From inspection #6058 — Done, Nov 9" on the Bids page and in the estimator (bids.from_job_id;
+ * owner, Nov 9): the ticket's number, its stage and the day the tech marked it Done (office
+ * time). A ticket not yet Done (it cannot start a bid, but the stage can move back) reads
+ * "From inspection #6058 — Open".
+ */
+export function fromInspectionLine(t: {
+  number: number;
+  stage: string;
+  completed_at: string | null;
+}): string {
+  const stage = (STAGE_LABELS as Record<string, string>)[t.stage as ServiceStage] ?? t.stage;
+  const day = t.completed_at
+    ? new Date(t.completed_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: TASK_TZ,
+      })
+    : null;
+  return `From inspection #${t.number} — ${stage}${day ? `, ${day}` : ""}`;
+}
 
 // ---- the bid's customer (owner, Oct 26) ------------------------------------------------------
 

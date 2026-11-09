@@ -327,6 +327,7 @@ export type Database = {
           due_date: string | null
           figures: Json | null
           folder: string | null
+          from_job_id: string | null
           grand_total: number
           id: string
           lost_reason: string | null
@@ -359,6 +360,7 @@ export type Database = {
           due_date?: string | null
           figures?: Json | null
           folder?: string | null
+          from_job_id?: string | null
           grand_total?: number
           id?: string
           lost_reason?: string | null
@@ -391,6 +393,7 @@ export type Database = {
           due_date?: string | null
           figures?: Json | null
           folder?: string | null
+          from_job_id?: string | null
           grand_total?: number
           id?: string
           lost_reason?: string | null
@@ -425,6 +428,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bids_from_job_id_fkey"
+            columns: ["from_job_id"]
+            isOneToOne: false
+            referencedRelation: "service_jobs"
             referencedColumns: ["id"]
           },
           {

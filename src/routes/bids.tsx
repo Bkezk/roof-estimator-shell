@@ -50,6 +50,7 @@ import {
   STATUS_LABELS,
   asBidStatus,
   bidOfficeToday,
+  fromInspectionLine,
   fromOpportunityLine,
   type BidStatus,
 } from "@/lib/bid-status";
@@ -629,6 +630,20 @@ function BidsPage() {
                   onKeyDown={(e) => e.stopPropagation()}
                 >
                   {fromOpportunityLine(bid.opportunity.title)}
+                </Link>
+              </p>
+            )}
+            {/* The inspection it was started from (bids.from_job_id; owner, Nov 9). */}
+            {bid.from_job && (
+              <p className="text-xs text-muted-foreground" data-line="from-inspection">
+                <Link
+                  to="/service"
+                  search={{ id: bid.from_job.id }}
+                  className="hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  {fromInspectionLine(bid.from_job)}
                 </Link>
               </p>
             )}

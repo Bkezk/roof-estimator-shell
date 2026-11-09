@@ -33,7 +33,7 @@ import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
  * the browser gets the systems, never the sections or the payload.
  */
 const LIST_COLUMNS: string =
-  "id, name, status, grand_total, created_at, updated_at, updated_by_name, folder, due_date, lost_reason, account_id, opportunity_id, estimator_name:data->customer->>estimatorName, typed_customer:data->customer->>name, roof_system:data->>roofSystem, sections:data->sections, import_source:data->importInfo->>source, account:crm_accounts!bids_account_id_fkey(id, name)";
+  "id, name, status, grand_total, created_at, updated_at, updated_by_name, folder, due_date, lost_reason, account_id, opportunity_id, from_job_id, estimator_name:data->customer->>estimatorName, typed_customer:data->customer->>name, roof_system:data->>roofSystem, sections:data->sections, import_source:data->importInfo->>source, account:crm_accounts!bids_account_id_fkey(id, name)";
 /** A row as LIST_COLUMNS reads it (typed by hand: the select parser cannot follow the JSON paths). */
 interface RawListRow {
   id: string;
@@ -48,6 +48,7 @@ interface RawListRow {
   lost_reason: string | null;
   account_id: string | null;
   opportunity_id: string | null;
+  from_job_id: string | null;
   estimator_name: string | null;
   typed_customer: string | null;
   roof_system: string | null;
@@ -82,12 +83,28 @@ export const listBids = createServerFn({ method: "GET" })
         .in("id", oppIds);
       for (const o of opps ?? []) titles.set(o.id, o.title);
     }
+    // The inspection ticket a bid was started from (bids.from_job_id; owner, Nov 9: "From
+    // inspection #6058 — Done, Nov 9" on the row). Under the tickets' own RLS; one that cannot be
+    // read, or is deleted, leaves the line off.
+    const jobIds = [
+      ...new Set((data ?? []).map((b) => b.from_job_id).filter((x): x is string => !!x)),
+    ];
+    const tickets = new Map<string, NonNullable<BidListRow["from_job"]>>();
+    if (jobIds.length) {
+      const { data: jobs } = await context.supabase
+        .from("service_jobs")
+        .select("id, number, stage, completed_at")
+        .in("id", jobIds)
+        .is("deleted_at", null);
+      for (const j of jobs ?? []) tickets.set(j.id, j);
+    }
     return (data ?? []).map(({ sections, roof_system, estimator_name, typed_customer, ...b }) => ({
       ...b,
       account: b.account ? { id: b.account.id, name: b.account.name } : null,
       opportunity: b.opportunity_id
         ? { id: b.opportunity_id, title: titles.get(b.opportunity_id) ?? null }
         : null,
+      from_job: b.from_job_id ? (tickets.get(b.from_job_id) ?? null) : null,
       estimator_name: (estimator_name ?? "").trim(),
       typed_customer: (typed_customer ?? "").trim(),
       roof_systems: bidRoofSystems(roof_system, sections),
