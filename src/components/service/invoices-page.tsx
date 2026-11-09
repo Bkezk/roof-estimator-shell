@@ -24,11 +24,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, FileDown, Loader2, Receipt } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  FileDown,
+  Loader2,
+  Receipt,
+} from "lucide-react";
 import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
+import {
+  groupInvoicesByStatus,
+  readCollapsedInvoiceGroups,
+  toggleCollapsedGroup,
+  writeCollapsedInvoiceGroups,
+} from "@/lib/invoice-groups";
 import {
   AWAITING_INVOICE_TITLE,
   invoiceListSearch,
@@ -52,8 +66,8 @@ import {
   exportSageCsv,
   markSageExported,
   INVOICE_STATUSES,
-  listInvoices,
   type InvoiceStatus,
+  listInvoices,
 } from "@/lib/invoices.functions";
 import { InvoiceEditorPage, InvoiceStatusBadge } from "@/components/service/invoice-editor";
 import { VendorBilledBadge } from "@/components/service/bill-to-picker";
@@ -191,6 +205,9 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
   const [exportOpen, setExportOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<InvoiceStatus[]>(() =>
+    readCollapsedInvoiceGroups(typeof window === "undefined" ? null : window.localStorage),
+  );
   const today = todayYmd();
 
   const list = useQuery({
@@ -224,6 +241,16 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
   const openSum = sum((r) => (asInvoiceStatus(r.status) === "final" ? Number(r.total) : 0));
   const shown = sortInvoices(rows, sort.key, sort.dir);
+  // One collapsible group per status, Draft → Final → Paid → Void (owner, Nov 9: "like on bids
+  // where each status is a collapsible row"); the rows keep the sort inside each group (by date,
+  // newest first, unless a heading was clicked). A collapsed group is remembered per browser.
+  const groups = groupInvoicesByStatus(shown);
+  const toggleGroup = (st: InvoiceStatus) =>
+    setCollapsed((prev) => {
+      const next = toggleCollapsedGroup(prev, st);
+      writeCollapsedInvoiceGroups(window.localStorage, next);
+      return next;
+    });
   const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
   // The ticket's Back link returns to this queue (owner, Oct 9).
   const open = (serviceJobId: string) =>
@@ -232,6 +259,77 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const openInvoice = (invoiceId: string) =>
     void navigate({ to: "/service/invoices", search: { ...filters, id: invoiceId } });
 
+  /** One invoice's row (the same columns in every group). */
+  const renderRow = (r: (typeof shown)[number]) => {
+    const s = asInvoiceStatus(r.status);
+    // Due and how late (owner, Nov 3, review item 12): a late open invoice is tinted.
+    const due = invoiceDue(r, today);
+    const late = due.lateDays > 0;
+    return (
+      <tr
+        key={r.id}
+        className={`cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40 ${s === "void" ? "text-muted-foreground" : ""} ${late ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
+        data-late={late ? due.lateDays : undefined}
+        onClick={() => openInvoice(r.id)}
+      >
+        <td className="px-3 py-2 font-medium tabular-nums">
+          <Link
+            to="/service/invoices"
+            search={{ ...filters, id: r.id }}
+            className="underline-offset-2 hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {r.label}
+          </Link>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">{shortDay(r.invoice_date)}</td>
+        <td className="px-3 py-2">
+          {r.bill_to_vendor_id ? (
+            <VendorBilledBadge name={r.customer_name} />
+          ) : (
+            r.customer_name || "—"
+          )}
+        </td>
+        <td className="px-3 py-2">{r.site_name || "—"}</td>
+        <td className="whitespace-nowrap px-3 py-2">{r.po_number || "—"}</td>
+        <td className="whitespace-nowrap px-3 py-2">{r.job_code || "—"}</td>
+        <td className={`px-3 py-2 text-right tabular-nums ${s === "void" ? "line-through" : ""}`}>
+          {money(r.total)}
+        </td>
+        <td className="px-3 py-2">
+          <InvoiceStatusBadge status={r.status} />
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">
+          {due.due ? shortDay(due.due) : due.open ? "On receipt" : "—"}
+          {late && (
+            <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
+              {due.lateDays} day{due.lateDays === 1 ? "" : "s"} late
+            </span>
+          )}
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">
+          {r.paid_on ? (
+            <>
+              {shortDay(r.paid_on)}
+              <span className="block text-xs text-muted-foreground">
+                {money(r.paid_amount)}
+                {r.paid_ref ? ` · ${r.paid_ref}` : ""}
+              </span>
+            </>
+          ) : (
+            "—"
+          )}
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">
+          {stampDay(r.sent_at) || "—"}
+          <span className="block text-xs text-muted-foreground">
+            {r.sent_by_name ? `by ${r.sent_by_name}` : ""}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">{stampDay(r.sage_exported_at) || "—"}</td>
+      </tr>
+    );
+  };
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -379,82 +477,35 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
                 <th className="px-3 py-2 font-medium">Sage</th>
               </tr>
             </thead>
-            <tbody>
-              {shown.map((r) => {
-                const s = asInvoiceStatus(r.status);
-                // Due and how late (owner, Nov 3, review item 12): a late open invoice is tinted.
-                const due = invoiceDue(r, today);
-                const late = due.lateDays > 0;
-                return (
-                  <tr
-                    key={r.id}
-                    className={`cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40 ${s === "void" ? "text-muted-foreground" : ""} ${late ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
-                    data-late={late ? due.lateDays : undefined}
-                    onClick={() => openInvoice(r.id)}
-                  >
-                    <td className="px-3 py-2 font-medium tabular-nums">
-                      <Link
-                        to="/service/invoices"
-                        search={{ ...filters, id: r.id }}
-                        className="underline-offset-2 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
+            {groups.map((g) => {
+              const open = !collapsed.includes(g.status);
+              const Chevron = open ? ChevronDown : ChevronRight;
+              return (
+                <tbody key={g.status} data-group={g.status} data-open={open ? "" : undefined}>
+                  <tr className="border-b bg-muted/30">
+                    <td colSpan={12} className="px-3 py-1.5">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-expanded={open}
+                        title={open ? "Collapse this group" : "Expand this group"}
+                        onClick={() => toggleGroup(g.status)}
                       >
-                        {r.label}
-                      </Link>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">{shortDay(r.invoice_date)}</td>
-                    <td className="px-3 py-2">
-                      {r.bill_to_vendor_id ? (
-                        <VendorBilledBadge name={r.customer_name} />
-                      ) : (
-                        r.customer_name || "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{r.site_name || "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{r.po_number || "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{r.job_code || "—"}</td>
-                    <td
-                      className={`px-3 py-2 text-right tabular-nums ${s === "void" ? "line-through" : ""}`}
-                    >
-                      {money(r.total)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <InvoiceStatusBadge status={r.status} />
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {due.due ? shortDay(due.due) : due.open ? "On receipt" : "—"}
-                      {late && (
-                        <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
-                          {due.lateDays} day{due.lateDays === 1 ? "" : "s"} late
+                        <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        <span className="text-xs font-semibold uppercase tracking-wide">
+                          {STATUS_LABELS[g.status]}
                         </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {r.paid_on ? (
-                        <>
-                          {shortDay(r.paid_on)}
-                          <span className="block text-xs text-muted-foreground">
-                            {money(r.paid_amount)}
-                            {r.paid_ref ? ` · ${r.paid_ref}` : ""}
-                          </span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {stampDay(r.sent_at) || "—"}
-                      <span className="block text-xs text-muted-foreground">
-                        {r.sent_by_name ? `by ${r.sent_by_name}` : ""}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {stampDay(r.sage_exported_at) || "—"}
+                        <span className="text-xs text-muted-foreground">
+                          {g.rows.length} invoice{g.rows.length === 1 ? "" : "s"}
+                          {g.status === "void" ? "" : ` · ${money(g.total)}`}
+                        </span>
+                      </button>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
+                  {open && g.rows.map(renderRow)}
+                </tbody>
+              );
+            })}
             <tfoot>
               <tr className="border-t bg-muted/40 text-sm font-medium">
                 <td className="px-3 py-2" colSpan={6}>
