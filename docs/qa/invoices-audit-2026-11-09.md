@@ -57,7 +57,16 @@ removed with the rest.
   finalised then voided: "Void", kept on record under 6059.2, the ticket stayed Invoiced because
   #6059 was still live, the list's Void group counted it and the sums left it out.
 
-## Findings (not fixed; owner to choose)
+## Findings (owner, Nov 9: "fix 1 … 6 is not an issue"; 2–5 proposed, awaiting the choice)
+
+**Fix 1 (done, same day).** The lines and the Totals box sit side by side only when the content
+is at least 1,420 px wide — a container query (`@min-[1420px]`, so the sidebar's width counts),
+not the window's `xl`; narrower, the box goes below the lines and the line grid scrolls sideways
+in its own strip (`data-lines-scroll`). Proven read-only on the real draft #6024 at 1280, 1366,
+1440, 1536, 1680 and 1920 px: the Remove × answers `elementFromPoint` at every width (at 1280
+after scrolling the strip 50 px), the box is beside the lines from 1680 up. The first attempt
+built the class names from a template and Tailwind never generated them — written out in full,
+`invoice-editor-layout.test.ts` pins that. Full chain green (504 files / 6,428 tests).
 
 1. **Lines table under the Totals box (office view, 1280–1536 px wide).** With the Cost column,
    the line grid is 1,096 px wide at minimum and the two-column layout (`xl:grid-cols-[minmax(0,1fr)_300px]`)

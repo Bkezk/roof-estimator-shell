@@ -633,6 +633,17 @@ const LINE_COLS =
 /** The same with a Cost column after Rate, for the office (managesTickets; owner, Oct 8). */
 const LINE_COLS_COST =
   "lg:grid lg:grid-cols-[112px_minmax(200px,1fr)_88px_76px_112px_112px_56px_120px_112px_36px] lg:items-start lg:gap-2";
+/**
+ * The office's line grid at its narrowest (LINE_COLS_COST: the columns plus the gaps), and the
+ * content width from which the Totals box (300 px, a 20 px gap) sits beside the lines: a
+ * container-query breakpoint, so the sidebar's width counts (Nov 9 audit, finding 1).
+ */
+export const LINES_MIN_PX = 112 + 200 + 88 + 76 + 112 + 112 + 56 + 120 + 112 + 36 + 9 * 8;
+export const SIDE_BY_SIDE_PX = 1420;
+// Written out in full (Tailwind reads class names from the source; a template would not be seen).
+const LINES_AND_TOTALS =
+  "grid gap-5 @min-[1420px]:grid-cols-[minmax(0,1fr)_300px] @min-[1420px]:items-start";
+const TOTALS_ASIDE = "@min-[1420px]:sticky @min-[1420px]:top-4";
 
 /** A label above a line's box on a phone (the table header carries it on a wide screen). */
 function CellLabel({ children }: { children: React.ReactNode }) {
@@ -1119,215 +1130,228 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       </div>
 
       {/* The lines, with the totals in a summary box on the right */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
-        <section className="min-w-0 space-y-2" aria-label="Lines">
-          <h2 className="text-sm font-semibold">Lines</h2>
-          <div
-            className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${internal ? LINE_COLS_COST : LINE_COLS}`}
-          >
-            <span>Kind</span>
-            <span>Description</span>
-            <span className="text-right">Qty</span>
-            <span>Unit</span>
-            <span className="text-right">Rate</span>
-            {internal && <span className="text-right">Cost</span>}
-            <span className="text-center">Taxable</span>
-            <span>On the invoice</span>
-            <span className="text-right">Total</span>
-            <span className="sr-only">Remove</span>
-          </div>
-          {lines.length === 0 && (
-            <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              No lines. The ticket has no time or material yet: add a line, or record the time in
-              Close out and rebuild from the ticket.
-            </p>
-          )}
-          <div className="space-y-2 lg:space-y-0">
-            {lines.map((l, i) => (
+      {/* The totals sit beside the lines only when the content is wide enough for both (a
+          container query, not the window: the sidebar takes its share). Nov 9 audit: at 1280 to
+          1536 px the office's line grid (LINES_MIN_PX with the Cost column) ran under the sticky
+          Totals box and the Remove × could not be clicked. Narrower, the box goes below the
+          lines and the line grid scrolls sideways inside its own strip instead of bleeding. */}
+      <div className="@container">
+        <div className={LINES_AND_TOTALS}>
+          <section className="min-w-0 space-y-2" aria-label="Lines">
+            <h2 className="text-sm font-semibold">Lines</h2>
+            <div className="min-w-0 overflow-x-auto" data-lines-scroll>
               <div
-                key={l.key}
-                className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
+                className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${internal ? LINE_COLS_COST : LINE_COLS}`}
               >
-                <div className="order-first lg:order-none">
-                  <CellLabel>Kind</CellLabel>
-                  {l.source ? (
-                    <div className="flex h-9 items-center">
-                      <KindBadge kind={l.kind} />
+                <span>Kind</span>
+                <span>Description</span>
+                <span className="text-right">Qty</span>
+                <span>Unit</span>
+                <span className="text-right">Rate</span>
+                {internal && <span className="text-right">Cost</span>}
+                <span className="text-center">Taxable</span>
+                <span>On the invoice</span>
+                <span className="text-right">Total</span>
+                <span className="sr-only">Remove</span>
+              </div>
+              {lines.length === 0 && (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  No lines. The ticket has no time or material yet: add a line, or record the time
+                  in Close out and rebuild from the ticket.
+                </p>
+              )}
+              <div className="space-y-2 lg:space-y-0">
+                {lines.map((l, i) => (
+                  <div
+                    key={l.key}
+                    className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
+                  >
+                    <div className="order-first lg:order-none">
+                      <CellLabel>Kind</CellLabel>
+                      {l.source ? (
+                        <div className="flex h-9 items-center">
+                          <KindBadge kind={l.kind} />
+                        </div>
+                      ) : (
+                        <Select
+                          value={l.kind}
+                          onValueChange={(v) => setLine(l.key, { kind: asKind(v) })}
+                        >
+                          <SelectTrigger className="h-9 w-full" aria-label={`Line ${i + 1} kind`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {LINE_KINDS.map((k) => (
+                              <SelectItem key={k} value={k}>
+                                {KIND_LABELS[k]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
-                  ) : (
-                    <Select
-                      value={l.kind}
-                      onValueChange={(v) => setLine(l.key, { kind: asKind(v) })}
-                    >
-                      <SelectTrigger className="h-9 w-full" aria-label={`Line ${i + 1} kind`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LINE_KINDS.map((k) => (
-                          <SelectItem key={k} value={k}>
-                            {KIND_LABELS[k]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                <div className="col-span-2 lg:col-span-1">
-                  <CellLabel>Description</CellLabel>
-                  <Input
-                    value={l.description}
-                    maxLength={300}
-                    autoFocus={l.key === newKey}
-                    aria-label={`Line ${i + 1} description`}
-                    className={showProblems && !l.description.trim() ? "border-destructive" : ""}
-                    onChange={(e) => setLine(l.key, { description: e.target.value })}
-                  />
-                  {l.on_date && (
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {shortDay(l.on_date)}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <CellLabel>Qty</CellLabel>
-                  <OptionalNumber
-                    value={l.qty}
-                    step="0.25"
-                    label={`Line ${i + 1} quantity`}
-                    invalid={showProblems && l.qty === null}
-                    onChange={(v) => setLine(l.key, { qty: v })}
-                  />
-                </div>
-                <div>
-                  <CellLabel>Unit</CellLabel>
-                  <Input
-                    value={l.unit}
-                    maxLength={20}
-                    aria-label={`Line ${i + 1} unit`}
-                    onChange={(e) => setLine(l.key, { unit: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <CellLabel>Rate</CellLabel>
-                  {/* A ticket material's rate follows the markup (owner, Oct 14): shown with
-                      its rule and a pencil; the box comes back to type a price of your own. */}
-                  {rateIsComputed(l) && !rateEdit.has(l.key) ? (
-                    <div className="flex h-9 items-center justify-end gap-1">
-                      <span className="text-right leading-tight">
-                        <span className="block text-sm tabular-nums">{rateText(l.rate)}</span>
-                        <span className="block text-[10px] text-muted-foreground">
-                          {computedRateHint(l, head.markup_pct, head.po_markup)}
+                    <div className="col-span-2 lg:col-span-1">
+                      <CellLabel>Description</CellLabel>
+                      <Input
+                        value={l.description}
+                        maxLength={300}
+                        autoFocus={l.key === newKey}
+                        aria-label={`Line ${i + 1} description`}
+                        className={
+                          showProblems && !l.description.trim() ? "border-destructive" : ""
+                        }
+                        onChange={(e) => setLine(l.key, { description: e.target.value })}
+                      />
+                      {l.on_date && (
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {shortDay(l.on_date)}
                         </span>
+                      )}
+                    </div>
+                    <div>
+                      <CellLabel>Qty</CellLabel>
+                      <OptionalNumber
+                        value={l.qty}
+                        step="0.25"
+                        label={`Line ${i + 1} quantity`}
+                        invalid={showProblems && l.qty === null}
+                        onChange={(v) => setLine(l.key, { qty: v })}
+                      />
+                    </div>
+                    <div>
+                      <CellLabel>Unit</CellLabel>
+                      <Input
+                        value={l.unit}
+                        maxLength={20}
+                        aria-label={`Line ${i + 1} unit`}
+                        onChange={(e) => setLine(l.key, { unit: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <CellLabel>Rate</CellLabel>
+                      {/* A ticket material's rate follows the markup (owner, Oct 14): shown with
+                      its rule and a pencil; the box comes back to type a price of your own. */}
+                      {rateIsComputed(l) && !rateEdit.has(l.key) ? (
+                        <div className="flex h-9 items-center justify-end gap-1">
+                          <span className="text-right leading-tight">
+                            <span className="block text-sm tabular-nums">{rateText(l.rate)}</span>
+                            <span className="block text-[10px] text-muted-foreground">
+                              {computedRateHint(l, head.markup_pct, head.po_markup)}
+                            </span>
+                          </span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 shrink-0 text-muted-foreground"
+                            aria-label={`Override the rate for line ${i + 1}`}
+                            title="Type a rate of your own"
+                            onClick={() => setRateEdit((s) => new Set(s).add(l.key))}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <OptionalNumber
+                          value={l.rate}
+                          min={-1_000_000}
+                          step="0.01"
+                          label={`Line ${i + 1} rate`}
+                          invalid={showProblems && l.rate === null}
+                          onChange={(v) => setLine(l.key, { rate: v })}
+                        />
+                      )}
+                    </div>
+                    {internal && (
+                      <div>
+                        <CellLabel>Cost</CellLabel>
+                        <OptionalNumber
+                          value={l.cost_rate}
+                          step="0.01"
+                          label={`Line ${i + 1} cost`}
+                          onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
+                        />
+                        {/* Owner, Oct 14 ("it says cost 0.091, I'm confused"): a material from the
+                        ledger is costed per piece — the box price over the pieces in it. */}
+                        {rateIsComputed(l) && (
+                          <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
+                            per {l.unit.trim() || "ea"}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
+                      <Checkbox
+                        checked={l.taxable}
+                        aria-label={`Line ${i + 1} taxable`}
+                        onCheckedChange={(c) => setLine(l.key, { taxable: c === true })}
+                      />
+                      <span className="lg:hidden">Taxable</span>
+                    </label>
+                    {/* On the customer's PDF (owner, Oct 8): Hidden (in the one Services and
+                    materials amount), No price (listed with its quantity), With price. */}
+                    <div>
+                      <CellLabel>On the invoice</CellLabel>
+                      <Select
+                        value={showChoice(l)}
+                        onValueChange={(v) => setLine(l.key, showFlags(v as ShowChoice))}
+                      >
+                        <SelectTrigger
+                          className="h-9 w-full"
+                          aria-label={`Line ${i + 1} on the invoice`}
+                          title="Hidden: in the one Services and materials amount. No price: listed with its quantity. With price: listed with rate and amount."
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hidden">Hidden</SelectItem>
+                          <SelectItem value="no_price">No price</SelectItem>
+                          <SelectItem value="priced">With price</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 lg:block lg:h-9 lg:pt-2 lg:text-right">
+                      <span className="text-xs text-muted-foreground lg:hidden">Total</span>
+                      <span className="tabular-nums">
+                        {money(r2((l.qty ?? 0) * (l.rate ?? 0)))}
                       </span>
+                    </div>
+                    <div className="order-first flex justify-end lg:order-none">
                       <Button
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className="h-7 w-7 shrink-0 text-muted-foreground"
-                        aria-label={`Override the rate for line ${i + 1}`}
-                        title="Type a rate of your own"
-                        onClick={() => setRateEdit((s) => new Set(s).add(l.key))}
+                        className="h-9 w-9 text-destructive hover:text-destructive"
+                        aria-label={`Remove line ${i + 1}`}
+                        title="Remove this line"
+                        onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <X className="h-4 w-4" />
                       </Button>
                     </div>
-                  ) : (
-                    <OptionalNumber
-                      value={l.rate}
-                      min={-1_000_000}
-                      step="0.01"
-                      label={`Line ${i + 1} rate`}
-                      invalid={showProblems && l.rate === null}
-                      onChange={(v) => setLine(l.key, { rate: v })}
-                    />
-                  )}
-                </div>
-                {internal && (
-                  <div>
-                    <CellLabel>Cost</CellLabel>
-                    <OptionalNumber
-                      value={l.cost_rate}
-                      step="0.01"
-                      label={`Line ${i + 1} cost`}
-                      onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
-                    />
-                    {/* Owner, Oct 14 ("it says cost 0.091, I'm confused"): a material from the
-                        ledger is costed per piece — the box price over the pieces in it. */}
-                    {rateIsComputed(l) && (
-                      <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
-                        per {l.unit.trim() || "ea"}
-                      </span>
-                    )}
                   </div>
-                )}
-                <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
-                  <Checkbox
-                    checked={l.taxable}
-                    aria-label={`Line ${i + 1} taxable`}
-                    onCheckedChange={(c) => setLine(l.key, { taxable: c === true })}
-                  />
-                  <span className="lg:hidden">Taxable</span>
-                </label>
-                {/* On the customer's PDF (owner, Oct 8): Hidden (in the one Services and
-                    materials amount), No price (listed with its quantity), With price. */}
-                <div>
-                  <CellLabel>On the invoice</CellLabel>
-                  <Select
-                    value={showChoice(l)}
-                    onValueChange={(v) => setLine(l.key, showFlags(v as ShowChoice))}
-                  >
-                    <SelectTrigger
-                      className="h-9 w-full"
-                      aria-label={`Line ${i + 1} on the invoice`}
-                      title="Hidden: in the one Services and materials amount. No price: listed with its quantity. With price: listed with rate and amount."
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hidden">Hidden</SelectItem>
-                      <SelectItem value="no_price">No price</SelectItem>
-                      <SelectItem value="priced">With price</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center justify-between gap-2 lg:block lg:h-9 lg:pt-2 lg:text-right">
-                  <span className="text-xs text-muted-foreground lg:hidden">Total</span>
-                  <span className="tabular-nums">{money(r2((l.qty ?? 0) * (l.rate ?? 0)))}</span>
-                </div>
-                <div className="order-first flex justify-end lg:order-none">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 text-destructive hover:text-destructive"
-                    aria-label={`Remove line ${i + 1}`}
-                    title="Remove this line"
-                    onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-dashed"
+              disabled={!!busy}
+              onClick={addLine}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add line
+            </Button>
+          </section>
+          <div className={TOTALS_ASIDE}>
+            <Totals
+              t={t}
+              taxPct={head.tax_pct}
+              poError={po.error}
+              poCountedOn={po.countedOn}
+              poOnInvoice={po.onInvoice}
+            />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full border-dashed"
-            disabled={!!busy}
-            onClick={addLine}
-          >
-            <Plus className="mr-1 h-4 w-4" /> Add line
-          </Button>
-        </section>
-        <div className="xl:sticky xl:top-4">
-          <Totals
-            t={t}
-            taxPct={head.tax_pct}
-            poError={po.error}
-            poCountedOn={po.countedOn}
-            poOnInvoice={po.onInvoice}
-          />
         </div>
       </div>
 

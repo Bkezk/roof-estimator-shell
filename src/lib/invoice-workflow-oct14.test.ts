@@ -395,8 +395,9 @@ describe("2. the computed Rate cell and the red outlines (invoice-editor.tsx)", 
   });
   it("red only after a Finalise was tried, never on an untouched line; cleared once fixed", () => {
     expect(draft).toContain("const [showProblems, setShowProblems] = useState(false);");
-    expect(draft).toContain(
-      'className={showProblems && !l.description.trim() ? "border-destructive" : ""}',
+    // Prettier wraps this one since the lines gained a scroll strip (Nov 9): read it flattened.
+    expect(draft.replace(/\s+/g, " ")).toContain(
+      'className={ showProblems && !l.description.trim() ? "border-destructive" : "" }',
     );
     expect(draft).toContain("invalid={showProblems && l.qty === null}");
     expect(draft).toContain("invalid={showProblems && l.rate === null}");
