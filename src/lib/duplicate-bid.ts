@@ -27,7 +27,11 @@ export function copyBidName(sourceName: string, typed?: string | null): string {
   return t ? t.slice(0, 200).trimEnd() : duplicateBidName(sourceName);
 }
 
-/** The columns a copy takes from its source, and what it resets. `name` = the typed job name. */
+/**
+ * The columns a copy takes from its source, and what it resets. `name` = the typed job name;
+ * `dueDate` = the day the Bids page's popup asked for (owner, Nov 6, audit finding 2: a copy had
+ * no due date and no folder, so it never showed on Work Overview). The folder comes along.
+ */
 export function duplicateBidRow<
   T extends {
     name: string;
@@ -37,8 +41,9 @@ export function duplicateBidRow<
     site_id: string | null;
     building_id: string | null;
     roof_id: string | null;
+    folder?: string | null;
   },
->(source: T, updatedByName: string | null, now: string, name?: string | null) {
+>(source: T, updatedByName: string | null, now: string, name?: string | null, dueDate?: string) {
   return {
     name: copyBidName(source.name, name),
     data: source.data as T["data"],
@@ -49,6 +54,8 @@ export function duplicateBidRow<
     site_id: source.site_id,
     building_id: source.building_id,
     roof_id: source.roof_id,
+    folder: source.folder ?? null,
+    due_date: dueDate ?? null,
     takeoff_id: null,
     opportunity_id: null,
     updated_at: now,

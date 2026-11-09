@@ -18,22 +18,55 @@ import { bidFiguresSchema } from "@/lib/bid-figures";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
+import { type BidListRow, bidRoofSystems } from "@/lib/bids-list";
+import { DOCUMENTS_BUCKET, documentImageFolder } from "@/lib/documents/server-pure";
 import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
+/**
+ * The columns the Bids list reads (bids-list.ts BidListRow; owner, Nov 6, audit finding 1: the
+ * list had selected `*` — 7.9 MB for 24 bids, the frozen price snapshot of every bid included).
+ * The sections ride DB → server only (a few KB each) so the roof systems can be read off them;
+ * the browser gets the systems, never the sections or the payload.
+ */
+const LIST_COLUMNS: string =
+  "id, name, status, grand_total, created_at, updated_at, updated_by_name, folder, due_date, lost_reason, account_id, opportunity_id, estimator_name:data->customer->>estimatorName, typed_customer:data->customer->>name, roof_system:data->>roofSystem, sections:data->sections, import_source:data->importInfo->>source, account:crm_accounts!bids_account_id_fkey(id, name)";
+/** A row as LIST_COLUMNS reads it (typed by hand: the select parser cannot follow the JSON paths). */
+interface RawListRow {
+  id: string;
+  name: string;
+  status: string;
+  grand_total: number | string | null;
+  created_at: string;
+  updated_at: string;
+  updated_by_name: string | null;
+  folder: string | null;
+  due_date: string | null;
+  lost_reason: string | null;
+  account_id: string | null;
+  opportunity_id: string | null;
+  estimator_name: string | null;
+  typed_customer: string | null;
+  roof_system: string | null;
+  sections: unknown;
+  import_source: string | null;
+  account: { id: string; name: string } | null;
+}
+
 export const listBids = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .handler(async ({ context }): Promise<BidListRow[]> => {
     // The linked customer's name rides along so the list can show, search and sort by it
     // (owner, Sep 30: "make it to where you can sort bids by customers").
     const { data, error } = await context.supabase
       .from("bids")
-      .select("*, account:crm_accounts!bids_account_id_fkey(id, name)")
+      .select(LIST_COLUMNS)
       .is("deleted_at", null)
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .returns<RawListRow[]>();
     if (error) throw error;
     // The opportunity a bid was started from (bids.opportunity_id; owner, Oct 12: "From
     // opportunity: <title>" on the row). Read under the opportunities' own RLS; one that cannot be
@@ -49,16 +82,74 @@ export const listBids = createServerFn({ method: "GET" })
         .in("id", oppIds);
       for (const o of opps ?? []) titles.set(o.id, o.title);
     }
-    return (data ?? []).map((b) => ({
+    return (data ?? []).map(({ sections, roof_system, estimator_name, typed_customer, ...b }) => ({
       ...b,
+      account: b.account ? { id: b.account.id, name: b.account.name } : null,
       opportunity: b.opportunity_id
         ? { id: b.opportunity_id, title: titles.get(b.opportunity_id) ?? null }
         : null,
+      estimator_name: (estimator_name ?? "").trim(),
+      typed_customer: (typed_customer ?? "").trim(),
+      roof_systems: bidRoofSystems(roof_system, sections),
+      import_source: b.import_source ?? null,
     }));
   });
 
 /** Soft-deleted bids are kept this long, then purged (lazily, whenever the bin is listed). */
 export const DELETED_BID_RETENTION_DAYS = 30;
+
+/** The least a client needs for removeBidDocumentFiles (so a test can hand in a fake). */
+export interface DocumentFilesClient {
+  from: (table: "documents") => {
+    select: (cols: "id") => {
+      in: (col: "bid_id", ids: string[]) => PromiseLike<{ data: { id: string }[] | null }>;
+    };
+  };
+  storage: {
+    from: (bucket: string) => {
+      list: (
+        prefix: string,
+        opts: { limit: number },
+      ) => PromiseLike<{ data: { name: string }[] | null; error: { message: string } | null }>;
+      remove: (paths: string[]) => PromiseLike<{ error: { message: string } | null }>;
+    };
+  };
+}
+
+/**
+ * The files of the bids' documents (every version's PDF and every uploaded picture, under
+ * docs/<document id>/), removed before the bids' rows go (owner, Nov 6, audit finding 8: the
+ * FK cascade deleted the document rows and left the files in the bucket). Best effort: a file
+ * that cannot be listed or removed is logged and the purge goes on — an orphaned file is a
+ * nuisance, a bid that cannot be purged is a bug. Returns how many files went.
+ */
+export async function removeBidDocumentFiles(
+  sb: DocumentFilesClient,
+  bidIds: readonly string[],
+): Promise<number> {
+  if (!bidIds.length) return 0;
+  const { data: docs } = await sb
+    .from("documents")
+    .select("id")
+    .in("bid_id", [...bidIds]);
+  let removed = 0;
+  for (const d of docs ?? []) {
+    const folder = documentImageFolder({ documentId: d.id });
+    const bucket = sb.storage.from(DOCUMENTS_BUCKET);
+    const { data: files, error } = await bucket.list(folder, { limit: 1000 });
+    if (error) {
+      console.warn(`[bids] could not list ${folder}: ${error.message}`);
+      continue;
+    }
+    const paths = (files ?? []).map((f) => `${folder}/${f.name}`);
+    if (!paths.length) continue;
+    const { error: rmErr } = await bucket.remove(paths);
+    if (rmErr)
+      console.warn(`[bids] could not remove ${paths.length} under ${folder}: ${rmErr.message}`);
+    else removed += paths.length;
+  }
+  return removed;
+}
 
 /** The "Recently deleted" bin: soft-deleted bids still inside the retention window. */
 export const listDeletedBids = createServerFn({ method: "GET" })
@@ -67,13 +158,28 @@ export const listDeletedBids = createServerFn({ method: "GET" })
     const cutoff = new Date(
       Date.now() - DELETED_BID_RETENTION_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
-    // Purge anything past the window before listing what is left.
-    const { error: purgeError } = await context.supabase
+    // Purge anything past the window before listing what is left — its documents' files first.
+    const { data: aged, error: agedErr } = await context.supabase
       .from("bids")
-      .delete()
+      .select("id")
       .not("deleted_at", "is", null)
       .lt("deleted_at", cutoff);
-    if (purgeError) throw new Error(purgeError.message);
+    if (agedErr) throw new Error(agedErr.message);
+    if (aged?.length) {
+      await removeBidDocumentFiles(
+        // The narrow client shape: comparing the full client's types blows TypeScript's stack.
+        context.supabase as unknown as DocumentFilesClient,
+        aged.map((b) => b.id),
+      );
+      const { error: purgeError } = await context.supabase
+        .from("bids")
+        .delete()
+        .in(
+          "id",
+          aged.map((b) => b.id),
+        );
+      if (purgeError) throw new Error(purgeError.message);
+    }
     const { data, error } = await context.supabase
       .from("bids")
       .select("id, name, status, grand_total, updated_at, deleted_at")
@@ -584,14 +690,25 @@ export const deleteBid = createServerFn({ method: "POST" })
   });
 
 /**
- * Duplicate a bid as a new draft (owner, Oct 6): the same payload, total, customer, site and
- * building under the job name typed in the Bids page's popup (owner, Nov 3), else "<name> (copy)";
- * status, lost reason and the takeoff / opportunity links are not copied (lib/duplicate-bid.ts).
+ * Duplicate a bid as a new draft (owner, Oct 6): the same payload, total, customer, site,
+ * building and folder under the job name typed in the Bids page's popup (owner, Nov 3), else
+ * "<name> (copy)", with the due date the popup asked for (owner, Nov 6); status, lost reason and
+ * the takeoff / opportunity links are not copied (lib/duplicate-bid.ts).
  * Returns the new row; the Bids page opens it.
  */
 export const duplicateBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d) => getBidSchema.extend({ name: z.string().max(200).optional() }).parse(d))
+  .validator((d) =>
+    getBidSchema
+      .extend({
+        name: z.string().max(200).optional(),
+        /** The copy's due date (owner, Nov 6): required, like a new bid's first save. */
+        dueDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "The bid due date must be a day (YYYY-MM-DD)"),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { data: source, error } = await context.supabase
       .from("bids")
@@ -614,6 +731,7 @@ export const duplicateBid = createServerFn({ method: "POST" })
           (me?.full_name ?? "").trim() || me?.email || null,
           new Date().toISOString(),
           data.name,
+          data.dueDate,
         ),
       )
       .select()
@@ -681,11 +799,15 @@ export const restoreBid = createServerFn({ method: "POST" })
     return { id: data.id };
   });
 
-/** Permanently remove a bid that is already in Recently deleted. Cannot be undone. */
+/**
+ * Permanently remove a bid that is already in Recently deleted, its documents' files with it
+ * (removeBidDocumentFiles; the rows go by the FK cascade). Cannot be undone.
+ */
 export const purgeBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => getBidSchema.parse(d))
   .handler(async ({ data, context }) => {
+    await removeBidDocumentFiles(context.supabase as unknown as DocumentFilesClient, [data.id]);
     const { error, count } = await context.supabase
       .from("bids")
       .delete({ count: "exact" })

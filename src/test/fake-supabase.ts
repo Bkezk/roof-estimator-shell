@@ -370,6 +370,9 @@ export function fakeSupabase(
         return b;
       },
       order: () => b,
+      // `.returns<T>()` only retypes the result (a hand-typed row for a select the parser cannot
+      // follow, as listBids' JSON paths): nothing to do here.
+      returns: () => b,
       limit: (n: number) => {
         max = n;
         return b;

@@ -132,6 +132,7 @@ describe("the Bids page", () => {
     expect(dlg).toContain("if (name === renameFor.name) {");
     expect(dlg).toContain("renameName.mutate({ id: renameFor.id, name });");
     expect(dlg).toContain("Save name");
-    expect(page).toMatch(/const renameName = useMutation\(\{[\s\S]{0,400}refresh\(\);/);
+    // Nov 6: the one row is patched in the cache instead of the list being fetched again.
+    expect(page).toMatch(/const renameName = useMutation\(\{[\s\S]{0,400}patchRows\(/);
   });
 });

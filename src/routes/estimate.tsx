@@ -73,7 +73,13 @@ import { offeredDesignTables, snapBidChain, type ChainBidState } from "@/lib/sec
 import { nextLayerFromForm } from "@/lib/underlayment-layer";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import { warrantiesForSystem } from "@/lib/warranty-systems";
-import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
+import { canonicalEstimator } from "@/lib/bids-list";
+import {
+  combinedHeader,
+  combineSavedBids,
+  combineWarningLines,
+  type CombineInfo,
+} from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
 import { catalogSearchItems } from "@/lib/takeoff/material";
@@ -617,10 +623,12 @@ function EstimatePage() {
   // Per-tab edit lock (docs: bid_locks). Another tab — any user, or this account in a second
   // window — makes this view read-only; when the holder leaves, this tab takes over and
   // re-hydrates from the saved row so it never edits a stale copy.
+  // Taken once the profile is known, so the holder is named (audit finding 4: taken on the
+  // session alone, the first lock named the login's email).
   const lockHolderName = profile?.full_name?.trim() || session?.user.email || "Another user";
   const bidLock = useBidLock({
     bidId: bidParam,
-    enabled: authed,
+    enabled: authed && !!profile,
     holderName: lockHolderName,
     onAcquired: (firstTime) => {
       if (firstTime) return;
@@ -1293,6 +1301,9 @@ function EstimatePage() {
         id: b.id,
         name: b.name,
         saved: (b.data ?? {}) as Partial<SavedBidState>,
+        accountId: b.account_id,
+        siteId: b.site_id,
+        dueDate: b.due_date,
       }));
     if (sources.length < 2) {
       toast.error("Could not load two or more bids to combine.");
@@ -1302,12 +1313,17 @@ function EstimatePage() {
       const { saved: merged } = combineSavedBids(sources, saved);
       hydrateSaved(merged, {});
       setBidId(undefined);
-      setLink(null, null, "", false); // a new bid; link it from Setup › Customer Name
+      // The customer the sources share, picked as a change of this session (so the first save
+      // sends it), and the earliest of their due dates (owner, Nov 6, audit finding 5); sources
+      // of different customers leave both for Setup to fill.
+      const header = combinedHeader(sources);
+      if (header.accountId) linkFromTakeoff(header.accountId, "", header.siteId);
+      else setLink(null, null, "", false); // a new bid; link it from Setup › Customer Name
       // Named after the bids it came from, e.g. "Summit + Knox County Fiscal Court".
       setBidName(sources.map((b) => b.name.trim() || "Untitled").join(" + "));
       setBidStatus("draft");
       setLostReason(null);
-      setBidDueDate("");
+      setBidDueDate(header.dueDate ?? "");
       setBidReminderOn("");
       setBidReminderNote("");
       // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.
@@ -1966,7 +1982,12 @@ function EstimatePage() {
     nonDlCalc,
     parapets,
     curbs,
-    customer,
+    // One spelling per estimator (bids-list.ts canonicalEstimator; audit finding 6): a legacy
+    // "Brian" saves as the roster's "Brian Folden".
+    customer: {
+      ...customer,
+      estimatorName: canonicalEstimator(customer.estimatorName, estimatorNames ?? []),
+    },
     markupMode,
     markup,
     laborRate,

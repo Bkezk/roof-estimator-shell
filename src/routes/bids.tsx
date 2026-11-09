@@ -36,6 +36,14 @@ import {
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
+import { listEstimatorNames } from "@/lib/auth.functions";
+import {
+  type BidListRow,
+  canonicalEstimator,
+  importedFromLabel,
+  patchBidRow,
+  patchBidRows,
+} from "@/lib/bids-list";
 import { duplicateBidName } from "@/lib/duplicate-bid";
 import {
   BID_STATUSES,
@@ -104,15 +112,6 @@ import {
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-/** Where an imported bid came from: a legacy .bax (src/lib/bax) or a PlanSwift export. */
-const importedFrom = (data: unknown): string | null => {
-  const src =
-    !!data && typeof data === "object"
-      ? (data as { importInfo?: { source?: string } }).importInfo?.source
-      : undefined;
-  return src === "bid-advantage" ? "Bid-Advantage" : src === "planswift" ? "PlanSwift" : null;
-};
-
 export const Route = createFileRoute("/bids")({
   head: () => ({
     meta: [
@@ -137,30 +136,12 @@ export const Route = createFileRoute("/bids")({
 });
 
 const NO_ESTIMATOR = "__none__";
-/** Roof systems a bid uses: the Setup default plus any per-section override. */
-const roofSystemsOf = (bid: { data: unknown }): string[] => {
-  const d = bid.data as {
-    roofSystem?: string;
-    sections?: { roofSystem?: string }[];
-  } | null;
-  const out = new Set<string>();
-  if (d?.roofSystem) out.add(d.roofSystem);
-  for (const s of d?.sections ?? []) if (s.roofSystem) out.add(s.roofSystem);
-  return [...out];
-};
-/** Estimator's Name as keyed on Setup › Bid Info (customer.estimatorName); "" when blank. */
-const estimatorOf = (bid: { data: unknown }): string => {
-  const d = bid.data as { customer?: { estimatorName?: string } } | null;
-  return d?.customer?.estimatorName?.trim() ?? "";
-};
+/** Roof systems a bid uses: the Setup default plus any per-section override (read on the server). */
+const roofSystemsOf = (bid: BidListRow): string[] => bid.roof_systems;
 
 /** The bid's customer: the linked profile's name, else the name typed on Setup; "" = none. */
-const customerOf = (bid: { data: unknown; account?: { name: string } | null }): string => {
-  const linked = bid.account?.name?.trim();
-  if (linked) return linked;
-  const d = bid.data as { customer?: { name?: string } } | null;
-  return d?.customer?.name?.trim() ?? "";
-};
+const customerOf = (bid: BidListRow): string =>
+  bid.account?.name?.trim() || bid.typed_customer.trim();
 
 /** "Oct 20, 2026" for a YYYY-MM-DD day (a calendar day: no time zone shift). */
 const dueLabel = (ymd: string) => {
@@ -183,18 +164,8 @@ const SORT_LABELS: Record<BidSort, string> = {
   due: "Due date, soonest first",
 };
 /** Order rows within a status group; ties fall back to the last-saved order. */
-function sortBids<
-  T extends {
-    name: string;
-    data: unknown;
-    account?: { name: string } | null;
-    grand_total: unknown;
-    created_at: string;
-    updated_at: string;
-    due_date?: string | null;
-  },
->(rows: T[], by: BidSort): T[] {
-  const cmp = (a: T, b: T): number => {
+function sortBids(rows: BidListRow[], by: BidSort): BidListRow[] {
+  const cmp = (a: BidListRow, b: BidListRow): number => {
     switch (by) {
       case "due": {
         const da = a.due_date ?? null;
@@ -258,6 +229,16 @@ function BidsPage() {
     queryFn: listBidsFn,
     enabled: !!session,
   });
+  // The estimator roster (admin General → Estimators): one spelling per estimator on the rows,
+  // in the filter and in the Years grouping (bids-list.ts canonicalEstimator; audit finding 6).
+  const listEstimatorsFn = useServerFn(listEstimatorNames);
+  const { data: roster } = useQuery({
+    queryKey: ["estimator-names"],
+    queryFn: () => listEstimatorsFn(),
+    enabled: !!session,
+  });
+  const estimatorOf = (bid: BidListRow): string =>
+    canonicalEstimator(bid.estimator_name, roster ?? []);
   const [statusFilter, setStatusFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
   const [planswiftOpen, setPlanswiftOpen] = useState(false);
@@ -317,6 +298,10 @@ function BidsPage() {
     void qc.invalidateQueries({ queryKey: ["bids"] });
     void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
   };
+  // A rename, a status change or a folder move changes the one row in the cache (audit finding
+  // 1: the whole list used to be fetched again after each).
+  const patchRows = (fn: (rows: BidListRow[]) => BidListRow[]) =>
+    qc.setQueryData<BidListRow[]>(["bids"], (old) => (old ? fn(old) : old));
   const [lostFor, setLostFor] = useState<{ id: string; name: string } | null>(null);
   // Marking Won asks for the day it was won (bids.won_on; owner, Oct 21: "a way to adjust the
   // date the bid was won to ensure the data appears correctly"), today's office day to start.
@@ -331,15 +316,26 @@ function BidsPage() {
     onSuccess: (b) => {
       setRenameFor(null);
       toast.success(`Renamed to "${b.name}"`);
-      refresh();
+      patchRows((rows) =>
+        patchBidRow(rows, b.id, {
+          name: b.name,
+          updated_at: b.updated_at,
+          updated_by_name: b.updated_by_name,
+        }),
+      );
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not rename the bid"),
   });
   // The copy popup (owner, Nov 3): the copy's job name is typed before the copy is made.
-  const [copyFor, setCopyFor] = useState<{ id: string; name: string; newName: string } | null>(
-    null,
-  );
+  // Owner, Nov 6 (audit finding 2): the copy also takes its due date here, the source's day to
+  // start, so a copy is on Work Overview like any new bid; it keeps the source's folder.
+  const [copyFor, setCopyFor] = useState<{
+    id: string;
+    name: string;
+    newName: string;
+    dueDate: string;
+  } | null>(null);
   const setStatus = useMutation({
     mutationFn: (v: {
       id: string;
@@ -347,9 +343,16 @@ function BidsPage() {
       lostReason?: string | null;
       wonOn?: string | null;
     }) => setStatusFn({ data: v }),
-    onSuccess: (b) => {
+    onSuccess: (b, v) => {
       toast.success(`Status: ${STATUS_LABELS[asBidStatus(b.status)]}`);
-      refresh();
+      patchRows((rows) =>
+        patchBidRow(rows, b.id, {
+          status: b.status,
+          lost_reason: v.status === "lost" ? (v.lostReason ?? null) : null,
+          updated_at: b.updated_at,
+          updated_by_name: b.updated_by_name,
+        }),
+      );
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not change status"),
@@ -366,7 +369,7 @@ function BidsPage() {
       );
       if (v.ids.length > 1) setCombineSel([]);
       setMoveFor(null);
-      refresh();
+      patchRows((rows) => patchBidRows(rows, v.ids, { folder: r.folder }));
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not move to the folder"),
@@ -374,11 +377,17 @@ function BidsPage() {
   const renameFolderFn = useServerFn(renameBidFolder);
   const rename = useMutation({
     mutationFn: (v: { from: string; to: string }) => renameFolderFn({ data: v }),
-    onSuccess: (r) => {
+    onSuccess: (r, v) => {
       toast.success(`Renamed to "${r.folder}" (${r.count} bid${r.count === 1 ? "" : "s"})`);
       setRenaming(false);
       setFolderOpen(folderKey(r.folder));
-      refresh();
+      patchRows((rows) =>
+        patchBidRows(
+          rows,
+          rows.filter((b) => folderKey(b.folder) === folderKey(v.from)).map((b) => b.id),
+          { folder: r.folder },
+        ),
+      );
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not rename the folder"),
@@ -387,7 +396,7 @@ function BidsPage() {
   // popup asks for the copy's job name first; the server falls back to "<name> (copy)".
   const duplicateFn = useServerFn(duplicateBid);
   const duplicate = useMutation({
-    mutationFn: (v: { id: string; name: string }) => duplicateFn({ data: v }),
+    mutationFn: (v: { id: string; name: string; dueDate: string }) => duplicateFn({ data: v }),
     onSuccess: (copy) => {
       setCopyFor(null);
       toast.success(`Copied as "${copy.name}" — opening the copy`);
@@ -398,9 +407,10 @@ function BidsPage() {
   });
   const del = useMutation({
     mutationFn: (id: string) => deleteBidFn({ data: { id } }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       toast.success(`Bid moved to Recently deleted (kept ${DELETED_BID_RETENTION_DAYS} days)`);
-      refresh();
+      patchRows((rows) => rows.filter((b) => b.id !== r.id));
+      void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
     onSettled: () => setConfirmDelete(null),
@@ -428,7 +438,7 @@ function BidsPage() {
     mutationFn: (id: string) => purgeFn({ data: { id } }),
     onSuccess: () => {
       toast.success("Bid permanently deleted");
-      refresh();
+      void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
     onSettled: () => setConfirmPurge(null),
@@ -545,7 +555,7 @@ function BidsPage() {
   /** One bid's card, in the list and in the folder view (owner, Oct 7). */
   // The viewer's day, for the Due tag (lib/my-work.ts localYmd — the day Work Overview uses).
   const today = localYmd(new Date());
-  const renderBid = (bid: (typeof bids)[number]) => {
+  const renderBid = (bid: BidListRow) => {
     const st = asBidStatus(bid.status);
     const overdueDays = bidOverdueDays(bid, today);
     return (
@@ -604,7 +614,9 @@ function BidsPage() {
               {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
               {bid.folder ? ` · Folder: ${bid.folder}` : ""}
               {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
-              {importedFrom(bid.data) ? ` · Imported from ${importedFrom(bid.data)}` : ""}
+              {importedFromLabel(bid.import_source)
+                ? ` · Imported from ${importedFromLabel(bid.import_source)}`
+                : ""}
             </p>
             {/* The opportunity it was started from (bids.opportunity_id; owner, Oct 12). */}
             {bid.opportunity?.title && (
@@ -622,7 +634,9 @@ function BidsPage() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-6">
+        {/* Wraps on a phone (audit finding 3: the cluster was 594 px wide on a 390 px screen,
+            and the whole page scrolled sideways). */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           {/* The bid due date (owner, Oct 12), red with the day count when a draft is past it
             (work-counts.ts bidOverdueDays: a submitted / won / lost bid is never overdue). */}
           <span
@@ -697,7 +711,12 @@ function BidsPage() {
             disabled={duplicate.isPending}
             onClick={(e) => {
               e.stopPropagation();
-              setCopyFor({ id: bid.id, name: bid.name, newName: duplicateBidName(bid.name) });
+              setCopyFor({
+                id: bid.id,
+                name: bid.name,
+                newName: duplicateBidName(bid.name),
+                dueDate: bid.due_date ?? "",
+              });
             }}
             onKeyDown={(e) => e.stopPropagation()}
           >
@@ -868,10 +887,10 @@ function BidsPage() {
       {bids.length > 0 && (
         <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
           <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground">
-            Bid name
+            Search
             <Input
               type="search"
-              placeholder="Search by bid or customer name…"
+              placeholder="Bid name, customer or folder…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="bg-background"
@@ -1040,10 +1059,9 @@ function BidsPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-muted-foreground">No bids match these filters.</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
-            Clear filters
-          </Button>
+          <p className="text-muted-foreground">
+            No bids match these filters. Clear filters above to see every bid.
+          </p>
         </div>
       ) : view === "byFolder" && folderOpen === null ? (
         /* The assigned folders (owner, Oct 13): one card per folder, Unfiled last; a click opens it. */
@@ -1500,17 +1518,23 @@ function BidsPage() {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (duplicate.isPending) return;
+                if (!copyFor.dueDate) {
+                  toast.error("Give the copy a due date.");
+                  return;
+                }
                 duplicate.mutate({
                   id: copyFor.id,
                   name: copyFor.newName.trim() || duplicateBidName(copyFor.name),
+                  dueDate: copyFor.dueDate,
                 });
               }}
             >
               <DialogHeader>
                 <DialogTitle>Copy this bid</DialogTitle>
                 <DialogDescription>
-                  A new draft copy of “{copyFor.name}” with the same work, prices and customer. Give
-                  the copy its job name; it opens in the estimator once it is made.
+                  A new draft copy of “{copyFor.name}” with the same work, prices, customer and
+                  folder. Give the copy its job name and due date; it opens in the estimator once it
+                  is made.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-1 py-3">
@@ -1525,6 +1549,21 @@ function BidsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Left blank, the copy is named “{duplicateBidName(copyFor.name)}”.
+                </p>
+              </div>
+              <div className="space-y-1 pb-3">
+                <Label htmlFor="copy-bid-due">Bid due</Label>
+                <Input
+                  id="copy-bid-due"
+                  type="date"
+                  required
+                  value={copyFor.dueDate}
+                  onChange={(e) => setCopyFor({ ...copyFor, dueDate: e.target.value })}
+                  className="w-[11rem]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  When the copy must go out; it sits on Work Overview by this day.
+                  {copyFor.dueDate ? "" : " The original has no due date, so pick one."}
                 </p>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">

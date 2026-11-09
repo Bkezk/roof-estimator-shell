@@ -314,7 +314,9 @@ describe("2. the estimator", () => {
     expect(src).toContain('"border-amber-500 ring-1 ring-amber-500/40"');
   });
   it("a bid started fresh (combine, takeoff, PlanSwift) starts with no due date", () => {
-    expect(src.match(/setBidDueDate\(""\);/g)).toHaveLength(3);
+    expect(src.match(/setBidDueDate\(""\);/g)).toHaveLength(2);
+    // The Combiner (Nov 6): the earliest of the sources' due dates, else none.
+    expect(src).toContain('setBidDueDate(header.dueDate ?? "");');
   });
 });
 

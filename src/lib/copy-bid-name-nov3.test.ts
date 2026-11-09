@@ -107,15 +107,23 @@ describe("copyBidName", () => {
 
 describe("duplicateBid (the server function) takes the popup's name", () => {
   it("inserts the copy under the typed name", async () => {
-    const copy = await call({ id: BID, name: "Somerset Career Center — option B" });
+    const copy = await call({
+      id: BID,
+      name: "Somerset Career Center — option B",
+      dueDate: "2026-12-01",
+    });
     expect(copy["name"]).toBe("Somerset Career Center — option B");
     expect(copy["status"]).toBe("draft");
   });
   it("blank or no name = the (copy) default; a name over 200 is refused by the schema", async () => {
-    expect((await call({ id: BID, name: "  " }))["name"]).toBe("Somerset Career Center (copy)");
-    expect((await call({ id: BID }))["name"]).toBe("Somerset Career Center (copy)");
+    expect((await call({ id: BID, name: "  ", dueDate: "2026-12-01" }))["name"]).toBe(
+      "Somerset Career Center (copy)",
+    );
+    expect((await call({ id: BID, dueDate: "2026-12-01" }))["name"]).toBe(
+      "Somerset Career Center (copy)",
+    );
     await expect(
-      Promise.resolve().then(() => call({ id: BID, name: "z".repeat(201) })),
+      Promise.resolve().then(() => call({ id: BID, name: "z".repeat(201), dueDate: "2026-12-01" })),
     ).rejects.toThrow();
   });
 });
@@ -124,7 +132,7 @@ describe("the Bids page", () => {
   const page = readFileSync("src/routes/bids.tsx", "utf8");
   it("Duplicate opens the popup with '<name> (copy)' filled in instead of copying at once", () => {
     expect(page).toContain(
-      "setCopyFor({ id: bid.id, name: bid.name, newName: duplicateBidName(bid.name) });",
+      "setCopyFor({\n                id: bid.id,\n                name: bid.name,\n                newName: duplicateBidName(bid.name),",
     );
     expect(page).not.toContain("duplicate.mutate(bid.id)");
   });
@@ -136,7 +144,7 @@ describe("the Bids page", () => {
     expect(dlg).toContain("Make the copy");
     expect(dlg).toContain("onFocus={(e) => e.currentTarget.select()}");
     expect(page).toContain(
-      "mutationFn: (v: { id: string; name: string }) => duplicateFn({ data: v }),",
+      "mutationFn: (v: { id: string; name: string; dueDate: string }) => duplicateFn({ data: v }),",
     );
   });
 });

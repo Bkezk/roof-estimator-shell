@@ -320,8 +320,10 @@ describe("the wiring", () => {
     expect(fns).toContain("ids: z.array(z.string().uuid()).min(1).max(200),");
     expect(fns).toContain("export const renameBidFolder = createServerFn");
     expect(fns).toContain("export const listBidFolders = createServerFn");
-    // listBids selects * so the column rides along.
-    expect(fns).toContain('.select("*, account:crm_accounts!bids_account_id_fkey(id, name)")');
+    // listBids reads the column (the slim list, Nov 6: no more `*`).
+    expect(fns).toContain(
+      '"id, name, status, grand_total, created_at, updated_at, updated_by_name, folder,',
+    );
     const types = here("../integrations/supabase/types.ts");
     expect(types).toContain("folder: string | null;");
     expect(types).toContain("folder?: string | null;");

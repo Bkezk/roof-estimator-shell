@@ -78,8 +78,15 @@ export function useBidLock(args: {
       }
     };
     void tick();
+    // keepalive: the request outlives the page, so a closed tab or a typed address frees the
+    // bid at once instead of leaving the lock to expire (owner, Nov 6, audit finding 4: for 45 s
+    // the Bids list said "Read only: <you> is currently editing this bid").
     const release = () => {
-      if (held) void releaseFn({ data: { bidId, sessionKey } }).catch(() => undefined);
+      if (held)
+        void releaseFn({
+          data: { bidId, sessionKey },
+          fetch: (input, init) => fetch(input, { ...init, keepalive: true }),
+        }).catch(() => undefined);
     };
     window.addEventListener("pagehide", release);
     return () => {

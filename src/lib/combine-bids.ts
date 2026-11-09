@@ -472,3 +472,27 @@ export function combineWarningLines(info: CombineInfo): string[] {
   ];
   return lines;
 }
+
+/**
+ * The combined bid's header (owner, Nov 6, audit finding 5: the Combiner opened with no customer
+ * even when every source bid had the same one). The customer every source is linked to (null
+ * when any differs or has none), the site when every source names the same one, and the
+ * earliest of the sources' due dates (YYYY-MM-DD; null when none has one).
+ */
+export function combinedHeader(
+  sources: readonly {
+    accountId: string | null | undefined;
+    siteId: string | null | undefined;
+    dueDate: string | null | undefined;
+  }[],
+): { accountId: string | null; siteId: string | null; dueDate: string | null } {
+  const accounts = new Set(sources.map((s) => s.accountId ?? null));
+  const accountId = accounts.size === 1 ? ([...accounts][0] ?? null) : null;
+  const sites = new Set(sources.map((s) => s.siteId ?? null));
+  const siteId = accountId && sites.size === 1 ? ([...sites][0] ?? null) : null;
+  const dues = sources
+    .map((s) => s.dueDate ?? "")
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  return { accountId, siteId, dueDate: dues[0] ?? null };
+}

@@ -10,7 +10,7 @@ customer and bid (three copies made and purged on the way). Scripts: scratchpad
 `wo/pw-bids-1..4.cjs`; the write guard aborted every REST write and every server-function write
 naming a row that was not mine (none was refused). Everything temporary was removed afterwards: a
 uuid sweep over every public and storage table came back empty; 22 live bids, 0 "ZZ" accounts.
-No fix was made — the owner decides.
+The fixes the owner chose follow the findings.
 
 ## What works (proven in the browser)
 
@@ -63,17 +63,48 @@ No fix was made — the owner decides.
 | 8 | Purging a bid (Delete permanently, or the 30-day sweep) cascades its document rows but leaves the documents' PDF files in the bucket — nothing in the bid or document functions removes storage files. Nothing is orphaned today (the two deleted bids' five documents have no files). | FK `documents.bid_id` CASCADE; no storage removal in `bids.functions.ts` / `documents.functions.ts`; storage count 0 |
 | 9 | Small: the search box is labelled "Bid name" but also matches the customer and the folder; "Clear filters" shows twice when nothing matches. | the filter bar |
 
-## Suggested fixes (not made)
+## Fixes (owner: "go for 1, 2, 3, 4, 5, 6, 8, 9"; 7 is fine as is — the importer was being tested)
 
-1. A slim list query (the columns plus `data->customer->>estimatorName`, `data->customer->>name`,
-   `data->>roofSystem`, the sections' systems and `data->importInfo->>source`), as the Customers
-   list got on Nov 6; update the one row in the cache after a rename / status / folder change
-   instead of refetching the list.
-2. Copy the folder; ask for the copy's due date in the Copy popup (the source's day prefilled),
-   or require it on the copy's first save like a new bid.
-3. Let the row's right cluster wrap below md (due and total on one line, status and the buttons
-   on the next).
-4. Send the lock release with `keepalive` (or `navigator.sendBeacon`), and wait for the profile
-   before taking the lock so the holder is named.
-5. Prefill the Combiner's customer (and the earliest due date) when the sources agree.
-6. Pick the estimator from the profiles instead of free text, or normalize on save.
+1. **The slim list.** `listBids` reads the row's columns plus the few JSON fields the page needs
+   (`estimator_name`, `typed_customer`, the roof systems read off the Setup default and the
+   sections on the server, the import source) — never the payload (`lib/bids-list.ts`
+   BidListRow). A rename, a status change, a folder move or rename and a delete patch the one
+   row in the cache (`patchBidRow` / `patchBidRows`); only a restore or a copy refetches.
+   Proof: the list is 18,741 bytes where it was 7,925,677; rename, Submitted / Lost / Draft, a
+   move and a folder rename made 0 list fetches and the rows read right, and right again after a
+   reload.
+2. **The copy keeps its folder and takes a due date.** `duplicateBidRow` copies `folder` and sets
+   `due_date`; `duplicateBid` requires the day; the Copy popup has a Bid due box (the source's
+   day to start; blank is refused by the box itself). Proof: the popup showed Dec 1, the copy
+   opened with Dec 15 and "ZZ Fix Folder B", the row read "Folder: ZZ Fix Folder B · Due Dec 15".
+3. **Rows wrap on a phone.** The row's right cluster is `flex-wrap`. Proof: 390 px viewport,
+   `scrollWidth` 390 (was 636), the row 364 px wide.
+4. **The lock release survives a tab close.** The release call is sent with `keepalive`, and the
+   lock is taken once the profile is known so the holder is named. Proof: with the bid open in
+   another tab, Rename said "Read only: Claude is currently editing"; that tab typed a new address
+   and 1.5 s later Rename went through (before: refused for 45 s).
+5. **The Combiner's customer and due date.** `combinedHeader` (lib/combine-bids.ts): the customer
+   every source shares (and the site when they name the same one), picked as a change of this
+   session, and the earliest source due date. Proof: two bids of one customer → "Linked to ZZ
+   Bids Fix Claude", the Customer Name box filled, Bid due Dec 1 (the earlier of Dec 1 / Dec 15).
+6. **One spelling per estimator.** `canonicalEstimator` (lib/bids-list.ts) reads a name against
+   the roster (admin General → Estimators): the roster's spelling on a match whatever the case,
+   the one roster name whose first name it is ("Brian" → "Brian Folden"), else as typed. The Bids
+   page folds every row through it (the filter, the rows, the Years grouping) and the estimator's
+   save stores the folded name. Proof: the Estimator filter lists Braden Keck, Brian Folden, Garry
+   Peters, John — "Brian" is gone; "John" stays (no John on the roster).
+8. **The documents' files go with a purged bid.** `removeBidDocumentFiles` lists each document's
+   `docs/<id>/` folder and removes the files, before Delete permanently and before the 30-day
+   sweep delete the rows (best effort: a file that cannot be removed is logged, the purge goes
+   on). Documents themselves are only ever soft-deleted, so there is nothing to do on a document
+   delete. Proof: a document with an exported PDF (`v1.pdf`) on the temp copy; after the purge the
+   bucket held 0 files under its folder, the document and revision rows were gone.
+9. **Labels.** The search box is labelled "Search" with "Bid name, customer or folder…"; the empty
+   state says "Clear filters above" instead of a second button.
+
+Tests: `src/lib/bids-page-fixes-nov6.test.ts` (16; 12 fail on the previous code), the pins
+updated in `duplicate-bid.test.ts`, `copy-bid-name-nov3.test.ts`, `rename-bid-nov3.test.ts`,
+`bid-due-date.test.ts`, `bids-folders.test.ts`; the shared fake gains a no-op `.returns()`. Chain
+green: 500 files / 6,415 tests, 0 lint errors, types, build. Browser proof: scratchpad
+`wo/pw-bids-5.cjs` on a temporary customer, bid, copy and document, all removed afterwards (uuid
+sweep empty; 22 live bids, 0 "ZZ" rows).

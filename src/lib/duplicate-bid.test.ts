@@ -84,6 +84,8 @@ const source: Row = {
   roof_id: "roof-1",
   takeoff_id: "takeoff-1",
   opportunity_id: "opp-1",
+  folder: "Owens Construction",
+  due_date: "2026-10-20",
   deleted_at: null,
   created_by: "someone-else",
   updated_by_name: "Brian Folden",
@@ -115,7 +117,7 @@ describe("duplicateBidName", () => {
 describe("duplicateBid (the server function, against a fake database)", () => {
   it("inserts a draft copy with the payload, total, customer, site and building; not the links or status", async () => {
     const { tables, context } = world([{ ...source }]);
-    const copy = await call({ id: BID }, context);
+    const copy = await call({ id: BID, dueDate: "2026-12-01" }, context);
     expect(tables["bids"]).toHaveLength(2);
     expect(copy["id"]).toBe("new-1");
     expect(copy["name"]).toBe("Monicello Banking Company 2026 (copy)");
@@ -129,15 +131,20 @@ describe("duplicateBid (the server function, against a fake database)", () => {
     expect(copy["roof_id"]).toBe("roof-1");
     expect(copy["takeoff_id"]).toBeNull();
     expect(copy["opportunity_id"]).toBeNull();
+    // Owner, Nov 6 (audit finding 2): the folder comes along; the due date is the popup's.
+    expect(copy["folder"]).toBe("Owens Construction");
+    expect(copy["due_date"]).toBe("2026-12-01");
     expect(copy["updated_by_name"]).toBe("Braden Keck");
     // The source is untouched.
     expect(tables["bids"]![0]).toEqual(source);
   });
   it("refuses a deleted or unknown bid", async () => {
     const { context } = world([{ ...source, deleted_at: "2026-10-01T00:00:00Z" }]);
-    await expect(call({ id: BID }, context)).rejects.toThrow("Bid not found");
+    await expect(call({ id: BID, dueDate: "2026-12-01" }, context)).rejects.toThrow(
+      "Bid not found",
+    );
     await expect(
-      Promise.resolve().then(() => call({ id: "not-a-uuid" }, context)),
+      Promise.resolve().then(() => call({ id: "not-a-uuid", dueDate: "2026-12-01" }, context)),
     ).rejects.toThrow();
   });
   it("duplicateBidRow never copies created_by, deleted_at or the id", () => {
@@ -147,6 +154,8 @@ describe("duplicateBid (the server function, against a fake database)", () => {
         "account_id",
         "building_id",
         "data",
+        "due_date",
+        "folder",
         "grand_total",
         "lost_reason",
         "name",
@@ -174,10 +183,10 @@ describe("the Bids page", () => {
       src.indexOf('title="Delete this bid"'),
     );
     expect(src).toContain('void navigate({ to: "/estimate", search: { bid: copy.id } });');
-    expect(src).toContain("newName: duplicateBidName(bid.name) });");
+    expect(src).toContain("newName: duplicateBidName(bid.name),");
     // The row itself opens the bid on click; the button must not also do that.
     expect(src).toMatch(
-      /newName: duplicateBidName\(bid\.name\) \}\);[\s\S]{0,80}onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/,
+      /newName: duplicateBidName\(bid\.name\),[\s\S]{0,120}onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/,
     );
   });
 });
