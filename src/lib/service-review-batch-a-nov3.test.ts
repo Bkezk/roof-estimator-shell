@@ -15,6 +15,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { csvMoney, csvNumber, pctLabel, pdfMoney } from "@/lib/invoice-format";
 import { invoiceDue, sortInvoices } from "@/lib/invoice-list";
 import { invoiceListSearch, invoiceSearch } from "@/lib/invoice-search";
@@ -185,8 +187,9 @@ describe("12. Invoices list: Due and how late", () => {
     expect(invoices).toContain("data-late={late ? due.lateDays : undefined}");
   });
   it("the table scrolls inside its box instead of widening the page on a phone", () => {
+    // One table since Nov 9: the Awaiting invoice queue is its first group.
     expect(invoices.match(/className="min-w-0 overflow-x-auto rounded-lg border"/g)?.length).toBe(
-      2,
+      1,
     );
     // The shell's flex column must not grow to the table either (measured: an iPhone laid the
     // page out 1,168 px wide and zoomed out until the two min-w-0 below).
@@ -288,7 +291,7 @@ describe("39 + 41. the lists read the list's columns, with city and state on the
     expect(migration).toContain(
       "create index if not exists service_jobs_week_idx\n  on public.service_jobs (scheduled_date) where deleted_at is null and technician_id is not null;",
     );
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toContain("site_city: string | null;");
   });
 });

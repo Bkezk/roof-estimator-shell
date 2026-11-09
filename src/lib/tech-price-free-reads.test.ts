@@ -19,6 +19,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", () => ({
   createServerFn: () => {
     let validate: (d: unknown) => unknown = (d) => d;
@@ -345,7 +347,7 @@ describe("migration 20261002160000_tech_price_free_reads.sql", () => {
 });
 
 describe("generated types: the views and the function", () => {
-  const types = read("src/integrations/supabase/types.ts");
+  const types = readGeneratedTypes();
   const views = types.slice(types.indexOf("    Views: {"), types.indexOf("    Functions: {"));
   const block = (name: string) => {
     const at = views.indexOf(`      ${name}: {`);
@@ -361,12 +363,16 @@ describe("generated types: the views and the function", () => {
     for (const c of ["id", "service_job_id", "technician_id", "sort", "created_at"])
       expect(crew).toContain(`${c}:`);
     expect(crew).not.toContain("bill_rate");
-    for (const b of [cat, crew]) expect(b).not.toMatch(/Insert:|Update:/);
+    // Nov 9: the generator types every view as writable (Insert / Update); the grants and RLS
+    // (pinned on the migration above) are what keep a technician from writing through them.
   });
   it("set_job_crew(p_job, p_rows)", () => {
-    expect(types).toContain(
-      "set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };",
-    );
+    expect(
+      typesInclude(
+        types,
+        "set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };",
+      ),
+    ).toBe(true);
   });
 });
 

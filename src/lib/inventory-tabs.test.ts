@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { seesEveryone } from "@/lib/access";
 import { placeWord } from "@/lib/inventory-reconcile";
 import { INVENTORY_TABS, parseInventorySearch } from "@/lib/inventory-search";
@@ -47,7 +49,7 @@ describe("1 · the opened-box rule is gone", () => {
     expect(fns).not.toContain("getInventorySettings");
     expect(fns).not.toContain("setOpenedBoxRule");
     expect(fns).not.toContain("inventory_settings");
-    expect(read("src/integrations/supabase/types.ts")).toContain("inventory_settings");
+    expect(readGeneratedTypes()).toContain("inventory_settings");
   });
   it("the header comment says why", () => {
     expect(page.replace(/\n \* /g, " ")).toContain(

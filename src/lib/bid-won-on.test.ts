@@ -14,6 +14,8 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -278,7 +280,7 @@ describe("the column", () => {
     const sql = read("supabase/migrations/20261021140000_bid_figures.sql");
     expect(sql).toContain("alter table public.bids add column if not exists won_on date;");
     expect(sql).toMatch(/comment on column public\.bids\.won_on is/);
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const bids = types.slice(types.indexOf("      bids: {\n        Row: {"));
     const row = bids.slice(0, bids.indexOf("Insert: {"));
     const insert = bids.slice(bids.indexOf("Insert: {"), bids.indexOf("Update: {"));

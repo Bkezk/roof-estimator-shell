@@ -541,7 +541,8 @@ describe("5. 20261021101000_followup_sync_invoice_caller.sql", () => {
     expect(server).toContain(
       'await admin.rpc("followup_sync_close", { p_id: open.id, p_reason: reason });',
     );
-    expect(server).toContain('await admin.rpc("followup_sync_upsert", {');
+    // Through the typed wrapper (database-rpc.ts, Nov 9): the same admin client.
+    expect(server).toContain('await databaseRpc(admin)("followup_sync_upsert", {');
     expect(server).not.toMatch(/\bsb\.rpc\(/);
     const files: string[] = [];
     const walk = (dir: string) => {

@@ -11,6 +11,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", () => ({
   createServerFn: () => {
     let validate: (d: unknown) => unknown = (d) => d;
@@ -141,7 +143,7 @@ describe("migration 20261006220000_repair_catalog_tags.sql", () => {
 });
 
 describe("generated types", () => {
-  const types = read("src/integrations/supabase/types.ts");
+  const types = readGeneratedTypes();
   const views = types.slice(types.indexOf("    Views: {"), types.indexOf("    Functions: {"));
   it("repair_templates_catalog Row has tags, still no unit_price", () => {
     const at = views.indexOf("      repair_templates_catalog: {");

@@ -13,6 +13,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   ACCOUNT_MERGED,
   CONTACT_REQUIRED,
@@ -132,7 +134,7 @@ describe("4. a merged customer is not restored", () => {
     expect(page).toContain('data-link="merged-into"');
   });
   it("the types know the column", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const crm = types.slice(types.indexOf("      crm_accounts: {"));
     expect(crm.slice(0, crm.indexOf("Relationships:"))).toContain("merged_into: string | null;");
   });

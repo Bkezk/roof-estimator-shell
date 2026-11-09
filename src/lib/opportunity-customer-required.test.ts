@@ -18,6 +18,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -454,7 +456,7 @@ describe("4. Start a ticket", () => {
     // No NOT NULL anywhere (older rows must still open), no constraint, no backfill.
     expect(sql).not.toMatch(/set not null|uuid not null|add constraint/i);
     expect(sql).not.toMatch(/\bupdate\s+public\./i);
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const jobs = types.slice(types.indexOf("      service_jobs: {"));
     const jobsEnd = jobs.indexOf("Relationships:");
     const block = jobs.slice(0, jobsEnd);

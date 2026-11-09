@@ -20,6 +20,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesBlock } from "@/test/generated-types";
+
 const admin = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
@@ -260,11 +262,8 @@ describe("2. the migration, 20261013140000_invoice_share_links.sql", () => {
     expect(src).toContain("is silent: no audit row");
   });
   it("the generated types carry the columns and the rpc", () => {
-    const types = read("src/integrations/supabase/types.ts");
-    const inv = types.slice(
-      types.indexOf("      invoices: {\n        Row: {"),
-      types.indexOf("      inspection_checklist_items: {"),
-    );
+    const types = readGeneratedTypes();
+    const inv = typesBlock(types, "invoices");
     expect(inv).toContain("share_token: string | null;");
     expect(inv).toContain("share_created_at: string | null;");
     expect(inv).toContain("share_views: number;");

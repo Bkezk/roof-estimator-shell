@@ -9,6 +9,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -279,9 +281,9 @@ describe("the RLS for it (20261009100000)", () => {
     expect(flat).not.toContain("drop policy if exists tasks_write on");
   });
   it("the types know can_claim()", () => {
-    expect(read("src/integrations/supabase/types.ts")).toContain(
-      "can_claim: {\n        Args: never;\n        Returns: boolean;\n      };",
-    );
+    expect(
+      typesInclude(readGeneratedTypes(), "can_claim: { Args: never; Returns: boolean; };"),
+    ).toBe(true);
   });
 });
 

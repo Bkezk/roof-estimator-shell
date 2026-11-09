@@ -37,40 +37,52 @@ export function groupInvoicesByStatus<T extends { status: string; total: number 
   });
 }
 
-/** Where the browser remembers which groups are collapsed. */
-export const INVOICE_GROUPS_COLLAPSED_KEY = "jbk-portal:invoices-collapsed";
+/** The groups on the page: the Awaiting invoice queue (Authorized tickets) and the four statuses. */
+export type InvoiceGroupKey = "awaiting" | InvoiceStatus;
+const GROUP_KEYS: readonly InvoiceGroupKey[] = ["awaiting", ...INVOICE_STATUSES];
+
+/** Where the browser remembers which groups the user opened (owner, Nov 9: they start collapsed). */
+export const INVOICE_GROUPS_OPEN_KEY = "jbk-portal:invoices-open";
 
 interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
 
-/** The collapsed groups as remembered; junk (bad JSON, unknown names, no storage) reads as none. */
-export function readCollapsedInvoiceGroups(
-  storage: StorageLike | null | undefined,
-): InvoiceStatus[] {
+/** The open groups as remembered; junk (bad JSON, unknown names, no storage) reads as none. */
+export function readOpenInvoiceGroups(storage: StorageLike | null | undefined): InvoiceGroupKey[] {
   try {
-    const raw: unknown = JSON.parse(storage?.getItem(INVOICE_GROUPS_COLLAPSED_KEY) ?? "[]");
-    return Array.isArray(raw) ? INVOICE_STATUSES.filter((s) => raw.includes(s)) : [];
+    const raw: unknown = JSON.parse(storage?.getItem(INVOICE_GROUPS_OPEN_KEY) ?? "[]");
+    return Array.isArray(raw) ? GROUP_KEYS.filter((k) => raw.includes(k)) : [];
   } catch {
     return [];
   }
 }
 
-export function writeCollapsedInvoiceGroups(
+export function writeOpenInvoiceGroups(
   storage: StorageLike | null | undefined,
-  collapsed: readonly InvoiceStatus[],
+  open: readonly InvoiceGroupKey[],
 ): void {
   try {
-    storage?.setItem(INVOICE_GROUPS_COLLAPSED_KEY, JSON.stringify(collapsed));
+    storage?.setItem(INVOICE_GROUPS_OPEN_KEY, JSON.stringify(open));
   } catch {
-    // Storage unavailable (private mode, blocked site data): the collapse lasts this visit.
+    // Storage unavailable (private mode, blocked site data): the choice lasts this visit.
   }
 }
 
-/** The collapsed set with one group flipped. */
-export const toggleCollapsedGroup = (
-  collapsed: readonly InvoiceStatus[],
-  status: InvoiceStatus,
-): InvoiceStatus[] =>
-  collapsed.includes(status) ? collapsed.filter((s) => s !== status) : [...collapsed, status];
+/** The open set with one group flipped. */
+export const toggleOpenGroup = (
+  open: readonly InvoiceGroupKey[],
+  key: InvoiceGroupKey,
+): InvoiceGroupKey[] => (open.includes(key) ? open.filter((k) => k !== key) : [...open, key]);
+
+/**
+ * Is a group open? Every group starts collapsed and opens when clicked (remembered); a group is
+ * forced open when the list is narrowed to it — a status chip for its status, `?tab=to-invoice`
+ * for Awaiting invoice — so a narrowed list never shows one collapsed header.
+ */
+export const isGroupOpen = (
+  open: readonly InvoiceGroupKey[],
+  key: InvoiceGroupKey,
+  forced = false,
+): boolean => forced || open.includes(key);

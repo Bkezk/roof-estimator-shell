@@ -85,11 +85,11 @@ describe("B1. the Awaiting invoice queue lists the Authorized tickets", () => {
     const fn = svc.slice(svc.indexOf("export const listAwaitingInvoice"));
     expect(fn.slice(0, 900)).toContain('.eq("stage", "authorized")');
     expect(invoices).toContain("toInvoiceRows(jobsQ.data?.rows ?? [])");
-    expect(invoices).toContain(
-      "Authorized tickets waiting for their invoice, longest waiting first.",
-    );
-    expect(invoices).toContain("Nothing waiting: every Authorized ticket has been invoiced.");
-    expect(invoices).toContain('<th className="px-3 py-2 font-medium">Authorized</th>');
+    // Nov 9: the queue is the first group of the one table — its header carries the tooltip,
+    // each row the Authorized badge and how long it has waited.
+    expect(invoices).toContain("title={AWAITING_INVOICE_TITLE}");
+    expect(invoices).toContain("Authorized\n");
+    expect(invoices).toContain('`Waiting ${days} day${days === 1 ? "" : "s"}`');
     expect(invoices).not.toContain('<th className="px-3 py-2 font-medium">Done</th>');
     expect(invoices).toContain("const since = waitingSince(j);");
     expect(AWAITING_INVOICE_TITLE).toBe("Tickets marked Authorized with no finalised invoice yet");

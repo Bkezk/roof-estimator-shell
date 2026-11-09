@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { isOffice } from "./access";
 import {
   UNASSIGNED_OVERDUE_DAYS_DEFAULT,
@@ -260,7 +262,7 @@ describe("the 'needs assignment' timer (owner, Oct 7: overdue just by nature of 
     expect(migration).toContain(
       "add column if not exists unassigned_overdue_days integer not null default 1",
     );
-    expect(read("../integrations/supabase/types.ts")).toContain("unassigned_overdue_days: number;");
+    expect(readGeneratedTypes()).toContain("unassigned_overdue_days: number;");
     expect(read("./followups.functions.ts")).toContain(
       "unassigned_overdue_days: z.number().int().min(0).max(365)",
     );

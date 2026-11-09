@@ -8,6 +8,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   openedLine,
   openerName,
@@ -338,7 +340,7 @@ describe("migration: a ticket's stage on its timeline, from the database", () =>
 });
 
 describe("types: crm_opportunity_events", () => {
-  const types = read("src/integrations/supabase/types.ts");
+  const types = readGeneratedTypes();
   const start = types.indexOf("      crm_opportunity_events: {");
   const block = types.slice(start, types.indexOf("      crm_site_contacts: {", start));
   it("Row / Insert / Update and the cascade's relationship", () => {

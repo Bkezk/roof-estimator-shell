@@ -18,6 +18,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -297,9 +299,7 @@ describe("3. Service rates: headings, the note until confirmed, the tax hint", (
     expect(sql).toMatch(
       /alter table public\.service_settings\s+add column if not exists rates_confirmed_at timestamptz,\s+add column if not exists rates_confirmed_by_name text;/,
     );
-    expect(read("src/integrations/supabase/types.ts")).toContain(
-      "rates_confirmed_at: string | null;",
-    );
+    expect(readGeneratedTypes()).toContain("rates_confirmed_at: string | null;");
   });
   it("the tax hint says blank means no tax", () => {
     expect(flat(rates)).toContain(

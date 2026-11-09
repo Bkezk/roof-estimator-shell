@@ -22,6 +22,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -108,7 +110,7 @@ describe("1. the column", () => {
     expect(sql).not.toMatch(/due_date date not null/);
   });
   it("the generated types carry it on the bids Row / Insert / Update", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const bids = types.slice(types.indexOf("      bids: {\n        Row: {"));
     const block = bids.slice(0, bids.indexOf("        Relationships: ["));
     expect(block).toContain("due_date: string | null;");

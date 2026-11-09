@@ -14,6 +14,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { claimReminderInMemory } from "@/test/claim-reminder";
 
 import { dispatchDueReminders, type Client } from "@/lib/notify.server";
@@ -431,7 +433,7 @@ describe("the migration (20261002110000_untouched_escalation.sql) and types", ()
     expect(flat).not.toContain("function public.crm_untouched");
   });
   it("types.ts knows the new columns", () => {
-    const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
+    const types = readGeneratedTypes();
     expect(types.match(/escalated_at: string \| null;/g)).toHaveLength(2);
     expect(types.match(/escalated_at\?: string \| null;/g)).toHaveLength(4);
   });

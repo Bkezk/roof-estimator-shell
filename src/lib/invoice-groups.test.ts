@@ -1,7 +1,8 @@
 /**
- * The Invoices list in status groups (owner, Nov 9: "like on bids where each status is a
- * collapsible row, the same for invoices … each row sorted by date"): the grouping, the
- * remembered collapse, and the page's wiring.
+ * The Invoices list in groups (owner, Nov 9: "like on bids where each status is a collapsible
+ * row, the same for invoices … each row sorted by date", then "make awaiting invoice one of the
+ * dropdowns, and have them start collapsed"): the grouping, the remembered open groups, and the
+ * page's wiring.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -9,10 +10,11 @@ import { describe, expect, it } from "vitest";
 import {
   groupInvoicesByStatus,
   INVOICE_GROUP_ORDER,
-  INVOICE_GROUPS_COLLAPSED_KEY,
-  readCollapsedInvoiceGroups,
-  toggleCollapsedGroup,
-  writeCollapsedInvoiceGroups,
+  INVOICE_GROUPS_OPEN_KEY,
+  isGroupOpen,
+  readOpenInvoiceGroups,
+  toggleOpenGroup,
+  writeOpenInvoiceGroups,
 } from "./invoice-groups";
 
 const page = readFileSync("src/components/service/invoices-page.tsx", "utf8");
@@ -41,7 +43,7 @@ describe("groupInvoicesByStatus", () => {
   });
 });
 
-describe("the remembered collapse", () => {
+describe("the open groups", () => {
   const store = () => {
     const m = new Map<string, string>();
     return {
@@ -50,42 +52,76 @@ describe("the remembered collapse", () => {
       m,
     };
   };
-  it("writes and reads the collapsed groups; junk reads as none", () => {
+  it("every group starts collapsed; the ones opened are written and read back; junk reads as none", () => {
     const st = store();
-    expect(readCollapsedInvoiceGroups(st)).toEqual([]);
-    writeCollapsedInvoiceGroups(st, ["void", "paid"]);
-    expect(st.m.get(INVOICE_GROUPS_COLLAPSED_KEY)).toBe('["void","paid"]');
-    // Read back in the statuses' order, unknown names dropped.
-    expect(readCollapsedInvoiceGroups(st)).toEqual(["paid", "void"]);
-    st.setItem(INVOICE_GROUPS_COLLAPSED_KEY, '["sent","nope",3]');
-    expect(readCollapsedInvoiceGroups(st)).toEqual([]);
-    st.setItem(INVOICE_GROUPS_COLLAPSED_KEY, "{not json");
-    expect(readCollapsedInvoiceGroups(st)).toEqual([]);
-    expect(readCollapsedInvoiceGroups(null)).toEqual([]);
-    expect(() => writeCollapsedInvoiceGroups(null, ["draft"])).not.toThrow();
+    expect(readOpenInvoiceGroups(st)).toEqual([]);
+    writeOpenInvoiceGroups(st, ["void", "awaiting"]);
+    expect(st.m.get(INVOICE_GROUPS_OPEN_KEY)).toBe('["void","awaiting"]');
+    // Read back in the groups' order, unknown names dropped.
+    expect(readOpenInvoiceGroups(st)).toEqual(["awaiting", "void"]);
+    st.setItem(INVOICE_GROUPS_OPEN_KEY, '["sent","nope",3]');
+    expect(readOpenInvoiceGroups(st)).toEqual([]);
+    st.setItem(INVOICE_GROUPS_OPEN_KEY, "{not json");
+    expect(readOpenInvoiceGroups(st)).toEqual([]);
+    expect(readOpenInvoiceGroups(null)).toEqual([]);
+    expect(() => writeOpenInvoiceGroups(null, ["draft"])).not.toThrow();
   });
-  it("toggles one group", () => {
-    expect(toggleCollapsedGroup([], "final")).toEqual(["final"]);
-    expect(toggleCollapsedGroup(["final", "void"], "final")).toEqual(["void"]);
+  it("toggles one group; a narrowed list forces its group open", () => {
+    expect(toggleOpenGroup([], "final")).toEqual(["final"]);
+    expect(toggleOpenGroup(["final", "void"], "final")).toEqual(["void"]);
+    expect(isGroupOpen([], "final")).toBe(false);
+    expect(isGroupOpen(["final"], "final")).toBe(true);
+    expect(isGroupOpen([], "final", true)).toBe(true);
+    expect(isGroupOpen([], "awaiting", true)).toBe(true);
   });
 });
 
 describe("the page", () => {
-  it("renders one collapsible tbody per group from the sorted rows; the header counts and sums; the rows keep their sort", () => {
+  it("renders the Awaiting invoice group first, then one collapsible tbody per status from the sorted rows", () => {
     expect(page).toContain("const shown = sortInvoices(rows, sort.key, sort.dir);");
     expect(page).toContain("const groups = groupInvoicesByStatus(shown);");
     expect(page).toContain(
+      '<tbody data-group="awaiting" data-open={awaitingOpen ? "" : undefined}>',
+    );
+    expect(page).toContain('const awaitingShown = status === "all" && waiting.length > 0;');
+    expect(page).toContain('const awaitingOpen = isGroupOpen(openGroups, "awaiting", toInvoice);');
+    expect(page).toContain("{awaitingOpen && waiting.map(renderTicketRow)}");
+    expect(page).toContain(
       '<tbody key={g.status} data-group={g.status} data-open={open ? "" : undefined}>',
     );
-    expect(page).toContain("aria-expanded={open}");
+    expect(page).toContain('const open = isGroupOpen(openGroups, g.status, status !== "all");');
     expect(page).toContain("onClick={() => toggleGroup(g.status)}");
     expect(page).toContain("{open && g.rows.map(renderRow)}");
     expect(page).toContain('{g.status === "void" ? "" : ` · ${money(g.total)}`}');
-    expect(page).toContain("writeCollapsedInvoiceGroups(window.localStorage, next);");
+    // The headers stand out (owner, Nov 9: "the draft, final, paid, void etc just kind of blend
+    // into the text"): a status-coloured badge on a tinted row, the count beside it.
+    expect(page).toContain('<tr className="border-y bg-muted/70 dark:bg-muted/40">');
     expect(page).toContain(
-      'readCollapsedInvoiceGroups(typeof window === "undefined" ? null : window.localStorage)',
+      "className={`px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${STATUS_CLASS[g.status]}`}",
     );
-    // The old flat body is gone.
+    // Every group starts collapsed; the ones opened are remembered.
+    expect(page).toContain("writeOpenInvoiceGroups(window.localStorage, next);");
+    expect(page).toContain(
+      'readOpenInvoiceGroups(typeof window === "undefined" ? null : window.localStorage)',
+    );
+    // The old flat body and the separate Awaiting table are gone.
     expect(page).not.toContain("{shown.map((r) => {");
+    expect(page).not.toContain("function ToInvoiceTable(");
+  });
+  it("the chips: All and the four statuses; no Awaiting invoice chip, no Unpaid chip (an unpaid invoice is a final one); ?status=unpaid lights Final", () => {
+    expect(page).not.toContain("Awaiting invoice{jobsQ.data");
+    expect(page).not.toContain("> Unpaid </Chip>");
+    expect(page).not.toContain("Unpaid\n          </Chip>");
+    expect(page).toContain('const on = status === s || (s === "final" && status === "unpaid");');
+  });
+  it("a ticket row in the Awaiting group opens the ticket and says how long it has waited", () => {
+    const row = page.slice(
+      page.indexOf("const renderTicketRow = "),
+      page.indexOf("const renderRow = "),
+    );
+    expect(row).toContain('search={{ id: j.id, from: "invoices" }}');
+    expect(row).toContain("onClick={() => open(j.id)}");
+    expect(row).toContain('`Waiting ${days} day${days === 1 ? "" : "s"}`');
+    expect(row).toContain("Authorized");
   });
 });

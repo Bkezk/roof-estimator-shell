@@ -1368,7 +1368,10 @@ export const saveContact = createServerFn({ method: "POST" })
     await assertLiveAccount(sb, data.account_id);
     // Under the caller's RLS (security invoker); only the sites that changed are unlinked /
     // linked, so the audit log records "site 'X' linked / unlinked" for those alone.
-    const { data: saved, error } = await databaseRpc(sb)("save_contact_with_sites", saveContactArgs(data));
+    const { data: saved, error } = await databaseRpc(sb)(
+      "save_contact_with_sites",
+      saveContactArgs(data),
+    );
     if (error) throw new Error(error.message);
     if (!saved) throw new Error("The contact was not saved");
     return saved as unknown as ContactWithSites;

@@ -12,6 +12,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { marker: "admin" } }));
 
 import { BID_DUE_NOTICE_KIND, bidDayPlus, bidDueNotice, bidDueNoticeDue } from "@/lib/bid-status";
@@ -47,7 +49,7 @@ describe("the column and the trigger", () => {
       "drop trigger if exists bids_due_notice_reset on public.bids; create trigger bids_due_notice_reset before update of due_date on public.bids for each row execute function public.bids_due_notice_reset();",
     );
     expect(sql).toContain("revoke all on function public.bids_due_notice_reset() from public;");
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const bids = types.slice(types.indexOf("      bids: {\n        Row: {"));
     expect(bids.slice(0, bids.indexOf("        Relationships: ["))).toContain(
       "notified_due_at: string | null;",

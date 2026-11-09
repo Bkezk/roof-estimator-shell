@@ -13,6 +13,8 @@ import { inflateSync } from "node:zlib";
 import { PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { AUDIT_ENTITIES } from "@/lib/audit";
 import { computeTotals, storedTotals } from "@/lib/invoice-totals";
 import {
@@ -448,7 +450,7 @@ describe("migration 20261001100000_ticket_purchase_orders.sql", () => {
 });
 
 describe("generated types: service_job_purchase_orders", () => {
-  const types = read("src/integrations/supabase/types.ts");
+  const types = readGeneratedTypes();
   const block = types.slice(
     types.indexOf("      service_job_purchase_orders: {"),
     types.indexOf("      service_job_repairs: {"),

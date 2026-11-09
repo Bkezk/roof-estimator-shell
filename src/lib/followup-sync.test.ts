@@ -16,6 +16,8 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -412,11 +414,14 @@ describe("item 5 — the sync writes through the guard's functions", () => {
     expect(MIG).toContain("and (v_system or assignee_id is distinct from auth.uid());");
   });
   it("types.ts knows the three functions", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toContain("followup_sync_upsert: {");
-    expect(types).toContain(
-      "followup_sync_close: { Args: { p_id: string; p_reason: string }; Returns: boolean };",
-    );
+    expect(
+      typesInclude(
+        types,
+        "followup_sync_close: { Args: { p_id: string; p_reason: string }; Returns: boolean };",
+      ),
+    ).toBe(true);
     expect(types).toContain("followup_claim_reminder: {");
   });
 });

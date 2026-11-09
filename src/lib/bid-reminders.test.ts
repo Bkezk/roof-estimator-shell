@@ -11,6 +11,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { marker: "admin" } }));
 
 import {
@@ -135,7 +137,7 @@ describe("the migration, 20261013160000_bid_reminders.sql", () => {
     expect(next).toContain("'notified_overdue_at'");
   });
   it("the generated types carry the new columns", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const settings = types.slice(types.indexOf("      crm_settings: {\n        Row: {"));
     const settingsRow = settings.slice(0, settings.indexOf("        Insert: {"));
     expect(settingsRow).toContain("bid_due_notice_days: number;");

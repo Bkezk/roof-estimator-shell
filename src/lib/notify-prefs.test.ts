@@ -13,6 +13,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -182,9 +184,14 @@ describe("migration 20261002180000_notify_prefs.sql", () => {
   });
 
   it("is typed (the seven-argument form of 20261013170000_notice_categories.sql, which the app calls)", () => {
-    const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
-    expect(types.replace(/\s+/g, " ")).toContain(
-      "set_my_notify_prefs: { Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null; p_opportunities: boolean | null; p_service: boolean | null; p_bids: boolean | null; p_storms: boolean | null; }; Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
-    );
+    const types = readGeneratedTypes();
+    // The generator (Nov 9) lists every overload of set_my_notify_prefs A–Z and without `| null`;
+    // the seven-argument form the app calls is one of them (database-rpc.ts carries the nulls).
+    expect(
+      typesInclude(
+        types,
+        "Args: { p_bids: boolean; p_email: boolean; p_leads: boolean; p_opportunities: boolean; p_push: boolean; p_service: boolean; p_storms: boolean; }; Returns: { notify_bids: boolean; notify_email: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_push: boolean; notify_service: boolean; notify_storms: boolean; }[];",
+      ),
+    ).toBe(true);
   });
 });

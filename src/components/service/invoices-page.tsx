@@ -39,10 +39,13 @@ import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
 import {
   groupInvoicesByStatus,
-  readCollapsedInvoiceGroups,
-  toggleCollapsedGroup,
-  writeCollapsedInvoiceGroups,
+  type InvoiceGroupKey,
+  isGroupOpen,
+  readOpenInvoiceGroups,
+  toggleOpenGroup,
+  writeOpenInvoiceGroups,
 } from "@/lib/invoice-groups";
+import { Badge } from "@/components/ui/badge";
 import {
   AWAITING_INVOICE_TITLE,
   invoiceListSearch,
@@ -56,11 +59,7 @@ import {
   type InvoiceSort,
   type InvoiceSortKey,
 } from "@/lib/invoice-list";
-import {
-  AWAITING_INVOICE_KEY,
-  listAwaitingInvoice,
-  type ServiceJobListRow,
-} from "@/lib/service.functions";
+import { AWAITING_INVOICE_KEY, listAwaitingInvoice } from "@/lib/service.functions";
 import { daysSince, toInvoice as toInvoiceRows, waitingSince } from "@/lib/service-schedule";
 import {
   exportSageCsv,
@@ -78,6 +77,7 @@ import {
   money,
   shortDay,
   stampDay,
+  STATUS_CLASS,
   STATUS_LABELS,
   thisMonth,
   todayYmd,
@@ -175,7 +175,6 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const setStatus = (s: StatusFilter) => patchFilters({ status: s });
   const setFrom = (v: string) => patchFilters({ from: v });
   const setTo = (v: string) => patchFilters({ to: v });
-  const showToInvoice = () => writeFilters({ ...filters, tab: "to-invoice" });
   // A click on a heading sorts by it (A–Z, oldest, smallest first); a second click reverses.
   // The list's own order (newest first) is left out of the URL.
   const sortBy = (key: InvoiceSortKey) => {
@@ -205,8 +204,9 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
   const [exportOpen, setExportOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState<InvoiceStatus[]>(() =>
-    readCollapsedInvoiceGroups(typeof window === "undefined" ? null : window.localStorage),
+  // Every group starts collapsed; the ones the user opened are remembered per browser.
+  const [openGroups, setOpenGroups] = useState<InvoiceGroupKey[]>(() =>
+    readOpenInvoiceGroups(typeof window === "undefined" ? null : window.localStorage),
   );
   const today = todayYmd();
 
@@ -220,7 +220,7 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
           ...(to ? { to } : {}),
         },
       }),
-    enabled: !!session && !toInvoice,
+    enabled: !!session,
   });
   // The Authorized tickets and their count from the server (the count is the database's, not
   // the length of the 1,000-row ticket list). Under "service-jobs", so every ticket change that
@@ -241,16 +241,21 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
   const openSum = sum((r) => (asInvoiceStatus(r.status) === "final" ? Number(r.total) : 0));
   const shown = sortInvoices(rows, sort.key, sort.dir);
-  // One collapsible group per status, Draft → Final → Paid → Void (owner, Nov 9: "like on bids
-  // where each status is a collapsible row"); the rows keep the sort inside each group (by date,
-  // newest first, unless a heading was clicked). A collapsed group is remembered per browser.
+  // One collapsible group per status, Draft → Final → Paid → Void, under the Awaiting invoice
+  // queue (owner, Nov 9: "like on bids where each status is a collapsible row … make awaiting
+  // invoice one of the dropdowns, and have them start collapsed"); the rows keep the sort inside
+  // each group (by date, newest first, unless a heading was clicked). A group opens on a click
+  // (remembered per browser), or when the list is narrowed to it (a chip; ?tab=to-invoice).
   const groups = groupInvoicesByStatus(shown);
-  const toggleGroup = (st: InvoiceStatus) =>
-    setCollapsed((prev) => {
-      const next = toggleCollapsedGroup(prev, st);
-      writeCollapsedInvoiceGroups(window.localStorage, next);
+  const toggleGroup = (key: InvoiceGroupKey) =>
+    setOpenGroups((prev) => {
+      const next = toggleOpenGroup(prev, key);
+      writeOpenInvoiceGroups(window.localStorage, next);
       return next;
     });
+  const awaitingShown = status === "all" && waiting.length > 0;
+  const awaitingOpen = isGroupOpen(openGroups, "awaiting", toInvoice);
+  const now = new Date();
   const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
   // The ticket's Back link returns to this queue (owner, Oct 9).
   const open = (serviceJobId: string) =>
@@ -258,6 +263,62 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   // The invoice's URL carries the list's filters, so its "← Invoices" returns to them.
   const openInvoice = (invoiceId: string) =>
     void navigate({ to: "/service/invoices", search: { ...filters, id: invoiceId } });
+
+  /**
+   * One Authorized ticket's row in the Awaiting invoice group, on the invoice columns: the
+   * ticket number (opens the ticket, whose Back returns here), the day it was authorized, the
+   * customer and property, its PO and job numbers, and how long it has waited.
+   */
+  const renderTicketRow = (j: (typeof waiting)[number]) => {
+    const since = waitingSince(j);
+    const days = daysSince(since, now);
+    return (
+      <tr
+        key={j.id}
+        className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
+        data-awaiting={days}
+        onClick={() => open(j.id)}
+      >
+        <td className="px-3 py-2 font-medium tabular-nums">
+          <Link
+            to="/service"
+            search={{ id: j.id, from: "invoices" }}
+            className="underline-offset-2 hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            #{j.number}
+          </Link>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">{stampDay(since)}</td>
+        <td className="px-3 py-2">{j.customer_name || "—"}</td>
+        <td className="px-3 py-2">
+          {j.site_name || "—"}
+          {j.site_address ? (
+            <span className="block text-xs text-muted-foreground">{j.site_address}</span>
+          ) : null}
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">{j.po_number || "—"}</td>
+        <td className="whitespace-nowrap px-3 py-2">{j.job_number || "—"}</td>
+        <td className="px-3 py-2 text-right text-muted-foreground">—</td>
+        <td className="px-3 py-2">
+          <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+            Authorized
+          </Badge>
+        </td>
+        <td
+          className={`whitespace-nowrap px-3 py-2 ${days >= 7 ? "font-medium text-amber-700 dark:text-amber-400" : ""}`}
+        >
+          {days === 0 ? "Waiting since today" : `Waiting ${days} day${days === 1 ? "" : "s"}`}
+          <span className="block text-xs font-normal text-muted-foreground">
+            {j.technician_name ?? "Unassigned"}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-muted-foreground">—</td>
+        <td className="px-3 py-2 text-muted-foreground">—</td>
+        <td className="px-3 py-2 text-muted-foreground">—</td>
+      </tr>
+    );
+  };
 
   /** One invoice's row (the same columns in every group). */
   const renderRow = (r: (typeof shown)[number]) => {
@@ -349,100 +410,71 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
 
       <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Chip
-            active={toInvoice}
-            title={AWAITING_INVOICE_TITLE}
-            onClick={toInvoice ? () => setStatus("all") : showToInvoice}
-          >
-            Awaiting invoice{jobsQ.data ? ` (${waitingCount})` : ""}
-          </Chip>
-          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-          <Chip active={!toInvoice && status === "all"} onClick={() => setStatus("all")}>
+          {/* Awaiting invoice is the first group below (Nov 9), not a chip; Unpaid went with the
+              Sent status (an unpaid invoice is a final one), ?status=unpaid lights Final. */}
+          <Chip active={status === "all"} onClick={() => setStatus("all")}>
             All
           </Chip>
-          <Chip
-            active={!toInvoice && status === "unpaid"}
-            title="Final, not yet marked paid"
-            onClick={() => setStatus(!toInvoice && status === "unpaid" ? "all" : "unpaid")}
-          >
-            Unpaid
-          </Chip>
-          {INVOICE_STATUSES.map((s) => (
-            <Chip
-              key={s}
-              active={!toInvoice && status === s}
-              onClick={() => setStatus(!toInvoice && status === s ? "all" : s)}
-            >
-              {STATUS_LABELS[s]}
-            </Chip>
-          ))}
+          {INVOICE_STATUSES.map((s) => {
+            const on = status === s || (s === "final" && status === "unpaid");
+            return (
+              <Chip key={s} active={on} onClick={() => setStatus(on ? "all" : s)}>
+                {STATUS_LABELS[s]}
+              </Chip>
+            );
+          })}
         </div>
-        {toInvoice ? (
-          <p className="text-xs text-muted-foreground">
-            Authorized tickets waiting for their invoice, longest waiting first. Open one to make
-            and finalise its invoice.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground sm:max-w-sm">
-              Search
-              <Input
-                type="search"
-                value={q}
-                placeholder="Search number, customer, property, PO #, Job #"
-                className="bg-background"
-                onChange={(e) => setQ(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Invoice date from
-              <Input
-                type="date"
-                value={from}
-                className="w-[160px] bg-background"
-                onChange={(e) => setFrom(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              to
-              <Input
-                type="date"
-                value={to}
-                className="w-[160px] bg-background"
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </label>
-            {anyFilter && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setQ("");
-                  sentQ.current = "";
-                  writeFilters({});
-                }}
-              >
-                Clear filters
-              </Button>
-            )}
-            {list.data && (
-              <span className="ml-auto text-xs text-muted-foreground">
-                {rows.length} invoice{rows.length === 1 ? "" : "s"}
-              </span>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground sm:max-w-sm">
+            Search
+            <Input
+              type="search"
+              value={q}
+              placeholder="Search number, customer, property, PO #, Job #"
+              className="bg-background"
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Invoice date from
+            <Input
+              type="date"
+              value={from}
+              className="w-[160px] bg-background"
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            to
+            <Input
+              type="date"
+              value={to}
+              className="w-[160px] bg-background"
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
+          {anyFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setQ("");
+                sentQ.current = "";
+                writeFilters({});
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+          {list.data && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {rows.length} invoice{rows.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
       </div>
 
-      {toInvoice ? (
-        <ToInvoiceTable
-          rows={waiting}
-          count={waitingCount}
-          loading={jobsQ.isLoading || !jobsQ.data}
-          error={jobsQ.error}
-          onOpen={open}
-        />
-      ) : list.error ? (
+      {list.error ? (
         <p className="text-sm text-destructive">
           Could not load invoices ({errText(list.error)}). Try refreshing, or sign in again.
         </p>
@@ -450,7 +482,7 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading invoices…
         </p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && waiting.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
           {anyFilter
             ? "No invoices match these filters."
@@ -477,13 +509,53 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
                 <th className="px-3 py-2 font-medium">Sage</th>
               </tr>
             </thead>
+            {awaitingShown && (
+              <tbody data-group="awaiting" data-open={awaitingOpen ? "" : undefined}>
+                <tr className="border-y bg-muted/70 dark:bg-muted/40">
+                  <td colSpan={12} className="px-3 py-2">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-expanded={awaitingOpen}
+                      title={AWAITING_INVOICE_TITLE}
+                      onClick={() => toggleGroup("awaiting")}
+                    >
+                      {awaitingOpen ? (
+                        <ChevronDown
+                          className="h-4 w-4 shrink-0 text-muted-foreground"
+                          aria-hidden
+                        />
+                      ) : (
+                        <ChevronRight
+                          className="h-4 w-4 shrink-0 text-muted-foreground"
+                          aria-hidden
+                        />
+                      )}
+                      <Badge
+                        variant="outline"
+                        className="border-violet-300 bg-violet-50 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-violet-900 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-100"
+                      >
+                        Awaiting invoice
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        {waitingCount} ticket{waitingCount === 1 ? "" : "s"}
+                        {waitingCount > waiting.length
+                          ? ` · the ${waiting.length} waiting longest shown`
+                          : ""}
+                      </span>
+                    </button>
+                  </td>
+                </tr>
+                {awaitingOpen && waiting.map(renderTicketRow)}
+              </tbody>
+            )}
             {groups.map((g) => {
-              const open = !collapsed.includes(g.status);
+              const open = isGroupOpen(openGroups, g.status, status !== "all");
               const Chevron = open ? ChevronDown : ChevronRight;
               return (
                 <tbody key={g.status} data-group={g.status} data-open={open ? "" : undefined}>
-                  <tr className="border-b bg-muted/30">
-                    <td colSpan={12} className="px-3 py-1.5">
+                  <tr className="border-y bg-muted/70 dark:bg-muted/40">
+                    <td colSpan={12} className="px-3 py-2">
                       <button
                         type="button"
                         className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -491,11 +563,14 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
                         title={open ? "Collapse this group" : "Expand this group"}
                         onClick={() => toggleGroup(g.status)}
                       >
-                        <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className="text-xs font-semibold uppercase tracking-wide">
+                        <Chevron className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                        <Badge
+                          variant="outline"
+                          className={`px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${STATUS_CLASS[g.status]}`}
+                        >
                           {STATUS_LABELS[g.status]}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
                           {g.rows.length} invoice{g.rows.length === 1 ? "" : "s"}
                           {g.status === "void" ? "" : ` · ${money(g.total)}`}
                         </span>
@@ -551,100 +626,6 @@ function SortHead(props: {
         {on && <Arrow className="h-3 w-3" aria-hidden />}
       </button>
     </th>
-  );
-}
-
-/** The Awaiting invoice queue: Authorized tickets, longest waiting first; a row opens its ticket. */
-function ToInvoiceTable(props: {
-  rows: ServiceJobListRow[];
-  /** Every Authorized ticket (the database's count); more than rows when the list is capped. */
-  count: number;
-  loading: boolean;
-  error: Error | null;
-  onOpen: (serviceJobId: string) => void;
-}) {
-  if (props.error)
-    return (
-      <p className="text-sm text-destructive">
-        Could not load the tickets ({errText(props.error)}). Try refreshing, or sign in again.
-      </p>
-    );
-  if (props.loading)
-    return (
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading tickets…
-      </p>
-    );
-  if (props.rows.length === 0)
-    return (
-      <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-        Nothing waiting: every Authorized ticket has been invoiced.
-      </div>
-    );
-  const now = new Date();
-  return (
-    <div className="min-w-0 overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[720px] text-sm">
-        <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">Ticket</th>
-            <th className="px-3 py-2 font-medium">Customer</th>
-            <th className="px-3 py-2 font-medium">Property</th>
-            <th className="px-3 py-2 font-medium">Technician</th>
-            <th className="px-3 py-2 font-medium">Authorized</th>
-            <th className="px-3 py-2 text-right font-medium">Waiting</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.rows.map((j) => {
-            const since = waitingSince(j);
-            const days = daysSince(since, now);
-            return (
-              <tr
-                key={j.id}
-                className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
-                onClick={() => props.onOpen(j.id)}
-              >
-                <td className="px-3 py-2 font-medium tabular-nums">
-                  <Link
-                    to="/service"
-                    search={{ id: j.id, from: "invoices" }}
-                    className="underline-offset-2 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    #{j.number}
-                  </Link>
-                </td>
-                <td className="px-3 py-2">{j.customer_name || "—"}</td>
-                <td className="px-3 py-2">
-                  {j.site_name || "—"}
-                  {j.site_address ? (
-                    <span className="block text-xs text-muted-foreground">{j.site_address}</span>
-                  ) : null}
-                </td>
-                <td className="px-3 py-2">{j.technician_name ?? "Unassigned"}</td>
-                <td className="whitespace-nowrap px-3 py-2">{stampDay(since)}</td>
-                <td
-                  className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${days >= 7 ? "font-medium text-amber-700 dark:text-amber-400" : ""}`}
-                >
-                  {days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="border-t bg-muted/40 text-sm font-medium">
-            <td className="px-3 py-2" colSpan={6}>
-              {props.count} ticket{props.count === 1 ? "" : "s"} awaiting invoice
-              {props.count > props.rows.length
-                ? ` (the ${props.rows.length} waiting longest shown)`
-                : ""}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
   );
 }
 

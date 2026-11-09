@@ -19,6 +19,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -577,7 +579,7 @@ describe(`migration ${MIGRATION}`, () => {
   });
 
   it("is typed: the profiles rows and the two functions", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const profiles = types.slice(
       types.indexOf("      profiles: {"),
       types.indexOf("      push_subscriptions: {"),
@@ -586,12 +588,20 @@ describe(`migration ${MIGRATION}`, () => {
       expect(profiles.match(new RegExp(`${col}: boolean;`, "g"))).toHaveLength(1);
       expect(profiles.match(new RegExp(`${col}\\?: boolean;`, "g"))).toHaveLength(2);
     }
-    expect(flat(types)).toContain(
-      "set_my_notify_prefs: { Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null; p_opportunities: boolean | null; p_service: boolean | null; p_bids: boolean | null; p_storms: boolean | null; }; Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
-    );
-    expect(flat(types)).toContain(
-      "notify_recipients: { Args: { ids: string[] }; Returns: { email: string; full_name: string | null; id: string; notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
-    );
+    // The generator (Nov 9) lists every overload of set_my_notify_prefs A–Z and without `| null`;
+    // the seven-argument form the app calls is one of them (database-rpc.ts carries the nulls).
+    expect(
+      typesInclude(
+        types,
+        "Args: { p_bids: boolean; p_email: boolean; p_leads: boolean; p_opportunities: boolean; p_push: boolean; p_service: boolean; p_storms: boolean; }; Returns: { notify_bids: boolean; notify_email: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_push: boolean; notify_service: boolean; notify_storms: boolean; }[];",
+      ),
+    ).toBe(true);
+    expect(
+      typesInclude(
+        types,
+        "notify_recipients: { Args: { ids: string[] }; Returns: { email: string; full_name: string; id: string; notify_bids: boolean; notify_email: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_push: boolean; notify_service: boolean; notify_storms: boolean; }[]; };",
+      ),
+    ).toBe(true);
   });
 });
 

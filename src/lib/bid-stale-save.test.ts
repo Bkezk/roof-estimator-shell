@@ -17,6 +17,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   bidDeletedMessage,
   bidSaveIsStale,
@@ -173,6 +175,6 @@ describe("the wiring", () => {
     expect(on).toBeGreaterThan(fill);
     // History does not list the stamp on every save.
     expect(sql).toMatch(/v_skip constant text\[\] := array\[[^\]]*'content_saved_at'/);
-    expect(read("../integrations/supabase/types.ts")).toContain("content_saved_at: string;");
+    expect(readGeneratedTypes()).toContain("content_saved_at: string;");
   });
 });

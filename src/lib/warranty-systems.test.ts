@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { warrantiesForSystem } from "@/lib/warranty-systems";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -48,7 +50,7 @@ describe("wiring", () => {
     expect(mig).toContain("add column if not exists systems text[]");
     expect(mig).toContain("'25 Yr EPDM'");
     expect(mig).toContain("'30 Yr EPDM'");
-    expect(read("src/integrations/supabase/types.ts")).toContain("systems: string[] | null;");
+    expect(readGeneratedTypes()).toContain("systems: string[] | null;");
     expect(read("src/lib/bids.functions.ts")).toContain("systems: w.systems ?? null,");
   });
   it("the estimator lists the bid system's warranties", () => {

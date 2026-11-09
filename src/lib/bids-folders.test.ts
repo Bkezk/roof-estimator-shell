@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   bidsInFolder,
   bidsInYear,
@@ -324,7 +326,7 @@ describe("the wiring", () => {
     expect(fns).toContain(
       '"id, name, status, grand_total, created_at, updated_at, updated_by_name, folder,',
     );
-    const types = here("../integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toContain("folder: string | null;");
     expect(types).toContain("folder?: string | null;");
   });

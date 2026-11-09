@@ -12,6 +12,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 const PATH = "supabase/migrations/20261002130000_audit_readable.sql";
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
 const flatSql = (p: string) =>
@@ -180,9 +182,14 @@ describe("7. save_contact_with_sites", () => {
     expect(fn).toContain(
       "return to_jsonb(v_row) || jsonb_build_object('site_ids', to_jsonb(v_sites));",
     );
-    const types = read("src/integrations/supabase/types.ts");
-    expect(types).toContain(
-      "save_contact_with_sites: {\n        Args: { p_contact: Json; p_site_ids?: string[] | null };\n        Returns: Json;\n      };",
-    );
+    const types = readGeneratedTypes();
+    // The generator (Nov 9) writes the optional array without `| null`; database-rpc.ts carries
+    // the SQL's nullable contract.
+    expect(
+      typesInclude(
+        types,
+        "save_contact_with_sites: { Args: { p_contact: Json; p_site_ids?: string[] }; Returns: Json; };",
+      ),
+    ).toBe(true);
   });
 });

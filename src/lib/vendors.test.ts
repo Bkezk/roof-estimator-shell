@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes, typesBlock, typesInclude } from "@/test/generated-types";
+
 import { AUDIT_ENTITIES } from "@/lib/audit";
 import {
   VENDOR_NAME_MAX,
@@ -338,15 +340,18 @@ describe("migration 20261001110000_vendors.sql", () => {
 });
 
 describe("generated types", () => {
-  const types = read("src/integrations/supabase/types.ts");
+  const types = readGeneratedTypes();
   const block = between(types, "      vendors: {\n", "      warranties: {\n");
   it("vendors: Row, Insert, Update in the table's shape, between vehicle_drivers and warranties", () => {
     expect(types.indexOf("      vehicle_drivers: {")).toBeLessThan(
       types.indexOf("      vendors: {"),
     );
-    expect(block).toContain(
-      "Row: {\n          account_number: string | null;\n          address1: string | null;\n          address2: string | null;\n          archived_at: string | null;\n          billable: boolean;\n          city: string | null;\n          contact_name: string | null;\n          created_at: string;\n          created_by: string | null;\n          email: string | null;\n          id: string;\n          name: string;\n          notes: string | null;\n          phone: string | null;\n          state: string | null;\n          terms: string | null;\n          updated_at: string;\n          zip: string | null;\n        };",
-    );
+    expect(
+      typesInclude(
+        block,
+        "Row: {           account_number: string | null;           address1: string | null;           address2: string | null;           archived_at: string | null;           billable: boolean;           city: string | null;           contact_name: string | null;           created_at: string;           created_by: string | null;           email: string | null;           id: string;           name: string;           notes: string | null;           phone: string | null; sage_customer_id: string | null; state: string | null;           terms: string | null;           updated_at: string;           zip: string | null;         };",
+      ),
+    ).toBe(true);
     const insert = between(block, "Insert: {", "Update: {");
     expect(insert).toContain("          name: string;\n");
     expect(insert.match(/^\s+\w+: /gm)).toHaveLength(1); // only the name is required
@@ -354,7 +359,7 @@ describe("generated types", () => {
     expect(update).not.toMatch(/^\s+\w+: /m);
   });
   it("invoices.bill_to_vendor_id and the PO's vendor_id, with their foreign keys", () => {
-    const inv = between(types, "      invoices: {\n", "      inspection_checklist_items: {\n");
+    const inv = typesBlock(types, "invoices");
     expect(inv).toContain(
       "          bill_to: Json;\n          bill_to_vendor_id: string | null;\n",
     );

@@ -13,6 +13,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   BID_FIGURES_VERSION,
   asBidFigures,
@@ -181,7 +183,7 @@ describe("pinned to the source", () => {
     expect(sql).toContain("alter table public.bids add column if not exists figures jsonb;");
     expect(sql).toMatch(/comment on column public\.bids\.figures is/);
     expect(sql).toContain("lib/bid-figures.ts");
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const bids = types.slice(types.indexOf("      bids: {\n        Row: {"));
     const row = bids.slice(0, bids.indexOf("Insert: {"));
     const insert = bids.slice(bids.indexOf("Insert: {"), bids.indexOf("Update: {"));

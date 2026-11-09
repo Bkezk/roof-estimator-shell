@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -815,7 +817,7 @@ describe("the migration 20261009150000_followup_holds.sql", () => {
     expect(body).not.toMatch(/create trigger|drop trigger|create policy/);
   });
   it("types.ts knows the columns and the function", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const block = types.slice(
       types.indexOf("crm_followups: {"),
       types.indexOf("Relationships", types.indexOf("crm_followups: {")),
@@ -829,9 +831,14 @@ describe("the migration 20261009150000_followup_holds.sql", () => {
       "hold_count: number;",
     ])
       expect(block).toContain(line);
-    expect(flat(types)).toContain(
-      "hold_followup: { Args: { p_followup: string; p_until: string | null; p_reason: string | null; p_via: string; }; Returns: Json; };",
-    );
+    // The generator (Nov 9) lists the arguments A–Z and without `| null`; database-rpc.ts carries
+    // the SQL's nullable p_until / p_reason.
+    expect(
+      typesInclude(
+        types,
+        "hold_followup: { Args: { p_followup: string; p_reason: string; p_until: string; p_via: string; }; Returns: Json; };",
+      ),
+    ).toBe(true);
   });
 });
 

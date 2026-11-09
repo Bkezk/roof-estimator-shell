@@ -376,7 +376,10 @@ describe("the click-throughs", () => {
     expect(read("src/components/service/invoices-page.tsx")).toContain(
       'const status: StatusFilter = filters.status ?? "all";',
     );
-    expect(read("src/components/service/invoices-page.tsx")).toContain("> Unpaid </Chip>");
+    // Nov 9: no Unpaid chip (an unpaid invoice is a final one); ?status=unpaid lights Final.
+    expect(read("src/components/service/invoices-page.tsx")).toContain(
+      'const on = status === s || (s === "final" && status === "unpaid");',
+    );
     expect(read("src/lib/invoices.functions.ts")).toContain(
       'if (data.status === "unpaid") q = q.eq("status", "final");',
     );

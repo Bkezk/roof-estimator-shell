@@ -13,6 +13,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -338,7 +340,7 @@ describe("the scheduled job's last run", () => {
       "create or replace function public.stamp_dispatch_result(p_failed integer)",
     );
     expect(sql).toContain("last_dispatch_failed = greatest(0, coalesce(p_failed, 0))");
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toContain("last_cron_at: string | null;");
     expect(types).toContain("last_dispatch_failed: number;");
   });

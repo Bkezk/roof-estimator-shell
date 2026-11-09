@@ -10,6 +10,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 import { SERVICE_STAGES } from "@/lib/service.functions";
 import {
   DONE_VIA_CLOSEOUT_MESSAGE,
@@ -175,9 +177,13 @@ describe("the invoice path still sets Invoiced / Closed, through the database fu
     expect(inv).not.toMatch(/\.update\(\{\s*stage: "(invoiced|closed)"/);
   });
   it("types.ts knows set_ticket_stage_from_invoice", () => {
-    expect(read("src/integrations/supabase/types.ts")).toMatch(
-      /set_ticket_stage_from_invoice: \{\s*Args: \{ p_job: string; p_stage: string; p_invoice\?: string \| null \};\s*Returns: undefined;/,
-    );
+    // The generator (Nov 9) lists the arguments A–Z and without `| null` (database-rpc.ts carries it).
+    expect(
+      typesInclude(
+        readGeneratedTypes(),
+        "set_ticket_stage_from_invoice: { Args: { p_invoice?: string; p_job: string; p_stage: string }; Returns: undefined; };",
+      ),
+    ).toBe(true);
   });
 });
 

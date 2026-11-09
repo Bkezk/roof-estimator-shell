@@ -24,6 +24,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 const notify = vi.hoisted(() =>
   vi.fn<
     (
@@ -121,7 +123,7 @@ const check = read("src/lib/closeout-check.ts");
 const fieldFn = read("src/lib/service-field.functions.ts");
 const inspFn = read("src/lib/service-inspection.functions.ts");
 const migration = read("supabase/migrations/20261012190000_inspection_flow.sql");
-const types = read("src/integrations/supabase/types.ts");
+const types = readGeneratedTypes();
 
 // ── 1. The steps ──────────────────────────────────────────────────────────────────────────
 

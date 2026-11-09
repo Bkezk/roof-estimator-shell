@@ -8,6 +8,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -211,7 +213,7 @@ describe("reading and showing a task's History", () => {
     );
   });
   it("the types know the two columns", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toContain(
       "done_at: string | null;\n          done_by: string | null;\n          done_by_name: string | null;",
     );

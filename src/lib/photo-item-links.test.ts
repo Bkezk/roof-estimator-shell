@@ -9,6 +9,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   alsoOnText,
   attachableTicketPhotos,
@@ -416,7 +418,7 @@ describe("the screens: 'also on Seams', Detach removes one link, the picker offe
     );
   });
   it("the types carry the table by hand", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toMatch(
       /service_job_photo_items: \{\s*Row: \{\s*created_at: string;\s*item_key: string;\s*photo_id: string;\s*\};/,
     );

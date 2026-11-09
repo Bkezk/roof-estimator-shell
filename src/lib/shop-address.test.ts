@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { parseStreetAddress } from "@/lib/aerial-address";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -69,7 +71,7 @@ describe("the save path: admin-settings.functions.ts saveCompanySettings upserts
     expect(fns).toContain('sb.from("company_settings").select("*").eq("id", 1).maybeSingle()');
   });
   it("the generated types carry the columns on Row, Insert and Update", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const block = types.slice(
       types.indexOf("      company_settings: {"),
       types.indexOf("      county_codes: {"),

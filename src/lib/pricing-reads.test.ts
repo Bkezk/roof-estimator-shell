@@ -19,6 +19,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -398,7 +400,7 @@ describe("(ii) the migration: the table list is the earlier migrations', every p
       ).toBe(true);
   });
   it("types.ts knows the views, the getters and the fence helpers", () => {
-    const t = read("src/integrations/supabase/types.ts");
+    const t = readGeneratedTypes();
     for (const v of [
       "pricing_catalog_units: {",
       "catalog_item_numbers_map: {",
@@ -407,7 +409,8 @@ describe("(ii) the migration: the table list is the earlier migrations', every p
       expect(t).toContain(v);
     expect(t).toContain("unassigned_overdue_days: { Args: never; Returns: number };");
     expect(t).toContain("opportunity_close_days: { Args: never; Returns: number };");
-    expect(t).toContain("crm_last_dispatch_at: { Args: never; Returns: string | null };");
+    // The generator (Nov 9) does not mark a nullable return.
+    expect(t).toContain("crm_last_dispatch_at: { Args: never; Returns: string };");
     expect(t).not.toMatch(/catalog_item_numbers_map: \{\s*Row: \{[^}]*last_price/);
   });
 });

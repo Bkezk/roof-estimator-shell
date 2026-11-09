@@ -5,6 +5,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { contactMethodLabel, LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -129,7 +131,7 @@ describe("4. Database: the manager-only trigger", () => {
     expect(sql).toMatch(/if new\.method = 'note' then\s+return new;/);
   });
   it("types.ts knows the new columns", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const block = types.slice(
       types.indexOf("crm_followups: {"),
       types.indexOf("Relationships", types.indexOf("crm_followups: {")),

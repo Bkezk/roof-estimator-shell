@@ -12,5 +12,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // A prettier-formatted copy of the generated database types for the tests that pin them
+    // (src/test/generated-types.ts): Lovable regenerates the file in its own style.
+    globalSetup: ["src/test/format-generated-types.ts"],
   },
 });

@@ -14,6 +14,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
 import { applyMarkup } from "@/lib/invoice-materials";
 import {
@@ -244,7 +246,7 @@ describe("the server builds and saves PO lines (source scan)", () => {
     expect(read("supabase/migrations/20261014100000_invoice_po_markup.sql")).toContain(
       "add column if not exists po_markup boolean not null default true",
     );
-    expect(read("src/integrations/supabase/types.ts")).toContain("po_markup: boolean;");
+    expect(readGeneratedTypes()).toContain("po_markup: boolean;");
   });
   it("the PDF renderer keys on nothing a PO line lacks (no special casing)", () => {
     const pdf = server.slice(

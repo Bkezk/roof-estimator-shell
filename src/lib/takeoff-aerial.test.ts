@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -413,7 +415,7 @@ describe("the address on the takeoff", () => {
       "alter table public.takeoffs add column if not exists source_address text;",
     );
     expect(sql).toMatch(/comment on column public\.takeoffs\.source_address is/);
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const t = types.slice(types.indexOf("      takeoffs: {\n        Row: {"));
     const row = t.slice(0, t.indexOf("Insert: {"));
     const insert = t.slice(t.indexOf("Insert: {"), t.indexOf("Update: {"));

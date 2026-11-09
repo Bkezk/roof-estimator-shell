@@ -9,6 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const MIGRATION = "../../../supabase/migrations/20261026150000_documents.sql";
 
@@ -176,7 +178,7 @@ describe("the migration 20261026150000_documents.sql", () => {
 
 describe("types.ts and the share route", () => {
   it("types.ts knows the five tables, the two columns and the two functions", () => {
-    const t = read("../../integrations/supabase/types.ts");
+    const t = readGeneratedTypes();
     for (const name of [
       "document_assets",
       "document_modules",

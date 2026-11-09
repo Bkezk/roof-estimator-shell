@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 import {
   LEAD_SOURCE_SEED,
   cleanLeadSourceName,
@@ -66,13 +68,18 @@ describe("the starting list", () => {
   });
 
   it("types.ts knows the table, the column and the functions", () => {
-    const types = read("../integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toMatch(/lead_sources: \{\s*Row: \{/);
     expect(types).toContain('foreignKeyName: "crm_opportunities_site_id_fkey"');
-    expect(types).toContain("lead_source_use_count: { Args: { p_name: string }; Returns: number }");
-    expect(types).toContain(
-      "rename_lead_source: { Args: { p_id: string; p_name: string }; Returns: number }",
-    );
+    expect(
+      typesInclude(types, "lead_source_use_count: { Args: { p_name: string }; Returns: number }"),
+    ).toBe(true);
+    expect(
+      typesInclude(
+        types,
+        "rename_lead_source: { Args: { p_id: string; p_name: string }; Returns: number }",
+      ),
+    ).toBe(true);
   });
 });
 

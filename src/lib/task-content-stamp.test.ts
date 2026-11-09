@@ -16,6 +16,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -182,7 +184,7 @@ describe("(i) the stamp: content_updated_at, updated_at until the migration is a
     ).rejects.toThrow(TASK_CHANGED);
   });
   it("types.ts carries the column", () => {
-    const t = read("src/integrations/supabase/types.ts");
+    const t = readGeneratedTypes();
     expect(t).toMatch(/tasks: \{\s*Row: \{[\s\S]*?content_updated_at: string;/);
   });
 });

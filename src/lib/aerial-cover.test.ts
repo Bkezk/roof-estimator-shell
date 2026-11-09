@@ -8,6 +8,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -115,7 +117,7 @@ describe("the migration", () => {
     expect(sql).toContain("check (aerial_state is null or aerial_state in ('KY', 'TN'))");
   });
   it("the generated types carry them", () => {
-    const t = read("src/integrations/supabase/types.ts");
+    const t = readGeneratedTypes();
     const i = t.indexOf("\n      crm_sites: {");
     const block = t.slice(i, t.indexOf("Relationships: [", i));
     for (const c of [

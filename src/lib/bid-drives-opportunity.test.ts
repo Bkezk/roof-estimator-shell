@@ -20,6 +20,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
 }));
@@ -747,9 +749,7 @@ describe("the migration, 20261012100000_bid_drives_opportunity.sql", () => {
     expect(flat).toContain(
       "create index if not exists bids_opportunity_idx on public.bids (opportunity_id);",
     );
-    expect(read("src/integrations/supabase/types.ts")).toContain(
-      'foreignKeyName: "bids_opportunity_id_fkey";',
-    );
+    expect(readGeneratedTypes()).toContain('foreignKeyName: "bids_opportunity_id_fkey";');
   });
   it("the stamps trigger: status_changed_at on a change, submitted_at once, an older one kept", () => {
     expect(flat).toContain(
@@ -797,9 +797,12 @@ describe("the migration, 20261012100000_bid_drives_opportunity.sql", () => {
     );
     // The status log row comes from the existing trigger on update of status: it is untouched.
     expect(flat).not.toContain("crm_opportunities_log");
-    expect(read("src/integrations/supabase/types.ts")).toContain(
-      "sync_opportunity_from_bid: {\n        Args: { p_bid: string };\n        Returns: Json;\n      };",
-    );
+    expect(
+      typesInclude(
+        readGeneratedTypes(),
+        "sync_opportunity_from_bid: { Args: { p_bid: string }; Returns: Json; };",
+      ),
+    ).toBe(true);
   });
   it("the server calls it after the bid write, in both paths, then syncs the follow-up", () => {
     const bids = src("src/lib/bids.functions.ts");

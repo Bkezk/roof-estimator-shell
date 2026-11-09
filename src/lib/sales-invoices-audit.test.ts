@@ -15,6 +15,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { isSalesPm, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES, auditLine } from "@/lib/audit";
 
@@ -240,7 +242,10 @@ describe("the database logs: no server code calls logAudit", () => {
     // Since Oct 2 in one transaction: save_contact_with_sites (20261002130000_audit_readable.sql)
     // deletes only the links no longer wanted and inserts only the new ones.
     const fn = serverFn(read("src/lib/crm.functions.ts"), "saveContact");
-    expect(fn).toContain('sb.rpc("save_contact_with_sites", saveContactArgs(data))');
+    // Through the typed wrapper (database-rpc.ts, Nov 9): the same client, the SQL's contract.
+    expect(fn.replace(/\s+/g, " ")).toContain(
+      'databaseRpc(sb)( "save_contact_with_sites", saveContactArgs(data), )',
+    );
     expect(fn).not.toContain('.from("crm_site_contacts")');
     const sql = read("supabase/migrations/20261002130000_audit_readable.sql")
       .replace(/--[^\n]*/g, "")
@@ -401,7 +406,7 @@ describe("migration 20261001070000_sales_invoices_audit.sql", () => {
       expect(flat).toContain(`drop policy if exists ${name} on ${table};`);
   });
   it("types.ts knows audit_log and is_sales_pm", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     expect(types).toMatch(
       /audit_log: \{\s*Row: \{\s*action: string;\s*at: string;\s*by_name: string \| null;\s*by_role: string \| null;\s*by_user: string \| null;\s*changes: Json \| null;\s*entity: string;\s*entity_id: string \| null;\s*id: number;\s*summary: string \| null;/,
     );

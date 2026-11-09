@@ -6,6 +6,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import {
   COMPANY_HEADERS,
   CONTACT_HEADERS,
@@ -850,7 +852,7 @@ describe("20261013120000_centerpoint_import.sql", () => {
     expect(sql).not.toContain("v_skip constant");
   });
   it("is known to the generated types", () => {
-    const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
+    const types = readGeneratedTypes();
     const accounts = types.slice(
       types.indexOf("      crm_accounts: {"),
       types.indexOf("      crm_contacts: {"),

@@ -5,6 +5,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { vendorLink } from "./purchase-orders";
 
 const vendors = [
@@ -45,7 +47,7 @@ describe("the column, the server and the form", () => {
     expect(sql).toContain("add column if not exists vendor_text text");
     expect(sql).toContain("length(vendor_text) <= 120");
     expect(sql).not.toMatch(/insert into public\.vendors/i);
-    const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
+    const types = readGeneratedTypes();
     const po = types.slice(types.indexOf("service_job_purchase_orders: {"));
     expect(po).toContain("vendor_text: string | null;");
     expect(po.match(/vendor_text\?: string \| null;/g)).toHaveLength(2);

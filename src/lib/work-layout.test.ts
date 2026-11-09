@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 import { LIST_BUCKETS, type WorkBucket } from "./my-work";
 import {
   DEFAULT_WORK_LAYOUT_ORDER,
@@ -170,7 +172,7 @@ describe("the layout follows the user", () => {
     expect(sql).toContain(
       "grant execute on function public.set_my_work_layout(jsonb) to authenticated",
     );
-    expect(read("../integrations/supabase/types.ts")).toContain("work_layout: Json | null;");
+    expect(readGeneratedTypes()).toContain("work_layout: Json | null;");
   });
   it("the page: drag the heading, X in the corner, Hidden chips, Reset layout, saved both places", () => {
     const page = read("../components/my-work-page.tsx");

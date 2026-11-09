@@ -18,6 +18,8 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes, typesInclude } from "@/test/generated-types";
+
 const notifyMock = vi.hoisted(() =>
   vi.fn(async (ids: string[], _msg: { kind: string; title: string }) => ids.length),
 );
@@ -121,7 +123,7 @@ describe(`migration ${MIGRATION}`, () => {
   });
 
   it("is typed: the profiles rows and the two functions", () => {
-    const types = read("src/integrations/supabase/types.ts");
+    const types = readGeneratedTypes();
     const profiles = types.slice(
       types.indexOf("      profiles: {"),
       types.indexOf("      push_subscriptions: {"),
@@ -131,9 +133,14 @@ describe(`migration ${MIGRATION}`, () => {
     expect(types).toContain("lead_notice_user_ids: { Args: never; Returns: string[] };");
     // Oct 13 (20261013170000_notice_categories.sql): the app calls the six-argument form, which
     // still carries p_leads / notify_leads.
-    expect(types.replace(/\s+/g, " ")).toContain(
-      "set_my_notify_prefs: { Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null; p_opportunities: boolean | null; p_service: boolean | null; p_bids: boolean | null; p_storms: boolean | null; }; Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_service: boolean; notify_bids: boolean; notify_storms: boolean; }[]; };",
-    );
+    // The generator (Nov 9) lists every overload of set_my_notify_prefs A–Z and without `| null`;
+    // the seven-argument form the app calls is one of them (database-rpc.ts carries the nulls).
+    expect(
+      typesInclude(
+        types,
+        "Args: { p_bids: boolean; p_email: boolean; p_leads: boolean; p_opportunities: boolean; p_push: boolean; p_service: boolean; p_storms: boolean; }; Returns: { notify_bids: boolean; notify_email: boolean; notify_leads: boolean; notify_opportunities: boolean; notify_push: boolean; notify_service: boolean; notify_storms: boolean; }[];",
+      ),
+    ).toBe(true);
   });
 });
 

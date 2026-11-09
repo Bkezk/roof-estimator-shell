@@ -12,6 +12,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
+import { readGeneratedTypes } from "@/test/generated-types";
+
 vi.mock("@tanstack/react-start", () => ({
   createServerFn: () => {
     let validate: (d: unknown) => unknown = (d) => d;
@@ -87,7 +89,7 @@ describe("5. migration 20261002170000_theme.sql", () => {
 });
 
 describe("5. types", () => {
-  const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
+  const types = readGeneratedTypes();
   const profiles = types.slice(
     types.indexOf("      profiles: {\n        Row: {"),
     types.indexOf("      push_subscriptions: {"),
