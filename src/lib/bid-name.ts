@@ -47,6 +47,23 @@ export function customerBidName(
   }
 }
 
+/**
+ * Is `name` still the automatic name for `customer` — the customer's name itself, or with a
+ * "(n)" after it? (owner, Nov 10, re-audit finding 8: a bid auto-named "A (1)" and then moved to
+ * customer B stayed "A (1)".) saveBid renames such a bid after its new customer; any other name
+ * was typed by someone and is kept.
+ */
+export function isCustomerBidName(
+  name: string | null | undefined,
+  customer: string | null | undefined,
+): boolean {
+  const base = collapse(customer ?? "").toLowerCase();
+  const n = collapse(name ?? "").toLowerCase();
+  if (!base || !n) return false;
+  if (n === base) return true;
+  return n.startsWith(`${base} (`) && /^\(\d+\)$/.test(n.slice(base.length + 1));
+}
+
 /** The pattern that finds the names a customer-named bid could collide with (PostgREST ilike). */
 export const customerNamePrefix = (customer: string): string =>
   `${collapse(customer).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;

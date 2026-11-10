@@ -21,6 +21,25 @@ export interface PaymentFields {
 export const paidStatusFor = (total: number | string | null, amount: number): "paid" | "final" =>
   amount + 0.005 >= num(total) ? "paid" : "final";
 
+/**
+ * A zero amount on an invoice that has a total takes the recorded payment off (owner, Nov 10,
+ * re-audit finding 1: a payment typed on the wrong invoice could not be removed — set to $0 it
+ * still read "Partly paid $0.00" with no Mark paid and no Void). The server then clears the day,
+ * the method and the reference, and the invoice is a plain Final again. A $0 invoice is not
+ * touched by this: marking it paid with $0 is its payment.
+ */
+export const clearsPayment = (total: number | string | null, amount: number): boolean =>
+  amount <= 0 && num(total) > 0.005;
+
+/**
+ * How much a payment is over the total — 0 when it is not (a cent's rounding forgiven). The
+ * dialog asks before recording one (owner, Nov 10, re-audit finding 2).
+ */
+export const overpaidBy = (total: number | string | null, amount: number): number => {
+  const over = r2(amount - num(total));
+  return over >= 0.01 ? over : 0;
+};
+
 /** Has a payment been recorded (an amount, or a day)? */
 export const hasPayment = (inv: Pick<PaymentFields, "paid_amount" | "paid_on">): boolean =>
   num(inv.paid_amount) > 0 || !!inv.paid_on;

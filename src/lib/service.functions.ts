@@ -15,6 +15,9 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+
+import { invoiceLabel } from "@/lib/invoice-numbering";
+import { ticketDeleteProblem } from "@/lib/ticket-delete-rule";
 import { shiftYmd } from "@/lib/tech-clock";
 import { stopClocksForOffice } from "@/lib/clock-close.server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -1014,6 +1017,23 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
     if (!managesTickets(p)) throw new Error("Ask a manager to delete a ticket");
+    // A ticket with a live invoice stays (owner, Nov 10; ticket-delete-rule.ts): its invoices
+    // would otherwise keep counting on the Invoices page and the Owner view with no ticket.
+    const [{ data: tk, error: tErr }, { data: invs, error: iErr }] = await Promise.all([
+      context.supabase.from("service_jobs").select("number").eq("id", data.id).maybeSingle(),
+      context.supabase
+        .from("invoices")
+        .select("number, display_number, status, paid_amount, paid_on")
+        .eq("service_job_id", data.id)
+        .neq("status", "void"),
+    ]);
+    if (tErr) throw new Error(tErr.message);
+    if (iErr) throw new Error(iErr.message);
+    const problem = ticketDeleteProblem(
+      tk?.number ?? "",
+      (invs ?? []).map((i) => ({ ...i, label: invoiceLabel(i) })),
+    );
+    if (problem) throw new Error(problem);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })

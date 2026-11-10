@@ -138,3 +138,37 @@ findings.
 - The edit lock's release on a closed tab (unchanged code, proved Nov 9).
 - The PO markup box on a draft (my script's selector missed it; unchanged code, proved Nov 9).
 - Takeoff and PlanSwift seeds in the browser (code read only, above).
+
+## Fixes (Nov 10)
+
+The owner: "fix 1, 2, 3 (currently all invoices are tests) … fix 5, 6, 7, 8, 9". Finding 4 was
+a question, answered in chat; nothing changed for it.
+
+1. **A $0 amount takes the payment off.** The server clears the day, the method and the
+   reference; the invoice is a plain Final again, with Mark paid and Void back. The dialog says
+   "To take this payment off, set the amount to 0", and at $0 its button reads "Take the payment
+   off". A $0 invoice is still paid by $0.
+2. **An overpayment is asked about.** The first press shows "$700.00 is $250.00 more than the
+   invoice total of $450.00. If that is right, press “Record it anyway”"; changing the amount
+   drops the question.
+3. **A ticket with a live invoice is not deleted.** The message names the invoice and the step:
+   delete the draft, void the invoice, or take the payment off and then void. Void invoices do
+   not hold a ticket. The five test invoices already on deleted tickets were left as they are.
+5. **The inspection's outcome follows its bids.** Deleting the last live bid clears "Outcome:
+   Bid" (or falls back to the repair ticket when one came of the inspection), so the "what
+   happens next?" banner returns; restoring a bid records Bid again unless another choice was
+   made since. Each leaves a timeline note.
+6. **A deleted ticket is not shown as a bid's inspection** in the estimator, as on the Bids page.
+7. **The server asks for the office or a manager** before linking a bid to an inspection. The
+   gap was someone with Estimate and Customers access but not Service — they never see the
+   button, and now the server refuses them too.
+8. **The automatic name follows a changed customer.** A bid still named after its old customer
+   (the name, or the name with "(n)") is renamed after the new one on save, and the toast says
+   so; a typed name is kept.
+9. **A copy carries the inspection** its source was started from, so the ticket lists the copy
+   beside the first bid.
+
+Tests: `re-audit-fixes-nov10.test.ts` (23; 19 red on the old code, the rest controls), one pin
+updated in `duplicate-bid.test.ts`. Chain: 511 files, 6,493 tests, build clean. Each fix was
+proved in the browser on temporary rows (two customers, two tickets, one invoice, four bids),
+all removed afterwards; the sweep is empty.

@@ -494,14 +494,92 @@ export const getSourceInspection = createServerFn({ method: "GET" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<LinkedTicket | null> => {
     await me(context);
+    // A deleted ticket is not linked to (owner, Nov 10: the estimator kept "From inspection #N"
+    // for one the Bids page had dropped, and the link opened the deleted ticket).
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .select("id, number, service_type, stage, completed_at")
       .eq("id", data.id)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     return row ?? null;
   });
+
+/**
+ * A bid started from an inspection was deleted or restored (bids.functions.ts deleteBid /
+ * restoreBid; owner, Nov 10, re-audit finding 5: with every linked bid deleted the ticket still
+ * read "Outcome: Bid" and never asked what happens next again).
+ *
+ *  - Deleted, and no live bid of this inspection is left while its outcome is "bid": the outcome
+ *    falls back to "repair_ticket" when a live repair ticket came of it, else it is cleared, so
+ *    the "what happens next?" banner returns.
+ *  - Restored, and the inspection has no outcome: "bid" is recorded again.
+ *
+ * Each leaves a timeline note. The ticket-side writes go through the server client: the person
+ * deleting a bid has Estimate access, not always the right to edit tickets, and the change is
+ * this narrow one. A deleted or non-inspection ticket is left alone.
+ */
+export async function syncInspectionOutcomeAfterBidChange(
+  ctx: Ctx,
+  jobId: string,
+  change: { bidName: string; deleted: boolean },
+): Promise<void> {
+  const { serverClient } = await import("@/lib/notify.server");
+  const admin = (await serverClient(
+    ctx.supabase as unknown as Parameters<typeof serverClient>[0],
+  )) as unknown as SupabaseClient<Database>;
+  const { data: job, error } = await admin
+    .from("service_jobs")
+    .select("id, service_type, stage, deleted_at, inspection_outcome")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!job || job.deleted_at || job.service_type !== "inspection") return;
+  const { data: live, error: bErr } = await admin
+    .from("bids")
+    .select("id")
+    .eq("from_job_id", jobId)
+    .is("deleted_at", null)
+    .limit(1);
+  if (bErr) throw new Error(bErr.message);
+  const { data: who } = await admin
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  const name = who ? nameOf(who) : "";
+  const note = async (text: string, outcome: InspectionOutcome | null) => {
+    await admin.from("service_job_events").insert({
+      service_job_id: jobId,
+      kind: "note",
+      note: text,
+      by_user: ctx.userId,
+      by_name: name,
+      meta: { inspection_outcome: outcome } as Json,
+    });
+  };
+  if (change.deleted) {
+    if (live?.length || job.inspection_outcome !== "bid") return;
+    const repair = await repairTicketOf(admin, jobId);
+    const next: InspectionOutcome | null = repair ? "repair_ticket" : null;
+    const { error: uErr } = await admin
+      .from("service_jobs")
+      .update({
+        inspection_outcome: next,
+        inspection_outcome_at: next ? new Date().toISOString() : null,
+        inspection_outcome_by: null,
+        updated_by_name: name || null,
+      })
+      .eq("id", jobId);
+    if (uErr) throw new Error(uErr.message);
+    await note(`Bid "${change.bidName}" was deleted — this inspection has no bid now`, next);
+    return;
+  }
+  if (!live?.length || job.inspection_outcome || !inspectionComplete(job.stage)) return;
+  await recordOutcome(admin, jobId, "bid", ctx.userId, name);
+  await note(`Bid "${change.bidName}" was restored — started from this inspection`, "bid");
+}
 
 /**
  * The estimator's first save of a bid started with "Create bid" (owner, Nov 9: "make it to where
@@ -518,6 +596,10 @@ export const linkBidToInspection = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<{ linked: boolean }> => {
     const p = await me(context);
+    // The same people the Create bid button shows to (owner, Nov 10: the server said less than
+    // the screen) — the office or a manager, as for "No action needed".
+    if (!dispatchesTickets(p))
+      throw new Error("Only the office or a manager starts a bid from an inspection");
     const sb = context.supabase;
     const [{ data: job, error }, { data: bid, error: bErr }] = await Promise.all([
       sb

@@ -22,7 +22,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
-import { hasPayment, paidStatusFor } from "@/lib/invoice-payment";
+import { clearsPayment, hasPayment, paidStatusFor } from "@/lib/invoice-payment";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
@@ -1034,16 +1034,30 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     if (cur.status === "draft") throw new Error("Finalize the invoice first");
     // Paid means paid in full (owner, Nov 9): a smaller amount is recorded and the invoice stays
     // Final with the balance due (invoice-payment.ts).
+    // A $0 amount takes the payment off (owner, Nov 10): the day, the method and the reference
+    // go with it, so the invoice is a plain Final again — Mark paid and Void are back.
+    const off = clearsPayment(cur.total, data.amount);
     const { data: inv, error } = await sb
       .from("invoices")
-      .update({
-        status: paidStatusFor(cur.total, data.amount),
-        paid_on: data.paid_on,
-        paid_amount: data.amount,
-        paid_method: data.method ?? null,
-        paid_ref: data.ref ?? null,
-        updated_by_name: nameOf(p),
-      })
+      .update(
+        off
+          ? {
+              status: "final",
+              paid_on: null,
+              paid_amount: 0,
+              paid_method: null,
+              paid_ref: null,
+              updated_by_name: nameOf(p),
+            }
+          : {
+              status: paidStatusFor(cur.total, data.amount),
+              paid_on: data.paid_on,
+              paid_amount: data.amount,
+              paid_method: data.method ?? null,
+              paid_ref: data.ref ?? null,
+              updated_by_name: nameOf(p),
+            },
+      )
       .eq("id", data.id)
       .in("status", ["final", "paid"])
       .select("*")

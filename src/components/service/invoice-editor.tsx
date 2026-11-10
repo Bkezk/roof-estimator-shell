@@ -74,7 +74,13 @@ import {
   storedTotals,
   type InvoiceTotals,
 } from "@/lib/invoice-totals";
-import { balanceDue, hasPayment, partlyPaid } from "@/lib/invoice-payment";
+import {
+  balanceDue,
+  clearsPayment,
+  hasPayment,
+  overpaidBy,
+  partlyPaid,
+} from "@/lib/invoice-payment";
 import { poTotal } from "@/lib/purchase-orders";
 import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
 import { sendToEdited, sendToOf, type SendTo } from "@/lib/invoice-send-to";
@@ -1945,10 +1951,13 @@ function FinalInvoice({
       ctx.applied(r, { stage: r.ticket_closed });
       // Owner, Oct 5: a manager closes the ticket by hand (its stage); paid no longer does.
       // Nov 9: a payment short of the total is recorded and the invoice stays Final.
+      // Nov 10: a $0 amount takes the payment off; the invoice is a plain Final again.
       toast.success(
         r.invoice.status === "paid"
           ? `Invoice #${invoiceLabel(r.invoice)} marked paid; close the ticket from its stage when it is finished`
-          : `Payment of ${money(r.invoice.paid_amount)} recorded on invoice #${invoiceLabel(r.invoice)}; balance due ${money(balanceDue(r.invoice))}, so it stays Final`,
+          : !hasPayment(r.invoice)
+            ? `Payment taken off invoice #${invoiceLabel(r.invoice)}; it is Final again with ${money(balanceDue(r.invoice))} due`
+            : `Payment of ${money(r.invoice.paid_amount)} recorded on invoice #${invoiceLabel(r.invoice)}; balance due ${money(balanceDue(r.invoice))}, so it stays Final`,
       );
     },
     onError: (e) => toast.error(`Could not mark the invoice paid: ${errText(e)}`),
@@ -2576,9 +2585,18 @@ function PaidDialog(props: {
   const [amount, setAmount] = useState(again ? Number(inv.paid_amount) : Number(inv.total));
   const [method, setMethod] = useState(inv.paid_method ?? "Check");
   const [ref, setRef] = useState(inv.paid_ref ?? "");
+  // An amount above the total is asked about once before it is recorded (owner, Nov 10).
+  const [overAsked, setOverAsked] = useState(false);
+  const over = overpaidBy(inv.total, amount);
+  // $0 on an invoice with a payment on record takes the payment off (owner, Nov 10).
+  const takesOff = again && clearsPayment(inv.total, amount);
   const submit = () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
       toast.error("Set the day it was paid");
+      return;
+    }
+    if (over > 0 && !overAsked) {
+      setOverAsked(true);
       return;
     }
     props.onSave({ paid_on: paidOn, amount, method, ref });
@@ -2600,6 +2618,7 @@ function PaidDialog(props: {
             change — close it from the stage picker when it is finished. Total {money(inv.total)}.
             An amount that covers the total marks it paid; a smaller one is recorded and the invoice
             stays final with the balance due.
+            {again ? " To take this payment off, set the amount to 0." : ""}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -2626,12 +2645,21 @@ function PaidDialog(props: {
               step="0.01"
               inputMode="decimal"
               blankZero={false}
-              onChange={setAmount}
+              onChange={(v) => {
+                setAmount(v);
+                setOverAsked(false);
+              }}
             />
-            {r2(amount) !== r2(Number(inv.total)) && (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                Differs from the total ({money(inv.total)})
+            {takesOff ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400" data-note="takes-off">
+                $0 takes the payment off: the invoice goes back to Final with the whole total due.
               </p>
+            ) : (
+              r2(amount) !== r2(Number(inv.total)) && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Differs from the total ({money(inv.total)})
+                </p>
+              )
             )}
           </div>
           <div className="space-y-1">
@@ -2663,6 +2691,16 @@ function PaidDialog(props: {
             />
           </div>
         </form>
+        {overAsked && over > 0 && (
+          <p
+            role="alert"
+            data-note="overpayment"
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          >
+            {money(amount)} is {money(over)} more than the invoice total of {money(inv.total)}. If
+            that is right, press “Record it anyway”.
+          </p>
+        )}
         <DialogFooter className="gap-2">
           <Button variant="outline" disabled={props.busy} onClick={props.onClose}>
             Cancel
@@ -2673,7 +2711,13 @@ function PaidDialog(props: {
             ) : (
               <CircleDollarSign className="mr-2 h-4 w-4" />
             )}
-            {again ? "Save payment" : "Mark paid"}
+            {overAsked && over > 0
+              ? "Record it anyway"
+              : takesOff
+                ? "Take the payment off"
+                : again
+                  ? "Save payment"
+                  : "Mark paid"}
           </Button>
         </DialogFooter>
       </DialogContent>

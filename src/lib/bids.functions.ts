@@ -15,7 +15,13 @@ import {
   bidCustomerProblem,
 } from "@/lib/bid-status";
 import { bidFiguresSchema } from "@/lib/bid-figures";
-import { customerBidName, customerNamePrefix, isUntitledBid, UNTITLED_BID } from "@/lib/bid-name";
+import {
+  customerBidName,
+  customerNamePrefix,
+  isCustomerBidName,
+  isUntitledBid,
+  UNTITLED_BID,
+} from "@/lib/bid-name";
 import { assertPricingRead } from "@/lib/auth.functions";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { folderKey, folderOptions, normalizeFolder } from "@/lib/bids-folders";
@@ -24,6 +30,7 @@ import { DOCUMENTS_BUCKET, documentImageFolder } from "@/lib/documents/server-pu
 import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
+import { syncInspectionOutcomeAfterBidChange } from "@/lib/service-inspection.functions";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -354,6 +361,18 @@ export const saveBid = createServerFn({ method: "POST" })
         storedAccountId: cur.account_id,
       });
       if (customerProblem) throw new Error(customerProblem);
+      // The customer changed and the name is still the automatic one for the old customer: the
+      // bid is named after its new customer (owner, Nov 10). A typed name is kept.
+      let renamed: string | null = null;
+      if (data.accountId && cur.account_id && data.accountId !== cur.account_id) {
+        const { data: old } = await context.supabase
+          .from("crm_accounts")
+          .select("name")
+          .eq("id", cur.account_id)
+          .maybeSingle();
+        if (isCustomerBidName(name, old?.name))
+          renamed = await nameAfterCustomer(context.supabase, data);
+      }
       // The due date may be changed any time, and cleared only on a won / lost bid (owner, Oct
       // 12); a bid that never had one is not held up.
       const dueProblem = bidDueDateProblem({
@@ -372,6 +391,7 @@ export const saveBid = createServerFn({ method: "POST" })
         .from("bids")
         .update({
           ...payload,
+          ...(renamed ? { name: renamed } : {}),
           ...(data.status && cur ? bidStatusStamps(cur, data.status) : {}),
           ...wonOnColumns(
             cur ?? null,
@@ -751,13 +771,22 @@ export const deleteBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => getBidSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { error, count } = await context.supabase
+    const { data: rows, error } = await context.supabase
       .from("bids")
-      .update({ deleted_at: new Date().toISOString() }, { count: "exact" })
+      .update({ deleted_at: new Date().toISOString() })
       .eq("id", data.id)
-      .is("deleted_at", null);
+      .is("deleted_at", null)
+      .select("id, name, from_job_id");
     if (error) throw new Error(error.message);
-    if (!count) throw new Error("Bid not found (it may already have been deleted).");
+    const gone = rows?.[0];
+    if (!gone) throw new Error("Bid not found (it may already have been deleted).");
+    // The inspection it was started from follows (owner, Nov 10): with no live bid left its
+    // "Outcome: Bid" is cleared, so the ticket asks what happens next again.
+    if (gone.from_job_id)
+      await syncInspectionOutcomeAfterBidChange(context, gone.from_job_id, {
+        bidName: gone.name,
+        deleted: true,
+      });
     return { id: data.id };
   });
 
@@ -765,7 +794,9 @@ export const deleteBid = createServerFn({ method: "POST" })
  * Duplicate a bid as a new draft (owner, Oct 6): the same payload, total, customer, site,
  * building and folder under the job name typed in the Bids page's popup (owner, Nov 3), else
  * "<name> (copy)", with the due date the popup asked for (owner, Nov 6); status, lost reason and
- * the takeoff / opportunity links are not copied (lib/duplicate-bid.ts).
+ * the takeoff / opportunity links are not copied (lib/duplicate-bid.ts). The inspection it was
+ * started from IS carried (owner, Nov 10): a second option for the customer is usually a copy,
+ * and the ticket lists it beside the first.
  * Returns the new row; the Bids page opens it.
  */
 export const duplicateBid = createServerFn({ method: "POST" })
@@ -861,13 +892,21 @@ export const restoreBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => getBidSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { error, count } = await context.supabase
+    const { data: rows, error } = await context.supabase
       .from("bids")
-      .update({ deleted_at: null }, { count: "exact" })
+      .update({ deleted_at: null })
       .eq("id", data.id)
-      .not("deleted_at", "is", null);
+      .not("deleted_at", "is", null)
+      .select("id, name, from_job_id");
     if (error) throw new Error(error.message);
-    if (!count) throw new Error("Bid not found in Recently deleted.");
+    const back = rows?.[0];
+    if (!back) throw new Error("Bid not found in Recently deleted.");
+    // Its inspection has a bid again (owner, Nov 10): the outcome is recorded once more.
+    if (back.from_job_id)
+      await syncInspectionOutcomeAfterBidChange(context, back.from_job_id, {
+        bidName: back.name,
+        deleted: false,
+      });
     return { id: data.id };
   });
 

@@ -156,6 +156,8 @@ describe("duplicateBid (the server function, against a fake database)", () => {
         "data",
         "due_date",
         "folder",
+        // The inspection the source was started from rides along (owner, Nov 10).
+        "from_job_id",
         "grand_total",
         "lost_reason",
         "name",

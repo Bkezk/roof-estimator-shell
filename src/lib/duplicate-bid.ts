@@ -42,6 +42,7 @@ export function duplicateBidRow<
     building_id: string | null;
     roof_id: string | null;
     folder?: string | null;
+    from_job_id?: string | null;
   },
 >(source: T, updatedByName: string | null, now: string, name?: string | null, dueDate?: string) {
   return {
@@ -58,6 +59,9 @@ export function duplicateBidRow<
     due_date: dueDate ?? null,
     takeoff_id: null,
     opportunity_id: null,
+    // The inspection ticket the source was started from (owner, Nov 10): the copy is another
+    // bid from the same inspection, listed on the ticket beside the first.
+    from_job_id: source.from_job_id ?? null,
     updated_at: now,
     updated_by_name: updatedByName,
   };
