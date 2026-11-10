@@ -21,8 +21,21 @@ import { closeoutGaps, closeoutRefusal } from "@/lib/closeout-check";
 import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import { REPAIR_TAG_VALUES } from "@/lib/repair-tags";
-import type { ServiceJobRow, ServiceJobWithTech } from "@/lib/service.functions";
-import { SERVICE_DONE_METHOD } from "@/lib/contact-log.functions";
+import {
+  readJobCrew,
+  readJobMaterials,
+  type CrewMemberView,
+  type JobMaterialRow,
+  type ServiceJobRow,
+  type ServiceJobWithTech,
+} from "@/lib/service.functions";
+import {
+  readContactLog,
+  SERVICE_DONE_METHOD,
+  type ContactLogRow,
+} from "@/lib/contact-log.functions";
+import { readPurchaseOrders, type PurchaseOrderList } from "@/lib/service-pos.functions";
+import { readTicketInspection, type TicketInspection } from "@/lib/service-inspection.functions";
 import { readProfile } from "@/lib/profile-cache.server";
 import { siteHistorySummarySchema, type SiteHistorySummary } from "@/lib/service-history";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
@@ -48,7 +61,7 @@ import {
   stockCellOf,
   unitWord,
 } from "@/lib/service-materials";
-import { cellUnit } from "@/lib/inventory.functions";
+import { pieceDefsForCells } from "@/lib/inventory.functions";
 import { stockUnitFor, type PieceDef } from "@/lib/stock-units";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 import { siteAddressLine } from "@/lib/crm.functions";
@@ -427,27 +440,32 @@ export const myClock = createServerFn({ method: "GET" })
 export const clockOnJob = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<(MyClock & { technician_name: string }) | null> => {
-    await me(context);
-    const sb = context.supabase;
-    const { data: rows, error } = await sb
-      .from("service_tech_clock")
-      .select("technician_id, service_job_id, kind, started_at, helper_count")
-      .eq("service_job_id", data.id)
-      .order("started_at", { ascending: false })
-      .limit(1);
-    if (error) throw new Error(`Could not read the clock: ${error.message}`);
-    const row = rows?.[0];
-    if (!row) return null;
-    const clock = await withTicket(context, {
-      ...row,
-      kind: row.kind === "travel" ? "travel" : "labor",
-    });
-    if (!clock) return null;
-    const { data: techs } = await sb.rpc("technician_options");
-    const t = (techs ?? []).find((x) => x.id === row.technician_id);
-    return { ...clock, technician_name: t ? (t.full_name ?? "").trim() || t.email : "Technician" };
+  .handler(({ data, context }): Promise<JobClock | null> => readClockOnJob(context, data.id));
+
+/** A clock running on a ticket, with whose it is. */
+export type JobClock = MyClock & { technician_name: string };
+/** clockOnJob's read as a plain function: the ticket's bundle read runs it too (Nov 10). */
+async function readClockOnJob(context: Ctx, id: string): Promise<JobClock | null> {
+  await me(context);
+  const sb = context.supabase;
+  const { data: rows, error } = await sb
+    .from("service_tech_clock")
+    .select("technician_id, service_job_id, kind, started_at, helper_count")
+    .eq("service_job_id", id)
+    .order("started_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Could not read the clock: ${error.message}`);
+  const row = rows?.[0];
+  if (!row) return null;
+  const clock = await withTicket(context, {
+    ...row,
+    kind: row.kind === "travel" ? "travel" : "labor",
   });
+  if (!clock) return null;
+  const { data: techs } = await sb.rpc("technician_options");
+  const t = (techs ?? []).find((x) => x.id === row.technician_id);
+  return { ...clock, technician_name: t ? (t.full_name ?? "").trim() || t.email : "Technician" };
+}
 
 /** The stages a technician's clock can still be closed at (ticket_open_for_tech's list). */
 const CLOCKABLE_STAGES: readonly string[] = WORK_STAGES;
@@ -1368,8 +1386,14 @@ export const setPhotoThumb = createServerFn({ method: "POST" })
  * item 36): the ticket with its technician's name, its repairs, photos (with signed links),
  * time and timeline — five reads that each re-checked the caller. The page seeds the five
  * caches from it (fieldKeys), and each section's own read stays fresh for FIELD_STALE_MS, so
- * nothing is asked twice. Crew, materials and purchase orders keep their own reads (they are
- * folded away until opened).
+ * nothing is asked twice.
+ *
+ * Nov 10 (speed finding 4: one ticket open made 28 calls in four rounds): six more plain reads
+ * of the same ticket ride along — the crew, the materials used, the purchase orders, the contact
+ * log, the clock running on it and, on an inspection ticket, its checklist record. Each is its
+ * own function with its own access rule, run here as it would be on its own call
+ * (TICKET_EXTRAS); one that refuses or fails is simply left out, and that section then asks for
+ * itself and shows what it always showed. The page seeds each one's cache (seedTicketCaches).
  */
 export interface TicketBundle {
   job: ServiceJobWithTech;
@@ -1377,13 +1401,50 @@ export interface TicketBundle {
   photos: JobPhotoWithItems[];
   time: TimeEntryRow[];
   events: JobEventRow[];
+  /** The ticket's named crew (listJobCrew); absent when that read refused or failed. */
+  crew?: CrewMemberView[];
+  /** The materials used on it (listServiceJobMaterials). */
+  materials?: JobMaterialRow[];
+  /** Its purchase orders (listPurchaseOrders). */
+  pos?: PurchaseOrderList;
+  /** Its contact log (listContactLog, kind "ticket"). */
+  contacts?: ContactLogRow[];
+  /** The clock running on it, or null for none (clockOnJob). */
+  clock?: JobClock | null;
+  /** An inspection ticket's checklist record (getTicketInspection); never read for another kind. */
+  inspection?: TicketInspection;
 }
+/** The parts of the bundle that are another function's read (each optional, each seeded apart). */
+export const TICKET_EXTRAS = [
+  "crew",
+  "materials",
+  "pos",
+  "contacts",
+  "clock",
+  "inspection",
+] as const;
+/** One of the ride-along reads: its answer, or undefined when it refused or failed. */
+const rideAlong = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
+  try {
+    return await read();
+  } catch {
+    return undefined;
+  }
+};
 export const getTicketBundle = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<TicketBundle> => {
     await me(context);
     const sb = context.supabase;
+    // Started now, awaited at the end: they run beside the ticket's own reads, not after them.
+    const extras = Promise.all([
+      rideAlong(() => readJobCrew(context, data.id)),
+      rideAlong(() => readJobMaterials(context, data.id)),
+      rideAlong(() => readPurchaseOrders(context, data.id)),
+      rideAlong(() => readContactLog(sb, "ticket", data.id)),
+      rideAlong(() => readClockOnJob(context, data.id)),
+    ]);
     const [jobRes, repairs, photos, time, events, techs] = await Promise.all([
       sb.from("service_jobs").select("*").eq("id", data.id).maybeSingle(),
       sb
@@ -1414,7 +1475,7 @@ export const getTicketBundle = createServerFn({ method: "GET" })
     for (const t of techs.data ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
     const job = jobRes.data;
     const rows = photos.data ?? [];
-    const [links, urls] = await Promise.all([
+    const [links, urls, inspection, [crew, materials, pos, contacts, clock]] = await Promise.all([
       photoLinks(
         sb,
         rows.map((p) => p.id),
@@ -1424,6 +1485,11 @@ export const getTicketBundle = createServerFn({ method: "GET" })
         ...rows,
         ...(job.signature_path ? [{ storage_path: job.signature_path, thumb_path: null }] : []),
       ]),
+      // Only an inspection ticket has a checklist record (the page asks for it on no other).
+      job.service_type === "inspection"
+        ? rideAlong(() => readTicketInspection(context, job.id))
+        : Promise.resolve(undefined),
+      extras,
     ]);
     return {
       job: {
@@ -1439,6 +1505,13 @@ export const getTicketBundle = createServerFn({ method: "GET" })
       })),
       time: time.data ?? [],
       events: events.data ?? [],
+      // A read that refused or failed is left out (not sent as null): its section asks itself.
+      ...(crew !== undefined ? { crew } : {}),
+      ...(materials !== undefined ? { materials } : {}),
+      ...(pos !== undefined ? { pos } : {}),
+      ...(contacts !== undefined ? { contacts } : {}),
+      ...(clock !== undefined ? { clock } : {}),
+      ...(inspection !== undefined ? { inspection } : {}),
     };
   });
 
@@ -1987,22 +2060,14 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
     ]);
     // A twin cell counts in the catalog's pieces (a box of 1,000 fasteners) unless the material
     // says otherwise (servicePiece); owner, Oct 9: a tap must log one screw, not one box.
-    const pieceCache = new Map<string, PieceDef | null>();
-    const catalogPiece = async (cell: {
-      screen_id: string;
-      row_label: string;
-      price_col: string;
-    }) => {
-      const k = `${cell.screen_id}\u0000${cell.row_label}\u0000${cell.price_col}`;
-      if (!pieceCache.has(k)) {
-        try {
-          pieceCache.set(k, (await cellUnit(sb, cell)).piece);
-        } catch {
-          pieceCache.set(k, null);
-        }
-      }
-      return pieceCache.get(k) ?? null;
-    };
+    // Read once for every twin cell (Nov 10, speed finding 6: it was two reads a material, one
+    // after another, on the close-out's material list).
+    const listed = [...materialsByCell(materials.filter((m) => m.active)).values()];
+    const catalogPiece = await pieceDefsForCells(
+      sb,
+      listed.filter((m) => m.stock_screen_id && !servicePiece(m)).map(stockCellOf),
+      materials,
+    );
     const numsByCell = new Map<string, string[]>();
     for (const n of nums ?? []) {
       if (!n.item_no) continue; // a view's columns type as nullable; the key never is
@@ -2013,7 +2078,7 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
     }
     // One row per cell, named by the material that names it everywhere else (materialsByCell).
     const out: ServiceMaterialOption[] = [];
-    for (const m of materialsByCell(materials.filter((m) => m.active)).values()) {
+    for (const m of listed) {
       const cell = stockCellOf(m);
       const nos = numsByCell.get(`${cell.screen_id}\u0000${cell.row_label}\u0000${cell.price_col}`);
       out.push({
@@ -2021,7 +2086,7 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
         label: m.name,
         category: m.category?.trim() || SERVICE_CATEGORY,
         unit: m.stock_screen_id ? stockUnitFor(cell.screen_id) : unitWord(m.unit),
-        piece: servicePiece(m) ?? (m.stock_screen_id ? await catalogPiece(cell) : null),
+        piece: servicePiece(m) ?? (m.stock_screen_id ? catalogPiece(cell) : null),
         item_no: nos?.length === 1 ? (nos[0] ?? null) : null,
       });
     }

@@ -66,14 +66,17 @@ describe("listAccounts reads past the 1,000-row cap", () => {
     expect(cp["open_jobs"]).toBe(1001);
     expect(rows.find((r) => r["id"] === id(7))!["site_count"]).toBe(1);
   });
-  it("pages each list with .range and a stable order", () => {
+  it("pages the customers with .range and a stable order; the counts are the database's", () => {
     const src = readFileSync("src/lib/crm.functions.ts", "utf8");
     const fn = src.slice(src.indexOf("export const listAccounts"));
     const body = fn.slice(0, fn.indexOf("\nexport "));
-    expect(body.match(/fetchAllPages\(/g)).toHaveLength(3);
-    expect(body.match(/\.range\(from, to\)/g)).toHaveLength(3);
+    // One paged list since Nov 10: the properties and the open tickets are counted beside each
+    // customer in the same read (LIST_SELECT), so there is no list of them to page or to cap.
+    expect(body.match(/fetchAllPages\(/g)).toHaveLength(1);
+    expect(body.match(/\.range\(from, to\)/g)).toHaveLength(1);
     expect(body).not.toContain(".limit(");
-    expect(body.match(/\.order\("id"\)/g)).toHaveLength(3);
+    expect(body.match(/\.order\("id"\)/g)).toHaveLength(1);
+    expect(body).toContain(".select(LIST_SELECT)");
   });
 });
 

@@ -261,17 +261,29 @@ export const listContactLog = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z.object({ kind: z.enum(CONTACT_KINDS), item_id: z.string().uuid() }).parse(d),
   )
-  .handler(async ({ data, context }): Promise<ContactLogRow[]> => {
-    const { data: rows, error } = await context.supabase
-      .from("crm_contact_log")
-      .select("*")
-      .eq("kind", data.kind)
-      .eq("item_id", data.item_id)
-      .order("at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(error.message);
-    return rows ?? [];
-  });
+  .handler(({ data, context }): Promise<ContactLogRow[]> =>
+    readContactLog(context.supabase, data.kind, data.item_id),
+  );
+
+/**
+ * listContactLog's read as a plain function (Nov 10, speed finding 4): the ticket's one bundle
+ * read runs it for the ticket too. The rows are the database's row security's, as before.
+ */
+export async function readContactLog(
+  sb: SupabaseClient<Database>,
+  kind: (typeof CONTACT_KINDS)[number],
+  itemId: string,
+): Promise<ContactLogRow[]> {
+  const { data: rows, error } = await sb
+    .from("crm_contact_log")
+    .select("*")
+    .eq("kind", kind)
+    .eq("item_id", itemId)
+    .order("at", { ascending: false })
+    .limit(200);
+  if (error) throw new Error(error.message);
+  return rows ?? [];
+}
 
 /** Untouched items this user may see, oldest assignment first. */
 export const listUntouched = createServerFn({ method: "GET" })

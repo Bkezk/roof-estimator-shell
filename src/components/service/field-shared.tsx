@@ -70,6 +70,7 @@ import {
   loudError,
   shortDay,
   useSignedUrl,
+  useStableLink,
 } from "@/components/service/field-utils";
 
 // ---------------------------------------------------------------------------------------------
@@ -353,11 +354,17 @@ export function PhotoThumb({
   const ownFull = useSignedUrl(
     (open || !photo.thumb_path) && !listed.url ? photo.storage_path : null,
   );
+  // One link per stored file for as long as it is good (Nov 10, speed finding 4): the read
+  // signs fresh links every time, and a fresh link is a new address, so every open downloaded
+  // every thumbnail again. The link this browser used before is kept (field-utils stableLink),
+  // and the picture comes from the browser's own copy.
+  const listedSmall = useStableLink(smallPath, photo.thumb_path ? listed.thumb_url : listed.url);
+  const listedFull = useStableLink(photo.storage_path, listed.url);
   const url = {
-    data: (photo.thumb_path ? listed.thumb_url : listed.url) || ownSmall.data || null,
+    data: listedSmall || ownSmall.data || null,
     error: ownSmall.error,
   };
-  const fullUrl = listed.url || ownFull.data || (!photo.thumb_path ? url.data : null);
+  const fullUrl = listedFull || ownFull.data || (!photo.thumb_path ? url.data : null);
   // A photo without a small copy yet (taken before Nov 3): the first viewer who may touch the
   // ticket makes one from the picture it downloaded anyway, once (backfillThumb).
   useEffect(() => {

@@ -62,6 +62,7 @@ import {
   dragHasFiles,
   errText,
   FIELD_READ,
+  FIELD_SEEDED_MS,
   fieldKeys,
   loudError,
   takePickedFiles,
@@ -314,6 +315,9 @@ export function JobClockLine({ jobId }: { jobId: string }) {
     queryKey: fieldKeys.jobClock(jobId),
     queryFn: () => fn({ data: { id: jobId } }),
     enabled: !!session,
+    // The ticket's one read brought it (Nov 10): no second ask as the line mounts; it is still
+    // read again every minute.
+    staleTime: FIELD_SEEDED_MS,
     refetchInterval: 60_000,
   });
   if (q.error)

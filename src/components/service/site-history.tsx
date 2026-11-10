@@ -67,7 +67,7 @@ import {
 } from "@/lib/service.functions";
 import { Box } from "@/components/service/field-shared";
 import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
-import { errText, fieldKeys, useSignedUrl } from "@/components/service/field-utils";
+import { errText, fieldKeys, useSignedUrl, useStableLink } from "@/components/service/field-utils";
 
 /** The fold's element id: the strip scrolls to it, and so does ?open=history. */
 export const HISTORY_FOLD_ID = "history-at-property";
@@ -447,7 +447,12 @@ function PhotoGrid({
 function HistoryThumb({ photo, onOpen }: { photo: HistoryPhoto; onOpen: () => void }) {
   // The small copy for the square when the photo has one (Nov 3); the server signed the links,
   // and when that failed the browser asks for its own.
-  const small = photo.thumb_url ?? photo.url;
+  // The link this browser already used for the file is kept while it is good (Nov 10: a fresh
+  // link each read made every thumbnail download again; field-utils stableLink).
+  const small = useStableLink(
+    photo.thumb_url ? photo.thumb_path : photo.storage_path,
+    photo.thumb_url ?? photo.url,
+  );
   const own = useSignedUrl(small ? null : (photo.thumb_path ?? photo.storage_path));
   const url = small ?? own.data ?? null;
   const { marks, rotation } = useMemo(
@@ -518,8 +523,9 @@ function HistoryViewer({
   nav: { index: number; count: number; onStep: (delta: 1 | -1) => void };
   onClose: () => void;
 }) {
-  const own = useSignedUrl(photo.url ? null : photo.storage_path);
-  const url = photo.url ?? own.data ?? null;
+  const listed = useStableLink(photo.storage_path, photo.url);
+  const own = useSignedUrl(listed ? null : photo.storage_path);
+  const url = listed ?? own.data ?? null;
   if (!url) return null;
   return (
     <PhotoLightbox

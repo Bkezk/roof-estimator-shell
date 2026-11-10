@@ -222,7 +222,7 @@ export const searchAccounts = createServerFn({ method: "GET" })
  * column; these are a fraction of that.
  */
 export const LIST_COLUMNS =
-  "id, name, kind, contact_name, phone, mobile, email, address1, city, state, zip, external_id, account_manager_id, updated_at, deleted_at" as const;
+  "id, name, kind, contact_name, phone, mobile, email, address1, city, state, zip, external_id, account_manager_id, updated_at" as const;
 export type AccountListColumn =
   | "id"
   | "name"
@@ -237,11 +237,37 @@ export type AccountListColumn =
   | "zip"
   | "external_id"
   | "account_manager_id"
-  | "updated_at"
-  | "deleted_at";
+  | "updated_at";
 export interface AccountListRow extends Pick<AccountRow, AccountListColumn> {
   site_count: number;
   open_jobs: number;
+}
+
+/**
+ * The list's one read (Nov 10, speed finding 7): the card's columns and, beside each customer,
+ * how many properties and how many tickets in progress it has — counted by the database
+ * (PostgREST's counted child lists). The list used to read every property and every open ticket
+ * as rows (1,138 and 10 of them, two more requests) to count them here. The filters on `sites.`
+ * and `jobs.` narrow what is counted, never which customers come back. Each child is read under
+ * its own row security, as the separate reads were.
+ */
+export const LIST_SELECT: string = `${LIST_COLUMNS}, sites:crm_sites!crm_sites_account_id_fkey(count), jobs:service_jobs!service_jobs_account_id_fkey(count)`;
+/** A row as LIST_SELECT answers it (typed by hand: the column list is a plain string). */
+export type AccountListRaw = Pick<AccountRow, AccountListColumn> & {
+  sites?: { count: number | string }[] | null;
+  jobs?: { count: number | string }[] | null;
+};
+const childCount = (list: { count: number | string }[] | null | undefined): number => {
+  const n = Number(list?.[0]?.count ?? 0);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+};
+/** LIST_SELECT's rows as the page reads them: the counts as two plain numbers. */
+export function shapeAccountList(rows: readonly AccountListRaw[]): AccountListRow[] {
+  return rows.map(({ sites, jobs, ...a }) => ({
+    ...a,
+    site_count: childCount(sites),
+    open_jobs: childCount(jobs),
+  }));
 }
 
 export const listAccounts = createServerFn({ method: "GET" })
@@ -250,43 +276,22 @@ export const listAccounts = createServerFn({ method: "GET" })
     await bookAccess(context);
     const sb = context.supabase;
     // Every row, 1,000 at a time (paging.ts: PostgREST caps a request at 1,000 rows, so
-    // asking for 2,000 stopped at 1,000 customers and the counts at 1,000 sites / tickets).
-    // Ordered by a unique column last, so no row repeats or drops between pages.
-    const [accounts, sites, jobs] = await Promise.all([
-      fetchAllPages((from, to) =>
-        sb
-          .from("crm_accounts")
-          .select(LIST_COLUMNS)
-          .is("deleted_at", null)
-          .order("name")
-          .order("id")
-          .range(from, to),
-      ),
-      fetchAllPages((from, to) =>
-        sb
-          .from("crm_sites")
-          .select("id, account_id")
-          .is("deleted_at", null)
-          .order("id")
-          .range(from, to),
-      ),
-      fetchAllPages((from, to) =>
-        sb
-          .from("service_jobs")
-          .select("id, account_id")
-          .is("deleted_at", null)
-          .in("stage", [...OPEN_TICKET_STAGES])
-          .order("id")
-          .range(from, to),
-      ),
-    ]);
-    const siteCount = countBy(sites, (s) => s.account_id);
-    const jobCount = countBy(jobs, (j) => j.account_id);
-    return accounts.map((a) => ({
-      ...a,
-      site_count: siteCount.get(a.id) ?? 0,
-      open_jobs: jobCount.get(a.id) ?? 0,
-    }));
+    // asking for 2,000 stopped at 1,000 customers). Ordered by a unique column last, so no row
+    // repeats or drops between pages. The counts are the database's, so no cap touches them.
+    const rows = await fetchAllPages((from, to) =>
+      sb
+        .from("crm_accounts")
+        .select(LIST_SELECT)
+        .is("deleted_at", null)
+        .is("sites.deleted_at", null)
+        .is("jobs.deleted_at", null)
+        .in("jobs.stage", [...OPEN_TICKET_STAGES])
+        .order("name")
+        .order("id")
+        .range(from, to)
+        .returns<AccountListRaw[]>(),
+    );
+    return shapeAccountList(rows);
   });
 
 export interface LinkedBidRow {

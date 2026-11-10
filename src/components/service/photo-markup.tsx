@@ -491,6 +491,9 @@ export function RotatedPhoto({
           )}
           style={style}
           loading={loading}
+          // Unpacked off the main thread, so a strip of pictures does not stall a tap or a
+          // scroll while it comes in (Nov 10, speed finding 4: 0.75 s of stall on a phone).
+          decoding="async"
           draggable={draggable}
           onLoad={(e) => {
             const s = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight };

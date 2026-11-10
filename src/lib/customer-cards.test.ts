@@ -17,7 +17,11 @@ describe("the list: one full-width card per customer, opening its own page", () 
     page.indexOf("export function CustomerPage("),
   );
   it("the card carries the name and kind, address, contact and reach, manager, properties, tickets in progress", () => {
-    expect(page).toContain('<div className="space-y-2" data-list="customers">');
+    // Nov 10: the cards on or near the screen only (WindowedList; the list keeps its
+    // data-list="customers" and its 8 px between cards).
+    expect(page).toMatch(
+      /<WindowedList\s+rows=\{rows\}\s+listName="customers"\s+rowsClassName="space-y-2"/,
+    );
     expect(page).toContain("<AccountCard key={a.id} a={a} managerName=");
     expect(card).toContain('to="/customers/$id"');
     expect(card).toContain("params={{ id: a.id }}");
@@ -36,7 +40,9 @@ describe("the list: one full-width card per customer, opening its own page", () 
     expect(card).toContain(
       '<dt className="text-xs text-muted-foreground">Tickets in progress</dt>',
     );
-    expect(card).toContain("{!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}");
+    // The list holds live customers only (and carries no deleted_at since Nov 10), so the
+    // card's badge needs no deleted check; the customer's own page keeps it.
+    expect(card).toContain("{!hasContactMethod(a) && <NoContactInfoBadge />}");
   });
   it("the two-pane layout and the counts strip are gone", () => {
     expect(page).not.toContain("md:grid-cols-[minmax(260px,340px)_1fr]");

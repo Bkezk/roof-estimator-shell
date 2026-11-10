@@ -61,7 +61,9 @@ describe("the open set", () => {
   it("a customer's open_jobs reads the same four stages (crm.functions.ts listAccounts, from crm-account.ts)", () => {
     const crm = read("src/lib/crm.functions.ts");
     const fn = crm.slice(crm.indexOf("export const listAccounts"));
-    expect(fn.slice(0, 1600)).toContain('.in("stage", [...OPEN_TICKET_STAGES])');
+    // Nov 10: the tickets are counted by the database beside each customer (the `jobs` child
+    // list of LIST_SELECT), narrowed to the same four stages.
+    expect(fn.slice(0, 1600)).toContain('.in("jobs.stage", [...OPEN_TICKET_STAGES])');
     expect(crm.slice(0, crm.indexOf("\nexport "))).toMatch(
       /import \{[^}]*OPEN_TICKET_STAGES[^}]*\} from "@\/lib\/crm-account"/,
     );

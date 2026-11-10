@@ -3,7 +3,7 @@
  * (docs/service-module-design.md §5.3): query keys, loud errors, dates, GPS with a short
  * timeout, and the private "service" bucket (browser upload, signed URLs).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -11,6 +11,7 @@ import { createAutosave, type AutosaveState } from "@/lib/autosave";
 
 import { supabase } from "@/integrations/supabase/client";
 import { SERVICE_BUCKET } from "@/lib/service-field.functions";
+import { PhotoLinkStore, linkFreshForMs } from "@/lib/photo-link-store";
 import { plainErrText } from "@/lib/plain-error";
 
 /** What went wrong, in plain English (lib/plain-error.ts; Nov 3, review item 49). */
@@ -35,6 +36,12 @@ export function loudError(what: string, e: unknown, retry?: () => void) {
  */
 export const FIELD_STALE_MS = 5 * 60_000;
 export const FIELD_READ = { staleTime: FIELD_STALE_MS, refetchOnWindowFocus: false } as const;
+/**
+ * How long a read the ticket's bundle seeded counts as fresh for a section that has no stale
+ * time of its own (Nov 10, speed finding 4): long enough that mounting right after the bundle
+ * does not ask again, short enough that coming back to the page still refreshes it.
+ */
+export const FIELD_SEEDED_MS = 30_000;
 
 /** Query keys of the field flow, shared so each screen refreshes the others. */
 export const fieldKeys = {
@@ -263,22 +270,75 @@ export function useSignatureUrl(job: {
     job.signature_url && job.signature_path && job.signature_url.includes(job.signature_path)
       ? job.signature_url
       : null;
+  // The link remembered for this file while it is good, so the image comes from the browser's
+  // own copy (lib/photo-link-store.ts); else the bundle's fresh one.
+  const stable = useStableLink(bundled ? job.signature_path : null, bundled);
   const own = useSignedUrl(bundled ? null : job.signature_path);
-  return { data: bundled ?? own.data ?? null, error: own.error };
+  return { data: stable ?? own.data ?? null, error: own.error };
+}
+
+// The browser's memory of picture links (lib/photo-link-store.ts): one per page load, mirrored
+// to localStorage, emptied on sign-out and when another person signs in.
+let photoLinkStore: PhotoLinkStore | null = null;
+function photoLinks(): PhotoLinkStore | null {
+  if (typeof window === "undefined") return null; // the server renders no pictures
+  if (!photoLinkStore) {
+    let storage: Storage | null = null;
+    try {
+      storage = window.localStorage;
+    } catch {
+      storage = null; // a browser that refuses storage: the memory lasts for this page only
+    }
+    const store = new PhotoLinkStore(storage, (save) => window.setTimeout(save, 250));
+    photoLinkStore = store;
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") store.clear();
+      else if (session?.user.id) store.forUser(session.user.id);
+    });
+  }
+  return photoLinkStore;
+}
+
+/**
+ * The link to show for the stored file at `path`, given the fresh link a read just signed for
+ * it: the one this browser already used for that file while it is still good — so the picture
+ * comes from the browser's own copy instead of being downloaded again — else the fresh one,
+ * remembered from now on (Nov 10, speed finding 4; the rules are in lib/photo-link-store.ts).
+ */
+export function stableLink(
+  path: string | null | undefined,
+  fresh: string | null | undefined,
+): string | null {
+  if (!path) return fresh ?? null;
+  const store = photoLinks();
+  return store ? store.link(path, fresh, Date.now()) : (fresh ?? null);
+}
+/** `stableLink` for a component: worked out again only when the path or the fresh link changes. */
+export function useStableLink(
+  path: string | null | undefined,
+  fresh: string | null | undefined,
+): string | null {
+  return useMemo(() => stableLink(path, fresh), [path, fresh]);
 }
 
 export function useSignedUrl(path: string | null | undefined) {
   return useQuery({
     queryKey: ["service-signed-url", path],
     queryFn: async () => {
+      // A link this browser already has for the file, while it is good: no signing call, and
+      // the picture comes from the browser's own copy.
+      const kept = photoLinks()?.peek(path!, Date.now());
+      if (kept) return kept;
       const { data, error } = await supabase.storage
         .from(SERVICE_BUCKET)
         .createSignedUrl(path!, 3600);
       if (error || !data) throw new Error(error?.message ?? "no link");
-      return data.signedUrl;
+      return stableLink(path, data.signedUrl) ?? data.signedUrl;
     },
     enabled: !!path,
-    staleTime: 50 * 60_000,
+    // Fresh until the link is close to running out (it was "50 of its 60 minutes"; a remembered
+    // link has less left, so it is counted from the link itself).
+    staleTime: (q) => linkFreshForMs(q.state.data, q.state.dataUpdatedAt),
     gcTime: 55 * 60_000,
     retry: 1,
   });

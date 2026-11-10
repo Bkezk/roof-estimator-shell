@@ -202,6 +202,8 @@ function fakeDb(tables: Record<string, Record<string, unknown>[]>) {
     const q = {
       select: () => q,
       eq: (c: string, v: unknown) => (preds.push((r) => r[c] === v), q),
+      // Nov 10: the pack sizes of all the listed cells come from one read of their screens.
+      in: (c: string, vs: unknown[]) => (preds.push((r) => vs.includes(r[c])), q),
       order: () => q,
       maybeSingle: async () => ({ data: run().data[0] ?? null, error: null }),
       then: (res: (r: unknown) => unknown, rej?: (e: unknown) => unknown) =>
@@ -428,12 +430,14 @@ describe("pieces per box reach the search (owner, Oct 9: a tap logged a whole bo
   it("listStock computes the piece per cell and the catalog options fall back to it", () => {
     const inv = readFileSync("src/lib/inventory.functions.ts", "utf8");
     expect(inv).toMatch(/export interface StockRow \{[\s\S]*?piece: PieceDef \| null;/);
+    // Nov 10 (speed finding 6): every cell's piece from one read (pieceDefsForCells), where
+    // each cell used to be asked for in turn (inventory-piece-reads-nov10b.test.ts).
     expect(inv).toMatch(
-      /export const listStock[\s\S]*?row\.piece = pieceCache\.get\(k\) \?\? null;/,
+      /export const listStock[\s\S]*?for \(const row of byCell\.values\(\)\) row\.piece = pieceOf\(row\);/,
     );
     const fld = readFileSync("src/lib/service-field.functions.ts", "utf8");
     expect(fld).toContain(
-      "piece: servicePiece(m) ?? (m.stock_screen_id ? await catalogPiece(cell) : null),",
+      "piece: servicePiece(m) ?? (m.stock_screen_id ? catalogPiece(cell) : null),",
     );
     expect(readFileSync("src/lib/material-search.ts", "utf8")).toContain(
       "e.piece ??= s.piece ?? null;",

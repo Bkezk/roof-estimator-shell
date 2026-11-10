@@ -16,6 +16,32 @@ export const DEFAULT_CUSTOMER_SORT: CustomerSort = "name";
 export const isCustomerSort = (v: unknown): v is CustomerSort =>
   CUSTOMER_SORTS.some((s) => s.id === v);
 
+/** What the list's search box reads on a customer. */
+export interface SearchableCustomer {
+  name: string;
+  city: string | null;
+  contact_name: string | null;
+  external_id: string | null;
+  phone: string | null;
+  mobile: string | null;
+  email: string | null;
+}
+
+/**
+ * Does the customer match the search box? `q` is the typed text, trimmed and lower-cased; empty
+ * matches everyone. Name, city, contact, customer #, phone, mobile and email, as one line (so
+ * "acme corbin" finds Acme in Corbin only when typed in that order, as before). The page runs
+ * this over EVERY customer before it cuts the list into screenfuls (lib/list-window.ts).
+ */
+export function matchesCustomerSearch(a: SearchableCustomer, q: string): boolean {
+  if (!q) return true;
+  return [a.name, a.city, a.contact_name, a.external_id, a.phone, a.mobile, a.email]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(q);
+}
+
 export interface SortableCustomer {
   name: string;
   open_jobs: number;

@@ -131,9 +131,11 @@ import {
   CUSTOMER_SORTS,
   DEFAULT_CUSTOMER_SORT,
   isCustomerSort,
+  matchesCustomerSearch,
   sortCustomers,
   type CustomerSort,
 } from "@/lib/customer-list-sort";
+import { WindowedList } from "@/components/windowed-list";
 import { mapsUrl, telHref } from "@/lib/maps-link";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import { VendorsSection } from "@/components/crm/vendors-section";
@@ -345,8 +347,9 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
               {a.kind === "individual" ? "Individual" : "Company"}
             </Badge>
             {/* Owner, Oct 13: a customer imported from CenterPoint may have no email or phone;
-                the badge asks the office to fill one in (NoContactInfoBadge). */}
-            {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
+                the badge asks the office to fill one in (NoContactInfoBadge). The list holds
+                live customers only (listAccounts), so there is no deleted one to leave out. */}
+            {!hasContactMethod(a) && <NoContactInfoBadge />}
             {a.external_id && (
               <span className="text-xs text-muted-foreground">#{a.external_id}</span>
             )}
@@ -460,6 +463,9 @@ export function CustomerPage({ id }: { id: string }) {
   );
 }
 
+/** A first guess at a customer card's height, until the list has measured one (px). */
+const CUSTOMER_CARD_PX = 104;
+
 function AccountList() {
   const { session } = useAuth();
   const listFn = useServerFn(listAccounts);
@@ -477,17 +483,10 @@ function AccountList() {
   const [manager, setManager] = useState<ManagerFilter>("all");
   const [sort, setSort] = useState<CustomerSort>(DEFAULT_CUSTOMER_SORT);
   const q = search.trim().toLowerCase();
+  // Every customer is searched, filtered and sorted here; only then is the result cut into the
+  // screenfuls WindowedList draws (Nov 10), so the search finds a customer wherever it sits.
   const rows = sortCustomers(
-    (list.data ?? []).filter(
-      (a) =>
-        matchesManager(a, manager) &&
-        (!q ||
-          [a.name, a.city, a.contact_name, a.external_id, a.phone, a.mobile, a.email]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-            .includes(q)),
-    ),
+    (list.data ?? []).filter((a) => matchesManager(a, manager) && matchesCustomerSearch(a, q)),
     sort,
     (id) => userName.get(id),
   );
@@ -560,11 +559,18 @@ function AccountList() {
               : ` for ${userName.get(manager) ?? "that account manager"}.`}
         </p>
       ) : (
-        <div className="space-y-2" data-list="customers">
-          {rows.map((a) => (
+        // Only the cards on or near the screen are drawn (Nov 10: all 636 at once was 22,398
+        // page elements); the rest of the list is held open by empty boxes of the same height.
+        <WindowedList
+          rows={rows}
+          listName="customers"
+          rowsClassName="space-y-2"
+          gap={8}
+          rowHeight={CUSTOMER_CARD_PX}
+          renderRow={(a) => (
             <AccountCard key={a.id} a={a} managerName={userName.get(a.account_manager_id ?? "")} />
-          ))}
-        </div>
+          )}
+        />
       )}
       {list.data && list.data.length > 0 && (
         <p className="text-xs text-muted-foreground">

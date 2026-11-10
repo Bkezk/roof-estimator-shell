@@ -284,9 +284,10 @@ describe("searches and pickers leave deleted customers out", () => {
     ).toHaveLength(4);
     const list = src.slice(src.indexOf("export const listAccounts"));
     // Paged since Oct 2 (crm-list-paging.test.ts): the same filter, one page at a time; the
-    // card's columns only since Nov 2 (customers-nov2-list.test.ts).
+    // card's columns only since Nov 2 (customers-nov2-list.test.ts), with the two counts in the
+    // same read since Nov 10 (LIST_SELECT = LIST_COLUMNS and the counted child lists).
     expect(list.slice(0, list.indexOf("\nexport "))).toMatch(
-      /\.from\("crm_accounts"\)\s*\.select\(LIST_COLUMNS\)\s*\.is\("deleted_at", null\)/,
+      /\.from\("crm_accounts"\)\s*\.select\(LIST_SELECT\)\s*\.is\("deleted_at", null\)/,
     );
     const picker = read("src/components/crm/account-picker.tsx");
     expect(picker).toContain("useServerFn(searchAccounts)");

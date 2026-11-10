@@ -148,8 +148,10 @@ describe("4. the list reads only the card's columns", () => {
       src.indexOf("export const listAccounts"),
       src.indexOf("export const LIST_COLUMNS") > 0 ? src.indexOf("export const getAccount") : 0,
     );
-    expect(fn).toContain('.from("crm_accounts")\n          .select(LIST_COLUMNS)');
-    expect(fn).not.toContain('.from("crm_accounts")\n          .select("*")');
+    // LIST_SELECT since Nov 10: LIST_COLUMNS and the two counted child lists, in one read.
+    expect(fn).toMatch(/\.from\("crm_accounts"\)\s*\.select\(LIST_SELECT\)/);
+    expect(src).toContain("export const LIST_SELECT: string = `${LIST_COLUMNS}, sites:");
+    expect(fn).not.toMatch(/\.from\("crm_accounts"\)\s*\.select\("\*"\)/);
   });
 });
 

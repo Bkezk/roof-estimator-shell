@@ -256,19 +256,9 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
   for (const row of byCell.values())
     row.item_nos =
       numsByCell.get(`${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`) ?? [];
-  // Piece definitions per distinct cell (a handful of catalog reads, like myTruckStock).
-  const pieceCache = new Map<string, PieceDef | null>();
-  for (const row of byCell.values()) {
-    const k = `${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`;
-    if (!pieceCache.has(k)) {
-      try {
-        pieceCache.set(k, (await cellUnit(sb, row)).piece);
-      } catch {
-        pieceCache.set(k, null);
-      }
-    }
-    row.piece = pieceCache.get(k) ?? null;
-  }
+  // Piece definitions for every cell from one read of their screens (pieceDefsForCells).
+  const pieceOf = await pieceDefsForCells(sb, [...byCell.values()], materials);
+  for (const row of byCell.values()) row.piece = pieceOf(row);
   return [...byCell.values()]
     .map((r) => ({ ...r, on_hand: Math.round(r.on_hand * 1000) / 1000 }))
     .sort(
@@ -636,19 +626,23 @@ async function onHandAt(
   return (data ?? []).reduce((n, r) => n + Number(r.qty), 0);
 }
 
+/** A catalog cell: the screen, the product row's key and the price column. */
+export interface StockCellRef {
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+}
+type MaterialLinks = Awaited<ReturnType<typeof loadServiceMaterialLinks>>;
+const cellKey = (c: StockCellRef) => `${c.screen_id}\u0000${c.row_label}\u0000${c.price_col}`;
+
 /** The stock unit and pieces-per-pack of a catalog cell (the same rules addMovement applies). */
 export async function cellUnit(
   sb: SupabaseClient<Database>,
-  cell: { screen_id: string; row_label: string; price_col: string },
+  cell: StockCellRef,
 ): Promise<{ unit: string; piece: PieceDef | null }> {
   // A service material with no bid-catalog twin: stocked in its own unit, whole units only.
-  if (cell.screen_id === SERVICE_STOCK_SCREEN) {
-    const m = (await loadServiceMaterialLinks(sb)).find(
-      (x) => !x.stock_screen_id && x.name === cell.row_label,
-    );
-    if (!m) throw new Error(`"${cell.row_label}" is not on the service material list`);
-    return { unit: unitWord(m.unit), piece: null };
-  }
+  if (cell.screen_id === SERVICE_STOCK_SCREEN)
+    return cellUnitFrom(cell, null, await loadServiceMaterialLinks(sb));
   // The price-free view (Oct 20; lib/catalog-units.ts is its twin): the labels, the pack sizes
   // and an adhesive's unit type — the screen's columns by name, never a price.
   const { data: screen, error } = await sb
@@ -657,6 +651,72 @@ export async function cellUnit(
     .eq("id", cell.screen_id)
     .maybeSingle();
   if (error) throw new Error(error.message);
+  if (!screen) throw new Error("Catalog screen not found");
+  return cellUnitFrom(cell, screen, await loadServiceMaterialLinks(sb));
+}
+
+/**
+ * The pieces-per-pack of every cell in a list, from ONE read of the screens they sit on (Nov 10,
+ * speed finding 6). Each list used to ask cellUnit for one cell after another, two reads a
+ * cell: 0.77 s for ten stocked items and about 6 s at a hundred. A cell cellUnit would refuse (a
+ * row renamed since, a screen gone, a failed read) has no pieces, as before. `materials` is the
+ * service material list when the caller has read it already.
+ */
+export async function pieceDefsForCells(
+  sb: SupabaseClient<Database>,
+  cells: readonly StockCellRef[],
+  materials?: MaterialLinks,
+): Promise<(cell: StockCellRef) => PieceDef | null> {
+  const distinct = [...new Map(cells.map((c) => [cellKey(c), c])).values()];
+  if (!distinct.length) return () => null;
+  const screenIds = [
+    ...new Set(
+      distinct.filter((c) => c.screen_id !== SERVICE_STOCK_SCREEN).map((c) => c.screen_id),
+    ),
+  ];
+  const [screens, mats] = await Promise.all([
+    (async (): Promise<Map<string, { data: unknown }> | null> => {
+      const found = new Map<string, { data: unknown }>();
+      if (!screenIds.length) return found;
+      const { data, error } = await sb
+        .from("pricing_catalog_units")
+        .select("id, data")
+        .in("id", screenIds);
+      if (error) return null;
+      // (A view's columns type as nullable; the base table's never are.)
+      for (const s of data ?? []) if (s.id) found.set(s.id, { data: s.data });
+      return found;
+    })(),
+    materials ?? loadServiceMaterialLinks(sb).catch(() => null),
+  ]);
+  const out = new Map<string, PieceDef | null>();
+  for (const c of distinct) {
+    let piece: PieceDef | null = null;
+    try {
+      if (mats && (screens || c.screen_id === SERVICE_STOCK_SCREEN))
+        piece = cellUnitFrom(c, screens?.get(c.screen_id) ?? null, mats).piece;
+    } catch {
+      piece = null;
+    }
+    out.set(cellKey(c), piece);
+  }
+  return (cell) => out.get(cellKey(cell)) ?? null;
+}
+
+/**
+ * cellUnit's rules on rows already read: the screen's price-free data (null for a service
+ * material's own screen, which has none) and the service material list. No database call.
+ */
+export function cellUnitFrom(
+  cell: StockCellRef,
+  screen: { data: unknown } | null | undefined,
+  materials: MaterialLinks,
+): { unit: string; piece: PieceDef | null } {
+  if (cell.screen_id === SERVICE_STOCK_SCREEN) {
+    const m = materials.find((x) => !x.stock_screen_id && x.name === cell.row_label);
+    if (!m) throw new Error(`"${cell.row_label}" is not on the service material list`);
+    return { unit: unitWord(m.unit), piece: null };
+  }
   if (!screen) throw new Error("Catalog screen not found");
   const d = screen.data as {
     kind?: string;
@@ -688,9 +748,7 @@ export async function cellUnit(
   }
   // A service material counted in its own unit against this stock (an ISO board = 32 sq ft):
   // the truck and ticket count it in that unit (owner, Oct 6).
-  const own = servicePiece(
-    materialForCell(materialsByCell(await loadServiceMaterialLinks(sb)), cell),
-  );
+  const own = servicePiece(materialForCell(materialsByCell(materials), cell));
   return { unit, piece: own ?? piece };
 }
 
@@ -1101,18 +1159,10 @@ export const myTruckStock = createServerFn({ method: "GET" })
       row.last_at = m.created_at;
     }
     const rows = [...byCell.values()].filter((r) => r.on_hand > 1e-9);
-    // Piece definitions per distinct cell (a handful of catalog reads).
-    const pieceCache = new Map<string, PieceDef | null>();
+    // Piece definitions for every cell from one read of their screens (pieceDefsForCells).
+    const pieceOf = await pieceDefsForCells(sb, rows, materials);
     for (const r of rows) {
-      const k = `${r.screen_id}\u0000${r.row_label}\u0000${r.price_col}`;
-      if (!pieceCache.has(k)) {
-        try {
-          pieceCache.set(k, (await cellUnit(sb, r)).piece);
-        } catch {
-          pieceCache.set(k, null);
-        }
-      }
-      r.piece = pieceCache.get(k) ?? null;
+      r.piece = pieceOf(r);
       r.on_hand = Math.round(r.on_hand * 1000) / 1000;
     }
     return rows.sort(

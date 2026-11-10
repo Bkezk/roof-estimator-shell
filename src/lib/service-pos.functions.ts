@@ -148,22 +148,27 @@ async function viewsOf(
 export const listPurchaseOrders = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ jobId: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<PurchaseOrderList> => {
-    const p = await me(context);
-    const { job, works } = await ticketFor(context, data.jobId);
-    const { data: rows, error } = await context.supabase
-      .from("service_job_purchase_orders")
-      .select("*")
-      .eq("service_job_id", data.jobId)
-      .order("po_date", { ascending: true })
-      .order("created_at", { ascending: true });
-    if (error) throw new Error(error.message);
-    return {
-      pos: await viewsOf(context, p, rows ?? [], works),
-      ticketNumber: job.number ?? null,
-      canAdd: canAddPo(p, works),
-    };
-  });
+  .handler(({ data, context }): Promise<PurchaseOrderList> =>
+    readPurchaseOrders(context, data.jobId),
+  );
+
+/** listPurchaseOrders' read as a plain function: the ticket's bundle read runs it too (Nov 10). */
+export async function readPurchaseOrders(context: Ctx, jobId: string): Promise<PurchaseOrderList> {
+  const p = await me(context);
+  const { job, works } = await ticketFor(context, jobId);
+  const { data: rows, error } = await context.supabase
+    .from("service_job_purchase_orders")
+    .select("*")
+    .eq("service_job_id", jobId)
+    .order("po_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return {
+    pos: await viewsOf(context, p, rows ?? [], works),
+    ticketNumber: job.number ?? null,
+    canAdd: canAddPo(p, works),
+  };
+}
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "The date is YYYY-MM-DD");
 const optText = (max: number) =>

@@ -170,6 +170,43 @@ const readAccess = async (ctx: {
   }
 };
 
+/**
+ * The columns the building list reads (Nov 10, speed finding 12): what a row shows (its title,
+ * the address / size / roof age / land use line with a re-roof permit's stamp, the stage chip,
+ * the storm badge) and what the map's pin needs.
+ * `select("*")` sent 500 whole rows — owner and parcel fields, notes, the loader's bookkeeping
+ * and each building's outline: 1.2 MB. The outline rides along only for the storm-hit list,
+ * the one list the map draws (BUILDING_LIST_COLUMNS_WITH_OUTLINE); the open building's whole
+ * row comes from getBuilding as before.
+ */
+export const BUILDING_LIST_COLUMNS: string =
+  "id, name, address1, address_approx, city, county, state, roof_sqft, building_sqft, year_built, roof_year, land_use, last_reroof_on, last_reroof_by, prospect_stage, last_storm_at, last_storm_kind, last_storm_magnitude, last_storm_miles, centroid_lat, centroid_lng";
+export const BUILDING_LIST_COLUMNS_WITH_OUTLINE: string = `${BUILDING_LIST_COLUMNS}, footprint`;
+export type BuildingListColumn =
+  | "id"
+  | "name"
+  | "address1"
+  | "address_approx"
+  | "city"
+  | "county"
+  | "state"
+  | "roof_sqft"
+  | "building_sqft"
+  | "year_built"
+  | "roof_year"
+  | "land_use"
+  | "last_reroof_on"
+  | "last_reroof_by"
+  | "prospect_stage"
+  | "last_storm_at"
+  | "last_storm_kind"
+  | "last_storm_magnitude"
+  | "last_storm_miles"
+  | "centroid_lat"
+  | "centroid_lng";
+/** A building as the list reads it; `footprint` is null unless the list asked for outlines. */
+export type BuildingListRow = Pick<BuildingRow, BuildingListColumn> & { footprint: Json | null };
+
 /** Buildings for the list: newest first, optional search / county filters. */
 export const listBuildings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -191,7 +228,7 @@ export const listBuildings = createServerFn({ method: "GET" })
       })
       .parse(d ?? {}),
   )
-  .handler(async ({ data, context }): Promise<BuildingRow[]> => {
+  .handler(async ({ data, context }): Promise<BuildingListRow[]> => {
     await readAccess(context);
     // Search text reads the twin view (buildings_search, 20261110211000) so the trigram index is
     // used: through the table, row security keeps ilike out of the index and every search walked
@@ -199,7 +236,11 @@ export const listBuildings = createServerFn({ method: "GET" })
     const table = data.q
       ? buildingsSearchTable(context.supabase)
       : context.supabase.from("buildings");
-    let q = table.select("*").is("deleted_at", null).limit(500);
+    // The storm-hit list is plotted on the map, so it alone carries the outlines.
+    let q = table
+      .select(data.stormHit ? BUILDING_LIST_COLUMNS_WITH_OUTLINE : BUILDING_LIST_COLUMNS)
+      .is("deleted_at", null)
+      .limit(500);
     if (data.stormHit) q = q.not("last_storm_at", "is", null);
     if (data.sort === "storm") {
       q = q
@@ -228,9 +269,11 @@ export const listBuildings = createServerFn({ method: "GET" })
     }
     // Quoted per part (searchFilters): a comma or ")" in the text is not filter syntax.
     if (data.q) for (const f of searchFilters(data.q)) q = q.or(f);
-    const { data: rows, error } = await q;
+    // (Typed by hand, as the bids list is: the column list is a plain string.)
+    const { data: rows, error } =
+      await q.returns<(Pick<BuildingRow, BuildingListColumn> & { footprint?: Json | null })[]>();
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    return (rows ?? []).map((r) => ({ ...r, footprint: r.footprint ?? null }));
   });
 
 /** The Tennessee imagery index's county polygon under a point (null outside Tennessee). */

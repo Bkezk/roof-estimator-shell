@@ -1117,19 +1117,27 @@ export interface JobMaterialRow {
 export const listServiceJobMaterials = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<JobMaterialRow[]> => {
-    await serviceAccess(context);
-    const { data: rows, error } = await context.supabase
-      .from("inventory_movements")
-      .select(
-        "id, location_id, screen_id, row_label, price_col, qty, unit, counted_note, created_by, created_by_name, created_at",
-      )
-      .eq("service_job_id", data.id)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    const byMaterial = materialsByCell(await loadServiceMaterialLinks(context.supabase));
-    return (rows ?? []).map((r) => ({ ...r, label: serviceLabel(byMaterial, r) }));
-  });
+  .handler(({ data, context }): Promise<JobMaterialRow[]> => readJobMaterials(context, data.id));
+
+/**
+ * listServiceJobMaterials' read as a plain function (Nov 10, speed finding 4): the ticket's one
+ * bundle read (service-field.functions.ts getTicketBundle) runs it too, under the same rule.
+ * (Exported below it, so the server function and its rule still read as one block.)
+ */
+async function readJobMaterials(context: Ctx, id: string): Promise<JobMaterialRow[]> {
+  await serviceAccess(context);
+  const { data: rows, error } = await context.supabase
+    .from("inventory_movements")
+    .select(
+      "id, location_id, screen_id, row_label, price_col, qty, unit, counted_note, created_by, created_by_name, created_at",
+    )
+    .eq("service_job_id", id)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const byMaterial = materialsByCell(await loadServiceMaterialLinks(context.supabase));
+  return (rows ?? []).map((r) => ({ ...r, label: serviceLabel(byMaterial, r) }));
+}
+export { readJobMaterials };
 
 /** A crew member as the ticket shows it. `bill_rate` is null for anyone but a manager (no money). */
 export interface CrewMemberView extends CrewRow {
@@ -1139,23 +1147,30 @@ export interface CrewMemberView extends CrewRow {
 export const listJobCrew = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<CrewMemberView[]> => {
-    const p = await serviceAccess(context);
-    const sb = context.supabase;
-    const { readCrew } = await import("@/lib/service-crew.server");
-    const [rows, { data: techs }] = await Promise.all([
-      readCrew(sb, data.id),
-      sb.rpc("technician_options"),
-    ]);
-    const names = new Map<string, string>();
-    for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    const noMoney = !managesTickets(p);
-    return rows.map((r) => ({
-      ...r,
-      bill_rate: noMoney ? null : r.bill_rate,
-      name: names.get(r.technician_id) ?? "Former technician",
-    }));
-  });
+  .handler(({ data, context }): Promise<CrewMemberView[]> => readJobCrew(context, data.id));
+
+/**
+ * listJobCrew's read as a plain function: the ticket's bundle read runs it too (Nov 10).
+ * (Exported below it, so the server function and its money rule still read as one block.)
+ */
+async function readJobCrew(context: Ctx, id: string): Promise<CrewMemberView[]> {
+  const p = await serviceAccess(context);
+  const sb = context.supabase;
+  const { readCrew } = await import("@/lib/service-crew.server");
+  const [rows, { data: techs }] = await Promise.all([
+    readCrew(sb, id),
+    sb.rpc("technician_options"),
+  ]);
+  const names = new Map<string, string>();
+  for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  const noMoney = !managesTickets(p);
+  return rows.map((r) => ({
+    ...r,
+    bill_rate: noMoney ? null : r.bill_rate,
+    name: names.get(r.technician_id) ?? "Former technician",
+  }));
+}
+export { readJobCrew };
 
 /**
  * What a blank $ box beside a name bills (managers only): the rate table's labor bill rates at a

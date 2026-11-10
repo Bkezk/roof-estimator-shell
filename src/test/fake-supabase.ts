@@ -98,6 +98,33 @@ export const parseSelect = (cols: string | undefined): SelectColumn[] | null => 
   return out;
 };
 
+/**
+ * A counted child list of a select — `sites:crm_sites!crm_sites_account_id_fkey(count)` (Nov 10:
+ * the Customers list counts properties and tickets in the database). Answered as
+ * `<as>: [{ count }]`, the child rows whose `fk` column is the parent's id; a filter written
+ * `<as>.<column>` (is / in / eq) narrows the children counted, as PostgREST's does.
+ */
+export interface SelectCountEmbed {
+  as: string;
+  table: string;
+  fk: string;
+}
+/** The select with its counted child lists taken out (`rest`), and those lists. */
+export const splitCountEmbeds = (
+  cols: string | undefined,
+): { rest: string | undefined; embeds: SelectCountEmbed[] } => {
+  const embeds: SelectCountEmbed[] = [];
+  if (!cols || !/\(count\)/.test(cols)) return { rest: cols, embeds };
+  const rest: string[] = [];
+  for (const c of cols.split(",").map((x) => x.trim())) {
+    const m = /^(\w+):(\w+)!(\w+)\(count\)$/.exec(c);
+    const fk = m && new RegExp(`^${m[2]}_(\\w+)_fkey$`).exec(m[3]!);
+    if (m && fk) embeds.push({ as: m[1]!, table: m[2]!, fk: fk[1]! });
+    else rest.push(c);
+  }
+  return { rest: rest.join(", "), embeds };
+};
+
 /** `row` reduced to `cols` (the keys it has), or as is when `cols` is null. */
 const project = (row: Row, cols: SelectColumn[] | null): Row => {
   if (!cols) return { ...row };
@@ -294,8 +321,22 @@ export function fakeSupabase(
     let max = Infinity;
     let offset = 0;
     let cols: SelectColumn[] | null = null;
+    let countEmbeds: SelectCountEmbed[] = [];
+    const embedPreds = new Map<string, Array<(r: Row) => boolean>>();
     const preds: Array<(r: Row) => boolean> = [];
     const filters: string[] = [];
+    /** The row as selected, with each counted child list (`<as>: [{ count }]`). */
+    const shaped = (r: Row): Row => {
+      const out = project(r, cols);
+      for (const e of countEmbeds) {
+        const narrowed = embedPreds.get(e.as) ?? [];
+        const count = (tables[e.table] ?? []).filter(
+          (c) => c[e.fk] === r["id"] && narrowed.every((p) => p(c)),
+        ).length;
+        out[e.as] = [{ count }];
+      }
+      return out;
+    };
     const run = (): Result => {
       if (op === "upsert") {
         const list = Array.isArray(payload) ? payload : [payload ?? {}];
@@ -353,9 +394,7 @@ export function fakeSupabase(
         writes.push({ table, op, payload: null, filters, rows: hit.length });
       }
       const cap = Math.min(max, opts.maxRows ?? Infinity);
-      const data = (op === "select" ? hit.slice(offset, offset + cap) : hit).map((r) =>
-        project(r, cols),
-      );
+      const data = (op === "select" ? hit.slice(offset, offset + cap) : hit).map(shaped);
       return { data, error: null, count: wantCount ? hit.length : null };
     };
     const filter = (label: string, p: (r: Row) => boolean) => {
@@ -363,9 +402,27 @@ export function fakeSupabase(
       preds.push(p);
       return b;
     };
+    /**
+     * A filter on one column: the parent's, or — written `<as>.<column>` for a counted child
+     * list of this select — the children's (it narrows what is counted, never the parents).
+     */
+    const filterOn = (label: string, c: string, test: (v: unknown) => boolean) => {
+      const dot = c.indexOf(".");
+      const embed = dot > 0 ? countEmbeds.find((e) => e.as === c.slice(0, dot)) : undefined;
+      if (!embed) return filter(label, (r) => test(r[c]));
+      const col = c.slice(dot + 1);
+      filters.push(label);
+      embedPreds.set(embed.as, [...(embedPreds.get(embed.as) ?? []), (r) => test(r[col])]);
+      return b;
+    };
     const b = {
       select: (c?: string, opts?: { count?: string; head?: boolean }) => {
         if (opts?.count) wantCount = true;
+        // Counted child lists (`sites:crm_sites!…(count)`) are answered apart (shaped); the
+        // rest of the select is projected as before.
+        const counted = splitCountEmbeds(c);
+        countEmbeds = counted.embeds;
+        c = counted.rest;
         cols = parseSelect(c);
         return b;
       },
@@ -382,11 +439,11 @@ export function fakeSupabase(
         max = to - from + 1;
         return b;
       },
-      eq: (c: string, v: unknown) => filter(`eq ${c}=${String(v)}`, (r) => r[c] === v),
+      eq: (c: string, v: unknown) => filterOn(`eq ${c}=${String(v)}`, c, (x) => x === v),
       neq: (c: string, v: unknown) => filter(`neq ${c}=${String(v)}`, (r) => r[c] !== v),
       in: (c: string, vs: unknown[]) =>
-        filter(`in ${c}=${vs.map(String).join(",")}`, (r) => vs.includes(r[c])),
-      is: (c: string, v: unknown) => filter(`is ${c}=${String(v)}`, (r) => (r[c] ?? null) === v),
+        filterOn(`in ${c}=${vs.map(String).join(",")}`, c, (x) => vs.includes(x)),
+      is: (c: string, v: unknown) => filterOn(`is ${c}=${String(v)}`, c, (x) => (x ?? null) === v),
       not: (c: string, o: string, v: unknown) => {
         if (o === "is" && v === null)
           return filter(`not ${c} is null`, (r) => (r[c] ?? null) !== null);

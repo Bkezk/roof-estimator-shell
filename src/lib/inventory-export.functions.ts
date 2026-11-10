@@ -31,7 +31,7 @@ import {
   type ExportReport,
 } from "@/lib/inventory-export";
 import { readAllMovements } from "@/lib/inventory-reconcile.functions";
-import { categories, cellUnit, readStock } from "@/lib/inventory.functions";
+import { categories, pieceDefsForCells, readStock } from "@/lib/inventory.functions";
 import { toCsv } from "@/lib/review-export";
 import { materialForCell, materialsByCell, serviceLabel, type Cell } from "@/lib/service-materials";
 import { loadServiceMaterialLinks, loadServiceMaterials } from "@/lib/service-materials.server";
@@ -141,24 +141,9 @@ async function readWindowMovements(
     }));
 }
 
-/** The pack definition per distinct cell among the rows (cellUnit, as readStock does). */
-async function piecesFor(
-  sb: Client,
-  cells: readonly Cell[],
-): Promise<(c: Cell) => PieceDef | null> {
-  const key = (c: Cell) => `${c.screen_id}\u0000${c.row_label}\u0000${c.price_col}`;
-  const cache = new Map<string, PieceDef | null>();
-  for (const c of cells) {
-    const k = key(c);
-    if (cache.has(k)) continue;
-    try {
-      cache.set(k, (await cellUnit(sb, c)).piece);
-    } catch {
-      cache.set(k, null);
-    }
-  }
-  return (c) => cache.get(key(c)) ?? null;
-}
+/** The pack definition per distinct cell among the rows (one read: pieceDefsForCells, as readStock). */
+const piecesFor = (sb: Client, cells: readonly Cell[]): Promise<(c: Cell) => PieceDef | null> =>
+  pieceDefsForCells(sb, cells);
 
 /**
  * The export as a plain function (the server function below wraps it): the report's rows through

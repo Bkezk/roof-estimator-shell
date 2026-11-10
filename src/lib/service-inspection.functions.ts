@@ -170,68 +170,77 @@ export interface TicketInspection {
 export const getTicketInspection = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<TicketInspection> => {
-    await me(context);
-    const sb = context.supabase;
-    const { data: job, error } = await sb
+  .handler(({ data, context }): Promise<TicketInspection> =>
+    readTicketInspection(context, data.id),
+  );
+
+/**
+ * getTicketInspection's read as a plain function (Nov 10, speed finding 4): the ticket's one
+ * bundle read (service-field.functions.ts getTicketBundle) runs it for an inspection ticket, so
+ * the page does not ask again. The same access rule, checked here.
+ */
+export async function readTicketInspection(context: Ctx, id: string): Promise<TicketInspection> {
+  await me(context);
+  const sb = context.supabase;
+  const { data: job, error } = await sb
+    .from("service_jobs")
+    .select(
+      "id, site_id, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by",
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!job) throw new Error("Ticket not found");
+  const [items, created, site, chooser, bids] = await Promise.all([
+    sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
+    sb
       .from("service_jobs")
-      .select(
-        "id, site_id, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by",
-      )
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!job) throw new Error("Ticket not found");
-    const [items, created, site, chooser, bids] = await Promise.all([
-      sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
-      sb
-        .from("service_jobs")
-        .select("id, number, service_type, stage, completed_at")
-        .eq("from_job_id", job.id)
-        .is("deleted_at", null)
-        .order("created_at"),
-      job.site_id
-        ? sb
-            .from("crm_sites")
-            .select("address1, address2, city, state, zip")
-            .eq("id", job.site_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      job.inspection_outcome_by
-        ? sb
-            .from("profiles")
-            .select("full_name, email")
-            .eq("id", job.inspection_outcome_by)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      // Bids started from this inspection (bids.from_job_id; owner, Nov 9). Under the bids' own
-      // RLS: a Service user without Estimate access reads none, and the panel lists none.
-      sb
-        .from("bids")
-        .select("id, name, status, created_at")
-        .eq("from_job_id", job.id)
-        .is("deleted_at", null)
-        .order("created_at"),
-    ]);
-    if (items.error) throw new Error(items.error.message);
-    if (created.error) throw new Error(created.error.message);
-    if (bids.error) throw new Error(bids.error.message);
-    const outcome = asOutcome(job.inspection_outcome);
-    return {
-      inspection: parseInspection(job.inspection),
-      checklist: items.data ?? [],
-      created: created.data ?? [],
-      bids: bids.data ?? [],
-      outcome: outcome
-        ? {
-            outcome,
-            at: job.inspection_outcome_at ?? null,
-            by: chooser.data ? nameOf(chooser.data) : null,
-          }
-        : null,
-      site: site.data ?? null,
-    };
-  });
+      .select("id, number, service_type, stage, completed_at")
+      .eq("from_job_id", job.id)
+      .is("deleted_at", null)
+      .order("created_at"),
+    job.site_id
+      ? sb
+          .from("crm_sites")
+          .select("address1, address2, city, state, zip")
+          .eq("id", job.site_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    job.inspection_outcome_by
+      ? sb
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", job.inspection_outcome_by)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    // Bids started from this inspection (bids.from_job_id; owner, Nov 9). Under the bids' own
+    // RLS: a Service user without Estimate access reads none, and the panel lists none.
+    sb
+      .from("bids")
+      .select("id, name, status, created_at")
+      .eq("from_job_id", job.id)
+      .is("deleted_at", null)
+      .order("created_at"),
+  ]);
+  if (items.error) throw new Error(items.error.message);
+  if (created.error) throw new Error(created.error.message);
+  if (bids.error) throw new Error(bids.error.message);
+  const outcome = asOutcome(job.inspection_outcome);
+  return {
+    inspection: parseInspection(job.inspection),
+    checklist: items.data ?? [],
+    created: created.data ?? [],
+    bids: bids.data ?? [],
+    outcome: outcome
+      ? {
+          outcome,
+          at: job.inspection_outcome_at ?? null,
+          by: chooser.data ? nameOf(chooser.data) : null,
+        }
+      : null,
+    site: site.data ?? null,
+  };
+}
 
 const asOutcome = (v: string | null | undefined): InspectionOutcome | null =>
   (INSPECTION_OUTCOMES as readonly string[]).includes(v ?? "") ? (v as InspectionOutcome) : null;

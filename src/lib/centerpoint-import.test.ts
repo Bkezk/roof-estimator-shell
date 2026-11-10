@@ -951,8 +951,11 @@ describe("the Customers page", () => {
     expect(src).toContain('data-badge="no-contact-info"');
     expect(src).toContain(">\n      No contact info\n    </Badge>");
     expect(src).toContain("text-muted-foreground");
+    // The header (a deleted customer shows no badge), and the list row — which holds live
+    // customers only since Nov 10 (the list no longer carries deleted_at), so it needs no check.
     expect(
       src.match(/\{!a\.deleted_at && !hasContactMethod\(a\) && <NoContactInfoBadge \/>\}/g),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
+    expect(src.match(/\{!hasContactMethod\(a\) && <NoContactInfoBadge \/>\}/g)).toHaveLength(1);
   });
 });

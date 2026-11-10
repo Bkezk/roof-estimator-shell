@@ -127,6 +127,7 @@ import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.f
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
 import { getTicketBundle, listJobEvents } from "@/lib/service-field.functions";
+import { seedTicketCaches } from "@/components/service/ticket-bundle-seed";
 import { shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
@@ -206,7 +207,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RateBox } from "@/components/service/rate-box";
-import { FIELD_READ, fieldKeys } from "@/components/service/field-utils";
+import { FIELD_READ, FIELD_SEEDED_MS, fieldKeys } from "@/components/service/field-utils";
 import { defaultBillRate, MAX_HELPERS, othersOf } from "@/lib/service-crew";
 import { isFinishedStage } from "@/lib/ticket-stages";
 import { plainErrText } from "@/lib/plain-error";
@@ -986,10 +987,9 @@ function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
     queryKey: ["service-job", id],
     queryFn: async () => {
       const b = await bundleFn({ data: { id } });
-      qc.setQueryData(fieldKeys.repairs(id), b.repairs);
-      qc.setQueryData(fieldKeys.photos(id), b.photos);
-      qc.setQueryData(fieldKeys.time(id), b.time);
-      qc.setQueryData(fieldKeys.events(id), b.events);
+      // Every part into its section's own cache (Nov 10: the crew, materials, purchase orders,
+      // contact log, the ticket's clock and an inspection's record ride along too).
+      seedTicketCaches(qc, id, b);
       return b.job;
     },
     enabled: !!session,
@@ -3026,6 +3026,8 @@ function MaterialsUsed({
     queryKey: ["service-job-materials", jobId],
     queryFn: () => listFn({ data: { id: jobId } }),
     enabled: !!session,
+    // The ticket's one read brought these (Nov 10): no second ask as the section mounts.
+    staleTime: FIELD_SEEDED_MS,
   });
   return (
     <section

@@ -232,10 +232,14 @@ describe("36. one bundle read on open; the profile once a minute", () => {
     );
     const page = read("src/components/service-page.tsx");
     expect(page).toContain("const b = await bundleFn({ data: { id } });");
-    expect(page).toContain("qc.setQueryData(fieldKeys.repairs(id), b.repairs);");
-    expect(page).toContain("qc.setQueryData(fieldKeys.photos(id), b.photos);");
-    expect(page).toContain("qc.setQueryData(fieldKeys.time(id), b.time);");
-    expect(page).toContain("qc.setQueryData(fieldKeys.events(id), b.events);");
+    // The seeding moved into its own function on Nov 10, when six more reads joined the bundle
+    // (ticket-pictures-nov10b.test.ts): the same four keys, set the same way.
+    expect(page).toContain("seedTicketCaches(qc, id, b);");
+    const seed = read("src/components/service/ticket-bundle-seed.ts");
+    expect(seed).toContain("qc.setQueryData(fieldKeys.repairs(id), b.repairs);");
+    expect(seed).toContain("qc.setQueryData(fieldKeys.photos(id), b.photos);");
+    expect(seed).toContain("qc.setQueryData(fieldKeys.time(id), b.time);");
+    expect(seed).toContain("qc.setQueryData(fieldKeys.events(id), b.events);");
     expect(page).not.toContain("useServerFn(getServiceJob);\n  const job = useQuery");
   });
   it("the profile cache serves a second call within the TTL and forgets on demand", async () => {

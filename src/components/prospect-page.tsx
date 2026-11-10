@@ -58,6 +58,7 @@ import {
   setTaskDone,
   type BuildingDetail,
   type BuildingInput,
+  type BuildingListRow,
   type BuildingRow,
   type RoofInput,
   type RoofRow,
@@ -562,8 +563,9 @@ export function ProspectPage(props: {
       );
       // Patch the caches in place: refetching the 500-row search and the county counts for a
       // one-row flag is what made the star feel slow.
-      const patch = (b: BuildingRow) => (b.id === row.id ? { ...b, ...row } : b);
-      qc.setQueriesData<BuildingRow[]>({ queryKey: ["buildings"] }, (list) => list?.map(patch));
+      // (The list's rows carry the list's columns only: BuildingListRow.)
+      const patch = (b: BuildingListRow) => (b.id === row.id ? { ...b, ...row } : b);
+      qc.setQueriesData<BuildingListRow[]>({ queryKey: ["buildings"] }, (list) => list?.map(patch));
       qc.setQueryData<BuildingRow[]>(["prospects"], (list) => {
         const rest = (list ?? []).filter((b) => b.id !== row.id);
         return row.prospect_stage ? [row, ...rest] : rest;

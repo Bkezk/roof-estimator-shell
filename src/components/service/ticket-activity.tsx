@@ -44,7 +44,13 @@ import {
   type TimelineIcon,
 } from "@/lib/ticket-timeline";
 import { LogContactButtons } from "@/components/crm/contact-log";
-import { errText, FIELD_READ, fieldKeys, whenShort } from "@/components/service/field-utils";
+import {
+  errText,
+  FIELD_READ,
+  FIELD_SEEDED_MS,
+  fieldKeys,
+  whenShort,
+} from "@/components/service/field-utils";
 
 const ICONS: Record<TimelineIcon, typeof Phone> = {
   called: Phone,
@@ -73,6 +79,8 @@ export function TicketActivity({ jobId }: { jobId: string }) {
     queryKey: ["contact-log", "ticket", jobId],
     queryFn: () => contactsFn({ data: { kind: "ticket", item_id: jobId } }),
     enabled: !!session,
+    // The ticket's one read brought these (Nov 10): no second ask as the block mounts.
+    staleTime: FIELD_SEEDED_MS,
   });
   // The same query (and cache) as the stage strip under the header (service-page.tsx).
   const events = useQuery({
