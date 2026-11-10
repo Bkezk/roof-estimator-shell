@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 
-import { isNarrow } from "./touch";
+import { isNarrow, panelsSlide } from "./touch";
 
 /** True on a touch screen (`(pointer: coarse)`), false until mounted. */
 export function useCoarsePointer(): boolean {
@@ -30,4 +30,20 @@ export function useNarrowScreen(): boolean {
     return () => window.removeEventListener("resize", update);
   }, []);
   return narrow;
+}
+
+/**
+ * True where the editor opens in Focus with sliding panels (./touch.ts `panelsSlide`): a narrow
+ * window, or any touch screen. False until mounted, and follows the window, like the two above.
+ */
+export function usePanelsSlide(): boolean {
+  const coarse = useCoarsePointer();
+  const [slide, setSlide] = useState(false);
+  useEffect(() => {
+    const update = () => setSlide(panelsSlide({ width: window.innerWidth, coarse }));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [coarse]);
+  return slide;
 }

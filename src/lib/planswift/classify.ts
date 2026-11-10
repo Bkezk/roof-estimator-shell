@@ -20,6 +20,7 @@ export const PLANSWIFT_TARGETS = [
   "gutter",
   "downspout",
   "twopiece",
+  "termbar",
   "metals",
   "curb",
   "drain",
@@ -40,6 +41,7 @@ export const PLANSWIFT_TARGET_LABELS: Record<PlanSwiftTarget, string> = {
   gutter: "Gutter",
   downspout: "Downspout (Metals)",
   twopiece: "Two-piece metal (Base & Snap Cover)",
+  termbar: "Termination bar (Accessories › Term Bar)",
   metals: "Metals line",
   curb: "Curb",
   drain: "Drain",
@@ -398,6 +400,15 @@ const ELBOW_RE = /\belbows?\b|\b(?:45|80|90)\s*(?:°|deg(?:ree)?s?\b|'?s\b)/i;
 const DOWNSPOUT_PART_RE = new RegExp(`\\bdrops?\\b|\\boutlets?\\b|${ELBOW_RE.source}`, "i");
 /** `6" 2-piece`, `6 in two piece`, `2-Piece Compression 6"`: two-piece edge metal. */
 const TWO_PIECE_RE = /(?:\b2|\btwo)[\s-]*piece/i;
+/**
+ * A termination bar by any of its names: "T-Bar", "T Bar", "TBar", "Term Bar", "Term. Bar",
+ * "Termination Bar", any case, with or without a size before or after (owner's Activity &
+ * Fitness Center file: a 33.53 ft row named "T-Bar" read as "a length the importer does not
+ * recognise" every time). It is the estimator's own word: the termination "T-Bar" on a roof
+ * side or a parapet, counted on Accessories › Term Bar.
+ */
+export const TERM_BAR_RE = /\bt[\s-]*bars?\b|\bterm(?:ination)?\.?\s*bars?\b/i;
+export const TERM_BAR_WHERE = "Accessories › Term Bar";
 
 /**
  * The Metals screen's downspout size for a `W" X D"` in the name (`3" X 4" Drops`, `3" x 4"
@@ -574,6 +585,13 @@ function classifyTarget(
       });
     // `10' of Gutter strap` (owner's Activity & Fitness Center file): a strap, not a gutter.
     if (has(STRAP_RE, n)) return out("unmatched", "low", STRAP_REASON);
+    // A termination bar run (Nov 10): the estimator counts and prices it on Accessories › Term
+    // Bar, so the sheet's length goes there as "Additional" feet, never "place by hand".
+    if (has(TERM_BAR_RE, n))
+      return out("termbar", "high", "the name says termination bar (T-Bar)", {
+        kind: "Termination bar",
+        where: TERM_BAR_WHERE,
+      });
     if (has(/gutter/i, n))
       return out("gutter", "high", "the name says gutter", { where: "Metals › Gutters" });
     if (has(WALK_PAD_RE, n))
@@ -656,6 +674,16 @@ function classifyTarget(
       has(/curb|hatch|exhaust|\bfans?\b|a\s*\/\s*c\b|\bac\b|\brtu\b|hvac|skylight|smoke\s*vent/i, n)
     )
       return out("curb", "medium", "a curbed unit with no size in the name");
+    // Termination bar by the piece (after the curbs: "Lift & T-Bar" is a curb's option): the bid
+    // takes it in feet and the sheet does not say how long a piece is, so it is named and left
+    // to place, with where to type it.
+    if (has(TERM_BAR_RE, n))
+      return out(
+        "unmatched",
+        "low",
+        `termination bar counted by the piece — the bid takes it in feet: type the length on ${TERM_BAR_WHERE} (Additional)`,
+        { kind: "Termination bar", where: TERM_BAR_WHERE },
+      );
     if (has(/drain/i, n)) return out("drain", "high", "the name says drain");
     if (has(/stack|pipe|plumb|\bvtr\b/i, n))
       return out(
@@ -855,6 +883,10 @@ export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.tar
     }
     case "twopiece":
       return `two-piece edge metal${d.twoPieceIn !== undefined ? ` ${formatInches(d.twoPieceIn)}"` : " (no size in the name)"}, ${q} — base and covers (${SNAP_COVER})`;
+    case "termbar":
+      return r.unitKind === "ft"
+        ? `termination bar ${q} — ${TERM_BAR_WHERE}, No Drill, "Additional (ft)" in the roof's colour`
+        : `termination bar ${q} — not a length: type its feet on ${TERM_BAR_WHERE} (Additional)`;
     case "metals":
       return `${d.kind ?? r.name} ${q} (a Sheet Metals line)`;
     case "nondl":

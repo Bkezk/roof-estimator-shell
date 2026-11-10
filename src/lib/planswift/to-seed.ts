@@ -22,9 +22,11 @@
 import type { Attachment } from "@/lib/engine/estimate";
 import type { MetalsCatalogItem } from "@/lib/engine/adapters";
 import {
+  foldColor,
   normalizeAccessoriesState,
   SNAP_SIZES,
   SNAP_TERMINATION_ID,
+  TERMINATION_ID_BY_LABEL,
   type SnapSize,
 } from "@/lib/engine/accessories";
 import {
@@ -41,7 +43,7 @@ import { bootPickSize, namedElbowRow, parseElbowPick, parseGutterPick } from "./
 import { defaultEdges } from "@/lib/engine/edges";
 import type { NonDlCustomRow, NonDlGroup } from "@/lib/engine/nondl";
 import { bidSeedFromTakeoff, type TakeoffBidSeed } from "@/lib/takeoff/create-bid";
-import { equivalentRect } from "@/lib/takeoff/geometry";
+import { equivalentRect, layoutWidthForArea } from "@/lib/takeoff/geometry";
 import type {
   CountQuantity,
   LinearQuantity,
@@ -57,6 +59,7 @@ import {
   formatInches,
   parseInchNumber,
   PLANSWIFT_TARGET_LABELS,
+  TERM_BAR_WHERE,
   type ClassifiedRow,
   type InsulationGuess,
   type MembraneGuess,
@@ -107,6 +110,14 @@ export interface PlanSwiftBidSeed extends TakeoffBidSeed {
   twoPieceFt: Partial<Record<SnapSize, number>>;
   /** Walk pad counts by Accessories › Walk Pads row. */
   walkPads: Record<string, number>;
+  /**
+   * Termination bar ("T-Bar") in feet (re-check, Nov 10: the row had nowhere to go):
+   * Accessories › Term Bar, where the engine counts the roof sides and parapets terminated in
+   * T-Bar and prices the bar, its fasteners and labor. The bid gets the sheet's footage less
+   * what its T-Bar parapets already count, as No Drill "Additional (ft)" in the roof's colour
+   * (savedFromPlanSwiftSeed). Absent on a seed stashed before this existed.
+   */
+  termBarFt?: number;
   importInfo: PlanSwiftImportInfo;
   /** Everything worth a second look, also kept on importInfo. */
   warnings: string[];
@@ -202,6 +213,24 @@ export function planSwiftSectionRect(areaSqFt: number, perimeterFt: number | nul
   if (perimeterFt < min) return square();
   const r = equivalentRect(a, perimeterFt);
   return { length: r.length, width: r.width, perimeterFt, square: false };
+}
+
+/**
+ * The bid's Length × Width for a sheet rectangle (re-check, Nov 10: 139.37 sq ft was seeded as
+ * 11.81 × 11.81 = 139.48). The length carries two decimals (an eighth of an inch); the width
+ * carries the AREA, since the bid prices length × width: the sheet's area over the rounded
+ * length (`layoutWidthForArea`, four decimals or six on a long section). So the product is the
+ * sheet's area to within 0.01 sq ft. The same rule a drawn section follows
+ * (src/lib/takeoff/model.ts `roundSectionDims`).
+ */
+export function planSwiftSectionDims(rect: Pick<PlanSwiftRect, "length" | "width">): {
+  length: number;
+  width: number;
+} {
+  const area = rect.length * rect.width;
+  const length = round2(rect.length);
+  const width = length > 0 ? layoutWidthForArea(area, length) : round2(rect.width);
+  return { length, width };
 }
 
 export const EQUIVALENT_RECT_NOTE =
@@ -475,9 +504,9 @@ export function planSwiftSeed(
         `${names[i]}: the equivalent rectangle is ${num(round2(rect.length))} × ${num(round2(rect.width))} ft — the Linear total may include more than the roof edge (walls, curbs); check the perimeter.`,
       );
     const area = rect.length * rect.width;
-    // The bid's dimensions carry two decimals (an eighth of an inch); the area stays the sheet's.
-    const length = round2(rect.length);
-    const width = round2(rect.width);
+    const { length, width } = planSwiftSectionDims(rect);
+    // A PlanSwift section is a TYPED rectangle in the bid (no outline), so its sides are its
+    // Length (A, C) and Width (B, D) exactly, as the Roof Sections screen keeps them.
     const edges = defaultEdges(length, width);
     sections.push({
       objectId: `planswift-row-${r.sheetRow}`,
@@ -530,6 +559,7 @@ export function planSwiftSeed(
   };
   const twoPieceFt: Partial<Record<SnapSize, number>> = {};
   const walkPads: Record<string, number> = {};
+  let termBarFt = 0;
   // Metals › Gutters: one entry per style / size the estimator picked (owner's Pineville file,
   // Oct 8: the gutter had gone to Non-DL Sheet Metals).
   const gutters: GutterEntryState[] = [];
@@ -751,6 +781,22 @@ export function planSwiftSeed(
         twoPieceFt[size] = round2((twoPieceFt[size] ?? 0) + r.qty);
         warnings.push(
           `${collapse(r.name)}: ${num(round2(r.qty))} ft on ${where} (${size}", covers on) — the parapets terminated in ${size}" two-piece count there by themselves; the rest is Additional Required.`,
+        );
+        break;
+      }
+      case "termbar": {
+        // Owner's Activity & Fitness Center file: `T-Bar` 33.53 ft. The estimator's own word
+        // for it: the "T-Bar" termination, counted and priced on Accessories › Term Bar.
+        if (r.unitKind !== "ft" || !(r.qty > 0)) {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: `Termination bar that is not a length in feet — type its feet on ${TERM_BAR_WHERE} (Additional).`,
+          });
+          break;
+        }
+        termBarFt = round2(termBarFt + r.qty);
+        warnings.push(
+          `${collapse(r.name)}: ${num(round2(r.qty))} ft on ${TERM_BAR_WHERE} (No Drill, "Additional (ft)", the roof's colour) — roof sides and parapets terminated in T-Bar count there by themselves, so only the rest is added. Move it to Pre-Drill there if this bar goes on a pre-drilled wall.`,
         );
         break;
       }
@@ -995,6 +1041,7 @@ export function planSwiftSeed(
     downspoutFt > 0 ? `${num(round2(downspoutFt))} ft of downspout` : null,
     downspoutParts > 0 ? `${downspoutParts} downspout drops / elbows` : null,
     twoPieceTotal > 0 ? `${num(round2(twoPieceTotal))} ft of two-piece metal` : null,
+    termBarFt > 0 ? `${num(termBarFt)} ft of termination bar` : null,
     walkPadCount > 0 ? `${walkPadCount} walk pads` : null,
     allUnmapped.length ? `${allUnmapped.length} to place by hand` : null,
   ].filter((x): x is string => !!x);
@@ -1031,6 +1078,7 @@ export function planSwiftSeed(
     metalsCalc: { downspouts, gutters },
     twoPieceFt,
     walkPads,
+    ...(termBarFt > 0 ? { termBarFt } : {}),
     importInfo,
     warnings,
   };
@@ -1095,6 +1143,16 @@ export function savedFromPlanSwiftSeed(
       additionalFt: round2((snapCover[size].additionalFt || 0) + extra),
     };
   }
+  // The sheet's termination bar: No Drill "Additional (ft)" on Accessories › Term Bar, under the
+  // colour the roof's bar is bought in (the first section's, else the bid's default).
+  const termBar = { ...acc.termBar, additionalNoDrill: { ...acc.termBar.additionalNoDrill } };
+  const termExtra = termBarAdditionalFt(seed.termBarFt ?? 0, merged.parapets ?? []);
+  if (termExtra > 0) {
+    const colour = foldColor(merged.sections?.[0]?.color ?? saved.sectionDefaults.color ?? "White");
+    termBar.additionalNoDrill[colour] = round2(
+      (termBar.additionalNoDrill[colour] ?? 0) + termExtra,
+    );
+  }
   return {
     ...merged,
     nonDlCalc: { rows: saved.nonDlCalc?.rows ?? {}, custom },
@@ -1103,9 +1161,29 @@ export function savedFromPlanSwiftSeed(
       downspouts: [...metalsCalc.downspouts, ...(seed.metalsCalc?.downspouts ?? [])],
       gutters: [...metalsCalc.gutters, ...(seed.metalsCalc?.gutters ?? [])],
     },
-    accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty }, snapCover },
+    accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty }, snapCover, termBar },
     importInfo: seed.importInfo,
   };
+}
+
+/** The legacy termination id of "T-Bar" (engine/accessories.ts TERMINATION_ID_BY_LABEL). */
+const T_BAR_TERMINATION_ID = TERMINATION_ID_BY_LABEL["T-Bar"]!;
+
+/**
+ * Term Bar's "Additional (ft)" for a sheet's termination bar footage, the same way two-piece
+ * metal is placed (`twoPieceAdditionalFt`): the sheet measured the whole run, and the engine
+ * already counts every parapet whose termination is T-Bar, so only the rest is typed in. Never
+ * negative: when the parapets alone exceed the sheet, nothing is added.
+ */
+export function termBarAdditionalFt(
+  sheetFt: number,
+  parapets: ReadonlyArray<{ lengthFt?: number; termOptionId?: number; termLengthFt?: number }>,
+): number {
+  if (!(sheetFt > 0)) return 0;
+  const counted = parapets
+    .filter((p) => p.termOptionId === T_BAR_TERMINATION_ID)
+    .reduce((s, p) => s + (p.termLengthFt ?? p.lengthFt ?? 0), 0);
+  return Math.max(0, round2(sheetFt - counted));
 }
 
 /**

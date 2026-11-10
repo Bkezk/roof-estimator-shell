@@ -20,6 +20,7 @@ import {
   drawnSideLabels,
   edgeLengths,
   equivalentRect as equivalentRectangleOf,
+  layoutWidthForArea,
   polygonArea,
   polygonPerimeter,
   sectionFromOutline,
@@ -652,7 +653,6 @@ export function bidBlocker(q: Pick<TakeoffQuantities, "sections">): string | nul
 }
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
-const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
 /**
  * The bid's dimensions carry two decimals (an eighth of an inch): the layout rectangle and each
@@ -661,10 +661,13 @@ const round4 = (x: number) => Math.round(x * 10000) / 10000;
 function roundSectionDims(section: OutlineSection): void {
   section.length = round2(section.length);
   // The width carries the area: the bid prices length × width, so it is the measured area over
-  // the rounded length, to four decimals (audit, Nov 10: two rounded sides priced a 9,100 sq ft
-  // roof as 9,099.47). A drawn 100 × 50 is still exactly 100 × 50.
+  // the rounded length, to four decimals, or six on a long section where four would let the
+  // product drift (./geometry.ts `layoutWidthForArea`; audit, Nov 10: two rounded sides priced
+  // a 9,100 sq ft roof as 9,099.47). A drawn 100 × 50 is still exactly 100 × 50.
   section.width =
-    section.length > 0 ? round4(section.measured.areaSqFt / section.length) : round2(section.width);
+    section.length > 0
+      ? layoutWidthForArea(section.measured.areaSqFt, section.length)
+      : round2(section.width);
   section.edges = section.edges.map((e) => {
     const ne = { ...e, lengthFt: round2(e.lengthFt) };
     if (e.perimLengthFt !== undefined) ne.perimLengthFt = round2(e.perimLengthFt);

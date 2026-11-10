@@ -2,9 +2,10 @@
  * The takeoff on a touch screen (owner, Nov 3: "ensure everything is as easy to use as possible
  * on an ipad"). Pure, no React; the hooks that read the screen are in ./use-screen.ts.
  *
- *  - A NARROW screen (under NARROW_PX, an iPad either way up) opens the editor in Focus: the
- *    pages list and the side panel slide OVER the drawing when asked for, instead of squeezing
- *    it (upright, the drawing was 44 px wide).
+ *  - A NARROW screen (under NARROW_PX) or any TOUCH screen (`panelsSlide`; Nov 10: the bigger
+ *    iPads held sideways are wider than NARROW_PX) opens the editor in Focus: the pages list
+ *    and the side panel slide OVER the drawing when asked for, instead of squeezing it
+ *    (upright, the drawing was 44 px wide).
  *  - On a coarse pointer (a finger) the toolbar's and header's buttons grow to TOUCH_TARGET_PX
  *    and the corner handles and pins get a wider hit area.
  *  - While drawing, a bar of buttons stands in for the keys an iPad has not got: Finish / Close
@@ -25,6 +26,16 @@ export const TAP_PX = 10;
 export const TOUCH_HIT_PX = 22;
 
 export const isNarrow = (width: number): boolean => width < NARROW_PX;
+
+/**
+ * The editor opens in Focus, and its pages list and side panel slide OVER the drawing: on a
+ * narrow window, and (owner, Nov 10) on ANY touch screen. An iPad Air (1,180), an iPad Pro 11
+ * (1,194) and an iPad Pro 12.9 (1,366) held sideways are wider than NARROW_PX, so with the
+ * width alone the menu, the pages and the panel all stayed open and the drawing got 396 x 264 px
+ * of a 1,194 x 834 screen. A desktop with a mouse keeps the width rule.
+ */
+export const panelsSlide = (s: { width: number; coarse: boolean }): boolean =>
+  s.coarse || isNarrow(s.width);
 
 /**
  * Tailwind for a container whose buttons grow to TOUCH_TARGET_PX on a touch screen. In pixels,

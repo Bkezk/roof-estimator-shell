@@ -121,8 +121,8 @@ import {
 } from "./shapes";
 import { DEFAULT_PAGE_NAME, sheetPageName } from "./sheet-title";
 import { closePdf, openPdf, readSheetTitle, type UnderlaySource } from "./underlay";
-import { TOUCH_BUTTON_CLASS } from "./touch";
-import { useCoarsePointer, useNarrowScreen } from "./use-screen";
+import { TOUCH_BUTTON_CLASS, isNarrow } from "./touch";
+import { useCoarsePointer, useNarrowScreen, usePanelsSlide } from "./use-screen";
 import { useAutosave, type SaveState } from "./use-autosave";
 import { TIP_DELAY_MS, Tip } from "./toolbar";
 import { TakeoffViewer } from "./viewer";
@@ -737,18 +737,37 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
       return !o;
     });
   // A narrow screen (an iPad; owner, Nov 3; ./touch.ts) opens in Focus, and its pages list and
-  // side panel slide OVER the drawing when asked for instead of squeezing it. A coarse pointer
-  // (a finger) gets finger-sized buttons throughout the editor.
+  // side panel slide OVER the drawing when asked for instead of squeezing it. So does any touch
+  // screen (owner, Nov 10; `panelsSlide`): an iPad Air or Pro held sideways is wider than
+  // NARROW_PX, and the drawing got a corner of the screen. Once per visit, so leaving Focus
+  // afterwards is the person's own choice. A coarse pointer (a finger) gets finger-sized
+  // buttons throughout the editor.
   const narrow = useNarrowScreen();
   const touch = useCoarsePointer();
-  const narrowApplied = useRef(false);
+  const slide = usePanelsSlide();
+  const slideApplied = useRef(false);
+  const foldedWideMenu = useRef(false);
   useEffect(() => {
-    if (!narrow || narrowApplied.current) return;
-    narrowApplied.current = true;
+    if (!slide || slideApplied.current) return;
+    slideApplied.current = true;
     setPagesOpen(false);
     setPanelOpen(false);
-    if (!isMobile) setNavOpen(false);
-  }, [narrow, isMobile, setNavOpen]);
+    if (!isMobile) {
+      // A wide touch screen had its menu open for the rest of the pages: give it back on leaving.
+      foldedWideMenu.current = navOpen && !isNarrow(window.innerWidth);
+      setNavOpen(false);
+    }
+  }, [slide, isMobile, navOpen, setNavOpen]);
+  // The menu the editor folded on a wide touch screen opens again when the takeoff is left (a
+  // narrow screen keeps its menu folded everywhere: lib/narrow-menu.ts).
+  const setNavOpenRef = useRef(setNavOpen);
+  setNavOpenRef.current = setNavOpen;
+  useEffect(
+    () => () => {
+      if (foldedWideMenu.current) setNavOpenRef.current(true);
+    },
+    [],
+  );
   const focused = !pagesOpen && !panelOpen && (isMobile || !navOpen);
   const toggleFocus = () => {
     const next = !focused;
@@ -804,7 +823,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     setEdge(null);
     toast.success(`Made from ${area.attrs.name}: ${sum.text}.`);
   };
-  const gridCols = narrow
+  const gridCols = slide
     ? "minmax(0,1fr)"
     : `${pagesOpen ? "150px " : ""}minmax(0,1fr)${panelOpen ? " 380px" : ""}`;
 
@@ -817,6 +836,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
       }`}
       data-touch={touch ? "" : undefined}
       data-narrow={narrow ? "" : undefined}
+      data-slide={slide ? "" : undefined}
     >
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild variant="ghost" size="sm" className="px-2">
@@ -1135,7 +1155,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         {pagesOpen && (
           <Card
             className={
-              narrow
+              slide
                 ? "absolute inset-y-0 left-0 z-20 w-[220px] overflow-y-auto shadow-xl"
                 : "min-h-0 overflow-y-auto"
             }
@@ -1146,7 +1166,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Pages ({pages.length})
                 </p>
-                {narrow && (
+                {slide && (
                   <Button
                     size="icon"
                     variant="ghost"
@@ -1251,7 +1271,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         {panelOpen && (
           <Card
             className={
-              narrow
+              slide
                 ? "absolute inset-y-0 right-0 z-20 flex w-[min(380px,92vw)] flex-col overflow-hidden shadow-xl"
                 : "flex min-h-0 flex-col overflow-hidden"
             }
@@ -1264,7 +1284,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                   <TabsTrigger value="objects">Objects</TabsTrigger>
                   <TabsTrigger value="quantities">Quantities</TabsTrigger>
                 </TabsList>
-                {narrow && (
+                {slide && (
                   <Button
                     size="icon"
                     variant="ghost"

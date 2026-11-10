@@ -98,15 +98,17 @@ describe("test_pS.xlsx → seed", async () => {
     expect(seed.sections).toHaveLength(1);
     const s = seed.sections[0]!;
     expect(s.name).toBe("Roof 1");
-    // Two decimals (an eighth of an inch): 612.32 × 21.96 keeps the sheet's area within 0.01 %.
-    expect([s.length, s.width]).toEqual([612.32, 21.96]);
-    expect(Math.abs(s.length! * s.width! - 13445.64) / 13445.64).toBeLessThan(1e-4);
+    // The length carries two decimals (an eighth of an inch) and the width carries the area
+    // (Nov 10; ./section-area-nov10b.test.ts): 612.32 × 21.96 priced 13,446.55 sq ft, 0.91 over
+    // the sheet's 13,445.64.
+    expect([s.length, s.width]).toEqual([612.32, 21.958518]);
+    expect(Math.abs(s.length! * s.width! - 13445.64)).toBeLessThanOrEqual(0.01);
     expect(2 * (s.length! + s.width!)).toBeCloseTo(1268.56, 1);
     expect(s.edges!.map((e) => [e.side, e.lengthFt])).toEqual([
       ["A", 612.32],
-      ["B", 21.96],
+      ["B", 21.958518],
       ["C", 612.32],
-      ["D", 21.96],
+      ["D", 21.958518],
     ]);
     // The summary keeps the sheet's exact area (the rounding is the layout rectangle's alone).
     expect(seed.summary).toContain("13,445.64 sq ft");
@@ -249,7 +251,10 @@ describe("knox.xlsx → seed", async () => {
       [seed.sections[2]!, 355.37],
     ] as const) {
       expect(s.length).toBe(Math.round(Math.sqrt(area) * 100) / 100);
-      expect(s.width).toBe(s.length);
+      // The width carries the sheet's area over the rounded length (Nov 10: two rounded sides
+      // made a 139.37 sq ft area 139.48), so it is the square's side to within a hundredth.
+      expect(Math.abs(s.width! - s.length!)).toBeLessThan(0.01);
+      expect(Math.abs(s.length! * s.width! - area)).toBeLessThanOrEqual(0.01);
     }
     expect(seed.warnings.filter((w) => /No Linear total/.test(w))).toHaveLength(4);
   });

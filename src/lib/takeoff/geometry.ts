@@ -87,6 +87,26 @@ export function equivalentRect(
   return { length: (half + root) / 2, width: (half - root) / 2 };
 }
 
+const roundTo = (x: number, places: number) => {
+  const k = 10 ** places;
+  return Math.round(x * k) / k;
+};
+
+/**
+ * The bid's Width for a section of `areaSqFt` whose Length is already rounded for the reader
+ * (two decimals). The bid prices length × width, so the width carries the area: the area over
+ * the length, to four decimals, which keeps the product within 0.005 sq ft for a length up to
+ * 100 ft. A longer section takes six decimals, so the product stays within 0.01 sq ft of the
+ * measured area whatever the size (audit, Nov 10: two rounded sides priced a 9,100 sq ft roof as
+ * 9,099.47, and a 139.37 sq ft PlanSwift area as 139.48). Used by a drawn section
+ * (./model.ts `roundSectionDims`) and by a PlanSwift one (lib/planswift/to-seed.ts).
+ */
+export function layoutWidthForArea(areaSqFt: number, lengthFt: number): number {
+  if (!(lengthFt > 0) || !(areaSqFt > 0)) return 0;
+  const w4 = roundTo(areaSqFt / lengthFt, 4);
+  return Math.abs(lengthFt * w4 - areaSqFt) <= 0.005 ? w4 : roundTo(areaSqFt / lengthFt, 6);
+}
+
 /** Per-edge options for `sectionFromOutline` (everything a typed section's edge panel offers). */
 export type OutlineEdgeOptions = Partial<
   Pick<EdgeInput, "isPerimeter" | "termination" | "blockingFt" | "arpSizeIn" | "hasTallWall">

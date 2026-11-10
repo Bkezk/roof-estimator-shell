@@ -109,8 +109,10 @@ describe("monticello.xlsx — the owner's export, row by row", async () => {
       labor: LABOR,
     });
     expect(seed.sections.map((s) => [s.name, s.length, s.width, s.thickness])).toEqual([
-      ["Roof Type 1", 69.67, 59.68, 50],
-      ["Roof Type 2", 50.08, 21.28, 50],
+      // The width carries the sheet's area over the two-decimal length (Nov 10): it was 59.68
+      // and 21.28, which priced a little more than the sheet measured.
+      ["Roof Type 1", 69.67, 59.6793, 50],
+      ["Roof Type 2", 50.08, 21.2764, 50],
     ]);
     expect(seed.sections.map((s) => s.layers!.map((l) => [l.board, !!l.quote]))).toEqual([
       [

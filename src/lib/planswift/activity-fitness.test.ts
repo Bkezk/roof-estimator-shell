@@ -88,11 +88,13 @@ describe("the compound downspout row is split into its parts", () => {
     expect(strap.reason).toContain("Downspout Straps");
   });
 
-  it('the 7" Gutters row and the others are as before', () => {
+  // The T-Bar row is a termination bar since Nov 10 (./termbar-nov10b.test.ts); before, it was
+  // "unmatched" and asked every time.
+  it('the 7" Gutters row and the others are as before; the T-Bar has a home', () => {
     expect(cs.slice(0, 4).map((c) => c.target)).toEqual([
       "section",
       "parapet",
-      "unmatched",
+      "termbar",
       "gutter",
     ]);
   });
@@ -120,9 +122,9 @@ describe("the compound downspout row is split into its parts", () => {
       ]);
     });
 
-    it("the strap and the T-Bar are listed to place by hand; the record keeps every part", () => {
-      expect(seed.unmapped.map((u) => u.label)).toEqual(["T-Bar: 33.53 ft", "Gutter strap: 10 ft"]);
-      expect(seed.unmapped[1]!.detail).toContain("Downspout Straps");
+    it("the strap is listed to place by hand (the T-Bar is placed); the record keeps every part", () => {
+      expect(seed.unmapped.map((u) => u.label)).toEqual(["Gutter strap: 10 ft"]);
+      expect(seed.unmapped[0]!.detail).toContain("Downspout Straps");
       expect(seed.summary).toContain("22.99 ft of downspout; 8 downspout drops / elbows");
       const m = seed.importInfo.mapping.filter((x) => x.sheetRow === 6);
       expect(m.map((x) => x.name)).toEqual([
@@ -136,7 +138,7 @@ describe("the compound downspout row is split into its parts", () => {
       );
     });
 
-    it("Create bid waits on the T-Bar and the strap only", () => {
+    it("Create bid waits on the strap only", () => {
       const rows = cs.map((row) => ({
         row,
         target: row.confidence === "low" ? null : row.target,
@@ -147,7 +149,7 @@ describe("the compound downspout row is split into its parts", () => {
         { metalsCatalog: METALS, gutterSizesByStyle: { "LX-Style": ['A = 7" B = 6" C = 5"'] } },
         ['4"X5"'],
       );
-      expect(open.map((i) => cs[i]!.row.name)).toEqual(["T-Bar", "Gutter strap"]);
+      expect(open.map((i) => cs[i]!.row.name)).toEqual(["Gutter strap"]);
     });
   });
 });

@@ -48,8 +48,11 @@ describe("1. a narrow screen (an iPad either way up)", () => {
     const editor = read("src/components/takeoff/editor.tsx");
     expect(editor).toContain("const narrow = useNarrowScreen();");
     expect(editor).toContain("const touch = useCoarsePointer();");
+    // Since Nov 10 the rule is `panelsSlide` (a narrow window OR any touch screen:
+    // ./touch-focus-nov10b.test.ts); a narrow screen still opens in Focus, once per visit.
+    expect(editor).toContain("const slide = usePanelsSlide();");
     expect(editor).toContain(
-      "    if (!narrow || narrowApplied.current) return;\n    narrowApplied.current = true;\n    setPagesOpen(false);\n    setPanelOpen(false);\n    if (!isMobile) setNavOpen(false);",
+      "    if (!slide || slideApplied.current) return;\n    slideApplied.current = true;\n    setPagesOpen(false);\n    setPanelOpen(false);",
     );
     expect(editor).toContain('? "minmax(0,1fr)"');
     expect(editor).toContain(
