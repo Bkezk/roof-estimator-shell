@@ -578,6 +578,8 @@ export const pageSchema: z.ZodType<DocPage, z.ZodTypeDef, unknown> = z.object({
   modules: z.array(moduleSchema),
 });
 export const pagesSchema = z.array(pageSchema).max(60);
+/** A page snippet's modules (the saved-snippet server function validates with it). */
+export const pageSnippetSchema = z.array(moduleSchema).min(1).max(60);
 
 /** The generate-time checkboxes; a template stores its defaults, a document what it was made with. */
 export interface DocOptions {
@@ -864,6 +866,37 @@ export function movePage(pages: readonly DocPage[], pageId: string, dir: -1 | 1)
   [next[i], next[j]] = [next[j]!, next[i]!];
   return next;
 }
+/** The most pages a document holds (pagesSchema). */
+export const MAX_PAGES = 60;
+/** The most modules a page snippet holds. */
+export const PAGE_SNIPPET_MAX_MODULES = 60;
+
+/**
+ * A page snippet (owner, Nov 10: a saved snippet that is a whole page of different modules):
+ * what is stored for `page` — its modules in order, as fresh copies. Null for an empty page
+ * (there is nothing to save).
+ */
+export function pageSnippetModules(page: DocPage): DocModule[] | null {
+  if (!page.modules.length) return null;
+  return page.modules.slice(0, PAGE_SNIPPET_MAX_MODULES).map(cloneModule);
+}
+
+/**
+ * `pages` with a page snippet inserted as a NEW page right after page `afterIndex` (fresh ids
+ * throughout, so the same snippet can be inserted any number of times), and where it landed.
+ * Null when the document is already at its page limit.
+ */
+export function insertPageSnippet(
+  pages: readonly DocPage[],
+  afterIndex: number,
+  modules: readonly DocModule[],
+): { pages: DocPage[]; index: number; pageId: string } | null {
+  if (pages.length >= MAX_PAGES) return null;
+  const page: DocPage = { id: newId("p"), modules: modules.map(cloneModule) };
+  const index = Math.max(0, Math.min(afterIndex + 1, pages.length));
+  return { pages: addPage(pages, index, page), index, pageId: page.id };
+}
+
 export function duplicatePage(pages: readonly DocPage[], pageId: string): DocPage[] {
   const i = pages.findIndex((p) => p.id === pageId);
   if (i < 0) return [...pages];

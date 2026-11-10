@@ -37,6 +37,7 @@ import {
   type DocPage,
   type ImageRef,
   moduleSchema,
+  pageSnippetSchema,
   optionsSchema,
   pagesSchema,
 } from "./documents/model";
@@ -342,6 +343,8 @@ export type SavedModuleRow = Omit<
   "module"
 > & {
   module: DocModule;
+  /** A page snippet: the page's modules in order; null = the one module above. */
+  page_modules: DocModule[] | null;
 };
 
 export const listSavedModules = createServerFn({ method: "POST" })
@@ -356,7 +359,7 @@ export const listSavedModules = createServerFn({ method: "POST" })
     await whoami(context);
     const { data, error } = await context.supabase
       .from("document_modules")
-      .select("id, name, module, updated_at")
+      .select("id, name, module, page_modules, updated_at")
       .is("deleted_at", null)
       .order("name");
     if (error) throw err(error, "Could not read the saved snippets");
@@ -371,6 +374,8 @@ export const saveSavedModule = createServerFn({ method: "POST" })
         id: z.string().uuid().optional(),
         name: z.string().trim().min(1).max(120),
         module: moduleSchema,
+        /** A whole page (owner, Nov 10): its modules in order. `module` is then its first. */
+        pageModules: pageSnippetSchema.optional(),
       })
       .parse(d),
   )
@@ -378,11 +383,18 @@ export const saveSavedModule = createServerFn({ method: "POST" })
     const me = await whoami(context);
     managerOnly(me.profile);
     const sb = context.supabase;
-    const patch = { name: data.name, module: json(data.module), updated_by_name: me.name };
+    const patch = {
+      name: data.name,
+      module: json(data.pageModules ? data.pageModules[0] : data.module),
+      page_modules: data.pageModules ? json(data.pageModules) : null,
+      updated_by_name: me.name,
+    };
     const q = data.id
       ? sb.from("document_modules").update(patch).eq("id", data.id).is("deleted_at", null)
       : sb.from("document_modules").insert({ ...patch, created_by: context.userId });
-    const { data: row, error } = await q.select("id, name, module, updated_at").maybeSingle();
+    const { data: row, error } = await q
+      .select("id, name, module, page_modules, updated_at")
+      .maybeSingle();
     if (error) throw err(error, "The module was not saved");
     if (!row) throw new Error("Saved snippet not found");
     return row as unknown as SavedModuleRow;
@@ -477,6 +489,30 @@ export const uploadDocumentAsset = createServerFn({ method: "POST" })
       .single();
     if (error) throw err(error, "The PDF was not added to the library");
     return row;
+  });
+
+/**
+ * A signed link (an hour) to a library PDF's file, so the editor can SHOW an inserted PDF's
+ * pages (owner, Nov 10: "when you import a pdf it is not shown" — the module was a grey bar).
+ * A PDF since deleted from the library still resolves: documents that use it keep it.
+ */
+export const documentAssetUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(idInput)
+  .handler(async ({ data, context }): Promise<{ url: string }> => {
+    await whoami(context);
+    const { data: row, error } = await context.supabase
+      .from("document_assets")
+      .select("storage_path")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw err(error, "Could not read the PDF library");
+    if (!row) throw new Error("That PDF is no longer in the library");
+    const { data: signed, error: sErr } = await context.supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .createSignedUrl(row.storage_path, SIGNED_SECONDS);
+    if (sErr || !signed) throw new Error(sErr?.message ?? "Could not open the PDF");
+    return { url: signed.signedUrl };
   });
 
 /** Out of the library; the file stays (a document that inserted it still renders). */

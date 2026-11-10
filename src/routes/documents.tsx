@@ -25,6 +25,7 @@ import {
   Building2,
   ChevronDown,
   Columns2,
+  Bookmark,
   Copy,
   Eye,
   EyeOff,
@@ -87,6 +88,9 @@ import {
   type DocOptions,
   type DocPage,
   duplicatePage,
+  insertPageSnippet,
+  MAX_PAGES,
+  pageSnippetModules,
   instantiatePages,
   MODULE_LABELS,
   MODULE_TILES,
@@ -694,6 +698,8 @@ function EditorShell(props: {
   }, [dispatch]);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveModule, setSaveModule] = useState<DocModule | null>(null);
+  // "Save page as snippet…" on a page's menu: the page being named, or null.
+  const [savePage, setSavePage] = useState<DocPage | null>(null);
 
   const savedFn = useServerFn(listSavedModules);
   const savedModules = useQuery({ queryKey: savedModulesKey, queryFn: () => savedFn() });
@@ -713,10 +719,14 @@ function EditorShell(props: {
 
   const saveModuleFn = useServerFn(saveSavedModule);
   const saveModuleMut = useMutation({
-    mutationFn: (input: { name: string; module: DocModule }) => saveModuleFn({ data: input }),
-    onSuccess: () => {
-      toast.success("Snippet saved");
+    mutationFn: (input: { name: string; module: DocModule; pageModules?: DocModule[] }) =>
+      saveModuleFn({ data: input }),
+    onSuccess: (_row, input) => {
+      if (input.pageModules)
+        toast.success("Page saved as a snippet. Find it under Saved snippets on the Modules tab.");
+      else toast.success("Snippet saved");
       setSaveModule(null);
+      setSavePage(null);
       void qc.invalidateQueries({ queryKey: savedModulesKey });
     },
     onError: (e) => toast.error(`Could not save the snippet: ${errText(e)}`),
@@ -770,6 +780,19 @@ function EditorShell(props: {
     if (page) window.setTimeout(() => scrollToPage(page.id), 50);
   };
 
+  /** A page snippet: a NEW page right after the selected one, filled with fresh copies. */
+  const addSavedPage = (name: string, modules: readonly DocModule[]) => {
+    setToolsOpen(false);
+    const r = insertPageSnippet(state.pages, selectedPageIndex(state), modules);
+    if (!r) {
+      toast.error(`A document holds ${MAX_PAGES} pages at most. Delete a page first.`);
+      return;
+    }
+    dispatch({ type: "setPages", op: () => r.pages });
+    toast.success(`“${name}” added as page ${r.index + 1}`);
+    window.setTimeout(() => scrollToPage(r.pageId), 80);
+  };
+
   const title = state.title || (mode === "template" ? "New template" : "Untitled");
 
   // The Document / Modules / Variables tabs: a side panel from md up; on a phone (Nov 6: the
@@ -788,6 +811,7 @@ function EditorShell(props: {
           state={state}
           dispatch={dispatch}
           savedModules={savedModules.data ?? []}
+          onSavePage={setSavePage}
         >
           {props.documentTab}
         </DocumentTab>
@@ -798,6 +822,7 @@ function EditorShell(props: {
           savedError={savedModules.isError ? errText(savedModules.error) : null}
           onAdd={(type) => addToSelected(newModule(type))}
           onAddSaved={(m) => addToSelected(cloneModule(m))}
+          onAddSavedPage={addSavedPage}
         />
       </TabsContent>
       <TabsContent value="variables" className="space-y-3 px-3 pb-6">
@@ -1023,6 +1048,21 @@ function EditorShell(props: {
           if (saveModule) saveModuleMut.mutate({ name, module: cloneModule(saveModule) });
         }}
       />
+      <NamePromptDialog
+        open={savePage !== null}
+        onOpenChange={(o) => {
+          if (!o) setSavePage(null);
+        }}
+        title="Save page as snippet"
+        description="The whole page is saved, every module with its content. It is offered under Saved snippets on the Modules tab of every document and template; its + adds it as a new page."
+        label="Snippet name"
+        placeholder="e.g. Roof Evaluation Summary"
+        busy={saveModuleMut.isPending}
+        onSubmit={(name) => {
+          const mods = savePage ? pageSnippetModules(savePage) : null;
+          if (mods) saveModuleMut.mutate({ name, module: mods[0]!, pageModules: mods });
+        }}
+      />
     </EditorEnvContext.Provider>
   );
 }
@@ -1034,6 +1074,8 @@ function DocumentTab(props: {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
   savedModules: ReadonlyArray<{ name: string; module: DocModule }>;
+  /** "Save page as snippet…" on a page's menu. */
+  onSavePage?: (page: DocPage) => void;
   children?: React.ReactNode;
 }) {
   const { state, dispatch } = props;
@@ -1193,6 +1235,14 @@ function DocumentTab(props: {
                       <DropdownMenuItem onClick={() => op((p) => duplicatePage(p, page.id))}>
                         <Copy className="h-4 w-4" /> Duplicate
                       </DropdownMenuItem>
+                      {props.onSavePage && (
+                        <DropdownMenuItem
+                          disabled={page.modules.length === 0}
+                          onClick={() => props.onSavePage?.(page)}
+                        >
+                          <Bookmark className="h-4 w-4" /> Save page as snippet…
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive"
@@ -1326,10 +1376,17 @@ function StartOverPicker(props: {
 const EMPTY_SNIPPETS: ReadonlyArray<{ id: string; name: string; module: DocModule }> = [];
 
 function ModulesTab(props: {
-  savedModules: ReadonlyArray<{ id: string; name: string; module: DocModule }>;
+  savedModules: ReadonlyArray<{
+    id: string;
+    name: string;
+    module: DocModule;
+    page_modules?: DocModule[] | null;
+  }>;
   savedError: string | null;
   onAdd: (type: ModuleType) => void;
   onAddSaved: (m: DocModule) => void;
+  /** A page snippet: add it as a new page after the selected one. */
+  onAddSavedPage: (name: string, modules: readonly DocModule[]) => void;
 }) {
   const qc = useQueryClient();
   const deleteFn = useServerFn(deleteSavedModule);
@@ -1395,28 +1452,48 @@ function ModulesTab(props: {
             {props.savedModules.map((s) => (
               <li
                 key={s.id}
-                draggable
+                data-snippet={s.page_modules?.length ? "page" : "module"}
+                // A page snippet becomes a new page (its +); only a one-module snippet is dragged.
+                draggable={!s.page_modules?.length}
                 onDragStart={(e) => {
+                  if (s.page_modules?.length) return;
                   e.dataTransfer.setData(SNIPPET_DRAG_TYPE, s.id);
                   e.dataTransfer.effectAllowed = "copy";
                 }}
-                className="flex cursor-grab items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 active:cursor-grabbing"
-                title={`${s.name} — drag onto a page`}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50",
+                  !s.page_modules?.length && "cursor-grab active:cursor-grabbing",
+                )}
+                title={
+                  s.page_modules?.length
+                    ? `${s.name} — a whole page; its + adds it as a new page`
+                    : `${s.name} — drag onto a page`
+                }
               >
                 <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate" title={MODULE_LABELS[s.module.type]}>
                   {s.name}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {MODULE_LABELS[s.module.type]}
+                  {s.page_modules?.length
+                    ? `Page · ${s.page_modules.length} ${s.page_modules.length === 1 ? "module" : "modules"}`
+                    : MODULE_LABELS[s.module.type]}
                 </span>
                 <Button
                   type="button"
                   size="icon"
                   variant="ghost"
                   className="h-6 w-6"
-                  title="Add a copy to the selected page"
-                  onClick={() => props.onAddSaved(s.module)}
+                  title={
+                    s.page_modules?.length
+                      ? "Add as a new page after the selected page"
+                      : "Add a copy to the selected page"
+                  }
+                  onClick={() =>
+                    s.page_modules?.length
+                      ? props.onAddSavedPage(s.name, s.page_modules)
+                      : props.onAddSaved(s.module)
+                  }
                 >
                   <Plus className="h-4 w-4" />
                 </Button>

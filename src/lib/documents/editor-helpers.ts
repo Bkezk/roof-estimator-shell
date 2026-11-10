@@ -288,6 +288,15 @@ export const pageDomId = (pageId: string) => `doc-page-${pageId}`;
 
 /** The drag type a Modules tab tile carries onto a sheet (its data: the module type). */
 export const MODULE_DRAG_TYPE = "application/x-jbk-document-module";
+/** The most pages of an inserted PDF the editor draws (the rest are counted, and all print). */
+export const PDF_PREVIEW_MAX_PAGES = 12;
+/** How many of an inserted PDF's pages the editor draws, and how many it only counts. */
+export function pdfPreviewPages(pageCount: number): { shown: number; more: number } {
+  const n = Math.max(0, Math.floor(pageCount) || 0);
+  const shown = Math.min(n, PDF_PREVIEW_MAX_PAGES);
+  return { shown, more: n - shown };
+}
+
 /** The drag type a saved snippet row carries onto a sheet (its data: the snippet's id). */
 export const SNIPPET_DRAG_TYPE = "application/x-jbk-document-snippet";
 

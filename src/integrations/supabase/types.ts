@@ -1542,6 +1542,7 @@ export type Database = {
           id: string
           module: Json
           name: string
+          page_modules: Json | null
           updated_at: string
           updated_by_name: string | null
         }
@@ -1552,6 +1553,7 @@ export type Database = {
           id?: string
           module: Json
           name: string
+          page_modules?: Json | null
           updated_at?: string
           updated_by_name?: string | null
         }
@@ -1562,6 +1564,7 @@ export type Database = {
           id?: string
           module?: Json
           name?: string
+          page_modules?: Json | null
           updated_at?: string
           updated_by_name?: string | null
         }

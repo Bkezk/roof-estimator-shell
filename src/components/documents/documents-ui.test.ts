@@ -84,8 +84,12 @@ describe("the /documents route", () => {
     expect(rows).toContain('e.dataTransfer.effectAllowed = "copy";');
     expect(rows).toContain("cursor-grab");
     expect(rows).toContain("<GripVertical");
-    expect(rows).toContain("title={`${s.name} — drag onto a page`}");
-    expect(rows).toContain("onClick={() => props.onAddSaved(s.module)}");
+    // A page snippet (Nov 10) has its own title; a one-module snippet still says this.
+    expect(rows).toContain("`${s.name} — drag onto a page`");
+    // The + of a one-module snippet still adds it to the selected page; a page snippet's + adds
+    // a new page (Nov 10).
+    expect(rows).toContain(": props.onAddSaved(s.module)");
+    expect(rows).toContain("? props.onAddSavedPage(s.name, s.page_modules)");
     // The + paths are unchanged: a fresh copy appended to the selected page.
     expect(route).toContain("onAdd={(type) => addToSelected(newModule(type))}");
     expect(route).toContain("onAddSaved={(m) => addToSelected(cloneModule(m))}");

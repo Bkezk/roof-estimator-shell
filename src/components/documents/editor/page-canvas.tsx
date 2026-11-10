@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
+import { FilePlus2, FileText, FileUp, Loader2, Trash2 } from "lucide-react";
 
 import {
   continuedTabLabel,
@@ -52,15 +52,20 @@ import {
   type DocModule,
   type DocOptions,
   type DocPage,
+  insertPageSnippet,
+  MAX_PAGES,
   MODULE_TYPES,
   type ModuleType,
+  newId,
   newModule,
   newPdfModule,
 } from "@/lib/documents/model";
+import { docxModules, readDocx, wordImportToast } from "@/lib/documents/docx-import";
 import {
   deleteDocumentAsset,
   listDocumentAssets,
   uploadDocumentAsset,
+  uploadDocumentImage,
 } from "@/lib/documents.functions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -76,7 +81,7 @@ import {
 import { assetsKey, type DocumentAssetRow, errText } from "../document-types";
 import { dropIndexFromY } from "./drop-index";
 import { type EditorEnv, useEditorEnv } from "./editor-context";
-import { scrollToModule } from "./editor-dom";
+import { scrollToModule, scrollToPage } from "./editor-dom";
 import { ModuleView } from "./module-view";
 
 /** The print styles the rich text boxes need (Tailwind's preflight strips them). */
@@ -105,6 +110,72 @@ export function PageCanvas(props: {
   const hostRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pdfFor, setPdfFor] = useState<number | null>(null);
+  // "Import Word" (owner, Nov 10): the page the picked .docx goes after, and the read in flight.
+  const wordRef = useRef<HTMLInputElement>(null);
+  const wordAfter = useRef(0);
+  const [importing, setImporting] = useState(false);
+  const uploadImageFn = useServerFn(uploadDocumentImage);
+  const importWord = async (file: File) => {
+    if (props.pages.length >= MAX_PAGES) {
+      toast.error(`A document holds ${MAX_PAGES} pages at most. Delete a page first.`);
+      return;
+    }
+    setImporting(true);
+    try {
+      const read = await readDocx(new Uint8Array(await file.arrayBuffer()));
+      const skipped = [...read.skipped];
+      const owner = env.documentId
+        ? { documentId: env.documentId }
+        : env.templateId
+          ? { templateId: env.templateId }
+          : null;
+      // Each picture is stored with this document (or template), like an uploaded one.
+      const refs: Array<{ path: string; width: number; height: number } | null> = [];
+      for (const b of read.blocks) {
+        if (b.kind !== "image") continue;
+        if (!owner) {
+          refs.push(null);
+          continue;
+        }
+        try {
+          let bin = "";
+          for (let k = 0; k < b.image.bytes.length; k += 0x8000)
+            bin += String.fromCharCode(...b.image.bytes.subarray(k, k + 0x8000));
+          refs.push(
+            await uploadImageFn({
+              data: {
+                ...owner,
+                fileName: b.image.name,
+                base64: btoa(bin),
+                width: b.image.width,
+                height: b.image.height,
+              },
+            }),
+          );
+        } catch (e) {
+          refs.push(null);
+          skipped.push(`a picture that could not be stored (${errText(e)})`);
+        }
+      }
+      if (!owner && refs.length)
+        skipped.push("its pictures (save this template once, then import the file again)");
+      const modules = docxModules(
+        read.blocks,
+        (k) => refs[k] ?? null,
+        () => newId(),
+      );
+      if (!modules.length) throw new Error("nothing in it could be brought across");
+      const landed = insertPageSnippet(props.pages, wordAfter.current, modules);
+      if (!landed) throw new Error(`a document holds ${MAX_PAGES} pages at most`);
+      env.dispatch({ type: "setPages", op: () => landed.pages });
+      toast.success(wordImportToast(file.name, landed.index + 1, skipped), { duration: 15000 });
+      window.setTimeout(() => scrollToPage(landed.pageId), 80);
+    } catch (e) {
+      toast.error(`Could not import the Word document: ${errText(e)}`, { duration: 12000 });
+    } finally {
+      setImporting(false);
+    }
+  };
   // How many sheets each page takes on screen (its modules packed up to the page break), so
   // the sheets' running numbers match what prints.
   const [sheetCounts, setSheetCounts] = useState<Record<string, number>>({});
@@ -164,6 +235,24 @@ export function PageCanvas(props: {
                   type="button"
                   size="sm"
                   variant="outline"
+                  title="Bring a Word document (.docx) in as a new page after this one: its text, pictures and tables become modules you can edit"
+                  disabled={importing}
+                  onClick={() => {
+                    wordAfter.current = i;
+                    wordRef.current?.click();
+                  }}
+                >
+                  {importing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4" />
+                  )}
+                  Import Word
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
                   title="Add a blank page after this one"
                   onClick={() =>
                     env.dispatch({
@@ -183,6 +272,18 @@ export function PageCanvas(props: {
           );
         })}
       </div>
+      <input
+        ref={wordRef}
+        type="file"
+        accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+        className="hidden"
+        data-input="import-word"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void importWord(f);
+        }}
+      />
       <InsertPdfDialog
         open={pdfFor !== null}
         onOpenChange={(o) => {
