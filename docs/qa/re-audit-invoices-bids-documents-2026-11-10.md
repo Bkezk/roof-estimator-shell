@@ -172,3 +172,15 @@ Tests: `re-audit-fixes-nov10.test.ts` (23; 19 red on the old code, the rest cont
 updated in `duplicate-bid.test.ts`. Chain: 511 files, 6,493 tests, build clean. Each fix was
 proved in the browser on temporary rows (two customers, two tickets, one invoice, four bids),
 all removed afterwards; the sweep is empty.
+
+## The test invoices were removed (Nov 10)
+
+The owner: "currently all invoices are tests" and then "go ahead and remove the invoices". All
+ten were removed by id: the nine stored PDFs through the Storage API, the ten rows (their 15
+lines went with them), and the pointer each ticket kept. The five tickets that were at Invoiced
+went back to Authorized through the database's own `set_ticket_stage_from_invoice`, the same
+step a void takes; four of those five are deleted tickets. No notification was sent.
+
+After: 0 invoices, 0 lines, 0 invoice PDFs, no ticket pointing at an invoice. The Invoices page
+shows "0 invoices $0.00 Paid $0.00 · Open $0.00" with four tickets awaiting an invoice, and the
+Owner view's tile reads "UNPAID — Nothing outstanding". The audit log keeps the removal.
