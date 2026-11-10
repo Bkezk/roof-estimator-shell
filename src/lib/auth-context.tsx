@@ -15,6 +15,7 @@ import {
   type ProfileLoadMemo,
   type ProfileLoadResult,
 } from "@/lib/auth-flow";
+import { forgetStoredPhotoLinks } from "@/lib/photo-link-store";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 import { canAccess } from "@/lib/access";
 import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-store";
@@ -137,6 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A session that ended outside signOut (Oct 20): another tab's sign-out, a refresh that
       // failed — nothing of this person stays cached for the next one.
       if (event === "SIGNED_OUT" || (!next && had)) queryClient.clear();
+      // The ticket pictures' kept links too (photo-link-store.ts), whatever page this is.
+      if (event === "SIGNED_OUT" || (!next && had)) forgetStoredPhotoLinks();
       // A real sign-in (Oct 20, shouldHoldForProfile: no session before, one now): `loading`
       // holds the gate's redirect off /login until the profile is here, so the landing page is
       // the person's own (homeFor: a technician-only user's is My tickets, not Work Overview).

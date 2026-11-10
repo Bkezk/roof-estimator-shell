@@ -588,3 +588,28 @@ describe("3b. the page seeds each section's cache from the one read", () => {
     );
   });
 });
+
+describe("sign-out from any page forgets the kept picture links", () => {
+  it("removes the store's key, and survives storage being off", async () => {
+    const { forgetStoredPhotoLinks, LINK_STORE_KEY } = await import("@/lib/photo-link-store");
+    const removed: string[] = [];
+    forgetStoredPhotoLinks({ removeItem: (k) => void removed.push(k) });
+    expect(removed).toEqual([LINK_STORE_KEY]);
+    expect(() =>
+      forgetStoredPhotoLinks({
+        removeItem: () => {
+          throw new Error("storage is off");
+        },
+      }),
+    ).not.toThrow();
+    expect(() => forgetStoredPhotoLinks(null)).not.toThrow();
+  });
+
+  it("the auth context calls it wherever it clears the person's cache on a sign-out", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/lib/auth-context.tsx", "utf8").replace(/\s+/g, " ");
+    expect(src).toContain(
+      'if (event === "SIGNED_OUT" || (!next && had)) forgetStoredPhotoLinks();',
+    );
+  });
+});

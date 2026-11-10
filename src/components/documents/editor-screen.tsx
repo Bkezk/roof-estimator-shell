@@ -625,7 +625,7 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
 // ------------------------------------------------------------------------- the shell
 
 /** Where Ctrl+Z belongs to the field itself: a text box (TipTap), an input or a textarea. */
-export function inOwnUndoField(target: EventTarget | null): boolean {
+function inOwnUndoField(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.closest(".ProseMirror")) return true;
   if (target.closest("input, textarea, [contenteditable=true]")) return true;

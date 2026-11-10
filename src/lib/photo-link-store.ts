@@ -218,3 +218,19 @@ export function linkFreshForMs(url: string | null | undefined, gotAtMs: number):
   if (!url) return 0;
   return Math.max(0, linkExpiryMs(url, gotAtMs) - gotAtMs - LINK_MIN_LEFT_MS);
 }
+
+/**
+ * Sign-out from ANY page: the kept links go, even when no picture was shown on this page (so the
+ * store above was never made). Called by the auth context beside its own cache clear.
+ */
+export function forgetStoredPhotoLinks(
+  storage: Pick<Storage, "removeItem"> | null | undefined = typeof window === "undefined"
+    ? null
+    : window.localStorage,
+): void {
+  try {
+    storage?.removeItem(LINK_STORE_KEY);
+  } catch {
+    /* storage is off (private mode): there is nothing kept to forget */
+  }
+}
