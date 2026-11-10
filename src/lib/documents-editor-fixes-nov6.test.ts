@@ -26,6 +26,7 @@ import {
 const read = (p: string) => readFileSync(p, "utf8");
 const route = read("src/routes/documents.tsx");
 const moduleView = read("src/components/documents/editor/module-view.tsx");
+const deletePage = read("src/components/documents/editor/delete-page.ts");
 const richText = read("src/components/documents/editor/rich-text.tsx");
 const canvas = read("src/components/documents/editor/page-canvas.tsx");
 
@@ -137,8 +138,10 @@ describe("2. undo and redo", () => {
     expect(route).toContain("if (inOwnUndoField(e.target)) return;");
     expect(route).toContain('dispatch({ type: k === "y" || e.shiftKey ? "redo" : "undo" });');
     expect(route).toContain('if (target.closest(".ProseMirror")) return true;');
-    expect(route).toContain("toast(`Page ${i + 1} deleted`, {");
-    expect(route).toContain("onClick: () => op((p) => addPage(p, i, page)),");
+    // Nov 10: the page menu and the bin under each page share one delete-with-Undo.
+    expect(route).toContain("onClick={() => deletePageWithUndo(dispatch, state.pages, page)}");
+    expect(deletePage).toContain("toast(`Page ${i + 1} deleted`, {");
+    expect(deletePage).toContain("restorePage(p, i, page, wasOnly)");
     expect(moduleView).toContain("toast(`${MODULE_LABELS[m.type]} deleted`, {");
     expect(moduleView).toContain("addModule(p, pageIndex, m, index)");
     expect(canvas).toContain("pageIndex={props.index}");

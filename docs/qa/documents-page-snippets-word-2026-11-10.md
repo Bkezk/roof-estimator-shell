@@ -139,3 +139,33 @@ Browser, on a temporary template (removed afterwards with its two library PDFs a
 Clicking each PDF line put that sheet at the top of the view. The button's right edge matched
 the sheet's right edge (1552 px both); it opened "Save page 1 as a snippet"; page 2, empty, had
 it switched off. At phone width it stayed inside the screen.
+
+## Right after: a bin under each page
+
+"also add a little trash can icon to the right of save as snippet that lets you delete the page".
+
+- **The bin.** A small bin button sits to the right of Save page as snippet, under every page.
+  It deletes that page at once and the toast offers Undo; Ctrl+Z takes it back too. It is off
+  only where deleting would do nothing: the one page, already blank.
+- **One delete.** The page menu's Delete and the bin now run the same code
+  (`src/components/documents/editor/delete-page.ts`).
+- **Found on the way.** Deleting the ONLY page and pressing Undo used to leave two pages: the
+  page that came back and the blank one that had taken its place. Undo now puts the page back
+  alone (`restorePage`). If the blank was typed on in the meantime it is kept.
+- Tests: the last block of `src/lib/documents/pages-list-sheets-nov10.test.ts`; the page delete
+  pins in `src/lib/documents-editor-fixes-nov6.test.ts` moved to the shared helper.
+
+Browser, on a new template that was never saved (nothing written):
+
+| Step                             | Pages | Rows                        |
+| -------------------------------- | ----- | --------------------------- |
+| New template                     | 1     | page 1, 3 modules           |
+| Add Page, bin on page 2          | 1     | page 1                      |
+| Undo                             | 2     | page 1, blank page 2        |
+| Bin on page 1                    | 1     | the blank page, its bin off |
+| Undo                             | 2     | page 1 back in first place  |
+| Only page: bin, then Undo        | 1     | page 1, 3 modules           |
+| Page menu Delete on page 2, Undo | 2     | both back                   |
+
+The bin is 28 by 26 px, the same height as the button beside it, 6 px to its right, and its
+right edge meets the sheet's right edge.

@@ -84,7 +84,7 @@ import {
 } from "@/lib/documents/editor-helpers";
 import {
   addModule,
-  addPage,
+  canDeletePage,
   cloneModule,
   DEFAULT_OPTIONS,
   type DocKind,
@@ -102,7 +102,6 @@ import {
   movePage,
   newModule,
   newPage,
-  removePage,
 } from "@/lib/documents/model";
 import type { ImageSize } from "@/lib/documents/pdf-layout";
 import { flaggedItemsNotShown, notOnPageNote, storedInspection } from "@/lib/documents/server-pure";
@@ -144,6 +143,7 @@ import {
   EMPTY_EDITOR,
   selectedPageIndex,
 } from "@/components/documents/editor/editor-state";
+import { deletePageWithUndo } from "@/components/documents/editor/delete-page";
 import { scrollToPage, scrollToSheet } from "@/components/documents/editor/editor-dom";
 import { usePdfMeasure } from "@/components/documents/editor/screen-measure";
 import { PageCanvas } from "@/components/documents/editor/page-canvas";
@@ -1298,15 +1298,8 @@ function DocumentTab(props: {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => {
-                          op((p) => removePage(p, page.id));
-                          toast(`Page ${i + 1} deleted`, {
-                            action: {
-                              label: "Undo",
-                              onClick: () => op((p) => addPage(p, i, page)),
-                            },
-                          });
-                        }}
+                        disabled={!canDeletePage(state.pages, page)}
+                        onClick={() => deletePageWithUndo(dispatch, state.pages, page)}
                       >
                         <Trash2 className="h-4 w-4" /> Delete
                       </DropdownMenuItem>

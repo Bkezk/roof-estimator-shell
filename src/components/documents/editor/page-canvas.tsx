@@ -55,6 +55,7 @@ import { variableLabel } from "@/lib/documents/variables";
 import {
   addModule,
   addPage,
+  canDeletePage,
   cloneModule,
   type DocModule,
   type DocOptions,
@@ -86,6 +87,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { assetsKey, type DocumentAssetRow, errText } from "../document-types";
+import { deletePageWithUndo } from "./delete-page";
 import { dropIndexFromY } from "./drop-index";
 import { type EditorEnv, useEditorEnv } from "./editor-context";
 import { scrollToModule, scrollToPage } from "./editor-dom";
@@ -262,20 +264,34 @@ export function PageCanvas(props: {
                   <FilePlus2 className="h-4 w-4" />
                   Add Page
                 </Button>
-                {env.onSavePage && (
+                <div className="ml-auto flex items-center gap-2">
+                  {env.onSavePage && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      title={`Save page ${i + 1} as a snippet: the whole page, to add again as a new page from the Modules tab`}
+                      disabled={page.modules.length === 0}
+                      onClick={() => env.onSavePage?.(page)}
+                    >
+                      <BookmarkPlus className="h-4 w-4" />
+                      Save page as snippet
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="ml-auto"
-                    title={`Save page ${i + 1} as a snippet: the whole page, to add again as a new page from the Modules tab`}
-                    disabled={page.modules.length === 0}
-                    onClick={() => env.onSavePage?.(page)}
+                    className="px-2 text-muted-foreground hover:text-destructive"
+                    data-action="delete-page"
+                    title={`Delete page ${i + 1}. Undo is offered right after.`}
+                    aria-label={`Delete page ${i + 1}`}
+                    disabled={!canDeletePage(props.pages, page)}
+                    onClick={() => deletePageWithUndo(env.dispatch, props.pages, page)}
                   >
-                    <BookmarkPlus className="h-4 w-4" />
-                    Save page as snippet
+                    <Trash2 className="h-4 w-4" />
                   </Button>
-                )}
+                </div>
               </div>
             </div>
           );

@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { canDeletePage, newModule, newPage, removePage, restorePage } from "./model";
 import {
   PDF_PREVIEW_MAX_PAGES,
   pageSheetInfos,
@@ -135,7 +136,10 @@ describe("Save page as snippet under each page", () => {
     const at = canvas.indexOf("Save page as snippet </Button>");
     expect(at).toBeGreaterThan(-1);
     const button = canvas.slice(canvas.lastIndexOf("<Button", at), at);
-    expect(button).toContain('className="ml-auto"');
+    // It and the bin sit together at the right end of the row.
+    expect(
+      canvas.slice(canvas.lastIndexOf("<div", canvas.lastIndexOf("<Button", at)), at),
+    ).toContain('className="ml-auto flex items-center gap-2"');
     expect(button).toContain("title={`Save page ${i + 1} as a snippet:");
     expect(button).toContain("disabled={page.modules.length === 0}");
     expect(button).toContain("onClick={() => env.onSavePage?.(page)}");
@@ -149,5 +153,63 @@ describe("Save page as snippet under each page", () => {
     expect(route).not.toContain("whose menu you opened");
     expect(route).toContain("the page you picked, by its menu or the button under it");
     expect(route).toContain("onSheets,");
+  });
+});
+
+/**
+ * Nov 10, right after: "also add a little trash can icon to the right of save as snippet that
+ * lets you delete the page".
+ */
+describe("the bin under each page", () => {
+  const helper = flat("src/components/documents/editor/delete-page.ts");
+  const full = () => ({ ...newPage(), modules: [newModule("body")] });
+
+  it("sits to the right of Save page as snippet and names the page", () => {
+    const snippet = canvas.indexOf("Save page as snippet </Button>");
+    const at = canvas.indexOf('data-action="delete-page"');
+    expect(at).toBeGreaterThan(snippet);
+    const end = canvas.indexOf("</Button>", at);
+    const button = canvas.slice(canvas.lastIndexOf("<Button", at), end);
+    expect(button).toContain("title={`Delete page ${i + 1}. Undo is offered right after.`}");
+    expect(button).toContain("aria-label={`Delete page ${i + 1}`}");
+    expect(button).toContain("<Trash2 ");
+    expect(button).toContain("disabled={!canDeletePage(props.pages, page)}");
+    expect(button).toContain("onClick={() => deletePageWithUndo(env.dispatch, props.pages, page)}");
+    // Still inside the same right-hand group, with nothing but the row's end after it.
+    expect(canvas.slice(end, end + 40)).toContain("</Button> </div> </div>");
+  });
+
+  it("deletes the same way as the page menu, with Undo on the toast", () => {
+    expect(route).toContain("onClick={() => deletePageWithUndo(dispatch, state.pages, page)}");
+    expect(helper).toContain('dispatch({ type: "setPages", op: (p) => removePage(p, page.id) });');
+    expect(helper).toContain("toast(`Page ${i + 1} deleted`, {");
+    expect(helper).toContain('label: "Undo",');
+    expect(helper).toContain("restorePage(p, i, page, wasOnly)");
+  });
+
+  it("Undo puts the page back where it was", () => {
+    const [a, b, c] = [full(), full(), full()];
+    const after = removePage([a, b, c], b.id);
+    expect(after.map((p) => p.id)).toEqual([a.id, c.id]);
+    expect(restorePage(after, 1, b, false).map((p) => p.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  it("Undo after deleting the only page leaves that page alone, not a blank beside it", () => {
+    const only = full();
+    const after = removePage([only], only.id);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.id).not.toBe(only.id);
+    expect(restorePage(after, 0, only, true).map((p) => p.id)).toEqual([only.id]);
+    // If the blank was typed on in the meantime, it is kept and the page goes back in front.
+    const used = [{ ...after[0]!, modules: [newModule("body")] }];
+    expect(restorePage(used, 0, only, true).map((p) => p.id)).toEqual([only.id, used[0]!.id]);
+  });
+
+  it("is off only where deleting would do nothing: the one page, already blank", () => {
+    const blank = newPage();
+    expect(canDeletePage([blank], blank)).toBe(false);
+    const one = full();
+    expect(canDeletePage([one], one)).toBe(true);
+    expect(canDeletePage([one, blank], blank)).toBe(true);
   });
 });

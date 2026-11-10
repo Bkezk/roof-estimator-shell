@@ -858,6 +858,23 @@ export function removePage(pages: readonly DocPage[], pageId: string): DocPage[]
   const next = pages.filter((p) => p.id !== pageId);
   return next.length ? next : [newPage()];
 }
+/**
+ * Undo of a page delete: the page goes back where it was. Deleting the ONLY page leaves a blank
+ * one in its place (`removePage`); if that blank is still all there is, the page takes its place
+ * instead of sitting beside it.
+ */
+export function restorePage(
+  pages: readonly DocPage[],
+  at: number,
+  page: DocPage,
+  wasOnly: boolean,
+): DocPage[] {
+  if (wasOnly && pages.length === 1 && pages[0]!.modules.length === 0) return [page];
+  return addPage(pages, at, page);
+}
+/** Whether deleting this page does anything: not when it is the only page and already blank. */
+export const canDeletePage = (pages: readonly DocPage[], page: DocPage): boolean =>
+  !(pages.length === 1 && page.modules.length === 0);
 export function movePage(pages: readonly DocPage[], pageId: string, dir: -1 | 1): DocPage[] {
   const i = pages.findIndex((p) => p.id === pageId);
   const j = i + dir;
