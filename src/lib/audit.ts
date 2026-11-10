@@ -26,7 +26,10 @@
  */
 import type { Json } from "@/integrations/supabase/types";
 
-/** The audit_log.entity check constraint. */
+/**
+ * The audit_log.entity check constraint, less Setup's own three entities (SETUP_AUDIT_ENTITIES
+ * in setup-history.ts; 20261110214000_setup_history.sql), which only the Setup page reads.
+ */
 export const AUDIT_ENTITIES = [
   "invoice",
   "invoice_line",
@@ -73,7 +76,7 @@ export const AUDIT_FIELD_LABELS: Record<"opportunity" | "bid", Readonly<Record<s
     est_value: "est value",
     lead_source: "lead source",
     account_id: "customer",
-    site_id: "site",
+    site_id: "property",
     bid_id: "bid link",
     description: "description",
     notes: "notes",
@@ -87,15 +90,29 @@ export const AUDIT_FIELD_LABELS: Record<"opportunity" | "bid", Readonly<Record<s
     submitted_at: "submitted at",
     lost_reason: "lost reason",
     account_id: "account",
-    site_id: "site",
+    site_id: "property",
     opportunity_id: "opportunity",
     deleted_at: "deleted",
   },
 };
 
+/**
+ * The words audit_col_name() uses for a property and its inner site, on every entity (Nov 10,
+ * 20261110213000_history_property_wording.sql): a ticket's `site_id` is the property; its
+ * `location_id` is the named site inside it.
+ */
+export const AUDIT_PROPERTY_WORDS: Readonly<Record<string, string>> = {
+  site_id: "property",
+  site_name: "property name",
+  site_address: "property address",
+  location_id: "site",
+  location_name: "site name",
+};
+
 /** The readable name of a changed field, for an entity ("expected close"); the column otherwise. */
 export const auditFieldLabel = (entity: string, column: string): string =>
   (entity === "opportunity" || entity === "bid" ? AUDIT_FIELD_LABELS[entity][column] : undefined) ??
+  AUDIT_PROPERTY_WORDS[column] ??
   column.replace(/_id$/, "").replace(/_/g, " ");
 
 /** A logged row as the History folds read it. */

@@ -11,6 +11,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import { buildingsSearchTable } from "@/lib/database-rpc";
 import { parseLooseJson } from "@/lib/loose-json";
 import { easternYmd } from "@/lib/field-day";
 import {
@@ -192,7 +193,13 @@ export const listBuildings = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }): Promise<BuildingRow[]> => {
     await readAccess(context);
-    let q = context.supabase.from("buildings").select("*").is("deleted_at", null).limit(500);
+    // Search text reads the twin view (buildings_search, 20261110211000) so the trigram index is
+    // used: through the table, row security keeps ilike out of the index and every search walked
+    // all 270,000 rows. Same rows, same access rule.
+    const table = data.q
+      ? buildingsSearchTable(context.supabase)
+      : context.supabase.from("buildings");
+    let q = table.select("*").is("deleted_at", null).limit(500);
     if (data.stormHit) q = q.not("last_storm_at", "is", null);
     if (data.sort === "storm") {
       q = q

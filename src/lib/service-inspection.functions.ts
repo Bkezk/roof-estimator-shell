@@ -107,21 +107,14 @@ export const saveChecklistItems = createServerFn({ method: "POST" })
     const labels = data.items.map((i) => i.label.toLowerCase());
     const dup = labels.find((l, i) => labels.indexOf(l) !== i);
     if (dup) throw new Error(`"${data.items[labels.indexOf(dup)]!.label}" is on the list twice`);
-    const { data: cur, error: cErr } = await sb.from("inspection_checklist_items").select("id");
-    if (cErr) throw new Error(cErr.message);
-    const keep = new Set(data.items.map((i) => i.id).filter(Boolean));
-    const gone = (cur ?? []).map((r) => r.id).filter((id) => !keep.has(id));
-    if (gone.length) {
-      const { error } = await sb.from("inspection_checklist_items").delete().in("id", gone);
-      if (error) throw new Error(error.message);
-    }
-    for (const [i, item] of data.items.entries()) {
-      const row = { label: item.label, sort: (i + 1) * 10 };
-      const { error } = item.id
-        ? await sb.from("inspection_checklist_items").update(row).eq("id", item.id)
-        : await sb.from("inspection_checklist_items").insert(row);
-      if (error) throw new Error(error.message);
-    }
+    // One transaction for the whole list (Nov 10; save_checklist_items, 20261110214000): rows left
+    // out are removed, the rest updated or added in this order, and a changed order leaves one
+    // "moved" line in Setup's History. Row by row, a failure halfway left half a list and a
+    // reorder could not be described.
+    const { error: sErr } = await sb.rpc("save_checklist_items", {
+      p_items: data.items.map((i) => ({ ...(i.id ? { id: i.id } : {}), label: i.label })),
+    });
+    if (sErr) throw new Error(sErr.message);
     const { data: rows, error } = await sb
       .from("inspection_checklist_items")
       .select("id, label, sort")

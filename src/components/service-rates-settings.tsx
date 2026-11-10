@@ -15,6 +15,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+
+import { SETUP_HISTORY_KEY, SetupHistory } from "@/components/setup-history";
 import { Check, Loader2, Save } from "lucide-react";
 
 import {
@@ -156,6 +158,7 @@ export function ServiceRatesSettings() {
       // The drafts are refilled from the fresh row once it is here.
       refillRef.current = true;
       await qc.invalidateQueries({ queryKey: ["service-rates"] });
+      void qc.invalidateQueries({ queryKey: SETUP_HISTORY_KEY });
     },
     onError: (e) => toast.error(`Could not save the service rates: ${errText(e)}`),
   });
@@ -169,6 +172,7 @@ export function ServiceRatesSettings() {
     mutationFn: () => confirmFn(),
     onSuccess: (r) => {
       toast.success("Rates confirmed");
+      void qc.invalidateQueries({ queryKey: SETUP_HISTORY_KEY });
       qc.setQueryData(["service-rates"], (cur: typeof q.data) =>
         cur
           ? {
@@ -475,6 +479,7 @@ export function ServiceRatesSettings() {
             </div>
           </form>
         )}
+        <SetupHistory tab="rates" />
       </CardContent>
     </Card>
   );

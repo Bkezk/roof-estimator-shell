@@ -5255,6 +5255,7 @@ export type Database = {
         Returns: Json
       }
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
+      save_checklist_items: { Args: { p_items: Json }; Returns: undefined }
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] }
         Returns: Json

@@ -128,7 +128,7 @@ describe("the app's field labels (audit.ts)", () => {
       est_value: "est value",
       lead_source: "lead source",
       account_id: "customer",
-      site_id: "site",
+      site_id: "property",
       bid_id: "bid link",
     });
     expect(AUDIT_FIELD_LABELS.bid).toMatchObject({
@@ -138,7 +138,7 @@ describe("the app's field labels (audit.ts)", () => {
       submitted_at: "submitted at",
       lost_reason: "lost reason",
       account_id: "account",
-      site_id: "site",
+      site_id: "property",
     });
     expect(auditFieldLabel("opportunity", "expected_close")).toBe("expected close");
     expect(auditFieldLabel("bid", "lost_reason")).toBe("lost reason");

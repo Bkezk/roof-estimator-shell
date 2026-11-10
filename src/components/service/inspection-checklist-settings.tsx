@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+
+import { SETUP_HISTORY_KEY, SetupHistory } from "@/components/setup-history";
 import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -71,6 +73,7 @@ export function InspectionChecklistSettings() {
       setDirty(false);
       setRows(saved.map((r) => ({ key: r.id, id: r.id, label: r.label })));
       toast.success("Inspection checklist saved");
+      void qc.invalidateQueries({ queryKey: SETUP_HISTORY_KEY });
     },
     onError: (e) => toast.error(`Could not save the checklist: ${errText(e)}`),
   });
@@ -214,6 +217,7 @@ export function InspectionChecklistSettings() {
             </div>
           </>
         )}
+        <SetupHistory tab="inspection" />
       </CardContent>
     </Card>
   );

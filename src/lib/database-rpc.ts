@@ -56,3 +56,13 @@ type RpcDatabase = Omit<Database, "public"> & {
 export function databaseRpc(client: SupabaseClient<Database>) {
   return (client as unknown as SupabaseClient<RpcDatabase>).rpc.bind(client);
 }
+
+/**
+ * `buildings_search` (20261110211000_building_search_and_fk_indexes.sql): the read-only twin of
+ * `buildings` that the Roofs & Storms text search reads, so the trigram index can be used (under
+ * row security an `ilike` cannot be an index condition on the table itself). Same columns and
+ * the same access rule, so it is typed as the table; the generated types do not list it.
+ */
+export function buildingsSearchTable(client: SupabaseClient<Database>) {
+  return client.from("buildings_search" as "buildings");
+}
