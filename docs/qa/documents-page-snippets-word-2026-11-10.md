@@ -86,3 +86,20 @@ in the page lineup normally".
 Browser, on a temporary template (removed afterwards): a three-page PDF made three sheets; the
 owner's Word form came in as page 2; a .pub file gave the Publisher message; the popup read
 "Save page 2 as a snippet"; the bin took the PDF out.
+
+## Urgent the same day: "Not saved: you saved this document from another tab"
+
+A manager kept getting this on Save with one tab open and nobody else in the document.
+
+- **Cause.** The editor kept an opened document in memory for five minutes after it closed, and
+  a save never rewrote that copy. Leaving the document and opening it again inside that time
+  showed the copy from BEFORE the last save, at its old version number. Every save from that copy
+  was refused as stale, naming his own earlier save. The last save also looked missing on screen.
+- **Proof (read-only, on a document the owner called fake).** Open it, go to Customers, press
+  Back. Old code: 0 reads of the document on coming back. Fixed code: 1 read.
+- **Fix.** The copy is dropped when the editor closes, so opening a document always reads the
+  row (`DOCUMENT_BUNDLE_GC_MS`, `src/routes/documents.tsx` loader). Also: a later re-read that
+  fails no longer takes the open editor off the screen (documents and templates).
+- **Live data.** The document's saves are all there (versions 6 to 10 that morning); nothing was
+  lost on the server.
+- Test: `src/components/documents/stale-bundle-nov10.test.ts`.

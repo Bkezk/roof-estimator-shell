@@ -121,6 +121,7 @@ import { cn } from "@/lib/utils";
 import { useDocumentActions } from "@/components/documents/document-actions";
 import {
   type DocumentBundle,
+  DOCUMENT_BUNDLE_GC_MS,
   documentKey,
   errText,
   revisionsKey,
@@ -231,9 +232,17 @@ function DocumentEditorLoader({ id }: { id: string }) {
     queryFn: () => getFn({ data: { id } }),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    // Never kept once the editor closes (Nov 10, urgent: "Not saved: you saved this document
+    // from another tab" with one tab and one person). A save does not rewrite this copy, so
+    // leaving the document and opening it again inside five minutes showed the copy from BEFORE
+    // the last save, with its old version number, and every save from it was refused as stale.
+    // Opening a document now always reads the row.
+    gcTime: DOCUMENT_BUNDLE_GC_MS,
   });
   if (q.isLoading) return <Loading what="document" />;
-  if (q.isError || !q.data)
+  // Only when there is nothing to show: a later re-read that fails (after Export or Share)
+  // must not take the open editor, and what is typed in it, off the screen.
+  if (!q.data)
     return (
       <div className="py-10 text-sm text-destructive">
         Could not open the document: {q.isError ? errText(q.error) : "not found"}
@@ -251,7 +260,8 @@ function TemplateEditorLoader({ id }: { id: string }) {
     refetchOnWindowFocus: false,
   });
   if (q.isLoading) return <Loading what="template" />;
-  if (q.isError || !q.data)
+  // As for a document: a failed re-read never takes the open editor off the screen.
+  if (!q.data)
     return (
       <div className="py-10 text-sm text-destructive">
         Could not open the template: {q.isError ? errText(q.error) : "not found"}

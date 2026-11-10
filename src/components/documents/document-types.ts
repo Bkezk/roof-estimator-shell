@@ -25,6 +25,12 @@ export type DocumentRevisionRow = Awaited<ReturnType<typeof listDocumentRevision
 
 /** TanStack Query keys. */
 export const documentKey = (id: string) => ["document", id] as const;
+/**
+ * How long an opened document's bundle stays in memory after its editor closes: not at all.
+ * The editor is the only reader, it never rewrites the bundle on a save, and a kept copy is the
+ * document as it was BEFORE the saves made from it (see the loader in routes/documents.tsx).
+ */
+export const DOCUMENT_BUNDLE_GC_MS = 0;
 export const documentsKey = (scope: {
   bidId?: string | undefined;
   serviceJobId?: string | undefined;
