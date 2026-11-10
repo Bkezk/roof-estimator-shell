@@ -10,7 +10,9 @@ import {
   PROFILE_HOLD_MS,
   PROFILE_REFRESH_FAILED_TOAST,
   profileRefreshWarnDue,
+  reusableProfileLoad,
   shouldHoldForProfile,
+  type ProfileLoadMemo,
   type ProfileLoadResult,
 } from "@/lib/auth-flow";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
@@ -35,20 +37,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // When the "could not refresh your profile" toast was last shown (Oct 21): at most one per
   // PROFILE_REFRESH_WARN_EVERY_MS, however often a tab wakes.
   const warnedAtRef = useRef<number | null>(null);
+  // The last profile read (Nov 10): asks that arrive together, or within PROFILE_REUSE_MS of a
+  // read that found the row, share it instead of each reading again.
+  const loadMemoRef = useRef<ProfileLoadMemo<UserProfile> | null>(null);
+  // refreshProfile wants a new read, not the remembered one (set just before it calls loadProfile).
+  const forceReadRef = useRef(false);
 
-  async function loadProfile(current: Session | null) {
-    if (!current) {
-      profileRef.current = null;
-      setProfile(null);
-      setProfileFailed(false);
-      return;
-    }
-    // Oct 21 (the sixth audit): a profile already held this session survives a failed RE-read
-    // (TOKEN_REFRESHED, a tab-wake SIGNED_IN, refreshProfile) — nulling it and setting
-    // profileFailed made the gate send the person home from the page they were on. Only a load
-    // with no profile to begin with fails (lib/auth-flow.ts nextProfileState); a session that
-    // ends still clears everything above.
-    const held = profileRef.current;
+  /** One read of the caller's profile row, with its one retry. Never throws. */
+  async function readProfile(): Promise<ProfileLoadResult<UserProfile>> {
     let result: ProfileLoadResult<UserProfile>;
     try {
       let p = await getMyProfile();
@@ -63,6 +59,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       result = { ok: false };
     }
+    return result;
+  }
+
+  async function loadProfile(current: Session | null) {
+    if (!current) {
+      profileRef.current = null;
+      setProfile(null);
+      setProfileFailed(false);
+      return;
+    }
+    // Oct 21 (the sixth audit): a profile already held this session survives a failed RE-read
+    // (TOKEN_REFRESHED, a tab-wake SIGNED_IN, refreshProfile) — nulling it and setting
+    // profileFailed made the gate send the person home from the page they were on. Only a load
+    // with no profile to begin with fails (lib/auth-flow.ts nextProfileState); a session that
+    // ends still clears everything above.
+    const held = profileRef.current;
+    // Nov 10 (the speed pass, finding 8): one read answers every ask that arrives with it. A
+    // page load used to read the profile three or four times — the stored session below, then
+    // the auth library's INITIAL_SESSION and SIGNED_IN, each on its own
+    // (lib/auth-flow.ts reusableProfileLoad). refreshProfile asks for a new read.
+    const force = forceReadRef.current;
+    forceReadRef.current = false;
+    const userId = current.user.id;
+    let pending = reusableProfileLoad(loadMemoRef.current, userId, Date.now(), force);
+    if (!pending) {
+      const memo: ProfileLoadMemo<UserProfile> = {
+        userId,
+        promise: readProfile(),
+        okAt: null,
+        settled: false,
+      };
+      loadMemoRef.current = memo;
+      void memo.promise.then((r) => {
+        memo.settled = true;
+        memo.okAt = r.ok && r.profile ? Date.now() : null;
+      });
+      pending = memo.promise;
+    }
+    const result = await pending;
     const next = nextProfileState(held, result);
     profileRef.current = next.profile;
     setProfile(next.profile);
@@ -171,6 +206,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     refreshProfile: async () => {
       const { data } = await supabase.auth.getSession();
+      // A new read, not the one remembered from a moment ago (a read still in flight is joined).
+      forceReadRef.current = true;
       await loadProfile(data.session);
     },
   };

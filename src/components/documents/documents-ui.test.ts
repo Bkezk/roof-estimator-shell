@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const read = (p: string) => readFileSync(p, "utf8");
-const route = read("src/routes/documents.tsx");
+const route = read("src/components/documents/editor-screen.tsx");
 const canvas = read("src/components/documents/editor/page-canvas.tsx");
 const panel = read("src/components/documents/documents-panel.tsx");
 const newDialog = read("src/components/documents/new-document-dialog.tsx");
@@ -19,8 +19,8 @@ const moduleView = read("src/components/documents/editor/module-view.tsx");
 
 describe("the /documents route", () => {
   it("is the file route at /documents with the search parser", () => {
-    expect(route).toContain('createFileRoute("/documents")');
-    expect(route).toContain("validateSearch: documentSearch");
+    expect(read("src/routes/documents.tsx")).toContain('createFileRoute("/documents")');
+    expect(read("src/routes/documents.tsx")).toContain("validateSearch: documentSearch");
     // The route tree knows it (the sidebar / panel links type-check against this).
     expect(read("src/routeTree.gen.ts")).toContain("'/documents'");
   });

@@ -24,7 +24,7 @@ import {
 } from "@/components/documents/editor/editor-state";
 
 const read = (p: string) => readFileSync(p, "utf8");
-const route = read("src/routes/documents.tsx");
+const route = read("src/components/documents/editor-screen.tsx");
 const moduleView = read("src/components/documents/editor/module-view.tsx");
 const deletePage = read("src/components/documents/editor/delete-page.ts");
 const richText = read("src/components/documents/editor/rich-text.tsx");

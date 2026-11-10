@@ -297,6 +297,11 @@ export const seesInvoices = (p: AccessLike | null | undefined): boolean =>
  * or deals with customers. A technician-only user is not this, so the field ticket page shows
  * them no "Inspection report" button. The twin of `public.documents_access()`
  * (20261026150000_documents.sql).
+ *
+ * Since Nov 10 (owner: "keep technicians off the documents page. Allow office users to have
+ * access") it is also the gate of the Documents page and of Admin › Documents (pageForPath:
+ * "documents"), and the rule for adding, changing and deleting templates, saved snippets and
+ * the PDF library (documents.functions.ts `documentsOnly`), which were a manager's until then.
  */
 export const hasDocumentsAccess = (p: AccessLike | null | undefined): boolean =>
   managesTickets(p) ||
@@ -314,9 +319,25 @@ export const seesOpportunitiesList = (p: AccessLike | null | undefined): boolean
 
 /**
  * The page a route belongs to; null for routes every signed-in user may open (/account).
- * "admin": admins only; "manager": admins and managers (`managesTickets`).
+ * "admin": admins only; "manager": admins and managers (`managesTickets`); "documents":
+ * Documents access (`hasDocumentsAccess`).
  */
-export function pageForPath(pathname: string): Page | "admin" | "manager" | null {
+export type RoutePage = Page | "admin" | "manager" | "documents";
+
+/** What a closed route needs, in words (the gate's and the tiles' "Needs … access"). */
+export const DOCUMENTS_NEEDS = "Documents needs Estimate, Invoices or Customers access";
+
+/** May this profile open a route of this page (the gate's rule; `page` from pageForPath)? */
+export const canOpenPage = (p: AccessLike | null | undefined, page: RoutePage): boolean =>
+  page === "admin"
+    ? isAdmin(p)
+    : page === "manager"
+      ? managesTickets(p)
+      : page === "documents"
+        ? hasDocumentsAccess(p)
+        : canAccess(p, page);
+
+export function pageForPath(pathname: string): RoutePage | null {
   if (pathname === "/account" || pathname === "/login") return null;
   // Follow-ups and Work Overview: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
@@ -333,14 +354,12 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   // are the owners' — both admins — so the gate blocks it as it blocks Admin › Users.
   if (pathname.startsWith("/owner")) return "admin";
   // Setup (service rates, inspection checklist, vehicles) is ticket money: a manager's too
-  // (owner, Oct 1); /admin/service-rates is its old address and redirects there. Document
-  // templates (Admin › Documents, owner Oct 26) are written by admins and managers (RLS too).
-  if (
-    pathname.startsWith("/setup") ||
-    pathname.startsWith("/admin/service-rates") ||
-    pathname.startsWith("/admin/documents")
-  )
+  // (owner, Oct 1); /admin/service-rates is its old address and redirects there.
+  if (pathname.startsWith("/setup") || pathname.startsWith("/admin/service-rates"))
     return "manager";
+  // Document templates, saved snippets and the PDF library (Admin › Documents, owner Oct 26)
+  // were a manager's; since Nov 10 they are for everyone with Documents access (RLS too).
+  if (pathname.startsWith("/admin/documents")) return "documents";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";
@@ -363,9 +382,12 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   // assignments (crm_opportunities_read). The sidebar lists the page for Customers / Estimate
   // (seesOpportunitiesList).
   if (pathname.startsWith("/opportunities")) return null;
-  // Documents (owner, Oct 26): every signed-in user may open the page; the server's row security
-  // (documents_access: admins, managers, Estimate / Invoices / Customers) decides what it shows.
-  if (pathname.startsWith("/documents")) return null;
+  // Documents (owner, Oct 26). Until Nov 10 every signed-in user could open the page and the
+  // server's row security decided what it showed, so a technician reached a blank template
+  // editor that could save nothing. Owner, Nov 10: "keep technicians off the documents page.
+  // Allow office users to have access" — the page is closed without Documents access
+  // (documents_access: admins, managers, Estimate / Invoices / Customers).
+  if (pathname.startsWith("/documents")) return "documents";
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||

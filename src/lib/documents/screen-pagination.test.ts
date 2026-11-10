@@ -156,7 +156,7 @@ describe("cutPx", () => {
 
 describe("the editor wires it", () => {
   const canvas = read("src/components/documents/editor/page-canvas.tsx");
-  const route = read("src/routes/documents.tsx");
+  const route = read("src/components/documents/editor-screen.tsx");
   const picker = read("src/components/documents/editor/photo-picker.tsx");
   const views = read("src/components/documents/editor/module-view.tsx");
   it("the canvas builds the server's layout context and draws the sheets from paginatePage", () => {

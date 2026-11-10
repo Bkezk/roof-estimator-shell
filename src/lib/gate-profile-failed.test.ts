@@ -74,8 +74,13 @@ describe("the wiring", () => {
     // Oct 21 (the sixth audit): the outcome goes through nextProfileState, which keeps a profile
     // already held when a RE-read fails (src/lib/profile-reload-keeps-held.test.ts); with none
     // held a throw or no row is still null + failed.
+    // Nov 10: the read itself is readProfile (shared by the asks that arrive together — the
+    // speed pass, finding 8); loadProfile awaits it and applies the outcome as before.
     expect(auth).toMatch(
-      /result = \{ ok: true, profile: p \};\s*\} catch \{\s*result = \{ ok: false \};\s*\}\s*const next = nextProfileState\(held, result\);\s*profileRef\.current = next\.profile;\s*setProfile\(next\.profile\);\s*setProfileFailed\(next\.failed\);/,
+      /result = \{ ok: true, profile: p \};\s*\} catch \{\s*result = \{ ok: false \};\s*\}\s*return result;/,
+    );
+    expect(auth).toMatch(
+      /const result = await pending;\s*const next = nextProfileState\(held, result\);\s*profileRef\.current = next\.profile;\s*setProfile\(next\.profile\);\s*setProfileFailed\(next\.failed\);/,
     );
     expect(auth).toMatch(
       /if \(!current\) \{\s*profileRef\.current = null;\s*setProfile\(null\);\s*setProfileFailed\(false\);/,

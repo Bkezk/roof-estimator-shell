@@ -31,7 +31,7 @@ describe("Refresh data", () => {
     expect(handler).toContain("        variables,\n        findings: refreshFindings(");
     expect(handler).toContain('.select("id")\n        .maybeSingle();');
     expect(handler).toContain("the document could not be updated");
-    const route = read("src/routes/documents.tsx");
+    const route = read("src/components/documents/editor-screen.tsx");
     expect(route).toContain("setVariables(r.variables);");
     expect(route).toContain("const note = REFRESH_FINDINGS_NOTE[r.findings];");
     expect(route).toContain("toast.warning(note)");

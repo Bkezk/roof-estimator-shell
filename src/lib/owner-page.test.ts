@@ -135,7 +135,7 @@ describe("source: the sidebar", () => {
     // The group renders for admins, and for managers since Oct 26 (Documents); every other item
     // in it stays the admins'.
     expect(nav).toMatch(
-      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
     );
     expect(nav).toContain('.filter((item) => !item.adminOnly || role === "admin")');
     // Owner is not a second item under Work Overview.

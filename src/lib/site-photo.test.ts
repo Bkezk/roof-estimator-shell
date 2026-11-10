@@ -105,7 +105,7 @@ describe("the property card's cover photo (property-sites.tsx SiteCoverPhoto)", 
     expect(picker).toContain("Property photo");
     expect(picker).toContain('props.onPick({ kind: "siteCover", siteId: siteCover })');
     expect(picker).toContain("src = env.siteCoverUrl ?? null;");
-    const route = read("src/routes/documents.tsx");
+    const route = read("src/components/documents/editor-screen.tsx");
     expect(route).toContain("siteId={bundle.siteId}");
     expect(route).toContain("siteCoverUrl={bundle.siteCoverUrl}");
     const fns = read("src/lib/documents.functions.ts");

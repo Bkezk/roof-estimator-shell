@@ -334,7 +334,7 @@ describe("R5. Refresh data's note", () => {
 
 describe("R6. wiring (source pins)", () => {
   const moduleView = read("src/components/documents/editor/module-view.tsx");
-  const route = read("src/routes/documents.tsx");
+  const route = read("src/components/documents/editor-screen.tsx");
   it("the tile, the item view and its settings", () => {
     expect(moduleView).toContain(
       'case "repairItem":\n      return <RepairItem m={m} set={set} />;',

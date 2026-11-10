@@ -87,7 +87,7 @@ describe("documents.functions.ts", () => {
     expect(fn).toContain('randomBytes(SHARE_TOKEN_BYTES).toString("base64url")');
     expect(fn).toContain("documentShareUrl(origin, row.share_token)");
   });
-  it("templates, saved modules and the PDF library are a manager's to write", () => {
+  it("templates, saved modules and the PDF library are written by Documents access (Nov 10; they were a manager's)", () => {
     for (const name of [
       "saveDocumentTemplate",
       "deleteDocumentTemplate",
@@ -98,7 +98,7 @@ describe("documents.functions.ts", () => {
       "uploadDocumentAsset",
       "deleteDocumentAsset",
     ])
-      expect(serverFn(fn, name), name).toContain("managerOnly(me.profile)");
+      expect(serverFn(fn, name), name).toContain("documentsOnly(me.profile)");
     expect(serverFn(fn, "uploadDocumentAsset")).toContain("PDFDocument.load(bytes");
     expect(serverFn(fn, "uploadDocumentImage")).toContain("sniffImageType(bytes)");
   });
@@ -227,6 +227,6 @@ describe("types.ts and the share route", () => {
     expect(search).toContain('return { to: "/documents", search: { id: row.id } };');
     const access = read("../access.ts");
     expect(access).toContain('pathname.startsWith("/admin/documents")');
-    expect(access).toContain('if (pathname.startsWith("/documents")) return null;');
+    expect(access).toContain('if (pathname.startsWith("/documents")) return "documents";');
   });
 });

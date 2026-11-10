@@ -82,7 +82,8 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
     // Oct 15: `who` is the URL's, else the remembered one (landingSearch), resolved on the page;
     // changeWho remembers the pick and then puts it in the URL (props.onWho).
     expect(page).toContain("<Select value={who} onValueChange={changeWho}>");
-    expect(page).toContain("const who = resolveWho(landing.who, profile);");
+    // Nov 10: whoForList (resolveWho once the profile is here; the list waits or uses the hint before).
+    expect(page).toContain("const { who, ready: whoReady } = whoForList(landing.who, profile, {");
     expect(page).toContain('<SelectItem value="all">Everyone</SelectItem>');
   });
 });

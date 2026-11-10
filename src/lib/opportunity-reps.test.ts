@@ -33,7 +33,7 @@ import {
 import { listFollowups } from "@/lib/followups.functions";
 import { bidPrefillFromOpportunity, createReminderHint } from "@/lib/opportunity-form";
 import { parseEstimateSearch } from "@/lib/estimate-search";
-import { canAccess, pageForPath, seesOpportunitiesList } from "@/lib/access";
+import { canOpenPage, pageForPath, seesOpportunitiesList } from "@/lib/access";
 import { fakeSupabase } from "@/test/fake-supabase";
 
 type Row = Record<string, unknown>;
@@ -177,7 +177,8 @@ describe("item 11 — a rep opens their own opportunities", () => {
   /** The central gate's test (components/auth-gate.tsx). */
   const blocked = (p: typeof plain, path: string) => {
     const page = pageForPath(path);
-    return page !== null && page !== "admin" && page !== "manager" && !canAccess(p, page);
+    // Nov 10: the gate's rule is canOpenPage (admin, manager, documents, else canAccess).
+    return page !== null && !canOpenPage(p, page);
   };
   it("a user with neither Customers nor Estimate is not bounced from /opportunities", () => {
     expect(blocked(plain, "/opportunities")).toBe(false);

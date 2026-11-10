@@ -11,8 +11,10 @@
  * Nothing is automated: no document is made or sent without someone pressing the button.
  *
  * Who: the database decides (migration 20261026150000: documents_access() = admins, managers,
- * Estimate / Invoices / Customers access; templates, saved snippets and the PDF library are
- * written by admins and managers). Every read and write here runs as the signed-in user.
+ * Estimate / Invoices / Customers access). Templates, saved snippets and the PDF library were
+ * written by admins and managers only until Nov 10 (owner: "Allow office users to have
+ * access"); now by everyone with Documents access (`documentsOnly`, and the row security of
+ * the Nov 10 migration). Every read and write here runs as the signed-in user.
  * Pure helpers live in documents/server-pure.ts; the model in documents/model.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -21,7 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { managesTickets } from "@/lib/access";
+import { DOCUMENTS_NEEDS, hasDocumentsAccess } from "@/lib/access";
 import { easternYmd } from "@/lib/field-day";
 import { parseInspection, withItemKeys } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
@@ -120,10 +122,14 @@ async function whoami(ctx: Ctx) {
   if (!data) throw new Error("Forbidden: no profile");
   return { profile: data, name: displayName(data) };
 }
-/** Templates, saved snippets (document_modules) and the PDF library are written by admins and managers (RLS too). */
-function managerOnly(p: { role: string; access: string[] }) {
-  if (!managesTickets(p))
-    throw new Error("Templates, saved snippets and the PDF library are a manager's");
+/**
+ * Templates, saved snippets (document_modules) and the PDF library are written by everyone with
+ * Documents access (RLS too): admins, managers and anyone with Estimate, Invoices or Customers
+ * access. They were a manager's until Nov 10 (owner: "keep technicians off the documents page.
+ * Allow office users to have access"); a Service-only technician has no Documents access.
+ */
+function documentsOnly(p: { role: string; access: string[] }) {
+  if (!hasDocumentsAccess(p)) throw new Error(DOCUMENTS_NEEDS);
 }
 
 const json = (v: unknown) => v as Json;
@@ -226,7 +232,7 @@ export const saveDocumentTemplate = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<DocumentTemplateRow> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const sb = context.supabase;
     if (data.isDefault) await clearDefault(sb, data.kind, data.id ?? null, me.name);
     const patch = {
@@ -282,7 +288,7 @@ export const deleteDocumentTemplate = createServerFn({ method: "POST" })
   .validator(idInput)
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const { error } = await context.supabase
       .from("document_templates")
       .update({ deleted_at: new Date().toISOString(), is_default: false, updated_by_name: me.name })
@@ -296,7 +302,7 @@ export const setDefaultDocumentTemplate = createServerFn({ method: "POST" })
   .validator(idInput)
   .handler(async ({ data, context }): Promise<DocumentTemplateRow> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const sb = context.supabase;
     const t = await templateRow(sb, data.id);
     await clearDefault(sb, t.kind as DocKind, t.id, me.name);
@@ -315,7 +321,7 @@ export const duplicateDocumentTemplate = createServerFn({ method: "POST" })
   .validator(idInput)
   .handler(async ({ data, context }): Promise<DocumentTemplateRow> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const sb = context.supabase;
     const t = await templateRow(sb, data.id);
     const { data: row, error } = await sb
@@ -381,7 +387,7 @@ export const saveSavedModule = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<SavedModuleRow> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const sb = context.supabase;
     const patch = {
       name: data.name,
@@ -405,7 +411,7 @@ export const deleteSavedModule = createServerFn({ method: "POST" })
   .validator(idInput)
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const { error } = await context.supabase
       .from("document_modules")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: me.name })
@@ -456,7 +462,7 @@ export const uploadDocumentAsset = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<DocumentAssetRow> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const sb = context.supabase;
     const bytes = bytesFromBase64(data.base64);
     if (bytes.length > MAX_ASSET_BYTES) throw new Error("The PDF is over 20 MB");
@@ -521,7 +527,7 @@ export const deleteDocumentAsset = createServerFn({ method: "POST" })
   .validator(idInput)
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const me = await whoami(context);
-    managerOnly(me.profile);
+    documentsOnly(me.profile);
     const { error } = await context.supabase
       .from("document_assets")
       .update({ deleted_at: new Date().toISOString() })

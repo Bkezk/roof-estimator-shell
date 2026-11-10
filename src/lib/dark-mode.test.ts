@@ -352,7 +352,7 @@ describe("3. the sun / moon toggle", () => {
     const src = read("src/components/app-sidebar.tsx");
     const header = src.slice(src.indexOf("<SidebarHeader"), src.indexOf("</SidebarHeader>"));
     expect(header).toContain("rounded-md bg-image-plate");
-    expect(header.indexOf("bg-image-plate")).toBeLessThan(header.indexOf('src="/jbk-logo.webp"'));
+    expect(header.indexOf("bg-image-plate")).toBeLessThan(header.indexOf("src={logoSmall}"));
   });
 });
 

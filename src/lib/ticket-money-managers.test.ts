@@ -74,8 +74,11 @@ describe("the gate and the Admin group", () => {
     // Oct 20: the gate's rule is lib/auth-flow.ts gateDecision (the gate calls it).
     const gate = read("src/components/auth-gate.tsx");
     expect(gate).toContain('gateDecision(session, profile, profileFailed, page) === "blocked"');
+    // Nov 10: the per-page rule moved to access.ts canOpenPage (gateDecision calls it), which
+    // also knows the Documents pages.
     const flow = read("src/lib/auth-flow.ts");
-    expect(flow).toMatch(/page === "manager"\s*\?\s*managesTickets\(profile\)/);
+    expect(flow).toContain('return canOpenPage(profile, page) ? "open" : "blocked";');
+    expect(read("src/lib/access.ts")).toMatch(/page === "manager"\s*\?\s*managesTickets\(p\)/);
   });
   it("the sidebar: Setup (managers and admins) under Opportunities; the Admin group admins only", () => {
     // Owner, Oct 5: Service Rates became Setup, under Opportunities in the Customers group; with
@@ -84,7 +87,7 @@ describe("the gate and the Admin group", () => {
     // Since Oct 26 the group also opens for managers, for Documents alone; Users & access and
     // Reminders stay admin-only (owner-page.test.ts).
     expect(nav).toMatch(
-      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
     );
     expect(nav).toMatch(
       /title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true/,

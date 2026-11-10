@@ -11,7 +11,10 @@ import { describe, expect, it } from "vitest";
 
 import { DOCUMENT_BUNDLE_GC_MS } from "./document-types";
 
-const route = readFileSync("src/routes/documents.tsx", "utf8").replace(/\s+/g, " ");
+const route = readFileSync("src/components/documents/editor-screen.tsx", "utf8").replace(
+  /\s+/g,
+  " ",
+);
 
 describe("an opened document is always read from the row", () => {
   it("its bundle is not kept once the editor closes", () => {

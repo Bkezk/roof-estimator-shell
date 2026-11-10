@@ -308,7 +308,8 @@ describe("the page and the route", () => {
     );
     // Oct 21: the Owner view moved to /owner; no effectiveView any more, the landing view is final.
     expect(page).toContain("const view = landing.view;");
-    expect(page).toContain("const who = resolveWho(landing.who, profile);");
+    // Nov 10: whoForList (resolveWho once the profile is here; the list waits or uses the hint before).
+    expect(page).toContain("const { who, ready: whoReady } = whoForList(landing.who, profile, {");
     expect(page).toContain('queryKey: ["my-work", who],');
     // The browser's copy is there from the first render (no flash of the List, one list fetch).
     expect(page).toContain(

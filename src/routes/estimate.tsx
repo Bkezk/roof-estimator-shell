@@ -125,13 +125,13 @@ import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { tearOffLaborForSection } from "@/lib/engine/quantities";
 import { buildOrderList, describeOrderQty, orderListTotal, type OrderLine } from "@/lib/order-list";
 import {
+  EXCEL_LOAD_FAILED,
   ORDER_COLUMNS,
   orderListHtml,
   orderListRows,
   orderMoney,
   toBuyCount,
 } from "@/lib/order-list-export";
-import * as XLSX from "xlsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { addMovement, listMovements, listStock } from "@/lib/inventory.functions";
 import { listPriceTargets } from "@/lib/admin-item-numbers.functions";
@@ -2602,7 +2602,17 @@ function EstimatePage() {
     jobSite:
       [customer.projectAddress, customer.jobCityStZip].filter(Boolean).join(", ") || undefined,
   });
-  const exportOrderExcel = () => {
+  // Nov 10 (the speed pass, finding 9): the Excel library (139 KB packed) is fetched when Export
+  // is pressed, as the PlanSwift import does (lib/planswift/parse.ts) — a plain import at the
+  // top of this file made every estimator open download it.
+  const exportOrderExcel = async () => {
+    let XLSX: typeof import("xlsx");
+    try {
+      XLSX = await import("xlsx");
+    } catch {
+      toast.error(EXCEL_LOAD_FAILED);
+      return;
+    }
     const ws = XLSX.utils.aoa_to_sheet([
       [`Order list — ${bidName}`],
       [
@@ -6563,7 +6573,7 @@ function EstimatePage() {
                         variant="outline"
                         className="h-7 text-xs"
                         disabled={orderList.length === 0}
-                        onClick={exportOrderExcel}
+                        onClick={() => void exportOrderExcel()}
                       >
                         Excel
                       </Button>

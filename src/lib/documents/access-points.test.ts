@@ -261,22 +261,22 @@ describe("Admin › Documents", () => {
 });
 
 describe("the sidebar and the gate", () => {
-  it("lists Documents in the Admin group for managers and admins", () => {
+  it("lists Documents in the Admin group for everyone with Documents access (Nov 10; it was managers and admins)", () => {
     expect(sidebar).toContain(
       '{ title: "Documents", url: "/admin/documents", icon: Files, adminOnly: false },',
     );
-    // The group opens for managers (as Setup does) so the one non-admin item shows.
-    expect(sidebar).toContain('{(role === "admin" || managesTickets(profile)) && (');
+    // The group opens for anyone with Documents access so the one non-admin item shows.
+    expect(sidebar).toContain('{(role === "admin" || hasDocumentsAccess(profile)) && (');
     expect(sidebar).toContain('.filter((item) => !item.adminOnly || role === "admin")');
     // The three admin-only entries stay the admins'.
     for (const t of ["Owner", "Users & access", "Reminders"])
       expect(sidebar).toMatch(new RegExp(`title: "${t.replace("&", "&")}".*adminOnly: true`));
   });
-  it("maps /admin/documents to managers and the editor to every signed-in user", () => {
-    expect(pageForPath("/admin/documents")).toBe("manager");
-    expect(pageForPath("/admin/documents?tab=pdfs")).toBe("manager");
-    expect(pageForPath("/documents")).toBeNull();
-    expect(pageForPath("/documents/abc")).toBeNull();
+  it("maps /admin/documents and the editor to Documents access (Nov 10; they were managers and every signed-in user)", () => {
+    expect(pageForPath("/admin/documents")).toBe("documents");
+    expect(pageForPath("/admin/documents?tab=pdfs")).toBe("documents");
+    expect(pageForPath("/documents")).toBe("documents");
+    expect(pageForPath("/documents/abc")).toBe("documents");
     // The rest of /admin stays Estimate Pricing's.
     expect(pageForPath("/admin/settings")).toBe("pricing");
   });
@@ -296,7 +296,7 @@ describe("Admin › Settings: the company's website and email", () => {
 });
 
 describe("Saved snippets (owner, Oct 28: 'saved modules' were confused with the module kinds)", () => {
-  const route = read("src/routes/documents.tsx");
+  const route = read("src/components/documents/editor-screen.tsx");
   const moduleView = read("src/components/documents/editor/module-view.tsx");
   const editorCtx = read("src/components/documents/editor/editor-context.tsx");
   const fns = read("src/lib/documents.functions.ts");

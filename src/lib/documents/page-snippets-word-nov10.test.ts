@@ -152,7 +152,7 @@ describe("page snippets", () => {
   });
 
   it("the editor offers it: the page menu saves, the snippet's + adds a new page", () => {
-    const d = src("src/routes/documents.tsx");
+    const d = src("src/components/documents/editor-screen.tsx");
     // The menu item and the popup both name the page (owner: "how does it know which page?").
     expect(d).toContain("Save page {i + 1} as a snippet…");
     expect(d).toContain(
@@ -224,7 +224,7 @@ describe("an inserted PDF is drawn in the editor", () => {
 
 describe("saving a new template (found while testing the import)", () => {
   it("its move to its own address is not asked about as leaving unsaved work", () => {
-    const d = src("src/routes/documents.tsx");
+    const d = src("src/components/documents/editor-screen.tsx");
     expect(d).toContain("savedNew.current = true; void router.navigate({");
     expect(d).toContain("leaveFreelyRef={savedNew}");
     expect(d).toContain("if (template?.id) savedNew.current = false;");

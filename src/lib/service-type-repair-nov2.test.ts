@@ -247,6 +247,8 @@ describe("3. Price lines", () => {
     expect(view).toContain("data-price-total");
     expect(view).toContain("{moneyText(total)}");
     expect(view).toContain('<Plus className="h-3 w-3" /> Add line');
-    expect(read("src/routes/documents.tsx")).toContain("priceLines: CircleDollarSign,");
+    expect(read("src/components/documents/editor-screen.tsx")).toContain(
+      "priceLines: CircleDollarSign,",
+    );
   });
 });

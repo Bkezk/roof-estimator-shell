@@ -1,7 +1,7 @@
 {
   "name": "JBK Portal",
   "short_name": "JBK Portal",
-  "start_url": "/",
+  "start_url": "/my-work",
   "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",

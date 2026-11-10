@@ -18,14 +18,7 @@
  *    profile read after a sign-in never settles (the same bound as its mount guard).
  */
 
-import {
-  canAccess,
-  EVERYONE_PAGES,
-  isAdmin,
-  managesTickets,
-  type AccessLike,
-  type Page,
-} from "@/lib/access";
+import { canOpenPage, EVERYONE_PAGES, type AccessLike, type RoutePage } from "@/lib/access";
 
 /** How long a sign-in may hang before the way out is offered (the gate's Waiting uses it too). */
 export const SIGN_IN_STALL_MS = 8_000;
@@ -86,7 +79,7 @@ export function gateDecision(
   session: unknown,
   profile: AccessLike | null | undefined,
   profileFailed: boolean,
-  page: Page | "admin" | "manager" | null,
+  page: RoutePage | null,
 ): GateDecision {
   if (!session) return "no-session";
   if (page === null) return "open";
@@ -94,13 +87,9 @@ export function gateDecision(
     return profileFailed && !(EVERYONE_PAGES as readonly string[]).includes(page)
       ? "blocked"
       : "open";
-  const ok =
-    page === "admin"
-      ? isAdmin(profile)
-      : page === "manager"
-        ? managesTickets(profile)
-        : canAccess(profile, page);
-  return ok ? "open" : "blocked";
+  // The page's own rule (access.ts canOpenPage): admin → isAdmin, manager → managesTickets,
+  // documents → hasDocumentsAccess (Nov 10), else canAccess.
+  return canOpenPage(profile, page) ? "open" : "blocked";
 }
 
 /**
@@ -147,6 +136,45 @@ export function nextProfileState<P>(held: P | null, result: ProfileLoadResult<P>
   if (result.ok && result.profile) return { profile: result.profile, failed: false, kept: false };
   if (held) return { profile: held, failed: false, kept: true };
   return { profile: null, failed: true, kept: false };
+}
+
+/**
+ * One profile read per page load (Nov 10, the speed pass, finding 8: every page asked for the
+ * profile three or four times — the stored session, then the auth library's INITIAL_SESSION and
+ * its SIGNED_IN on the same wake each ran their own read, side by side).
+ *
+ * The provider remembers its last read (`ProfileLoadMemo`): who it was for, the promise, and
+ * when it settled with a row. `reusableProfileLoad` says whether the next ask may take that
+ * promise instead of a new read:
+ *  - still in flight for the same person: always (two asks at once share one answer);
+ *  - settled with a row for the same person less than PROFILE_REUSE_MS ago: yes, unless `force`
+ *    (refreshProfile — the gate's retry, "Try again", a save on My account — wants a new read);
+ *  - a read that failed or found no row is never reused once it has settled, so a retry asks
+ *    again; another person's read is never reused.
+ * A token refresh or a tab wake later than that reads again, so a role changed by an admin
+ * still arrives as it did.
+ */
+export const PROFILE_REUSE_MS = 10_000;
+
+export interface ProfileLoadMemo<P> {
+  userId: string;
+  promise: Promise<ProfileLoadResult<P>>;
+  /** When it settled WITH a row; null while in flight, and for a failed or empty read. */
+  okAt: number | null;
+  /** Settled (either way). */
+  settled: boolean;
+}
+
+export function reusableProfileLoad<P>(
+  memo: ProfileLoadMemo<P> | null,
+  userId: string,
+  now: number,
+  force = false,
+): Promise<ProfileLoadResult<P>> | null {
+  if (!memo || memo.userId !== userId) return null;
+  if (!memo.settled) return memo.promise;
+  if (force || memo.okAt === null) return null;
+  return now - memo.okAt < PROFILE_REUSE_MS ? memo.promise : null;
 }
 
 /** Is the "could not refresh" toast due (none yet, or the last one PROFILE_REFRESH_WARN_EVERY_MS ago)? */

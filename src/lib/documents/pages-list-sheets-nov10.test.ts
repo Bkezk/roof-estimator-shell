@@ -21,7 +21,7 @@ import {
 } from "./editor-helpers";
 
 const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
-const route = flat("src/routes/documents.tsx");
+const route = flat("src/components/documents/editor-screen.tsx");
 const canvas = flat("src/components/documents/editor/page-canvas.tsx");
 const pdf = flat("src/components/documents/editor/pdf-preview.tsx");
 

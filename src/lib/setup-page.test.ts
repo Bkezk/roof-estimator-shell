@@ -107,7 +107,7 @@ describe("the sidebar", () => {
     expect(nav).not.toContain("/admin/service-rates");
     // Since Oct 26 the group also opens for managers, for Documents alone (owner-page.test.ts).
     expect(nav).toMatch(
-      /\{\(role === "admin" \|\| managesTickets\(profile\)\) && \(\s*<NavGroup label="Admin"/,
+      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
     );
     const adminItems = nav.slice(
       nav.indexOf("const adminGroupItems"),

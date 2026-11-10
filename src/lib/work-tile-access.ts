@@ -8,14 +8,7 @@
  *
  * Pure (no I/O), unit-tested in work-tile-access.test.ts.
  */
-import {
-  PAGE_LABELS,
-  canAccess,
-  isAdmin,
-  managesTickets,
-  pageForPath,
-  type AccessLike,
-} from "@/lib/access";
+import { PAGE_LABELS, canOpenPage, pageForPath, type AccessLike } from "@/lib/access";
 import { tileHref, type TileKind } from "@/lib/work-counts";
 
 /** May this user open `pathname`? The AuthGate's rule; false while the profile is unknown. */
@@ -23,9 +16,7 @@ export function canOpenPath(p: AccessLike | null | undefined, pathname: string):
   if (!p) return false;
   const page = pageForPath(pathname);
   if (page === null) return true;
-  if (page === "admin") return isAdmin(p);
-  if (page === "manager") return managesTickets(p);
-  return canAccess(p, page);
+  return canOpenPage(p, page);
 }
 
 /** Null when the tile may link; otherwise its title: "Needs Service access". */
@@ -34,6 +25,14 @@ export function tileBlockedTitle(p: AccessLike | null | undefined, kind: TileKin
   if (canOpenPath(p, to)) return null;
   const page = pageForPath(to);
   const what =
-    page === "admin" ? "admin" : page === "manager" ? "manager" : page ? PAGE_LABELS[page] : "page";
+    page === "admin"
+      ? "admin"
+      : page === "manager"
+        ? "manager"
+        : page === "documents"
+          ? "Documents"
+          : page
+            ? PAGE_LABELS[page]
+            : "page";
   return `Needs ${what} access`;
 }

@@ -62,10 +62,13 @@ import {
   mergeWork,
   monthGrid,
   nextPicked,
-  resolveWho,
+  readWhoHint,
+  whoForList,
   whoParam,
+  writeWhoHint,
   compareWork,
   defaultBucket,
+  defaultWho,
   presetBucket,
   waitingDays,
   ymdParts,
@@ -1132,7 +1135,7 @@ export function MyWorkPage(props: {
   onMonth: (month: string | null) => void;
   onBucket: (b: BucketPreset | null) => void;
 }) {
-  const { session, profile } = useAuth();
+  const { session, profile, profileFailed } = useAuth();
   const qc = useQueryClient();
   const [newTask, setNewTask] = useState(false);
   // The user's layout (owner, Oct 7): the browser's copy first, then the profile's copy once the
@@ -1156,7 +1159,20 @@ export function MyWorkPage(props: {
   // The List or the Calendar (Oct 21: the Owner view moved to its own page, /owner).
   const view = landing.view;
   // No ?who: the remembered person, else Everyone for admins and managers, Mine for anyone else.
-  const who = resolveWho(landing.who, profile);
+  // Nov 10 (the speed pass, finding 8): the shell renders while the profile is still on its way,
+  // so the list used to start as "mine" and start again as "all" once an admin's or a manager's
+  // profile landed. whoForList (lib/my-work.ts) settles it once: the named person at once; else
+  // the default this browser last saw for this person (the hint below), so nobody waits; else —
+  // a first visit — the list waits for the profile rather than guess.
+  const whoHint = useMemo(() => readWhoHint(storage, userId), [storage, userId]);
+  const { who, ready: whoReady } = whoForList(landing.who, profile, {
+    selfId: userId,
+    profileFailed,
+    hint: whoHint,
+  });
+  useEffect(() => {
+    if (profile && userId) writeWhoHint(storage, userId, defaultWho(profile));
+  }, [profile, storage, userId]);
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
     queryKey: ["my-work", who],
@@ -1166,7 +1182,7 @@ export function MyWorkPage(props: {
       const requestedAt = Date.now();
       return { ...(await listFn({ data: { who } })), requestedAt };
     },
-    enabled: !!session,
+    enabled: !!session && whoReady,
     // Owner, Oct 15: "do every 5 minutes just so we're not constantly refreshing" — the list
     // refreshes itself while the page sits open, not while the tab is in the background.
     refetchInterval: 5 * 60_000,
@@ -1598,7 +1614,7 @@ export function MyWorkPage(props: {
         </p>
       )}
 
-      {q.isLoading ? (
+      {q.isLoading || !whoReady ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : errMsg && !q.data ? (
         <div className="space-y-2">

@@ -197,7 +197,7 @@ describe("the page", () => {
     expect(page).toMatch(
       // The queryFn stamps the request's start for the layout seed (Oct 20).
       // Oct 21: the Owner view moved to /owner, so the query no longer pauses for it.
-      /queryKey: \["my-work", who\],(?:\s*\/\/[^\n]*)*\s*queryFn: async \(\) => \{\s*const requestedAt = Date\.now\(\);\s*return \{ \.\.\.\(await listFn\(\{ data: \{ who \} \}\)\), requestedAt \};\s*\},\s*enabled: !!session,(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
+      /queryKey: \["my-work", who\],(?:\s*\/\/[^\n]*)*\s*queryFn: async \(\) => \{\s*const requestedAt = Date\.now\(\);\s*return \{ \.\.\.\(await listFn\(\{ data: \{ who \} \}\)\), requestedAt \};\s*\},\s*enabled: !!session && whoReady,(?:\s*\/\/[^\n]*)*\s*refetchInterval: 5 \* 60_000,\s*refetchIntervalInBackground: false,/,
     );
   });
   it("10a — the task dialog's roster is read once it opens", () => {

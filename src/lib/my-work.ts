@@ -130,6 +130,58 @@ export const resolveWho = (who: string | null | undefined, profile: RoleLike): W
   who ? ownToMine(who, profile) : defaultWho(profile);
 
 /**
+ * Whose list Work Overview asks the server for, and whether it may ask yet (Nov 10, the speed
+ * pass, finding 8: an admin's or a manager's page fetched its list twice — the shell renders
+ * while the profile is still on its way, so the list started as "mine" and started again as
+ * "all" when the profile landed).
+ *
+ *  - The profile is here: resolveWho, as always.
+ *  - Not yet, and the URL (or the remembered layout) names someone: that person — the profile
+ *    changes nothing about it (the caller's own id reads as Mine straight away, from `selfId`).
+ *  - Not yet, nobody named, and the profile read FAILED: Mine, as resolveWho gives without one.
+ *  - Not yet, nobody named: the default this browser last saw for this person (`hint`, kept by
+ *    writeWhoHint each time the profile is known), so nobody waits and nobody fetches twice.
+ *  - No hint either (the first visit on this browser): wait for the profile (`ready` false).
+ * A hint that turns out wrong (a role changed since) costs the second fetch it always did.
+ */
+export function whoForList(
+  explicit: string | null | undefined,
+  profile: RoleLike,
+  o: { selfId: string; profileFailed: boolean; hint: "mine" | "all" | null },
+): { who: WorkWho; ready: boolean } {
+  if (profile) return { who: resolveWho(explicit, profile), ready: true };
+  if (explicit) return { who: o.selfId && explicit === o.selfId ? "mine" : explicit, ready: true };
+  if (o.profileFailed) return { who: "mine", ready: true };
+  if (o.hint) return { who: o.hint, ready: true };
+  return { who: "mine", ready: false };
+}
+
+/** Where the last-seen default `who` of a person is kept in this browser (whoForList's hint). */
+export const WORK_WHO_HINT_KEY = "jbk-portal:work-who-default";
+type HintStorage = Pick<Storage, "getItem" | "setItem">;
+
+export function readWhoHint(storage: HintStorage | null, userId: string): "mine" | "all" | null {
+  if (!storage || !userId) return null;
+  try {
+    const v = storage.getItem(`${WORK_WHO_HINT_KEY}:${userId}`);
+    return v === "mine" || v === "all" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember this person's default (written only when it differs from what is stored). */
+export function writeWhoHint(storage: HintStorage | null, userId: string, who: "mine" | "all") {
+  if (!storage || !userId) return;
+  try {
+    const key = `${WORK_WHO_HINT_KEY}:${userId}`;
+    if (storage.getItem(key) !== who) storage.setItem(key, who);
+  } catch {
+    /* a browser that blocks storage: the list waits for the profile on the next visit */
+  }
+}
+
+/**
  * The `who` to put in the URL: nothing when it is the caller's default, so Everyone is the bare
  * URL for an admin or manager and ?who=mine stays when they pick Mine. Oct 21: nextWorkSearch
  * keeps naming the default when the URL already named it (whoExplicit) — this rule alone is for

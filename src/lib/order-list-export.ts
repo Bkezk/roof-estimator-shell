@@ -11,6 +11,13 @@ export interface OrderListHeader {
   printedAt?: Date | undefined;
 }
 
+/**
+ * What the Excel button says when the Excel part could not be fetched (Nov 10: it is fetched
+ * when Export is pressed, not with the estimator — the speed pass, finding 9).
+ */
+export const EXCEL_LOAD_FAILED =
+  "Could not get the Excel part of the page. Check the connection and press Excel again";
+
 export const ORDER_COLUMNS = [
   "Group",
   "Product",

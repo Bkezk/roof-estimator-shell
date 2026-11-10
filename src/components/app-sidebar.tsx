@@ -29,9 +29,11 @@ import {
   Files,
 } from "lucide-react";
 
+import logoSmall from "@/assets/jbk-logo-360.webp";
 import { useAuth } from "@/lib/auth-store";
 import { closeDrawerAfterLink, type Tapped } from "@/lib/sidebar-phone-close";
 import {
+  hasDocumentsAccess,
   isOffice,
   managesTickets,
   seesOpportunitiesList,
@@ -142,8 +144,9 @@ const adminGroupItems = [
   { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
   // Documents (owner, Oct 26: the CenterPoint-style document generator): the templates proposals
-  // and letters start from, saved modules and the PDF library. A manager's too, as Setup is
-  // (pageForPath: /admin/documents → manager), so the group shows for managers with this one item.
+  // and letters start from, saved modules and the PDF library. For everyone with Documents access
+  // since Nov 10 (pageForPath: /admin/documents → documents), so the group shows for an office
+  // user with this one item.
   { title: "Documents", url: "/admin/documents", icon: Files, adminOnly: false },
   // Oct 21: the CenterPoint import (Oct 13) left the menu, not the code — its page still opens by
   // address (admin/centerpoint-import) and can be listed here again if needed.
@@ -409,13 +412,20 @@ export function AppSidebar() {
       <SidebarHeader className={collapsed ? "items-center px-1 py-2" : "px-3 pt-3 pb-1"}>
         {/* The logo's black banner and outline vanish on the dark sidebar, so it sits on the
             image-plate token: transparent in light mode, a lighter grey panel in dark mode
-            (styles.css). The image itself is untouched. */}
+            (styles.css). The image itself is untouched.
+            Nov 10 (the speed pass, finding 5): the menu draws a 360 px wide copy (12 KB, sharp on
+            a 2x screen at the 180 px it is shown) that goes through the build, so it has a
+            hashed address the browser keeps. public/jbk-logo.webp (2000 x 1125, 88 KB, fetched on
+            every page with no cache header) stays for the document editor's preview, and the
+            PDFs keep their own embedded copy (lib/jbk-logo.server.ts). */}
         <div
           data-image-plate=""
           className={`rounded-md bg-image-plate ${collapsed ? "p-0.5" : "mx-auto w-full max-w-[180px] p-1"}`}
         >
           <img
-            src="/jbk-logo.webp"
+            src={logoSmall}
+            width={360}
+            height={203}
             alt="JBK Commercial Roofing"
             className={collapsed ? "h-6 w-auto" : "mx-auto h-auto w-full"}
           />
@@ -593,8 +603,10 @@ export function AppSidebar() {
         )}
 
         {/* Admins; managers too since Oct 26, for Documents alone (the `adminOnly` items stay the
-            admins', as Setup's gate — managesTickets — is the manager's). */}
-        {(role === "admin" || managesTickets(profile)) && (
+            admins'). Since Nov 10 (owner: "Allow office users to have access") everyone with
+            Documents access sees the group with that one item — hasDocumentsAccess, the gate's
+            rule for /admin/documents, so the link never bounces. */}
+        {(role === "admin" || hasDocumentsAccess(profile)) && (
           <NavGroup label="Admin" id="admin" iconMode={collapsed}>
             <SidebarMenu>
               {adminGroupItems

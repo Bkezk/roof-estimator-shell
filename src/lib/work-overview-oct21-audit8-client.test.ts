@@ -170,7 +170,8 @@ describe("5. the gone-person fallback waits for the profile", () => {
     );
     expect(page).toMatch(/props\.onWho\(shownWho\);[\s\S]*?\}, \[profile, shownWho, who\]\);/);
     // resolveWho and the query key are as they were (finding 4/f: two round trips, accepted).
-    expect(page).toContain("const who = resolveWho(landing.who, profile);");
+    // Nov 10: whoForList (resolveWho once the profile is here; the list waits or uses the hint before).
+    expect(page).toContain("const { who, ready: whoReady } = whoForList(landing.who, profile, {");
     expect(page).toContain('queryKey: ["my-work", who],');
   });
 });

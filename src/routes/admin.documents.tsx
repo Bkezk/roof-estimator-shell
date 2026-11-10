@@ -4,8 +4,9 @@
  * ticket documents — with the default starred), the SAVED SNIPPETS people keep from inside the
  * editor ("Save as snippet…" on a filled-in module; the table is still document_modules), and
  * the PDF LIBRARY (award letters, warranty samples, spec sheets)
- * inserted under any page with Insert PDF. Managers and admins (pageForPath: /admin/documents →
- * manager, as Setup); the sidebar lists it in the Admin group for both. Editing a template opens
+ * inserted under any page with Insert PDF. Everyone with Documents access since Nov 10 (owner:
+ * "Allow office users to have access"; pageForPath: /admin/documents → documents; it was a
+ * manager's); the sidebar lists it in the Admin group for them. Editing a template opens
  * the editor itself (/documents?template=<id>); this page only lists, duplicates, stars and
  * deletes. "Restore defaults" is not needed: the server seeds a kind with none the first time it
  * is asked for them, so an empty table only says so.
