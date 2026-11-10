@@ -53,10 +53,13 @@ import {
   lockedToast,
   lockMeta,
   takeoffChangeList,
+  staleSaveRefusal,
   TAKEOFF_LOCKED,
+  TAKEOFF_STALE,
 } from "@/lib/takeoff/lock";
 import { settleEdit, syncSideTags } from "@/lib/takeoff/side-tags";
 import {
+  bidBlocker,
   deficiencyNumbers,
   feetPerPx,
   rotatePoints,
@@ -69,6 +72,8 @@ import {
   type TakeoffPage,
   type TakeoffSetup,
 } from "@/lib/takeoff/model";
+import { spreadScale } from "@/lib/takeoff/scale-spread";
+import { CUTOUT_PROBLEM_TEXT, cutoutProblem } from "@/lib/takeoff/geometry";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -192,6 +197,12 @@ function SaveIndicator({ state }: { state: SaveState }) {
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The document as text, for the autosave's "is this what is already saved?" check. */
+const takeoffDocKey = (d: { name: string; pages: unknown; setup: unknown; objects: unknown }) =>
+  JSON.stringify([d.name.trim() || "Untitled takeoff", d.pages, d.setup, d.objects]);
+/** Why drawing is off, for the viewer's notice. */
+const STALE_NOTICE =
+  "Someone else changed this takeoff after you opened it. Reload to get the current drawing.";
 const noChange = () => {};
 
 function LoadedEditor({ row }: { row: TakeoffWithBid }) {
@@ -212,8 +223,20 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   });
   const live = lockQ.data ?? row;
   const locked = isTakeoffLocked(live);
-  const lockedRef = useRef(locked);
-  lockedRef.current = locked;
+  // Someone else saved this drawing after it was opened here (lib/takeoff/lock.ts
+  // `staleSaveRefusal`): nothing more is saved or drawn until a reload. The message, or null.
+  const [stale, setStale] = useState<string | null>(null);
+  // The drawing's revision this editor holds: the loaded row's, then each of its own saves'.
+  const revRef = useRef<number>(row.rev ?? 0);
+  // Seen on a refetch (the window came back into focus): the row moved on without this editor.
+  const savingRef = useRef(false);
+  useEffect(() => {
+    if (live.rev > revRef.current && !savingRef.current)
+      setStale(staleSaveRefusal(live.updated_by_name));
+  }, [live.rev, live.updated_by_name]);
+  const readOnly = locked || !!stale;
+  const lockedRef = useRef(readOnly);
+  lockedRef.current = readOnly;
   const lockedBid = locked ? live.bid : null;
   // Told once: the takeoff became locked while open (it was not when it opened).
   const wasLocked = useRef(isTakeoffLocked(row));
@@ -312,24 +335,32 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const { state: saveState, flush: flushSave } = useAutosave(
     doc,
     async (d) => {
+      savingRef.current = true;
       try {
-        await saveFn({
+        const saved = await saveFn({
           data: {
             id: row.id,
             name: d.name.trim() || "Untitled takeoff",
             pages: d.pages,
             setup: d.setup,
             objects: d.objects,
+            base_rev: revRef.current,
           },
         });
+        revRef.current = saved.rev;
       } catch (e) {
         // Refused as locked: pick up the lock (the editor turns read-only).
         if (errText(e).includes(TAKEOFF_LOCKED)) void lockQ.refetch();
+        // Refused as stale: someone else saved first. Stop here; the banner offers a reload.
+        if (errText(e).includes(TAKEOFF_STALE)) setStale(errText(e));
         throw e;
+      } finally {
+        savingRef.current = false;
       }
     },
     800,
-    locked,
+    readOnly,
+    takeoffDocKey,
   );
 
   // The underlay file, straight from the private storage bucket.
@@ -503,6 +534,11 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     onError: (e) => toast.error(errText(e)),
   });
   const toBid = async (bidId: string | null) => {
+    const blocker = bidBlocker(quantities);
+    if (blocker) {
+      toast.error(blocker, { duration: 15000 });
+      return;
+    }
     const ok = await flushSave();
     if (!ok) {
       toast.error(
@@ -600,7 +636,15 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     commit((os) => os.map((o) => (o.id === id ? { ...o, points } : o)));
   const moveObject = (id: string, dx: number, dy: number) =>
     commit((os) => os.map((o) => (o.id === id ? translateObject(o, dx, dy) : o)));
-  const addCutout = (areaId: string, ring: PagePoint[]) =>
+  const addCutout = (areaId: string, ring: PagePoint[]) => {
+    // Inside its roof and clear of the other cut-outs, or it is not added (lib/takeoff/geometry).
+    const area = objectsRef.current.find((o) => o.id === areaId && o.kind === "area");
+    const problem =
+      area?.kind === "area" ? cutoutProblem(area.points, area.attrs.cutouts ?? [], ring) : null;
+    if (problem) {
+      toast.error(CUTOUT_PROBLEM_TEXT[problem], { duration: 10000 });
+      return;
+    }
     commit((os) =>
       os.map((o) =>
         o.id === areaId && o.kind === "area"
@@ -608,20 +652,12 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           : o,
       ),
     );
+  };
   // Set this page's scale; with `applyToAll`, pages that have none take the same one (turned
   // to their own rotation when it differs). Pages with a scale keep it.
   const setScale = (scale: PageScale, applyToAll: boolean) => {
     if (lockedRef.current) return;
-    setPages((ps) =>
-      ps.map((x) => {
-        if (x.index === page.index) return { ...x, scale };
-        if (!applyToAll || x.scale) return x;
-        const turns = (x.rotation - page.rotation + 4) % 4;
-        const W = page.width;
-        const H = page.height;
-        return { ...x, scale: turns && W && H ? rotateScale(scale, W, H, turns) : { ...scale } };
-      }),
-    );
+    setPages((ps) => spreadScale(ps, page, scale, applyToAll));
   };
   const unscaledOtherPages = pages.filter((x) => x.index !== page.index && !x.scale).length;
   const updateObject = (id: string, fn: (o: TakeoffObject) => TakeoffObject) =>
@@ -791,7 +827,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          readOnly={locked}
+          readOnly={readOnly}
           className="h-9 w-[min(420px,100%)] text-base font-semibold"
           aria-label="Takeoff name"
         />
@@ -994,6 +1030,18 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         </div>
       </div>
 
+      {stale && (
+        <div
+          role="alert"
+          data-banner="takeoff-stale"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          <p className="min-w-0 flex-1 font-medium">{stale}</p>
+          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+            Reload
+          </Button>
+        </div>
+      )}
       {locked && (
         <div
           role="status"
@@ -1192,7 +1240,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             onEdgeCreate={createEdges}
             onDuplicate={duplicate}
             stampRequest={stampRequest}
-            readOnly={locked}
+            readOnly={readOnly}
+            readOnlyNotice={stale ? STALE_NOTICE : undefined}
             deficiencyNumbers={defNumbers}
             onOpenDeficiency={setLightbox}
             touch={touch}
@@ -1233,7 +1282,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     takeoffId={row.id}
                     setup={setup}
                     onChange={locked ? noChange : setSetup}
-                    readOnly={locked}
+                    readOnly={readOnly}
                     isNew={isNew}
                     customer={customer}
                     onCustomerChange={setCustomer}
@@ -1257,7 +1306,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onEdgeChange={changeEdge}
                     onEdgeCreate={createEdges}
                     onDuplicate={(objectId) => setStampRequest({ id: objectId })}
-                    readOnly={locked}
+                    readOnly={readOnly}
                   />
                 </TabsContent>
                 <TabsContent value="quantities" className="mt-0">

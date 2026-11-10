@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
 
+import { APPLY_SCALE_TO_ALL_DEFAULT } from "@/lib/takeoff/scale-spread";
 import { sheetScaleMessage } from "./sheet-scale";
 
 export function ScaleDialog(props: {
@@ -45,11 +46,12 @@ export function ScaleDialog(props: {
   const [ft, setFt] = useState(0);
   const [inch, setInch] = useState(0);
   const multi = props.pageCount > 1;
-  const [applyAll, setApplyAll] = useState(multi);
-  // Each time the dialog opens: on by default when the file has more than one page.
+  // Off until ticked (audit, Nov 10: ticked by default it put one sheet's scale on sheets drawn
+  // at another, and a 40 × 20 ft roof measured four times too large).
+  const [applyAll, setApplyAll] = useState(APPLY_SCALE_TO_ALL_DEFAULT);
   useEffect(() => {
-    if (props.open) setApplyAll(multi);
-  }, [props.open, multi]);
+    if (props.open) setApplyAll(APPLY_SCALE_TO_ALL_DEFAULT);
+  }, [props.open]);
   const total = ft + inch / 12;
   const drawn = props.pixels !== null;
   const choices = props.sheetChoices ?? [];
@@ -143,11 +145,11 @@ export function ScaleDialog(props: {
                   onCheckedChange={(c) => setApplyAll(c === true)}
                 />
                 <span>
-                  Apply this scale to every page of this file that has no scale yet
+                  Also use this scale on the other pages that have none
                   <span className="block text-xs text-muted-foreground">
                     {props.unscaledOtherPages === 0
                       ? "Every other page already has its own scale; they are left alone."
-                      : `${props.unscaledOtherPages} other page${props.unscaledOtherPages === 1 ? "" : "s"} without a scale. Pages that already have one are left alone.`}
+                      : `${props.unscaledOtherPages} other page${props.unscaledOtherPages === 1 ? "" : "s"} without a scale. Tick this only when they are drawn at the same scale as this one. A page that prints its own scale keeps its own.`}
                   </span>
                 </span>
               </label>

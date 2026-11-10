@@ -97,6 +97,8 @@ import {
   type TakeoffObject,
   type TakeoffPage,
 } from "@/lib/takeoff/model";
+import { copiedScaleReplacedMessage, sheetScaleVerdict } from "@/lib/takeoff/scale-spread";
+import { CROSSED_OUTLINE_TEXT, outlineCrossesItself } from "@/lib/takeoff/geometry";
 
 import {
   DraftShape,
@@ -264,6 +266,8 @@ export interface ViewerProps {
    * no drawing tools, no dragging, no delete, no stamping, no scale read off the sheet.
    */
   readOnly?: boolean;
+  /** Why drawing is off when it is not the bid lock (e.g. someone else changed the takeoff). */
+  readOnlyNotice?: string | undefined;
   /** Deficiency number by object id, across the takeoff (the pin shows it). */
   deficiencyNumbers?: ReadonlyMap<string, number>;
   /** A click on an already selected deficiency pin: show its pictures (the lightbox). */
@@ -406,6 +410,8 @@ export function TakeoffViewer(props: ViewerProps) {
   onSetScaleRef.current = props.onSetScale;
   const hasScaleRef = useRef(!!page.scale);
   hasScaleRef.current = !!page.scale;
+  const scaleRef = useRef(page.scale);
+  scaleRef.current = page.scale;
   const pageIndexRef = useRef(page.index);
   pageIndexRef.current = page.index;
   const isPdf = source?.kind === "pdf";
@@ -503,9 +509,15 @@ export function TakeoffViewer(props: ViewerProps) {
       setSheet({ index, read });
       const note = read.scale;
       let done = sheetApplied.get(doc);
-      if (!note || hasScaleRef.current || readOnlyRef.current || done?.has(index)) return;
+      // A page with no scale takes the sheet's; so does a page holding a COPY from another page
+      // that disagrees with what this sheet prints (lib/takeoff/scale-spread.ts).
+      if (!note || readOnlyRef.current || done?.has(index)) return;
+      if (sheetScaleVerdict(scaleRef.current, note.fpp) === "leave") return;
       const pos = await pdfPointToPage(doc, index, rotation, note.at);
-      if (!live || hasScaleRef.current) return;
+      if (!live) return;
+      const verdict = sheetScaleVerdict(scaleRef.current, note.fpp);
+      if (verdict === "leave") return;
+      const copiedFrom = scaleRef.current?.copiedFrom ?? "";
       if (!done) {
         done = new Set();
         sheetApplied.set(doc, done);
@@ -513,10 +525,16 @@ export function TakeoffViewer(props: ViewerProps) {
       if (done.has(index)) return;
       done.add(index);
       onSetScaleRef.current(sheetScaleLine(note, pos.at, pos.width, pos.height), false);
-      toast.info(`${sheetScaleMessage(note.text)}.`, {
-        description: sheetSizeWarning(pos.width, pos.height) ?? undefined,
-        duration: 12000,
-      });
+      if (verdict === "replace")
+        toast.warning(copiedScaleReplacedMessage(copiedFrom, note.text), {
+          description: sheetSizeWarning(pos.width, pos.height) ?? undefined,
+          duration: 20000,
+        });
+      else
+        toast.info(`${sheetScaleMessage(note.text)}.`, {
+          description: sheetSizeWarning(pos.width, pos.height) ?? undefined,
+          duration: 12000,
+        });
     })().catch(() => {
       // No text layer or an unreadable page: the scale is drawn by hand as before.
     });
@@ -790,7 +808,10 @@ export function TakeoffViewer(props: ViewerProps) {
 
   const changeTool = (t: Tool) => {
     if (!toolAllowed(t, readOnly)) {
-      toast.info("This takeoff is locked (it built a bid). Use Edit a copy to draw or change it.");
+      toast.info(
+        props.readOnlyNotice ??
+          "This takeoff is locked (it built a bid). Use Edit a copy to draw or change it.",
+      );
       return;
     }
     if (t === "cutout" && !selectedArea) {
@@ -912,6 +933,11 @@ export function TakeoffViewer(props: ViewerProps) {
    */
   const finish = (points: readonly PagePoint[] = draft): boolean => {
     const pts = [...points];
+    if (tool === "area" && pts.length >= 3 && outlineCrossesItself(pts)) {
+      // Not made, and the corners stay so the last ones can be taken back.
+      toast.error(CROSSED_OUTLINE_TEXT, { duration: 10000 });
+      return true;
+    }
     if (tool === "area" && pts.length >= 3) props.onCreate("area", pts, roles);
     else if (tool === "linear" && pts.length >= 2) props.onCreate("linear", pts, roles);
     else if (tool === "cutout" && pts.length >= 3 && selectedArea)

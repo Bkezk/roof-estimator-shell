@@ -543,7 +543,8 @@ describe("2. Seed → bid", () => {
 
   it("three bid sections with the measured layout rectangle and drawn edges", () => {
     expect(bid.sections.map((s) => s.name)).toEqual(["Section 1", "Section 2", "Section 3"]);
-    // Section 1: the cut-out shrinks the layout rectangle, not a side: 101.91 × 58.09 = 5920.
+    // Section 1: the cut-out shrinks the layout rectangle, not a side: 101.91 × 58.0905 = 5920
+    // (the width carries the area over the two-decimal length; audit fix, Nov 10).
     // FIXED (#13): the bid section has no deduction field (BidSectionInput), so length × width
     // must carry the net area; the true sides stay and the note says the layout is the net-area
     // equivalent of the 100 × 60 outline.
@@ -552,7 +553,7 @@ describe("2. Seed → bid", () => {
     );
     // Two decimals (an eighth of an inch); the rectangle keeps the net area within 0.01 %.
     expect(sec("Section 1").length).toBe(101.91);
-    expect(sec("Section 1").width).toBe(58.09);
+    expect(sec("Section 1").width).toBe(58.0905);
     expect(Math.abs(sec("Section 1").length * sec("Section 1").width - 5920) / 5920).toBeLessThan(
       1e-4,
     );
@@ -562,9 +563,9 @@ describe("2. Seed → bid", () => {
       ["C", 100],
       ["D", 60],
     ]);
-    // Section 2: the slope stretches the width: 40 × 31.62 = 1264.9 (plan 1200).
+    // Section 2: the slope stretches the width: 40 × 31.6228 = 1264.9 (plan 1200).
     expect(sec("Section 2").length).toBe(40);
-    expect(sec("Section 2").width).toBe(31.62);
+    expect(sec("Section 2").width).toBe(31.6228);
     expect(sec("Section 2").notes).toBe(
       "Measured in Takeoff: 1264.9 sq ft (1200 sq ft on plan at 4:12, ×1.054), 143.2 ft around (140 ft on plan; rakes assumed: the two shorter sides (B, D) run up the slope), 4 sides.",
     );

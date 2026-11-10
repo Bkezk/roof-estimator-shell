@@ -23,6 +23,12 @@ export function useAutosave<T>(
   save: (value: T) => Promise<void>,
   delayMs = 800,
   locked = false,
+  /**
+   * The value as text. With it, a "change" whose text equals what is already saved (the loaded
+   * document, or the last save) schedules nothing — opening a takeoff used to save it again
+   * unchanged and stamp "last updated by" with the viewer's name (audit, Nov 10, finding 3).
+   */
+  keyOf?: (value: T) => string,
 ): { state: SaveState; flush: () => Promise<boolean> } {
   const [state, setState] = useState<SaveState>("idle");
   const lockedRef = useRef(locked);
@@ -38,6 +44,10 @@ export function useAutosave<T>(
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorToasted = useRef(false);
   const initial = useRef(value);
+  const keyOfRef = useRef(keyOf);
+  keyOfRef.current = keyOf;
+  // The text of what the server holds: the loaded document, then each successful save.
+  const savedKey = useRef<string | null>(keyOf ? keyOf(value) : null);
 
   const run = useCallback((): Promise<boolean> => {
     if (inFlight.current) {
@@ -50,9 +60,11 @@ export function useAutosave<T>(
       do {
         again.current = false;
         const v = version.current;
+        const sending = latest.current;
         setState("saving");
         try {
-          await saveRef.current(latest.current);
+          await saveRef.current(sending);
+          if (keyOfRef.current) savedKey.current = keyOfRef.current(sending);
           savedVersion.current = Math.max(savedVersion.current, v);
           errorToasted.current = false;
         } catch (e) {
@@ -92,7 +104,20 @@ export function useAutosave<T>(
   // Every change to the loaded document schedules a save (the loaded value itself does not).
   useEffect(() => {
     latest.current = value;
-    if (!shouldAutosave({ locked: lockedRef.current, changed: value !== initial.current })) return;
+    // The same content as what is saved, with nothing waiting to go: not a change.
+    const sameAsSaved =
+      !!keyOfRef.current &&
+      version.current === savedVersion.current &&
+      savedKey.current !== null &&
+      keyOfRef.current(value) === savedKey.current;
+    if (
+      !shouldAutosave({
+        locked: lockedRef.current,
+        changed: value !== initial.current,
+        sameAsSaved,
+      })
+    )
+      return;
     version.current += 1;
     setState("saving");
     if (timer.current) clearTimeout(timer.current);

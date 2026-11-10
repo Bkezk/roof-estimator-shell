@@ -166,7 +166,9 @@ describe("takeoffQuantities", () => {
     const s = takeoffQuantities([page()], [withWell]).sections[0]!;
     const decimals = (x: number) => (String(x).split(".")[1] ?? "").length;
     expect(decimals(s.section.length)).toBeLessThanOrEqual(2);
-    expect(decimals(s.section.width)).toBeLessThanOrEqual(2);
+    // The width carries the area over the rounded length (four decimals; audit fix, Nov 10).
+    expect(decimals(s.section.width)).toBeLessThanOrEqual(4);
+    expect(Math.abs(s.section.length * s.section.width - s.areaSqFt)).toBeLessThan(0.02);
     for (const e of s.section.edges) {
       expect(decimals(e.lengthFt)).toBeLessThanOrEqual(2);
       if (e.perimLengthFt !== undefined) expect(decimals(e.perimLengthFt)).toBeLessThanOrEqual(2);
@@ -270,7 +272,7 @@ describe("slope factor (pitch, rise per 12)", () => {
     expect(s.edgeLengthsFt.map((x) => Math.round(x))).toEqual([100, 10, 100, 10]);
     // The layout rectangle is the sloped surface: length stays, width grows by the factor.
     expect(s.section.length).toBeCloseTo(100, 6);
-    expect(s.section.width).toBe(Math.round(10 * s.slopeFactor * 100) / 100);
+    expect(s.section.width).toBe(Math.round(10 * s.slopeFactor * 10000) / 10000);
     expect(Math.abs(s.section.length * s.section.width - s.areaSqFt) / s.areaSqFt).toBeLessThan(
       1e-4,
     );

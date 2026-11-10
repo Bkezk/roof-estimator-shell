@@ -277,6 +277,14 @@ export function QuantitiesTab(props: {
                 <TableRow key={s.objectId}>
                   <C>
                     {s.name}
+                    {s.problem && (
+                      <span
+                        data-problem="section"
+                        className="block text-xs font-medium normal-case text-destructive"
+                      >
+                        Wrong area: {s.problem}.
+                      </span>
+                    )}
                     {sectionSideRolesText(s) && (
                       <span
                         className="block text-[10px] text-muted-foreground"

@@ -87,6 +87,12 @@ import { takeoffQuantities } from "@/lib/takeoff/model";
 import { catalogSearchItems } from "@/lib/takeoff/material";
 import { lockedToast } from "@/lib/takeoff/lock";
 import {
+  LINK_ATTEMPTS,
+  linkFailedToast,
+  linkRetryDelayMs,
+  takeoffApplyReady,
+} from "@/lib/takeoff/update-bid-ready";
+import {
   applyTakeoffToBid,
   bidAccountFromTakeoff,
   bidSeedFromTakeoff,
@@ -1146,6 +1152,11 @@ function EstimatePage() {
   // Bumped when a saved bid finishes hydrating so the unsaved-changes baseline is captured
   // from the hydrated state (not the empty pre-load render).
   const [hydrationStamp, setHydrationStamp] = useState(0);
+  // The bid whose saved content this render's state holds. A STATE on purpose (never the
+  // `hydratedFor` ref): it turns to the bid's id in the same render that first carries the bid's
+  // sections, so whatever waits on it never reads the page from before the load (takeoff audit,
+  // Nov 10, finding 1).
+  const [renderedBidId, setRenderedBidId] = useState<string | null>(null);
   // Bumped by every hydrate (a loaded bid, the Bid Combiner's result): the membrane-mil check
   // after the unsaved-changes baseline (see the effect below it).
   const [milCheckStamp, setMilCheckStamp] = useState(0);
@@ -1289,6 +1300,7 @@ function EstimatePage() {
     loadedHeader.current = bidHeaderOfRow(loadedBid);
     setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
+    setRenderedBidId(loadedBid.id);
     setHydrationStamp((n) => n + 1);
   }, [loadedBid]);
 
@@ -1377,12 +1389,19 @@ function EstimatePage() {
     enabled: authed && !!takeoffParam,
   });
   const takeoffSeededFor = useRef<string | null>(null);
+  // Set when a NEW bid was just seeded from a takeoff (read once by the load check).
+  const freshFromTakeoff = useRef(false);
   // A takeoff (an "Edit a copy" copy) that updated THIS saved bid: saving the bid links it, which
   // locks it (src/lib/takeoff/lock.ts) — it built what is saved now.
   const takeoffToLock = useRef<{ takeoffId: string; bidId: string } | null>(null);
   // The takeoff remembers the bid it built (best effort; the bid already links back), which locks
   // it; the user is told once. A takeoff with no customer takes this bid's (server side).
-  const lockTakeoff = (takeoffId: string, builtBidId: string, builtBidName: string) => {
+  const lockTakeoff = (
+    takeoffId: string,
+    builtBidId: string,
+    builtBidName: string,
+    attempt = 1,
+  ) => {
     takeoffToLock.current = null;
     void saveTakeoffFn({ data: { id: takeoffId, bid_id: builtBidId } })
       .then((t) => {
@@ -1393,7 +1412,21 @@ function EstimatePage() {
         void qc.invalidateQueries({ queryKey: ["takeoff", takeoffId] });
         void qc.invalidateQueries({ queryKey: ["takeoff-lock", takeoffId] });
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        // Tried again by itself, then said out loud and kept for the next save of this bid
+        // (takeoff audit, Nov 10, finding 6: it used to fail without a word).
+        if (attempt < LINK_ATTEMPTS) {
+          window.setTimeout(
+            () => lockTakeoff(takeoffId, builtBidId, builtBidName, attempt + 1),
+            linkRetryDelayMs(attempt),
+          );
+          return;
+        }
+        takeoffToLock.current = { takeoffId, bidId: builtBidId };
+        toast.error(linkFailedToast(builtBidName, e instanceof Error ? e.message : String(e)), {
+          duration: 20000,
+        });
+      });
   };
   // The takeoff's customer onto a bid that has none (owner, Sep 30): linked as a change of this
   // session (so the save sends it), and the bid's BLANK client fields filled from the profile.
@@ -1418,7 +1451,7 @@ function EstimatePage() {
     // With ?bid= too, the takeoff UPDATES that saved bid (owner, Sep 24): wait until the bid is
     // hydrated, then replace only what the drawing owns and keep everything else.
     const updating = !!bidParam;
-    if (updating && hydratedFor.current !== bidParam) return;
+    if (!takeoffApplyReady({ bidParam, renderedBidId })) return;
     const seedKey = `${bidParam ?? ""}|${takeoffParam}`;
     if (takeoffSeededFor.current === seedKey) return;
     takeoffSeededFor.current = seedKey;
@@ -1519,6 +1552,9 @@ function EstimatePage() {
         takeoffInfo: info,
       };
       hydrateSaved(merged, {});
+      // The sections are minutes old and nobody typed their spacing: the load check below sets
+      // it from the fastener lookup without its "re-derived … (was 18")" notice.
+      freshFromTakeoff.current = true;
       setBidId(undefined);
       // A bid made from a takeoff starts linked to the takeoff's customer, if it has one.
       if (seed.accountId) linkFromTakeoff(seed.accountId, takeoffCustomer);
@@ -1538,7 +1574,7 @@ function EstimatePage() {
       toast.error(e instanceof Error ? e.message : "Could not start a bid from this takeoff.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per ?takeoff (and ?bid) value
-  }, [takeoffRow, takeoffParam, bidParam, hydrationStamp]);
+  }, [takeoffRow, takeoffParam, bidParam, hydrationStamp, renderedBidId]);
   useEffect(() => {
     if (takeoffError)
       toast.error(
@@ -2179,6 +2215,8 @@ function EstimatePage() {
     if (milCheckStamp === 0 || milCheckDone.current === milCheckStamp || !admin) return;
     if (fastenerLookup === undefined && !fastenerLookupFailed) return;
     milCheckDone.current = milCheckStamp;
+    const quietChain = freshFromTakeoff.current;
+    freshFromTakeoff.current = false;
     const before = chainState();
     const r = snapBidMils(before, admin);
     const rs = snapBidSheets(r.state, admin, fastenerLookup);
@@ -2212,10 +2250,11 @@ function EstimatePage() {
     }
     if (rc.changes.length) {
       applyChainFix(rs.state, rc.state);
-      warnMilChanges(
-        "Design table / lap / spacing re-derived from the fastener lookup (save to keep it):",
-        rc.changes,
-      );
+      if (!quietChain)
+        warnMilChanges(
+          "Design table / lap / spacing re-derived from the fastener lookup (save to keep it):",
+          rc.changes,
+        );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hydrate, on that state
   }, [milCheckStamp, admin, fastenerLookup, fastenerLookupFailed]);

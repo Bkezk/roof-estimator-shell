@@ -375,6 +375,20 @@ export function bidSeedFromTakeoff(
   }
 
   const unmapped: TakeoffBidSeed["unmapped"] = [];
+  // First, loudly: a section whose numbers cannot be trusted (the editor refuses to start a bid
+  // from one; this is for a seed built some other way).
+  for (const s of q.sections) {
+    if (s.problem)
+      unmapped.push({
+        label: `CHECK ${s.name}: the measured area is wrong`,
+        detail: `In the takeoff, ${s.problem}.`,
+      });
+    else if (!(s.areaSqFt >= 0.5))
+      unmapped.push({
+        label: `CHECK ${s.name}: it measures 0 sq ft`,
+        detail: "Delete it in the takeoff or draw it again; it prices as nothing here.",
+      });
+  }
   for (const c of q.counts) {
     if (c.role === "curb") {
       if (!curbSized(c))

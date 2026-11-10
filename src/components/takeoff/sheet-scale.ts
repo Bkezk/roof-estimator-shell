@@ -290,8 +290,10 @@ export function scaleChipText(scale: PageScale, fpp: number | null): string {
   const origin = scaleOrigin(scale);
   if (origin?.source === "sheet" && isAerialScaleNote(origin.note))
     return aerialScaleChipText(origin.note, fpp);
-  const head =
-    origin?.source === "sheet"
+  // A copy from another page says so: nothing was drawn or read on THIS sheet.
+  const head = scale.copiedFrom
+    ? `Scale: copied from “${scale.copiedFrom}”, check it on this sheet`
+    : origin?.source === "sheet"
       ? `Scale: read from the sheet, ${origin.note}`
       : `Scale: ${feetLabel(scale.feet)} line drawn on the sheet`;
   if (fpp === null || !Number.isFinite(fpp)) return head;

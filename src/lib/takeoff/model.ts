@@ -16,6 +16,7 @@ import type { UnderlaymentLayer } from "@/lib/engine/bid-builder";
 import type { Attachment } from "@/lib/engine/estimate";
 import { edgeLineSides, sideRolesOf, type SideRoles } from "./edge-lines";
 import {
+  areaProblem,
   drawnSideLabels,
   edgeLengths,
   equivalentRect as equivalentRectangleOf,
@@ -41,6 +42,12 @@ export interface PageScale {
   source?: "sheet" | "drawn";
   /** The sheet's scale note as printed, when `source` is "sheet". */
   note?: string;
+  /**
+   * Set when this scale was NOT set on this page but copied from another page by the Scale
+   * popup's "also use it on the other pages" box: that page's name (./scale-spread.ts). The
+   * chip says so, and the sheet's own printed scale replaces a copy that disagrees with it.
+   */
+  copiedFrom?: string;
 }
 
 export interface TakeoffPage {
@@ -364,6 +371,12 @@ export interface SectionQuantity {
   cutoutAreaSqFt: number;
   /** The wall around each cut-out (its perimeter, ft): penthouse / well walls, not seeded. */
   cutoutPerimetersFt: number[];
+  /**
+   * Set when the numbers above cannot be trusted (./geometry.ts `areaProblem`): the outline
+   * crosses itself, or a cut-out is outside the roof or over another one. Plain words, shown on
+   * the Quantities tab and in the bid notice; Create bid waits until it is fixed.
+   */
+  problem?: string;
   section: OutlineSection;
 }
 export interface LinearQuantity {
@@ -609,6 +622,8 @@ export function takeoffQuantities(
     };
     if (factor !== 1) sq.pitch = o.attrs.pitch!;
     if (rakes.note) sq.rakeNote = rakes.note;
+    const problem = areaProblem(outer, cutoutRings);
+    if (problem) sq.problem = problem;
     out.sections.push(sq);
     out.totals.roofAreaSqFt += section.measured.areaSqFt;
     out.totals.planAreaSqFt += planAreaSqFt;
@@ -620,7 +635,24 @@ export function takeoffQuantities(
   return out;
 }
 
+/**
+ * Why a bid must not be made (or updated) from these quantities yet: a section whose numbers
+ * cannot be trusted (`problem`), or one that measures nothing. Plain words naming each section;
+ * null when the drawing is fit to price (takeoff audit, Nov 10, findings 4 and 5: a crossed
+ * outline went into a bid as a 0 × 0 section and nothing said so).
+ */
+export function bidBlocker(q: Pick<TakeoffQuantities, "sections">): string | null {
+  const lines: string[] = [];
+  for (const s of q.sections) {
+    if (s.problem) lines.push(`“${s.name}”: ${s.problem}.`);
+    else if (!(s.areaSqFt >= 0.5))
+      lines.push(`“${s.name}” measures 0 sq ft. Delete it or draw it again.`);
+  }
+  return lines.length ? `Fix this in the drawing before the bid: ${lines.join(" ")}` : null;
+}
+
 const round2 = (x: number) => Math.round(x * 100) / 100;
+const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
 /**
  * The bid's dimensions carry two decimals (an eighth of an inch): the layout rectangle and each
@@ -628,7 +660,11 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
  */
 function roundSectionDims(section: OutlineSection): void {
   section.length = round2(section.length);
-  section.width = round2(section.width);
+  // The width carries the area: the bid prices length × width, so it is the measured area over
+  // the rounded length, to four decimals (audit, Nov 10: two rounded sides priced a 9,100 sq ft
+  // roof as 9,099.47). A drawn 100 × 50 is still exactly 100 × 50.
+  section.width =
+    section.length > 0 ? round4(section.measured.areaSqFt / section.length) : round2(section.width);
   section.edges = section.edges.map((e) => {
     const ne = { ...e, lengthFt: round2(e.lengthFt) };
     if (e.perimLengthFt !== undefined) ne.perimLengthFt = round2(e.perimLengthFt);

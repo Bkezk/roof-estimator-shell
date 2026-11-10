@@ -164,3 +164,50 @@ still offered Create bid, which would make a second bid.
 - A material on a line priced in the browser (the suite covers it).
 - The PlanSwift import.
 - Delete and restore of a takeoff.
+
+## Fixes (Nov 10)
+
+The owner asked for findings 1 to 6 and the smaller points. Each fix has tests in
+`src/lib/takeoff/audit-fixes-nov10.test.ts` and `src/lib/takeoff-lock.functions.test.ts`; with
+the old wiring put back, 16 of them fail. Each was then proved in the browser on temporary rows
+(removed afterwards).
+
+1. **Update bid.** The estimator now waits on the bid id its own state holds, which only shows
+   the bid in the same render that carries the bid's sections
+   (`src/lib/takeoff/update-bid-ready.ts`). Browser: 8 of 8 tries kept the hand-added section and
+   the Tan colour (it was 3 of 8).
+2. **Scale.** The popup's box starts unticked and says to tick it only when the other pages are
+   drawn at the same scale. A copy is marked with the page it came from, and its chip reads
+   "Scale: copied from “A-101 Roof Plan”, check it on this sheet". A sheet that prints exactly one
+   scale replaces a copy that disagrees with it, with a warning. Browser: the 1/4" sheet took its
+   own scale and its roof read 800 sq ft.
+3. **Two people.** New column `takeoffs.rev`
+   (`supabase/migrations/20261110190000_takeoffs_rev.sql`, applied live). Every save of the
+   drawing names the revision it started from; a save from an older one is refused, the editor
+   stops saving and drawing, and a red bar offers Reload. Browser: the second window's area was
+   refused with "This takeoff was changed by Claude after you opened it…", and the first
+   window's area was still there after a reload. Opening a takeoff and touching nothing now sends
+   no save (0 saves; it was 1 each time).
+4. **Crossed outline.** The Area tool refuses to close an outline that crosses itself and keeps
+   the corners so the last ones can be taken back. One already in a drawing is marked "Wrong
+   area" on the Quantities tab, Create bid and Update bid refuse until it is fixed, and a section
+   of 0 sq ft blocks the bid too.
+5. **Cut-outs.** A cut-out outside its roof, half outside it, or over another cut-out is not
+   added, with the reason. One already in a drawing is marked and blocks the bid the same way.
+6. **Takeoff link.** Tried three times (2 s and 4 s apart), then said in plain words, and tried
+   again at each later save of the bid. Browser: with the request blocked the message appeared;
+   the next save linked and locked the takeoff.
+
+Smaller points:
+
+- The bid's layout width now carries the measured area over the two-decimal length (four
+  decimals). The audit's 4,900 sq ft section saves as 101.93 × 48.0722; the test roof reads
+  5,800 sq ft exactly. A drawn 100 × 50 is still exactly 100 × 50.
+- A bid just seeded from a takeoff sets its field spacing from the fastener lookup without the
+  "re-derived … (was 18")" notice.
+- Not changed: the "Perimeter Enhancement Width < 12" note. The legacy rule flags a width under
+  12 ft on Duro-Last and the web default is 3 ft (`docs/legacy-money-parity.md`, "needs a human
+  call on the intended default"). Changing the default changes prices, so it waits for the
+  owner's choice.
+- Not changed: Setup answers reaching drains placed before they were chosen (the page says they
+  apply from then on).

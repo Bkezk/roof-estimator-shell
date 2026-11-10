@@ -4349,6 +4349,7 @@ export type Database = {
           name: string
           objects: Json
           pages: Json
+          rev: number
           setup: Json
           source_address: string | null
           status: string
@@ -4370,6 +4371,7 @@ export type Database = {
           name?: string
           objects?: Json
           pages?: Json
+          rev?: number
           setup?: Json
           source_address?: string | null
           status?: string
@@ -4391,6 +4393,7 @@ export type Database = {
           name?: string
           objects?: Json
           pages?: Json
+          rev?: number
           setup?: Json
           source_address?: string | null
           status?: string

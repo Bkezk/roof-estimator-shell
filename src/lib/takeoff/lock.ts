@@ -190,8 +190,16 @@ export function copyTakeoffRow(
  * The autosave guard: a change is sent only when the takeoff is not locked and the value differs
  * from the one loaded. A locked takeoff never autosaves (the server would refuse it anyway).
  */
-export function shouldAutosave(opts: { locked: boolean; changed: boolean }): boolean {
-  return !opts.locked && opts.changed;
+export function shouldAutosave(opts: {
+  locked: boolean;
+  changed: boolean;
+  /**
+   * The value's content equals what the server already holds and nothing is waiting to go
+   * (audit, Nov 10: opening a takeoff re-saved it unchanged and stamped the viewer's name).
+   */
+  sameAsSaved?: boolean;
+}): boolean {
+  return !opts.locked && opts.changed && !opts.sameAsSaved;
 }
 
 /** Drawing tools a locked takeoff still offers: look and measure, never change. */
@@ -303,6 +311,25 @@ export function lockBannerText(bidName: string | null, builtAt: string | null): 
     ? ` on ${new Date(builtAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
     : "";
   return `This takeoff built ${bid}${when}. It is locked so a slip cannot change that bid. To measure again, edit a copy.`;
+}
+
+/** How a refused stale save starts (the editor recognises it and stops saving). */
+export const TAKEOFF_STALE = "This takeoff was changed";
+/**
+ * The refusal for a save that started from an older revision of the drawing (takeoff audit,
+ * Nov 10, finding 3: two people in one takeoff overwrote each other without a word).
+ */
+export function staleSaveRefusal(byName: string | null | undefined): string {
+  const who = (byName ?? "").trim();
+  return `${TAKEOFF_STALE} ${who ? `by ${who}` : "somewhere else"} after you opened it, so your last change was not saved. Reload to get the current drawing, then make your change again.`;
+}
+/**
+ * Whether a save of the drawing may go through: `baseRev` is the revision the editor started
+ * from (absent = an older page that does not send one: let through, as before), `currentRev` the
+ * row's now.
+ */
+export function staleSave(baseRev: number | undefined, currentRev: number): boolean {
+  return baseRev !== undefined && baseRev !== currentRev;
 }
 
 /** The one-time notice when a takeoff becomes locked by building a bid. */

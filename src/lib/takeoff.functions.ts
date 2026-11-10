@@ -14,8 +14,11 @@ import { takeoffAccountFromBid } from "@/lib/takeoff/create-bid";
 import {
   copyTakeoffName,
   copyTakeoffRow,
+  DRAWING_FIELDS,
   lockedSaveRefusal,
   setupForLinkChange,
+  staleSave,
+  staleSaveRefusal,
   TAKEOFF_LOCKED,
   type BidPresence,
 } from "@/lib/takeoff/lock";
@@ -69,6 +72,8 @@ const pageSchema = z.object({
       // a save.
       source: z.enum(["sheet", "drawn"]).optional(),
       note: z.string().max(120).optional(),
+      // A copy made by "also use this scale on the other pages": the page it came from.
+      copiedFrom: z.string().max(120).optional(),
     })
     .nullable(),
 });
@@ -289,6 +294,8 @@ export const saveTakeoffInput = z.object({
   bid_id: z.string().uuid().nullable().optional(),
   /** The customer profile (null unlinks). */
   account_id: z.string().uuid().nullable().optional(),
+  /** The drawing's revision this save started from; a save from an older one is refused. */
+  base_rev: z.number().int().min(0).optional(),
 });
 
 /** A saved takeoff; `inherited_account_id` is set when linking a bid gave it the bid's customer. */
@@ -310,10 +317,10 @@ export async function saveTakeoffImpl(
   data: SaveTakeoffInput,
 ): Promise<SavedTakeoff> {
   await writeAccess(ctx);
-  const { id, ...rest } = data;
+  const { id, base_rev, ...rest } = data;
   const { data: cur, error: curErr } = await ctx.supabase
     .from("takeoffs")
-    .select("id, bid_id, account_id, setup")
+    .select("id, bid_id, account_id, setup, rev, updated_by_name")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -326,9 +333,15 @@ export async function saveTakeoffImpl(
     if (refusal) throw new Error(refusal);
   }
 
+  // The drawing (pages, setup, objects): refused from an older revision, and each save of it
+  // moves the revision on. Status, customer and bid-link saves do neither.
+  const drawing = DRAWING_FIELDS.some((k) => rest[k] !== undefined);
+  if (drawing && staleSave(base_rev, cur.rev))
+    throw new Error(staleSaveRefusal(cur.updated_by_name));
   const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {
     updated_by_name: await meName(ctx),
   };
+  if (drawing) patch.rev = cur.rev + 1;
   if (rest.name !== undefined) patch.name = rest.name;
   if (rest.status !== undefined) patch.status = rest.status;
   if (rest.pages !== undefined) patch.pages = rest.pages as unknown as Json;
@@ -358,9 +371,20 @@ export async function saveTakeoffImpl(
   }
   const base = ctx.supabase.from("takeoffs").update(patch).eq("id", id).is("deleted_at", null);
   // Only if the bid link is still the one checked above.
-  const guarded = cur.bid_id ? base.eq("bid_id", cur.bid_id) : base.is("bid_id", null);
+  const linked = cur.bid_id ? base.eq("bid_id", cur.bid_id) : base.is("bid_id", null);
+  // …and, for the drawing, only if nobody saved it since the read above.
+  const guarded = drawing ? linked.eq("rev", cur.rev) : linked;
   const { data: row, error } = await guarded.select("*").maybeSingle();
   if (error) throw new Error(error.message);
+  if (!row && drawing) {
+    const { data: now } = await ctx.supabase
+      .from("takeoffs")
+      .select("bid_id, rev, updated_by_name")
+      .eq("id", id)
+      .maybeSingle();
+    if (now && now.bid_id === cur.bid_id && now.rev !== cur.rev)
+      throw new Error(staleSaveRefusal(now.updated_by_name));
+  }
   if (!row)
     throw new Error(
       `${TAKEOFF_LOCKED} or changed while saving (it may have just built a bid). Reload it.`,

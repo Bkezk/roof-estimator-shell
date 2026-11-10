@@ -177,3 +177,141 @@ export function sectionFromOutline(
     measured: { points: points.map((p) => [p[0], p[1]]), areaSqFt, perimeterFt, source },
   };
 }
+
+// ── Outline checks (takeoff audit, Nov 10, findings 4 and 5) ───────────────────────────────
+// A crossed outline has no honest area (corners clicked in a crossing order read 0 sq ft, or a
+// believable wrong number), and a cut-out outside its roof or on top of another one took off
+// membrane that is not there. These tell the editor (which refuses them as they are drawn) and
+// the quantities (which flag one already in a drawing). Any unit: page px or feet.
+
+const cross = (o: Pt, a: Pt, b: Pt) =>
+  (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+const spanOf = (pts: readonly Pt[]) => {
+  let m = 1;
+  for (const p of pts) m = Math.max(m, Math.abs(p[0]), Math.abs(p[1]));
+  return m;
+};
+/** The two segments cross at a point inside both (touching ends and running along do not count). */
+function properCross(a: Pt, b: Pt, c: Pt, d: Pt, eps: number): boolean {
+  const d1 = cross(a, b, c);
+  const d2 = cross(a, b, d);
+  const d3 = cross(c, d, a);
+  const d4 = cross(c, d, b);
+  return (
+    ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
+    ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps))
+  );
+}
+const sidesOf = (pts: readonly Pt[]): Array<[Pt, Pt]> =>
+  pts.map((p, i) => [p, pts[(i + 1) % pts.length]!] as [Pt, Pt]);
+
+/** True when two sides of the outline cross each other (a bowtie, corners clicked out of order). */
+export function outlineCrossesItself(points: readonly Pt[]): boolean {
+  const n = points.length;
+  if (n < 4) return false;
+  const eps = 1e-9 * spanOf(points) ** 2;
+  const sides = sidesOf(points);
+  for (let i = 0; i < n; i++)
+    for (let j = i + 1; j < n; j++) {
+      if (j === i + 1 || (i === 0 && j === n - 1)) continue; // neighbours share a corner
+      if (properCross(sides[i]![0], sides[i]![1], sides[j]![0], sides[j]![1], eps)) return true;
+    }
+  return false;
+}
+
+/** "in", "on" (the boundary, within a hair) or "out" of the outline. */
+function whereIs(p: Pt, outline: readonly Pt[]): "in" | "on" | "out" {
+  const tol = 1e-7 * spanOf(outline);
+  let inside = false;
+  for (const [a, b] of sidesOf(outline)) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len > 0) {
+      const t = ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / (len * len);
+      const u = Math.max(0, Math.min(1, t));
+      if (Math.hypot(p[0] - (a[0] + u * (b[0] - a[0])), p[1] - (a[1] + u * (b[1] - a[1]))) <= tol)
+        return "on";
+    }
+    if (a[1] > p[1] !== b[1] > p[1]) {
+      const x = a[0] + ((p[1] - a[1]) / (b[1] - a[1])) * (b[0] - a[0]);
+      if (x > p[0]) inside = !inside;
+    }
+  }
+  return inside ? "in" : "out";
+}
+const anyProperCross = (a: readonly Pt[], b: readonly Pt[]): boolean => {
+  const eps = 1e-9 * Math.max(spanOf(a), spanOf(b)) ** 2;
+  for (const [p, q] of sidesOf(a))
+    for (const [r, s] of sidesOf(b)) if (properCross(p, q, r, s, eps)) return true;
+  return false;
+};
+const middleOf = (pts: readonly Pt[]): Pt => [
+  pts.reduce((t, p) => t + p[0], 0) / pts.length,
+  pts.reduce((t, p) => t + p[1], 0) / pts.length,
+];
+
+/** The ring sits wholly inside the outline (touching its edge is allowed: a well at the wall). */
+export function ringInsideOutline(ring: readonly Pt[], outline: readonly Pt[]): boolean {
+  if (ring.some((p) => whereIs(p, outline) === "out")) return false;
+  return !anyProperCross(ring, outline);
+}
+
+/** The two rings cover some of the same ground (sharing an edge or a corner is not overlap). */
+export function ringsOverlap(a: readonly Pt[], b: readonly Pt[]): boolean {
+  if (anyProperCross(a, b)) return true;
+  if (a.some((p) => whereIs(p, b) === "in") || b.some((p) => whereIs(p, a) === "in")) return true;
+  // One on top of the other, corner for corner: no corner is strictly inside, the middle is.
+  return whereIs(middleOf(a), b) === "in" || whereIs(middleOf(b), a) === "in";
+}
+
+export type CutoutProblem = "crossed" | "outside" | "overlap";
+/**
+ * What is wrong with `ring` as a cut-out of `outline` next to the cut-outs it already has
+ * (`others`): it crosses itself, it is not wholly inside the roof, or it lies over another
+ * cut-out. Null when it is fine.
+ */
+export function cutoutProblem(
+  outline: readonly Pt[],
+  others: ReadonlyArray<readonly Pt[]>,
+  ring: readonly Pt[],
+): CutoutProblem | null {
+  if (ring.length < 3) return null;
+  if (outlineCrossesItself(ring)) return "crossed";
+  if (!ringInsideOutline(ring, outline)) return "outside";
+  if (others.some((o) => o.length >= 3 && ringsOverlap(o, ring))) return "overlap";
+  return null;
+}
+
+/** The words for a refused cut-out. */
+export const CUTOUT_PROBLEM_TEXT: Record<CutoutProblem, string> = {
+  crossed: "That cut-out crosses itself. Click its corners in order, going around it.",
+  outside:
+    "A cut-out has to sit inside its roof area. That one reaches outside it, so it was not added.",
+  overlap:
+    "That cut-out lies over another cut-out of this area, which would take the same roof off twice. It was not added.",
+};
+/** The words for a refused outline. */
+export const CROSSED_OUTLINE_TEXT =
+  "This outline crosses itself, so its area would be wrong. Click the corners in order, going around the roof (Backspace takes the last corner back).";
+
+/**
+ * What is wrong with an area already in a drawing (its outline and cut-outs), in plain words
+ * for the Quantities tab and the bid notice; null when nothing is.
+ */
+export function areaProblem(
+  outline: readonly Pt[],
+  cutouts: ReadonlyArray<readonly Pt[]> = [],
+): string | null {
+  if (outlineCrossesItself(outline))
+    return "its outline crosses itself, so its area is wrong. Delete it and draw it again, clicking the corners in order";
+  const rings = cutouts.filter((c) => c.length >= 3);
+  for (let i = 0; i < rings.length; i++) {
+    const p = cutoutProblem(outline, rings.slice(0, i), rings[i]!);
+    if (p === "outside")
+      return "a cut-out reaches outside the roof, so too much is taken off. Move it inside or delete it";
+    if (p === "overlap")
+      return "two cut-outs lie over each other, so the same roof is taken off twice. Delete one";
+    if (p === "crossed")
+      return "a cut-out crosses itself, so the area taken off is wrong. Delete it and draw it again";
+  }
+  return null;
+}

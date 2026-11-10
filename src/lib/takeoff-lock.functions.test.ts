@@ -119,6 +119,8 @@ const takeoff = (over: Row = {}): Row => ({
   account_id: null,
   bid_id: BID,
   deleted_at: null,
+  rev: 0,
+  updated_by_name: "Dana",
   ...over,
 });
 
@@ -273,5 +275,47 @@ describe("copyTakeoff", () => {
   it("refuses a deleted takeoff", async () => {
     stored().deleted_at = "2026-09-30T00:00:00.000Z";
     await expect(copyTakeoffImpl(ctx(), { id: T })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("the drawing's revision (takeoff audit, Nov 10, finding 3)", () => {
+  const open = () => {
+    env = fakeDb({
+      takeoffs: [takeoff({ bid_id: null, rev: 4, updated_by_name: "Dana" })],
+      profiles: [{ id: "user-1", full_name: "Braden", email: "b@example.com" }],
+      bids: [],
+    });
+  };
+
+  it("a save from the revision the row holds goes through and moves it on", async () => {
+    open();
+    const row = await saveTakeoffImpl(ctx(), { id: T, objects, base_rev: 4 });
+    expect(row.rev).toBe(5);
+    expect(stored()["rev"]).toBe(5);
+  });
+
+  it("a save from an older revision is refused and nothing is written", async () => {
+    open();
+    await expect(saveTakeoffImpl(ctx(), { id: T, objects: [], base_rev: 3 })).rejects.toThrow(
+      /This takeoff was changed by Dana after you opened it/,
+    );
+    expect(stored()["objects"]).toEqual(objects);
+    expect(stored()["rev"]).toBe(4);
+    expect(env.writes.filter((w) => w.table === "takeoffs" && w.op === "update")).toEqual([]);
+  });
+
+  it("the second of two people who opened the same revision is the one refused", async () => {
+    open();
+    await saveTakeoffImpl(ctx(), { id: T, objects, base_rev: 4 });
+    await expect(saveTakeoffImpl(ctx(), { id: T, objects: [], base_rev: 4 })).rejects.toThrow(
+      /your last change was not saved/,
+    );
+    expect(stored()["objects"]).toEqual(objects);
+  });
+
+  it("status and customer saves neither check nor move the revision", async () => {
+    open();
+    const row = await saveTakeoffImpl(ctx(), { id: T, status: "draft", base_rev: 1 });
+    expect(row.rev).toBe(4);
   });
 });
