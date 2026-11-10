@@ -71,7 +71,12 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { snapBidSheets, type SheetBidState } from "@/lib/bid-sheets";
-import { offeredDesignTables, snapBidChain, type ChainBidState } from "@/lib/section-chain";
+import {
+  offeredDesignTables,
+  snapBidChain,
+  snapNewSection,
+  type ChainBidState,
+} from "@/lib/section-chain";
 import { nextLayerFromForm } from "@/lib/underlayment-layer";
 import { membraneColors, snapMembraneColor } from "@/lib/membrane-colors";
 import { warrantiesForSystem } from "@/lib/warranty-systems";
@@ -116,6 +121,7 @@ import {
   acknowledgeAll,
   bidSanityWarnings,
   sanityFactsFromSaved,
+  savedWithAcknowledged,
   unacknowledged,
   type SanityWarning,
 } from "@/lib/bid-sanity";
@@ -2052,7 +2058,6 @@ function EstimatePage() {
     perDiem,
     perDiemInMarkup,
     perDiemFromChart,
-    ...(sanityAcknowledged.length ? { sanityAcknowledged } : {}),
     commissionInMarkup,
     adjustLaborPct,
     adjustSetupPct,
@@ -2077,6 +2082,10 @@ function EstimatePage() {
     ...(combineInfo ? { combineInfo } : {}),
     ...(takeoffInfo ? { takeoffInfo } : {}),
     ...(importInfo ? { importInfo } : {}),
+    // LAST on purpose (Nov 10): "Save anyway" sends the list a render before `saved` carries it,
+    // and the save's baseline adds it the same way (bid-sanity.ts savedWithAcknowledged), so the
+    // two read alike and the bid is not left "Unsaved changes" by its own save.
+    ...(sanityAcknowledged.length ? { sanityAcknowledged } : {}),
   };
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
@@ -2095,8 +2104,8 @@ function EstimatePage() {
   };
   // Two baselines, because the header can be saved on its own (autoSaveStatus / autoSaveDueDate
   // below) while the body still has edits pending.
-  const bodyJsonOf = (name: string) =>
-    `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;
+  const bodyJsonOf = (name: string, body: SavedBidState = saved) =>
+    `${JSON.stringify(body)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;
   // The won day counts only while Won and the lost reason only while Lost (the save sends them
   // that way; a day left behind by an earlier Won is not a change).
   const headerJsonOf = (h: BidHeader) =>
@@ -2868,7 +2877,10 @@ function EstimatePage() {
           setBidReminderNote(h.reminderNote);
         }
       }
-      lastSavedBody.current = bodyJsonOf(row?.name ?? bidName);
+      // What was sent: `saved` as this render has it plus the numbers just waved through (the
+      // state takes them a render later; without this the bid read "Unsaved changes" straight
+      // after "Save anyway", until a second Save).
+      lastSavedBody.current = bodyJsonOf(row?.name ?? bidName, savedWithAcknowledged(saved, ack));
       lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
@@ -4361,8 +4373,17 @@ function EstimatePage() {
                 }
                 newSection={() =>
                   // Legacy RoofSection ctor: seeds AdjustUnderlaymentLabor / TO_Additional from the
-                  // estimate's template (AdjustLabor comes from the bid-level default).
-                  newSection({ ...sectionDefaults, ...seedSectionAdjust(templateDeltas) })
+                  // estimate's template (AdjustLabor comes from the bid-level default). Its
+                  // design table, lap and fastener spacing come from the fastener lookup at once
+                  // (section-chain.ts snapNewSection; Nov 10): the 18 / 12 / 6 placeholders used
+                  // to price the section until the bid was next opened, which then "re-derived"
+                  // them and left the bid unsaved.
+                  snapNewSection(
+                    chainState(),
+                    newSection({ ...sectionDefaults, ...seedSectionAdjust(templateDeltas) }),
+                    admin,
+                    fastenerLookup,
+                  )
                 }
                 onGoUnderlayment={(id) => {
                   setUSel([id]);

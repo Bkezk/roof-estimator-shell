@@ -86,7 +86,10 @@ describe("the wiring", () => {
     );
     expect(est).toContain("if (row && renamed) setBidName(row.name);");
     expect(est).toContain('`${savedToastText(kept)} — named "${row.name}" after the customer`');
-    expect(est).toContain("lastSavedBody.current = bodyJsonOf(row?.name ?? bidName);");
+    // (Nov 10: the baseline also carries the numbers just waved through, bid-sanity.ts.)
+    expect(est).toContain(
+      "lastSavedBody.current = bodyJsonOf(row?.name ?? bidName, savedWithAcknowledged(saved, ack));",
+    );
     expect(UNTITLED_BID).toBe("Untitled bid");
     // The legacy blur handler that refused a blank title and put "Untitled bid" back is gone.
     expect(est).not.toContain("Bid Title cannot be left blank.");

@@ -372,3 +372,21 @@ export function pullTestAdvice(
     message: `No spacing for a ${a.lap}" lap at ${a.designTable} psf with a ${lb} pull test. ${fix}`,
   };
 }
+
+/**
+ * A section added on the Sections screen, with its design table, lap and fastener spacing taken
+ * from the fastener lookup at once (owner, Nov 10): the same pass a bid gets when it is opened
+ * (snapBidChain), run on the one new section. Before this a new section kept the placeholder
+ * spacing (18 / 12 / 6) and was priced on it until the bid was next opened, which then
+ * "re-derived" it and left the bid unsaved. Without a lookup, or for an adhered section, the
+ * section comes back as it is.
+ */
+export function snapNewSection<T extends ChainBidState>(
+  state: T,
+  section: T["sections"][number],
+  admin: SheetAdmin | null | undefined,
+  lookup: MechFastenerRow[] | null | undefined,
+): T["sections"][number] {
+  const one = { ...state, sections: [section], sectionDefaults: undefined } as T;
+  return snapBidChain(one, admin, lookup).state.sections[0] ?? section;
+}

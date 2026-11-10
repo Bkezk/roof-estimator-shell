@@ -301,3 +301,19 @@ export function acknowledgeAll(
     ...new Set([...(acknowledged ?? []).filter((k) => live.has(k)), ...warnings.map((w) => w.key)]),
   ];
 }
+
+/**
+ * The saved bid body as it reads once the numbers just waved through are part of it: the
+ * estimator's baseline after "Save anyway" (owner, Nov 10: a bid said "Unsaved changes" straight
+ * after its own save). The list goes LAST, where the estimator's own `saved` object keeps it, so
+ * the two serialize alike. Nothing waved through → the same object.
+ */
+export function savedWithAcknowledged<T extends object>(
+  saved: T,
+  acknowledged: readonly string[],
+): T {
+  if (!acknowledged.length) return saved;
+  const { sanityAcknowledged: _dropped, ...rest } = saved as T & { sanityAcknowledged?: string[] };
+  void _dropped;
+  return { ...rest, sanityAcknowledged: [...acknowledged] } as unknown as T;
+}

@@ -41,9 +41,9 @@ describe("Setup › Customer Name adds a new customer through the popup", () => 
 
 describe("a renamed bid, a changed status or due date count as unsaved changes", () => {
   it("the baselines carry the name (body) and the header beside the saved body and the link", () => {
-    expect(page).toContain("const bodyJsonOf = (name: string) =>");
+    expect(page).toContain("const bodyJsonOf = (name: string, body: SavedBidState = saved) =>");
     expect(page).toContain(
-      '`${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;',
+      '`${JSON.stringify(body)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}|${name.trim()}`;',
     );
     expect(page).toContain("const headerJsonOf = (h: BidHeader) =>");
     expect(page).toContain(
