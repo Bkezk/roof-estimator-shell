@@ -661,8 +661,8 @@ function PdfLibraryTab() {
         <CardHeader>
           <CardTitle>PDF library</CardTitle>
           <CardDescription>
-            Insert these into any document from the Insert PDF button under a page (award letters,
-            warranty samples, spec sheets). PDF only, 20 MB at most.
+            Insert these into any document from the Import document button under a page (award
+            letters, warranty samples, spec sheets). PDF only, 20 MB at most.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

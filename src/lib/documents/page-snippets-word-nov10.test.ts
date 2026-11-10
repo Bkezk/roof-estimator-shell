@@ -15,7 +15,14 @@ import {
   unzip,
   wordImportToast,
 } from "./docx-import";
-import { PDF_PREVIEW_MAX_PAGES, pdfPreviewPages } from "./editor-helpers";
+import {
+  IMPORT_ACCEPT,
+  importFileKind,
+  PDF_PREVIEW_MAX_PAGES,
+  pdfPreviewPages,
+  pdfSheetLabel,
+  PUBLISHER_IMPORT_TEXT,
+} from "./editor-helpers";
 import {
   insertPageSnippet,
   MAX_PAGES,
@@ -146,7 +153,11 @@ describe("page snippets", () => {
 
   it("the editor offers it: the page menu saves, the snippet's + adds a new page", () => {
     const d = src("src/routes/documents.tsx");
-    expect(d).toContain("Save page as snippet…");
+    // The menu item and the popup both name the page (owner: "how does it know which page?").
+    expect(d).toContain("Save page {i + 1} as a snippet…");
+    expect(d).toContain(
+      "`Save page ${state.pages.findIndex((x) => x.id === savePage.id) + 1} as a snippet`",
+    );
     expect(d).toContain("saveModuleMut.mutate({ name, module: mods[0]!, pageModules: mods });");
     expect(d).toContain("insertPageSnippet(state.pages, selectedPageIndex(state), modules)");
     expect(d).toContain("props.onAddSavedPage(s.name, s.page_modules)");
@@ -159,7 +170,40 @@ describe("page snippets", () => {
   });
 });
 
+describe("Import document: one button for PDF and Word; Publisher explained", () => {
+  it("knows a file by its name, or by its type when the name says nothing", () => {
+    expect(importFileKind("Banner 2.PDF")).toBe("pdf");
+    expect(importFileKind("form.docx")).toBe("word");
+    expect(importFileKind("old letter.doc")).toBe("word");
+    expect(importFileKind("flyer.pub")).toBe("publisher");
+    expect(importFileKind("scan", "application/pdf")).toBe("pdf");
+    expect(importFileKind("photo.png", "image/png")).toBe("other");
+    expect(IMPORT_ACCEPT).toContain(".pub");
+    expect(PUBLISHER_IMPORT_TEXT).toContain("Export, Create PDF/XPS Document");
+  });
+  it("the canvas has the one button, and its dialog routes each kind", () => {
+    const c = src("src/components/documents/editor/page-canvas.tsx");
+    expect(c).toContain("Import document </Button>");
+    expect(c).not.toContain("Insert PDF </Button>");
+    expect(c).not.toContain("Import Word </Button>");
+    expect(c).toContain(
+      'if (kind === "pdf") upload.mutate(f); else if (kind === "word") props.onWord(f);',
+    );
+    expect(c).toContain('kind === "publisher" ? PUBLISHER_IMPORT_TEXT : OTHER_IMPORT_TEXT');
+  });
+});
+
 describe("an inserted PDF is drawn in the editor", () => {
+  it("each of its pages is a sheet in the lineup, with its own tab", () => {
+    expect(pdfSheetLabel("Page 2", "Banner 2", 1, 3)).toBe("Page 2 · Banner 2, page 1 of 3");
+    expect(pdfSheetLabel("Page 1", "Award letter", 1, 1)).toBe("Page 1 · Award letter");
+    const c = src("src/components/documents/editor/page-canvas.tsx");
+    expect(c).toContain('if (pdf?.type === "pdf") return ( <PdfSheets');
+    const p = src("src/components/documents/editor/pdf-preview.tsx");
+    expect(p).toContain("Array.from({ length: Math.max(1, shown) }, (_, k) => (");
+    expect(p).toContain("style={{ width: SHEET.width, minHeight: SHEET.height }}");
+    expect(p).toContain("frames.current[i - 1]?.replaceChildren(canvas);");
+  });
   it("the first pages are drawn, the rest counted", () => {
     expect(pdfPreviewPages(3)).toEqual({ shown: 3, more: 0 });
     expect(pdfPreviewPages(PDF_PREVIEW_MAX_PAGES + 5)).toEqual({
@@ -168,16 +212,22 @@ describe("an inserted PDF is drawn in the editor", () => {
     });
     expect(pdfPreviewPages(0)).toEqual({ shown: 0, more: 0 });
   });
-  it("the module shows the pages, not only a bar with the file's name", () => {
-    expect(src("src/components/documents/editor/module-view.tsx")).toContain(
-      "<PdfPreview assetId={m.assetId} pageCount={m.pageCount} />",
-    );
+  it("the pages are read from the library file and drawn", () => {
     expect(src("src/lib/documents.functions.ts")).toContain(
       "export const documentAssetUrl = createServerFn",
     );
     expect(src("src/components/documents/editor/pdf-preview.tsx")).toContain(
       "await page.render({ canvas, viewport: vp }).promise;",
     );
+  });
+});
+
+describe("saving a new template (found while testing the import)", () => {
+  it("its move to its own address is not asked about as leaving unsaved work", () => {
+    const d = src("src/routes/documents.tsx");
+    expect(d).toContain("savedNew.current = true; void router.navigate({");
+    expect(d).toContain("leaveFreelyRef={savedNew}");
+    expect(d).toContain("if (template?.id) savedNew.current = false;");
   });
 });
 
@@ -280,10 +330,10 @@ describe("Word import", () => {
     );
   });
 
-  it("the editor offers Import Word under each sheet", () => {
+  it("a Word file picked in Import document becomes a new page after that sheet", () => {
     const c = src("src/components/documents/editor/page-canvas.tsx");
-    expect(c).toContain("Import Word");
-    expect(c).toContain('data-input="import-word"');
+    expect(c).toContain('data-input="import-document"');
+    expect(c).toContain("wordAfter.current = pdfFor ?? 0;");
     expect(c).toContain(
       "const landed = insertPageSnippet(props.pages, wordAfter.current, modules);",
     );

@@ -85,7 +85,6 @@ import {
   variableLabel,
 } from "@/lib/documents/variables";
 import { cn } from "@/lib/utils";
-import { PdfPreview } from "./pdf-preview";
 import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 
@@ -251,16 +250,15 @@ function ModuleBody({ module: m, set }: { module: DocModule; set: Setter }) {
       return <RepairItem m={m} set={set} />;
     case "pdf":
       return (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
-            <FileText className="h-5 w-5 shrink-0" />
-            <span className="flex-1">
-              Inserted PDF: <span className="font-medium">{m.name}</span>, {m.pageCount}{" "}
-              {m.pageCount === 1 ? "page" : "pages"}
-            </span>
-            <span className="text-xs text-neutral-500">Prints as its own pages</span>
-          </div>
-          <PdfPreview assetId={m.assetId} pageCount={m.pageCount} />
+        // Only until the page's layout is measured: the canvas then draws the PDF's pages as
+        // sheets of their own (pdf-preview.tsx PdfSheets).
+        <div className="flex items-center gap-3 rounded-md bg-neutral-100 px-3 py-4 text-sm text-neutral-700 dark:bg-neutral-100 dark:text-neutral-700">
+          <FileText className="h-5 w-5 shrink-0" />
+          <span className="flex-1">
+            Inserted PDF: <span className="font-medium">{m.name}</span>, {m.pageCount}{" "}
+            {m.pageCount === 1 ? "page" : "pages"}
+          </span>
+          <span className="text-xs text-neutral-500">Prints as its own pages</span>
         </div>
       );
   }

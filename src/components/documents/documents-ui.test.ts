@@ -112,8 +112,8 @@ describe("the /documents route", () => {
 });
 
 describe("the canvas", () => {
-  it("has Insert PDF and Add Page under each page, and the Page N tab", () => {
-    expect(canvas).toContain("Insert PDF");
+  it("has Import document (PDF or Word; Nov 10, it was Insert PDF) and Add Page under each page, and the Page N tab", () => {
+    expect(canvas).toContain("Import document");
     expect(canvas).toContain("Add Page");
     // The tab reads "Page N" on a page's first sheet and "Page N · continued" on the sheets its
     // modules overflow onto (owner, Oct 26: the page break starts a new sheet on screen).

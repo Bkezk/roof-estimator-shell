@@ -13,11 +13,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { FilePlus2, FileText, FileUp, Loader2, Trash2 } from "lucide-react";
+import { FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
 
 import {
   continuedTabLabel,
+  IMPORT_ACCEPT,
+  importFileKind,
   MODULE_DRAG_TYPE,
+  OTHER_IMPORT_TEXT,
+  PUBLISHER_IMPORT_TEXT,
   breakOffsets,
   packIntoSegments,
   type SheetSegment,
@@ -83,6 +87,8 @@ import { dropIndexFromY } from "./drop-index";
 import { type EditorEnv, useEditorEnv } from "./editor-context";
 import { scrollToModule, scrollToPage } from "./editor-dom";
 import { ModuleView } from "./module-view";
+import { PdfSheets } from "./pdf-preview";
+import { ScaledSheet } from "./scaled-sheet";
 
 /** The print styles the rich text boxes need (Tailwind's preflight strips them). */
 const DOC_PROSE_CSS = `
@@ -111,7 +117,6 @@ export function PageCanvas(props: {
   const [scale, setScale] = useState(1);
   const [pdfFor, setPdfFor] = useState<number | null>(null);
   // "Import Word" (owner, Nov 10): the page the picked .docx goes after, and the read in flight.
-  const wordRef = useRef<HTMLInputElement>(null);
   const wordAfter = useRef(0);
   const [importing, setImporting] = useState(false);
   const uploadImageFn = useServerFn(uploadDocumentImage);
@@ -225,29 +230,16 @@ export function PageCanvas(props: {
                   type="button"
                   size="sm"
                   variant="outline"
-                  title="Insert a PDF from the library as the last module of this page"
-                  onClick={() => setPdfFor(i)}
-                >
-                  <FileUp className="h-4 w-4" />
-                  Insert PDF
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  title="Bring a Word document (.docx) in as a new page after this one: its text, pictures and tables become modules you can edit"
+                  title="Bring a file in after this page: a PDF (its pages print as they are), or a Word document (it becomes a page you can edit). A PDF already in the library can be picked too."
                   disabled={importing}
-                  onClick={() => {
-                    wordAfter.current = i;
-                    wordRef.current?.click();
-                  }}
+                  onClick={() => setPdfFor(i)}
                 >
                   {importing ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <FileText className="h-4 w-4" />
+                    <FileUp className="h-4 w-4" />
                   )}
-                  Import Word
+                  Import document
                 </Button>
                 <Button
                   type="button"
@@ -272,22 +264,15 @@ export function PageCanvas(props: {
           );
         })}
       </div>
-      <input
-        ref={wordRef}
-        type="file"
-        accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
-        className="hidden"
-        data-input="import-word"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (f) void importWord(f);
-        }}
-      />
       <InsertPdfDialog
         open={pdfFor !== null}
         onOpenChange={(o) => {
           if (!o) setPdfFor(null);
+        }}
+        onWord={(file) => {
+          wordAfter.current = pdfFor ?? 0;
+          setPdfFor(null);
+          void importWord(file);
         }}
         onInsert={(asset) => {
           const at = pdfFor ?? 0;
@@ -458,44 +443,63 @@ function PageSheets(props: {
 
   return (
     <>
-      {groups.map((segments, part) => (
-        <div key={part} className={part > 0 ? "mt-4" : undefined}>
-          <div className="mb-1 flex items-end gap-2">
-            <button
-              type="button"
-              className={cn(
-                "rounded-t-md border border-b-0 px-3 py-1 text-xs font-medium",
-                props.selected
-                  ? "bg-card text-card-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground",
-              )}
-              title="Select this page (the Modules tab adds here)"
-              onClick={() => env.dispatch({ type: "selectPage", pageId: props.page.id })}
-            >
-              {sheets[part]?.pdfPages
-                ? `${pageTabLabel(props.index)} · inserted PDF`
-                : continuedTabLabel(props.index, part)}
-            </button>
-            {part === 0 && props.page.modules.length === 0 ? (
-              <span className="pb-1 text-xs text-muted-foreground">
-                Empty page — add a module from the Modules tab
-              </span>
-            ) : null}
-          </div>
-          <ScaledSheet scale={props.scale}>
-            <Sheet
-              page={props.page}
-              index={props.index}
-              part={part}
-              segments={segments}
-              measureRef={measureRef}
-              printedNumber={numbers[part] ?? props.startNumber + part}
+      {groups.map((segments, part) => {
+        // An inserted PDF: each of its pages is a sheet of its own in the lineup.
+        const pdfId = sheets[part]?.pdfPages ? sheets[part]!.parts[0]?.id : undefined;
+        const pdfAt = pdfId ? props.page.modules.findIndex((x) => x.id === pdfId) : -1;
+        const pdf = pdfAt >= 0 ? props.page.modules[pdfAt] : undefined;
+        if (pdf?.type === "pdf")
+          return (
+            <PdfSheets
+              key={pdf.id}
+              module={pdf}
+              pageId={props.page.id}
+              pageIndex={props.index}
+              moduleIndex={pdfAt}
+              first={part === 0}
               selected={props.selected}
-              guide={props.guide}
+              scale={props.scale}
             />
-          </ScaledSheet>
-        </div>
-      ))}
+          );
+        return (
+          <div key={part} className={part > 0 ? "mt-4" : undefined}>
+            <div className="mb-1 flex items-end gap-2">
+              <button
+                type="button"
+                className={cn(
+                  "rounded-t-md border border-b-0 px-3 py-1 text-xs font-medium",
+                  props.selected
+                    ? "bg-card text-card-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+                title="Select this page (the Modules tab adds here)"
+                onClick={() => env.dispatch({ type: "selectPage", pageId: props.page.id })}
+              >
+                {sheets[part]?.pdfPages
+                  ? `${pageTabLabel(props.index)} · inserted PDF`
+                  : continuedTabLabel(props.index, part)}
+              </button>
+              {part === 0 && props.page.modules.length === 0 ? (
+                <span className="pb-1 text-xs text-muted-foreground">
+                  Empty page — add a module from the Modules tab
+                </span>
+              ) : null}
+            </div>
+            <ScaledSheet scale={props.scale}>
+              <Sheet
+                page={props.page}
+                index={props.index}
+                part={part}
+                segments={segments}
+                measureRef={measureRef}
+                printedNumber={numbers[part] ?? props.startNumber + part}
+                selected={props.selected}
+                guide={props.guide}
+              />
+            </ScaledSheet>
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -528,34 +532,6 @@ function locateCut(
   );
   if (rows.length) out.rowTops = rows;
   return out;
-}
-
-/** A scaled sheet still lays out at its full height; this wrapper takes the scaled height instead. */
-function ScaledSheet(props: { scale: number; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number>(SHEET.height);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
-    ro.observe(el);
-    setHeight(el.offsetHeight);
-    return () => ro.disconnect();
-  }, []);
-  return (
-    <div style={{ height: height * props.scale }}>
-      <div
-        ref={ref}
-        style={{
-          transform: `scale(${props.scale})`,
-          transformOrigin: "top left",
-          width: SHEET.width,
-        }}
-      >
-        {props.children}
-      </div>
-    </div>
-  );
 }
 
 function Sheet(props: {
@@ -758,6 +734,8 @@ export function InsertPdfDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onInsert: (asset: DocumentAssetRow) => void;
+  /** A Word document was picked: it becomes a new page (the canvas reads it). */
+  onWord: (file: File) => void;
 }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listDocumentAssets);
@@ -798,9 +776,11 @@ export function InsertPdfDialog(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Insert PDF</DialogTitle>
+          <DialogTitle>Import document</DialogTitle>
           <DialogDescription>
-            A PDF from the library prints as its own pages after this page's modules.
+            Upload a PDF or a Word document, or pick a PDF already in the library. A PDF comes in as
+            its own pages, printed as they are. A Word document (.docx) becomes a new page you can
+            edit. For a Publisher file, export it to PDF in Publisher first.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-72 space-y-1 overflow-y-auto">
@@ -814,7 +794,7 @@ export function InsertPdfDialog(props: {
             </div>
           ) : (assets.data ?? []).length === 0 ? (
             <div className="p-2 text-sm text-muted-foreground">
-              The library is empty. Upload a PDF to insert it.
+              The library is empty. Upload a file below.
             </div>
           ) : (
             (assets.data ?? []).map((a) => (
@@ -852,18 +832,26 @@ export function InsertPdfDialog(props: {
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf"
+            accept={IMPORT_ACCEPT}
             className="hidden"
+            data-input="import-document"
             onChange={(e) => {
               const f = e.target.files?.[0];
               e.target.value = "";
-              if (f) upload.mutate(f);
+              if (!f) return;
+              const kind = importFileKind(f.name, f.type);
+              if (kind === "pdf") upload.mutate(f);
+              else if (kind === "word") props.onWord(f);
+              else
+                toast.error(kind === "publisher" ? PUBLISHER_IMPORT_TEXT : OTHER_IMPORT_TEXT, {
+                  duration: 20000,
+                });
             }}
           />
           <Button
             type="button"
             variant="outline"
-            title="Add a PDF to the library and insert it"
+            title="A PDF goes into the library and is inserted; a Word document becomes a new page"
             disabled={upload.isPending}
             onClick={() => fileRef.current?.click()}
           >
@@ -872,7 +860,7 @@ export function InsertPdfDialog(props: {
             ) : (
               <FileUp className="h-4 w-4" />
             )}
-            Upload PDF
+            Upload file
           </Button>
           <Button type="button" variant="ghost" onClick={() => props.onOpenChange(false)}>
             Close

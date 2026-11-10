@@ -297,6 +297,32 @@ export function pdfPreviewPages(pageCount: number): { shown: number; more: numbe
   return { shown, more: n - shown };
 }
 
+/** The tab over one sheet of an inserted PDF: "Page 2 · Banner 2, page 1 of 3". */
+export const pdfSheetLabel = (pageLabel: string, name: string, n: number, of: number): string =>
+  of > 1 ? `${pageLabel} · ${name}, page ${n} of ${of}` : `${pageLabel} · ${name}`;
+
+/** What "Import document" does with a picked file, by its name (and type when the name is bare). */
+export type ImportFileKind = "pdf" | "word" | "publisher" | "other";
+export function importFileKind(fileName: string, mime = ""): ImportFileKind {
+  const ext = (/\.([a-z0-9]+)$/i.exec(fileName.trim())?.[1] ?? "").toLowerCase();
+  if (ext === "pdf" || mime === "application/pdf") return "pdf";
+  if (ext === "docx" || ext === "doc" || /wordprocessingml|msword/.test(mime)) return "word";
+  if (ext === "pub" || /ms-publisher/.test(mime)) return "publisher";
+  return "other";
+}
+/** The files the "Import document" picker offers. */
+export const IMPORT_ACCEPT =
+  ".pdf,.docx,.doc,.pub,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/x-mspublisher,application/vnd.ms-publisher";
+/**
+ * Said for a Publisher file: its format is Microsoft's own and nothing outside Publisher reads
+ * it, so the way in is the PDF that Publisher itself makes.
+ */
+export const PUBLISHER_IMPORT_TEXT =
+  "A Publisher file can only be opened by Publisher itself. In Publisher choose File, Export, Create PDF/XPS Document, then import that PDF here. It comes in as pages that print exactly as Publisher made them.";
+/** Said for anything else. */
+export const OTHER_IMPORT_TEXT =
+  "That file type cannot be imported. Pick a PDF or a Word document (.docx).";
+
 /** The drag type a saved snippet row carries onto a sheet (its data: the snippet's id). */
 export const SNIPPET_DRAG_TYPE = "application/x-jbk-document-snippet";
 

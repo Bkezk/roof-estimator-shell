@@ -525,6 +525,11 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template?.id]);
 
+  // Set by the first save of a new template: its move to its own address is not "leaving".
+  const savedNew = useRef(false);
+  useEffect(() => {
+    if (template?.id) savedNew.current = false;
+  }, [template?.id]);
   const dirty =
     state.dirty || description !== savedDescription || (!template && state.title.trim() !== "");
   const saveFn = useServerFn(saveDocumentTemplate);
@@ -540,6 +545,11 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
       void qc.invalidateQueries({ queryKey: templatesKey(props.kind) });
       void qc.invalidateQueries({ queryKey: templatesKey() });
       if (!template) {
+        // A new template moves to its own address once saved. Until that address has loaded
+        // the editor still counts as "new with a name", so the leave question would come up
+        // on the very save that made it (Nov 10: "Leave without saving?" right after Save, and
+        // the template never got its id, so its pictures could not be stored).
+        savedNew.current = true;
         void router.navigate({
           to: "/documents",
           search: { template: row.id, kind: props.kind },
@@ -573,6 +583,7 @@ function TemplateEditor(props: { template: TemplateRow | null; kind: DocKind }) 
       variables={variables}
       photos={[]}
       templateId={template?.id}
+      leaveFreelyRef={savedNew}
       recordLabel="Templates"
       back={TEMPLATES_ADMIN_PATH}
       saving={save.isPending}
@@ -1053,8 +1064,12 @@ function EditorShell(props: {
         onOpenChange={(o) => {
           if (!o) setSavePage(null);
         }}
-        title="Save page as snippet"
-        description="The whole page is saved, every module with its content. It is offered under Saved snippets on the Modules tab of every document and template; its + adds it as a new page."
+        title={
+          savePage
+            ? `Save page ${state.pages.findIndex((x) => x.id === savePage.id) + 1} as a snippet`
+            : "Save page as a snippet"
+        }
+        description="This is the page whose menu you opened. The whole page is saved, every module with its content. It is offered under Saved snippets on the Modules tab of every document and template; its + adds it as a new page."
         label="Snippet name"
         placeholder="e.g. Roof Evaluation Summary"
         busy={saveModuleMut.isPending}
@@ -1240,7 +1255,7 @@ function DocumentTab(props: {
                           disabled={page.modules.length === 0}
                           onClick={() => props.onSavePage?.(page)}
                         >
-                          <Bookmark className="h-4 w-4" /> Save page as snippet…
+                          <Bookmark className="h-4 w-4" /> Save page {i + 1} as a snippet…
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />

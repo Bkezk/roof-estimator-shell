@@ -251,7 +251,7 @@ describe("Admin › Documents", () => {
       "<AlertDialogTitle>Delete this PDF from the library?</AlertDialogTitle>",
     );
     expect(admin).toContain(
-      "Insert these into any document from the Insert PDF button under a page (award letters,",
+      "Insert these into any document from the Import document button under a page (award",
     );
   });
   it("toasts the server's message on every failure", () => {

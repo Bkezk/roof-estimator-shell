@@ -57,3 +57,32 @@ Composition, Assessment & Recommendations) in bold with blank lines to type on.
 
 `src/lib/documents/page-snippets-word-nov10.test.ts` (10 tests; a .docx is built inside the
 test). Two older pins were updated for the page-snippet row (`documents-ui.test.ts`).
+
+## Follow-up the same day
+
+The owner, after trying it: "if you click save page as a snippet how does it know which page?
+… could we just have the button document import and accept pdf, word, and publisher files?
+also when i import a pdf with multiple pages it appears weirdly … the pdf pages should just be
+in the page lineup normally".
+
+- **Which page.** Each row of the Pages list has its own three-dot menu, so the menu belongs to
+  that row's page. The item now reads "Save page 2 as a snippet…" and the popup's title says
+  "Save page 2 as a snippet".
+- **One button.** "Insert PDF" and "Import Word" are now one "Import document" button under each
+  sheet. Its popup lists the library's PDFs and has "Upload file", which takes a PDF (into the
+  library and inserted) or a Word document (a new page of editable modules).
+- **Publisher.** A .pub file can be picked, but it cannot be read: the format is Microsoft's own
+  and only Publisher opens it. The message says to use File, Export, Create PDF/XPS Document in
+  Publisher and import that PDF.
+- **PDF pages in the lineup.** An inserted PDF used to be one sheet (a grey bar, then every page
+  stacked inside one tall sheet). Each of its pages is now a sheet of its own in the lineup,
+  drawn edge to edge, with a tab such as "Page 1 · Banner 2, page 1 of 3". The first sheet's tab
+  carries Move up, Move down and a bin (with Undo). The first 12 pages are drawn; the rest are
+  counted and all print.
+- **Found on the way.** Saving a brand-new template raised "Leave without saving?" on the very
+  save that made it, and the template never moved to its own address, so its pictures could not
+  be stored. Fixed: that move is no longer treated as leaving.
+
+Browser, on a temporary template (removed afterwards): a three-page PDF made three sheets; the
+owner's Word form came in as page 2; a .pub file gave the Publisher message; the popup read
+"Save page 2 as a snippet"; the bin took the PDF out.
