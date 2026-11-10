@@ -2,12 +2,19 @@
  * DOM helpers for the Documents editor (no React): scrolling the canvas to a page or a module,
  * and reading a picture file for upload.
  */
-import { pageDomId } from "@/lib/documents/editor-helpers";
+import { pageDomId, SHEET_OF_ATTR } from "@/lib/documents/editor-helpers";
 
 export function scrollToPage(pageId: string) {
   document
     .getElementById(pageDomId(pageId))
     ?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Scroll the canvas to the k-th sheet of a page (0 = the page's first sheet). */
+export function scrollToSheet(pageId: string, index: number) {
+  document
+    .querySelectorAll(`[${SHEET_OF_ATTR}="${pageId}"]`)
+    [index]?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /** Scroll a module's wrapper on the canvas into view (one just dropped where the pointer was). */

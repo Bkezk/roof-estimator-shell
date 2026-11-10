@@ -27,6 +27,7 @@ import {
   Columns2,
   Bookmark,
   Copy,
+  CornerDownRight,
   Eye,
   EyeOff,
   FileDown,
@@ -73,8 +74,11 @@ import {
   PAGE_BREAK_MIN,
   parsePageBreak,
   savedModuleNamesOnPage,
+  sheetInfoLabel,
+  type SheetInfo,
   SNIPPET_DRAG_TYPE,
   TEMPLATES_ADMIN_PATH,
+  totalSheetPages,
   variableRowValue,
   versionLine,
 } from "@/lib/documents/editor-helpers";
@@ -140,7 +144,7 @@ import {
   EMPTY_EDITOR,
   selectedPageIndex,
 } from "@/components/documents/editor/editor-state";
-import { scrollToPage } from "@/components/documents/editor/editor-dom";
+import { scrollToPage, scrollToSheet } from "@/components/documents/editor/editor-dom";
 import { usePdfMeasure } from "@/components/documents/editor/screen-measure";
 import { PageCanvas } from "@/components/documents/editor/page-canvas";
 import { insertVariable } from "@/components/documents/editor/rich-text";
@@ -721,6 +725,16 @@ function EditorShell(props: {
   const [saveModule, setSaveModule] = useState<DocModule | null>(null);
   // "Save page as snippet…" on a page's menu: the page being named, or null.
   const [savePage, setSavePage] = useState<DocPage | null>(null);
+  // Each page's sheets as the canvas laid them out (continued sheets, an inserted PDF's pages):
+  // the Pages list counts and lists every one (owner, Nov 10).
+  const [sheetsByPage, setSheetsByPage] = useState<Record<string, SheetInfo[]>>({});
+  const onSheets = useCallback((pageId: string, sheets: SheetInfo[]) => {
+    setSheetsByPage((prev) =>
+      JSON.stringify(prev[pageId] ?? null) === JSON.stringify(sheets)
+        ? prev
+        : { ...prev, [pageId]: sheets },
+    );
+  }, []);
 
   const savedFn = useServerFn(listSavedModules);
   const savedModules = useQuery({ queryKey: savedModulesKey, queryFn: () => savedFn() });
@@ -769,6 +783,8 @@ function EditorShell(props: {
         activeEditorRef.current = e;
       },
       onSaveModule: (m) => setSaveModule(m),
+      onSavePage: setSavePage,
+      onSheets,
       snippets: savedModules.data ?? EMPTY_SNIPPETS,
       measure,
       imageSizes,
@@ -789,6 +805,7 @@ function EditorShell(props: {
       props.siteCoverUrl,
       dispatch,
       savedModules.data,
+      onSheets,
     ],
   );
 
@@ -833,6 +850,7 @@ function EditorShell(props: {
           dispatch={dispatch}
           savedModules={savedModules.data ?? []}
           onSavePage={setSavePage}
+          sheetsByPage={sheetsByPage}
         >
           {props.documentTab}
         </DocumentTab>
@@ -1079,7 +1097,7 @@ function EditorShell(props: {
             ? `Save page ${state.pages.findIndex((x) => x.id === savePage.id) + 1} as a snippet`
             : "Save page as a snippet"
         }
-        description="This is the page whose menu you opened. The whole page is saved, every module with its content. It is offered under Saved snippets on the Modules tab of every document and template; its + adds it as a new page."
+        description="This is the page you picked, by its menu or the button under it. The whole page is saved, every module with its content. It is offered under Saved snippets on the Modules tab of every document and template; its + adds it as a new page."
         label="Snippet name"
         placeholder="e.g. Roof Evaluation Summary"
         busy={saveModuleMut.isPending}
@@ -1101,6 +1119,8 @@ function DocumentTab(props: {
   savedModules: ReadonlyArray<{ name: string; module: DocModule }>;
   /** "Save page as snippet…" on a page's menu. */
   onSavePage?: (page: DocPage) => void;
+  /** Each page's sheets as the canvas laid them out (absent until it has). */
+  sheetsByPage?: Readonly<Record<string, readonly SheetInfo[] | undefined>>;
   children?: React.ReactNode;
 }) {
   const { state, dispatch } = props;
@@ -1189,7 +1209,14 @@ function DocumentTab(props: {
       </div>
 
       <div className="space-y-1">
-        <div className="text-sm font-medium">Pages ({state.pages.length})</div>
+        <div className="text-sm font-medium" data-pages-total>
+          Pages (
+          {totalSheetPages(
+            state.pages.map((p) => p.id),
+            props.sheetsByPage ?? {},
+          )}
+          )
+        </div>
         <ul className="divide-y rounded-md border">
           {state.pages.map((page, i) => {
             const chips = savedModuleNamesOnPage(page, props.savedModules);
@@ -1286,6 +1313,24 @@ function DocumentTab(props: {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
+                {(props.sheetsByPage?.[page.id] ?? []).map((sheet, k) =>
+                  sheet.kind === "page" ? null : (
+                    <button
+                      key={k}
+                      type="button"
+                      data-sheet-row={sheet.kind}
+                      className="flex w-full items-center gap-1.5 py-0.5 pl-4 text-left text-xs text-muted-foreground hover:text-foreground"
+                      title="Go to this page"
+                      onClick={() => {
+                        dispatch({ type: "selectPage", pageId: page.id });
+                        scrollToSheet(page.id, k);
+                      }}
+                    >
+                      <CornerDownRight className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{sheetInfoLabel(sheet)}</span>
+                    </button>
+                  ),
+                )}
                 {chips.length ? (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {chips.map((c) => (

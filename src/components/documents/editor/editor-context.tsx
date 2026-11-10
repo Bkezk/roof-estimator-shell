@@ -8,7 +8,8 @@
 import { createContext, type Dispatch, useContext } from "react";
 import type { Editor } from "@tiptap/react";
 
-import type { DocKind, DocModule, DocOptions } from "@/lib/documents/model";
+import type { SheetInfo } from "@/lib/documents/editor-helpers";
+import type { DocKind, DocModule, DocOptions, DocPage } from "@/lib/documents/model";
 import type { ImageSize, Measure } from "@/lib/documents/pdf-layout";
 
 import type { DocumentPhoto } from "../document-types";
@@ -31,6 +32,10 @@ export interface EditorEnv {
   setActiveEditor: (editor: Editor | null) => void;
   /** "Save as snippet…" on a module's toolbar: the page asks for a name and saves (document_modules). */
   onSaveModule: (module: DocModule) => void;
+  /** "Save page as snippet" under a page (and on its menu): the page asks for a name and saves. */
+  onSavePage?: ((page: DocPage) => void) | undefined;
+  /** The canvas reports each page's sheets as laid out (the Pages list shows every one). */
+  onSheets?: ((pageId: string, sheets: SheetInfo[]) => void) | undefined;
   /** The saved snippets the Modules tab lists; a row dragged onto a sheet drops a fresh copy. */
   snippets: ReadonlyArray<{ id: string; name: string; module: DocModule }>;
   /**

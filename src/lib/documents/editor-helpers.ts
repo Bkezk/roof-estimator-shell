@@ -297,6 +297,62 @@ export function pdfPreviewPages(pageCount: number): { shown: number; more: numbe
   return { shown, more: n - shown };
 }
 
+/**
+ * One sheet of a page as the canvas lays it out, for the Document tab's Pages list (owner,
+ * Nov 10: "when you import something as multiple pages it still only shows two pages total"):
+ * the page's first sheet, a sheet its modules ran over onto, one page of an inserted PDF, or
+ * the count of an inserted PDF's pages the canvas does not draw.
+ */
+export type SheetInfo =
+  | { kind: "page" }
+  | { kind: "continued" }
+  | { kind: "pdf"; name: string; n: number; of: number }
+  | { kind: "more"; name: string; count: number };
+
+/**
+ * The sheets of one page: `flows` are its laid-out sheets in order, each an ordinary sheet or an
+ * inserted PDF (`pdf`: its name and page count). The first ordinary sheet is the page itself;
+ * later ones are "continued".
+ */
+export function pageSheetInfos(
+  flows: ReadonlyArray<{ pdf?: { name: string; pageCount: number } | undefined }>,
+): SheetInfo[] {
+  const out: SheetInfo[] = [];
+  let seenPage = false;
+  for (const f of flows) {
+    if (!f.pdf) {
+      out.push({ kind: seenPage ? "continued" : "page" });
+      seenPage = true;
+      continue;
+    }
+    const { shown, more } = pdfPreviewPages(f.pdf.pageCount);
+    const of = Math.max(1, f.pdf.pageCount);
+    for (let n = 1; n <= Math.max(1, shown); n++)
+      out.push({ kind: "pdf", name: f.pdf.name, n, of });
+    if (more > 0) out.push({ kind: "more", name: f.pdf.name, count: more });
+  }
+  return out;
+}
+/** How many printed pages those sheets are. */
+export const sheetInfoPages = (infos: readonly SheetInfo[]): number =>
+  infos.reduce((t, s) => t + (s.kind === "more" ? s.count : 1), 0);
+/** A sheet's line in the Pages list (the page's own first sheet has the page row instead). */
+export function sheetInfoLabel(s: SheetInfo): string {
+  if (s.kind === "continued") return "continued";
+  if (s.kind === "pdf") return s.of > 1 ? `${s.name}, page ${s.n} of ${s.of}` : s.name;
+  if (s.kind === "more") return `${s.count} more ${s.count === 1 ? "page" : "pages"} of ${s.name}`;
+  return "Page";
+}
+/** The total the Pages list shows: every sheet of every page (a page not laid out yet is one). */
+export function totalSheetPages(
+  pageIds: readonly string[],
+  byPage: Readonly<Record<string, readonly SheetInfo[] | undefined>>,
+): number {
+  return pageIds.reduce((t, id) => t + Math.max(1, sheetInfoPages(byPage[id] ?? [])), 0);
+}
+/** The attribute every sheet on the canvas carries (the Pages list scrolls to the k-th of a page). */
+export const SHEET_OF_ATTR = "data-sheet-of";
+
 /** The tab over one sheet of an inserted PDF: "Page 2 · Banner 2, page 1 of 3". */
 export const pdfSheetLabel = (pageLabel: string, name: string, n: number, of: number): string =>
   of > 1 ? `${pageLabel} · ${name}, page ${n} of ${of}` : `${pageLabel} · ${name}`;

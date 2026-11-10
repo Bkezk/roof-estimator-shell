@@ -103,3 +103,39 @@ A manager kept getting this on Save with one tab open and nobody else in the doc
 - **Live data.** The document's saves are all there (versions 6 to 10 that morning); nothing was
   lost on the server.
 - Test: `src/components/documents/stale-bundle-nov10.test.ts`.
+
+## Later the same day: the Pages list and a button under each page
+
+"when you import something as multiple pages it still only shows two pages total even though
+there a lot more than 2 due to the import. also add a button at the bottom of the page to the
+right that says save page as snippet".
+
+- **Is the stale-copy fix live?** Yes. The published site's documents code was downloaded and
+  read: it holds `gcTime:0` on the document read and the "keep the open editor" guard, along
+  with "Import document" and the page snippet menu.
+- **Pages list.** The Document tab's list counted the editor's own pages only, so a page holding
+  an imported three-page PDF was one row and one in the total. The canvas now reports every
+  sheet it lays out for a page (`pageSheetInfos`), and the list counts them all
+  (`totalSheetPages`). Under a page's row, each extra sheet has its own line: "continued" for
+  text that ran over, "Plans, page 2 of 3" for a PDF page, "28 more pages of Manual" for PDF
+  pages past the 12 the editor draws. Clicking a line scrolls to that sheet.
+- **Save page as snippet.** A button at the right of the row under each page, beside Import
+  document and Add Page. It opens the same naming popup as the page's menu, titled with the
+  page number. It is off on an empty page. The popup's first line no longer says the menu was
+  used.
+- Tests: `src/lib/documents/pages-list-sheets-nov10.test.ts` (6 of its 14 fail on the old
+  wiring).
+
+Browser, on a temporary template (removed afterwards with its two library PDFs and files):
+
+| Step                    | Pages total | Lines under page 1                    |
+| ----------------------- | ----------- | ------------------------------------- |
+| New template            | 1           | none                                  |
+| Three-page PDF imported | 4           | three, "page 1 of 3" to "page 3 of 3" |
+| Add Page                | 5           | three                                 |
+| Saved and reopened      | 4           | three                                 |
+| PDF taken out           | 2           | none                                  |
+
+Clicking each PDF line put that sheet at the top of the view. The button's right edge matched
+the sheet's right edge (1552 px both); it opened "Save page 1 as a snippet"; page 2, empty, had
+it switched off. At phone width it stayed inside the screen.

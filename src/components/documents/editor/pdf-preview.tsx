@@ -19,6 +19,7 @@ import {
   pdfPreviewPages,
   pdfSheetLabel,
   SHEET,
+  SHEET_OF_ATTR,
 } from "@/lib/documents/editor-helpers";
 import { addModule, moveModule, type PdfModule, removeModule } from "@/lib/documents/model";
 import { documentAssetUrl } from "@/lib/documents.functions";
@@ -99,6 +100,7 @@ export function PdfSheets(props: {
           key={k}
           className={!props.first || k > 0 ? "mt-4" : undefined}
           data-pdf-sheet={k + 1}
+          {...{ [SHEET_OF_ATTR]: props.pageId }}
           data-module-type={k === 0 ? "pdf" : undefined}
         >
           <div className="mb-1 flex items-end gap-2">
@@ -193,7 +195,11 @@ export function PdfSheets(props: {
         </div>
       ))}
       {more > 0 && (
-        <p className="mt-2 text-xs text-muted-foreground" data-pdf-more={more}>
+        <p
+          className="mt-2 text-xs text-muted-foreground"
+          data-pdf-more={more}
+          {...{ [SHEET_OF_ATTR]: props.pageId }}
+        >
           “{m.name}” has {more} more {more === 1 ? "page" : "pages"} not drawn here. All of them
           print.
         </p>

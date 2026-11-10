@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
+import { BookmarkPlus, FilePlus2, FileUp, Loader2, Trash2 } from "lucide-react";
 
 import {
   continuedTabLabel,
@@ -27,8 +27,11 @@ import {
   type SheetSegment,
   pageBreakPx,
   pageDomId,
+  pageSheetInfos,
   pageTabLabel,
   pricingSourceFromVariables,
+  SHEET_OF_ATTR,
+  type SheetInfo,
   SHEET,
   sheetContentLimit,
   sheetScale,
@@ -259,6 +262,20 @@ export function PageCanvas(props: {
                   <FilePlus2 className="h-4 w-4" />
                   Add Page
                 </Button>
+                {env.onSavePage && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                    title={`Save page ${i + 1} as a snippet: the whole page, to add again as a new page from the Modules tab`}
+                    disabled={page.modules.length === 0}
+                    onClick={() => env.onSavePage?.(page)}
+                  >
+                    <BookmarkPlus className="h-4 w-4" />
+                    Save page as snippet
+                  </Button>
+                )}
               </div>
             </div>
           );
@@ -434,6 +451,19 @@ function PageSheets(props: {
   useEffect(() => {
     onSheetCount(pageId, printed);
   }, [printed, pageId, onSheetCount]);
+  // Every sheet of this page, for the Document tab's Pages list (an inserted PDF: one per page).
+  const infos = pageSheetInfos(
+    sheets.map((sheet) => {
+      const id = sheet.pdfPages ? sheet.parts[0]?.id : undefined;
+      const pm = id ? props.page.modules.find((x) => x.id === id) : undefined;
+      return pm?.type === "pdf" ? { pdf: { name: pm.name, pageCount: pm.pageCount } } : {};
+    }),
+  );
+  const infoKey = JSON.stringify(infos);
+  const { onSheets } = env;
+  useEffect(() => {
+    onSheets?.(pageId, JSON.parse(infoKey) as SheetInfo[]);
+  }, [infoKey, pageId, onSheets]);
   /** The printed page number each sheet starts at (an inserted PDF takes its own pages). */
   const numbers: number[] = [];
   sheets.reduce((n, sheet) => {
@@ -462,7 +492,11 @@ function PageSheets(props: {
             />
           );
         return (
-          <div key={part} className={part > 0 ? "mt-4" : undefined}>
+          <div
+            key={part}
+            className={part > 0 ? "mt-4" : undefined}
+            {...{ [SHEET_OF_ATTR]: props.page.id }}
+          >
             <div className="mb-1 flex items-end gap-2">
               <button
                 type="button"
