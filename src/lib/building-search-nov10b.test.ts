@@ -65,7 +65,14 @@ describe("20261110211000: buildings_search", () => {
     expect(sql).not.toMatch(/security_barrier/);
   });
   it("is for signed-in users to read, nobody else, and never to write", () => {
-    expect(sql).toContain("revoke all on public.buildings_search from public, anon;");
+    // `authenticated` too: Supabase's default privileges give it every right on a new view, and
+    // this view runs as its owner, so a write through it would skip the table's own rules.
+    expect(sql).toContain(
+      "revoke all on public.buildings_search from public, anon, authenticated;",
+    );
+    expect(sql.indexOf("revoke all on public.buildings_search")).toBeLessThan(
+      sql.indexOf("grant select on public.buildings_search"),
+    );
     expect(sql).toContain(
       "grant select on public.buildings_search to authenticated, service_role;",
     );

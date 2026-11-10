@@ -34,7 +34,11 @@ create or replace view public.buildings_search as
     from public.buildings b
    where (select public.has_access('prospect')) or (select public.has_access('estimate'));
 
-revoke all on public.buildings_search from public, anon;
+-- Read-only for real: Supabase's default privileges hand `authenticated` every right on a new
+-- relation, and a plain one-table view can be written through. The view runs as its owner, so a
+-- write through it would skip the table's own insert / update / delete rules. Take every right
+-- away first, then give back SELECT alone.
+revoke all on public.buildings_search from public, anon, authenticated;
 grant select on public.buildings_search to authenticated, service_role;
 
 comment on view public.buildings_search is
