@@ -60,6 +60,9 @@ import { seedJobFromToday } from "@/lib/job-cache";
 import { CLOCK_MOVED_LINE, cardActions, pressLine, runningLabel } from "@/lib/tech-clock";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
+import { RateBadge } from "@/components/service/rate-badge";
+import { urgentFirst, urgentRate } from "@/lib/rate-urgency";
+import { RATE_TONES } from "@/lib/stage-colors";
 import { usePictures } from "@/components/service/picture-queue";
 import { UploadBadge, WaitingForSignalLine } from "@/components/service/picture-queue-ui";
 import { HistoryLink } from "@/components/service/site-history";
@@ -160,11 +163,13 @@ export function TodayPage() {
   const today = useLocalDay();
   const jobs = q.data ?? [];
   // Today (and anything overdue or already started) first, then the coming days, then undated.
-  const now_ = jobs.filter(
-    (j) => !!j.field_status || (!!j.scheduled_date && j.scheduled_date <= today),
+  // Inside each group the most urgent go first (owner, Nov 13: Emergency, then Urgent, then the
+  // rest; rate-urgency.ts urgentFirst), and each keeps the day order the server sent.
+  const now_ = urgentFirst(
+    jobs.filter((j) => !!j.field_status || (!!j.scheduled_date && j.scheduled_date <= today)),
   );
-  const later = jobs.filter((j) => !now_.includes(j) && !!j.scheduled_date);
-  const undated = jobs.filter((j) => !now_.includes(j) && !j.scheduled_date);
+  const later = urgentFirst(jobs.filter((j) => !now_.includes(j) && !!j.scheduled_date));
+  const undated = urgentFirst(jobs.filter((j) => !now_.includes(j) && !j.scheduled_date));
   const title = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "short",
@@ -459,9 +464,16 @@ function JobCard({
   const spin = (Icon: typeof Truck) =>
     busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Icon className="mr-2 h-5 w-5" />;
 
+  // Urgent or Emergency (owner, Nov 13): the badge above the title and a stripe down the edge,
+  // as on the Tech Board.
+  const urgency = urgentRate(j.labor_rate_kind);
+
   return (
-    <article className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+    <article
+      className={`space-y-3 rounded-xl border bg-card p-4 shadow-sm ${urgency ? RATE_TONES[urgency].stripe : ""}`}
+    >
       <div className="space-y-1">
+        {urgency && <RateBadge kind={urgency} size="lg" />}
         <Link
           to="/service"
           search={{ id: j.id }}

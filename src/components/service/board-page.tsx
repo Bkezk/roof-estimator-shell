@@ -32,6 +32,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { RateBadge } from "@/components/service/rate-badge";
 import { ServiceTabs } from "@/components/service/service-tabs";
 import { toast } from "sonner";
 import {
@@ -44,8 +45,6 @@ import {
   Inbox,
   Loader2,
   Plus,
-  Siren,
-  TriangleAlert,
 } from "lucide-react";
 import {
   FIELD_TONE_LABELS,
@@ -80,8 +79,7 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { chipBadge, chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
-import { RATE_KIND_LABELS } from "@/lib/invoices.functions";
-import { sortCell, type UrgentRate } from "@/lib/rate-urgency";
+import { sortCell } from "@/lib/rate-urgency";
 import { plainErrText } from "@/lib/plain-error";
 
 const errText = plainErrText;
@@ -725,20 +723,6 @@ function StageLegend({ stages }: { stages: readonly StageToneKey[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-/** The Urgent / Emergency badge (owner, Nov 13): a word and an icon, never colour alone. */
-function RateBadge({ kind }: { kind: UrgentRate }) {
-  const Icon = kind === "emergency" ? Siren : TriangleAlert;
-  return (
-    <span
-      data-rate={kind}
-      className={`flex w-fit max-w-full items-center gap-0.5 rounded-sm border px-1 text-[10px] font-bold uppercase leading-4 tracking-wide ${RATE_TONES[kind].badge}`}
-    >
-      <Icon className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="truncate">{RATE_KIND_LABELS[kind]}</span>
-    </span>
   );
 }
 

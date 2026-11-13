@@ -68,9 +68,10 @@ describe("the badge on a card", () => {
     for (const t of Object.values(STAGE_TONES)) {
       expect(t.chip).not.toMatch(/\b(?:bg|border)-(?:red|yellow)-/);
     }
-    const board = readFileSync("src/components/service/board-page.tsx", "utf8");
-    expect(board).toContain('const Icon = kind === "emergency" ? Siren : TriangleAlert;');
-    expect(board).toContain("{RATE_KIND_LABELS[kind]}");
+    // The badge is one component for the board and My tickets (rate-badge.tsx).
+    const badge = readFileSync("src/components/service/rate-badge.tsx", "utf8");
+    expect(badge).toContain('const Icon = kind === "emergency" ? Siren : TriangleAlert;');
+    expect(badge).toContain("{RATE_KIND_LABELS[kind]}");
   });
 });
 

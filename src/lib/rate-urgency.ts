@@ -33,3 +33,17 @@ export function sortCell<T extends { labor_rate_kind?: string | null; number: nu
     (a, b) => rateRank(a.labor_rate_kind) - rateRank(b.labor_rate_kind) || a.number - b.number,
   );
 }
+
+/**
+ * A list with the most urgent first (owner, Nov 13, for My tickets): Emergency, then Urgent, then
+ * the rest. The order the list came in is kept within each, so a list already by day stays by
+ * day. The input is not reordered.
+ */
+export function urgentFirst<T extends { labor_rate_kind?: string | null }>(
+  jobs: readonly T[],
+): T[] {
+  return jobs
+    .map((job, i) => ({ job, i }))
+    .sort((a, b) => rateRank(a.job.labor_rate_kind) - rateRank(b.job.labor_rate_kind) || a.i - b.i)
+    .map((x) => x.job);
+}

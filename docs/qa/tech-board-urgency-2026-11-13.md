@@ -77,3 +77,35 @@ Files: `src/lib/board-rows.ts` (new: `shadedRow`, `rowHeaderTone`, `cellTone`),
 Proof: `src/lib/board-row-shading-nov13k.test.ts`, 7 tests, 2 fail with the page put back to the
 old code. Full chain clean: 548 files / 7,153 tests, build. Browser, read only: the seven
 technician rows read plain, shaded, plain, shaded, plain, shaded, plain, in light and in dark.
+
+## Later the same day: My tickets shows the urgency too
+
+Asked whether the technician's phone list should carry the same badge and order, the owner said
+"yes go ahead".
+
+- A card on My tickets wears the same badge above its title, in a larger size, and the same stripe
+  down its left edge. Standard cards look as they did.
+- Inside each group (Today, Coming up, No date yet) the most urgent go first: Emergency, then
+  Urgent, then the rest. Each keeps the day order within it.
+- The groups keep their order. An Emergency for next week stays under Coming up; it does not jump
+  above today's work.
+- The badge is now one shared component (`src/components/service/rate-badge.tsx`) for the board
+  and the phone.
+
+Files: `rate-badge.tsx` (new), `src/lib/rate-urgency.ts` (`urgentFirst`),
+`src/components/service/today-page.tsx`, `src/components/service/board-page.tsx`.
+
+Proof:
+
+- `src/lib/my-tickets-urgency-nov13l.test.ts`: 9 tests, 3 fail with the two pages put back to the
+  old code.
+- Full chain clean: 549 files / 7,162 tests, build.
+- Browser at phone width (390 px), signed in as the test login, on five temporary tickets made by
+  SQL with numbers 999911 to 999915:
+  - Today read Emergency #999912, then Standard #999911.
+  - Coming up read Urgent for Tuesday, Urgent for Friday, then Standard for Monday.
+  - Each badge sat above its title, each urgent card had the stripe, and the page did not scroll
+    sideways.
+  - The Tech Board still drew its badges, at the small size.
+- Cleanup: the five tickets, their stage events and their history lines were removed. The ticket
+  counter still reads 6073. Nothing named "ZZ" is left.
