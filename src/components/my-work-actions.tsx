@@ -16,6 +16,10 @@
  *     scheduled for it, the task is due on it, the opportunity's expected close becomes it where
  *     the viewer may move that date, else the toast says it stayed). Cancel writes nothing.
  *
+ *   - bidStatus / bidDialogs (owner, Nov 13): the status select on a bid row (setBidStatus, the
+ *     Bids page's own call), with its "When was it won?" and "Why was it lost?" questions. The
+ *     row leaves once the bid is no longer a draft; the toast says so and its Undo sets it back.
+ *
  * Every change invalidates ["my-work"] and toasts; an error toasts the server's message and
  * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it;
  * Oct 21: so did a failed open or Done tick — "Task not found" on every click for five minutes).
@@ -34,6 +38,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { listTechnicians, type UserProfile } from "@/lib/auth.functions";
+import { asBidStatus, bidOfficeToday, type BidStatus } from "@/lib/bid-status";
+import { setBidStatus } from "@/lib/bids.functions";
 import { shortDay } from "@/lib/followup-rules";
 import { localYmd, type WorkItem } from "@/lib/my-work";
 import {
@@ -42,6 +48,9 @@ import {
   assignPlan,
   assignedToast,
   assignedToastExtra,
+  bidStatusAsks,
+  bidStatusHere,
+  bidStatusToast,
   canEditWorkTask,
   canMoveWork,
   canStartMove,
@@ -66,7 +75,9 @@ import {
   setTaskStatus,
   userLabel,
 } from "@/lib/tasks.functions";
+import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { AssignSelect, type AssignOption as Option } from "@/components/work-assign-select";
+import { BidStatusSelect, BidWonDialog } from "@/components/work-bid-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -95,6 +106,8 @@ export interface WorkActions {
   markingDone: (item: WorkItem) => boolean;
   /** The "Assign to…" select for an Unassigned row; null when the viewer may not assign it. */
   assign: (item: WorkItem) => ReactNode;
+  /** The status select for a bid row (Nov 13); null for every other kind. */
+  bidStatus: (item: WorkItem) => ReactNode;
   /**
    * Does a drop of this Unassigned row on a calendar day open the assign dialog (Oct 20: the
    * viewer may assign it but not Claim it — dropAssigns)? The pane drags the row when so.
@@ -117,6 +130,8 @@ export function useWorkActions(profile: UserProfile | null): {
   closeTask: () => void;
   /** The assign-for-a-day dialog (Oct 20), for the page to render once. */
   assignDialog: ReactNode;
+  /** A bid's "When was it won?" / "Why was it lost?" question (Nov 13), rendered once too. */
+  bidDialogs: ReactNode;
 } {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -365,12 +380,77 @@ export function useWorkActions(profile: UserProfile | null): {
     </Dialog>
   );
 
+  // A bid row's status (owner, Nov 13): the Bids page's call. Won carries its day, Lost its
+  // reason; the linked opportunity follows on the server (syncOpportunityFromBid).
+  const bidStatusFn = useServerFn(setBidStatus);
+  const bidStatus = useMutation({
+    mutationFn: (v: {
+      id: string;
+      status: BidStatus;
+      lostReason?: string | null;
+      wonOn?: string | null;
+    }) => bidStatusFn({ data: v }),
+    onSuccess: (b) => {
+      const t = bidStatusToast(asBidStatus(b.status));
+      toast.success(t.title, {
+        ...(t.description ? { description: t.description } : {}),
+        ...(t.undo
+          ? {
+              action: {
+                label: "Undo",
+                onClick: () => bidStatus.mutate({ id: b.id, status: "draft" }),
+              },
+            }
+          : {}),
+      });
+      invalidate();
+      // The Bids page's list, if it is cached, shows the old status until it is read again.
+      void qc.invalidateQueries({ queryKey: ["bids"] });
+    },
+    // A bid deleted or changed elsewhere: the row is stale, so the list is refetched.
+    onError: (e) => {
+      toast.error(errText(e) || "Could not change status");
+      invalidate();
+    },
+  });
+  const [wonFor, setWonFor] = useState<{ id: string; name: string; day: string } | null>(null);
+  const [lostFor, setLostFor] = useState<{ id: string; name: string } | null>(null);
+  const bidDialogs = (
+    <>
+      {wonFor && (
+        <BidWonDialog
+          bidName={wonFor.name}
+          day={wonFor.day}
+          busy={bidStatus.isPending}
+          onDay={(day) => setWonFor({ ...wonFor, day })}
+          onCancel={() => setWonFor(null)}
+          onConfirm={() => {
+            bidStatus.mutate({ id: wonFor.id, status: "won", wonOn: wonFor.day || null });
+            setWonFor(null);
+          }}
+        />
+      )}
+      {lostFor && (
+        <LostReasonDialog
+          open
+          bidName={lostFor.name}
+          onCancel={() => setLostFor(null)}
+          onConfirm={(reason) => {
+            bidStatus.mutate({ id: lostFor.id, status: "lost", lostReason: reason });
+            setLostFor(null);
+          }}
+        />
+      )}
+    </>
+  );
+
   const pendingIds = new Set<string>(
     [
       open.isPending ? open.variables : null,
       status.isPending ? status.variables?.id : null,
       move.isPending ? move.variables?.id : null,
       assign.isPending ? assign.variables?.id : null,
+      bidStatus.isPending ? bidStatus.variables?.id : null,
     ].filter((x): x is string => !!x),
   );
 
@@ -410,6 +490,24 @@ export function useWorkActions(profile: UserProfile | null): {
         />
       );
     },
+    bidStatus: (item) => {
+      if (!bidStatusHere(item)) return null;
+      const id = workId(item);
+      return (
+        <BidStatusSelect
+          label={`Status of ${item.title}`}
+          // Work Overview lists draft bids only (my-work.ts bidItem).
+          value="draft"
+          disabled={pendingIds.has(id)}
+          onPick={(status) => {
+            const asks = bidStatusAsks(status);
+            if (asks === "day") setWonFor({ id, name: item.title, day: bidOfficeToday() });
+            else if (asks === "reason") setLostFor({ id, name: item.title });
+            else bidStatus.mutate({ id, status });
+          }}
+        />
+      );
+    },
     dropAssigns: (item) => dropAssigns(item, profile),
     assignOn: (item, day) => {
       if (!assignKind(item, profile)) return;
@@ -427,5 +525,5 @@ export function useWorkActions(profile: UserProfile | null): {
     busy: (item) => pendingIds.has(workId(item)),
   };
 
-  return { actions, editTask, closeTask: () => setEditTask(null), assignDialog };
+  return { actions, editTask, closeTask: () => setEditTask(null), assignDialog, bidDialogs };
 }

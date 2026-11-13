@@ -431,8 +431,9 @@ describe("5. the page: the pane for assigners, their drag, the dialog", () => {
       /if \(it\.unassigned\) \{\s*if \(claim\) claim\(it, d\);\s*else actions\?\.assignOn\(it, d\);\s*\} else actions\?\.move\(it, d\);/,
     );
     expect(cal).toContain("const dropTargets = !!claim || !!actions;");
-    expect(page).toContain(
-      "const { actions: rowActions, editTask, closeTask, assignDialog } = useWorkActions(profile);",
+    // bidDialogs joined the hook's answer on Nov 13 (a bid row's status questions).
+    expect(page.replace(/\s+/g, " ")).toContain(
+      "const { actions: rowActions, editTask, closeTask, assignDialog, bidDialogs, } = useWorkActions(profile);",
     );
     expect(page).toContain("{assignDialog}");
     // The claim path itself is as it was.
@@ -462,7 +463,7 @@ describe("5. the page: the pane for assigners, their drag, the dialog", () => {
       /<Button type="button" variant="outline" onClick=\{closeDrop\}>\s*Cancel\s*<\/Button>/,
     );
     expect(hook).toContain(
-      "return { actions, editTask, closeTask: () => setEditTask(null), assignDialog };",
+      "return { actions, editTask, closeTask: () => setEditTask(null), assignDialog, bidDialogs };",
     );
     const select = read("src/components/work-assign-select.tsx");
     expect(select).toContain('value = "",');

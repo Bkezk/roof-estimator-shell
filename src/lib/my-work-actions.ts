@@ -30,9 +30,16 @@
  *     admin, a manager or an unticked office dispatcher could dispatch from the List alone.
  *   - The toolbar's New ticket / New opportunity links (`newTicketHref`, NEW_OPPORTUNITY_HREF):
  *     from the Calendar the ticket carries the selected day.
+ *   - A bid row's status changes in place (owner, Nov 13: "have the bid status be able to be
+ *     updated on the work overview page like how you can assign unassigned jobs on tickets"):
+ *     the Bids page's select on the row (`bidStatusHere`), with its two questions — the day for
+ *     Won, the reason for Lost (`bidStatusAsks`). Work Overview lists draft bids only, so the row
+ *     leaves once the status is anything else; the toast says where it went and offers Undo
+ *     (`bidStatusToast`).
  */
 import { canClaim, dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
 import { dateMoveProblem } from "@/lib/followup-rules";
+import { BID_STATUSES, STATUS_LABELS, type BidStatus } from "@/lib/bid-status";
 import { ymdParts, type WorkItem, type WorkKind } from "@/lib/my-work";
 
 /** The signed-in person as the rules read them: role, access, technician, and their id. */
@@ -337,3 +344,45 @@ export const HOLD_ENDED_SUFFIX = " — its hold was ended";
  */
 export const movedToast = (day: string, snoozeCleared: boolean): string =>
   `Moved to ${monthDay(day)}${snoozeCleared ? HOLD_ENDED_SUFFIX : ""}`;
+
+// ---- a bid row's status (owner, Nov 13) ------------------------------------------------------
+
+/**
+ * Does this row carry the status select? Every bid row: the server lists bids only for a viewer
+ * with Estimate access (my-work.functions.ts), the people the Bids page's own select is for.
+ */
+export const bidStatusHere = (item: Pick<WorkItem, "kind">): boolean => item.kind === "bid";
+
+/** The select's choices, in the Bids page's order, with its labels. */
+export const BID_STATUS_CHOICES: { value: BidStatus; label: string }[] = BID_STATUSES.map((v) => ({
+  value: v,
+  label: STATUS_LABELS[v],
+}));
+
+/**
+ * What a pick needs before it is saved, as on the Bids page: Won asks the day it was won, Lost
+ * asks why; Submitted (and Draft) save at once.
+ */
+export const bidStatusAsks = (status: BidStatus): "day" | "reason" | null =>
+  status === "won" ? "day" : status === "lost" ? "reason" : null;
+
+/** Said under the toast once a bid is no longer a draft: the row has left this page. */
+export const BID_LEFT_WORK_OVERVIEW =
+  "Work Overview lists draft bids only. This one is on the Bids page now.";
+
+/**
+ * The toast after a status change: the Bids page's "Status: Submitted", and where the row went
+ * when it is no longer a draft (with Undo, which sets it back to Draft).
+ */
+export function bidStatusToast(status: BidStatus): {
+  title: string;
+  description: string | null;
+  undo: boolean;
+} {
+  const left = status !== "draft";
+  return {
+    title: `Status: ${STATUS_LABELS[status]}`,
+    description: left ? BID_LEFT_WORK_OVERVIEW : null,
+    undo: left,
+  };
+}

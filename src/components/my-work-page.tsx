@@ -309,6 +309,8 @@ function WorkRow({
   const mapHref = act || inert ? taskMapHref(item) : null;
   const tick = !!act && act.canEditTask(item);
   const assignNode = item.unassigned && actions ? actions.assign(item) : null;
+  // A bid's status, changed in place (owner, Nov 13), beside where "Assign to…" sits.
+  const bidNode = actions ? actions.bidStatus(item) : null;
   const showClaim = !!item.unassigned && !!claim;
   // A ticket nobody is on that is not Unassigned (Done or Authorized with the technician
   // removed; Nov 2): "No technician", not "(unknown)" — no name lookup failed.
@@ -385,7 +387,7 @@ function WorkRow({
           {manage(f)}
         </div>
       )}
-      {(tick || mapHref || assignNode || showClaim) && (
+      {(tick || mapHref || assignNode || bidNode || showClaim) && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {/* The Done tick (owner, Oct 15): no confirm; the toast's Undo reopens it. It shows
@@ -415,6 +417,7 @@ function WorkRow({
             )}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {bidNode}
             {assignNode}
             {showClaim && (
               <Button
@@ -1247,7 +1250,13 @@ export function MyWorkPage(props: {
   // rules in lib/my-work-actions.ts). The Calendar's selected day is the page's, so New ticket
   // and New task carry it.
   const navigate = useNavigate();
-  const { actions: rowActions, editTask, closeTask, assignDialog } = useWorkActions(profile);
+  const {
+    actions: rowActions,
+    editTask,
+    closeTask,
+    assignDialog,
+    bidDialogs,
+  } = useWorkActions(profile);
   // A row's busy set includes the claim in flight on it (Oct 15: Claim could be clicked twice).
   const actions: WorkActions = {
     ...rowActions,
@@ -1506,6 +1515,8 @@ export function MyWorkPage(props: {
         {/* An Unassigned row dropped on a calendar day by someone who assigns rather than claims
           (Oct 20): "Assign <title> for <day>" (components/my-work-actions.tsx). */}
         {assignDialog}
+        {/* A bid row's "When was it won?" / "Why was it lost?" (Nov 13). */}
+        {bidDialogs}
         <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="View">
           <Button
             size="sm"

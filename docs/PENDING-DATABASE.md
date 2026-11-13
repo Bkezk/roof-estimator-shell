@@ -43,6 +43,18 @@ checked, delete this file, the `docs/pending-database/` folder and the pointer i
   purpose.
 - Record: `docs/qa/security-open-rules-2026-11-13.md`
 
+## 3. Remove a hidden test customer for good
+
+A browser test on Nov 13 made one temporary customer, "ZZ Status Co"
+(`crm_accounts.id = c10a9440-fb36-4504-bd81-f5ff120835d0`), and deleted it through the Customers
+page, which only hides it. Its temporary bid (`418e4f70-41e1-49f9-9c5e-d46d1eab7f7c`) was already
+removed for good through the Bids page.
+
+- Confirm the row is the test one (name starts "ZZ ", `deleted_at` set, created Nov 13 by the
+  test login), then delete it with its contact rows and any other child rows, and the
+  `audit_log` rows of the account and of the bid id above.
+- Touch no other row.
+
 ## Rules that still apply
 
 - Never delete or truncate a table. Never edit a real bid or ticket.
