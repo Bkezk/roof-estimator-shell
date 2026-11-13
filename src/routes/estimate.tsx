@@ -6971,8 +6971,11 @@ function EstimatePage() {
             beside the status … below that the notifications, document, and export in that order
             with the small square buttons"): Bid due and Status side by side, the three square
             buttons under them. */}
-        {/* The date box keeps its natural width (owner, Oct 26: "the date is still a bit cut off"). */}
-        <div className="grid grid-cols-[9.5rem_1fr] items-end gap-2">
+        {/* The date box keeps its natural width (owner, Oct 26: "the date is still a bit cut off").
+            Wider and a little less padding inside since the text grew 15% (Nov 13): at 9.5rem
+            the calendar icon was cut. Wider again below the md width, where a form box's text is
+            a size larger. */}
+        <div className="grid grid-cols-[11.5rem_1fr] items-end gap-2 md:grid-cols-[10rem_1fr]">
           {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so
             we can also have those show on this week, overdue, etc" — the row's due_date, beside
             Status. Required on the first save (handleSave rings it and says so); a bid from before
@@ -6985,7 +6988,7 @@ function EstimatePage() {
               id="bid-due-date"
               ref={dueDateRef}
               type="date"
-              className={`h-9 w-full ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
+              className={`h-9 w-full px-2 ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : bidId && !bidDueDate ? "border-amber-500 ring-1 ring-amber-500/40" : ""}`}
               value={bidDueDate}
               onChange={(e) => {
                 const v = e.target.value;
@@ -7164,7 +7167,7 @@ function EstimatePage() {
               <Input
                 id="bid-reminder-on"
                 type="date"
-                className="h-9 w-[9.5rem]"
+                className="h-9 w-[10.5rem]"
                 value={bidReminderOn}
                 onChange={(e) => {
                   setBidReminderOn(e.target.value);

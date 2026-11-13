@@ -4,7 +4,8 @@ Owner: "can you make font across the site larger without changing the layout?"
 
 ## What changed
 
-One number in `src/styles.css`, `--jbk-text-scale`, now 1.12.
+One number in `src/styles.css`, `--jbk-text-scale`. It started at 1.12 and is now 1.15 (see
+"Moved to 15%" below). The table is the first step.
 
 - Every text size is multiplied by it. Every line height is divided by it. So a line of text is
   exactly as tall as before and only the letters grow.
@@ -79,6 +80,23 @@ Nothing snaps at 12%. It is a slope: each step wraps more lines. Two things do s
 
 So +12% is the largest size measured with nothing cut. +16% is usable with that one box widened.
 Past +20% the line height would have to grow too, and that is a change of layout.
+
+## Moved to 15% (owner: "lets try an even 15%?")
+
+The number is now 1.15. Sizes: `text-xs` 11.21 px, `text-[10px]` 11.5 px, `text-[11px]` 12.65 px,
+`text-sm` 13.08 px, plain text 14.95 px, `text-lg` 16.82 px, `text-2xl` 22.43 px.
+
+- **Date boxes.** Every date box width in use was photographed at 15%. One kind was cut: 9.5rem
+  wide with the usual padding and normal text. That is the estimator's Bid due box and the bid's
+  Remind me on box. Bid due now has a 10rem column and slightly less padding inside, and 11.5rem
+  on phones, where a form box's text is a size larger. It was cut on phones before any of this.
+  Remind me on is 10.5rem. Every date and time box showing on the estimator, a ticket, a new
+  ticket, Bids and Invoices fits at 1366, 820 and 390 wide.
+- **Re-measured.** 26 pages, each at 1366, 390 and 1920 wide, old size against 15%. No new
+  sideways scroll. Pages are 568 px longer in total at 1366, 2,062 px at 390 and 369 px at 1920.
+- **Sizes worked out by the browser.** Every size is 1.15 times the old one and every line height
+  is the old number. Paper sheets and print equal the old sizes.
+- **Tests.** 37 in `text-size-nov13m.test.ts`; 7,216 in all.
 
 ## Not done
 

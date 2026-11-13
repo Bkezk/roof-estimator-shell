@@ -138,3 +138,23 @@ describe("two spots that needed room for the larger letters", () => {
     expect(tab).not.toContain('<span className="shrink-0 text-xs text-muted-foreground">');
   });
 });
+
+describe('the size the owner picked (Nov 13: "lets try an even 15%?")', () => {
+  it("is 15% larger than the old size", () => {
+    expect(css).toMatch(/@media screen \{\s*:root \{\s*--jbk-text-scale: 1\.15;\s*\}\s*\}/);
+  });
+  it("the estimator's Bid due box has room for its calendar icon at that size", () => {
+    // Measured in a browser: at 9.5rem with the usual padding the icon was cut on a laptop, and
+    // on a phone, where a form box's text is a size larger, it needs more again.
+    const page = readFileSync("src/routes/estimate.tsx", "utf8");
+    expect(page).toContain(
+      '<div className="grid grid-cols-[11.5rem_1fr] items-end gap-2 md:grid-cols-[10rem_1fr]">',
+    );
+    expect(page).toContain("className={`h-9 w-full px-2 ${dueDateMissing ?");
+    expect(page).not.toContain("grid-cols-[9.5rem_1fr]");
+  });
+  it("so has the bid's Remind me on box", () => {
+    const page = readFileSync("src/routes/estimate.tsx", "utf8");
+    expect(page).toMatch(/id="bid-reminder-on"\s*type="date"\s*className="h-9 w-\[10\.5rem\]"/);
+  });
+});

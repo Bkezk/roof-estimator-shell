@@ -222,7 +222,7 @@
  */
 @media screen {
   :root {
-    --jbk-text-scale: 1.12;
+    --jbk-text-scale: 1.15;
   }
 }
 .document-sheet,
