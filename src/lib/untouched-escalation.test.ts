@@ -8,8 +8,14 @@
  *
  * These run the real pass (notify.server.ts dispatchDueReminders) half-hourly over a simulated
  * clock against an in-memory stand-in for the Supabase client, where crm_untouched() is computed
- * from the ticket rows the way the SQL defines it (assigned, open, not scheduled, no field
- * status, no contact logged). Email and push are off for every recipient.
+ * from the ticket rows the way the SQL defines it. Email and push are off for every recipient.
+ *
+ * Owner, Nov 13 ("give it the new meaning for untouched tickets. also dont count weekend
+ * days"): a ticket is untouched when its date has passed, it is still assigned and nobody has
+ * started it, ticket_untouched_days WORKING days after the date; the repeat counts working days
+ * too and nothing goes out on a weekend (20261113120000; lib/ticket-reminders.ts). The scenario
+ * below is the Oct 2 one moved onto that meaning: a ticket dated Monday Oct 5 (T0), limit 2,
+ * every 3 — first escalation as Wednesday Oct 7 begins in the office, again Monday Oct 12.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +25,8 @@ import { readGeneratedTypes } from "@/test/generated-types";
 import { claimReminderInMemory } from "@/test/claim-reminder";
 
 import { dispatchDueReminders, type Client } from "@/lib/notify.server";
+import { ticketIsUntouched } from "@/lib/ticket-reminders";
+import { officeDay } from "@/lib/working-days";
 
 type Row = Record<string, unknown>;
 type Result = { data: unknown; error: { message: string } | null };
@@ -89,17 +97,11 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
     if (custom) return custom;
     const settings = (db["crm_settings"] ?? [])[0] ?? {};
     if (name === "crm_untouched") {
-      // The SQL definition (20260928120000_untouched.sql), for tickets.
+      // The SQL definition (20261113120000_ticket_reminders_working_days.sql), for tickets:
+      // only those past the limit, as of the office's day.
+      const today = officeDay(new Date());
       const data = (db["service_jobs"] ?? [])
-        .filter(
-          (j) =>
-            !j["deleted_at"] &&
-            j["technician_id"] &&
-            j["stage"] === "open" &&
-            !j["scheduled_date"] &&
-            !j["field_status"] &&
-            !j["contacted_at"],
-        )
+        .filter((j) => ticketIsUntouched(j, today, Number(settings["ticket_untouched_days"])))
         .map((j) => ({
           kind: "ticket",
           item_id: j["id"],
@@ -139,7 +141,10 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
   return { from, rpc };
 }
 
-/** The live settings and one ticket assigned at T0 with no contact; its follow-up (day 1, every 3). */
+/**
+ * The live settings and one ticket assigned at T0 (Monday Oct 5, 9 am in the office) for that
+ * same day, nobody starting it; its follow-up (on the date, then every 3 working days).
+ */
 function world(): Tables {
   const at = (days: number) => new Date(T0 + days * DAY).toISOString();
   return {
@@ -161,8 +166,8 @@ function world(): Tables {
         technician_id: TECH,
         assigned_at: at(0),
         contacted_at: null,
-        stage: "open",
-        scheduled_date: null,
+        stage: "scheduled",
+        scheduled_date: "2026-10-05",
         field_status: null,
         deleted_at: null,
         escalated_at: null,
@@ -177,8 +182,9 @@ function world(): Tables {
         assignee_id: TECH,
         title: "Ticket #7 Acme",
         url: `/service?id=${JOB}`,
-        due_at: at(1),
-        next_remind_at: at(1),
+        due_at: "2026-10-05T12:00:00.000Z",
+        next_remind_at: "2026-10-05T12:00:00.000Z",
+        created_at: at(0),
         every_days: 3,
         reminders_sent: 0,
         last_reminded_at: null,
@@ -227,34 +233,37 @@ afterEach(() => {
 });
 
 describe("an untouched ticket escalates on its own clock", () => {
-  it("limit 2 days, every 3: first escalation on the first pass after day 2, again at day 5 and day 8", async () => {
+  it("limit 2 working days, every 3: first escalation as the second working day after the date begins, again three working days on, never on the weekend", async () => {
     const db = world();
     await simulate(db, 9);
     const boss = daysOf(db, "boss-1", "untouched");
     expect(boss.length).toBeGreaterThan(0);
-    // The audit's assertion: the old pass first escalated at day 4.
-    expect(boss[0]).toBeGreaterThanOrEqual(2);
-    expect(boss[0]).toBeLessThanOrEqual(2.05);
-    expect(boss).toHaveLength(3);
-    expect(boss[1]).toBeGreaterThanOrEqual(5);
-    expect(boss[1]).toBeLessThanOrEqual(5.05);
-    expect(boss[2]).toBeGreaterThanOrEqual(8);
-    expect(boss[2]).toBeLessThanOrEqual(8.05);
-    // Every recipient, never the assignee; the message is the Sep 28 one.
+    // The date is Monday Oct 5; Wednesday Oct 7 begins in the office 1 day 15 h after T0
+    // (T0 is 9 am Monday there). The Oct 2 audit's point holds: it does not wait for the
+    // assignee's own reminder.
+    expect(boss[0]).toBeGreaterThanOrEqual(1.625);
+    expect(boss[0]).toBeLessThanOrEqual(1.675);
+    // Three working days on is Monday Oct 12 (6 days 15 h after T0): Thursday, Friday, Monday —
+    // not Saturday Oct 10, the third calendar day.
+    expect(boss).toHaveLength(2);
+    expect(boss[1]).toBeGreaterThanOrEqual(6.625);
+    expect(boss[1]).toBeLessThanOrEqual(6.675);
+    // Every recipient, never the assignee; the words say the date and count working days.
     expect(daysOf(db, "boss-2", "untouched")).toEqual(boss);
     expect(daysOf(db, TECH, "untouched")).toEqual([]);
     const first = db["notifications"]!.find((n) => n["kind"] === "untouched")!;
     expect(first["title"]).toBe("Untouched ticket: #7 Acme");
     expect(first["body"]).toBe(
-      "Assigned to Tech One 2 days ago; no contact logged and not started. Limit is 2 days.",
+      "Assigned to Tech One; due Monday 10/5/2026 and not started, 2 working days later. Limit is 2 working days.",
     );
     expect(first["url"]).toBe(`/service?id=${JOB}`);
     // Recorded on the ticket (the last one).
     expect(Date.parse(String(db["service_jobs"]![0]!["escalated_at"]))).toBe(
-      Math.round(T0 + boss[2]! * DAY),
+      Math.round(T0 + boss[1]! * DAY),
     );
-    // The assignee's own reminders are untouched by this: day 1, 4, 7.
-    expect(daysOf(db, TECH, "followup")).toEqual([1, 4, 7]);
+    // The assignee's own reminders are untouched by this: on the date (the first pass), then
+    // every 3 working days at 12:00 UTC — Thursday Oct 8 and Tuesday Oct 13.
+    expect(daysOf(db, TECH, "followup")).toEqual([0.021, 2.958, 7.958]);
   });
 
   it("stops once a contact is logged (contacted_at set on day 3)", async () => {
@@ -275,12 +284,28 @@ describe("an untouched ticket escalates on its own clock", () => {
     expect(daysOf(db, "boss-1", "untouched")).toEqual([]);
   });
 
-  it("stops once it is started (scheduled on day 3)", async () => {
+  it("stops once it is started (headed there on day 3)", async () => {
     const db = world();
     await simulate(db, 9, (d) => {
-      if (d >= 3) db["service_jobs"]![0]!["scheduled_date"] = "2026-10-09";
+      if (d >= 3) db["service_jobs"]![0]!["field_status"] = "en_route";
     });
     expect(daysOf(db, "boss-1", "untouched")).toHaveLength(1);
+  });
+
+  it("stops once its date is moved ahead (rescheduled on day 3 for the 20th)", async () => {
+    const db = world();
+    await simulate(db, 9, (d) => {
+      if (d >= 3) db["service_jobs"]![0]!["scheduled_date"] = "2026-10-20";
+    });
+    expect(daysOf(db, "boss-1", "untouched")).toHaveLength(1);
+  });
+
+  it("a ticket whose date has not passed is never untouched, however long ago it was assigned", async () => {
+    const db = world();
+    db["service_jobs"]![0]!["scheduled_date"] = "2026-10-30";
+    db["service_jobs"]![0]!["assigned_at"] = new Date(T0 - 30 * DAY).toISOString();
+    await simulate(db, 9);
+    expect(daysOf(db, "boss-1", "untouched")).toEqual([]);
   });
 });
 

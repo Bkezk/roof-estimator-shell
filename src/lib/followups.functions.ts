@@ -25,6 +25,7 @@ import {
 } from "@/lib/followup-holds";
 import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
 import { localHm } from "@/lib/tasks";
+import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
 
 export type FollowupRow = Database["public"]["Tables"]["crm_followups"]["Row"];
 export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
@@ -523,12 +524,17 @@ export const getCrmSettings = createServerFn({ method: "GET" })
     return data;
   });
 
-const settingsSchema = z.object({
+export const settingsSchema = z.object({
   opportunity_close_days: z.number().int().min(1).max(365),
   opportunity_first_days: z.number().int().min(0).max(365),
   opportunity_every_days: z.number().int().min(1).max(365),
   ticket_first_days: z.number().int().min(0).max(365),
   ticket_every_days: z.number().int().min(1).max(365),
+  // Owner, Nov 13 (Admin › Reminders › Tickets): before the date, a reminder every N working
+  // days from assignment, and one notice N working days before the date — null = off (a blank
+  // box). lib/ticket-reminders.ts has the rule.
+  ticket_before_every_days: z.number().int().min(1).max(TICKET_BEFORE_EVERY_DAYS_MAX).nullable(),
+  ticket_due_notice_days: z.number().int().min(1).max(TICKET_DUE_NOTICE_DAYS_MAX).nullable(),
   // Untouched limits and escalation (owner, Sep 28).
   ticket_untouched_days: z.number().int().min(0).max(365),
   opportunity_untouched_days: z.number().int().min(0).max(365),

@@ -12,6 +12,10 @@
  *   definition in crm_untouched() (RLS: a technician sees their own, the office everyone's).
  *   Each row carries its admin-set limit so the UI can grade it: muted before the limit, red
  *   past it. The reminder pass escalates the red ones to admins (notify.server.ts).
+ *   A TICKET is untouched in a new sense since Nov 13 (owner: "give it the new meaning for
+ *   untouched tickets"): its date has passed, it is still assigned and nobody has started it;
+ *   crm_untouched() returns it only once it is past the limit, counted in working days, so a
+ *   ticket row is always red. Each ticket row carries its date and the working days it is late.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -31,9 +35,19 @@ import {
 } from "@/lib/followup-holds";
 import { canManageFollowup } from "@/lib/followup-rules";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
+import { ticketLate } from "@/lib/ticket-reminders";
+import { officeDay } from "@/lib/working-days";
 
 export type ContactLogRow = Database["public"]["Tables"]["crm_contact_log"]["Row"];
-export type UntouchedRow = Database["public"]["Functions"]["crm_untouched"]["Returns"][number];
+export type UntouchedRow = Database["public"]["Functions"]["crm_untouched"]["Returns"][number] & {
+  /** A ticket's date (YYYY-MM-DD), when it could be read; opportunities have none. */
+  due_day?: string | null;
+  /**
+   * Working days a ticket has sat past its date — or since it was assigned, when that was
+   * later (lib/ticket-reminders.ts ticketLate), as of the office's day.
+   */
+  late_days?: number | null;
+};
 
 export const CONTACT_METHODS = ["called", "texted", "emailed", "visited", "other"] as const;
 export type ContactMethod = (typeof CONTACT_METHODS)[number];
@@ -94,11 +108,20 @@ export function daysSince(iso: string | null, now = new Date()): number | null {
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.floor((now.getTime() - t) / 86400000));
 }
-/** Past the admin limit: the row turns red and the reminder pass escalates it. */
+/**
+ * Past the admin limit: the row turns red and the reminder pass escalates it. A ticket row is
+ * always past it (Nov 13: the database returns a ticket only once it is ticket_untouched_days
+ * working days past its date); an opportunity is graded from the day it was assigned.
+ */
 export function isPastLimit(
-  row: { assigned_at: string | null; limit_days: UntouchedRow["limit_days"] },
+  row: {
+    kind?: string | null | undefined;
+    assigned_at: string | null;
+    limit_days: UntouchedRow["limit_days"];
+  },
   now = new Date(),
 ) {
+  if (row.kind === "ticket") return true;
   const d = daysSince(row.assigned_at, now);
   return d !== null && d >= row.limit_days;
 }
@@ -291,7 +314,25 @@ export const listUntouched = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<UntouchedRow[]> => {
     const { data, error } = await context.supabase.rpc("crm_untouched");
     if (error) throw new Error(error.message);
-    return [...(data ?? [])].sort((a, b) =>
+    const rows: UntouchedRow[] = [...(data ?? [])].sort((a, b) =>
       (a.assigned_at ?? "").localeCompare(b.assigned_at ?? ""),
     );
+    // A ticket's tag says how late it is: its date, read under the caller's own row security.
+    // Unreadable (it should not be: the ticket itself was): the tag says "Untouched" alone.
+    const ticketIds = rows.filter((r) => r.kind === "ticket").map((r) => r.item_id);
+    if (ticketIds.length) {
+      const { data: jobs } = await context.supabase
+        .from("service_jobs")
+        .select("id, scheduled_date, assigned_at")
+        .in("id", ticketIds);
+      const today = officeDay(new Date());
+      const byId = new Map((jobs ?? []).map((j) => [j.id, j]));
+      for (const r of rows) {
+        const j = r.kind === "ticket" ? byId.get(r.item_id) : undefined;
+        if (!j?.scheduled_date) continue;
+        r.due_day = j.scheduled_date;
+        r.late_days = ticketLate(j.scheduled_date, j.assigned_at ?? r.assigned_at, today).days;
+      }
+    }
+    return rows;
   });

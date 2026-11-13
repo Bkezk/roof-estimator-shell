@@ -416,7 +416,8 @@ function ServiceList({ filters }: { filters: ListFilters }) {
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["service-jobs-deleted"] });
   };
-  // Assigned tickets with no contact logged and not started (query key ["untouched"]).
+  // Assigned tickets whose date has passed with nobody starting them (query key ["untouched"];
+  // owner, Nov 13: the new meaning of untouched for a ticket).
   const untouchedFn = useServerFn(listUntouched);
   const untouchedQ = useQuery({
     queryKey: ["untouched"],
@@ -887,7 +888,7 @@ function TicketListRow({
   row: ServiceJobListRow;
   /** The list's day (the Overdue filter's): an open ticket whose day has passed shows "Overdue". */
   today: string;
-  /** Assigned with no contact logged and not started (listUntouched). */
+  /** Its date has passed, still assigned, and nobody has started it (listUntouched). */
   untouched?: UntouchedRow | undefined;
   onDelete?: (() => void) | undefined;
 }) {
@@ -937,7 +938,11 @@ function TicketListRow({
           )}
           <OverdueBadge days={ticketOverdueDays({ ...j, stage }, today)} what="Was due" />
           {untouched && (
-            <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
+            <UntouchedBadge
+              assignedAt={untouched.assigned_at}
+              limitDays={untouched.limit_days}
+              ticket={{ dueDay: untouched.due_day, lateDays: untouched.late_days }}
+            />
           )}
         </div>
         {(place || cityState) && (

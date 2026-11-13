@@ -683,7 +683,17 @@ describe("the reminder pass", () => {
     crm_settings: [
       { id: 1, ticket_every_days: 3, opportunity_every_days: 7, last_dispatch_at: null },
     ],
-    service_jobs: [{ id: JOB, technician_id: BOB, stage: "open", escalated_at: null }],
+    // Its date passed a week before T0 (Nov 13: the date an untouched ticket is past).
+    service_jobs: [
+      {
+        id: JOB,
+        technician_id: BOB,
+        stage: "scheduled",
+        escalated_at: null,
+        scheduled_date: "2026-10-02",
+        assigned_at: new Date(T0 - 9 * DAY).toISOString(),
+      },
+    ],
     crm_followups: [f],
     notifications: [],
     push_subscriptions: [],
@@ -735,9 +745,13 @@ describe("the reminder pass", () => {
     const row = env.tables["crm_followups"]![0]!;
     expect(row["reminders_sent"]).toBe(2);
     expect(Date.parse(String(row["last_reminded_at"]))).toBe(T0);
-    // Three days on: due again; the record is still set (nothing logged), but it is not the
-    // first reminder after the hold any more.
+    // Three working days on (T0 is a Friday, so Wednesday: a ticket's repeat skips the weekend
+    // since Nov 13): due again; the record is still set (nothing logged), but it is not the
+    // first reminder after the hold any more. Three calendar days on, Monday, it is not due.
     vi.setSystemTime(T0 + 3 * DAY + 60000);
+    await dispatchDueReminders(client);
+    expect(notices("followup")).toHaveLength(1);
+    vi.setSystemTime(Date.parse("2026-10-14T12:01:00Z"));
     await dispatchDueReminders(client);
     expect(notices("followup")).toHaveLength(2);
     expect(notices("followup")[1]!["title"]).toBe("Follow up: #7 Acme leak");

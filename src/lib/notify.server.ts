@@ -12,6 +12,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
 import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
+import {
+  ticketEscalationDue,
+  ticketNextRemindAt,
+  ticketReminderNotice,
+  ticketReminderSettings,
+  ticketReminderWaits,
+  ticketUntouchedNotice,
+  type TicketReminderSettings,
+} from "@/lib/ticket-reminders";
+import { officeDay } from "@/lib/working-days";
 import { generateVapidKeys, sendWebPush } from "@/lib/webpush";
 
 /**
@@ -328,18 +338,48 @@ const rawRpc = (
   ).rpc(fn, args);
 
 /**
+ * Admin › Reminders › Tickets' two "before the date" numbers, as this pass may read them (owner,
+ * Nov 13). No row (an office user's pass on the preview: the settings are an admin's and a
+ * manager's to read) or columns that are not there yet: the defaults, 3 and 1. The database's
+ * trigger sets each next reminder from the saved numbers whoever runs the pass.
+ */
+async function readTicketReminderSettings(admin: Client): Promise<TicketReminderSettings> {
+  try {
+    const { data, error } = await admin
+      .from("crm_settings")
+      .select("ticket_before_every_days, ticket_due_notice_days")
+      .eq("id", 1)
+      .limit(1);
+    if (error) throw new Error(error.message);
+    return ticketReminderSettings(data?.[0]);
+  } catch (e) {
+    console.error(
+      "Reminder pass: could not read the ticket reminder settings; using the defaults —",
+      errText(e),
+    );
+    return ticketReminderSettings(undefined);
+  }
+}
+
+/**
  * Claim a due reminder (see dispatchDueReminders): `won` when this pass got it, with `next` the
  * next_remind_at the claim wrote when this code wrote it (the direct update), or null when the
  * database function did (it uses its own clock). Through followup_claim_reminder when the pass
  * runs as a signed-in user (it refuses the follow-up's own assignee: false, and another pass
  * sends it); a direct conditional update with the service key, or before
  * 20261002140000_followup_guard.sql is applied.
+ *
+ * A ticket's next reminder is the working-day rule's (owner, Nov 13; lib/ticket-reminders.ts):
+ * this writes it, and the database's trigger (crm_followups_ticket_next, 20261113120000) sets
+ * the same on every claim. `next` is what the row holds after the claim, as the database
+ * answered it, so a failed send puts back exactly that row.
  */
 async function claimReminder(
   admin: Client,
   f: FollowupRow,
   now: Date,
   viaRpc: boolean,
+  tickets: TicketReminderSettings,
 ): Promise<{ won: boolean; next: string | null }> {
   if (viaRpc) {
     const r = await admin.rpc("followup_claim_reminder", {
@@ -349,7 +389,10 @@ async function claimReminder(
     if (!r.error) return { won: r.data === true, next: null };
     if (!isMissingRpc(r.error)) throw new Error(r.error.message);
   }
-  const next = new Date(now.getTime() + f.every_days * 86400000).toISOString();
+  const isTicket = f.kind === "ticket";
+  const next = isTicket
+    ? ticketNextRemindAt(f.due_at, officeDay(now), tickets, f.every_days)
+    : new Date(now.getTime() + f.every_days * 86400000).toISOString();
   const { data: won, error } = await admin
     .from("crm_followups")
     .update({
@@ -360,9 +403,9 @@ async function claimReminder(
     .eq("id", f.id)
     .eq("status", "open")
     .eq("next_remind_at", f.next_remind_at)
-    .select("id");
+    .select("id, next_remind_at");
   if (error) throw new Error(error.message);
-  return { won: !!won?.length, next };
+  return { won: !!won?.length, next: won?.[0]?.next_remind_at ?? next };
 }
 
 /**
@@ -469,6 +512,11 @@ async function recordFailure(admin: Client, f: FollowupRow, step: string, e: unk
  * cannot make the assignee hear the same reminder twice (the escalation has its own claim).
  *
  * Each follow-up is handled on its own: an error on one is recorded and the pass goes on.
+ *
+ * Tickets (owner, Nov 13): reminded before the date as well — a cadence, a notice the working
+ * day before and the date itself — and on working days only (lib/ticket-reminders.ts has the
+ * rule and the words). A ticket reminder that comes due on a Saturday or Sunday waits for
+ * Monday unless that day is the ticket's own date. Opportunities and the review timer: as before.
  */
 export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> {
   const admin = await serverClient(sb);
@@ -479,6 +527,8 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   // database no longer lets move next_remind_at directly (20261002140000_followup_guard.sql):
   // the claim goes through followup_claim_reminder, which makes the same conditional update.
   const claimViaRpc = !hasServiceRole();
+  const tickets = await readTicketReminderSettings(admin);
+  const today = officeDay(now);
   const { data: due, error } = await admin
     .from("crm_followups")
     .select("*")
@@ -495,10 +545,13 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     skipped: 0,
   };
   for (const f of due ?? []) {
+    // A ticket's reminder is not sent on a Saturday or Sunday, except on the ticket's own date:
+    // it stays due, unclaimed, and goes on Monday's first pass.
+    if (f.kind === "ticket" && ticketReminderWaits(f.due_at, today)) continue;
     // 1. Claim (see above). Lost to another pass: skip. Could not claim: record, skip.
     let claimedNext: string | null = null;
     try {
-      const claim = await claimReminder(admin, f, now, claimViaRpc);
+      const claim = await claimReminder(admin, f, now, claimViaRpc, tickets);
       if (!claim.won) {
         out.skipped++;
         continue;
@@ -529,15 +582,23 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
             hold_reason: f.hold_reason,
           })
         : null;
+    // A ticket's words name the weekday and count working days (ticketReminderNotice): the
+    // cadence before the date, the notice, the date itself, and after it.
+    const words = back
+      ? back
+      : f.kind === "ticket"
+        ? ticketReminderNotice(f, now, tickets)
+        : {
+            title: `Follow up: ${f.title}`,
+            body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
+          };
     try {
       await notify(
         [f.assignee_id],
         {
           kind: "followup",
-          title: back ? back.title : `Follow up: ${f.title}`,
-          body: back
-            ? back.body
-            : `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
+          title: words.title,
+          body: words.body,
           url: f.url,
           followup_id: f.id,
         },
@@ -603,6 +664,13 @@ const daysSince = (u: UntouchedItem, now: Date) =>
  * An item whose follow-up is on hold (snoozed_until ahead; owner, Oct 9) is skipped: someone
  * decided it waits, with a reason on the record, so it is not "untouched".
  *
+ * A TICKET is untouched in a new sense since Nov 13 (owner: "give it the new meaning for
+ * untouched tickets"): its date has passed, it is still assigned, and nobody has started it.
+ * crm_untouched() returns a ticket only once it is ticket_untouched_days WORKING days past its
+ * date (20261113120000), so every ticket it returns is past the limit; the repeat counts
+ * ticket_every_days working days, and nothing about a ticket is sent on a Saturday or Sunday
+ * (ticketEscalationDue). The words are ticketUntouchedNotice's. Opportunities: as before.
+ *
  * Each item is handled on its own: an error on one is recorded and the pass goes on.
  */
 async function escalateUntouched(admin: Client, now: Date, out: DispatchResult): Promise<void> {
@@ -623,7 +691,10 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
     console.error("Reminder pass: no escalations this pass —", errText(e));
     return;
   }
-  const past = untouched.filter((u) => daysSince(u, now) >= u.limit_days);
+  // A ticket crm_untouched() returns is already past its limit (the database counts the working
+  // days); an opportunity is graded here, from the day it was assigned.
+  const past = untouched.filter((u) => u.kind === "ticket" || daysSince(u, now) >= u.limit_days);
+  const today = officeDay(now);
   if (!past.length || !escalateTo.length) return;
 
   // How often each kind repeats, when each item was last escalated, and its open follow-up (for
@@ -636,7 +707,10 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
       .eq("id", 1)
       .limit(1),
     ids("ticket").length
-      ? admin.from("service_jobs").select("id, escalated_at").in("id", ids("ticket"))
+      ? admin
+          .from("service_jobs")
+          .select("id, escalated_at, scheduled_date, assigned_at")
+          .in("id", ids("ticket"))
       : Promise.resolve({ data: [], error: null }),
     ids("opportunity").length
       ? admin.from("crm_opportunities").select("id, escalated_at").in("id", ids("opportunity"))
@@ -662,7 +736,11 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
     opportunity: Math.max(1, Number(s?.opportunity_every_days ?? 7)),
   };
   const lastAt = new Map<string, string | null>();
-  for (const j of jobs.data ?? []) lastAt.set(`ticket:${j.id}`, j.escalated_at ?? null);
+  const jobOf = new Map<string, { scheduled_date: string | null; assigned_at: string | null }>();
+  for (const j of jobs.data ?? []) {
+    lastAt.set(`ticket:${j.id}`, j.escalated_at ?? null);
+    jobOf.set(j.id, { scheduled_date: j.scheduled_date, assigned_at: j.assigned_at });
+  }
   for (const o of opps.data ?? []) lastAt.set(`opportunity:${o.id}`, o.escalated_at ?? null);
   const followupOf = new Map<string, FollowupRow>();
   for (const f of (fus.data ?? []) as FollowupRow[]) followupOf.set(`${f.kind}:${f.item_id}`, f);
@@ -673,7 +751,12 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
     if (!lastAt.has(key)) continue;
     const prev = lastAt.get(key) ?? null;
     const everyDays = u.kind === "opportunity" ? every.opportunity : every.ticket;
-    if (prev && now.getTime() - Date.parse(prev) < everyDays * DAY) continue;
+    // A ticket: working days since the last escalation, never on a weekend, and only with the
+    // date it is past (none: the database is older than this code, and nothing is sent).
+    const ticketDate = u.kind === "ticket" ? (jobOf.get(u.item_id)?.scheduled_date ?? null) : null;
+    if (u.kind === "ticket") {
+      if (!ticketDate || !ticketEscalationDue(prev, today, everyDays)) continue;
+    } else if (prev && now.getTime() - Date.parse(prev) < everyDays * DAY) continue;
     const recipients = escalateTo.filter((id) => id !== u.assignee_id);
     if (!recipients.length) continue;
     const f = followupOf.get(key);
@@ -705,15 +788,27 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
       continue;
     }
 
-    // 2. The escalation (the message is the Sep 28 one).
+    // 2. The escalation (the message is the Sep 28 one; a ticket's says its date and counts
+    // working days, Nov 13).
     const since = daysSince(u, now);
+    const words = ticketDate
+      ? ticketUntouchedNotice(
+          u,
+          ticketDate,
+          jobOf.get(u.item_id)?.assigned_at ?? u.assigned_at,
+          today,
+        )
+      : {
+          title: `Untouched ${u.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
+          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
+        };
     try {
       await notify(
         recipients,
         {
           kind: "untouched",
-          title: `Untouched ${u.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
-          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
+          title: words.title,
+          body: words.body,
           url: f?.url ?? u.url,
           followup_id: f?.id ?? null,
         },

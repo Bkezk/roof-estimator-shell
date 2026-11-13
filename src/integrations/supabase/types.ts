@@ -1288,6 +1288,8 @@ export type Database = {
           opportunity_every_days: number
           opportunity_first_days: number
           opportunity_untouched_days: number
+          ticket_before_every_days: number | null
+          ticket_due_notice_days: number | null
           ticket_every_days: number
           ticket_first_days: number
           ticket_untouched_days: number
@@ -1307,6 +1309,8 @@ export type Database = {
           opportunity_every_days?: number
           opportunity_first_days?: number
           opportunity_untouched_days?: number
+          ticket_before_every_days?: number | null
+          ticket_due_notice_days?: number | null
           ticket_every_days?: number
           ticket_first_days?: number
           ticket_untouched_days?: number
@@ -1326,6 +1330,8 @@ export type Database = {
           opportunity_every_days?: number
           opportunity_first_days?: number
           opportunity_untouched_days?: number
+          ticket_before_every_days?: number | null
+          ticket_due_notice_days?: number | null
           ticket_every_days?: number
           ticket_first_days?: number
           ticket_untouched_days?: number
@@ -5032,6 +5038,10 @@ export type Database = {
           holder_user: string
         }[]
       }
+      add_working_days: {
+        Args: { p_day: string; p_n: number }
+        Returns: string
+      }
       apply_building_addresses: { Args: { rows: Json }; Returns: number }
       assignable_users: {
         Args: never
@@ -5231,6 +5241,7 @@ export type Database = {
           notify_storms: boolean
         }[]
       }
+      office_day: { Args: { p_at?: string }; Returns: string }
       opportunity_close_days: { Args: never; Returns: number }
       opportunity_status_from_bid: {
         Args: { p_bid_status: string; p_opp_status: string }
@@ -5405,6 +5416,26 @@ export type Database = {
         Args: { p_scheduled_date: string; p_stage: string }
         Returns: boolean
       }
+      ticket_next_remind_at: {
+        Args: {
+          p_after: number
+          p_before: number
+          p_due_at: string
+          p_from: string
+          p_notice: number
+        }
+        Returns: string
+      }
+      ticket_next_remind_day: {
+        Args: {
+          p_after: number
+          p_before: number
+          p_due: string
+          p_from: string
+          p_notice: number
+        }
+        Returns: string
+      }
       ticket_open_for_tech: { Args: { job: string }; Returns: boolean }
       ticket_opportunity: { Args: { p_job: string }; Returns: Json }
       trim_address_points: {
@@ -5437,6 +5468,14 @@ export type Database = {
           id: string
           technician: boolean
         }[]
+      }
+      working_days_before: {
+        Args: { p_day: string; p_n: number }
+        Returns: string
+      }
+      working_days_between: {
+        Args: { p_from: string; p_to: string }
+        Returns: number
       }
       works_on_ticket: { Args: { job: string }; Returns: boolean }
     }

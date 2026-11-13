@@ -30,7 +30,7 @@ export const NOTICE_CATEGORY_LABELS: Readonly<Record<NoticeCategory, string>> = 
 export const NOTICE_CATEGORY_HELP: Readonly<Record<NoticeCategory, string>> = {
   leads: "New leads from the bid boards. Off unless you work them.",
   opportunities: "Follow-ups, untouched and assignment notices on opportunities.",
-  service: "Ticket assignments, date moves, done and ready-to-invoice notices.",
+  service: "Ticket assignments, reminders, date moves, done and ready-to-invoice notices.",
   bids: "Bid due, past due and your own bid reminders.",
   storms: "Storm reports for roofs in your counties. Off unless you work them.",
 };

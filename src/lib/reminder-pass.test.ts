@@ -100,7 +100,9 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
     // stamp_dispatch_result (Oct 12) stamps the pass's failed count with the time; the older
     // stamp_dispatch stays for an app built before that migration.
     if (name === "stamp_dispatch" || name === "stamp_dispatch_result") {
-      const s = (db["crm_settings"] ??= [{ id: 1, last_dispatch_at: null }]);
+      // The pass reads the settings first (the ticket numbers, Nov 13), which makes the table.
+      const s = (db["crm_settings"] ??= []);
+      if (!s.length) s.push({ id: 1, last_dispatch_at: null });
       s[0]!["last_dispatch_at"] = new Date().toISOString();
       if (name === "stamp_dispatch_result") s[0]!["last_dispatch_failed"] = args?.["p_failed"];
       return { data: null, error: null };
@@ -174,6 +176,10 @@ async function callCron(): Promise<{ status: number; body: Record<string, unknow
 
 let errorLog: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
+  // A fixed working day (a Wednesday): since Nov 13 a ticket's reminder is not sent on a
+  // Saturday or Sunday, so these must not depend on the day the suite happens to run.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-placeholder-not-a-key");
   vi.stubEnv("RESEND_API_KEY", "");
   taskNotices.mockReset();
@@ -188,6 +194,7 @@ beforeEach(() => {
   errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   errorLog.mockRestore();
 });
@@ -278,7 +285,15 @@ describe("(c) an escalation failure never re-sends the assignee's reminder", () 
     const db: Tables = {
       crm_followups: [followup("f1", "rep-1")],
       crm_settings: [{ id: 1, last_dispatch_at: null, ticket_every_days: 3 }],
-      service_jobs: [{ id: "item-f1", escalated_at: null }],
+      // Its date passed ten days ago (Nov 13: the date an untouched ticket is past).
+      service_jobs: [
+        {
+          id: "item-f1",
+          escalated_at: null,
+          scheduled_date: iso(-10 * 24 * HOUR).slice(0, 10),
+          assigned_at: iso(-12 * 24 * HOUR),
+        },
+      ],
     };
     const untouched = [
       {

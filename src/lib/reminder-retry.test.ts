@@ -8,7 +8,7 @@
  * failed delivery: push_error stays null.
  */
 import { readFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The service-role client the pass loads under the key: a stand-in forwarding to the fake of the
 // test in progress.
@@ -24,6 +24,14 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 import { dispatchDueReminders, notify, type Client } from "@/lib/notify.server";
 import { claimReminderInMemory } from "@/test/claim-reminder";
 import { fakeSupabase, type FakeRpc } from "@/test/fake-supabase";
+
+// A fixed working day (a Wednesday): since Nov 13 a ticket's reminder is not sent on a Saturday
+// or Sunday, so these must not depend on the day the suite happens to run.
+vi.useFakeTimers({ toFake: ["Date"] });
+vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 type Row = Record<string, unknown>;
 const HOUR = 3600_000;
@@ -193,7 +201,17 @@ describe("(a) a reminder that fails to send is put back for the next pass", () =
     const env = world(
       {
         crm_followups: [],
-        service_jobs: [{ id: "job-1", technician_id: "rep-1", stage: "open", escalated_at: null }],
+        // Its date passed five days ago (Nov 13: the date an untouched ticket is past).
+        service_jobs: [
+          {
+            id: "job-1",
+            technician_id: "rep-1",
+            stage: "scheduled",
+            escalated_at: null,
+            scheduled_date: iso(-5 * DAY).slice(0, 10),
+            assigned_at: iso(-7 * DAY),
+          },
+        ],
       },
       {
         crm_untouched: () => [

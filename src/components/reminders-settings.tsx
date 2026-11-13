@@ -23,6 +23,15 @@
  * (notify.server.ts escalateUntouched): assigned, no contact logged, not started; past
  * ticket_untouched_days / opportunity_untouched_days the escalation people hear, "then again
  * every ticket_every_days / opportunity_every_days", while the assignee's own reminders go on.
+ *
+ * Tickets since Nov 13 (owner: "add the day before notice for tickets, also i think they would
+ * want some cadence of reminders as well … every 3 days or so and that can also be edited in
+ * settings" … "dont count weekend days" … "ensure the wording and editing is similar to our
+ * previous notifications editing and wordings"): two more numbers sit with the ticket ones,
+ * boxes that are blank when off like the bids' past-due one — "Before the date" (a reminder
+ * every N working days from assignment) and "Notice" (N working days before the date) — and the
+ * ticket lines say working days. Untouched, for a ticket, now means its date has passed and
+ * nobody has started it (lib/ticket-reminders.ts; crm_untouched(), 20261113120000).
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -42,6 +51,7 @@ import {
 } from "@/lib/followups.functions";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { blankOrNumber } from "@/lib/number-field-view";
+import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
 import { listAssigneeOptions } from "@/lib/opportunities.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,7 +123,30 @@ const FIELDS: Field[] = [
     min: 0,
     group: "ticket",
   },
-  { key: "ticket_every_days", label: "Then every N days", min: 1, group: "ticket" },
+  // Owner, Nov 13: reminders before the date, on working days. Blank = off, as the bids'
+  // past-due box is.
+  {
+    key: "ticket_before_every_days",
+    label: "Before the date, every N working days (blank = never)",
+    min: 1,
+    max: TICKET_BEFORE_EVERY_DAYS_MAX,
+    never: true,
+    group: "ticket",
+  },
+  {
+    key: "ticket_due_notice_days",
+    label: "Notice N working days before a ticket’s date (blank = never)",
+    min: 1,
+    max: TICKET_DUE_NOTICE_DAYS_MAX,
+    never: true,
+    group: "ticket",
+  },
+  {
+    key: "ticket_every_days",
+    label: "After the date, every N working days",
+    min: 1,
+    group: "ticket",
+  },
   // Owner, Oct 13 ("Where are the bid reminders set? Is it in Reminders like opps and service,
   // now that bids have due dates?"): bids-notify.server.ts reads these two.
   {
@@ -133,7 +166,7 @@ const FIELDS: Field[] = [
   },
   {
     key: "ticket_untouched_days",
-    label: "Ticket counts as untouched after N days with no contact",
+    label: "Ticket counts as untouched N working days after its date, when nobody has started it",
     min: 0,
     group: "untouched",
   },
@@ -156,6 +189,8 @@ const EMPTY: CrmSettingsInput = {
   opportunity_every_days: 0,
   ticket_first_days: 0,
   ticket_every_days: 0,
+  ticket_before_every_days: null,
+  ticket_due_notice_days: null,
   ticket_untouched_days: 0,
   opportunity_untouched_days: 0,
   unassigned_overdue_days: 0,
@@ -193,6 +228,12 @@ export function RemindersSettings() {
         opportunity_every_days: s.opportunity_every_days,
         ticket_first_days: s.ticket_first_days,
         ticket_every_days: s.ticket_every_days,
+        // Null is "off" (a blank box). Before 20261113120000 is applied the row has neither:
+        // the defaults, 3 and 1.
+        ticket_before_every_days:
+          s.ticket_before_every_days === undefined ? 3 : s.ticket_before_every_days,
+        ticket_due_notice_days:
+          s.ticket_due_notice_days === undefined ? 1 : s.ticket_due_notice_days,
         ticket_untouched_days: s.ticket_untouched_days,
         opportunity_untouched_days: s.opportunity_untouched_days,
         unassigned_overdue_days: s.unassigned_overdue_days ?? 1,
@@ -308,7 +349,8 @@ export function RemindersSettings() {
               that person is reminded at these lengths until it is closed. Nothing is timed, and
               nobody is reminded, while an item has no person on it. Each line below says who is
               reminded, when the item is due, when the first reminder goes and how often after that.
-              Changes apply to timers started from now on.
+              Changes apply to timers started from now on; a ticket’s “Before the date” and “Notice”
+              numbers apply from its next reminder.
             </CardDescription>
           </div>
           {saveButton}
@@ -354,7 +396,7 @@ export function RemindersSettings() {
 
               <Section
                 title="Tickets"
-                help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders."
+                help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders. Saturdays and Sundays are not counted, and no ticket reminder goes out on one, except on the ticket’s own date."
               >
                 <Line label="Who is reminded">
                   The technician on the ticket. Nobody, until one is assigned.
@@ -363,9 +405,17 @@ export function RemindersSettings() {
                   The scheduled day. With no scheduled day, {field("ticket_first_days")} days after
                   the technician is assigned.
                 </Line>
-                <Line label="First reminder">On the due date.</Line>
+                <Line label="Before the date">
+                  Every {field("ticket_before_every_days")} working days from the day the technician
+                  is assigned. Leave the box blank to never remind before the date.
+                </Line>
+                <Line label="Notice">
+                  {field("ticket_due_notice_days")} working days before the date (1 = a Monday
+                  ticket’s goes out on Friday). Leave the box blank for no notice.
+                </Line>
+                <Line label="On the date">That morning, also on a Saturday or Sunday.</Line>
                 <Line label="After that">
-                  Every {field("ticket_every_days")} days until the ticket is Done.
+                  Every {field("ticket_every_days")} working days until the ticket is Done.
                 </Line>
               </Section>
 
@@ -403,11 +453,12 @@ export function RemindersSettings() {
 
               <Section
                 title="Untouched work"
-                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until a contact is logged or it is started."
+                help="An opportunity: assigned, with no contact logged. A ticket: its date has passed, it is still assigned and nobody has started it. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until it is started or a contact is logged."
               >
                 <Line label="Counts as untouched">
-                  A ticket after {field("ticket_untouched_days")} days with no contact logged; an
-                  opportunity after {field("opportunity_untouched_days")} days.
+                  A ticket {field("ticket_untouched_days")} working days after its date, when it is
+                  still assigned and nobody has started it; an opportunity after{" "}
+                  {field("opportunity_untouched_days")} days with no contact logged.
                 </Line>
                 <Line label="What happens">
                   It turns red in the lists. The assignee keeps getting the reminders above.

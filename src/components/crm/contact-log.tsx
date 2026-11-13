@@ -57,6 +57,7 @@ import {
   type ContactMethod,
   type UntouchedRow,
 } from "@/lib/contact-log.functions";
+import { dayText } from "@/lib/ticket-reminders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -440,10 +441,33 @@ export function LatestContact({ kind, itemId }: { kind: ContactKind; itemId: str
 export function UntouchedBadge({
   assignedAt,
   limitDays,
+  ticket,
 }: {
   assignedAt: string | null;
   limitDays: number;
+  /**
+   * A ticket's row (owner, Nov 13: untouched = its date has passed, it is still assigned and
+   * nobody has started it): always red, counted in working days past its date.
+   */
+  ticket?: { dueDay?: string | null | undefined; lateDays?: number | null | undefined } | undefined;
 }) {
+  if (ticket) {
+    const n = ticket.lateDays ?? null;
+    const limit = `limit ${limitDays} working day${limitDays === 1 ? "" : "s"}`;
+    return (
+      <Badge
+        variant="destructive"
+        className="px-1.5 py-0 text-[11px]"
+        title={
+          ticket.dueDay && n !== null
+            ? `Due ${dayText(ticket.dueDay)} and nobody has started it, ${n} working day${n === 1 ? "" : "s"} later (${limit})`
+            : `Its date has passed and nobody has started it (${limit})`
+        }
+      >
+        Untouched{n === null ? "" : ` ${n}d`}
+      </Badge>
+    );
+  }
   const d = daysSince(assignedAt);
   if (d !== null && d >= limitDays)
     return (
@@ -565,8 +589,9 @@ export function NeedsActionStrip({
       {open && (
         <div className="space-y-2 border-t p-3">
           <p className="text-xs text-muted-foreground">
-            Assigned longer than the limit with no contact logged and not started. Open it and log
-            the call, text, email or visit, or schedule it.
+            An opportunity: assigned longer than the limit with no contact logged. A ticket: its
+            date has passed and nobody has started it. Open it and log the call, text, email or
+            visit, start it, or move its date.
           </p>
           <ul className="divide-y">
             {rows.map((r) => (
@@ -585,7 +610,13 @@ export function NeedsActionStrip({
                 )}
                 <span className="text-muted-foreground">· {r.assignee_name ?? "Unassigned"}</span>
                 <span className="ml-auto">
-                  <UntouchedBadge assignedAt={r.assigned_at} limitDays={r.limit_days} />
+                  <UntouchedBadge
+                    assignedAt={r.assigned_at}
+                    limitDays={r.limit_days}
+                    ticket={
+                      r.kind === "ticket" ? { dueDay: r.due_day, lateDays: r.late_days } : undefined
+                    }
+                  />
                 </span>
               </li>
             ))}

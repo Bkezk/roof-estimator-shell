@@ -9,6 +9,13 @@
  * first reminder after opportunity_first_days, then every opportunity_every_days, closed at
  * Won / Lost / No response.
  *
+ * Tickets since Nov 13 (owner: "add the day before notice for tickets … some cadence of
+ * reminders as well … dont count weekend days"): a ticket whose date is still ahead is reminded
+ * before it — every ticket_before_every_days working days from assignment, a notice
+ * ticket_due_notice_days working days before, and on the date — and after the date every
+ * ticket_every_days WORKING days. The rule is lib/ticket-reminders.ts (and the database's
+ * ticket_next_remind_at, 20261113120000).
+ *
  * The writes go through two SECURITY DEFINER functions (audit, Oct 2 —
  * 20261002140000_followup_guard.sql): followup_sync_upsert (start / refresh / hand over) and
  * followup_sync_close. The database now refuses a signed-in rep who changes a follow-up's
@@ -21,12 +28,25 @@ import type { Database } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
+import { officeDay } from "@/lib/working-days";
+import {
+  TICKET_REMINDER_DEFAULTS,
+  ticketFirstRemindAt,
+  ticketReminderSettings,
+  ticketStartTail,
+} from "@/lib/ticket-reminders";
 type Settings = {
   opportunity_close_days: number;
   opportunity_first_days: number;
   opportunity_every_days: number;
   ticket_first_days: number;
   ticket_every_days: number;
+  /**
+   * Admin › Reminders › Tickets (owner, Nov 13): before the date, a reminder every N working
+   * days and one notice N working days before; null = off. Absent before 20261113120000.
+   */
+  ticket_before_every_days?: number | null;
+  ticket_due_notice_days?: number | null;
   /** Admin › Reminders › Bids (owner, Oct 13; read by bids-notify.server.ts). */
   bid_due_notice_days: number;
   bid_overdue_every_days: number | null;
@@ -42,6 +62,7 @@ export async function crmSettings(admin: Client): Promise<Settings> {
       opportunity_every_days: 7,
       ticket_first_days: 1,
       ticket_every_days: 3,
+      ...TICKET_REMINDER_DEFAULTS,
       ...BID_REMINDER_DEFAULTS,
     }
   );
@@ -128,9 +149,18 @@ export function startNotice(input: {
   actorName: string | null;
   due: Date;
   every: number;
+  /**
+   * A ticket's first reminder, when the sync knows it (Nov 13): the notice names the day
+   * ("Due Saturday 12/13/2026; first reminder Tuesday 11/18/2026.", ticketStartTail).
+   */
+  firstReminder?: Date | null | undefined;
+  now?: Date | undefined;
 }): { title: string; body: string } {
   const who = input.actorName ?? "The office";
-  const tail = `Due ${input.due.toLocaleDateString("en-US")}; reminders every ${input.every} day${input.every === 1 ? "" : "s"} until it is closed.`;
+  const tail =
+    input.kind === "ticket"
+      ? ticketStartTail(input.due, input.firstReminder, input.every, input.now ?? new Date())
+      : `Due ${input.due.toLocaleDateString("en-US")}; reminders every ${input.every} day${input.every === 1 ? "" : "s"} until it is closed.`;
   if (input.reopened)
     return {
       title: `${KIND_LABEL[input.kind]} reopened: ${input.title}`,
@@ -163,6 +193,8 @@ interface UpsertOut {
   due_at: string;
   every_days: number;
   snooze_cleared: boolean;
+  /** The first reminder of a timer that starts now (since 20261113120000; absent before). */
+  first_remind_at?: string | null;
 }
 
 /**
@@ -221,7 +253,14 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   if (!up.error) {
     const out = up.data as unknown as UpsertOut;
     if (out.action === "unchanged") return out.snooze_cleared ? "snooze_cleared" : "unchanged";
-    await announce(a, out.id, new Date(out.due_at), out.every_days, admin);
+    await announce(
+      a,
+      out.id,
+      new Date(out.due_at),
+      out.every_days,
+      admin,
+      out.first_remind_at ? new Date(out.first_remind_at) : null,
+    );
     return out.action;
   }
 
@@ -232,12 +271,16 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   const due = a.dueDate
     ? dateAtNoonUtc(a.dueDate)
     : new Date(now.getTime() + days(a.kind === "opportunity" ? s.opportunity_close_days : first));
-  // Ticket: remind on the due day (the scheduled day) unless it is already past, then now.
-  // Opportunity: first reminder after first_days, never later than the due date.
+  // Ticket: a date still ahead is reminded before it, on working days (ticketFirstRemindAt);
+  // on the due day (the scheduled day) otherwise, unless it is already past, then now. The
+  // review timer: as a ticket was. Opportunity: first reminder after first_days, never later
+  // than the due date.
   const firstRemind =
-    a.kind !== "opportunity"
-      ? new Date(Math.max(due.getTime(), now.getTime()))
-      : new Date(Math.min(now.getTime() + days(first), due.getTime()));
+    a.kind === "ticket"
+      ? ticketFirstRemindAt(due, now, ticketReminderSettings(s), every)
+      : a.kind !== "opportunity"
+        ? new Date(Math.max(due.getTime(), now.getTime()))
+        : new Date(Math.min(now.getTime() + days(first), due.getTime()));
   if (open && open.assignee_id === a.assigneeId) {
     // Same person: keep the timer; refresh the title, customer and link, and the due date if it
     // moved (audit, Oct 2: the customer and link stayed the old ones).
@@ -252,7 +295,9 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
       const snoozed = open.snoozed_until ? Date.parse(open.snoozed_until) : null;
       snoozeCleared = snoozed !== null && snoozed > now.getTime();
       if (open.snoozed_until) patch.snoozed_until = null;
-      if (open.reminders_sent === 0 || snoozeCleared)
+      // A ticket's date moved to a day still ahead always takes the rule's reminder (Nov 13).
+      const ahead = a.kind === "ticket" && officeDay(due) > officeDay(now);
+      if (open.reminders_sent === 0 || snoozeCleared || ahead)
         patch.next_remind_at = firstRemind.toISOString();
     }
     if (Object.keys(patch).length)
@@ -277,7 +322,7 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
     .select("id")
     .single();
   if (insErr) throw new Error(insErr.message);
-  await announce(a, created.id, due, every, admin);
+  await announce(a, created.id, due, every, admin, firstRemind);
   return open ? "reassigned" : "started";
 }
 
@@ -285,7 +330,14 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
  * Tell the new assignee (never the person who made the change, and not when the caller already
  * did in this step — `quiet`).
  */
-async function announce(a: SyncArgs, followupId: string, due: Date, every: number, admin: Client) {
+async function announce(
+  a: SyncArgs,
+  followupId: string,
+  due: Date,
+  every: number,
+  admin: Client,
+  firstReminder: Date | null = null,
+) {
   if (!a.assigneeId || a.assigneeId === a.actorId || a.quiet) return;
   const n = startNotice({
     kind: a.kind,
@@ -294,6 +346,7 @@ async function announce(a: SyncArgs, followupId: string, due: Date, every: numbe
     actorName: a.actorName,
     due,
     every,
+    firstReminder,
   });
   await notify(
     [a.assigneeId],

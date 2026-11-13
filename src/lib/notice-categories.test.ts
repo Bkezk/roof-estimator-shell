@@ -40,7 +40,7 @@ describe("the four categories", () => {
     expect(NOTICE_CATEGORY_HELP).toEqual({
       leads: "New leads from the bid boards. Off unless you work them.",
       opportunities: "Follow-ups, untouched and assignment notices on opportunities.",
-      service: "Ticket assignments, date moves, done and ready-to-invoice notices.",
+      service: "Ticket assignments, reminders, date moves, done and ready-to-invoice notices.",
       bids: "Bid due, past due and your own bid reminders.",
       storms: "Storm reports for roofs in your counties. Off unless you work them.",
     });

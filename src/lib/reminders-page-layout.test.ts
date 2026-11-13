@@ -28,7 +28,9 @@ describe("Reminders page layout", () => {
       expect(src).toContain(t);
     expect(src.match(/<Line label="Who is reminded">/g)?.length).toBe(2);
     expect(src.match(/<Line label="Due date">/g)?.length).toBe(2);
-    expect(src.match(/<Line label="First reminder">/g)?.length).toBe(2);
+    // Tickets have no single first reminder since Nov 13: "Before the date", "Notice" and "On
+    // the date" lines say when they go (reminders-settings-nov13b.test.ts).
+    expect(src.match(/<Line label="First reminder">/g)?.length).toBe(1);
     expect(src.match(/<Line label="After that">/g)?.length).toBe(2);
     // Opportunities
     expect(src).toMatch(
@@ -48,8 +50,12 @@ describe("Reminders page layout", () => {
     expect(src).toMatch(
       /The scheduled day\. With no scheduled day, \{field\("ticket_first_days"\)\} days after\s+the technician is assigned\./,
     );
-    expect(src).toContain('<Line label="First reminder">On the due date.</Line>');
-    expect(src).toMatch(/Every \{field\("ticket_every_days"\)\} days until the ticket is Done\./);
+    expect(src).toContain(
+      '<Line label="On the date">That morning, also on a Saturday or Sunday.</Line>',
+    );
+    expect(src).toMatch(
+      /Every \{field\("ticket_every_days"\)\} working days until the ticket is Done\./,
+    );
     // Needs assignment
     expect(src).toContain('<Line label="Where it shows">Under Unassigned on Work Overview.</Line>');
     expect(src).toMatch(
@@ -57,7 +63,7 @@ describe("Reminders page layout", () => {
     );
     // Untouched work
     expect(src).toMatch(
-      /<Line label="Counts as untouched">\s+A ticket after \{field\("ticket_untouched_days"\)\} days with no contact logged; an\s+opportunity after \{field\("opportunity_untouched_days"\)\} days\./,
+      /<Line label="Counts as untouched">\s+A ticket \{field\("ticket_untouched_days"\)\} working days after its date, when it is\s+still assigned and nobody has started it; an opportunity after\{" "\}\s+\{field\("opportunity_untouched_days"\)\} days with no contact logged\./,
     );
     expect(src).toContain('<Line label="What happens">');
     expect(src).toContain('<Line label="Also tell">');
@@ -78,13 +84,13 @@ describe("Reminders page layout", () => {
       'help="Won, Lost or No response ends the timer; taking the assignee off stops the reminders."',
     );
     expect(src).toContain(
-      'help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders."',
+      'help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders. Saturdays and Sundays are not counted, and no ticket reminder goes out on one, except on the ticket’s own date."',
     );
     expect(src).toContain(
       'help="Nobody is reminded while a ticket or opportunity has no person on it — there is no timer until someone is assigned."',
     );
     expect(src).toMatch(
-      /help="Assigned, but no contact logged and not started\. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until a contact is logged or it is started\."/,
+      /help="An opportunity: assigned, with no contact logged\. A ticket: its date has passed, it is still assigned and nobody has started it\. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until it is started or a contact is logged\."/,
     );
     // The card's description states the one rule behind all four, and what each line answers.
     expect(src).toMatch(
