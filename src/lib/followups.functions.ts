@@ -494,8 +494,9 @@ export const sendTestNotification = createServerFn({ method: "POST" })
       [context.userId],
       {
         kind: "test",
-        title: "Bid-O-Matic test notification",
-        body: "If you can read this, reminders will reach you here.",
+        // Short on purpose (owner, Nov 13): a phone adds "from JBK Portal" under it by itself.
+        title: "Test notification",
+        body: "Notifications are working.",
         url: "/account",
       },
       context.supabase,

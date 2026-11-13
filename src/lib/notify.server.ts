@@ -44,7 +44,7 @@ export interface Outgoing {
 
 /** Where email comes from. Resend's onboarding sender only delivers to the account owner. */
 export const fromAddress = () =>
-  process.env["NOTIFY_FROM_EMAIL"] || "Bid-O-Matic <onboarding@resend.dev>";
+  process.env["NOTIFY_FROM_EMAIL"] || "JBK Portal <onboarding@resend.dev>";
 const contactSubject = () =>
   `mailto:${process.env["NOTIFY_CONTACT_EMAIL"] || "sales@flatroofonline.com"}`;
 /** The app's public origin for links in emails and push (set APP_URL in Lovable Cloud). */

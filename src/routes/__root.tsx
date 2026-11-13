@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -15,6 +16,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { lockIosFocusZoom } from "@/lib/ios-viewport";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import { ThemeProvider } from "@/lib/theme-context";
 
@@ -146,6 +148,10 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // iPhone / iPad: no zoom-in when a box is tapped (lib/ios-viewport.ts). After hydration, and
+  // again on a route change in case the head re-made its viewport tag.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => lockIosFocusZoom(), [pathname]);
 
   return (
     <QueryClientProvider client={queryClient}>
