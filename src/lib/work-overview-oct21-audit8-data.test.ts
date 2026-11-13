@@ -523,7 +523,7 @@ describe("9. setServiceStage Done → Scheduled: the technician hears 'reopened'
     const env = ticketEnv({ stage: "done", completed_at: "2026-10-15T20:10:00Z" });
     await stage(env, "scheduled");
     expect(env.tables["service_jobs"]![0]!["stage"]).toBe("scheduled");
-    expect(titles()).toEqual([`Ticket reopened: ${TITLE}`]);
+    expect(titles()).toEqual([`Reopened: ${TITLE}`]);
     const body = (vi.mocked(notify).mock.calls[0]![1] as { body: string }).body;
     expect(body).toMatch(/^Mia reopened this\./);
   });
@@ -531,13 +531,13 @@ describe("9. setServiceStage Done → Scheduled: the technician hears 'reopened'
     vi.mocked(notify).mockClear();
     const env = ticketEnv({ stage: "authorized" });
     await stage(env, "scheduled");
-    expect(titles()).toEqual([`Ticket reopened: ${TITLE}`]);
+    expect(titles()).toEqual([`Reopened: ${TITLE}`]);
   });
   it("a forward move is not: Open → Scheduled on a ticket without a timer still says assigned", async () => {
     vi.mocked(notify).mockClear();
     const env = ticketEnv({ stage: "open" });
     await stage(env, "scheduled");
-    expect(titles()).toEqual([`Ticket assigned to you: ${TITLE}`]);
+    expect(titles()).toEqual([`Assigned to you: ${TITLE}`]);
   });
   it("a plain assignment (assignServiceJob) keeps 'assigned to you'; Done closes the timer and tells nobody here", async () => {
     vi.mocked(notify).mockClear();
@@ -546,7 +546,7 @@ describe("9. setServiceStage Done → Scheduled: the technician hears 'reopened'
       data: { id: JOB, technician_id: TECH, scheduled_date: DAY, expect_unassigned: true },
       context: { supabase: env.db, userId: OFFICE },
     });
-    expect(titles()).toEqual([`Ticket assigned to you: ${TITLE}`]);
+    expect(titles()).toEqual([`Assigned to you: ${TITLE}`]);
     vi.mocked(notify).mockClear();
     await stage(env, "done");
     expect(titles()).toEqual([]);

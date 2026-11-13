@@ -100,10 +100,12 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 }));
 
 import { dispatchDueReminders, type Client } from "@/lib/notify.server";
+import { reminderMorning } from "@/lib/working-days";
 
 const TECH = "tech-1";
 const JOB = "job-1";
-const noon = (ymd: string) => `${ymd}T12:00:00.000Z`;
+/** A day's morning: 8:00 in the office (it was 12:00 UTC until the 8 AM change, Nov 13). */
+const at8 = (ymd: string) => reminderMorning(ymd).toISOString();
 /** 9 am in the office (America/New_York) on that day, winter time. */
 const morning = (ymd: string) => new Date(`${ymd}T14:00:00Z`);
 
@@ -116,8 +118,8 @@ const timer = (over: Row = {}): Row => ({
   assignee_id: TECH,
   title: "Ticket #6090 Acme — leak at the dock",
   url: `/service?id=${JOB}`,
-  due_at: noon("2026-12-13"),
-  next_remind_at: noon("2026-11-18"),
+  due_at: at8("2026-12-13"),
+  next_remind_at: at8("2026-11-18"),
   created_at: "2026-11-13T15:00:00.000Z",
   every_days: 3,
   reminders_sent: 0,
@@ -227,7 +229,7 @@ describe("a ticket a month out is walked to its date and past it", () => {
 
   it("with both numbers blank it is as it was: the date, then every 3 — on working days", async () => {
     const db: Tables = {
-      crm_followups: [timer({ next_remind_at: noon("2026-12-13") })],
+      crm_followups: [timer({ next_remind_at: at8("2026-12-13") })],
       crm_settings: [settings({ ticket_before_every_days: null, ticket_due_notice_days: null })],
     };
     const client = use(db);
@@ -247,7 +249,7 @@ describe("a ticket a month out is walked to its date and past it", () => {
 
   it("the settings row decides the cadence: every 5 working days, the notice 2 before", async () => {
     const db: Tables = {
-      crm_followups: [timer({ due_at: noon("2026-12-02"), next_remind_at: noon("2026-11-20") })],
+      crm_followups: [timer({ due_at: at8("2026-12-02"), next_remind_at: at8("2026-11-20") })],
       crm_settings: [settings({ ticket_before_every_days: 5, ticket_due_notice_days: 2 })],
     };
     vi.setSystemTime(morning("2026-11-20"));
@@ -257,7 +259,7 @@ describe("a ticket a month out is walked to its date and past it", () => {
     );
     // Five working days on is Fri Nov 27; the notice day (two working days before Wed Dec 2) is
     // Mon Nov 30: the cadence step comes first.
-    expect(f1(db)["next_remind_at"]).toBe(noon("2026-11-27"));
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-11-27"));
   });
 });
 
@@ -266,10 +268,10 @@ describe("no ticket reminder goes out on a Saturday or Sunday, except on the tic
     const db: Tables = {
       crm_followups: [
         timer({
-          due_at: noon("2026-11-10"),
+          due_at: at8("2026-11-10"),
           next_remind_at: "2026-11-14T02:00:00.000Z", // Friday evening in the office
           reminders_sent: 1,
-          last_reminded_at: noon("2026-11-10"),
+          last_reminded_at: at8("2026-11-10"),
         }),
       ],
       crm_settings: [settings()],
@@ -289,11 +291,11 @@ describe("no ticket reminder goes out on a Saturday or Sunday, except on the tic
     expect(sent(db)[0]!["body"]).toBe(
       "4 working days overdue. Reminder 2; it repeats every 3 working days until the item is finished or closed.",
     );
-    expect(f1(db)["next_remind_at"]).toBe(noon("2026-11-19"));
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-11-19"));
   });
   it("a ticket dated Saturday is reminded that Saturday", async () => {
     const db: Tables = {
-      crm_followups: [timer({ due_at: noon("2026-11-14"), next_remind_at: noon("2026-11-14") })],
+      crm_followups: [timer({ due_at: at8("2026-11-14"), next_remind_at: at8("2026-11-14") })],
       crm_settings: [settings()],
     };
     vi.setSystemTime(morning("2026-11-14"));
@@ -301,7 +303,7 @@ describe("no ticket reminder goes out on a Saturday or Sunday, except on the tic
     expect(r.reminded).toBe(1);
     expect(sent(db)[0]!["body"]).toMatch(/^due today\. Reminder 1;/);
     // Three working days after a Saturday: Wednesday.
-    expect(f1(db)["next_remind_at"]).toBe(noon("2026-11-18"));
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-11-18"));
   });
 });
 
@@ -316,7 +318,7 @@ describe("the claim", () => {
     const r = await dispatchDueReminders(client);
     expect(r).toMatchObject({ reminded: 0, failed: 1 });
     expect(f1(db)).toMatchObject({
-      next_remind_at: noon("2026-11-18"),
+      next_remind_at: at8("2026-11-18"),
       reminders_sent: 0,
       last_reminded_at: null,
     });
@@ -338,7 +340,7 @@ describe("the claim", () => {
     expect(sent(db)[0]!["body"]).toBe(
       "due Sunday 12/13/2026. Reminder 1; it repeats every 3 working days until the date.",
     );
-    expect(f1(db)["next_remind_at"]).toBe(noon("2026-11-23"));
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-11-23"));
   });
   it("two passes at once send one reminder", async () => {
     vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
@@ -360,7 +362,7 @@ describe("opportunities are reminded exactly as before", () => {
           kind: "opportunity",
           title: "Dock roof",
           url: "/opportunities?id=opp-1",
-          due_at: noon("2026-12-13"),
+          due_at: at8("2026-12-13"),
           next_remind_at: "2026-11-14T13:00:00.000Z",
           every_days: 7,
         }),
@@ -373,7 +375,7 @@ describe("opportunities are reminded exactly as before", () => {
     expect(r.reminded).toBe(1);
     expect(sent(db)[0]).toMatchObject({
       title: "Follow up: Dock roof",
-      body: `due ${new Date(noon("2026-12-13")).toLocaleDateString("en-US")}. Reminder 1; it repeats every 7 days until the item is finished or closed.`,
+      body: `due ${new Date(at8("2026-12-13")).toLocaleDateString("en-US")}. Reminder 1; it repeats every 7 days until the item is finished or closed.`,
     });
     expect(f1(db)["next_remind_at"]).toBe(new Date(now.getTime() + 7 * 86400000).toISOString());
   });
@@ -430,7 +432,7 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
     const told = sent(db, "untouched");
     expect(told.map((n) => n["user_id"]).sort()).toEqual(["boss-1", "boss-2"]);
     expect(told[0]).toMatchObject({
-      title: "Untouched ticket: #6090 Acme — leak at the dock",
+      title: "Untouched: Ticket #6090 Acme — leak at the dock",
       body: "Assigned to Sam Tech; due Friday 11/6/2026 and not started, 3 working days later. Limit is 2 working days.",
       url: `/service?id=${JOB}`,
     });
@@ -474,9 +476,9 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
     const db = world();
     db["crm_followups"] = [
       timer({
-        due_at: noon("2026-11-06"),
-        next_remind_at: noon("2026-11-20"),
-        snoozed_until: noon("2026-11-20"),
+        due_at: at8("2026-11-06"),
+        next_remind_at: at8("2026-11-20"),
+        snoozed_until: at8("2026-11-20"),
         hold_reason: "Waiting on the customer",
       }),
     ];

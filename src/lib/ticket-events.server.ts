@@ -209,7 +209,7 @@ export interface DispatchBefore {
  * The technician's notices after a dispatch or a date move (owner, Oct 12, item 9). Exactly one
  * per change, from the one place every path reaches (service.functions.ts syncTicketFollowup):
  *   - the technician changed from A to B: A hears "Ticket #N was reassigned" (kind `reassigned`,
- *     naming B and the ticket; B hears "Ticket assigned to you" from the follow-up as before);
+ *     naming B and the ticket; B hears "Assigned to you: Ticket #N …" from the follow-up as before);
  *     taken off to nobody: nothing beyond that (owner: "reassigned" wording, not "taken off you");
  *   - the technician stayed and the day moved: they hear "Ticket #N moved to <long day>" (kind
  *     `date_moved`) — unless they moved it themselves.

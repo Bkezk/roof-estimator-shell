@@ -28,7 +28,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
-import { officeDay } from "@/lib/working-days";
+import { officeDay, reminderMorning } from "@/lib/working-days";
 import {
   TICKET_REMINDER_DEFAULTS,
   ticketFirstRemindAt,
@@ -103,8 +103,6 @@ const previewSkipsReviewTimer = (
   );
   return true;
 };
-/** A calendar date as 08:00 local-ish (12:00 UTC keeps it on the same day across US zones). */
-const dateAtNoonUtc = (ymd: string) => new Date(`${ymd}T12:00:00Z`);
 
 interface SyncArgs {
   kind: "ticket" | "opportunity" | "invoice";
@@ -140,7 +138,8 @@ const KIND_LABEL = { opportunity: "Opportunity", invoice: "To invoice", ticket: 
 
 /**
  * The assignee's notice when a follow-up starts: "<Kind> assigned to you: <title>", or for an
- * item opened again after Won / Lost / No response, "<Kind> reopened: <title>".
+ * item opened again after Won / Lost / No response, "<Kind> reopened: <title>". For a ticket,
+ * whose title starts "Ticket #…": "Assigned to you: <title>" / "Reopened: <title>".
  */
 export function startNotice(input: {
   kind: SyncArgs["kind"];
@@ -161,9 +160,15 @@ export function startNotice(input: {
     input.kind === "ticket"
       ? ticketStartTail(input.due, input.firstReminder, input.every, input.now ?? new Date())
       : `Due ${input.due.toLocaleDateString("en-US")}; reminders every ${input.every} day${input.every === 1 ? "" : "s"} until it is closed.`;
+  // A ticket's title already starts "Ticket #6090 …", so its notices do not say "Ticket" again
+  // (owner, Nov 13: "update the wording so it doesnt double say ticket"): "Assigned to you:
+  // Ticket #6090 …" and "Reopened: Ticket #6090 …". An opportunity's title is its own words, so
+  // it keeps "Opportunity assigned to you: …" / "Opportunity reopened: …".
+  const lead = input.kind === "ticket" ? "" : `${KIND_LABEL[input.kind]} `;
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   if (input.reopened)
     return {
-      title: `${KIND_LABEL[input.kind]} reopened: ${input.title}`,
+      title: `${cap(`${lead}reopened`)}: ${input.title}`,
       body: `${who} reopened this. ${tail}`,
     };
   // The review timer (kind "invoice", title "Authorize Ticket #…"): nothing is to be invoiced
@@ -174,7 +179,7 @@ export function startNotice(input: {
       body: `${who} assigned this to you. ${tail}`,
     };
   return {
-    title: `${KIND_LABEL[input.kind]} assigned to you: ${input.title}`,
+    title: `${cap(`${lead}assigned to you`)}: ${input.title}`,
     body: `${who} assigned this to you. ${tail}`,
   };
 }
@@ -269,7 +274,8 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   const first = a.kind === "opportunity" ? s.opportunity_first_days : s.ticket_first_days;
   const every = a.kind === "opportunity" ? s.opportunity_every_days : s.ticket_every_days;
   const due = a.dueDate
-    ? dateAtNoonUtc(a.dueDate)
+    ? // 8:00 in the office that day (Nov 13; it was 12:00 UTC: 7 AM there in winter).
+      reminderMorning(a.dueDate)
     : new Date(now.getTime() + days(a.kind === "opportunity" ? s.opportunity_close_days : first));
   // Ticket: a date still ahead is reminded before it, on working days (ticketFirstRemindAt);
   // on the due day (the scheduled day) otherwise, unless it is already past, then now. The

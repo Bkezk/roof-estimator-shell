@@ -67,21 +67,21 @@ Every one is kind `followup` (the bell's "Reminder") or `untouched` ("Untouched"
 ticket (`/service?id=…`), and falls under the person's "Service notices" switch on My account.
 No new kind, and no title carries the site's name.
 
-| Which                                          | Title                             | Body                                                                                                         |
-| ---------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Before the date                                | `Follow up: <title>`              | `due Sunday 12/13/2026. Reminder 2; it repeats every 3 working days until the date.`                         |
-| Before the date, the cadence box blank         | `Follow up: <title>`              | `due Sunday 12/13/2026. Reminder 2.`                                                                         |
-| The notice                                     | `Due Monday: <title>`             | `due Monday 12/14/2026. Reminder 8; the next one is that morning.`                                           |
-| On the date                                    | `Follow up: <title>`              | `due today. Reminder 9; after today it repeats every 3 working days until the item is finished or closed.`   |
-| After the date                                 | `Follow up: <title>`              | `3 working days overdue. Reminder 10; it repeats every 3 working days until the item is finished or closed.` |
-| Untouched (to the admins and the named people) | `Untouched ticket: <title>`       | `Assigned to Sam Tech; due Friday 11/6/2026 and not started, 3 working days later. Limit is 2 working days.` |
-| Untouched, handed over after its date          | `Untouched ticket: <title>`       | `Assigned to Sam Tech 1 working day ago; due Friday 11/6/2026 and not started. Limit is 1 working day.`      |
-| Assigned, a reminder before the date           | `Ticket assigned to you: <title>` | `Roe assigned this to you. Due Sunday 12/13/2026; first reminder Wednesday 11/18/2026.`                      |
-| Assigned, nothing before the date              | `Ticket assigned to you: <title>` | `Roe assigned this to you. Due Sunday 12/13/2026; the reminder comes that morning.`                          |
-| Assigned for today or a past day               | `Ticket assigned to you: <title>` | `Roe assigned this to you. Due Friday 11/13/2026; reminders every 3 working days until it is closed.`        |
+| Which                                          | Title                                       | Body                                                                                                         |
+| ---------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Before the date                                | `Follow up: <title>`                        | `due Sunday 12/13/2026. Reminder 2; it repeats every 3 working days until the date.`                         |
+| Before the date, the cadence box blank         | `Follow up: <title>`                        | `due Sunday 12/13/2026. Reminder 2.`                                                                         |
+| The notice                                     | `Due Monday: <title>`                       | `due Monday 12/14/2026. Reminder 8; the next one is that morning.`                                           |
+| On the date                                    | `Follow up: <title>`                        | `due today. Reminder 9; after today it repeats every 3 working days until the item is finished or closed.`   |
+| After the date                                 | `Follow up: <title>`                        | `3 working days overdue. Reminder 10; it repeats every 3 working days until the item is finished or closed.` |
+| Untouched (to the admins and the named people) | `Untouched: <title>` (see the last section) | `Assigned to Sam Tech; due Friday 11/6/2026 and not started, 3 working days later. Limit is 2 working days.` |
+| Untouched, handed over after its date          | `Untouched: <title>` (see the last section) | `Assigned to Sam Tech 1 working day ago; due Friday 11/6/2026 and not started. Limit is 1 working day.`      |
+| Assigned, a reminder before the date           | `Assigned to you: <title>`                  | `Roe assigned this to you. Due Sunday 12/13/2026; first reminder Wednesday 11/18/2026.`                      |
+| Assigned, nothing before the date              | `Assigned to you: <title>`                  | `Roe assigned this to you. Due Sunday 12/13/2026; the reminder comes that morning.`                          |
+| Assigned for today or a past day               | `Assigned to you: <title>`                  | `Roe assigned this to you. Due Friday 11/13/2026; reminders every 3 working days until it is closed.`        |
 
 They are siblings of the ones already there (`Follow up: <title>` / `due 12/13/2026. Reminder 2;
-it repeats every 3 days until the item is finished or closed.`, and `Untouched ticket: <title>` /
+it repeats every 3 days until the item is finished or closed.`, and `Untouched opportunity: <title>` /
 `Assigned to <name> 3 days ago; no contact logged and not started. Limit is 2 days.`), which
 opportunities keep word for word. "1 working day" has no "s". "Back from hold" is unchanged.
 
@@ -367,3 +367,163 @@ rows. Counts as before: 51 tickets, 33 bids, 6 opportunities, 27 contact-log row
 `crm_settings` is the snapshot again (escalate to admins on, no named people, `updated_at`
 2026-09-27 03:23:51.733077+00) plus the two new numbers at 3 and 1. The three real timers are as
 the table above leaves them.
+
+## Later the same day: the morning is 8 AM Eastern, all year
+
+Owner, Nov 13: "lets do 8AM est instead of 7 am plz".
+
+"The morning" was written as 12:00 UTC of the day, which is 8 AM Eastern in summer but 7 AM in
+winter. It is now 8:00 on the office's clock (America/New_York) whatever the season: one helper
+in the database, `reminder_morning(day)`, and its twin in the app, `reminderMorning`
+(`src/lib/working-days.ts`).
+
+| Day                                            | The morning, in UTC |
+| ---------------------------------------------- | ------------------- |
+| A winter day (Nov 13, 2026)                    | 13:00               |
+| A summer day (Jul 15, 2026)                    | 12:00               |
+| Sat Oct 31, 2026 (the day before clocks back)  | 12:00               |
+| Sun Nov 1, 2026 (clocks go back)               | 13:00               |
+| Sat Mar 13, 2027 (the day before clocks ahead) | 13:00               |
+| Sun Mar 14, 2027 (clocks go forward)           | 12:00               |
+
+Both sides give these (the test table in `reminder-morning-nov13c.test.ts` holds the app to the
+database's answers).
+
+What uses it:
+
+- **A ticket's reminders** (the cadence, the notice, the date, after the date): every instant the
+  rule sets (`ticket_next_remind_at`, `ticketNextRemindAt`).
+- **A dated follow-up's due instant** (`followup_sync_upsert`, and the app's own direct write):
+  the morning of its date.
+- A hold already ended at 8:00 Eastern (`hold_followup`); nothing to change there.
+
+**Opportunities** share the due instant, so an opportunity's follow-up is now due at 8:00 Eastern
+on its expected close date instead of 12:00 UTC (an hour later in winter, the same in summer).
+What that changes for them: when the first reminder is capped by the due date ("or on the due
+date if that comes first") it goes at 8:00 instead of 7:00 in winter, and the pass's "N days
+overdue" count turns over at 8:00. Their first reminder otherwise (N days after the assignment,
+at the time of day it was assigned) and their repeat (every N days from the last one) are
+untouched.
+
+**The day never moves.** Every reader of the due instant takes its day in the office's zone
+(`officeDay`), the viewer's zone (`toYmd`, `whenDay`) or prints the date; 8:00 Eastern is the
+same calendar day in the office, in UTC, and in every US zone (a test walks two years of days).
+The database's "date moved" check compares the stored instant with the new one, so the open
+follow-ups are moved with the functions (below); otherwise the next save of any ticket would
+have read as a moved date, cleared a hold and restarted its reminders.
+
+**Wording.** Nothing prints a clock time; "that morning" stays. Admin › Reminders has one new
+line at the end of Tickets: **Time of day** — "Ticket reminders go out at 8 AM Eastern."
+
+**The schedule** (`.github/workflows/reminders.yml`) is unchanged: every 30 minutes from 12:00 to
+23:30 UTC, which is 8:00 AM to 7:30 PM Eastern in summer and 7:00 AM to 6:30 PM in winter (its
+comment said "8am–7pm Eastern" for both; it now says this). The first scheduled pass after 8 AM
+Eastern is the 12:00 UTC one in summer (8:00 AM) and the 13:00 UTC one in winter (8:00 AM; the
+12:00 and 12:30 UTC passes are 7:00 and 7:30 there and find the morning's reminders not yet due).
+An office user opening the site also runs a pass, at most every ten minutes.
+
+### The database: written, not applied
+
+The database connection was down for this change, so **nothing has been applied**. The new
+migration is `supabase/migrations/20261113130000_reminder_morning_8am.sql` (the applied one is
+not edited): the helper; `ticket_next_remind_at` and `followup_sync_upsert` re-created with their
+one "12:00 UTC" line calling it (a test shows nothing else in them differs); and the open
+follow-ups moved — a `due_at` exactly at 12:00:00 UTC of its day becomes that day's morning, and
+so does a `next_remind_at` exactly at 12:00:00 UTC that is still ahead. A reminder that is due
+and not yet sent is left as it is, so it stays due. Closed follow-ups, holds, the review timers
+and summer dates are untouched. Run twice, the second run changes nothing.
+
+The statements to run, one per block and in order, with the checks after them, are in the
+session's working files as `apply-8am.sql`. Until they are run the live database keeps writing
+12:00 UTC (7 AM Eastern in winter), whichever code is published: the database sets the instants.
+
+Checked without the live database: the migration file, and then the statements file, were run
+on a throwaway PostgreSQL 16 loaded with the applied migration and eleven sample timers. The
+helper gave the table above; a ticket a month out was due at 13:00 UTC with reminders at 13:00
+UTC on Nov 18, 23, 26, Dec 1, 4, 9, 11, the date, Dec 17; saving the same ticket again was "not
+moved" and a hold stayed; an opportunity's due instant was 13:00 UTC and its first reminder
+still three days from now; the sample rows moved as described, and a second run moved none.
+
+The three real open timers could not be read. As this morning's change left them, and what the
+statements will make of them:
+
+| Ticket's date | Due instant now → after | Next reminder → after                                               |
+| ------------- | ----------------------- | ------------------------------------------------------------------- |
+| Sun Nov 15    | 12:00 UTC → 13:00 UTC   | Was Fri Nov 13 12:00 UTC. If sent: now Sun Nov 15 12:00 → 13:00 UTC |
+| Wed Nov 18    | 12:00 UTC → 13:00 UTC   | Was Fri Nov 13 12:00 UTC. If sent: now Tue Nov 17 12:00 → 13:00 UTC |
+| Tue Nov 24    | 12:00 UTC → 13:00 UTC   | Tue Nov 17 12:00 → 13:00 UTC                                        |
+
+This was written at 13:30 UTC, after the two Nov 13 reminders came due at 12:00 UTC (7:00 AM
+Eastern, under the rule then live); what was sent is left alone, and one not yet sent stays due.
+
+### Task notices and "Bid due" notices (read from the code, nothing changed)
+
+- **Task notices** (`tasks-notify.server.ts`, the rule in `tasks.ts`): "due today" goes on the
+  first pass at or after **7:00 AM Eastern** on the task's day (`MORNING_HOUR = 7`), and "overdue"
+  on the first pass at or after 7:00 AM the next day. So yes, they can arrive before 8 AM: in
+  winter the 12:00 UTC scheduled pass is exactly 7:00 AM Eastern; in summer the first scheduled
+  pass is 8:00 AM, but an office user opening the site between 7 and 8 sends them then. "New
+  task" goes on the first pass after the task is saved, at any hour.
+- **"Bid due", "Bid past due" and "Bid reminder"** (`bids-notify.server.ts`): they have no hour
+  at all. Each is due as soon as the office's calendar day reaches its day, so it goes on the
+  first pass after midnight Eastern: the 7:00 AM scheduled pass in winter, the 8:00 AM one in
+  summer, or earlier whenever an office user opens the site (a pass ran at 1 AM Eastern today
+  that way).
+
+Both would need their own change to wait for 8 AM.
+
+### Proof for this change
+
+- `src/lib/reminder-morning-nov13c.test.ts` (32, with the titles below): the table of mornings; 8:00 on the wall and the
+  same day for every day of two years; ticket reminders at 13:00 UTC in winter and 12:00 UTC in
+  summer and across the change of clocks; not due on the 7:00 and 7:30 winter passes; no clock
+  time in any notice; the migration's text (the helper, the two one-line changes and nothing
+  else, the move step, the applied migration untouched); the page's line; the schedule and its
+  comment.
+- The two `*-nov13b` test files that pinned 12:00 UTC now use the helper's answer. No older test
+  pinned a winter 12:00 UTC morning (their dates are in October, where 12:00 UTC is 8 AM).
+- Prove-fail: with the wiring stashed, 37 tests failed across six files (with the titles below).
+- Not proven: anything on the live database (not reachable), and so the three real timers'
+  instants after the change.
+
+## Later the same day: a ticket notice says "Ticket" once
+
+Owner, Nov 13: "yes please update the wording so it doesnt double say ticket. i almost want a bit
+of nagging so thats fine on the reminder count".
+
+A ticket's own title starts "Ticket #6090 Acme Supply — …", and two lead-ins said the word again.
+The reminder count ("Reminder 7") stays in every reminder.
+
+Changed (old → new):
+
+| Notice                              | Old title                                | New title                          |
+| ----------------------------------- | ---------------------------------------- | ---------------------------------- |
+| A ticket assigned to a technician   | `Ticket assigned to you: Ticket #6090 …` | `Assigned to you: Ticket #6090 …`  |
+| A ticket opened again (Done → open) | `Ticket reopened: Ticket #6090 …`        | `Reopened: Ticket #6090 …`         |
+| An untouched ticket, to the admins  | `Untouched ticket: #6090 Acme — …`       | `Untouched: Ticket #6090 Acme — …` |
+
+The third did not say the word twice (the untouched list titles a ticket from its number); it was
+given the same shape as the others, as asked. Bodies are unchanged.
+
+Checked and left, because each says "Ticket" once already:
+
+- Reminders: `Follow up: Ticket #6090 …`, and the notice `Due Monday: Ticket #6090 …`.
+- A hold ending: `Back from hold: Ticket #6090 …`.
+- Done and authorized: `Ticket #6090 … is done — ready for your review`, `Ticket #6090 …
+authorized — ready to invoice`, `Authorize Ticket #6090 … — ready for your review`.
+- Reassigned: `Ticket #6090 was reassigned` / "… reassigned Ticket #6090 … to …. It is off your
+  list." Date moved: `Ticket #6090 moved to <day>` / "… moved Ticket #6090 … to <day>."
+- A mention: `<name> mentioned you on Ticket #6090 …`.
+- The Needs action strip and the tags print the ticket's title as it is, with no lead-in.
+- Opportunities (`Opportunity assigned to you: <title>`, `Opportunity reopened: <title>`,
+  `Untouched opportunity: <title>`): an opportunity's title is its own words, so nothing is said
+  twice. Bids, tasks and the review timer: the same; left as they were.
+
+Tests: the new titles are pinned in `reminder-morning-nov13c.test.ts` (each title a ticket's
+person can get says the word exactly once; the old strings fail), and in the older tests that
+pinned the old ones (`authorized-wording.test.ts`, `work-overview-oct21-audit8-data.test.ts`,
+`untouched-escalation.test.ts`, the two `*-nov13b` files). These are in the app's code, so they
+show after the next publish.
+
+Chain on the final tree for both changes: prettier clean, eslint 0 errors (the 16 baseline
+warnings), tsc clean, 540 test files / 7,063 tests, build exit 0.

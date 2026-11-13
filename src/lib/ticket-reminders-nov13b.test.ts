@@ -31,12 +31,13 @@ import {
   ticketStartTail,
   ticketUntouchedNotice,
 } from "@/lib/ticket-reminders";
-import { isWeekend } from "@/lib/working-days";
+import { isWeekend, reminderMorning } from "@/lib/working-days";
 import { RULE_CASES } from "@/test/working-day-cases";
 
 const ON = TICKET_REMINDER_DEFAULTS; // every 3 working days, the notice 1 working day before
 const OFF = { ticket_before_every_days: null, ticket_due_notice_days: null };
-const noon = (ymd: string) => `${ymd}T12:00:00.000Z`;
+/** A day's morning: 8:00 in the office (it was 12:00 UTC until the 8 AM change, Nov 13). */
+const at8 = (ymd: string) => reminderMorning(ymd).toISOString();
 /** The reminder days from `from`, each answer the next `from`. */
 function walk(
   due: string,
@@ -174,9 +175,9 @@ describe("the schedule, case by case", () => {
       "2026-12-24",
     ]);
     // The first reminder of a timer started today is the date's own morning, as it always was.
-    const due = new Date(noon("2026-12-13"));
+    const due = new Date(at8("2026-12-13"));
     const now = new Date("2026-11-13T15:00:00Z");
-    expect(ticketFirstRemindAt(due, now, OFF, 3).toISOString()).toBe(noon("2026-12-13"));
+    expect(ticketFirstRemindAt(due, now, OFF, 3).toISOString()).toBe(at8("2026-12-13"));
   });
   it("after the date never lands on a Saturday or a Sunday", () => {
     for (const from of ["2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15", "2026-11-16"])
@@ -200,31 +201,31 @@ describe("the database walks the same days (one table, two implementations)", ()
 
 describe("the first reminder of a timer, and its instant", () => {
   const now = new Date("2026-11-13T15:00:00Z"); // Friday, 10 am in the office
-  it("a month out: the first cadence step, 12:00 UTC that morning", () => {
-    expect(ticketFirstRemindAt(new Date(noon("2026-12-13")), now, ON, 3).toISOString()).toBe(
-      noon("2026-11-18"),
+  it("a month out: the first cadence step, 8:00 in the office that morning", () => {
+    expect(ticketFirstRemindAt(new Date(at8("2026-12-13")), now, ON, 3).toISOString()).toBe(
+      at8("2026-11-18"),
     );
   });
   it("a date that is today or already past: on the date, or now — as before", () => {
-    const today = new Date(noon("2026-11-13"));
+    const today = new Date(at8("2026-11-13"));
     expect(ticketFirstRemindAt(today, now, ON, 3).getTime()).toBe(now.getTime());
     const morning = new Date("2026-11-13T09:00:00Z"); // 4 am in the office
-    expect(ticketFirstRemindAt(today, morning, ON, 3).toISOString()).toBe(noon("2026-11-13"));
-    const past = new Date(noon("2026-11-10"));
+    expect(ticketFirstRemindAt(today, morning, ON, 3).toISOString()).toBe(at8("2026-11-13"));
+    const past = new Date(at8("2026-11-10"));
     expect(ticketFirstRemindAt(past, now, ON, 3).getTime()).toBe(now.getTime());
   });
-  it("landing on the date keeps the due instant itself; any other day is its 12:00 UTC", () => {
+  it("landing on the date keeps the due instant itself; any other day is its 8:00 in the office", () => {
     const odd = "2026-11-17T18:30:00.000Z"; // an unscheduled ticket's due_at has no fixed hour
     expect(ticketNextRemindAt(odd, "2026-11-16", ON, 3)).toBe(odd);
-    expect(ticketNextRemindAt(noon("2026-12-13"), "2026-11-13", ON, 3)).toBe(noon("2026-11-18"));
+    expect(ticketNextRemindAt(at8("2026-12-13"), "2026-11-13", ON, 3)).toBe(at8("2026-11-18"));
     // After the date: 3 working days on from the day it went, whatever the hour.
-    expect(ticketNextRemindAt(noon("2026-12-13"), "2026-12-13", ON, 3)).toBe(noon("2026-12-16"));
+    expect(ticketNextRemindAt(at8("2026-12-13"), "2026-12-13", ON, 3)).toBe(at8("2026-12-16"));
   });
   it("a reminder that comes due on a weekend waits for Monday, unless it is the ticket's date", () => {
-    expect(ticketReminderWaits(noon("2026-11-10"), "2026-11-14")).toBe(true); // Saturday, overdue
-    expect(ticketReminderWaits(noon("2026-11-14"), "2026-11-14")).toBe(false); // its own date
-    expect(ticketReminderWaits(noon("2026-11-15"), "2026-11-15")).toBe(false);
-    expect(ticketReminderWaits(noon("2026-11-10"), "2026-11-16")).toBe(false); // Monday
+    expect(ticketReminderWaits(at8("2026-11-10"), "2026-11-14")).toBe(true); // Saturday, overdue
+    expect(ticketReminderWaits(at8("2026-11-14"), "2026-11-14")).toBe(false); // its own date
+    expect(ticketReminderWaits(at8("2026-11-15"), "2026-11-15")).toBe(false);
+    expect(ticketReminderWaits(at8("2026-11-10"), "2026-11-16")).toBe(false); // Monday
   });
 });
 
@@ -253,7 +254,7 @@ describe("the settings as the pass reads them", () => {
 describe("which reminder it is, and its words", () => {
   const f = (over: Record<string, unknown> = {}) => ({
     title: "Ticket #6090 Acme — leak at the dock",
-    due_at: noon("2026-12-13"),
+    due_at: at8("2026-12-13"),
     created_at: "2026-11-13T15:00:00Z",
     last_reminded_at: null as string | null,
     every_days: 3,
@@ -279,7 +280,7 @@ describe("which reminder it is, and its words", () => {
     ).toBe("due Sunday 12/13/2026. Reminder 1.");
   });
   it("the notice: its own title, saying the weekday of the date (Friday says Monday)", () => {
-    const monday = f({ due_at: noon("2026-11-16"), created_at: "2026-11-10T15:00:00Z" });
+    const monday = f({ due_at: at8("2026-11-16"), created_at: "2026-11-10T15:00:00Z" });
     expect(ticketReminderNotice({ ...monday, reminders_sent: 1 }, at("2026-11-13"), ON)).toEqual({
       phase: "notice",
       title: "Due Monday: Ticket #6090 Acme — leak at the dock",
@@ -305,7 +306,7 @@ describe("which reminder it is, and its words", () => {
       body: "3 working days overdue. Reminder 9; it repeats every 3 working days until the item is finished or closed.",
     });
     expect(
-      ticketReminderNotice(f({ due_at: noon("2026-12-14"), every_days: 1 }), at("2026-12-15"), ON)
+      ticketReminderNotice(f({ due_at: at8("2026-12-14"), every_days: 1 }), at("2026-12-15"), ON)
         .body,
     ).toBe(
       "1 working day overdue. Reminder 1; it repeats every 1 working day until the item is finished or closed.",
@@ -319,14 +320,14 @@ describe("which reminder it is, and its words", () => {
   });
 
   it("the notice is the first reminder on or after the notice day, once", () => {
-    const monday = { due_at: noon("2026-11-16"), created_at: "2026-11-10T15:00:00Z" };
+    const monday = { due_at: at8("2026-11-16"), created_at: "2026-11-10T15:00:00Z" };
     // Thursday: still the cadence.
     expect(ticketReminderPhase(monday, "2026-11-12", ON)).toBe("before");
     expect(ticketReminderPhase(monday, "2026-11-13", ON)).toBe("notice");
     // Already had one on the notice day (two working days' notice, a daily cadence): the
     // cadence again.
     const two = { ticket_before_every_days: 1, ticket_due_notice_days: 2 };
-    const wed = { due_at: noon("2026-11-18"), created_at: "2026-11-10T15:00:00Z" };
+    const wed = { due_at: at8("2026-11-18"), created_at: "2026-11-10T15:00:00Z" };
     expect(ticketReminderPhase(wed, "2026-11-16", two)).toBe("notice");
     expect(
       ticketReminderPhase({ ...wed, last_reminded_at: "2026-11-16T13:00:00Z" }, "2026-11-17", two),
@@ -338,7 +339,7 @@ describe("which reminder it is, and its words", () => {
   });
   it("a ticket assigned on or after its notice day gets no notice", () => {
     // Assigned Friday for Monday; a hold then ends Friday afternoon: an ordinary reminder.
-    const friday = { due_at: noon("2026-11-16"), created_at: "2026-11-13T15:00:00Z" };
+    const friday = { due_at: at8("2026-11-16"), created_at: "2026-11-13T15:00:00Z" };
     expect(ticketReminderPhase(friday, "2026-11-13", ON)).toBe("before");
     expect(ticketReminderPhase(friday, "2026-11-16", ON)).toBe("due");
     expect(ticketReminderPhase(friday, "2026-11-17", ON)).toBe("after");
@@ -352,24 +353,24 @@ describe("which reminder it is, and its words", () => {
 
 describe("the assignment notice names the first reminder", () => {
   const now = new Date("2026-11-13T15:00:00Z");
-  const due = new Date(noon("2026-12-13"));
+  const due = new Date(at8("2026-12-13"));
   it("a date ahead with a reminder before it", () => {
-    expect(ticketStartTail(due, new Date(noon("2026-11-18")), 3, now)).toBe(
+    expect(ticketStartTail(due, new Date(at8("2026-11-18")), 3, now)).toBe(
       "Due Sunday 12/13/2026; first reminder Wednesday 11/18/2026.",
     );
     expect(
       startNotice({
         kind: "ticket",
-        title: "#6090 Acme",
+        title: "Ticket #6090 Acme",
         reopened: false,
         actorName: "Roe",
         due,
         every: 3,
-        firstReminder: new Date(noon("2026-11-18")),
+        firstReminder: new Date(at8("2026-11-18")),
         now,
       }),
     ).toEqual({
-      title: "Ticket assigned to you: #6090 Acme",
+      title: "Assigned to you: Ticket #6090 Acme",
       body: "Roe assigned this to you. Due Sunday 12/13/2026; first reminder Wednesday 11/18/2026.",
     });
   });
@@ -379,7 +380,7 @@ describe("the assignment notice names the first reminder", () => {
     );
   });
   it("today, past, or the first reminder unknown: the repeat, in working days", () => {
-    const today = new Date(noon("2026-11-13"));
+    const today = new Date(at8("2026-11-13"));
     expect(ticketStartTail(today, now, 3, now)).toBe(
       "Due Friday 11/13/2026; reminders every 3 working days until it is closed.",
     );
@@ -457,7 +458,7 @@ describe("untouched, for a ticket: its date has passed and nobody has started it
   it("the escalation's words: siblings of the Sep 28 ones, with the date and working days", () => {
     const u = { title: "#6090 Acme — leak", assignee_name: "Sam Tech", limit_days: 2 };
     expect(ticketUntouchedNotice(u, "2026-11-06", "2026-10-20T15:00:00Z", "2026-11-11")).toEqual({
-      title: "Untouched ticket: #6090 Acme — leak",
+      title: "Untouched: Ticket #6090 Acme — leak",
       body: "Assigned to Sam Tech; due Friday 11/6/2026 and not started, 3 working days later. Limit is 2 working days.",
     });
     expect(

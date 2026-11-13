@@ -14,12 +14,25 @@
  * zone against TASK_TZ.
  *
  * Holidays are not known: Thanksgiving counts as a working day.
+ *
+ * The morning (owner, Nov 13: "lets do 8AM est instead of 7 am plz"): a follow-up's due instant
+ * and a ticket's reminder are 8:00 on the office's clock, all year — reminderMorning, the twin of
+ * the database's reminder_morning() (20261113130000_reminder_morning_8am.sql). They used to be
+ * written at 12:00 UTC, which is 8 AM in summer and 7 AM in winter.
  */
-import { TASK_TZ, localYmd } from "@/lib/tasks";
+import { TASK_TZ, localYmd, zonedTime } from "@/lib/tasks";
 
 /** The office's calendar day (YYYY-MM-DD) of an instant: the SQL office_day(). */
 export const officeDay = (at: Date | string): string =>
   localYmd(typeof at === "string" ? new Date(at) : at, TASK_TZ);
+
+/** The time on the office's clock that "the morning" means. */
+export const REMINDER_MORNING = "08:00";
+/**
+ * 8:00 in the office on that day, as an instant: 13:00 UTC in winter, 12:00 UTC in summer, and
+ * right on the two days the clocks change. The SQL reminder_morning().
+ */
+export const reminderMorning = (ymd: string): Date => zonedTime(ymd, REMINDER_MORNING, TASK_TZ);
 
 const utc = (ymd: string): number => {
   const [y = 1970, m = 1, d = 1] = ymd.split("-").map(Number);

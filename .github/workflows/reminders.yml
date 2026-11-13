@@ -7,7 +7,11 @@ name: Follow-up reminders
 
 on:
   schedule:
-    - cron: "*/30 12-23 * * *" # every 30 min, 8am–7pm Eastern (12–23 UTC)
+    # Every 30 minutes from 12:00 to 23:30 UTC: 8:00 AM to 7:30 PM Eastern in summer, 7:00 AM to
+    # 6:30 PM Eastern in winter. Ticket reminders are set to 8:00 AM Eastern all year
+    # (reminder_morning): the first run after that is the 12:00 UTC one in summer and the 13:00
+    # UTC one in winter (the 12:00 and 12:30 UTC runs are 7:00 and 7:30 AM there, before it).
+    - cron: "*/30 12-23 * * *"
   workflow_dispatch:
 
 jobs:

@@ -32,6 +32,7 @@ import {
   addWorkingDays,
   isWeekend,
   officeDay,
+  reminderMorning,
   weekdayOf,
   workingDaysBefore,
   workingDaysBetween,
@@ -105,12 +106,15 @@ export function ticketNextRemindDay(
   return addWorkingDays(from, on(after) ? after : 1);
 }
 
-/** A day at 12:00 UTC: the morning in the office, the same calendar day in every US zone. */
-export const dayAtNoonUtc = (ymd: string): string => `${ymd}T12:00:00.000Z`;
+/**
+ * A day's morning as an ISO instant: 8:00 on the office's clock (working-days.ts
+ * reminderMorning; owner, Nov 13: "lets do 8AM est instead of 7 am plz").
+ */
+export const dayMorning = (ymd: string): string => reminderMorning(ymd).toISOString();
 
 /**
- * The next reminder as an instant: the due instant itself when the rule lands on the date (so a
- * dated ticket's reminder is still its 12:00 UTC morning), 12:00 UTC of the day otherwise.
+ * The next reminder as an instant: the due instant itself when the rule lands on the date (a
+ * dated ticket's due instant is that day's 8:00 in the office), the day's 8:00 otherwise.
  */
 export function ticketNextRemindAt(
   dueAt: string | Date,
@@ -127,7 +131,7 @@ export function ticketNextRemindAt(
     s.ticket_due_notice_days,
     after,
   );
-  return day === dueDay ? due.toISOString() : dayAtNoonUtc(day);
+  return day === dueDay ? due.toISOString() : dayMorning(day);
 }
 
 /**
@@ -323,10 +327,12 @@ export function ticketIsUntouched(j: UntouchedTicketLike, today: string, limit: 
 }
 
 /**
- * The escalation's words for a ticket — siblings of "Untouched ticket: <title>" / "Assigned to
- * <name> 3 days ago; no contact logged and not started. Limit is 2 days.":
- *   "Untouched ticket: <title>" / "Assigned to <name>; due Friday 11/6/2026 and not started, 3
- *   working days later. Limit is 2 working days."
+ * The escalation's words for a ticket — siblings of "Untouched opportunity: <title>" /
+ * "Assigned to <name> 3 days ago; no contact logged and not started. Limit is 2 days.". The
+ * untouched list titles a ticket "#6090 Acme — leak"; the notice says "Ticket" once, where every
+ * other ticket notice does (owner, Nov 13):
+ *   "Untouched: Ticket #6090 Acme — leak" / "Assigned to <name>; due Friday 11/6/2026 and not
+ *   started, 3 working days later. Limit is 2 working days."
  * and, for a ticket handed over after its date had passed,
  *   "Assigned to <name> 3 working days ago; due Friday 11/6/2026 and not started. Limit is 2
  *   working days."
@@ -341,7 +347,7 @@ export function ticketUntouchedNotice(
   const late = ticketLate(scheduled, assignedAt, today);
   const limit = `Limit is ${plural(u.limit_days, "working day")}.`;
   return {
-    title: `Untouched ticket: ${u.title}`,
+    title: `Untouched: Ticket ${u.title}`,
     body: late.sinceAssigned
       ? `Assigned to ${who} ${plural(late.days, "working day")} ago; due ${dayText(scheduled)} and not started. ${limit}`
       : `Assigned to ${who}; due ${dayText(scheduled)} and not started, ${plural(late.days, "working day")} later. ${limit}`,

@@ -96,8 +96,9 @@ describe("(b) the authorizer's follow-up notice", () => {
     expect(n.body).toContain("Ted Tech assigned this to you.");
   });
   it("other kinds are unchanged", () => {
+    // Nov 13: a ticket's title already says "Ticket", so the notice does not say it twice.
     expect(startNotice({ ...base, kind: "ticket", title: "Ticket #7" }).title).toBe(
-      "Ticket assigned to you: Ticket #7",
+      "Assigned to you: Ticket #7",
     );
     expect(startNotice({ ...base, kind: "opportunity", title: "Re-roof" }).title).toBe(
       "Opportunity assigned to you: Re-roof",

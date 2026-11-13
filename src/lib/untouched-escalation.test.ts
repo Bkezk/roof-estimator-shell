@@ -252,7 +252,7 @@ describe("an untouched ticket escalates on its own clock", () => {
     expect(daysOf(db, "boss-2", "untouched")).toEqual(boss);
     expect(daysOf(db, TECH, "untouched")).toEqual([]);
     const first = db["notifications"]!.find((n) => n["kind"] === "untouched")!;
-    expect(first["title"]).toBe("Untouched ticket: #7 Acme");
+    expect(first["title"]).toBe("Untouched: Ticket #7 Acme");
     expect(first["body"]).toBe(
       "Assigned to Tech One; due Monday 10/5/2026 and not started, 2 working days later. Limit is 2 working days.",
     );

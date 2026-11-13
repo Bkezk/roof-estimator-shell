@@ -1688,7 +1688,7 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
             : "No open follow-up for this opportunity."}
       </p>
     );
-  // Red only once the due DAY has passed, as Work Overview says it (not at 12:00 UTC on the due day);
+  // Red only once the due DAY has passed, as Work Overview says it (not at the morning instant on the due day);
   // never while on hold (owner, Oct 13).
   const overdue = isFollowupOverdue(f, localYmd(new Date()));
   const held = isOppHeld({ hold_until: f.snoozed_until }, localYmd(new Date()));

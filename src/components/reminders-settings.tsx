@@ -31,7 +31,9 @@
  * boxes that are blank when off like the bids' past-due one — "Before the date" (a reminder
  * every N working days from assignment) and "Notice" (N working days before the date) — and the
  * ticket lines say working days. Untouched, for a ticket, now means its date has passed and
- * nobody has started it (lib/ticket-reminders.ts; crm_untouched(), 20261113120000).
+ * nobody has started it (lib/ticket-reminders.ts; crm_untouched(), 20261113120000). Later the
+ * same day ("lets do 8AM est instead of 7 am plz"): a "Time of day" line says ticket reminders
+ * go out at 8 AM Eastern (working-days.ts reminderMorning; 20261113130000).
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -417,6 +419,8 @@ export function RemindersSettings() {
                 <Line label="After that">
                   Every {field("ticket_every_days")} working days until the ticket is Done.
                 </Line>
+                {/* Owner, Nov 13: "lets do 8AM est instead of 7 am plz" (reminder_morning). */}
+                <Line label="Time of day">Ticket reminders go out at 8 AM Eastern.</Line>
               </Section>
 
               {/* Owner, Oct 13: "Where are the bid reminders set? Is it in Reminders like opps and

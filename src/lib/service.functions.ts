@@ -706,7 +706,7 @@ const TICKET_CLOSING: readonly ServiceStage[] = FINISHED_STAGES;
  * `quiet` (followups.server.ts SyncArgs): a timer started here sends the technician no "assigned"
  * notice — the restore of a deleted ticket (owner, Oct 12, item 5), which is not a new assignment.
  * `reopened` (Oct 21, the eighth audit): the ticket is back at Open / Scheduled from Done or an
- * office stage, so the timer started here says "Ticket reopened: …", not "assigned to you" (the
+ * office stage, so the timer started here says "Reopened: Ticket #…", not "assigned to you" (the
  * wording opportunities have had since Oct 2; setServiceStage never asked for it).
  * Answers what the sync did (SyncResult; Oct 20: "snooze_cleared" when a date move ended the
  * follow-up's hold, which assignServiceJob passes on for Work Overview's toast).
