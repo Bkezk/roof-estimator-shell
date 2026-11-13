@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess, assertPricingRead } from "@/lib/auth.functions";
+import { fetchAllPages } from "@/lib/paging";
 
 export type ItemNumberRow = Database["public"]["Tables"]["catalog_item_numbers"]["Row"];
 
@@ -18,14 +19,19 @@ export const listItemNumbers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<ItemNumberRow[]> => {
     await assertPricingRead(context.supabase, context.userId);
-    const { data, error } = await context.supabase
-      .from("catalog_item_numbers")
-      .select("*")
-      .order("screen_id")
-      .order("row_label")
-      .order("price_col");
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    // Every page (Nov 13): one request stops at 1,000 rows, and the map holds more, so the
+    // Price import, the Item numbers tab and the catalog editor never saw the mappings after
+    // the first 1,000 in screen order. item_no ends the order: the paging needs a unique key.
+    return fetchAllPages<ItemNumberRow>((from, to) =>
+      context.supabase
+        .from("catalog_item_numbers")
+        .select("*")
+        .order("screen_id")
+        .order("row_label")
+        .order("price_col")
+        .order("item_no")
+        .range(from, to),
+    );
   });
 
 /**
@@ -53,14 +59,18 @@ export const listItemNumberKeys = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<string[]> => {
     await assertPricingRead(context.supabase, context.userId);
-    const { data, error } = await context.supabase
-      .from("catalog_item_numbers")
-      .select("item_no, screen_id, row_label, price_col")
-      .order("screen_id")
-      .order("row_label")
-      .order("price_col");
-    if (error) throw new Error(error.message);
-    return (data ?? []).map(itemNumberKeyLine);
+    // Every page, as listItemNumbers (Nov 13): the Inventory page missed the same mappings.
+    const rows = await fetchAllPages<ItemNumberKey>((from, to) =>
+      context.supabase
+        .from("catalog_item_numbers")
+        .select("item_no, screen_id, row_label, price_col")
+        .order("screen_id")
+        .order("row_label")
+        .order("price_col")
+        .order("item_no")
+        .range(from, to),
+    );
+    return rows.map(itemNumberKeyLine);
   });
 
 export type { PriceTarget } from "@/lib/price-targets";
