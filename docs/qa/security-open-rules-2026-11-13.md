@@ -63,10 +63,22 @@ sends with the server key, which no rule applies to.
 `src/lib/security-open-rules-nov13e.test.ts` (12). It also refuses any later migration that
 writes a `using (true)` or `with check (true)` rule.
 
-## Not done
+## Applied to the live database (Nov 13, about 15:25 UTC)
 
-- The migration is not applied to the live database yet.
-- The eleven-table list is not confirmed against the live database.
+- Before: the live rules that let everyone through were exactly the eleven tables listed above.
+- After: nine remain, the nine that are open on purpose.
+- Checked on the live database by acting as each kind of user inside a change that was rolled
+  back: an admin, a manager and an invoicer read `service_settings`; a technician reads no row.
+  A manager, an invoicer and a technician each changed no row when they tried to rewrite another
+  person's device. The stamp function, called as a technician, set "gone" and left the endpoint,
+  the keys and the owner as they were.
+- `push_subscription_mark`: not callable without a login; callable signed in and with the server
+  key.
+- There was no plain office user and no estimator-only user on the live site to act as; those
+  two were covered on the local PostgreSQL only.
+
+## Left as it is
+
 - A sender with Customers, Service or Estimate access can still mark another person's device as
   gone, which stops that device's push until its owner turns notifications on again. The sender
   needs that stamp to work.

@@ -47,6 +47,6 @@ Browser, local site against the live database, as the test login, on one tempora
 ## Cleanup
 
 The temporary bid was removed for good from the Bids page's Recently deleted list. A bid needs a
-customer, so a temporary customer was made too; it was deleted through the Customers page, which
-hides it but keeps the row. Removing that row for good needs the database connection and is
-listed in `docs/PENDING-DATABASE.md`.
+customer, so a temporary customer was made too. It was deleted through the Customers page, and
+later the same day removed for good from the database with its contact and its history rows.
+Nothing named "ZZ" is left.

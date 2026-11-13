@@ -10,4 +10,4 @@
 <!-- LOVABLE:END -->
 
 - Keep SQL-nullable and overloaded RPC contract corrections in `src/lib/database-rpc.ts`; generated database types remain untouched and calls retain the original client and authorization.
-- Database changes are applied by hand. `docs/PENDING-DATABASE.md`, while it exists, lists changes that are in the repo but not yet run on the live database: read it at the start of a session and apply them when the Lovable database tool is connected.
+- Database changes are applied by hand: a file under `supabase/migrations/` does not change the live database until its statements are run through the Lovable database tool and checked. If a change cannot be run, list it in `docs/PENDING-DATABASE.md` so the next session applies it.

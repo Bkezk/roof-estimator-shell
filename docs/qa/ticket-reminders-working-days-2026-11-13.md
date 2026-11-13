@@ -553,3 +553,18 @@ No database change is needed for this part: both rules live in the app's code.
 
 Tests: `src/lib/task-and-bid-notices-8am-nov13d.test.ts` (9), and the three 7:00 tests in
 `src/lib/tasks.test.ts` moved to 8:00. On the old code 8 of them fail.
+
+## The 8 AM change on the live database (Nov 13, about 15:25 UTC)
+
+The connection came back and `20261113130000_reminder_morning_8am.sql` was run, block by block.
+
+- Before: `ticket_next_remind_at` and `followup_sync_upsert` matched the applied migration by
+  hash.
+- After: the three functions match the file by hash, with the rights the file states.
+  `reminder_morning` gives 13:00 UTC for Nov 13, Nov 1 and Mar 13, and 12:00 UTC for Jul 15,
+  Oct 31 and Mar 14.
+- The three open ticket timers now read 8:00 AM Eastern: due Sun Nov 15, Wed Nov 18 and Tue
+  Nov 24, with next reminders Sun Nov 15, Tue Nov 17 and Tue Nov 17. One open opportunity's due
+  instant moved to 8:00 AM as well. Nothing open is left at 12:00 UTC.
+- The two reminders that were due at 12:00 UTC on Nov 13 had gone out at 12:19 UTC, 7:19 AM
+  Eastern, under the old timing.
