@@ -199,7 +199,10 @@ describe("2. the copy keeps the folder and takes a due date", () => {
 
 describe("3. rows wrap on a phone", () => {
   it("the row's right cluster wraps", () => {
-    expect(page).toContain('<div className="flex flex-wrap items-center gap-x-6 gap-y-2">');
+    // Tighter since Nov 13 (bid-row-tight-nov13o.test.ts): still wraps.
+    expect(page).toContain(
+      '<div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-part="bid-controls">',
+    );
     expect(page).not.toContain('<div className="flex items-center gap-6">');
   });
 });

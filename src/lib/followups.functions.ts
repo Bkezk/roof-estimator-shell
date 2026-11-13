@@ -441,6 +441,30 @@ export const setNotifyPrefs = createServerFn({ method: "POST" })
     return prefsOf(saved);
   });
 
+/**
+ * "My own changes" (own-notices.ts; owner, Nov 13: "notifications should go out to myself even if
+ * im the one who did it"): is the signed-in user also told about what they do themselves? Kept
+ * apart from the prefs above, whose save function answers with its own seven columns only.
+ */
+export const getNotifyOwn = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ notify_own: boolean }> => {
+    const { wantsOwnNotices } = await import("@/lib/own-notices.server");
+    return { notify_own: await wantsOwnNotices(context.supabase, context.userId) };
+  });
+
+/** Save it through set_my_notify_own (the caller's own row; only admins may update profiles). */
+export const setNotifyOwn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ on: z.boolean() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ notify_own: boolean }> => {
+    const { data: saved, error } = await context.supabase.rpc("set_my_notify_own", {
+      p_on: data.on,
+    });
+    if (error || saved !== data.on) throw new Error(PREFS_NOT_SAVED);
+    return { notify_own: saved };
+  });
+
 /** The public VAPID key the browser needs to subscribe (generated on first call). */
 export const getPushPublicKey = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

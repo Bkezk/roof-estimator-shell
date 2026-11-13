@@ -29,8 +29,9 @@ describe("Setup › Customer Name adds a new customer through the popup", () => 
   });
   it("the bid's picker is the free-text one with adding on, and the hint names the row", () => {
     const setup = page.slice(
-      page.indexOf('<Field label="Customer Name">'),
-      page.indexOf('<Field label="Job Name">'),
+      // Both boxes are placed by name since Nov 13 (bid-setup-contact-nov13p.test.ts).
+      page.indexOf('label="Customer Name"'),
+      page.indexOf('<Field label="Job Name"'),
     );
     expect(setup).toContain("allowFreeText");
     expect(setup).not.toContain("allowAdd={false}");

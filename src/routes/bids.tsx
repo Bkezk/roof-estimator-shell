@@ -565,7 +565,7 @@ function BidsPage() {
         role="link"
         tabIndex={0}
         title="Open this bid"
-        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex cursor-pointer flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -574,7 +574,10 @@ function BidsPage() {
           }
         }}
       >
-        <div className="flex items-center gap-3">
+        {/* Takes the room the controls leave (owner, Nov 13: "the bid info is ideally on one
+            line"): the info line runs as far as it can before it wraps, and on a narrow screen
+            the controls drop under it instead. */}
+        <div className="flex min-w-0 flex-1 basis-80 items-center gap-3" data-part="bid-info">
           <input
             type="checkbox"
             className="h-4 w-4 shrink-0 cursor-pointer"
@@ -585,7 +588,7 @@ function BidsPage() {
             onKeyDown={(e) => e.stopPropagation()}
             onChange={() => toggleCombine(bid.id)}
           />
-          <div>
+          <div className="min-w-0">
             <p className="flex items-center gap-1 font-medium">
               <span>{bid.name}</span>
               {/* Rename (owner, Nov 3): the job name, without opening the bid. */}
@@ -650,12 +653,13 @@ function BidsPage() {
           </div>
         </div>
         {/* Wraps on a phone (audit finding 3: the cluster was 594 px wide on a 390 px screen,
-            and the whole page scrolled sideways). */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            and the whole page scrolled sideways). Tighter since Nov 13 (owner: the status box
+            "smaller so that it takes up less space", the icons "a bit closer together"). */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-part="bid-controls">
           {/* The bid due date (owner, Oct 12), red with the day count when a draft is past it
             (work-counts.ts bidOverdueDays: a submitted / won / lost bid is never overdue). */}
           <span
-            className="min-w-[7.5rem] text-right text-xs tabular-nums text-muted-foreground"
+            className="min-w-[6.5rem] text-right text-xs tabular-nums text-muted-foreground"
             data-col="due"
             title="When the bid must go out (set in the estimator). Draft bids sit on Work Overview by this day."
           >
@@ -675,7 +679,7 @@ function BidsPage() {
           {/* Stored at save time — the estimator recomputes live, so an engine change
     (or an empty-data row) can differ from this until the bid is re-saved. */}
           <span
-            className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
+            className="whitespace-nowrap text-right text-sm font-semibold tabular-nums"
             title="Total as of the last save — open the bid for the live figure"
           >
             {money(Number(bid.grand_total ?? 0))}
@@ -693,7 +697,10 @@ function BidsPage() {
                     : setStatus.mutate({ id: bid.id, status: v as BidStatus })
               }
             >
-              <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
+              <SelectTrigger
+                className="h-8 w-[6.75rem] gap-1 px-2 text-xs md:h-7"
+                aria-label="Bid status"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -705,67 +712,72 @@ function BidsPage() {
               </SelectContent>
             </Select>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            title={bid.folder ? `Move to folder… (now in "${bid.folder}")` : "Move to folder…"}
-            disabled={moveFolder.isPending}
-            onClick={(e) => {
-              e.stopPropagation();
-              openMove([bid.id]);
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            <FolderInput className="h-4 w-4" />
-            <span className="sr-only">Move to folder…</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Copy this bid (a new draft copy, named in a popup)"
-            disabled={duplicate.isPending}
-            onClick={(e) => {
-              e.stopPropagation();
-              setCopyFor({
-                id: bid.id,
-                name: bid.name,
-                newName: duplicateBidName(bid.name),
-                dueDate: bid.due_date ?? "",
-              });
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            <Copy className="h-4 w-4" />
-            <span className="sr-only">Duplicate</span>
-          </Button>
-          {/* Documents (owner, Oct 26): the bid's proposals and letters, each made by a click. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Documents (proposals, letters)"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDocumentsFor({ id: bid.id, name: bid.name });
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            <FileText className="h-4 w-4" />
-            <span className="sr-only">Documents</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            title="Delete this bid"
-            disabled={del.isPending}
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmDelete({ id: bid.id, name: bid.name });
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span className="sr-only">Delete</span>
-          </Button>
+          <div className="flex items-center gap-0.5" data-part="bid-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 md:h-7 md:w-7"
+              title={bid.folder ? `Move to folder… (now in "${bid.folder}")` : "Move to folder…"}
+              disabled={moveFolder.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                openMove([bid.id]);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <FolderInput className="h-4 w-4" />
+              <span className="sr-only">Move to folder…</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 md:h-7 md:w-7"
+              title="Copy this bid (a new draft copy, named in a popup)"
+              disabled={duplicate.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCopyFor({
+                  id: bid.id,
+                  name: bid.name,
+                  newName: duplicateBidName(bid.name),
+                  dueDate: bid.due_date ?? "",
+                });
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <Copy className="h-4 w-4" />
+              <span className="sr-only">Duplicate</span>
+            </Button>
+            {/* Documents (owner, Oct 26): the bid's proposals and letters, each made by a click. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 md:h-7 md:w-7"
+              title="Documents (proposals, letters)"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDocumentsFor({ id: bid.id, name: bid.name });
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <FileText className="h-4 w-4" />
+              <span className="sr-only">Documents</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-destructive hover:text-destructive md:h-7 md:w-7"
+              title="Delete this bid"
+              disabled={del.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDelete({ id: bid.id, name: bid.name });
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="sr-only">Delete</span>
+            </Button>
+          </div>
         </div>
       </div>
     );

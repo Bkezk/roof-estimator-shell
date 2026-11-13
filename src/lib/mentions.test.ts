@@ -86,7 +86,10 @@ describe("saving the note", () => {
     fns.indexOf("export const recentRepairsForJob"),
   );
   it("notifies the people named, never the writer, with a link to the ticket", () => {
-    expect(body).toContain("mentionedIds(data.note, people).filter((id) => id !== context.userId)");
+    // Never the writer, unless they have "My own changes" on (own-notices-nov13q.test.ts).
+    expect(body).toMatch(
+      /await exceptActor\(\s*mentionedIds\(data\.note, people\),\s*context\.userId,\s*context\.supabase,\s*\)/,
+    );
     expect(body).toContain('kind: "mention"');
     expect(body).toContain("mentioned you on Ticket #${job.number}");
     expect(body).toContain("url: `/service?id=${job.id}`");

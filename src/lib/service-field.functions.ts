@@ -1943,7 +1943,13 @@ export const addJobNote = createServerFn({ method: "POST" })
         `Note added, but the mentions were not sent: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-    const ids = mentionedIds(data.note, people).filter((id) => id !== context.userId);
+    // Not yourself, unless "My own changes" is on (own-notices.ts; owner, Nov 13).
+    const { exceptActor } = await import("@/lib/own-notices.server");
+    const ids = await exceptActor(
+      mentionedIds(data.note, people),
+      context.userId,
+      context.supabase,
+    );
     if (!ids.length) return { mentioned: 0 };
     const { notify } = await import("@/lib/notify.server");
     try {

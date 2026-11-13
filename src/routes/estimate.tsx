@@ -53,6 +53,7 @@ import { UNTITLED_BID } from "@/lib/bid-name";
 import { getSourceInspection, linkBidToInspection } from "@/lib/service-inspection.functions";
 import { WorkChainLine } from "@/components/work-chain-line";
 import { AuditHistory } from "@/components/audit-history";
+import { BidCustomerContact } from "@/components/bid-customer-contact";
 import { withLightTheme } from "@/lib/theme";
 import {
   buildEstimateInputs,
@@ -3395,8 +3396,16 @@ function EstimatePage() {
             <CardContent>
               <div className="space-y-3" data-panel="bid-info">
                 <LegacyGroup title="1. General Info">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Customer Name">
+                  {/* Two columns from the sm width (owner, Nov 13): the customer, estimator,
+                        status and folder down the left; the job name and the date created
+                        beside the customer; and the linked customer's contact in the space that
+                        was left empty. Each box names its own place, so on a phone they simply
+                        follow each other, the contact last. */}
+                  <div className="grid gap-3 sm:grid-cols-2" data-grid="general-info">
+                    <Field
+                      label="Customer Name"
+                      className="sm:col-start-1 sm:row-span-2 sm:row-start-1"
+                    >
                       {/* Typing sets the name as before; picking a profile links the bid. */}
                       <AccountPicker
                         id="bid-customer"
@@ -3418,7 +3427,7 @@ function EstimatePage() {
                       {accountChip}
                       {siteBox}
                     </Field>
-                    <Field label="Job Name">
+                    <Field label="Job Name" className="sm:col-start-2 sm:row-start-1">
                       {/* A plain box (owner, Nov 3: "the job name really shouldn't search the
                             customer list … only the customer name should do that"). */}
                       <Input
@@ -3430,7 +3439,15 @@ function EstimatePage() {
                         placeholder="Named after the customer when saved"
                       />
                     </Field>
-                    <Field label="Estimator's Name">
+                    {/* Just under the job name (owner, Nov 13). */}
+                    <Field label="Date Created" className="sm:col-start-2 sm:row-start-2">
+                      <Input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Estimator's Name" className="sm:col-start-1 sm:row-start-3">
                       <PickOne
                         value={customer.estimatorName ?? ""}
                         // Roster from admin General → Estimators; a saved bid whose estimator
@@ -3445,14 +3462,7 @@ function EstimatePage() {
                         onChange={(v) => setCustomer((c) => ({ ...c, estimatorName: v }))}
                       />
                     </Field>
-                    <Field label="Date Created">
-                      <Input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Status">
+                    <Field label="Status" className="sm:col-start-1 sm:row-start-4">
                       <Select value={bidStatus} onValueChange={changeStatus}>
                         <SelectTrigger>
                           <SelectValue />
@@ -3466,23 +3476,12 @@ function EstimatePage() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Building Type">
-                      <PickOne
-                        value={buildingType}
-                        options={
-                          (BUILDING_TYPES as readonly string[]).includes(buildingType)
-                            ? BUILDING_TYPES
-                            : [buildingType, ...BUILDING_TYPES]
-                        }
-                        onChange={setBuildingType}
-                      />
-                    </Field>
                     {/* Owner, Oct 13 (Bid Advantage saved bids "in a file, so Bell County
                           Schools could be saved under a folder"): the folder this bid is filed
                           under on the Bids page's By folder view — a label you assign; the
                           customer's name is only suggested. Type a new one or pick one in use;
                           blank = Unfiled. */}
-                    <Field label="Folder">
+                    <Field label="Folder" className="sm:col-start-1 sm:row-start-5">
                       <Input
                         id="bid-folder"
                         list="bid-folder-options"
@@ -3499,6 +3498,29 @@ function EstimatePage() {
                         ))}
                       </datalist>
                     </Field>
+                    {/* Hidden while it is Commercial (owner, Nov 13: "its always going to be
+                          commercial"); every saved bid is. The value still rides with the bid, and
+                          a bid that somehow holds another type shows the box so it can be seen
+                          and changed. */}
+                    {buildingType !== "Commercial" && (
+                      <Field label="Building Type" className="sm:col-start-1 sm:row-start-6">
+                        <PickOne
+                          value={buildingType}
+                          options={
+                            (BUILDING_TYPES as readonly string[]).includes(buildingType)
+                              ? BUILDING_TYPES
+                              : [buildingType, ...BUILDING_TYPES]
+                          }
+                          onChange={setBuildingType}
+                        />
+                      </Field>
+                    )}
+                    <BidCustomerContact
+                      accountId={linkedAccountId}
+                      account={linkedDetail?.account ?? null}
+                      loading={!!linkedAccountId && !linkedDetail && linkedAccount.isLoading}
+                      className="sm:col-start-2 sm:row-span-3 sm:row-start-3"
+                    />
                   </div>
                 </LegacyGroup>
                 <LegacyGroup title="2. Labor &amp; Markup Setup">
@@ -7526,9 +7548,18 @@ function NumInput({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  /** Where the box sits in its grid, when the form places it by name. */
+  className?: string;
+}) {
   return (
-    <div className="space-y-1">
+    <div className={className ? `space-y-1 ${className}` : "space-y-1"}>
       <Label className="text-xs">{label}</Label>
       {children}
     </div>

@@ -16,6 +16,7 @@ import { longDay } from "@/lib/followup-rules";
 import { rosterDisplayName, technicianRoster } from "@/lib/roster.server";
 import { inspectionDoneTitle, parseInspection } from "@/lib/inspection";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
+import { exceptActor, wantsOwnNotices } from "@/lib/own-notices.server";
 import { syncFollowup } from "@/lib/followups.server";
 
 type JobRow = {
@@ -123,8 +124,9 @@ export async function afterTicketStage(
     );
   if (becameDone) {
     // Every authorizer the database names but the actor — the whole list, never truncated (a
-    // manager who is not the named authorizer is told too; owner, Oct 12).
-    const others = reviewers.filter((id) => id !== actor.id);
+    // manager who is not the named authorizer is told too; owner, Oct 12). The actor too, when
+    // they have "My own changes" on (own-notices.ts; owner, Nov 13).
+    const others = await exceptActor(reviewers, actor.id, admin);
     // The one Done notice (owner, Oct 12, item 2): the follow-up opened below is `quiet`, so the
     // first authorizer is not told a second time by its "assigned" notice.
     if (others.length)
@@ -144,7 +146,11 @@ export async function afterTicketStage(
   // An authorized inspection is complete: nothing to invoice, so nobody is told.
   if (becameAuthorized && !inspection) {
     // The manager invoices it next (the Invoices tab's To invoice queue).
-    const others = office.map((u) => u.id).filter((id) => id !== actor.id);
+    const others = await exceptActor(
+      office.map((u) => u.id),
+      actor.id,
+      admin,
+    );
     // A void sent it back here (owner, Oct 6): say so, not "authorized — ready to invoice".
     const voided = opts.reason === "void";
     if (others.length)
@@ -213,7 +219,8 @@ export interface DispatchBefore {
  *     taken off to nobody: nothing beyond that (owner: "reassigned" wording, not "taken off you");
  *   - the technician stayed and the day moved: they hear "Ticket #N moved to <long day>" (kind
  *     `date_moved`) — unless they moved it themselves.
- * Never to the person who made the change; nothing for a deleted ticket. Best effort: a failed
+ * Not to the person who made the change, unless they have "My own changes" on (own-notices.ts;
+ * owner, Nov 13); nothing for a deleted ticket. Best effort: a failed
  * notice is logged, the dispatch itself is already saved.
  */
 export async function afterTicketDispatch(
@@ -230,7 +237,11 @@ export async function afterTicketDispatch(
     const techChanged = (before.technician_id ?? null) !== (row.technician_id ?? null);
     if (techChanged) {
       // A → B: A is told; from nobody, or to nobody, there is no "reassigned" to tell.
-      if (before.technician_id && row.technician_id && before.technician_id !== actor.id) {
+      if (
+        before.technician_id &&
+        row.technician_id &&
+        (before.technician_id !== actor.id || (await wantsOwnNotices(admin, actor.id)))
+      ) {
         const newTech = (await rosterName(admin, row.technician_id)) ?? "another technician";
         await notify(
           [before.technician_id],
@@ -247,7 +258,7 @@ export async function afterTicketDispatch(
     }
     const dateChanged = (before.scheduled_date ?? null) !== (row.scheduled_date ?? null);
     if (!dateChanged || !row.scheduled_date || !row.technician_id) return;
-    if (row.technician_id === actor.id) return;
+    if (row.technician_id === actor.id && !(await wantsOwnNotices(admin, actor.id))) return;
     const from = before.scheduled_date ? ` from ${longDay(before.scheduled_date)}` : "";
     await notify(
       [row.technician_id],

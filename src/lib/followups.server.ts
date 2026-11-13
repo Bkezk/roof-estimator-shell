@@ -28,6 +28,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
+import { wantsOwnNotices } from "@/lib/own-notices.server";
 import { officeDay, reminderMorning } from "@/lib/working-days";
 import {
   TICKET_REMINDER_DEFAULTS,
@@ -335,8 +336,9 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
 }
 
 /**
- * Tell the new assignee (never the person who made the change, and not when the caller already
- * did in this step — `quiet`).
+ * Tell the new assignee: not when the caller already did in this step (`quiet`), and not the
+ * person who made the change, unless they have "My own changes" on (own-notices.ts; owner,
+ * Nov 13: "notifications should go out to myself even if im the one who did it").
  */
 async function announce(
   a: SyncArgs,
@@ -346,7 +348,8 @@ async function announce(
   admin: Client,
   firstReminder: Date | null = null,
 ) {
-  if (!a.assigneeId || a.assigneeId === a.actorId || a.quiet) return;
+  if (!a.assigneeId || a.quiet) return;
+  if (a.assigneeId === a.actorId && !(await wantsOwnNotices(admin, a.actorId))) return;
   const n = startNotice({
     kind: a.kind,
     title: a.title,

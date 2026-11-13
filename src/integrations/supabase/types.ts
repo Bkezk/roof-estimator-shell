@@ -2935,6 +2935,7 @@ export type Database = {
           notify_email: boolean
           notify_leads: boolean
           notify_opportunities: boolean
+          notify_own: boolean
           notify_push: boolean
           notify_service: boolean
           notify_storms: boolean
@@ -2956,6 +2957,7 @@ export type Database = {
           notify_email?: boolean
           notify_leads?: boolean
           notify_opportunities?: boolean
+          notify_own?: boolean
           notify_push?: boolean
           notify_service?: boolean
           notify_storms?: boolean
@@ -2977,6 +2979,7 @@ export type Database = {
           notify_email?: boolean
           notify_leads?: boolean
           notify_opportunities?: boolean
+          notify_own?: boolean
           notify_push?: boolean
           notify_service?: boolean
           notify_storms?: boolean
@@ -5345,6 +5348,7 @@ export type Database = {
         Args: { p_job: string; p_rows: Json }
         Returns: undefined
       }
+      set_my_notify_own: { Args: { p_on: boolean }; Returns: boolean }
       set_my_notify_prefs:
         | {
             Args: { p_email: boolean; p_push: boolean }

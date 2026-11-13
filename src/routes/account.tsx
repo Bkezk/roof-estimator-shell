@@ -8,8 +8,10 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-store";
 import {
+  getNotifyOwn,
   getNotifyPrefs,
   sendTestNotification,
+  setNotifyOwn,
   setNotifyPrefs,
   type NotifyPrefs,
 } from "@/lib/followups.functions";
@@ -19,6 +21,7 @@ import {
   NOTICE_CATEGORY_HELP,
   NOTICE_CATEGORY_LABELS,
 } from "@/lib/notice-categories";
+import { OWN_NOTICES_HELP, OWN_NOTICES_LABEL } from "@/lib/own-notices";
 import {
   IOS_INSTALL_HINT,
   disablePushHere,
@@ -219,6 +222,7 @@ function TopBarSpacingCard() {
 }
 
 const PREFS_KEY = ["notify-prefs"] as const;
+const OWN_KEY = ["notify-own"] as const;
 type Prefs = NotifyPrefs & { devices: number };
 /** One or several switches at a time (the page saves the one that was flipped). */
 type PrefsPatch = Partial<NotifyPrefs>;
@@ -239,6 +243,24 @@ function NotificationsCard() {
   const testFn = useServerFn(sendTestNotification);
 
   const prefs = useQuery({ queryKey: PREFS_KEY, queryFn: () => getFn(), enabled: !!session });
+
+  // "My own changes" (owner, Nov 13): its own small read and save (own-notices.ts).
+  const getOwnFn = useServerFn(getNotifyOwn);
+  const setOwnFn = useServerFn(setNotifyOwn);
+  const own = useQuery({ queryKey: OWN_KEY, queryFn: () => getOwnFn(), enabled: !!session });
+  const saveOwn = useMutation({
+    mutationFn: (on: boolean) => setOwnFn({ data: { on } }),
+    onMutate: (on) => {
+      const before = qc.getQueryData<{ notify_own: boolean }>(OWN_KEY);
+      qc.setQueryData(OWN_KEY, { notify_own: on });
+      return { before };
+    },
+    onError: (e, _on, ctx) => {
+      if (ctx?.before) qc.setQueryData(OWN_KEY, ctx.before);
+      toast.error(errText(e));
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: OWN_KEY }),
+  });
 
   const save = useMutation({
     mutationFn: (patch: PrefsPatch) => setFn({ data: patch }),
@@ -403,6 +425,20 @@ function NotificationsCard() {
                   </div>
                 );
               })}
+              {/* Owner, Nov 13: "notifications should go out to myself even if im the one who
+                  did it". Off for everyone until they turn it on (own-notices.ts). */}
+              <div className="flex items-center justify-between gap-4" data-row="notify-own">
+                <div>
+                  <Label htmlFor="notify-own">{OWN_NOTICES_LABEL}</Label>
+                  <p className="text-xs text-muted-foreground">{OWN_NOTICES_HELP}</p>
+                </div>
+                <Switch
+                  id="notify-own"
+                  checked={own.data?.notify_own ?? false}
+                  disabled={!own.data}
+                  onCheckedChange={(v) => saveOwn.mutate(v)}
+                />
+              </div>
             </div>
           </>
         )}

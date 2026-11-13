@@ -298,7 +298,8 @@ describe("the wiring", () => {
   });
   it("Setup › Bid Info has the Folder box (datalist of folders in use, customer suggested) saved on the row", () => {
     const est = here("../routes/estimate.tsx");
-    expect(est).toContain('<Field label="Folder">');
+    // Placed by name since Nov 13 (bid-setup-contact-nov13p.test.ts).
+    expect(est).toContain('<Field label="Folder" className="sm:col-start-1 sm:row-start-5">');
     expect(est).toContain('id="bid-folder"');
     expect(est).toContain('list="bid-folder-options"');
     expect(est).toContain("placeholder={suggestFolder(customer.name) ?? UNFILED}");

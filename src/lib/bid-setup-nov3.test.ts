@@ -23,7 +23,8 @@ const setup = page.slice(
 describe("Job Name and Customer Name", () => {
   it("Job Name is a plain box that keeps the blank-title rule; it does not search customers", () => {
     const job = setup.slice(
-      setup.indexOf('<Field label="Job Name">'),
+      // Placed by name since Nov 13 (bid-setup-contact-nov13p.test.ts).
+      setup.indexOf('<Field label="Job Name" className="sm:col-start-2 sm:row-start-1">'),
       setup.indexOf('<Field label="Estimator\'s Name">'),
     );
     expect(job).toContain('id="bid-name"');
@@ -38,7 +39,7 @@ describe("Job Name and Customer Name", () => {
   it("Customer Name is the one customer search on Setup, and a bid needs one to save", () => {
     expect(setup.match(/<AccountPicker/g)).toHaveLength(1);
     expect(setup).toMatch(
-      /<Field label="Customer Name">[\s\S]{0,300}<AccountPicker[\s\S]{0,100}id="bid-customer"/,
+      /<Field\s+label="Customer Name"[\s\S]{0,400}<AccountPicker[\s\S]{0,100}id="bid-customer"/,
     );
     expect(page).toContain("const customerProblem = bidCustomerProblem({");
     expect(bidCustomerProblem({ accountId: null, storedAccountId: null })).toBeTruthy();

@@ -132,7 +132,8 @@ describe("the Bids page", () => {
   const page = readFileSync("src/routes/bids.tsx", "utf8");
   it("Duplicate opens the popup with '<name> (copy)' filled in instead of copying at once", () => {
     expect(page).toContain(
-      "setCopyFor({\n                id: bid.id,\n                name: bid.name,\n                newName: duplicateBidName(bid.name),",
+      // Two spaces deeper since Nov 13: the four icons sit in one group (bid-row-tight-nov13o).
+      "setCopyFor({\n                  id: bid.id,\n                  name: bid.name,\n                  newName: duplicateBidName(bid.name),",
     );
     expect(page).not.toContain("duplicate.mutate(bid.id)");
   });

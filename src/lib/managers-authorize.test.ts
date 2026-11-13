@@ -207,7 +207,8 @@ describe("2. a ticket reaching Done tells every authorizer; the follow-up stays 
       'return (data ?? []).filter((x): x is string => typeof x === "string" && !!x);',
     );
     expect(ids).not.toMatch(/slice|\[0\]/);
-    expect(src).toContain("const others = reviewers.filter((id) => id !== actor.id);");
+    // Still every reviewer; the actor stays only with "My own changes" on (own-notices-nov13q).
+    expect(src).toContain("const others = await exceptActor(reviewers, actor.id, admin);");
     expect(src).toContain(
       "const reviewers = authorizers.length ? authorizers : office.map((u) => u.id);",
     );

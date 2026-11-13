@@ -154,7 +154,9 @@ describe("syncFollowup's quiet start", () => {
     const src = readFileSync("src/lib/ticket-events.server.ts", "utf8");
     expect(src).toContain("quiet: becameDone,");
     expect(readFileSync("src/lib/followups.server.ts", "utf8")).toContain(
-      "if (!a.assigneeId || a.assigneeId === a.actorId || a.quiet) return;",
+      // The actor is skipped on the next line since Nov 13, unless they have "My own changes" on
+      // (own-notices-nov13q.test.ts); quiet still ends it here.
+      "if (!a.assigneeId || a.quiet) return;",
     );
   });
 });

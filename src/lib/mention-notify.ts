@@ -67,7 +67,13 @@ export async function sendMentions(
   if (!text.includes("@")) return NO_MENTIONS;
   try {
     const people = await deps.roster(ctx.supabase);
-    const ids = newMentionIds(text, args.previous, people).filter((id) => id !== ctx.userId);
+    // Not yourself, unless "My own changes" is on (own-notices.ts; owner, Nov 13).
+    const { exceptActor } = await import("@/lib/own-notices.server");
+    const ids = await exceptActor(
+      newMentionIds(text, args.previous, people),
+      ctx.userId,
+      ctx.supabase,
+    );
     if (!ids.length) return NO_MENTIONS;
     await deps.notify(
       ids,

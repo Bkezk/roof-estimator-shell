@@ -232,13 +232,16 @@ export const saveTask = createServerFn({ method: "POST" })
     }
     if (row.status === "done") return { task: row, notified: 0, notifyErrors: [] };
 
-    // The "New task" notice: everyone on a new task, only the added ones on an edit.
+    // The "New task" notice: everyone on a new task, only the added ones on an edit. Whoever
+    // saved it is left out, unless they have "My own changes" on (own-notices.ts; owner, Nov 13).
+    const { wantsOwnNotices } = await import("@/lib/own-notices.server");
+    const skip = (await wantsOwnNotices(sb, context.userId)) ? null : context.userId;
     const to = before
       ? (() => {
           const added = addedAttendees(before, row);
-          return { users: added.users.filter((u) => u !== context.userId), emails: added.emails };
+          return { users: added.users.filter((u) => u !== skip), emails: added.emails };
         })()
-      : noticeRecipients(row, "created", context.userId);
+      : noticeRecipients(row, "created", skip);
     try {
       const { sendTaskNotice } = await import("@/lib/tasks-notify.server");
       const r =
@@ -479,7 +482,9 @@ export const assignTask = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error(CLAIM_TAKEN);
     const added = addedAttendees(cur, row);
-    const to = { users: added.users.filter((u) => u !== context.userId), emails: added.emails };
+    // The claimer is left out, unless they have "My own changes" on (own-notices.ts).
+    const { exceptActor } = await import("@/lib/own-notices.server");
+    const to = { users: await exceptActor(added.users, context.userId, sb), emails: added.emails };
     if (!to.users.length) return { task: row, notified: 0, notifyErrors: [] };
     try {
       const { sendTaskNotice } = await import("@/lib/tasks-notify.server");
