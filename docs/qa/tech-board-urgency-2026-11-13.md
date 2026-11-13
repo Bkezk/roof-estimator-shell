@@ -59,3 +59,21 @@ No database change. The rate is the one a manager already picks on the ticket ("
 
 - My tickets (the technician's phone list) and the Tickets list are unchanged. They do not show
   the rate today.
+
+## Later the same day: every second technician row is shaded
+
+Owner: "on the tech board can you have every other technician row be slightly darker to
+diffrientiate them a bit more".
+
+- The second, fourth, sixth technician's row is one shade off the page: the name cell and all
+  seven day cells. The first row is plain. The "Others" group alternates from its own first row.
+- Today's column keeps its tint on both kinds of row, a step darker on a shaded one.
+- The cell a ticket is dragged over still shows its blue ring over everything.
+- The name cell stays a solid fill, because tickets scroll under it on a narrow screen.
+
+Files: `src/lib/board-rows.ts` (new: `shadedRow`, `rowHeaderTone`, `cellTone`),
+`src/components/service/board-page.tsx`.
+
+Proof: `src/lib/board-row-shading-nov13k.test.ts`, 7 tests, 2 fail with the page put back to the
+old code. Full chain clean: 548 files / 7,153 tests, build. Browser, read only: the seven
+technician rows read plain, shaded, plain, shaded, plain, shaded, plain, in light and in dark.

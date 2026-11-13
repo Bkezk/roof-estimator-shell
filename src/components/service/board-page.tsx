@@ -26,6 +26,7 @@
  * its card, and goes first: in a technician's day, and in the Unassigned rail ahead of the day
  * order. The "Finished, no technician" group keeps its own order (longest waiting first): that
  * work is done, so the rate no longer says who to send first; its cards still wear the badge.
+ * Every second technician's row is a shade darker (board-rows.ts), to follow one person across.
  */
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -57,6 +58,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets } from "@/lib/access";
+import { cellTone, rowHeaderTone, shadedRow } from "@/lib/board-rows";
 import { weekLabel } from "@/lib/board-week";
 import {
   assignedStage,
@@ -565,10 +567,11 @@ function Board({ week }: { week?: string | undefined }) {
                   access.
                 </div>
               )}
-              {techRows.map((r) => (
+              {techRows.map((r, i) => (
                 <BoardRow
                   key={r.id}
                   row={r}
+                  shaded={shadedRow(i)}
                   days={days}
                   today={today}
                   over={over}
@@ -602,10 +605,11 @@ function Board({ week }: { week?: string | undefined }) {
                     </span>
                   </button>
                   {showOthers &&
-                    otherRows.map((r) => (
+                    otherRows.map((r, i) => (
                       <BoardRow
                         key={r.id}
                         row={r}
+                        shaded={shadedRow(i)}
                         days={days}
                         today={today}
                         over={over}
@@ -631,6 +635,8 @@ function Board({ week }: { week?: string | undefined }) {
 
 function BoardRow(props: {
   row: Row;
+  /** Every second row is a shade off the page (owner, Nov 13; board-rows.ts). */
+  shaded: boolean;
   days: string[];
   today: string;
   over: string | null;
@@ -649,7 +655,8 @@ function BoardRow(props: {
     <>
       <div
         role="rowheader"
-        className="sticky left-0 z-10 truncate border-b bg-background p-2 text-sm font-medium"
+        data-shaded={props.shaded ? "1" : undefined}
+        className={`sticky left-0 z-10 truncate border-b p-2 text-sm font-medium ${rowHeaderTone(props.shaded)}`}
         title={r.name}
       >
         {r.name}
@@ -662,13 +669,9 @@ function BoardRow(props: {
             key={d}
             role="gridcell"
             aria-label={`${r.name}, ${shortDay(d)}`}
-            className={`group relative min-h-[76px] space-y-1 border-b border-l p-1.5 pb-7 transition-colors ${
-              props.over === key
-                ? "bg-primary/10 ring-2 ring-inset ring-primary"
-                : d === props.today
-                  ? "bg-primary/5"
-                  : ""
-            }`}
+            className={`group relative min-h-[76px] space-y-1 border-b border-l p-1.5 pb-7 transition-colors ${cellTone(
+              { shaded: props.shaded, today: d === props.today, over: props.over === key },
+            )}`}
             onDragOver={(e) => props.allowDrop(e, key)}
             onDragLeave={(e) => props.leave(e, key)}
             onDrop={(e) => props.dropOn(e, r.id, d)}
