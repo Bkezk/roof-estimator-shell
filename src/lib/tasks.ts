@@ -20,8 +20,12 @@ export type TaskRow = Database["public"]["Tables"]["tasks"]["Row"];
 
 /** The office's time zone: all-day times, "the morning of", and the calendar's days. */
 export const TASK_TZ = "America/New_York";
-/** The morning notices go out on the first reminder pass at or after this local hour. */
-export const MORNING_HOUR = 7;
+/**
+ * The morning notices go out on the first reminder pass at or after this local hour. 8 since
+ * Nov 13 (owner: "yes plz move those to 8 am"; it was 7), the same morning as a ticket's
+ * reminders (working-days.ts reminderMorning).
+ */
+export const MORNING_HOUR = 8;
 /** An all-day task is stored at this local hour on its date. */
 export const ALL_DAY_HOUR = 8;
 

@@ -527,3 +527,29 @@ show after the next publish.
 
 Chain on the final tree for both changes: prettier clean, eslint 0 errors (the 16 baseline
 warnings), tsc clean, 540 test files / 7,063 tests, build exit 0.
+
+## Task and bid notices also wait for 8 AM Eastern (Nov 13, later)
+
+Owner: "yes plz move those to 8 am".
+
+Before:
+
+- Task "due today" went on the first pass at or after 7:00 AM Eastern, and "overdue" at 7:00 AM
+  the next day (`MORNING_HOUR = 7` in `src/lib/tasks.ts`).
+- "Bid due", "Bid past due" and "Bid reminder" had no hour. Each was due from midnight Eastern
+  of its day, so it went on the first pass after that: the 7:00 AM scheduled run in winter, the
+  8:00 AM one in summer, or earlier when an office user opened the site.
+
+Now:
+
+- `MORNING_HOUR = 8`. Task "due today" and "overdue" go on the first pass at or after 8:00 AM
+  Eastern. "New task" still goes at once, at any hour: it is the assignment itself.
+- `dispatchBidDueNotices` does nothing before 8:00 on the office's clock
+  (`working-days.ts morningReached`). It reads nothing and stamps nothing, so the 8:00 pass
+  sends what is due.
+- Admin › Reminders › Bids has a line: "Time of day: Bid reminders go out at 8 AM Eastern."
+
+No database change is needed for this part: both rules live in the app's code.
+
+Tests: `src/lib/task-and-bid-notices-8am-nov13d.test.ts` (9), and the three 7:00 tests in
+`src/lib/tasks.test.ts` moved to 8:00. On the old code 8 of them fail.

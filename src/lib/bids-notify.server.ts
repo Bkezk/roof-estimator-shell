@@ -35,6 +35,9 @@
  * The three passes run one after the other, each inside its own try/catch: one that throws as a
  * whole (a missing column before its migration is applied, say) is logged, counted in
  * `bids_errors` and named in `pass_errors`, and the other two still run.
+ *
+ * Time of day (owner, Nov 13): none of the three goes out before 8:00 on the office's clock
+ * (working-days.ts morningReached); a pass before it does nothing.
  */
 import type { Database } from "@/integrations/supabase/types";
 import {
@@ -50,6 +53,7 @@ import {
 } from "@/lib/bid-status";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
+import { morningReached } from "@/lib/working-days";
 
 export interface BidNoticeResult {
   /** Bids whose notice was due this pass (the three rules together). */
@@ -364,6 +368,11 @@ export async function dispatchBidDueNotices(
     bids_reminders: 0,
     pass_errors: [],
   };
+  // Nothing goes out before 8:00 in the office (owner, Nov 13: "yes plz move those to 8 am").
+  // The day's rules were already true from midnight, so the first pass of the day, or an office
+  // user opening the site early, sent them at 7 AM in winter or sooner. A pass before the
+  // morning now reads nothing and stamps nothing; the 8:00 pass sends what is due.
+  if (!morningReached(now)) return out;
   const settings = await readBidReminderSettings(admin);
   const passes: [string, () => Promise<void>][] = [
     ["Bid due", () => dueNotices(admin, today, stamp, settings, out)],

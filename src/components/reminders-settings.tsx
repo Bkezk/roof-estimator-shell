@@ -442,6 +442,8 @@ export function RemindersSettings() {
                   Whoever sets up a bid can also pick a “Remind me on” day on its Setup; that one
                   goes out on the day, whatever the bid’s status.
                 </Line>
+                {/* Owner, Nov 13: "yes plz move those to 8 am" (bids-notify.server.ts). */}
+                <Line label="Time of day">Bid reminders go out at 8 AM Eastern.</Line>
               </Section>
 
               <Section

@@ -33,6 +33,13 @@ export const REMINDER_MORNING = "08:00";
  * right on the two days the clocks change. The SQL reminder_morning().
  */
 export const reminderMorning = (ymd: string): Date => zonedTime(ymd, REMINDER_MORNING, TASK_TZ);
+/**
+ * Has the office's morning come yet today? False from midnight to 7:59 on the office's clock.
+ * The bid notices wait for it (bids-notify.server.ts; owner, Nov 13: "yes plz move those to 8
+ * am"); the task notices have the same hour in tasks.ts MORNING_HOUR.
+ */
+export const morningReached = (now: Date): boolean =>
+  now.getTime() >= reminderMorning(officeDay(now)).getTime();
 
 const utc = (ymd: string): number => {
   const [y = 1970, m = 1, d = 1] = ymd.split("-").map(Number);

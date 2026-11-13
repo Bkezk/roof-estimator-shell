@@ -79,16 +79,16 @@ describe("dueTaskNotices", () => {
     ).toEqual([]);
   });
 
-  it("sends the morning-of notice only on/after 07:00 local on the due day", () => {
+  it("sends the morning-of notice only on/after 08:00 local on the due day", () => {
     const t = task({ notified_created_at: et("2026-09-30", "10:00").toISOString() });
     expect(kinds(t, et("2026-10-01", "23:59"))).toEqual([]);
-    expect(kinds(t, et("2026-10-02", "06:59"))).toEqual([]);
-    expect(kinds(t, et("2026-10-02", "07:00"))).toEqual(["morning"]);
+    expect(kinds(t, et("2026-10-02", "07:59"))).toEqual([]);
+    expect(kinds(t, et("2026-10-02", "08:00"))).toEqual(["morning"]);
     expect(kinds(t, et("2026-10-02", "13:30"))).toEqual(["morning"]);
     // Once.
     expect(
       kinds(
-        { ...t, notified_morning_at: et("2026-10-02", "07:00").toISOString() },
+        { ...t, notified_morning_at: et("2026-10-02", "08:00").toISOString() },
         et("2026-10-02", "13:30"),
       ),
     ).toEqual([]);
@@ -96,26 +96,26 @@ describe("dueTaskNotices", () => {
 
   it("uses due_date at 08:00 local when due_at is missing (older rows)", () => {
     const t = task({ due_at: null, notified_created_at: et("2026-09-30", "10:00").toISOString() });
-    expect(kinds(t, et("2026-10-02", "06:30"))).toEqual([]);
-    expect(kinds(t, et("2026-10-02", "07:30"))).toEqual(["morning"]);
+    expect(kinds(t, et("2026-10-02", "07:30"))).toEqual([]);
+    expect(kinds(t, et("2026-10-02", "08:30"))).toEqual(["morning"]);
   });
 
-  it("sends the morning-after notice only if still open, on/after 07:00 the next day, once", () => {
+  it("sends the morning-after notice only if still open, on/after 08:00 the next day, once", () => {
     const sent = {
       notified_created_at: et("2026-09-30", "10:00").toISOString(),
-      notified_morning_at: et("2026-10-02", "07:00").toISOString(),
+      notified_morning_at: et("2026-10-02", "08:00").toISOString(),
     };
     const t = task(sent);
     expect(kinds(t, et("2026-10-02", "23:00"))).toEqual([]);
-    expect(kinds(t, et("2026-10-03", "06:59"))).toEqual([]);
-    expect(kinds(t, et("2026-10-03", "07:00"))).toEqual(["overdue"]);
+    expect(kinds(t, et("2026-10-03", "07:59"))).toEqual([]);
+    expect(kinds(t, et("2026-10-03", "08:00"))).toEqual(["overdue"]);
     expect(
       kinds(
-        { ...t, notified_overdue_at: et("2026-10-03", "07:00").toISOString() },
+        { ...t, notified_overdue_at: et("2026-10-03", "08:00").toISOString() },
         et("2026-10-04", "09:00"),
       ),
     ).toEqual([]);
-    expect(kinds({ ...t, status: "done" }, et("2026-10-03", "07:00"))).toEqual([]);
+    expect(kinds({ ...t, status: "done" }, et("2026-10-03", "08:00"))).toEqual([]);
   });
 
   it("gives a done task nothing, not even the created notice", () => {
