@@ -1367,8 +1367,8 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
   },
   tone: "info",
   note: j.account_id
-    ? `Copied from ticket #${j.number}: customer, property, contact, PO #, labor rate and type. Add the description, then the technician and day.`
-    : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, labor rate and type are copied.`,
+    ? `Copied from ticket #${j.number}: customer, property, contact, PO #, urgency and type. Add the description, then the technician and day.`
+    : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, urgency and type are copied.`,
 });
 
 /** The named crew on the form: the lead's $ and the other technicians (owner, Sep 30). */
@@ -2140,7 +2140,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         </div>
         {manager && (
           <div className="space-y-1">
-            <Label htmlFor="ticket-rate">Labor rate</Label>
+            <Label htmlFor="ticket-rate">Urgency</Label>
             <Select
               value={draft.labor_rate_kind}
               disabled={ro}
@@ -2148,7 +2148,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             >
               <SelectTrigger
                 id="ticket-rate"
-                title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
+                title={`Urgent and Emergency tickets go first on the Tech Board. Also sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
               >
                 <SelectValue />
               </SelectTrigger>

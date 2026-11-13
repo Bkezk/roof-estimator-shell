@@ -77,7 +77,7 @@ describe("the ticket form (service-page.tsx) after the Oct 1 clean-up", () => {
     const row = src.slice(src.indexOf('<Label htmlFor="ticket-type">'));
     const end = row.indexOf('<Label htmlFor="ticket-tech">');
     const between = row.slice(0, end);
-    expect(between).toContain('<Label htmlFor="ticket-rate">Labor rate</Label>');
+    expect(between).toContain('<Label htmlFor="ticket-rate">Urgency</Label>');
     expect(between).toContain('<Label htmlFor="ticket-date">Date</Label>');
     expect(src).not.toContain("(any day)");
   });

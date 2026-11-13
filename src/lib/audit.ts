@@ -109,10 +109,20 @@ export const AUDIT_PROPERTY_WORDS: Readonly<Record<string, string>> = {
   location_name: "site name",
 };
 
+/**
+ * A ticket's Standard / Urgent / Emergency choice is its "urgency" (owner, Nov 13: "can we change
+ * labor rate to urgency on the front end"; 20261113160000_history_urgency_wording.sql). The
+ * column keeps its name.
+ */
+export const AUDIT_TICKET_WORDS: Readonly<Record<string, string>> = {
+  labor_rate_kind: "urgency",
+};
+
 /** The readable name of a changed field, for an entity ("expected close"); the column otherwise. */
 export const auditFieldLabel = (entity: string, column: string): string =>
   (entity === "opportunity" || entity === "bid" ? AUDIT_FIELD_LABELS[entity][column] : undefined) ??
   AUDIT_PROPERTY_WORDS[column] ??
+  AUDIT_TICKET_WORDS[column] ??
   column.replace(/_id$/, "").replace(/_/g, " ");
 
 /** A logged row as the History folds read it. */

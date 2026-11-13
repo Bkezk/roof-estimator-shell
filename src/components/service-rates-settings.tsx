@@ -229,7 +229,7 @@ export function ServiceRatesSettings() {
       <CardHeader>
         <CardTitle>Service rates</CardTitle>
         <CardDescription>
-          The hourly rates and wording a ticket's invoice is built with. The ticket's Labor rate
+          The hourly rates and wording a ticket's invoice is built with. The ticket's Urgency
           (Standard / Urgent / Emergency) picks the row; each extra technician is billed as a
           Helper. A draft invoice picks up changes when it is rebuilt from its ticket.
         </CardDescription>
@@ -299,7 +299,7 @@ export function ServiceRatesSettings() {
                   <thead>
                     <tr className="border-b text-left text-xs text-muted-foreground">
                       <th scope="col" className="py-1 pr-4 font-medium">
-                        Rate kind
+                        Urgency
                       </th>
                       <th scope="col" className="py-1 pr-4 font-medium">
                         Role

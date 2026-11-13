@@ -22,7 +22,7 @@ describe("Setup page width", () => {
 describe("the rates are a compact table", () => {
   it("has the six column headers once, at the top", () => {
     const head = flat.slice(flat.indexOf("<thead>"), flat.indexOf("</thead>"));
-    expect(head).toContain("> Rate kind </th>");
+    expect(head).toContain("> Urgency </th>");
     expect(head).toContain("> Role </th>");
     expect(ui.match(/<thead>/g)).toHaveLength(1);
     expect(ui).toMatch(
