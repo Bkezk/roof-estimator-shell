@@ -3,6 +3,7 @@
  * page's "Awaiting invoice" queue (docs/service-module-design.md §5.1 step 4, §5.2, §5.4). Days
  * are local calendar days (YYYY-MM-DD), never UTC midnight.
  */
+import { rateRank } from "@/lib/rate-urgency";
 import { FINISHED_STAGES as ALL_FINISHED_STAGES, WORK_STAGES } from "@/lib/ticket-stages";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -130,17 +131,21 @@ export function assignedStage(
 interface RailJob {
   scheduled_date: string | null;
   created_at: string;
+  /** The ticket's labor rate; Emergency and Urgent go first (rate-urgency.ts). */
+  labor_rate_kind?: string | null;
 }
 
 /**
- * The Tech Board's Unassigned rail order (owner, Oct 9): by day — overdue first (the day has
- * passed), then today, then the coming days — and undated tickets last; within a day the oldest
- * created first. It used to be oldest created first overall, so a ticket due today sat under
- * one opened earlier for next month. Pure: ascending days already put overdue before today
- * before the coming days, so no "today" is needed.
+ * The Tech Board's Unassigned rail order. First by how urgent (owner, Nov 13: "sorted by most
+ * urgent to least urgent and subsorted by date"): Emergency, then Urgent, then the rest. Within
+ * each, by day (owner, Oct 9) — overdue first (the day has passed), then today, then the coming
+ * days — and undated tickets last; within a day the oldest created first. Pure: ascending days
+ * already put overdue before today before the coming days, so no "today" is needed.
  */
 export function sortUnassigned<T extends RailJob>(jobs: readonly T[]): T[] {
   return [...jobs].sort((a, b) => {
+    const rate = rateRank(a.labor_rate_kind) - rateRank(b.labor_rate_kind);
+    if (rate) return rate;
     if (a.scheduled_date && !b.scheduled_date) return -1;
     if (!a.scheduled_date && b.scheduled_date) return 1;
     if (a.scheduled_date && b.scheduled_date && a.scheduled_date !== b.scheduled_date)

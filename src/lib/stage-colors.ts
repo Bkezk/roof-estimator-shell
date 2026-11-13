@@ -57,6 +57,22 @@ export const STAGE_TONES: Record<StageToneKey, StageTone> = {
   ),
 };
 
+/**
+ * The Urgent / Emergency badge on a Tech Board card and the stripe down the card's left edge
+ * (owner, Nov 13: "some sort of indicator on that tile"). Red and yellow are in no stage's
+ * family above, and each badge carries its word and an icon, so it never rests on colour alone.
+ */
+export const RATE_TONES: Record<"emergency" | "urgent", { badge: string; stripe: string }> = {
+  emergency: {
+    badge: "border-red-800 bg-red-600 text-white",
+    stripe: "border-l-4 border-l-red-600 dark:border-l-red-500",
+  },
+  urgent: {
+    badge: "border-yellow-600 bg-yellow-300 text-black",
+    stripe: "border-l-4 border-l-yellow-500 dark:border-l-yellow-400",
+  },
+};
+
 export const FIELD_TONE_LABELS: Record<"en_route" | "on_site", string> = {
   en_route: "En route",
   on_site: "On site",

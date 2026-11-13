@@ -100,7 +100,7 @@ describe("the Tech Board card uses them", () => {
   it("every chip line comes from board-chip.ts, the description on its own clamped line", () => {
     expect(board).toContain('from "@/lib/board-chip"');
     expect(board).toContain("const place = chipPlace(j);");
-    expect(board).toContain("const facts = chipFacts(j);");
+    expect(board).toContain("const facts = chipFacts(j, { rate: false });");
     expect(board).toContain("const description = chipDescription(j);");
     expect(board).toContain("{place && <span");
     expect(board).toContain("{facts.length > 0 && (");

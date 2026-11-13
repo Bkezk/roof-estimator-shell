@@ -21,6 +21,11 @@
  * the same technician in one drag (one write, the stage stays Scheduled); a chip opens the
  * ticket with `?from=board&week=` so its Back returns to this week; the cell "+" is always
  * visible; the Unassigned rail reads by day (overdue, today, coming days, undated last).
+ *
+ * Owner, Nov 13: an Urgent or Emergency ticket (its labor rate) wears a badge and a stripe on
+ * its card, and goes first: in a technician's day, and in the Unassigned rail ahead of the day
+ * order. The "Finished, no technician" group keeps its own order (longest waiting first): that
+ * work is done, so the rate no longer says who to send first; its cards still wear the badge.
  */
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,9 +43,12 @@ import {
   Inbox,
   Loader2,
   Plus,
+  Siren,
+  TriangleAlert,
 } from "lucide-react";
 import {
   FIELD_TONE_LABELS,
+  RATE_TONES,
   STAGE_TONES,
   stageMark,
   ticketToneKey,
@@ -69,7 +77,9 @@ import {
 import { listTechnicians } from "@/lib/auth.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
+import { chipBadge, chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
+import { RATE_KIND_LABELS } from "@/lib/invoices.functions";
+import { sortCell, type UrgentRate } from "@/lib/rate-urgency";
 import { plainErrText } from "@/lib/plain-error";
 
 const errText = plainErrText;
@@ -235,10 +245,10 @@ function Board({ week }: { week?: string | undefined }) {
   const nameOf = (id: string) =>
     techRows.find((r) => r.id === id)?.name ?? otherRows.find((r) => r.id === id)?.name ?? null;
 
+  // A technician's day: Emergency, then Urgent, then the rest, by ticket number within each
+  // (owner, Nov 13; rate-urgency.ts sortCell). It used to be the ticket number alone.
   const cellJobs = (techId: string, ymd: string) =>
-    jobs
-      .filter((j) => j.technician_id === techId && boardDay(j) === ymd)
-      .sort((a, b) => a.number - b.number);
+    sortCell(jobs.filter((j) => j.technician_id === techId && boardDay(j) === ymd));
 
   const q = search.trim().toLowerCase();
   const unassigned = jobs
@@ -258,8 +268,8 @@ function Board({ week }: { week?: string | undefined }) {
         .toLowerCase()
         .includes(q);
     });
-  // By day (owner, Oct 9): overdue, today, the coming days, undated last; within a day the
-  // oldest created first (it used to be oldest created first overall).
+  // Emergency, then Urgent, then the rest (owner, Nov 13); within each by day (owner, Oct 9):
+  // overdue, today, the coming days, undated last; within a day the oldest created first.
   const rail = sortUnassigned(unassigned);
   const unassignedTotal = jobs.filter(
     (j) => movable(j) && (!j.technician_id || !j.scheduled_date),
@@ -452,6 +462,14 @@ function Board({ week }: { week?: string | undefined }) {
                 "closed",
               ]}
             />
+            <p
+              className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground"
+              data-legend="rate"
+            >
+              <RateBadge kind="emergency" />
+              <RateBadge kind="urgent" />
+              <span>go first, then by day.</span>
+            </p>
             <Input
               type="search"
               placeholder="Search #, customer, property…"
@@ -707,6 +725,20 @@ function StageLegend({ stages }: { stages: readonly StageToneKey[] }) {
   );
 }
 
+/** The Urgent / Emergency badge (owner, Nov 13): a word and an icon, never colour alone. */
+function RateBadge({ kind }: { kind: UrgentRate }) {
+  const Icon = kind === "emergency" ? Siren : TriangleAlert;
+  return (
+    <span
+      data-rate={kind}
+      className={`flex w-fit max-w-full items-center gap-0.5 rounded-sm border px-1 text-[10px] font-bold uppercase leading-4 tracking-wide ${RATE_TONES[kind].badge}`}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="truncate">{RATE_KIND_LABELS[kind]}</span>
+    </span>
+  );
+}
+
 function TicketChip(props: {
   job: ServiceJobWithTech;
   /** The rail's chips also say what is already set (a technician without a day, or the reverse). */
@@ -736,9 +768,11 @@ function TicketChip(props: {
           : null
       : null;
   // The card's lines (owner, Oct 13: "more details on the items shown on the calendar week"):
-  // the property, then Type · Urgent/Emergency · arrival window, then the description.
+  // the property, then Type · arrival window, then the description. An Urgent or Emergency
+  // ticket wears its badge above them (owner, Nov 13), so the facts line leaves the rate out.
+  const badge = chipBadge(j);
   const place = chipPlace(j);
-  const facts = chipFacts(j);
+  const facts = chipFacts(j, { rate: false });
   const description = chipDescription(j);
   const title = [
     ...chipTitleLines(j),
@@ -755,8 +789,13 @@ function TicketChip(props: {
       title={title}
       className={`block rounded-md border px-1.5 py-1 text-xs leading-snug shadow-sm transition-opacity hover:ring-1 hover:ring-primary/50 ${
         STAGE_TONES[toneKey].chip
-      } ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${props.dragging ? "opacity-40" : ""}`}
+      } ${badge ? RATE_TONES[badge.kind].stripe : ""} ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${props.dragging ? "opacity-40" : ""}`}
     >
+      {badge && (
+        <span className="mb-0.5 block">
+          <RateBadge kind={badge.kind} />
+        </span>
+      )}
       <span className="line-clamp-2">
         {mark === "check" && (
           <Check className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Done" />
