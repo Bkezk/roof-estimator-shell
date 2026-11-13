@@ -114,7 +114,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "manifest", href: "/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/icon-180.png" },
+      // The JBK logo on white (owner, Nov 13: "can we have the icon match the JBK logo"). New file
+      // names on purpose: a phone keeps an icon it fetched under the old address.
+      { rel: "apple-touch-icon", href: "/jbk-icon-180.png" },
     ],
   }),
   shellComponent: RootShell,

@@ -25,8 +25,8 @@ self.addEventListener("push", (event) => {
   const options = {
     body: typeof data.body === "string" ? data.body : "",
     tag: typeof data.tag === "string" && data.tag ? data.tag : undefined,
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: "/jbk-icon-192.png",
+    badge: "/jbk-icon-192.png",
     data: { url },
   };
   event.waitUntil(

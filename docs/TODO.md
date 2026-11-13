@@ -565,6 +565,13 @@ longer matches "additional"); BidNet copies of portal jobs are dropped (see BidN
        prices. All editable on Estimate Pricing.
 11. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
     zero-item column pick, prefill the new-product dialog.
+12. **PlanSwift T-Bar: pick No Drill or Pre-Drill from the deck / wall type** (owner, Nov 13:
+    "that's fine how you have it for now but we may need to automatically update based on
+    deck/wall types"). Today a PlanSwift "T-Bar" row goes to Accessories › Term Bar as No Drill
+    Additional feet in the roof's colour, less the bid's T-Bar parapet feet, with a notice to
+    move it for a pre-drilled wall (src/lib/planswift/classify.ts, to-seed.ts;
+    docs/qa/fixes-speed-setup-history-takeoff-documents-2026-11-10.md). Needs from the owner:
+    which deck and wall types take Pre-Drill.
 
 ## Done
 
