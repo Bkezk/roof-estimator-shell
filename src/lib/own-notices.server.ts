@@ -1,8 +1,9 @@
 /**
  * The database side of "My own changes" (own-notices.ts): does the person who made a change
  * want to be told about it? One small read of their own profile row, made only when they are
- * actually among the people a notice would go to. Any doubt (no row, the column not there yet,
- * a failed read) is a "no": the old rule, never the person who made the change.
+ * actually among the people a notice would go to. The switch is on for everyone unless they
+ * turned it off (the column's default). A read that fails outright (no row, the column not
+ * there yet, an error) is a "no", the old rule, so a fault can never send extra notices.
  */
 import type { Client } from "@/lib/notify.server";
 import { withoutActor } from "@/lib/own-notices";

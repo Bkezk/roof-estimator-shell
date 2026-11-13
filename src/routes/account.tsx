@@ -426,7 +426,8 @@ function NotificationsCard() {
                 );
               })}
               {/* Owner, Nov 13: "notifications should go out to myself even if im the one who
-                  did it". Off for everyone until they turn it on (own-notices.ts). */}
+                  did it", then "It should be on for everyone": on unless a person turns their
+                  own off (own-notices.ts). */}
               <div className="flex items-center justify-between gap-4" data-row="notify-own">
                 <div>
                   <Label htmlFor="notify-own">{OWN_NOTICES_LABEL}</Label>

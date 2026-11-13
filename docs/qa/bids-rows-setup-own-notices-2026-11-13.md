@@ -96,6 +96,11 @@ Proof:
 - **Cleanup.** The two tickets, their timers, events, the notice and History lines are removed.
   Nothing named ZZ is left; the ticket counter equals the highest real ticket.
 
+**On for everyone** (owner, asked whether it should stay opt-in: "It should be on for everyone").
+`supabase/migrations/20261113210000_notify_own_default_on.sql`, applied and checked: all 8
+people are on and a new person starts on. The switch stays on My account, so anyone can turn
+their own off.
+
 Not seen: a push arriving on a phone for a self-assignment. The local test server sends no
 pushes. The owner's phone is registered and took two pushes earlier the same day.
 

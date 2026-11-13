@@ -140,11 +140,11 @@ describe("the switch on My account", () => {
   const page = read("src/routes/account.tsx");
   it("has its own row, label and one line of help", () => {
     expect(OWN_NOTICES_LABEL).toBe("My own changes");
-    expect(OWN_NOTICES_HELP).toContain("Off unless you want it.");
+    expect(OWN_NOTICES_HELP).toContain("On unless you turn it off.");
     expect(page).toContain('data-row="notify-own"');
     expect(page).toContain('<Label htmlFor="notify-own">{OWN_NOTICES_LABEL}</Label>');
   });
-  it("is off until read, and saves the moment it is flipped", () => {
+  it("shows off until read, and saves the moment it is flipped", () => {
     expect(page).toContain("checked={own.data?.notify_own ?? false}");
     expect(page).toContain("onCheckedChange={(v) => saveOwn.mutate(v)}");
   });
@@ -157,10 +157,19 @@ describe("the switch on My account", () => {
 
 describe("the database (supabase/migrations/20261113200000_notify_own.sql)", () => {
   const sql = read("supabase/migrations/20261113200000_notify_own.sql");
-  it("the switch is off for everyone until they turn it on", () => {
+  it("the column came in off by default, with only the owner's on", () => {
     expect(sql).toContain(
       "alter table public.profiles add column if not exists notify_own boolean not null default false;",
     );
+  });
+  it('then on for everyone, and for every new person (owner: "It should be on for everyone")', () => {
+    const on = read("supabase/migrations/20261113210000_notify_own_default_on.sql");
+    expect(on).toContain("alter table public.profiles alter column notify_own set default true;");
+    expect(on).toContain(
+      "update public.profiles set notify_own = true where notify_own is distinct from true;",
+    );
+    // The switch itself stays: nothing here takes away a person's way to turn theirs off.
+    expect(on).not.toMatch(/drop (function|column)/i);
   });
   it("a person can set only their own, and must be signed in", () => {
     expect(sql).toContain("where p.id = auth.uid()");
