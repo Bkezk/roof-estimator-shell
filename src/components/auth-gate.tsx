@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { applyKeptTopGap } from "@/lib/top-gap";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -87,6 +88,8 @@ function useLazyReminderDispatch() {
 
 function AuthedShell({ children }: { children: ReactNode }) {
   useLazyReminderDispatch();
+  // A top-bar spacing kept on this iPhone (My account) replaces the stylesheet's own.
+  useEffect(() => applyKeptTopGap(), []);
   return (
     <SidebarProvider>
       <NarrowMenuDefault />
@@ -95,7 +98,9 @@ function AuthedShell({ children }: { children: ReactNode }) {
         {/* min-w-0 (Nov 3): a wide table inside (the Invoices list) used to grow this flex
             column past the phone's width, so the whole page zoomed out; now it scrolls inside. */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 items-center gap-3 border-b px-4">
+          {/* data-app-header: the iPhone Home Screen app pushes this row clear of the status
+              bar (styles.css, lib/top-gap.ts; owner, Nov 13). */}
+          <header data-app-header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
             <span className="font-semibold">JBK Portal</span>
             {/* One search over everything, Ctrl / ⌘ K (owner, Oct 6, as CenterPoint's header). */}

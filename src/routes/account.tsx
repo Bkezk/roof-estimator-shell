@@ -27,6 +27,15 @@ import {
   pushStateHere,
   type PushState,
 } from "@/lib/push-client";
+import {
+  TOP_GAP_DEFAULT,
+  TOP_GAP_MAX,
+  applyTopGap,
+  iosHomeScreenApp,
+  readTopGap,
+  saveTopGap,
+  stepTopGap,
+} from "@/lib/top-gap";
 import { NOTIFICATIONS_QUERY_KEY } from "@/components/notifications-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -74,6 +83,8 @@ function AccountPage() {
         <h1 className="text-2xl font-bold tracking-tight">My account</h1>
         <p className="text-sm text-muted-foreground">Signed in as {profile?.email}</p>
       </div>
+      {/* First on the page, so the top bar is in view while Less / More are pressed. */}
+      <TopBarSpacingCard />
       {profile && (
         <Card>
           <CardHeader>
@@ -148,6 +159,62 @@ function AccountPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * The iPhone Home Screen app only (owner, Nov 13): space above the top bar, so its row sits clear
+ * of the clock and battery where iOS softens it. Less / More move it a little at a time; the
+ * number is kept on this phone (lib/top-gap.ts).
+ */
+function TopBarSpacingCard() {
+  // Only knowable in the browser, so it starts hidden.
+  const [show, setShow] = useState(false);
+  const [gap, setGap] = useState(TOP_GAP_DEFAULT);
+  useEffect(() => {
+    setShow(iosHomeScreenApp());
+    setGap(readTopGap() ?? TOP_GAP_DEFAULT);
+  }, []);
+  if (!show) return null;
+  const move = (dir: -1 | 1) => {
+    const next = stepTopGap(gap, dir);
+    setGap(next);
+    saveTopGap(next);
+    applyTopGap(next);
+  };
+  return (
+    <Card data-card="top-bar-spacing">
+      <CardHeader>
+        <CardTitle>Top bar on this iPhone</CardTitle>
+        <CardDescription>
+          If the top bar looks faded, or sits too close to the clock and battery, press More until
+          it is clear. This is kept on this phone only.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={gap <= 0}
+          onClick={() => move(-1)}
+          aria-label="Less space above the top bar"
+        >
+          Less
+        </Button>
+        <span className="min-w-16 text-center tabular-nums" aria-live="polite">
+          {gap} px
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={gap >= TOP_GAP_MAX}
+          onClick={() => move(1)}
+          aria-label="More space above the top bar"
+        >
+          More
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
