@@ -270,8 +270,13 @@ export function ObjectsTab(props: ObjectsTabProps) {
                   className="h-3 w-3 shrink-0 rounded-sm"
                   style={{ backgroundColor: o.color ?? "#2563eb" }}
                 />
-                <span className="min-w-0 flex-1 truncate">{o.attrs.name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
+                {/* The object's name keeps its room; a long page name (an aerial page is named
+                    after its address) gives way first and shows in full on hover. */}
+                <span className="mr-auto min-w-0 truncate">{o.attrs.name}</span>
+                <span
+                  className="min-w-0 shrink-[999] truncate text-xs text-muted-foreground"
+                  title={pageOf(o.page)?.name ?? `Page ${o.page + 1}`}
+                >
                   {pageOf(o.page)?.name ?? `Page ${o.page + 1}`}
                 </span>
                 {unscaled.has(o.id) ? (

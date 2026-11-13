@@ -439,7 +439,7 @@ function Board({ week }: { week?: string | undefined }) {
           {/* Unassigned rail — above the grid on a phone. */}
           <aside
             aria-label="Unassigned tickets"
-            className={`flex max-h-[70vh] flex-col gap-2 rounded-lg border p-3 transition-colors lg:max-h-[calc(100vh-14rem)] ${
+            className={`flex max-h-[70vh] min-w-0 flex-col gap-2 rounded-lg border p-3 transition-colors lg:max-h-[calc(100vh-14rem)] ${
               over === "rail" ? "border-primary bg-primary/5" : "bg-muted/30"
             }`}
             onDragOver={(e) => allowDrop(e, "rail")}
