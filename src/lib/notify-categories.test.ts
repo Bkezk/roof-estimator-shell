@@ -169,7 +169,8 @@ describe("notify() skips a recipient whose switch for the notice's category is o
     expect(inbox(e)).toEqual([ESTIMATOR, OFFICE].sort());
     expect(emailed()).toEqual([emailOf(ESTIMATOR), emailOf(OFFICE)].sort());
     expect(pushed()).toEqual([endpointOf(ESTIMATOR), endpointOf(OFFICE)].sort());
-    expect(e.rpcCalls).toEqual([
+    // The device stamps (push_subscription_mark, Nov 13) follow each push; the one read is this.
+    expect(e.rpcCalls.filter((c) => c.fn !== "push_subscription_mark")).toEqual([
       { fn: "notify_recipients", args: { ids: [TECH, ESTIMATOR, OFFICE] } },
     ]);
   });

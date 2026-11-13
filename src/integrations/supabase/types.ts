@@ -5253,6 +5253,10 @@ export type Database = {
         Returns: number
       }
       prospect_user_ids: { Args: never; Returns: string[] }
+      push_subscription_mark: {
+        Args: { p_id: number; p_ok: boolean }
+        Returns: undefined
+      }
       release_bid_lock: {
         Args: { p_bid: string; p_session: string }
         Returns: undefined

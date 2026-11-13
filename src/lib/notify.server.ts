@@ -272,15 +272,9 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
         });
         if (r.ok) {
           sent++;
-          await admin
-            .from("push_subscriptions")
-            .update({ last_used_at: new Date().toISOString() })
-            .eq("id", s.id);
+          await markPushDevice(admin, s.id, true);
         } else {
-          await admin
-            .from("push_subscriptions")
-            .update(r.gone ? { failed_at: new Date().toISOString() } : {})
-            .eq("id", s.id);
+          if (r.gone) await markPushDevice(admin, s.id, false);
           patch.push_error = r.error;
         }
       }
@@ -318,6 +312,24 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** PostgREST's "function not in the schema cache" (a migration not applied yet). */
 const isMissingRpc = (e: { code?: string; message?: string }) =>
   e.code === "PGRST202" || /Could not find the function/i.test(e.message ?? "");
+
+/**
+ * The sender's stamp on a device row: "sent just now" (ok) or "this device is gone" (not ok).
+ * Through push_subscription_mark (20261113140000), which changes those two columns and nothing
+ * else: the sender used to UPDATE the row itself under a rule that let any office user rewrite
+ * any person's device, endpoint and keys included (owner, Nov 13). Before that migration is
+ * applied the function is missing and the old direct write runs; after it, that write can only
+ * reach the signed-in person's own rows (or any row with the server key).
+ */
+async function markPushDevice(admin: Client, id: number, ok: boolean): Promise<void> {
+  const r = await rawRpc(admin, "push_subscription_mark", { p_id: id, p_ok: ok });
+  if (!r.error || !isMissingRpc(r.error)) return;
+  const at = new Date().toISOString();
+  await admin
+    .from("push_subscriptions")
+    .update(ok ? { last_used_at: at } : { failed_at: at })
+    .eq("id", id);
+}
 
 /**
  * An rpc the generated types do not list yet (the Oct 12 migration's functions; the types file's

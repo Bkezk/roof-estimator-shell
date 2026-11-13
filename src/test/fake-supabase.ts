@@ -533,7 +533,13 @@ export function fakeSupabase(
       };
     // The follow-up functions of 20261002140000_followup_guard.sql are database code: here they
     // answer "not in the schema cache", so syncFollowup runs its direct writes (the same rules).
-    if (fn === "followup_sync_upsert" || fn === "followup_sync_close")
+    // push_subscription_mark (20261113140000) is database code too: missing here, so the
+    // sender's direct stamp runs and a test still sees it in `writes`.
+    if (
+      fn === "followup_sync_upsert" ||
+      fn === "followup_sync_close" ||
+      fn === "push_subscription_mark"
+    )
       return {
         data: null,
         error: { code: "PGRST202", message: `Could not find the function public.${fn}` },
