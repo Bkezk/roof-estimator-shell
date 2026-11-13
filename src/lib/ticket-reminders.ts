@@ -211,7 +211,8 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
  *   before  "Follow up: <title>" / "due Saturday 12/13/2026. Reminder 2; it repeats every 3
  *           working days until the date."
  *   notice  "Due Monday: <title>" / "due Monday 12/14/2026. Reminder 7; the next one is
- *           that morning." (a ticket's title already starts "Ticket #6090 …")
+ *           that morning." (a ticket's title already starts "Ticket #6090 …"); when a cadence
+ *           reminder still falls before the date: "…; the next one is Friday 12/11/2026."
  *   due     "Follow up: <title>" / "due today. Reminder 8; after today it repeats every 3
  *           working days until the item is finished or closed."
  *   after   "Follow up: <title>" / "2 working days overdue. Reminder 9; it repeats every 3
@@ -229,12 +230,23 @@ export function ticketReminderNotice(
   const every = Math.max(1, f.every_days);
   const until = `it repeats every ${plural(every, "working day")} until the item is finished or closed.`;
   const followUp = `Follow up: ${f.title}`;
-  if (phase === "notice")
+  if (phase === "notice") {
+    // What really comes next (Nov 13 audit, finding 8): with the notice two or more working days
+    // out and a shorter cadence, a cadence reminder still falls before the date, so "that
+    // morning" was wrong. The rule itself says which day: the date, or a day before it.
+    const next = ticketNextRemindDay(
+      due,
+      today,
+      s.ticket_before_every_days,
+      s.ticket_due_notice_days,
+      every,
+    );
     return {
       phase,
       title: `Due ${weekdayName(due)}: ${f.title}`,
-      body: `due ${dayText(due)}. ${count}; the next one is that morning.`,
+      body: `due ${dayText(due)}. ${count}; the next one is ${next < due ? dayText(next) : "that morning"}.`,
     };
+  }
   if (phase === "before") {
     const n = s.ticket_before_every_days;
     return {

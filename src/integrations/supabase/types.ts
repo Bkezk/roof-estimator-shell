@@ -5253,6 +5253,15 @@ export type Database = {
         Returns: number
       }
       prospect_user_ids: { Args: never; Returns: string[] }
+      push_subscription_claim: {
+        Args: {
+          p_auth: string
+          p_endpoint: string
+          p_p256dh: string
+          p_user_agent?: string
+        }
+        Returns: undefined
+      }
       push_subscription_mark: {
         Args: { p_id: number; p_ok: boolean }
         Returns: undefined
@@ -5447,6 +5456,7 @@ export type Database = {
         Returns: number
       }
       unassigned_overdue_days: { Args: never; Returns: number }
+      undo_opportunity_from_bid: { Args: { p_bid: string }; Returns: Json }
       upsert_buildings: { Args: { rows: Json }; Returns: number }
       warranty_leads: {
         Args: never

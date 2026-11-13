@@ -301,8 +301,10 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
       const snoozed = open.snoozed_until ? Date.parse(open.snoozed_until) : null;
       snoozeCleared = snoozed !== null && snoozed > now.getTime();
       if (open.snoozed_until) patch.snoozed_until = null;
-      // A ticket's date moved to a day still ahead always takes the rule's reminder (Nov 13).
-      const ahead = a.kind === "ticket" && officeDay(due) > officeDay(now);
+      // A ticket's date moved to a day still ahead always takes the rule's reminder (Nov 13);
+      // so does one moved to today (the audit, finding 5): reminders now go out before the
+      // date, so it had usually had one and kept its old cadence day, with no "due today".
+      const ahead = a.kind === "ticket" && officeDay(due) >= officeDay(now);
       if (open.reminders_sent === 0 || snoozeCleared || ahead)
         patch.next_remind_at = firstRemind.toISOString();
     }

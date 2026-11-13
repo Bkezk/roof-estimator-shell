@@ -29,7 +29,7 @@ import { type BidListRow, bidRoofSystems } from "@/lib/bids-list";
 import { DOCUMENTS_BUCKET, documentImageFolder } from "@/lib/documents/server-pure";
 import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
-import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
+import { syncOpportunityFromBid, undoOpportunityFromBid } from "@/lib/opportunities.functions";
 import { syncInspectionOutcomeAfterBidChange } from "@/lib/service-inspection.functions";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
@@ -618,7 +618,8 @@ export const listBidFolders = createServerFn({ method: "GET" })
  * status stamps (bidStatusStamps), the won day (wonOnColumns: the day the list asked for when
  * marking Won, else the stored one, else today; cleared otherwise), and then drives the linked
  * opportunity (owner, Oct 12: opportunities.functions.ts syncOpportunityFromBid — submitted →
- * quoted, won → won, lost → lost).
+ * quoted, won → won, lost → lost). `undo` (Nov 13): back to Draft AND the opportunity back to
+ * where it stood, for the Undo on Work Overview's toast.
  */
 export const setBidStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -629,6 +630,12 @@ export const setBidStatus = createServerFn({ method: "POST" })
         status: z.enum(BID_STATUSES),
         lostReason: z.string().trim().max(300).nullable().optional(),
         wonOn: WON_ON.nullable().optional(),
+        /**
+         * An Undo (Work Overview's toast; the Nov 13 audit, finding 4): with Draft, the
+         * opportunity's last step is taken back too, when it was this person's own a moment ago
+         * (undoOpportunityFromBid). A plain change to Draft still moves nothing.
+         */
+        undo: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -662,7 +669,10 @@ export const setBidStatus = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);
-    return bid;
+    const back =
+      data.undo && data.status === "draft" ? await undoOpportunityFromBid(context, bid.id) : null;
+    // The status the opportunity went back to on an Undo; null when nothing moved.
+    return { ...bid, opportunity_back_to: back?.action === "updated" ? (back.to ?? null) : null };
   });
 
 /**

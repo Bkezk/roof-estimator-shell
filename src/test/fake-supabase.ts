@@ -538,7 +538,14 @@ export function fakeSupabase(
     if (
       fn === "followup_sync_upsert" ||
       fn === "followup_sync_close" ||
-      fn === "push_subscription_mark"
+      fn === "push_subscription_mark" ||
+      // push_subscription_claim / undo_opportunity_from_bid (20261113150000): database code too.
+      fn === "push_subscription_claim" ||
+      fn === "undo_opportunity_from_bid" ||
+      // The two opportunity movers: their callers used to swallow ANY error naming the function
+      // (the Nov 13 audit, finding 9), so this stand-in's "unexpected rpc" passed for "missing".
+      fn === "sync_opportunity_from_bid" ||
+      fn === "move_opportunity_from_ticket"
     )
       return {
         data: null,

@@ -582,6 +582,18 @@ async function syncOppFollowup(
 }
 
 /**
+ * "This database function is not installed yet" (a migration not applied): PostgREST's PGRST202,
+ * "Could not find the function …". Nothing else (Nov 13 audit, finding 9): the two callers below
+ * used to treat ANY error that named their function as this one, so a refusal such as
+ * "permission denied for function move_opportunity_from_ticket" was swallowed: the ticket saved
+ * and the opportunity silently stayed where it was. Such an error is now thrown and shown.
+ */
+export const isMissingDatabaseFunction = (
+  e: { code?: string; message?: string } | null | undefined,
+): boolean =>
+  !!e && (e.code === "PGRST202" || /Could not find the function/i.test(e.message ?? ""));
+
+/**
  * The bid drives its opportunity (owner, Oct 12), after a bid's status is written (bids.functions.ts
  * saveBid / setBidStatus): the database function sync_opportunity_from_bid (20261012100000) finds
  * the live opportunity linked to the bid (crm_opportunities.bid_id, else bids.opportunity_id),
@@ -601,8 +613,43 @@ export async function syncOpportunityFromBid(
   if (error) {
     // Before 20261012100000 is applied there is no function: the bid is saved, the opportunity
     // keeps its status (as before Oct 12).
-    if (error.code === "PGRST202" || /sync_opportunity_from_bid/.test(error.message))
-      return { action: "none" };
+    if (isMissingDatabaseFunction(error)) return { action: "none" };
+    throw new Error(error.message);
+  }
+  const out = (data ?? { action: "none" }) as {
+    action: string;
+    opportunity_id?: string;
+    from?: string;
+    to?: string;
+  };
+  if (out.action !== "updated" || !out.opportunity_id) return out;
+  const { data: row, error: rErr } = await ctx.supabase
+    .from("crm_opportunities")
+    .select("*")
+    .eq("id", out.opportunity_id)
+    .maybeSingle();
+  if (rErr) throw new Error(rErr.message);
+  if (row) {
+    const p = await me(ctx);
+    await syncOppFollowup(row, out.from ?? null, ctx, nameOf(p));
+  }
+  return out;
+}
+
+/**
+ * The Undo on a bid's status takes its opportunity back too (the Nov 13 audit, finding 4): the
+ * database function undo_opportunity_from_bid (20261113150000) reverts the opportunity's last
+ * status step when that step is the caller's own, minutes old, still in place, and the bid is
+ * Draft again; anything else is left as somebody's later decision. The follow-up reopens or
+ * closes here as for a status set by hand (syncOppFollowup). `none` before the migration.
+ */
+export async function undoOpportunityFromBid(
+  ctx: Ctx,
+  bidId: string,
+): Promise<{ action: string; opportunity_id?: string; from?: string; to?: string }> {
+  const { data, error } = await ctx.supabase.rpc("undo_opportunity_from_bid", { p_bid: bidId });
+  if (error) {
+    if (isMissingDatabaseFunction(error)) return { action: "none" };
     throw new Error(error.message);
   }
   const out = (data ?? { action: "none" }) as {
@@ -660,8 +707,7 @@ export async function moveOpportunityFromTicket(
     ...(to ? { p_to: to } : {}),
   });
   if (error) {
-    if (error.code === "PGRST202" || /move_opportunity_from_ticket/.test(error.message))
-      return null;
+    if (isMissingDatabaseFunction(error)) return null;
     throw new Error(error.message);
   }
   const out = (data ?? { action: "none" }) as Partial<OpportunityMove> & {

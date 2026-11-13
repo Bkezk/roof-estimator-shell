@@ -7,11 +7,14 @@ name: Follow-up reminders
 
 on:
   schedule:
-    # Every 30 minutes from 12:00 to 23:30 UTC: 8:00 AM to 7:30 PM Eastern in summer, 7:00 AM to
-    # 6:30 PM Eastern in winter. Ticket reminders are set to 8:00 AM Eastern all year
-    # (reminder_morning): the first run after that is the 12:00 UTC one in summer and the 13:00
-    # UTC one in winter (the 12:00 and 12:30 UTC runs are 7:00 and 7:30 AM there, before it).
-    - cron: "*/30 12-23 * * *"
+    # Twice an hour from 12:07 to 23:37 UTC: 8:07 AM to 7:37 PM Eastern in summer, 7:07 AM to
+    # 6:37 PM Eastern in winter. Reminders are set to 8:00 AM Eastern all year (reminder_morning):
+    # the first run after that is the 12:07 UTC one in summer and the 13:07 UTC one in winter.
+    #
+    # At minutes 7 and 37, not 0 and 30 (the Nov 13 audit): GitHub starts scheduled runs late or
+    # not at all when it is busy, and the top and the half of the hour are its busiest moments.
+    # On "*/30" this job ran about twice a day instead of 24 times, hours late.
+    - cron: "7,37 12-23 * * *"
   workflow_dispatch:
 
 jobs:

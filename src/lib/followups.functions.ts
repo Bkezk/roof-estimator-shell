@@ -460,6 +460,22 @@ export const savePushSubscription = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => subSchema.parse(d))
   .handler(async ({ data, context }): Promise<void> => {
+    // This browser's notifications are the signed-in person's (the Nov 13 audit, finding 3):
+    // push_subscription_claim (20261113150000) writes the row for them whoever held it. The
+    // plain upsert below can only write the caller's own row, so a second person on a device
+    // someone else had registered (a shared office computer, a session that ended without a
+    // sign-out) was refused by the row rules. Before the migration: the upsert, as it was.
+    const claimed = await context.supabase.rpc("push_subscription_claim", {
+      p_endpoint: data.endpoint,
+      p_p256dh: data.keys.p256dh,
+      p_auth: data.keys.auth,
+      ...(data.user_agent ? { p_user_agent: data.user_agent } : {}),
+    });
+    if (!claimed.error) return;
+    const missing =
+      claimed.error.code === "PGRST202" ||
+      /Could not find the function/i.test(claimed.error.message ?? "");
+    if (!missing) throw new Error(claimed.error.message);
     const { error } = await context.supabase.from("push_subscriptions").upsert(
       {
         user_id: context.userId,

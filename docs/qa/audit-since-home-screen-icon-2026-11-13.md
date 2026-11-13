@@ -1,5 +1,7 @@
 # Audit of every change since the home-screen icon (Nov 13)
 
+Fixes that followed are in `audit-fixes-2026-11-13.md`.
+
 Owner: "weve made alot of edits here go ahead and do an audit of all the changes to ensure
 everything still work properly starting from the logo when added to the home screen of a phone to
 this point". Nothing was fixed in this audit; the findings are for the owner to decide on.

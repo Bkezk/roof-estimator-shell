@@ -26,7 +26,10 @@ self.addEventListener("push", (event) => {
     body: typeof data.body === "string" ? data.body : "",
     tag: typeof data.tag === "string" && data.tag ? data.tag : undefined,
     icon: "/jbk-icon-192.png",
-    badge: "/jbk-icon-192.png",
+    // Android draws the badge (the small mark in the status bar) from the picture's transparency
+    // alone: the icon has a solid white background, so it showed as a plain square. The badge is
+    // the logo's shape in white on a clear background.
+    badge: "/jbk-badge-96.png",
     data: { url },
   };
   event.waitUntil(

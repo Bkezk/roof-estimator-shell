@@ -120,7 +120,10 @@ describe("the wiring", () => {
     const body = hook.slice(at, hook.indexOf("const [wonFor, setWonFor]", at));
     expect(body).toContain("invalidate();");
     expect(body).toContain('void qc.invalidateQueries({ queryKey: ["bids"] });');
-    expect(body).toContain('onClick: () => bidStatus.mutate({ id: b.id, status: "draft" }),');
+    // Undo is marked as one (the audit, finding 4): the opportunity goes back too.
+    expect(body).toContain(
+      'onClick: () => bidStatus.mutate({ id: b.id, status: "draft", undo: true }),',
+    );
     expect(body).toContain('toast.error(errText(e) || "Could not change status");');
   });
 

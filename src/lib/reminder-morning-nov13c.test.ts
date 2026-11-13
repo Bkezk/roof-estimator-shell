@@ -252,23 +252,20 @@ describe("the app's own writes, the page and the schedule", () => {
       '<Line label="On the date">That morning, also on a Saturday or Sunday.</Line>',
     );
   });
-  it("the schedule is unchanged and its comment is true in both seasons", () => {
+  it("the schedule: twice an hour off the busy minutes, its comment true in both seasons", () => {
+    // Nov 13, later (the audit): "*/30" ran about twice a day on GitHub, not 24 times. The top
+    // and the half of the hour are its busiest moments, so the job moved to minutes 7 and 37.
     const y = read(".github/workflows/reminders.yml");
-    expect(y).toContain('- cron: "*/30 12-23 * * *"');
+    expect(y).toContain('- cron: "7,37 12-23 * * *"');
+    expect(y).not.toContain('"*/30 12-23 * * *"');
     expect(y).not.toContain("8am–7pm Eastern");
     const note = flat(y.replace(/\n\s*#/g, " "));
     expect(note).toContain(
-      "Every 30 minutes from 12:00 to 23:30 UTC: 8:00 AM to 7:30 PM Eastern in summer, 7:00 AM to 6:30 PM Eastern in winter.",
+      "Twice an hour from 12:07 to 23:37 UTC: 8:07 AM to 7:37 PM Eastern in summer, 7:07 AM to 6:37 PM Eastern in winter.",
     );
     expect(note).toContain(
-      "the first run after that is the 12:00 UTC one in summer and the 13:00 UTC one in winter",
+      "the first run after that is the 12:07 UTC one in summer and the 13:07 UTC one in winter.",
     );
-    // The arithmetic behind the comment: 12:00 UTC is 8:00 in July and 7:00 in January.
-    expect(localHm(new Date("2026-07-15T12:00:00Z"), TASK_TZ)).toBe("08:00");
-    expect(localHm(new Date("2026-01-15T12:00:00Z"), TASK_TZ)).toBe("07:00");
-    expect(localHm(new Date("2026-01-15T13:00:00Z"), TASK_TZ)).toBe("08:00");
-    expect(localHm(new Date("2026-07-15T23:30:00Z"), TASK_TZ)).toBe("19:30");
-    expect(localHm(new Date("2026-01-15T23:30:00Z"), TASK_TZ)).toBe("18:30");
   });
 });
 

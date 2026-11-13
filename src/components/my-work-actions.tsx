@@ -18,7 +18,8 @@
  *
  *   - bidStatus / bidDialogs (owner, Nov 13): the status select on a bid row (setBidStatus, the
  *     Bids page's own call), with its "When was it won?" and "Why was it lost?" questions. The
- *     row leaves once the bid is no longer a draft; the toast says so and its Undo sets it back.
+ *     row leaves once the bid is no longer a draft; the toast says so and its Undo sets it back,
+ *     and takes the linked opportunity back to where it stood (the audit, finding 4).
  *
  * Every change invalidates ["my-work"] and toasts; an error toasts the server's message and
  * invalidates too (Oct 20: a failed move or assignment left the row as the stale list had it;
@@ -64,7 +65,12 @@ import {
   type AssignPlan,
   type DropPlan,
 } from "@/lib/my-work-actions";
-import { assignOpportunity, listAssigneeOptions } from "@/lib/opportunities.functions";
+import {
+  OPP_STATUS_LABELS,
+  assignOpportunity,
+  listAssigneeOptions,
+  type OppStatus,
+} from "@/lib/opportunities.functions";
 import { assignServiceJob } from "@/lib/service.functions";
 import type { TaskRow } from "@/lib/tasks";
 import {
@@ -389,16 +395,21 @@ export function useWorkActions(profile: UserProfile | null): {
       status: BidStatus;
       lostReason?: string | null;
       wonOn?: string | null;
+      /** The toast's Undo: Draft again, and the opportunity back where it stood. */
+      undo?: boolean;
     }) => bidStatusFn({ data: v }),
     onSuccess: (b) => {
-      const t = bidStatusToast(asBidStatus(b.status));
+      const backTo = b.opportunity_back_to
+        ? (OPP_STATUS_LABELS[b.opportunity_back_to as OppStatus] ?? b.opportunity_back_to)
+        : null;
+      const t = bidStatusToast(asBidStatus(b.status), backTo);
       toast.success(t.title, {
         ...(t.description ? { description: t.description } : {}),
         ...(t.undo
           ? {
               action: {
                 label: "Undo",
-                onClick: () => bidStatus.mutate({ id: b.id, status: "draft" }),
+                onClick: () => bidStatus.mutate({ id: b.id, status: "draft", undo: true }),
               },
             }
           : {}),

@@ -372,9 +372,14 @@ export const BID_LEFT_WORK_OVERVIEW =
 
 /**
  * The toast after a status change: the Bids page's "Status: Submitted", and where the row went
- * when it is no longer a draft (with Undo, which sets it back to Draft).
+ * when it is no longer a draft (with Undo, which sets it back to Draft). After an Undo that also
+ * took the opportunity back (the audit, finding 4: Undo left it Lost / Won / Quoted), the toast
+ * says where the opportunity stands again: `opportunityBackTo` is its status label.
  */
-export function bidStatusToast(status: BidStatus): {
+export function bidStatusToast(
+  status: BidStatus,
+  opportunityBackTo: string | null = null,
+): {
   title: string;
   description: string | null;
   undo: boolean;
@@ -382,7 +387,11 @@ export function bidStatusToast(status: BidStatus): {
   const left = status !== "draft";
   return {
     title: `Status: ${STATUS_LABELS[status]}`,
-    description: left ? BID_LEFT_WORK_OVERVIEW : null,
+    description: left
+      ? BID_LEFT_WORK_OVERVIEW
+      : opportunityBackTo
+        ? `Its opportunity is back to ${opportunityBackTo}.`
+        : null,
     undo: left,
   };
 }
