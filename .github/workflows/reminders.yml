@@ -3,6 +3,11 @@
 # CRON_SECRET (the same value as LOVABLE_CRON_SECRET in Lovable Cloud). Without them the run
 # FAILS (red, so it is noticed — audit, Oct 2: it used to exit 0 with "skipping"); the app still
 # dispatches, throttled, whenever an office user opens it.
+#
+# Since Nov 13 this job is the BACKUP. The database keeps the time itself and calls the same
+# endpoint at minutes 2 and 32 (supabase/migrations/20261113190000_reminder_timer.sql), because
+# GitHub ran this job about twice a day instead of twice an hour. Two callers are safe: the
+# reminder pass claims each reminder before it sends.
 name: Follow-up reminders
 
 on:

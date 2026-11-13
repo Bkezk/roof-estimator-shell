@@ -5109,6 +5109,7 @@ export type Database = {
           id: string
         }[]
       }
+      cron_timer_ok: { Args: { p_token: string }; Returns: boolean }
       current_user_role: { Args: never; Returns: string }
       document_share_viewed: { Args: { p_token: string }; Returns: undefined }
       documents_access: { Args: never; Returns: boolean }

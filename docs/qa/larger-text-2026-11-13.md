@@ -56,6 +56,30 @@ in the same window, once at the old size and once at the new one.
 
 Card titles (`leading-none`) are 2 px taller. Left on purpose: squeezing them would clip letters.
 
+## Is 12% the most it can take? (owner's follow-up)
+
+Measured, not guessed: 20 pages at 1366 and 390 wide, at seven sizes in the same window.
+
+| Size | New sideways scroll | Letters clipped | Boxes taller, 1366 | Pages longer, 1366 |
+| --- | --- | --- | --- | --- |
+| +8% | none | none | 247 | 253 px |
+| +12% | none | none | 366 | 402 px |
+| +16% | none | none | 464 | 634 px |
+| +20% | none | none | 492 | 658 px |
+| +25% | none | none | 572 | 881 px |
+| +30% | none | 1 | 617 | 1,084 px |
+
+Nothing snaps at 12%. It is a slope: each step wraps more lines. Two things do set a ceiling.
+
+- **Narrow boxes.** At +16% the calendar icon in the estimator's Bid due box is half cut at 1366
+  wide. At +12% it is whole. That is the first thing seen to go.
+- **Line spacing.** Lines keep their old height, so bigger letters sit closer together. Small text
+  has 19% air between lines at +12%, 15% at +16%, 11% at +20% and 7% at +25%. At +30% a two-line
+  ticket note is clipped.
+
+So +12% is the largest size measured with nothing cut. +16% is usable with that one box widened.
+Past +20% the line height would have to grow too, and that is a change of layout.
+
 ## Not done
 
 - No real document was opened in the editor. The sheet proof used probe text inside a sheet.

@@ -8,12 +8,36 @@
  *   - LOVABLE_CRON_SECRET (and its previous value), checked by Lovable's generated
  *     authenticateCronRequest, kept for Lovable's own scheduling.
  *
+ * A third caller, only where a route asks for it (`opts.timer`; the reminders endpoint, Nov 13):
+ * the database's own reminder timer. It signs its calls with a token the database made and
+ * keeps (see cron-timer.ts); the route's `timer` asks the database whether a token of that shape
+ * is the one. A "no", or a check that could not run, changes nothing: the request goes on to the
+ * two secrets above exactly as before.
+ *
  * Comparison is constant-time on SHA-256 digests, like the generated check. Returns null when
  * the caller is allowed, else the response to send (401, or 500 when nothing is configured).
  */
 import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
 
-export async function authenticateCron(request: Request): Promise<Response | null> {
+import { type TimerCheck, timerTokenOf } from "./cron-timer";
+
+export async function authenticateCron(
+  request: Request,
+  opts: { timer?: TimerCheck } = {},
+): Promise<Response | null> {
+  if (opts.timer) {
+    const timerToken = timerTokenOf(request);
+    if (timerToken) {
+      try {
+        if ((await opts.timer(timerToken)) === true) return null;
+      } catch (e) {
+        console.error(
+          "Cron: the reminder timer's token could not be checked —",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
+  }
   const own = process.env["CRON_SECRET"]?.trim();
   if (own) {
     const match = /^Bearer ([^\s,]+)$/.exec(request.headers.get("authorization") ?? "");

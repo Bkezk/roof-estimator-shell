@@ -3,7 +3,9 @@
  * notices (tasks-notify.server.ts) and the "Bid due tomorrow" notices (bids-notify.server.ts;
  * owner, Oct 12). Called on a
  * schedule with `Authorization: Bearer <LOVABLE_CRON_SECRET>` (Lovable Cloud's cron, or the
- * GitHub Actions workflow .github/workflows/reminders.yml). The app also runs the same pass,
+ * GitHub Actions workflow .github/workflows/reminders.yml), and since Nov 13 by the database's
+ * own timer twice an hour with a token of its own (cron-timer.ts; GitHub ran this job about
+ * twice a day instead of twice an hour). The app also runs the same pass,
  * throttled, whenever an office user loads it, so reminders go out even with no cron set up.
  *
  * The passes are independent: the task and bid notices run whatever happened to the follow-ups.
@@ -20,11 +22,13 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import type { BidNoticeResult } from "@/lib/bids-notify.server";
 import { authenticateCron } from "@/lib/cron-auth";
+import { databaseTimerCheck } from "@/lib/cron-timer.server";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 async function run(request: Request): Promise<Response> {
-  const denied = await authenticateCron(request);
+  // The database's own timer may call this route too (cron-timer.ts); no other route takes it.
+  const denied = await authenticateCron(request, { timer: databaseTimerCheck });
   if (denied) return denied;
   let notifyMod: typeof import("@/lib/notify.server");
   let supabaseAdmin: (typeof import("@/integrations/supabase/client.server"))["supabaseAdmin"];
