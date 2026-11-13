@@ -41,12 +41,23 @@ import type { ServiceJobRow } from "@/lib/service.functions";
 import { listJobPhotos } from "@/lib/service-field.functions";
 import { getTicketInspection } from "@/lib/service-inspection.functions";
 import {
+  answerInspectionOpportunity,
   createRepairFromInspection,
   getSourceInspection,
   setInspectionOutcome,
+  type OpportunityQuestion,
   type OutcomeRecord,
   type TicketInspection,
 } from "@/lib/service-inspection.functions";
+import { refreshOpportunity, sayOpportunityMove } from "@/lib/opportunity-move-toast";
+import {
+  NO_ACTION_ANSWER_LABELS,
+  NO_ACTION_ANSWERS,
+  noActionAnswerNote,
+  noActionQuestion,
+  oppStillOpen,
+  type NoActionAnswer,
+} from "@/lib/ticket-moves";
 import {
   pressStatus,
   INSPECTION_GRADES,
@@ -57,6 +68,7 @@ import {
   inspectionComplete,
   inspectionSummary,
   isFlagged,
+  officePreselect,
   outcomeLine,
   parseInspection,
   visibleChecklist,
@@ -532,6 +544,8 @@ function OfficeActions({
   const navigate = useNavigate();
   const createFn = useServerFn(createRepairFromInspection);
   const outcomeFn = useServerFn(setInspectionOutcome);
+  // Those the opportunity's own rule lets read it get "Open" on the toast that names it.
+  const canOpenOpportunity = can("customers") || can("estimate");
   const [type, setType] = useState<RepairType>("repair");
   // Every ticket has a date (owner, Oct 1): the repair ticket gets its day here.
   const [date, setDate] = useState("");
@@ -561,6 +575,15 @@ function OfficeActions({
           onClick: () => void navigate({ to: "/service", search: { id: row.id } }),
         },
       });
+      // The repair ticket wins the inspection's opportunity (owner, Nov 13): said out loud.
+      void qc.invalidateQueries({ queryKey: ["work-chain"] });
+      sayOpportunityMove(row, {
+        qc,
+        open: canOpenOpportunity
+          ? (id) => void navigate({ to: "/opportunities", search: { id } })
+          : undefined,
+        saved: `Repair ticket #${row.number} was created`,
+      });
     },
     onError: (e) => toast.error(`Could not create the repair ticket: ${errText(e)}`),
   });
@@ -588,6 +611,14 @@ function OfficeActions({
         { items: ins.items, notes: ins.notes.trim() || (job.closing_notes ?? "") },
       )
     : null;
+  // The office's choice, preselected from the technician's recommendation (owner, Nov 13).
+  const pre = officePreselect(
+    {
+      recommend_repairs: ins?.recommend_repairs ?? false,
+      recommend_new_roof: job.recommend_new_roof,
+    },
+    data.closed_out_by,
+  );
   const outcome = data.outcome;
   const outcomeDetail =
     outcome?.outcome === "repair_ticket"
@@ -627,6 +658,11 @@ function OfficeActions({
               The checklist is still saving — a moment.
             </p>
           )}
+          {pre.line && (
+            <p className="font-medium" data-line="technician-recommended">
+              {pre.line}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {manager && (
               <>
@@ -649,8 +685,10 @@ function OfficeActions({
                 />
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={pre.repair ? "default" : "outline"}
                   className="h-10"
+                  data-action="create-repair-ticket"
+                  data-preselected={pre.repair ? "true" : undefined}
                   disabled={dirty || create.isPending || !date}
                   onClick={() => {
                     // One request at a time, even for a double click before the re-render
@@ -678,11 +716,24 @@ function OfficeActions({
             )}
             {can("estimate") &&
               (dirty || !bidPrefill ? (
-                <Button type="button" variant="outline" className="h-10" disabled>
+                <Button
+                  type="button"
+                  variant={pre.bid ? "default" : "outline"}
+                  className="h-10"
+                  data-action="create-bid"
+                  data-preselected={pre.bid ? "true" : undefined}
+                  disabled
+                >
                   <Calculator className="mr-2 h-4 w-4" /> Create bid
                 </Button>
               ) : (
-                <Button asChild variant="outline" className="h-10">
+                <Button
+                  asChild
+                  variant={pre.bid ? "default" : "outline"}
+                  className="h-10"
+                  data-action="create-bid"
+                  data-preselected={pre.bid ? "true" : undefined}
+                >
                   <Link
                     to="/estimate"
                     // The ticket rides along (owner, Nov 9): the estimator's first save links the
@@ -694,9 +745,12 @@ function OfficeActions({
                   </Link>
                 </Button>
               ))}
-            {/* Black (owner, Nov 3): the one that closes the matter without another ticket. */}
+            {/* Black (owner, Nov 3): the one that closes the matter without another ticket. When
+                the technician recommended something (owner, Nov 13) that choice is the black one
+                and this stands beside it, outlined: still one press away. */}
             <Button
               type="button"
+              variant={pre.line ? "outline" : "default"}
               className="h-10"
               disabled={dirty || record.isPending || outcome?.outcome === "none"}
               onClick={() => record.mutate("none")}
@@ -712,6 +766,7 @@ function OfficeActions({
           </div>
         </>
       )}
+      <OpportunityAfterNoAction jobId={job.id} opportunity={data.opportunity ?? null} />
       {(data.created.length > 0 || data.bids.length > 0) && (
         <p data-line="created-from-inspection">
           Created from this inspection:{" "}
@@ -736,6 +791,99 @@ function OfficeActions({
           ))}
         </p>
       )}
+    </div>
+  );
+}
+
+/** Is the office still owed an answer about this inspection's opportunity? */
+const opportunityAsked = (o: OpportunityQuestion | null | undefined): o is OpportunityQuestion =>
+  !!o && !o.answer && oppStillOpen(o.status);
+
+/**
+ * After "No action needed" on an inspection that came from an opportunity still open (owner, Nov
+ * 13): the outcome is recorded as before, and the office is asked here, in plain words, what
+ * happens to the opportunity — mark it Lost, mark it No response, or leave it open. Nothing is
+ * closed without that answer. (An opportunity's own Lost asks for no reason, so neither does
+ * this.) Once answered, one line says what was chosen.
+ */
+function OpportunityAfterNoAction({
+  jobId,
+  opportunity,
+}: {
+  jobId: string;
+  opportunity: OpportunityQuestion | null;
+}) {
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const answerFn = useServerFn(answerInspectionOpportunity);
+  const answer = useMutation({
+    mutationFn: (a: NoActionAnswer) => answerFn({ data: { id: jobId, answer: a } }),
+    onSuccess: (r) => {
+      qc.setQueryData<TicketInspection>(inspectionKey(jobId), (old) =>
+        old?.opportunity
+          ? { ...old, opportunity: { ...old.opportunity, answer: r.answer, status: r.status } }
+          : old,
+      );
+      void qc.invalidateQueries({ queryKey: inspectionKey(jobId) });
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
+      if (r.move) {
+        sayOpportunityMove(
+          { opportunity_move: r.move },
+          {
+            qc,
+            open:
+              can("customers") || can("estimate")
+                ? (id) => void navigate({ to: "/opportunities", search: { id } })
+                : undefined,
+            saved: "The answer was recorded",
+          },
+        );
+      } else if (r.answer === "open") {
+        toast.success("The opportunity stays open");
+      } else {
+        if (opportunity) refreshOpportunity(qc, opportunity.id);
+        toast.message("The opportunity was already closed, so nothing changed");
+      }
+    },
+    onError: (e) => toast.error(`Could not record the answer: ${errText(e)}`),
+  });
+  if (!opportunity) return null;
+  const answered = opportunity.answer;
+  if (answered)
+    return (
+      <p className="text-muted-foreground" data-line="opportunity-answer">
+        {noActionAnswerNote(answered, opportunity.title)}
+      </p>
+    );
+  // Closed by someone on the opportunity itself: nothing left to ask.
+  if (!oppStillOpen(opportunity.status)) return null;
+  return (
+    <div
+      role="group"
+      aria-label="What happens to the opportunity"
+      data-question="opportunity-after-no-action"
+      className="space-y-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-3"
+    >
+      <p className="font-medium">{noActionQuestion(opportunity.title)}</p>
+      <div className="flex flex-wrap gap-2">
+        {NO_ACTION_ANSWERS.map((a) => (
+          <Button
+            key={a}
+            type="button"
+            variant="outline"
+            className="h-10 bg-background"
+            disabled={answer.isPending}
+            data-answer={a}
+            onClick={() => answer.mutate(a)}
+          >
+            {answer.isPending && answer.variables === a && (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            )}
+            {NO_ACTION_ANSWER_LABELS[a]}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -767,7 +915,15 @@ export function InspectionNextStep({
     enabled: !!session && applies,
     ...FIELD_READ,
   });
-  if (!applies || !q.data || q.data.outcome) return null;
+  if (!applies || !q.data) return null;
+  // "No action needed" was pressed and the opportunity it came from is still open (owner, Nov
+  // 13): the question is asked up here too, where the button was, until it is answered.
+  if (q.data.outcome)
+    return opportunityAsked(q.data.opportunity) ? (
+      <div data-banner="inspection-opportunity" className="text-sm">
+        <OpportunityAfterNoAction jobId={job.id} opportunity={q.data.opportunity} />
+      </div>
+    ) : null;
   return (
     <div
       role="status"

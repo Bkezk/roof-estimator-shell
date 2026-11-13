@@ -553,7 +553,10 @@ const isReopen = (from: string | null, to: string) =>
 
 /** Keep the opportunity's follow-up in step after a save or a status change. */
 async function syncOppFollowup(
-  row: OpportunityRow,
+  row: Pick<
+    OpportunityRow,
+    "id" | "account_id" | "assignee_id" | "title" | "status" | "expected_close"
+  >,
   prevStatus: string | null,
   ctx: Ctx,
   actorName: string,
@@ -624,6 +627,95 @@ export async function syncOpportunityFromBid(
 
 /** The opportunity's new status for a bid status, or null (the pure twin, for the pages). */
 export { oppStatusFromBid };
+
+/** What a ticket did to its opportunity, for the toast that says so (lib/ticket-moves.ts). */
+export interface OpportunityMove {
+  opportunity_id: string;
+  title: string;
+  from: string;
+  to: string;
+  ticket: number;
+}
+
+/**
+ * A ticket moves its opportunity (owner, Nov 13), after the ticket is written (service.functions.ts
+ * saveServiceJob, service-inspection.functions.ts createRepairFromInspection and
+ * answerInspectionOpportunity): the database function move_opportunity_from_ticket
+ * (20261113100000) applies the rule (lib/ticket-moves.ts is its pure twin) with its own rights,
+ * because the people who create tickets do not all have the right to edit opportunities — it checks
+ * that the caller is one of them. The status log row comes from the database and names the ticket
+ * (crm_opportunity_events.note); the follow-up closes here exactly as for a status set by hand
+ * (syncOppFollowup). What the follow-up needs of the opportunity comes back in the function's own
+ * answer: the caller may not be able to read the opportunity, and nothing here is read with the
+ * server's rights (the preview has no service key). Null when nothing moved. Before the migration
+ * is applied there is no function: the ticket is saved and the opportunity keeps its status.
+ */
+export async function moveOpportunityFromTicket(
+  ctx: Ctx,
+  jobId: string,
+  to?: "lost" | "no_response",
+): Promise<OpportunityMove | null> {
+  const { data, error } = await ctx.supabase.rpc("move_opportunity_from_ticket", {
+    p_job: jobId,
+    ...(to ? { p_to: to } : {}),
+  });
+  if (error) {
+    if (error.code === "PGRST202" || /move_opportunity_from_ticket/.test(error.message))
+      return null;
+    throw new Error(error.message);
+  }
+  const out = (data ?? { action: "none" }) as Partial<OpportunityMove> & {
+    action: string;
+    account_id?: string | null;
+    assignee_id?: string | null;
+    expected_close?: string | null;
+  };
+  if (out.action !== "updated" || !out.opportunity_id || !out.to) return null;
+  const p = await me(ctx);
+  await syncOppFollowup(
+    {
+      id: out.opportunity_id,
+      account_id: out.account_id ?? null,
+      assignee_id: out.assignee_id ?? null,
+      title: out.title ?? "",
+      status: out.to,
+      expected_close: out.expected_close ?? null,
+    },
+    out.from ?? null,
+    ctx,
+    nameOf(p),
+  );
+  return {
+    opportunity_id: out.opportunity_id,
+    title: out.title ?? "",
+    from: out.from ?? "",
+    to: out.to,
+    ticket: out.ticket ?? 0,
+  };
+}
+
+/** What a new ticket did to its opportunity, as the pages get it back for the toast. */
+export interface OpportunityMoved {
+  /** The opportunity's move, when the ticket made one. */
+  opportunity_move?: OpportunityMove;
+  /** The ticket is saved, the opportunity is not moved: why, to be said out loud. */
+  opportunity_move_error?: string;
+}
+
+/**
+ * After a ticket is written: move its opportunity (opportunities.functions.ts
+ * moveOpportunityFromTicket). The ticket stands either way — a failure here is handed back to be
+ * said out loud, never thrown (a thrown error would read as "the ticket was not created" and the
+ * office would make it twice).
+ */
+export async function movedByTicket(ctx: Ctx, jobId: string): Promise<OpportunityMoved> {
+  try {
+    const move = await moveOpportunityFromTicket(ctx, jobId);
+    return move ? { opportunity_move: move } : {};
+  } catch (e) {
+    return { opportunity_move_error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 export const setOpportunityStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

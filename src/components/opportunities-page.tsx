@@ -129,6 +129,7 @@ import {
 import { followupForItem, getCrmSettings } from "@/lib/followups.functions";
 import { oppStatusStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
+import { WorkChainLine } from "@/components/work-chain-line";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
 import { SiteSelect } from "@/components/crm/site-select";
@@ -1340,6 +1341,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )}
           </div>
         </div>
+        {/* Owner, Nov 13: what came of it, in one line — its inspection, the repair ticket or the
+            bid after it — each part a link. Nothing while nothing was started from it. */}
+        {opp && <WorkChainLine kind="opportunity" id={opp.id} />}
         {opp?.deleted_at && (
           <div
             role="status"

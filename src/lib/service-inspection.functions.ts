@@ -35,6 +35,19 @@ import {
   type Inspection,
 } from "@/lib/inspection";
 import { isOfficeStage } from "@/lib/ticket-stages";
+import {
+  moveOpportunityFromTicket,
+  movedByTicket,
+  syncOpportunityFromBid,
+  type OpportunityMove,
+  type OpportunityMoved,
+} from "@/lib/opportunities.functions";
+import {
+  NO_ACTION_ANSWERS,
+  noActionAnswerNote,
+  oppStillOpen,
+  type NoActionAnswer,
+} from "@/lib/ticket-moves";
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 type JobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
@@ -165,6 +178,26 @@ export interface TicketInspection {
     state: string | null;
     zip: string | null;
   } | null;
+  /**
+   * Who closed the inspection out (the name on the timeline's latest move to Done), for "Tyler
+   * Reed recommended repairs" above the office's choices (owner, Nov 13); null when unknown.
+   */
+  closed_out_by?: string | null;
+  /**
+   * "No action needed" on an inspection that came from an opportunity (owner, Nov 13): the
+   * opportunity as the question names it, and the office's answer once given. Only for the people
+   * who answer (the office or a manager) and only while the outcome is "No action needed"; absent
+   * otherwise.
+   */
+  opportunity?: OpportunityQuestion | null;
+}
+/** The opportunity behind a "No action needed" inspection, and what the office answered. */
+export interface OpportunityQuestion {
+  id: string;
+  title: string;
+  status: string;
+  /** The office's answer since the outcome was recorded, or null: the question is still open. */
+  answer: NoActionAnswer | null;
 }
 
 export const getTicketInspection = createServerFn({ method: "GET" })
@@ -180,18 +213,18 @@ export const getTicketInspection = createServerFn({ method: "GET" })
  * the page does not ask again. The same access rule, checked here.
  */
 export async function readTicketInspection(context: Ctx, id: string): Promise<TicketInspection> {
-  await me(context);
+  const p = await me(context);
   const sb = context.supabase;
   const { data: job, error } = await sb
     .from("service_jobs")
     .select(
-      "id, site_id, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by",
+      "id, site_id, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by, from_opportunity_id",
     )
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!job) throw new Error("Ticket not found");
-  const [items, created, site, chooser, bids] = await Promise.all([
+  const [items, created, site, chooser, bids, doneBy] = await Promise.all([
     sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
     sb
       .from("service_jobs")
@@ -221,11 +254,27 @@ export async function readTicketInspection(context: Ctx, id: string): Promise<Ti
       .eq("from_job_id", job.id)
       .is("deleted_at", null)
       .order("created_at"),
+    // Who closed it out: the latest move to Done on the timeline (the database writes it).
+    sb
+      .from("service_job_events")
+      .select("by_name")
+      .eq("service_job_id", job.id)
+      .eq("kind", "stage")
+      .eq("stage", "done")
+      .order("at", { ascending: false })
+      .limit(1),
   ]);
   if (items.error) throw new Error(items.error.message);
   if (created.error) throw new Error(created.error.message);
   if (bids.error) throw new Error(bids.error.message);
   const outcome = asOutcome(job.inspection_outcome);
+  const opportunity =
+    outcome === "none" && job.from_opportunity_id && dispatchesTickets(p)
+      ? await readOpportunityQuestion(context, {
+          id: job.id,
+          inspection_outcome_at: job.inspection_outcome_at ?? null,
+        })
+      : null;
   return {
     inspection: parseInspection(job.inspection),
     checklist: items.data ?? [],
@@ -239,8 +288,69 @@ export async function readTicketInspection(context: Ctx, id: string): Promise<Ti
         }
       : null,
     site: site.data ?? null,
+    closed_out_by: closerName(doneBy.data?.[0]?.by_name),
+    ...(opportunity ? { opportunity } : {}),
   };
 }
+
+/**
+ * The opportunity a "No action needed" inspection came from, for the question that follows (owner,
+ * Nov 13). Its title and status come from the database function ticket_opportunity
+ * (20261113100000), which answers the people who are asked (the office dispatches tickets without
+ * always having Customers access) and nobody else — only the title and the status, only for the
+ * ticket's own opportunity. Nothing is read with the server's rights. Null when the opportunity is
+ * gone or deleted. The answer is the latest one on the ticket's timeline since the outcome was
+ * recorded (service_job_events.meta.opportunity_answer), so pressing "No action needed" again
+ * asks again.
+ */
+async function readOpportunityQuestion(
+  ctx: Ctx,
+  job: { id: string; inspection_outcome_at: string | null },
+): Promise<OpportunityQuestion | null> {
+  const [opp, events] = await Promise.all([
+    ctx.supabase.rpc("ticket_opportunity", { p_job: job.id }),
+    ctx.supabase
+      .from("service_job_events")
+      .select("at, meta")
+      .eq("service_job_id", job.id)
+      .eq("kind", "note")
+      .not("meta", "is", null)
+      .order("at", { ascending: false })
+      .limit(100),
+  ]);
+  if (opp.error) {
+    // Before the migration is applied there is no function: nothing is asked.
+    if (opp.error.code === "PGRST202") return null;
+    throw new Error(opp.error.message);
+  }
+  const found = opp.data as { id: string; title: string; status: string } | null;
+  if (!found?.id) return null;
+  const answerOf = (meta: Json | null) =>
+    (meta as { opportunity_answer?: string } | null)?.opportunity_answer;
+  const last = (events.data ?? [])
+    .filter((e) => !!answerOf(e.meta))
+    .sort((a, b) => b.at.localeCompare(a.at))[0];
+  const said = last ? answerOf(last.meta) : undefined;
+  const fresh =
+    !!last &&
+    (!job.inspection_outcome_at ||
+      new Date(last.at).getTime() >= new Date(job.inspection_outcome_at).getTime());
+  return {
+    id: found.id,
+    title: found.title,
+    status: found.status,
+    answer:
+      fresh && (NO_ACTION_ANSWERS as readonly string[]).includes(said ?? "")
+        ? (said as NoActionAnswer)
+        : null,
+  };
+}
+
+/** The name on the move to Done; a move nobody made (the log says "system") has none. */
+const closerName = (v: string | null | undefined): string | null => {
+  const name = (v ?? "").trim();
+  return name && name.toLowerCase() !== "system" ? name : null;
+};
 
 const asOutcome = (v: string | null | undefined): InspectionOutcome | null =>
   (INSPECTION_OUTCOMES as readonly string[]).includes(v ?? "") ? (v as InspectionOutcome) : null;
@@ -333,7 +443,10 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(
-    async ({ data, context }): Promise<{ id: string; number: number; existing: boolean }> => {
+    async ({
+      data,
+      context,
+    }): Promise<{ id: string; number: number; existing: boolean } & OpportunityMoved> => {
       const p = await me(context);
       if (!canAccess(p, "service") || !managesTickets(p))
         throw new Error("Only a manager creates a repair ticket");
@@ -404,7 +517,9 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       });
       // The outcome (owner, Oct 12): a repair ticket came of this inspection.
       await recordOutcome(sb, job.id, "repair_ticket", context.userId, nameOf(p));
-      return { ...row, existing: false };
+      // The repair ticket took the inspection's opportunity as it was written (the database,
+      // 20261113100000), and a repair ticket wins it (owner, Nov 13).
+      return { ...row, existing: false, ...(await movedByTicket(context, row.id)) };
     },
   );
 
@@ -472,6 +587,71 @@ export const setInspectionOutcome = createServerFn({ method: "POST" })
     });
     return { outcome: data.outcome, at, by: name };
   });
+
+/**
+ * The office's answer after "No action needed" on an inspection whose opportunity is still open
+ * (owner, Nov 13: "nothing closed without that answer"): mark it Lost, mark it No response, or
+ * leave it open. The same people who record the outcome (dispatchesTickets). Lost and No response
+ * go through the database function (it checks the ticket is an inspection marked "No action
+ * needed" and that the opportunity is not already closed), with the log line and the follow-up as
+ * for a status set by hand; every answer is kept on the ticket's timeline, which is also how the
+ * panel knows the question was answered. An opportunity someone closed in the meantime is left as
+ * it is (`move` null).
+ */
+export const answerInspectionOpportunity = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), answer: z.enum(NO_ACTION_ANSWERS) }).parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ answer: NoActionAnswer; move: OpportunityMove | null; status: string }> => {
+      const p = await me(context);
+      if (!dispatchesTickets(p))
+        throw new Error("Only the office or a manager decides what happens to the opportunity");
+      const sb = context.supabase;
+      const { data: job, error } = await sb
+        .from("service_jobs")
+        .select(
+          "id, number, service_type, inspection_outcome, inspection_outcome_at, from_opportunity_id",
+        )
+        .eq("id", data.id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!job) throw new Error("Ticket not found");
+      if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+      if (job.inspection_outcome !== "none")
+        throw new Error('This is asked only after "No action needed"');
+      if (!job.from_opportunity_id)
+        throw new Error("This inspection did not come from an opportunity");
+      const q = await readOpportunityQuestion(context, {
+        id: job.id,
+        inspection_outcome_at: job.inspection_outcome_at ?? null,
+      });
+      if (!q) throw new Error("The opportunity was deleted");
+      const move =
+        data.answer === "open" || !oppStillOpen(q.status)
+          ? null
+          : await moveOpportunityFromTicket(context, job.id, data.answer);
+      // Kept on the ticket whenever the answer stands: left open, or closed just now.
+      if (data.answer === "open" || move) {
+        const name = nameOf(p);
+        await sb.from("service_job_events").insert({
+          service_job_id: job.id,
+          kind: "note",
+          note: noActionAnswerNote(data.answer, q.title),
+          // The server's clock, like the outcome's own stamp it is compared with.
+          at: new Date().toISOString(),
+          by_user: context.userId,
+          by_name: name,
+          meta: { opportunity_answer: data.answer, opportunity_id: q.id } as Json,
+        });
+      }
+      return { answer: data.answer, move, status: move?.to ?? q.status };
+    },
+  );
 
 /** The inspection's live (not deleted) repair ticket, the first made; null when none. */
 async function repairTicketOf(
@@ -596,52 +776,72 @@ export const linkBidToInspection = createServerFn({ method: "POST" })
   .validator((d: unknown) =>
     z.object({ inspectionId: z.string().uuid(), bidId: z.string().uuid() }).parse(d),
   )
-  .handler(async ({ data, context }): Promise<{ linked: boolean }> => {
-    const p = await me(context);
-    // The same people the Create bid button shows to (owner, Nov 10: the server said less than
-    // the screen) — the office or a manager, as for "No action needed".
-    if (!dispatchesTickets(p))
-      throw new Error("Only the office or a manager starts a bid from an inspection");
-    const sb = context.supabase;
-    const [{ data: job, error }, { data: bid, error: bErr }] = await Promise.all([
-      sb
-        .from("service_jobs")
-        .select("id, number, service_type, stage, deleted_at")
-        .eq("id", data.inspectionId)
-        .maybeSingle(),
-      sb
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ linked: boolean; opportunity_id?: string; opportunity_error?: string }> => {
+      const p = await me(context);
+      // The same people the Create bid button shows to (owner, Nov 10: the server said less than
+      // the screen) — the office or a manager, as for "No action needed".
+      if (!dispatchesTickets(p))
+        throw new Error("Only the office or a manager starts a bid from an inspection");
+      const sb = context.supabase;
+      const [{ data: job, error }, { data: bid, error: bErr }] = await Promise.all([
+        sb
+          .from("service_jobs")
+          .select("id, number, service_type, stage, deleted_at")
+          .eq("id", data.inspectionId)
+          .maybeSingle(),
+        sb
+          .from("bids")
+          .select("id, name, from_job_id, deleted_at")
+          .eq("id", data.bidId)
+          .maybeSingle(),
+      ]);
+      if (error) throw new Error(error.message);
+      if (bErr) throw new Error(bErr.message);
+      if (!job || job.deleted_at) throw new Error("Ticket not found");
+      if (!bid || bid.deleted_at) throw new Error("Bid not found");
+      if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+      if (!inspectionComplete(job.stage))
+        throw new Error("The inspection is not done yet; mark it Done first");
+      if (bid.from_job_id === job.id) return { linked: true };
+      if (bid.from_job_id) throw new Error("This bid is already linked to another inspection");
+      const { data: rows, error: uErr } = await sb
         .from("bids")
-        .select("id, name, from_job_id, deleted_at")
-        .eq("id", data.bidId)
-        .maybeSingle(),
-    ]);
-    if (error) throw new Error(error.message);
-    if (bErr) throw new Error(bErr.message);
-    if (!job || job.deleted_at) throw new Error("Ticket not found");
-    if (!bid || bid.deleted_at) throw new Error("Bid not found");
-    if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
-    if (!inspectionComplete(job.stage))
-      throw new Error("The inspection is not done yet; mark it Done first");
-    if (bid.from_job_id === job.id) return { linked: true };
-    if (bid.from_job_id) throw new Error("This bid is already linked to another inspection");
-    const { data: rows, error: uErr } = await sb
-      .from("bids")
-      .update({ from_job_id: job.id })
-      .eq("id", bid.id)
-      .is("from_job_id", null)
-      .select("id");
-    if (uErr) throw new Error(uErr.message);
-    // Two saves at once: the other one linked it first (the pair is the same, so it stands).
-    if (!rows?.length) return { linked: true };
-    const name = nameOf(p);
-    await recordOutcome(sb, job.id, "bid", context.userId, name);
-    await sb.from("service_job_events").insert({
-      service_job_id: job.id,
-      kind: "note",
-      note: `Bid "${bid.name}" started from this inspection`,
-      by_user: context.userId,
-      by_name: name,
-      meta: { inspection_outcome: "bid", bid_id: bid.id } as Json,
-    });
-    return { linked: true };
-  });
+        .update({ from_job_id: job.id })
+        .eq("id", bid.id)
+        .is("from_job_id", null)
+        .select("id, opportunity_id");
+      if (uErr) throw new Error(uErr.message);
+      // Two saves at once: the other one linked it first (the pair is the same, so it stands).
+      if (!rows?.length) return { linked: true };
+      const name = nameOf(p);
+      await recordOutcome(sb, job.id, "bid", context.userId, name);
+      await sb.from("service_job_events").insert({
+        service_job_id: job.id,
+        kind: "note",
+        note: `Bid "${bid.name}" started from this inspection`,
+        by_user: context.userId,
+        by_name: name,
+        meta: { inspection_outcome: "bid", bid_id: bid.id } as Json,
+      });
+      // The bid took the inspection's opportunity as the link was written (the database,
+      // 20261113100000: bids.opportunity_id and the opportunity's own bid pointer), so it drives the
+      // opportunity like a bid started from it (owner, Nov 13) — one saved as Submitted moves it to
+      // Quoted now; a draft moves nothing. The link stands either way: a failure is handed back.
+      const opportunityId = rows[0]?.opportunity_id ?? null;
+      if (!opportunityId) return { linked: true };
+      try {
+        await syncOpportunityFromBid(context, bid.id);
+        return { linked: true, opportunity_id: opportunityId };
+      } catch (e) {
+        return {
+          linked: true,
+          opportunity_id: opportunityId,
+          opportunity_error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    },
+  );

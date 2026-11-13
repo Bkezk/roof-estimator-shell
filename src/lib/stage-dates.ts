@@ -112,6 +112,11 @@ export interface StatusEventLike {
   at: string;
   /** Who set it (the log's by_name); the strip says "by <name>" under the date (owner, Oct 12). */
   by_name?: string | null;
+  /**
+   * Where the change came from when it was not made by hand (crm_opportunity_events.note; owner,
+   * Nov 13): "from ticket #6071". The strip says it under the name.
+   */
+  note?: string | null;
 }
 
 /**
@@ -140,6 +145,8 @@ export interface StripCell {
   current: boolean;
   /** Who set it, when the log says (opportunities; owner, Oct 12: any status is anyone's). */
   by?: string | null;
+  /** Where the change came from, when a ticket made it: "from ticket #6071" (owner, Nov 13). */
+  note?: string | null;
 }
 
 /**
@@ -159,6 +166,28 @@ export function statusActors(
     latest[s] = e.at;
     const who = (e.by_name ?? "").trim();
     if (who) out[s] = who;
+    else delete out[s];
+  }
+  return out;
+}
+
+/**
+ * Where the LAST change to each opportunity status came from, when a ticket made it ("from ticket
+ * #6071"; owner, Nov 13). A status last set by hand has none, whatever happened before.
+ */
+export function statusNotes(
+  events: readonly StatusEventLike[],
+): Partial<Record<OppStatus, string>> {
+  const latest: Partial<Record<OppStatus, string>> = {};
+  const out: Partial<Record<OppStatus, string>> = {};
+  for (const e of events) {
+    if ((e.kind !== "status" && e.kind !== "created") || !e.status) continue;
+    if (!(OPP_STATUSES as readonly string[]).includes(e.status)) continue;
+    const s = e.status as OppStatus;
+    if (later(latest[s], e.at) !== e.at && latest[s]) continue;
+    latest[s] = e.at;
+    const note = (e.note ?? "").trim();
+    if (note) out[s] = note;
     else delete out[s];
   }
   return out;
@@ -237,12 +266,14 @@ export function oppStatusStrip(
 ): StripCell[] {
   const dates = statusDates(events);
   const actors = statusActors(events);
+  const notes = statusNotes(events);
   const cells: StripCell[] = OPP_STATUSES.filter((s) => !OPP_CLOSING.includes(s)).map((s) => ({
     key: s,
     label: OPP_STATUS_LABELS[s],
     at: dates[s] ?? null,
     current: s === current,
     ...(actors[s] ? { by: actors[s] } : {}),
+    ...(notes[s] ? { note: notes[s] } : {}),
   }));
   let outcome: OppStatus | null = OPP_CLOSING.includes(current as OppStatus)
     ? (current as OppStatus)
@@ -263,6 +294,7 @@ export function oppStatusStrip(
     at: outcome ? (dates[outcome] ?? null) : null,
     current: !!outcome && outcome === current,
     ...(outcome && actors[outcome] ? { by: actors[outcome] } : {}),
+    ...(outcome && notes[outcome] ? { note: notes[outcome] } : {}),
   });
   return cells;
 }

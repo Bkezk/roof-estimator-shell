@@ -178,6 +178,8 @@ import {
 import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-extras";
 import { AerialSection } from "@/components/service/aerial-markup";
 import { InspectionNextStep, InspectionSection } from "@/components/service/inspection-section";
+import { WorkChainLine } from "@/components/work-chain-line";
+import { sayOpportunityMove } from "@/lib/opportunity-move-toast";
 import { NeedsActionStrip, UntouchedBadge, untouchedKey } from "@/components/crm/contact-log";
 import { TicketActivity } from "@/components/service/ticket-activity";
 import { MaterialsPosFold } from "@/components/service/materials-pos-fold";
@@ -1711,6 +1713,16 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         // The opportunity's header lists it ("Ticket #6004").
         if (row.from_opportunity_id)
           void qc.invalidateQueries({ queryKey: ["opportunity-tickets", row.from_opportunity_id] });
+        // A ticket moves its opportunity (owner, Nov 13: an inspection makes an Open one
+        // Contacted, a repair ticket makes it Won): said out loud, with the opportunity named.
+        sayOpportunityMove(row, {
+          qc,
+          open:
+            can("customers") || can("estimate")
+              ? (id) => void navigate({ to: "/opportunities", search: { id } })
+              : undefined,
+          saved: `Ticket #${row.number} was created`,
+        });
         qc.setQueryData(["service-job", row.id], row);
         void navigate({ to: "/service", search: { id: row.id }, replace: true });
       }
@@ -2600,7 +2612,23 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             />
           </div>
         )}
-        {job?.from_opportunity_id && <FromOpportunityNote id={job.from_opportunity_id} />}
+        {/* Owner, Nov 13: the whole chain — opportunity › inspection › repair ticket / bid — in
+            one line, each part a link. Read for a ticket that came from something or that
+            something can come from (an inspection). Until there is a chain to show (nothing the
+            reader can see before or after this ticket) the two "From …" lines stand as before. */}
+        {job && (
+          <WorkChainLine
+            kind="ticket"
+            id={
+              job.from_opportunity_id || job.from_job_id || job.service_type === "inspection"
+                ? job.id
+                : null
+            }
+          >
+            {job.from_opportunity_id && <FromOpportunityNote id={job.from_opportunity_id} />}
+            <FromInspectionNote job={job} />
+          </WorkChainLine>
+        )}
         {job && (
           <p className="flex flex-wrap gap-x-4 text-sm" aria-label="Ticket numbers">
             <span>
@@ -2623,7 +2651,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {job.updated_by_name ? ` by ${job.updated_by_name}` : ""}
           </p>
         )}
-        {job && <FromInspectionNote job={job} />}
         {/* Owner, Nov 2: a Done inspection asks what happens next, up here where it is seen. */}
         {job && <InspectionNextStep job={job} officeOrAdmin={officeOrAdmin} />}
         {/* The clock on this ticket (owner, Oct 15): who is travelling here / on site, since when. */}

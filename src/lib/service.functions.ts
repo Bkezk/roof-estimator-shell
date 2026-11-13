@@ -39,6 +39,7 @@ import {
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import type { SyncResult } from "@/lib/followups.server";
+import type { OpportunityMove } from "@/lib/opportunities.functions";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
@@ -104,6 +105,10 @@ export type ServiceJobWithTech = ServiceJobRow & {
    * `signature_path`; otherwise they sign their own, as before.
    */
   signature_url?: string | null;
+  /** A new ticket's move of its opportunity (saveServiceJob's create; owner, Nov 13). */
+  opportunity_move?: OpportunityMove;
+  /** The ticket is saved but its opportunity did not move: why, said out loud by the page. */
+  opportunity_move_error?: string;
 };
 
 /**
@@ -636,7 +641,14 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     const saved = await saveCrew(sb, row, crew);
     await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, null);
-    return withTechName(sb, saved);
+    const out = await withTechName(sb, saved);
+    // A ticket moves its opportunity (owner, Nov 13): an inspection started from an open one makes
+    // it Contacted, a repair ticket makes it Won — by the database's rule, whoever creates the
+    // ticket (opportunities.functions.ts moveOpportunityFromTicket). The ticket is saved either
+    // way; what happened to the opportunity goes back with it so the page says it out loud.
+    if (!saved.from_opportunity_id) return out;
+    const { movedByTicket } = await import("@/lib/opportunities.functions");
+    return { ...out, ...(await movedByTicket(context, saved.id)) };
   });
 
 /**

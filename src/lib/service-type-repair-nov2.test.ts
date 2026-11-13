@@ -142,7 +142,9 @@ describe("2. the Done inspection's banner", () => {
     expect(section).toContain(
       'job.service_type === "inspection" && officeOrAdmin && inspectionComplete(job.stage);',
     );
-    expect(section).toContain("if (!applies || !q.data || q.data.outcome) return null;");
+    // Since Nov 13 an outcome hides the banner unless the opportunity question is still owed.
+    expect(section).toContain("if (!applies || !q.data) return null;");
+    expect(section).toContain("if (q.data.outcome)");
     expect(section).toContain('data-banner="inspection-next"');
     expect(section).toContain("<OfficeActions job={job} data={q.data} dirty={false} />");
     const page = read("src/components/service-page.tsx");

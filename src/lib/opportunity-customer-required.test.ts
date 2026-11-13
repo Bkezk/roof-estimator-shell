@@ -440,7 +440,9 @@ describe("4. Start a ticket", () => {
     const tags = page.indexOf('data-line="tags"');
     const note = page.indexOf("<FromOpportunityNote");
     expect(note).toBeGreaterThan(tags);
-    expect(note - tags).toBeLessThan(700);
+    // Wrapped in the chain line since Nov 13 (it stands when there is no chain to show).
+    expect(note - tags).toBeLessThan(1400);
+    expect(page.slice(page.indexOf("<WorkChainLine"), note)).toContain('kind="ticket"');
     expect(page).toContain("fromOpportunityLabel(q.data.title)");
   });
   it("the column: migration (idempotent, nullable, no backfill) and types", () => {

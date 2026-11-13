@@ -51,6 +51,7 @@ import { bidFigures } from "@/lib/bid-figures";
 import { getOpportunity, linkBid } from "@/lib/opportunities.functions";
 import { UNTITLED_BID } from "@/lib/bid-name";
 import { getSourceInspection, linkBidToInspection } from "@/lib/service-inspection.functions";
+import { WorkChainLine } from "@/components/work-chain-line";
 import { AuditHistory } from "@/components/audit-history";
 import { withLightTheme } from "@/lib/theme";
 import {
@@ -2169,6 +2170,13 @@ function EstimatePage() {
         row.updated_at,
       );
       toast.success(`Status saved: ${STATUS_LABELS[status]}`);
+      // The chain line shows this bid's status, and the opportunity's the bid has just moved
+      // (owner, Nov 13).
+      void qc.invalidateQueries({ queryKey: ["work-chain"] });
+      if (fromOpportunityId) {
+        void qc.invalidateQueries({ queryKey: ["opportunity", fromOpportunityId] });
+        void qc.invalidateQueries({ queryKey: ["opportunity-events", fromOpportunityId] });
+      }
     } catch (e) {
       toast.error(`The status is not saved yet (${errText(e)}) — Save the bid to keep it.`);
     }
@@ -2884,6 +2892,8 @@ function EstimatePage() {
       lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
+      // The chain line under the Status select reads the bid's status (owner, Nov 13).
+      void qc.invalidateQueries({ queryKey: ["work-chain"] });
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
@@ -2913,6 +2923,7 @@ function EstimatePage() {
         setLinkedOppId(opportunityId);
         void qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
         void qc.invalidateQueries({ queryKey: ["opportunities"] });
+        void qc.invalidateQueries({ queryKey: ["work-chain"] });
       })
       .catch((e: unknown) =>
         toast.error(
@@ -2924,11 +2935,24 @@ function EstimatePage() {
   // (service-inspection.functions.ts linkBidToInspection). Best effort, as the opportunity's.
   const linkInspection = (inspectionId: string, newBidId: string) => {
     linkInspectionFn({ data: { inspectionId, bidId: newBidId } })
-      .then(() => {
+      .then((r) => {
         setLinkedInspectionId(inspectionId);
         void qc.invalidateQueries({ queryKey: ["service-source-inspection", inspectionId] });
         void qc.invalidateQueries({ queryKey: ["service-job", inspectionId] });
         void qc.invalidateQueries({ queryKey: ["bids"] });
+        void qc.invalidateQueries({ queryKey: ["work-chain"] });
+        // The inspection came from an opportunity (owner, Nov 13): the bid took it as the link
+        // was written, and drives it from here like a bid started from the opportunity.
+        if (r.opportunity_id) {
+          setLinkedOppId(r.opportunity_id);
+          void qc.invalidateQueries({ queryKey: ["opportunity", r.opportunity_id] });
+          void qc.invalidateQueries({ queryKey: ["opportunity-events", r.opportunity_id] });
+          void qc.invalidateQueries({ queryKey: ["opportunities"] });
+        }
+        if (r.opportunity_error)
+          toast.error(
+            `The bid is saved and linked, but its opportunity's status did not change: ${r.opportunity_error}`,
+          );
       })
       .catch((e: unknown) =>
         toast.error(
@@ -7034,33 +7058,45 @@ function EstimatePage() {
                 Lost: {lostReason ?? "reason not known"}
               </p>
             )}
-            {fromOpportunity.data && (
-              <p
-                className="truncate text-[11px] text-muted-foreground"
-                data-line="from-opportunity"
-              >
-                <Link
-                  to="/opportunities"
-                  search={{ id: fromOpportunity.data.id }}
-                  className="hover:underline"
-                  title="Open the opportunity. Submitted / Won / Lost here move its status; its own status leaves this bid alone."
+            {/* Owner, Nov 13: the whole chain in one line — opportunity › inspection › this bid —
+                each part a link. Until there is one to show (the reader sees nothing before this
+                bid) the two "From …" lines stand as before. */}
+            <WorkChainLine
+              kind="bid"
+              id={fromOpportunityId || fromInspectionId ? bidId : null}
+              className="text-[11px]"
+            >
+              {fromOpportunity.data && (
+                <p
+                  className="truncate text-[11px] text-muted-foreground"
+                  data-line="from-opportunity"
                 >
-                  {fromOpportunityLine(fromOpportunity.data.title)}
-                </Link>
-              </p>
-            )}
-            {fromInspection.data && (
-              <p className="truncate text-[11px] text-muted-foreground" data-line="from-inspection">
-                <Link
-                  to="/service"
-                  search={{ id: fromInspection.data.id }}
-                  className="hover:underline"
-                  title="Open the inspection ticket this bid was started from."
+                  <Link
+                    to="/opportunities"
+                    search={{ id: fromOpportunity.data.id }}
+                    className="hover:underline"
+                    title="Open the opportunity. Submitted / Won / Lost here move its status; its own status leaves this bid alone."
+                  >
+                    {fromOpportunityLine(fromOpportunity.data.title)}
+                  </Link>
+                </p>
+              )}
+              {fromInspection.data && (
+                <p
+                  className="truncate text-[11px] text-muted-foreground"
+                  data-line="from-inspection"
                 >
-                  {fromInspectionLine(fromInspection.data)}
-                </Link>
-              </p>
-            )}
+                  <Link
+                    to="/service"
+                    search={{ id: fromInspection.data.id }}
+                    className="hover:underline"
+                    title="Open the inspection ticket this bid was started from."
+                  >
+                    {fromInspectionLine(fromInspection.data)}
+                  </Link>
+                </p>
+              )}
+            </WorkChainLine>
             {askLost && (
               <LostReasonDialog
                 open

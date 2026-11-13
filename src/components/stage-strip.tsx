@@ -61,6 +61,12 @@ export function StageStrip({
                 by {c.by}
               </span>
             )}
+            {/* Where it came from, when a ticket moved it: "from ticket #6071" (owner, Nov 13). */}
+            {c.note && (
+              <span className="pr-2 leading-tight text-muted-foreground" data-note>
+                {c.note}
+              </span>
+            )}
           </li>
         );
       })}

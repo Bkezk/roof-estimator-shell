@@ -1238,6 +1238,7 @@ export type Database = {
           by_user: string | null
           id: number
           kind: string
+          note: string | null
           opportunity_id: string
           status: string | null
         }
@@ -1248,6 +1249,7 @@ export type Database = {
           by_user?: string | null
           id?: number
           kind: string
+          note?: string | null
           opportunity_id: string
           status?: string | null
         }
@@ -1258,6 +1260,7 @@ export type Database = {
           by_user?: string | null
           id?: number
           kind?: string
+          note?: string | null
           opportunity_id?: string
           status?: string | null
         }
@@ -5209,6 +5212,10 @@ export type Database = {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
       }
+      move_opportunity_from_ticket: {
+        Args: { p_job: string; p_to?: string }
+        Returns: Json
+      }
       notify_recipients: {
         Args: { ids: string[] }
         Returns: {
@@ -5399,6 +5406,7 @@ export type Database = {
         Returns: boolean
       }
       ticket_open_for_tech: { Args: { job: string }; Returns: boolean }
+      ticket_opportunity: { Args: { p_job: string }; Returns: Json }
       trim_address_points: {
         Args: { p_county: string; p_keep_m?: number; p_limit?: number }
         Returns: number

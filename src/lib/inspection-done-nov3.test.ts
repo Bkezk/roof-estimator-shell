@@ -48,7 +48,12 @@ describe("1 + 2. the banner", () => {
     expect(banner).toContain("queryFn: () => getFn({ data: { id: job.id } }),");
     expect(banner).not.toContain("useInspectionDraft(");
     expect(banner).toContain("<OfficeActions job={job} data={q.data} dirty={false} />");
-    expect(banner).toContain("if (!applies || !q.data || q.data.outcome) return null;");
+    // Since Nov 13 an outcome hides the banner unless the opportunity question is still owed
+    // (opportunity-chain-nov13.test.ts).
+    expect(banner).toContain("if (!applies || !q.data) return null;");
+    expect(banner).toMatch(
+      /if \(q\.data\.outcome\)\s*return opportunityAsked\(q\.data\.opportunity\) \? \([\s\S]*?\) : null;/,
+    );
   });
   it("No action needed is the primary (black) button", () => {
     const btn = section.slice(
@@ -56,6 +61,9 @@ describe("1 + 2. the banner", () => {
       section.indexOf('data-action="no-action-needed"'),
     );
     expect(btn).not.toContain('variant="outline"');
+    // Since Nov 13: black unless the technician recommended something — then that choice is the
+    // black one and this stands outlined beside it (opportunity-chain-nov13.test.ts).
+    expect(btn).toContain('variant={pre.line ? "outline" : "default"}');
     expect(btn).toContain('className="h-10"');
   });
 });

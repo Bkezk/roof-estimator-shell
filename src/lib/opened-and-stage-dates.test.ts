@@ -346,10 +346,13 @@ describe("types: crm_opportunity_events", () => {
   it("Row / Insert / Update and the cascade's relationship", () => {
     expect(start).toBeGreaterThan(0);
     expect(flat(block)).toContain(
-      "Row: { assignee: string | null; at: string; by_name: string | null; by_user: string | null; id: number; kind: string; opportunity_id: string; status: string | null; }",
+      "Row: { assignee: string | null; at: string; by_name: string | null; by_user: string | null; id: number; kind: string; note: string | null; opportunity_id: string; status: string | null; }",
     );
     expect(flat(block)).toContain("Insert: { assignee?: string | null; at?: string;");
-    expect(block).toContain("kind: string;\n          opportunity_id: string;");
+    // `note` since Nov 13 (20261113100000): where a status change came from.
+    expect(block).toContain(
+      "kind: string;\n          note?: string | null;\n          opportunity_id: string;",
+    );
     expect(flat(block)).toContain("Update: { assignee?: string | null;");
     expect(block).toContain('foreignKeyName: "crm_opportunity_events_opportunity_id_fkey"');
     expect(block).toContain('referencedRelation: "crm_opportunities"');

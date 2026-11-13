@@ -372,6 +372,37 @@ export function recommendationText(rec: {
 }
 
 /**
+ * The office's choice, preselected from what the technician recommended (owner, Nov 13: "go with
+ * the preselect office choices"): "Recommend repairs" highlights Create repair ticket, "Recommend
+ * a new roof" highlights Create bid, both highlight both, and one line above says who recommended
+ * what — "Tyler Reed recommended repairs". `technician` is whoever closed the inspection out
+ * (the name on the timeline's move to Done); with no name it reads "The technician recommended …". With neither
+ * switch on nothing is highlighted and there is no line. A highlight is only that: every choice
+ * stays pressable.
+ */
+export interface OfficePreselect {
+  /** Highlight "Create repair ticket". */
+  repair: boolean;
+  /** Highlight "Create bid". */
+  bid: boolean;
+  /** "Tyler Reed recommended repairs and a new roof", or null when nothing was recommended. */
+  line: string | null;
+}
+export function officePreselect(
+  rec: { recommend_repairs: boolean; recommend_new_roof: boolean },
+  technician?: string | null,
+): OfficePreselect {
+  const what = recommendationText(rec);
+  if (!what) return { repair: false, bid: false, line: null };
+  const who = (technician ?? "").trim() || "The technician";
+  return {
+    repair: rec.recommend_repairs,
+    bid: rec.recommend_new_roof,
+    line: `${who} recommended ${what}`,
+  };
+}
+
+/**
  * The Done notice for an inspection (ticket-events.server.ts; owner, Oct 12): "Inspection #6012
  * Acme is done — 2 issues found, recommends repairs — ready for your review". With no saved
  * checklist (null) the counts are left out: "Inspection #6012 Acme is done — ready for your

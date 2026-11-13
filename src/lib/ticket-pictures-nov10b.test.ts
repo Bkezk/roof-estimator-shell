@@ -504,7 +504,7 @@ describe("3a. six reads of the same ticket ride along with its one read", () => 
       /export async function readPurchaseOrders\([^)]*\)[^{]*\{\s*const p = await me\(context\);\s*const \{ job, works \} = await ticketFor\(context, jobId\);/,
     );
     expect(read("src/lib/service-inspection.functions.ts")).toMatch(
-      /export async function readTicketInspection\([^)]*\)[^{]*\{\s*await me\(context\);/,
+      /export async function readTicketInspection\([^)]*\)[^{]*\{\s*const p = await me\(context\);/,
     );
     expect(field).toMatch(/async function readClockOnJob\([^)]*\)[^{]*\{\s*await me\(context\);/);
     expect(service).toContain(
