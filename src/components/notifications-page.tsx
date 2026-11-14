@@ -27,6 +27,7 @@ import {
   unreadNotificationCount,
   type NotificationRow,
 } from "@/lib/notifications.functions";
+import { notificationPath } from "@/lib/notification-link";
 import { cn } from "@/lib/utils";
 import { NOTIFICATIONS_QUERY_KEY, UNREAD_COUNT_QUERY_KEY } from "@/components/notifications-bell";
 import { Badge } from "@/components/ui/badge";
@@ -34,24 +35,16 @@ import { Button } from "@/components/ui/button";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Follow a row's url inside the app (same-origin) or by a plain navigation; modifier clicks pass. */
+/** Follow a row's link inside the app; modifier clicks pass. Never leaves the site. */
 function useFollow() {
   const router = useRouter();
   return (e: MouseEvent<HTMLAnchorElement>, url: string) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
       return;
-    let target: URL;
-    try {
-      target = new URL(url, window.location.origin);
-    } catch {
-      return;
-    }
+    // A notification leads to a page of this site or nowhere (notification-link.ts).
     e.preventDefault();
-    if (target.origin === window.location.origin) {
-      void router.navigate({ href: target.pathname + target.search + target.hash });
-    } else {
-      window.location.assign(target.href);
-    }
+    const path = notificationPath(url);
+    if (path) void router.navigate({ href: path });
   };
 }
 
@@ -353,9 +346,9 @@ function NotificationItem({
         aria-hidden
       />
       <div className="min-w-0 flex-1">
-        {r.url ? (
+        {notificationPath(r.url) ? (
           <a
-            href={r.url}
+            href={notificationPath(r.url) ?? undefined}
             onClick={(e) => onOpen(e, r)}
             className="-mx-1 block rounded px-1 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
           >

@@ -22,6 +22,7 @@ import {
   unreadNotificationCount,
   type NotificationRow,
 } from "@/lib/notifications.functions";
+import { notificationPath } from "@/lib/notification-link";
 import { registerServiceWorker } from "@/lib/push-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -111,19 +112,12 @@ export function NotificationsBell() {
     // Let ctrl/cmd/shift/middle-click open a new tab as usual.
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
       return;
-    let target: URL;
-    try {
-      target = new URL(r.url ?? "/", window.location.origin);
-    } catch {
-      return;
-    }
+    // A notification leads to a page of this site or nowhere (notification-link.ts).
     e.preventDefault();
+    const path = notificationPath(r.url ?? "/");
+    if (!path) return;
     setOpen(false);
-    if (target.origin === window.location.origin) {
-      void router.navigate({ href: target.pathname + target.search + target.hash });
-    } else {
-      window.location.assign(target.href);
-    }
+    void router.navigate({ href: path });
   };
 
   const badge = unreadBadge(unread);
@@ -194,9 +188,9 @@ export function NotificationsBell() {
                 );
                 return (
                   <li key={r.id}>
-                    {r.url ? (
+                    {notificationPath(r.url) ? (
                       <a
-                        href={r.url}
+                        href={notificationPath(r.url) ?? undefined}
                         onClick={(e) => follow(e, r)}
                         className="block px-3 py-2 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                       >
