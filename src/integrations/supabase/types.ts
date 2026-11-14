@@ -92,6 +92,13 @@ export type Database = {
             referencedRelation: "buildings"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "address_points_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
+            referencedColumns: ["id"]
+          },
         ]
       }
       adhesive_allowed_under: {
@@ -431,6 +438,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "bids_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "bids_from_job_id_fkey"
             columns: ["from_job_id"]
             isOneToOne: false
@@ -482,6 +496,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_storm_hits_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
             referencedColumns: ["id"]
           },
           {
@@ -2570,6 +2591,13 @@ export type Database = {
             referencedRelation: "buildings"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "leads_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
+            referencedColumns: ["id"]
+          },
         ]
       }
       legacy_adhesive: {
@@ -3299,6 +3327,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "reroof_permits_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "reroof_permits_roof_id_fkey"
             columns: ["roof_id"]
             isOneToOne: false
@@ -3375,6 +3410,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roofs_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
             referencedColumns: ["id"]
           },
         ]
@@ -4438,6 +4480,13 @@ export type Database = {
             referencedRelation: "buildings"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "takeoffs_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
+            referencedColumns: ["id"]
+          },
         ]
       }
       tasks: {
@@ -4550,6 +4599,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings_search"
             referencedColumns: ["id"]
           },
           {
@@ -4770,6 +4826,159 @@ export type Database = {
       }
     }
     Views: {
+      buildings_search: {
+        Row: {
+          address_approx: boolean | null
+          address_approx_m: number | null
+          address_checked_at: string | null
+          address1: string | null
+          address2: string | null
+          building_sqft: number | null
+          centroid_lat: number | null
+          centroid_lng: number | null
+          city: string | null
+          county: string | null
+          created_at: string | null
+          created_by: string | null
+          created_by_name: string | null
+          deed: string | null
+          deleted_at: string | null
+          footprint: Json | null
+          height_ft: number | null
+          id: string | null
+          imported_at: string | null
+          land_use: string | null
+          last_reroof_by: string | null
+          last_reroof_on: string | null
+          last_storm_at: string | null
+          last_storm_kind: string | null
+          last_storm_magnitude: number | null
+          last_storm_miles: number | null
+          lot_sqft: number | null
+          name: string | null
+          notes: string | null
+          own_book: boolean | null
+          owner_address: string | null
+          owner_name: string | null
+          parcel_id: string | null
+          perimeter_ft: number | null
+          prospect_owner_name: string | null
+          prospect_stage: string | null
+          prospected_at: string | null
+          roof_sqft: number | null
+          roof_year: number | null
+          source: string | null
+          source_key: string | null
+          source_layer: string | null
+          state: string | null
+          stories: number | null
+          tax_year: number | null
+          updated_at: string | null
+          year_built: number | null
+          zip: string | null
+        }
+        Insert: {
+          address_approx?: boolean | null
+          address_approx_m?: number | null
+          address_checked_at?: string | null
+          address1?: string | null
+          address2?: string | null
+          building_sqft?: number | null
+          centroid_lat?: number | null
+          centroid_lng?: number | null
+          city?: string | null
+          county?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_by_name?: string | null
+          deed?: string | null
+          deleted_at?: string | null
+          footprint?: Json | null
+          height_ft?: number | null
+          id?: string | null
+          imported_at?: string | null
+          land_use?: string | null
+          last_reroof_by?: string | null
+          last_reroof_on?: string | null
+          last_storm_at?: string | null
+          last_storm_kind?: string | null
+          last_storm_magnitude?: number | null
+          last_storm_miles?: number | null
+          lot_sqft?: number | null
+          name?: string | null
+          notes?: string | null
+          own_book?: boolean | null
+          owner_address?: string | null
+          owner_name?: string | null
+          parcel_id?: string | null
+          perimeter_ft?: number | null
+          prospect_owner_name?: string | null
+          prospect_stage?: string | null
+          prospected_at?: string | null
+          roof_sqft?: number | null
+          roof_year?: number | null
+          source?: string | null
+          source_key?: string | null
+          source_layer?: string | null
+          state?: string | null
+          stories?: number | null
+          tax_year?: number | null
+          updated_at?: string | null
+          year_built?: number | null
+          zip?: string | null
+        }
+        Update: {
+          address_approx?: boolean | null
+          address_approx_m?: number | null
+          address_checked_at?: string | null
+          address1?: string | null
+          address2?: string | null
+          building_sqft?: number | null
+          centroid_lat?: number | null
+          centroid_lng?: number | null
+          city?: string | null
+          county?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_by_name?: string | null
+          deed?: string | null
+          deleted_at?: string | null
+          footprint?: Json | null
+          height_ft?: number | null
+          id?: string | null
+          imported_at?: string | null
+          land_use?: string | null
+          last_reroof_by?: string | null
+          last_reroof_on?: string | null
+          last_storm_at?: string | null
+          last_storm_kind?: string | null
+          last_storm_magnitude?: number | null
+          last_storm_miles?: number | null
+          lot_sqft?: number | null
+          name?: string | null
+          notes?: string | null
+          own_book?: boolean | null
+          owner_address?: string | null
+          owner_name?: string | null
+          parcel_id?: string | null
+          perimeter_ft?: number | null
+          prospect_owner_name?: string | null
+          prospect_stage?: string | null
+          prospected_at?: string | null
+          roof_sqft?: number | null
+          roof_year?: number | null
+          source?: string | null
+          source_key?: string | null
+          source_layer?: string | null
+          state?: string | null
+          stories?: number | null
+          tax_year?: number | null
+          updated_at?: string | null
+          year_built?: number | null
+          zip?: string | null
+        }
+        Relationships: []
+      }
       catalog_item_numbers_map: {
         Row: {
           dl_description: string | null
@@ -5063,6 +5272,18 @@ export type Database = {
         Returns: string
       }
       audit_same: { Args: { a: Json; b: Json }; Returns: boolean }
+      audit_setup_log: {
+        Args: {
+          p_action: string
+          p_changes: Json
+          p_entity: string
+          p_entity_id: string
+          p_summary: string
+        }
+        Returns: undefined
+      }
+      audit_setup_money: { Args: { v: number }; Returns: string }
+      audit_setup_pct: { Args: { v: number }; Returns: string }
       building_county_counts: {
         Args: never
         Returns: {
@@ -5156,6 +5377,7 @@ export type Database = {
         Returns: boolean
       }
       has_access: { Args: { page: string }; Returns: boolean }
+      has_profile: { Args: never; Returns: boolean }
       hold_followup: {
         Args: {
           p_followup: string
@@ -5274,6 +5496,7 @@ export type Database = {
         Args: { p_bid: string; p_session: string }
         Returns: undefined
       }
+      reminder_morning: { Args: { p_day: string }; Returns: string }
       rename_lead_source: {
         Args: { p_id: string; p_name: string }
         Returns: number
