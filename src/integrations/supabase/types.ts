@@ -5614,6 +5614,7 @@ export type Database = {
         Args: { p_invoice?: string; p_job: string; p_stage: string }
         Returns: undefined
       }
+      sign_out_everywhere: { Args: { p_user: string }; Returns: number }
       site_history:
         | { Args: { p_job_id: string }; Returns: Json }
         | { Args: { p_job_id: string; p_limit: number }; Returns: Json }

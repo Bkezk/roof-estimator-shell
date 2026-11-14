@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, KeyRound, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, KeyRound, LogOut, Trash2, UserPlus } from "lucide-react";
 
 import {
   listUsers,
@@ -12,6 +12,7 @@ import {
   deleteUser,
   setDefaultBillRate,
   setUserPassword,
+  signOutUserEverywhere,
   type UserProfile,
 } from "@/lib/auth.functions";
 import { RateBox } from "@/components/service/rate-box";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/access";
 import { TECH_NEEDS_SERVICE, technicianNeedsService, withService } from "@/lib/dispatch-access";
 import { useAuth } from "@/lib/auth-store";
+import { signOutAllConfirm, signOutAllDone, signOutAllTitle } from "@/lib/sign-out-everywhere";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -229,6 +231,7 @@ function UsersPage() {
   const deleteUserFn = useServerFn(deleteUser);
   const rateFn = useServerFn(setDefaultBillRate);
   const passwordFn = useServerFn(setUserPassword);
+  const signOutFn = useServerFn(signOutUserEverywhere);
   const [passwordFor, setPasswordFor] = useState<UserProfile | null>(null);
 
   const { data: users, isLoading } = useQuery({
@@ -301,6 +304,15 @@ function UsersPage() {
       setPasswordFor(null);
     },
     onError: (e: Error) => toast.error(e.message || "Could not set the password"),
+  });
+
+  const signOutMut = useMutation({
+    mutationFn: (id: string) => signOutFn({ data: { id } }),
+    onSuccess: (r) => {
+      const u = (users ?? []).find((x) => x.id === r.id);
+      toast.success(signOutAllDone(u ? u.full_name || u.email : "The user", r.devices));
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not sign the user out"),
   });
 
   const deleteMut = useMutation({
@@ -510,6 +522,21 @@ function UsersPage() {
                           onClick={() => setPasswordFor(u)}
                         >
                           <KeyRound className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-action="sign-out-everywhere"
+                          title={signOutAllTitle(u.full_name || u.email)}
+                          aria-label={signOutAllTitle(u.full_name || u.email)}
+                          disabled={signOutMut.isPending}
+                          onClick={() => {
+                            if (confirm(signOutAllConfirm(u.full_name || u.email, isSelf))) {
+                              signOutMut.mutate(u.id);
+                            }
+                          }}
+                        >
+                          <LogOut className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"

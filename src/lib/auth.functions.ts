@@ -331,6 +331,35 @@ export const deleteUser = createServerFn({ method: "POST" })
     return { id: data.id };
   });
 
+const signOutEverywhereSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * An admin signs a person out of every device (security audit, Nov 14: a device stays signed in
+ * until someone signs out on it, so a lost phone kept its way in). Admin only. The database ends
+ * the person's sign-ins (sign_out_everywhere, which only the server's key may run); a device
+ * that is open keeps its pass for up to an hour and cannot renew it. Returns how many sign-ins
+ * were ended. Signing yourself out is allowed.
+ */
+export const signOutUserEverywhere = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data) => signOutEverywhereSchema.parse(data))
+  .handler(async ({ data, context }): Promise<{ id: string; devices: number }> => {
+    await assertAdmin(context.supabase, context.userId);
+    const { data: target, error: readErr } = await context.supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!target) throw new Error("User not found");
+    const supabaseAdmin = await admin();
+    const { data: ended, error } = await supabaseAdmin.rpc("sign_out_everywhere", {
+      p_user: data.id,
+    });
+    if (error) throw new Error(error.message);
+    return { id: data.id, devices: typeof ended === "number" ? ended : 0 };
+  });
+
 /** A technician (or anyone with Service access) a ticket can be assigned to. */
 export interface TechnicianOption {
   id: string;
