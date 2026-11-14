@@ -90,12 +90,14 @@ describe("listBuildings reads the view only when there is search text", () => {
     // Every other read and every write still names the table.
     expect(fns.match(/buildingsSearchTable\(/g)).toHaveLength(1);
   });
-  it("the twin is typed as the table (the generated types do not list it)", () => {
+  it("the twin is typed as the table", () => {
     expect(rpc).toContain(
       "export function buildingsSearchTable(client: SupabaseClient<Database>) {",
     );
     expect(rpc).toContain('return client.from("buildings_search" as "buildings");');
-    expect(read("src/integrations/supabase/types.ts")).not.toContain("buildings_search");
+    // The generated types did not list the view until Lovable refreshed them on Nov 14. They do
+    // now, with every column nullable as for any view, so the read stays typed as the table.
+    expect(read("src/integrations/supabase/types.ts")).toContain("buildings_search: {");
   });
 });
 
