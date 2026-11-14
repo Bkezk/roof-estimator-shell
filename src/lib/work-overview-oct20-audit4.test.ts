@@ -480,7 +480,8 @@ describe("b. shouldHoldForProfile; the gate keeps the shell while a session load
     expect(auth).not.toContain('event === "SIGNED_IN" && next && !profileRef.current');
   });
   it("the gate: Waiting only without a session; the shell renders while the profile loads", () => {
-    expect(gate).toContain("if (isLogin) return <>{children}</>;");
+    // The reset page is bare too since Nov 14 (password-reset-nov14.test.ts).
+    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
     expect(gate).toContain("if (!session) return <Waiting />;");
     expect(gate).not.toContain("if (loading || !session) return <Waiting />;");
     expect(gate).toContain("if (blocked) return <Waiting />;");
@@ -550,7 +551,10 @@ describe("d. landingDecision: retry for the profile, then home with a toast", ()
       /useEffect\(\(\) => \{\s*if \(decision !== "retry"\) return undefined;\s*const t = setTimeout\(\(\) => \{\s*void refreshRef\.current\(\)\.finally\(\(\) => setTries\(\(n\) => n \+ 1\)\);\s*\}, PROFILE_RETRY_MS\);\s*return \(\) => clearTimeout\(t\);\s*\}, \[decision, tries\]\);/,
     );
     // The signed-out and blocked legs are as they were.
-    expect(gate).toMatch(/if \(!session && !isLogin\) \{\s*navigate\(\{ to: "\/login" \}\);/);
+    // The reset page needs no session either since Nov 14 (password-reset-nov14.test.ts).
+    expect(gate).toMatch(
+      /if \(!session && !isLogin && !isReset\) \{\s*navigate\(\{ to: "\/login" \}\);/,
+    );
     expect(gate).toMatch(/\} else if \(session && blocked\) \{\s*navigate\(\{ to: home \}\);\s*\}/);
   });
   it("the Work Overview route asks for a missing profile once", () => {

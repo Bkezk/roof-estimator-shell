@@ -338,7 +338,8 @@ export const canOpenPage = (p: AccessLike | null | undefined, page: RoutePage): 
         : canAccess(p, page);
 
 export function pageForPath(pathname: string): RoutePage | null {
-  if (pathname === "/account" || pathname === "/login") return null;
+  if (pathname === "/account" || pathname === "/login" || pathname === "/reset-password")
+    return null;
   // Follow-ups and Work Overview: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
   if (pathname.startsWith("/my-work")) return null;

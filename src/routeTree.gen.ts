@@ -24,6 +24,7 @@ import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as OwnerRouteImport } from './routes/owner'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ServiceRouteImport } from './routes/service'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
@@ -129,6 +130,11 @@ const ProposalRoute = ProposalRouteImport.update({
 const ProspectRoute = ProspectRouteImport.update({
   id: '/prospect',
   path: '/prospect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceRoute = ServiceRouteImport.update({
@@ -303,6 +309,7 @@ export interface FileRoutesByFullPath {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
@@ -351,6 +358,7 @@ export interface FileRoutesByTo {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
@@ -400,6 +408,7 @@ export interface FileRoutesById {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
@@ -450,6 +459,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/reset-password'
     | '/service'
     | '/setup'
     | '/takeoff'
@@ -498,6 +508,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/reset-password'
     | '/service'
     | '/setup'
     | '/takeoff'
@@ -546,6 +557,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/reset-password'
     | '/service'
     | '/setup'
     | '/takeoff'
@@ -595,6 +607,7 @@ export interface RootRouteChildren {
   OwnerRoute: typeof OwnerRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   ServiceRoute: typeof ServiceRouteWithChildren
   SetupRoute: typeof SetupRoute
   TakeoffRoute: typeof TakeoffRoute
@@ -730,6 +743,13 @@ declare module '@tanstack/react-router' {
       path: '/prospect'
       fullPath: '/prospect'
       preLoaderRoute: typeof ProspectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/service': {
@@ -983,6 +1003,7 @@ const rootRouteChildren: RootRouteChildren = {
   OwnerRoute: OwnerRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   ServiceRoute: ServiceRouteWithChildren,
   SetupRoute: SetupRoute,
   TakeoffRoute: TakeoffRoute,

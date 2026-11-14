@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { applyKeptTopGap } from "@/lib/top-gap";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
@@ -22,6 +22,7 @@ import { GlobalSearch } from "@/components/global-search";
 import { StalledNotice } from "@/components/stalled-sign-in";
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import { foldMenuOnArrival } from "@/lib/narrow-menu";
+import { onRecoveryChange, recoveryState } from "@/lib/recovery-link";
 
 /**
  * On a narrow screen (an iPad; owner, Nov 3) the app menu starts folded so the page has the
@@ -135,6 +136,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: committedPathname });
 
   const isLogin = pathname === "/login";
+  // Forgot password (owner, Nov 14; lib/recovery-link.ts). The reset page is bare like the
+  // sign-in screen and open with or without a session. While this tab is in a reset (its link
+  // signed the person in for that one purpose) or its link was refused, the tab is kept on that
+  // page, wherever the link happened to land: no app page shows until a password is set or the
+  // reset is walked away from, which signs the tab out.
+  const isReset = pathname === "/reset-password";
+  const recovery = useSyncExternalStore(
+    onRecoveryChange,
+    () => recoveryState(window.sessionStorage),
+    () => null,
+  );
   // Per-page access (src/lib/access.ts): a route belongs to a page; a user without that page is
   // sent to the first page they may open. Until the profile has loaded nothing is blocked; once
   // its load has FAILED (Oct 20, lib/auth-flow.ts gateDecision) a page that needs it is blocked
@@ -160,8 +172,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const decision = !loading && session && isLogin ? landingDecision(session, profile, tries) : null;
 
   useEffect(() => {
+    if (recovery && !isReset) {
+      navigate({ to: "/reset-password" });
+      return;
+    }
     if (loading) return;
-    if (!session && !isLogin) {
+    if (!session && !isLogin && !isReset) {
       navigate({ to: "/login" });
     } else if (session && isLogin) {
       if (decision === "home") {
@@ -174,7 +190,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     } else if (session && blocked) {
       navigate({ to: home });
     }
-  }, [loading, session, pathname, isLogin, blocked, home, navigate, decision]);
+  }, [loading, session, pathname, isLogin, isReset, recovery, blocked, home, navigate, decision]);
 
   // One ask per try, PROFILE_RETRY_MS after the last answer (`tries` moves when it settles).
   useEffect(() => {
@@ -196,8 +212,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     });
   }, [loading, profileBlock]);
 
-  // The login screen renders full-bleed, with no app chrome.
-  if (isLogin) return <>{children}</>;
+  // On its way to the reset page: nothing of the app shows in between.
+  if (recovery && !isReset) return <Waiting />;
+
+  // The login screen and the reset page render full-bleed, with no app chrome.
+  if (isLogin || isReset) return <>{children}</>;
 
   // Oct 20 (b): with a session the shell renders through a profile load — `loading` only holds
   // the /login redirect (above). A tab wake that re-read a null profile used to swap the whole

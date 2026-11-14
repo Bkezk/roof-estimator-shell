@@ -111,7 +111,8 @@ describe("1. committedPathname: the page the Outlet renders, from the same commi
     expect(gate).not.toContain("s.location.pathname");
     // The decisions themselves are unchanged: bare login, spinner while signed out or blocked,
     // the shell otherwise; the signed-in visitor to /login goes home.
-    expect(gate).toContain("if (isLogin) return <>{children}</>;");
+    // The reset page is bare too since Nov 14 (password-reset-nov14.test.ts).
+    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
     // Oct 20, audit 4 (b): the shell renders through a profile load; `loading` only holds the
     // /login redirect (work-overview-oct20-audit4.test.ts).
     expect(gate).toContain("if (!session) return <Waiting />;");
@@ -368,7 +369,10 @@ describe("c. the login page no longer navigates; the gate's home redirect waits 
     expect(auth).toMatch(
       /if \(shouldHoldForProfile\(had, next, event\)\) \{\s*setLoading\(true\);/,
     );
-    expect(gate).toMatch(/useEffect\(\(\) => \{\s*if \(loading\) return;/);
+    // Still waits for `loading`; only a tab in a password reset is moved first (Nov 14).
+    expect(gate).toMatch(
+      /useEffect\(\(\) => \{\s*if \(recovery && !isReset\) \{[\s\S]{0,90}\}\s*if \(loading\) return;/,
+    );
   });
 });
 

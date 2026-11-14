@@ -19,6 +19,12 @@ import { forgetStoredPhotoLinks } from "@/lib/photo-link-store";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 import { canAccess } from "@/lib/access";
 import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-store";
+import { noteRecoveryArrival, setRecoveryState } from "@/lib/recovery-link";
+
+// A password reset link (or the service's "expired" answer) is in the address as the page
+// loads. Note it for this tab now, before the sign-in client reads the address and wipes it
+// (lib/recovery-link.ts; owner, Nov 14). An ordinary load notes nothing.
+if (typeof window !== "undefined") noteRecoveryArrival(window.location, window.sessionStorage);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -135,6 +141,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!active) return;
       const had = sessionRef.current;
       sessionRef.current = next;
+      // The sign-in client's own word that this session came from a reset link: the gate keeps
+      // the tab on the reset page until a password is set (lib/recovery-link.ts).
+      if (event === "PASSWORD_RECOVERY") setRecoveryState(window.sessionStorage, "pending");
       // A session that ended outside signOut (Oct 20): another tab's sign-out, a refresh that
       // failed — nothing of this person stays cached for the next one.
       if (event === "SIGNED_OUT" || (!next && had)) queryClient.clear();
