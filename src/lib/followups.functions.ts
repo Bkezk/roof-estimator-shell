@@ -24,6 +24,7 @@ import {
   isMissingRpc,
 } from "@/lib/followup-holds";
 import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
+import { ATTENTION_DAYS_MAX } from "@/lib/owner-attention";
 import { localHm } from "@/lib/tasks";
 import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
 
@@ -584,6 +585,10 @@ export const settingsSchema = z.object({
   // (0 = on the due day), and the past-due repeat every N days — null = never.
   bid_due_notice_days: z.number().int().min(0).max(BID_DUE_NOTICE_DAYS_MAX),
   bid_overdue_every_days: z.number().int().min(1).max(BID_OVERDUE_EVERY_DAYS_MAX).nullable(),
+  // Owner, Nov 15 (the Owner page's Needs attention list, lib/owner-attention.ts): a submitted
+  // bid with no follow-up date shows after N days; a Done ticket after N days not authorized.
+  attention_bid_days: z.number().int().min(0).max(ATTENTION_DAYS_MAX),
+  attention_authorize_days: z.number().int().min(0).max(ATTENTION_DAYS_MAX),
   escalate_to_admins: z.boolean(),
   escalate_user_ids: z.array(z.string().uuid()).max(50),
 });

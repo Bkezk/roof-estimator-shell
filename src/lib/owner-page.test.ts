@@ -104,8 +104,9 @@ describe("source: the Owner page", () => {
     expect(page).toContain('import { OwnerView } from "@/components/owner-view";');
     expect(page).toContain('import { OwnerBusiness } from "@/components/owner-business";');
     expect(page).toContain('import { MarginReport } from "@/components/margin-report";');
+    // Since Nov 15 the Needs attention list opens the tab, above that line (owner-attention.tsx).
     expect(page).toMatch(
-      /tab === "people" \? \(\s*<>\s*<p className="text-sm text-muted-foreground">\s*Everyone: what is due today, what is overdue, what got done this week\.\s*<\/p>\s*<OwnerView \/>\s*<\/>\s*\) : \(/,
+      /tab === "people" \? \(\s*<>\s*\{\/\*[^*]*\*\/\}\s*<OwnerAttention \/>\s*<p className="text-sm text-muted-foreground">\s*Everyone: what is due today, what is overdue, what got done this week\.\s*<\/p>\s*<OwnerView \/>\s*<\/>\s*\) : \(/,
     );
     const biz = page.slice(page.indexOf('tab === "people" ? ('));
     expect(biz.indexOf("<OwnerBusiness />")).toBeGreaterThan(0);

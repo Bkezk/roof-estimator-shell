@@ -53,6 +53,7 @@ import {
 } from "@/lib/followups.functions";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { blankOrNumber } from "@/lib/number-field-view";
+import { ATTENTION_DEFAULTS } from "@/lib/owner-attention";
 import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
 import { listAssigneeOptions } from "@/lib/opportunities.functions";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +104,7 @@ type Field = {
   max?: number;
   /** A blank box means never (stored null); a number must still be within min..max. */
   never?: boolean;
-  group: "opportunity" | "ticket" | "bids" | "untouched" | "unassigned";
+  group: "opportunity" | "ticket" | "bids" | "untouched" | "unassigned" | "attention";
 };
 const FIELDS: Field[] = [
   {
@@ -184,6 +185,19 @@ const FIELDS: Field[] = [
     min: 0,
     group: "unassigned",
   },
+  // Owner, Nov 15: the Owner page's Needs attention list (lib/owner-attention.ts).
+  {
+    key: "attention_bid_days",
+    label: "A submitted bid with no follow-up date needs attention after N days",
+    min: 0,
+    group: "attention",
+  },
+  {
+    key: "attention_authorize_days",
+    label: "A Done ticket needs attention after N days without being authorized",
+    min: 0,
+    group: "attention",
+  },
 ];
 const EMPTY: CrmSettingsInput = {
   opportunity_close_days: 0,
@@ -198,6 +212,8 @@ const EMPTY: CrmSettingsInput = {
   unassigned_overdue_days: 0,
   bid_due_notice_days: 1,
   bid_overdue_every_days: null,
+  attention_bid_days: ATTENTION_DEFAULTS.bidDays,
+  attention_authorize_days: ATTENTION_DEFAULTS.authorizeDays,
   escalate_to_admins: false,
   escalate_user_ids: [],
 };
@@ -242,6 +258,9 @@ export function RemindersSettings() {
         // Before 20261013160000 is applied the row has neither: the day before, never past due.
         bid_due_notice_days: s.bid_due_notice_days ?? 1,
         bid_overdue_every_days: s.bid_overdue_every_days ?? null,
+        // Before 20261115120000 is applied the row has neither: 7 and 3.
+        attention_bid_days: s.attention_bid_days ?? ATTENTION_DEFAULTS.bidDays,
+        attention_authorize_days: s.attention_authorize_days ?? ATTENTION_DEFAULTS.authorizeDays,
         escalate_to_admins: s.escalate_to_admins,
         escalate_user_ids: s.escalate_user_ids ?? [],
       });
@@ -506,6 +525,23 @@ export function RemindersSettings() {
                       );
                     })
                   )}
+                </Line>
+              </Section>
+
+              {/* Owner, Nov 15: "keep the owner on top of things" — the list at the top of the
+                  Owner page (lib/owner-attention.ts). It sends nothing; these two numbers only
+                  decide when a row appears there. */}
+              <Section
+                title="Owner’s Needs attention list"
+                help="The list at the top of the Owner page. Nobody is sent anything by it. It also lists work with nobody on it and untouched work, at the limits above, and draft bids past their due date."
+              >
+                <Line label="Bids sent">
+                  A submitted bid with no follow-up date shows after {field("attention_bid_days")}{" "}
+                  days. One whose “Remind me on” day has passed shows the next day.
+                </Line>
+                <Line label="Done tickets">
+                  A Done ticket shows after {field("attention_authorize_days")} days without being
+                  authorized.
                 </Line>
               </Section>
               <div className="flex justify-end pt-4">{saveButton}</div>

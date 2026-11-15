@@ -35,6 +35,9 @@ const saved = {
   unassigned_overdue_days: 1,
   bid_due_notice_days: 1,
   bid_overdue_every_days: null,
+  // Nov 15: the Owner page's Needs attention limits ride in the same save.
+  attention_bid_days: 7,
+  attention_authorize_days: 3,
   escalate_to_admins: true,
   escalate_user_ids: [],
 };

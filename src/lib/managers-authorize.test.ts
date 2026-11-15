@@ -609,7 +609,15 @@ describe("4. the words", () => {
     );
     expect(ui).not.toContain("Any manager can still mark a ticket");
     // The Reminders page says nothing about who authorizes (nothing to keep accurate there).
-    expect(read("src/components/reminders-settings.tsx")).not.toMatch(/authoriz/i);
+    // Since Nov 15 it does hold the Owner page's "Done ticket … without being authorized" limit
+    // (attention_authorize_days, lib/owner-attention.ts), which names nobody.
+    const reminders = read("src/components/reminders-settings.tsx");
+    expect(reminders).not.toMatch(
+      /authorizer|who authoriz|can authorize|mark (a|the) ticket Authorized/i,
+    );
+    expect(
+      reminders.replace(/attention_authorize_days|authorizeDays/g, "").match(/authoriz/gi) ?? [],
+    ).toHaveLength(2);
     expect(read("src/routes/admin.reminders.tsx")).not.toMatch(/authoriz/i);
   });
 });

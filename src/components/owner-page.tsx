@@ -1,6 +1,7 @@
 /**
  * The Owner page (owner, Oct 21: "owner should be its own tab"): the owners' own section, out of
- * Work Overview, with two tabs. People is the Owner view as it was — who is doing what they
+ * Work Overview, with two tabs. People opens with the Needs attention list (owner, Nov 15:
+ * components/owner-attention.tsx), then the Owner view as it was — who is doing what they
  * should be doing, when they should be doing it (components/owner-view.tsx; the "Everyone: …"
  * line that introduced it on Work Overview moved here with it). Business is the money: the tiles
  * (components/owner-business.tsx — what is in flight now) with the margin report under them
@@ -14,6 +15,7 @@ import { Crown } from "lucide-react";
 
 import type { OwnerTab } from "@/lib/owner-page";
 import { MarginReport } from "@/components/margin-report";
+import { OwnerAttention } from "@/components/owner-attention";
 import { OwnerBusiness } from "@/components/owner-business";
 import { OwnerView } from "@/components/owner-view";
 import { Button } from "@/components/ui/button";
@@ -21,8 +23,11 @@ import { Button } from "@/components/ui/button";
 export function OwnerPage(props: { tab: OwnerTab; onTab: (tab: OwnerTab) => void }) {
   const { tab } = props;
   return (
-    // The whole width, like Work Overview (the Owner view's table was laid out for it).
-    <div className="mx-auto max-w-none space-y-5">
+    // The whole width, like Work Overview (the Owner view's table was laid out for it). "w-full
+    // min-w-0" (Nov 15): the page is a centred item of a column, so without a width of its own it
+    // grew to the people table's 760px and the whole page scrolled sideways on a phone; now the
+    // table scrolls inside its own box and everything else fits the screen.
+    <div className="mx-auto w-full min-w-0 max-w-none space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <Crown className="h-6 w-6" /> Owner
@@ -53,6 +58,8 @@ export function OwnerPage(props: { tab: OwnerTab; onTab: (tab: OwnerTab) => void
 
       {tab === "people" ? (
         <>
+          {/* Owner, Nov 15: what has not been started or followed up, found by rules, first. */}
+          <OwnerAttention />
           <p className="text-sm text-muted-foreground">
             Everyone: what is due today, what is overdue, what got done this week.
           </p>

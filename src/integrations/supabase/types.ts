@@ -1297,6 +1297,8 @@ export type Database = {
       }
       crm_settings: {
         Row: {
+          attention_authorize_days: number
+          attention_bid_days: number
           bid_due_notice_days: number
           bid_overdue_every_days: number | null
           escalate_to_admins: boolean
@@ -1318,6 +1320,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attention_authorize_days?: number
+          attention_bid_days?: number
           bid_due_notice_days?: number
           bid_overdue_every_days?: number | null
           escalate_to_admins?: boolean
@@ -1339,6 +1343,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attention_authorize_days?: number
+          attention_bid_days?: number
           bid_due_notice_days?: number
           bid_overdue_every_days?: number | null
           escalate_to_admins?: boolean
