@@ -102,7 +102,7 @@ import {
   pageSnippetModules,
   instantiatePages,
   MODULE_LABELS,
-  MODULE_TILES,
+  MODULE_GROUPS,
   type ModuleType,
   movePage,
   newModule,
@@ -1466,36 +1466,44 @@ function ModulesTab(props: {
         Drag a module or a snippet onto a page where you want it, or use + to add it to the bottom
         of the selected page.
       </p>
-      <div className="grid grid-cols-2 gap-2">
-        {MODULE_TILES.map((type) => {
-          const Icon = TILE_ICONS[type];
-          return (
-            <div
-              key={type}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData(MODULE_DRAG_TYPE, type);
-                e.dataTransfer.effectAllowed = "copy";
-              }}
-              className="flex cursor-grab items-center gap-2 rounded-md border bg-card px-2 py-2 text-sm hover:bg-accent/50 active:cursor-grabbing"
-              title={`${MODULE_LABELS[type]} — drag onto a page`}
-            >
-              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="flex-1 truncate">{MODULE_LABELS[type]}</span>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6"
-                title={`Add ${MODULE_LABELS[type]} to the selected page`}
-                onClick={() => props.onAdd(type)}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-          );
-        })}
-      </div>
+      {MODULE_GROUPS.map((group) => (
+        <section key={group.label} data-module-group={group.label} className="space-y-1.5">
+          <h3 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {group.label}
+            <span className="h-px flex-1 bg-border" aria-hidden />
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {group.types.map((type) => {
+              const Icon = TILE_ICONS[type];
+              return (
+                <div
+                  key={type}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData(MODULE_DRAG_TYPE, type);
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
+                  className="flex cursor-grab items-center gap-2 rounded-md border bg-card px-2 py-2 text-sm hover:bg-accent/50 active:cursor-grabbing"
+                  title={`${MODULE_LABELS[type]} — drag onto a page`}
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">{MODULE_LABELS[type]}</span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    title={`Add ${MODULE_LABELS[type]} to the selected page`}
+                    onClick={() => props.onAdd(type)}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
       <div className="space-y-1">
         <div className="text-sm font-medium">Saved snippets</div>
         {props.savedError ? (

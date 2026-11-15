@@ -258,6 +258,24 @@ export const MODULE_TILES: ModuleType[] = [
   "repairItem",
 ];
 
+/**
+ * The Modules tab shows the tiles under headers by what a module holds (owner, Nov 15: "I'd like
+ * to have the modules grouped by type under headers such as text, pictures, etc"; of three
+ * mock-ups: "Option A", five headers that are always open, and the names "are good"). Photo on
+ * left and Photo on right hold text too and sit under Pictures (owner: "yes that's correct").
+ * Every tile of MODULE_TILES is in exactly one group.
+ */
+export const MODULE_GROUPS: readonly { label: string; types: readonly ModuleType[] }[] = [
+  { label: "Text", types: ["body", "twoColumns"] },
+  {
+    label: "Pictures",
+    types: ["fullPhoto", "twoPhotos", "photoLeft", "photoRight", "photoGrid"],
+  },
+  { label: "Tables and prices", types: ["table", "pricingTable", "priceLines"] },
+  { label: "Service", types: ["repairList", "repairItem"] },
+  { label: "Page parts", types: ["letterhead", "signature", "hr"] },
+];
+
 /** How a Pricing Table shows the bid's money (the "with or without cost" checkbox). */
 export type PriceMode = "total" | "none";
 

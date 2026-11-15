@@ -69,7 +69,9 @@ describe("the /documents route", () => {
     );
   });
   it("the Modules tab offers every tile and the saved modules", () => {
-    expect(route).toContain("MODULE_TILES.map(");
+    // Nov 15: the tiles sit under five headers (MODULE_GROUPS holds every tile once).
+    expect(route).toContain("MODULE_GROUPS.map((group) => (");
+    expect(route).toContain("group.types.map((type) => {");
     expect(route).toContain("listSavedModules");
     expect(route).toContain("deleteSavedModule");
     expect(route).toContain("MODULE_DRAG_TYPE");
