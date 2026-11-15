@@ -149,7 +149,11 @@ import {
   selectedPageIndex,
 } from "@/components/documents/editor/editor-state";
 import { deletePageWithUndo } from "@/components/documents/editor/delete-page";
-import { scrollToPage, scrollToSheet } from "@/components/documents/editor/editor-dom";
+import {
+  revealModule,
+  scrollToPage,
+  scrollToSheet,
+} from "@/components/documents/editor/editor-dom";
 import { usePdfMeasure } from "@/components/documents/editor/screen-measure";
 import { PageCanvas } from "@/components/documents/editor/page-canvas";
 import { insertVariable } from "@/components/documents/editor/rich-text";
@@ -807,8 +811,8 @@ function EditorShell(props: {
     setToolsOpen(false);
     const i = selectedPageIndex(state);
     dispatch({ type: "setPages", op: (pages) => addModule(pages, i, m) });
-    const page = state.pages[i];
-    if (page) window.setTimeout(() => scrollToPage(page.id), 50);
+    // Go to the new module itself, at the bottom of the page, not to the top of the page.
+    if (state.pages[i]) window.setTimeout(() => revealModule(m.id), 60);
   };
 
   /** A page snippet: a NEW page right after the selected one, filled with fresh copies. */

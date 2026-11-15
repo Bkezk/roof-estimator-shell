@@ -24,6 +24,40 @@ export function scrollToModule(moduleId: string) {
     ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+/** How long a module added with a + stays marked on the canvas, in milliseconds. */
+export const JUST_ADDED_MS = 1600;
+/** The mark a just-added module carries for that long (styled in src/styles.css). */
+export const JUST_ADDED_ATTR = "data-just-added";
+
+/**
+ * Show the module a + just added (owner, Nov 15: "if you click the plus to add a module the
+ * preview jumps to where the module is added"). The canvas went to the top of the page, so on a
+ * long page the new module at the bottom was out of sight.
+ *
+ * The module is drawn a moment after the click, so this looks for it for about a second. Then
+ * it brings it to the middle of the canvas and marks it briefly so the eye finds it. A long
+ * page is laid out again around a new module and may move it to the next sheet: one later look
+ * follows it there.
+ */
+export function revealModule(moduleId: string, tries = 12) {
+  const find = () => document.querySelector<HTMLElement>(`[data-module-id="${moduleId}"]`);
+  const show = (el: HTMLElement) => {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.setAttribute(JUST_ADDED_ATTR, "");
+    window.setTimeout(() => el.removeAttribute(JUST_ADDED_ATTR), JUST_ADDED_MS);
+  };
+  const el = find();
+  if (!el) {
+    if (tries > 0) window.setTimeout(() => revealModule(moduleId, tries - 1), 80);
+    return;
+  }
+  show(el);
+  window.setTimeout(() => {
+    const again = find();
+    if (again && again !== el) show(again);
+  }, 350);
+}
+
 /** Read a picture file: its data URL and pixel size. */
 export function readImageFile(
   file: File,

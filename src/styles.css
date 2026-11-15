@@ -299,3 +299,13 @@
 [data-sidebar="sidebar"][data-mobile="true"] {
   padding-top: var(--jbk-top-gap, 0px);
 }
+
+/* A module just added with a + is marked for a moment so the eye finds it (Nov 15). Screens
+   only: the mark is never part of a printed or saved document. */
+@media screen {
+  [data-just-added] {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+}
