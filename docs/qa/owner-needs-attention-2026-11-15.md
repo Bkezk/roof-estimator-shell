@@ -66,6 +66,22 @@ and a 390 px phone:
 
 Chain: lint 0 errors, types clean, 562 files and 7,449 tests pass, build ok.
 
+## Later the same day: the group headers fold and stand out
+
+Owner: "can you make the not started not followed up on and waiting on the office headers
+collapsable like previously suggested and a bit more noticable".
+
+- Each header is now a bar: a dark edge, bold words, a solid count and, on the right, the
+  longest wait in the group and how many rows are red.
+- A press on the bar folds its group shut or opens it. This browser remembers which are shut.
+  A folded group still shows its count and its "longest … · N red" line.
+- The total badge and the summary line count every row, folded or not.
+
+Tests: 4 more, 36 in the file. With the old screen 1 fails. Browser, desktop and phone: all
+three open at first; the middle group folded to 0 rows with the badge still 11; a reload kept
+it folded; Enter on the header opened it again; a person filter worked with a group folded;
+0 px sideways and 0 console errors. Chain: lint 0 errors, types clean, 7,453 tests, build ok.
+
 ## Database
 
 `supabase/migrations/20261115120000_owner_attention_limits.sql` was applied on the live database

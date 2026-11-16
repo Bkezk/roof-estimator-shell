@@ -1,7 +1,8 @@
 /**
  * The Owner page's "Needs attention" list (owner, Nov 15: "keep the owner on top of things").
  * One box at the top of the People tab: the count, a line that sums it up, a filter by person,
- * then the rows in three groups — Not started, Not followed up, Waiting on the office. Each row
+ * then the rows in three groups — Not started, Not followed up, Waiting on the office — each
+ * under a bar that folds it shut (the browser remembers which are shut). Each row
  * says how long it has waited (amber past the limit, red at twice the limit), what it is, what
  * is wrong, whose it is and, for a bid or an invoice, the dollars riding on it; the whole row is
  * a link to the item. Nothing here is a button that changes anything: a row leaves when the
@@ -15,18 +16,23 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
 import {
+  ATTENTION_FOLD_KEY,
   ATTENTION_GROUPS,
   attentionMoney,
   attentionPeople,
   attentionSummary,
+  groupNote,
   groupRows,
+  parseFolded,
   rowsFor,
+  toggleFolded,
   WHO_NOBODY,
+  type AttentionGroup,
   type AttentionRow,
 } from "@/lib/owner-attention";
 import { listOwnerAttention } from "@/lib/owner-attention.functions";
@@ -107,6 +113,26 @@ export function OwnerAttention() {
       toast.error(`Could not load the Needs attention list: ${errMsg}`, { id: "owner-attention" });
   }, [errMsg]);
   const [who, setWho] = useState<string | null>(null);
+  // Which groups are folded shut; this browser remembers (read after mount, so the server's
+  // page and the first paint agree: everything open).
+  const [folded, setFolded] = useState<AttentionGroup[]>([]);
+  useEffect(() => {
+    try {
+      setFolded(parseFolded(window.localStorage.getItem(ATTENTION_FOLD_KEY)));
+    } catch {
+      // Private window or storage switched off: nothing is remembered, everything is open.
+    }
+  }, []);
+  const fold = (g: AttentionGroup) =>
+    setFolded((cur) => {
+      const next = toggleFolded(cur, g);
+      try {
+        window.localStorage.setItem(ATTENTION_FOLD_KEY, JSON.stringify(next));
+      } catch {
+        // Not remembered; it still folds for this visit.
+      }
+      return next;
+    });
   const d = q.data;
   const all = d?.rows ?? [];
   const people = attentionPeople(all);
@@ -172,16 +198,39 @@ export function OwnerAttention() {
           {ATTENTION_GROUPS.map((g) => {
             const list = groupRows(rows, g.key);
             if (!list.length) return null;
+            const shut = folded.includes(g.key);
             return (
-              <div key={g.key} data-attention-group={g.key}>
-                <h3 className="flex items-center gap-2 px-3 pb-1.5 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {g.label}
-                  <span className="font-medium tabular-nums opacity-70">{list.length}</span>
-                  <span className="h-px flex-1 bg-border" aria-hidden />
+              <div key={g.key} data-attention-group={g.key} data-folded={shut ? "" : undefined}>
+                {/* Owner, Nov 15: the header is a bar that stands out, and a press folds the
+                    group shut or opens it. Folded, it still says how many and how bad. */}
+                <h3 className="border-t">
+                  <button
+                    type="button"
+                    aria-expanded={!shut}
+                    aria-controls={`attention-${g.key}`}
+                    onClick={() => fold(g.key)}
+                    className="flex w-full items-center gap-2 border-l-4 border-primary bg-muted px-3 py-2.5 text-left transition-colors hover:bg-muted/70"
+                  >
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 transition-transform ${shut ? "-rotate-90" : ""}`}
+                      aria-hidden
+                    />
+                    <span className="text-sm font-bold uppercase tracking-wide">{g.label}</span>
+                    <span className="rounded-full bg-foreground px-2 py-0.5 text-xs font-bold tabular-nums text-background">
+                      {list.length}
+                    </span>
+                    <span className="ml-auto text-right text-xs text-muted-foreground">
+                      {groupNote(list)}
+                    </span>
+                  </button>
                 </h3>
-                {list.map((r) => (
-                  <Row key={r.key} row={r} />
-                ))}
+                {!shut && (
+                  <div id={`attention-${g.key}`}>
+                    {list.map((r) => (
+                      <Row key={r.key} row={r} />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

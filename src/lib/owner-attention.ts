@@ -583,6 +583,43 @@ export function attentionList(i: AttentionIn): AttentionList {
 export const groupRows = (rows: readonly AttentionRow[], g: AttentionGroup): AttentionRow[] =>
   rows.filter((r) => r.group === g);
 
+/**
+ * Folding a group shut (owner, Nov 15: "make the … headers collapsable … and a bit more
+ * noticable"). A press on a group's header folds or opens it; this browser remembers which are
+ * shut (localStorage, `ATTENTION_FOLD_KEY`) so the page opens the way it was left. Nothing about
+ * the list itself changes: the count badge, the summary line and the header's own count still
+ * count a folded group's rows.
+ */
+export const ATTENTION_FOLD_KEY = "owner-attention-folded";
+const GROUP_KEYS = ATTENTION_GROUPS.map((g) => g.key);
+/** The remembered value as a list of groups; anything unreadable is "nothing folded". */
+export function parseFolded(raw: string | null | undefined): AttentionGroup[] {
+  if (!raw) return [];
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return GROUP_KEYS.filter((k) => v.includes(k));
+  } catch {
+    return [];
+  }
+}
+/** Fold a group that is open, open one that is folded; always in the groups' own order. */
+export const toggleFolded = (
+  folded: readonly AttentionGroup[],
+  g: AttentionGroup,
+): AttentionGroup[] =>
+  GROUP_KEYS.filter((k) => (k === g ? !folded.includes(k) : folded.includes(k)));
+/**
+ * What a group's header says beside its count: the longest wait in it and how many are red —
+ * "longest 33 days · 4 red" — so a folded group still tells the owner how bad it is.
+ */
+export function groupNote(rows: readonly AttentionRow[]): string {
+  if (!rows.length) return "";
+  const longest = rows.reduce((a, b) => (b.age > a.age ? b : a));
+  const red = rows.filter((r) => r.tone === "red").length;
+  return `longest ${longest.ageText}${red ? ` · ${red} red` : ""}`;
+}
+
 /** Dollars in submitted bids nobody has a follow-up date on. */
 export const bidsWaiting = (rows: readonly AttentionRow[]): number =>
   rows.filter((r) => r.kind === "bid_sent").reduce((s, r) => s + (r.amount ?? 0), 0);

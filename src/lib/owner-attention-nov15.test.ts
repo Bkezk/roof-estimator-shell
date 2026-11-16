@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { settingsSchema } from "@/lib/followups.functions";
 import {
   ATTENTION_DEFAULTS,
+  ATTENTION_FOLD_KEY,
   ATTENTION_GROUPS,
   INSPECTION_WINDOW_DAYS,
   attentionLimits,
@@ -19,10 +20,13 @@ import {
   attentionPeople,
   attentionSummary,
   bidsWaiting,
+  groupNote,
   groupRows,
   inspectionProblems,
+  parseFolded,
   redFrom,
   rowsFor,
+  toggleFolded,
   toneOf,
   type AttBid,
   type AttTicket,
@@ -576,6 +580,58 @@ describe("the list as a whole", () => {
     expect(l.untouchedRead).toBe(false);
     expect(l.rows).toHaveLength(5);
     expect(attentionList(full).untouchedRead).toBe(true);
+  });
+});
+
+describe('folding a group shut (owner: "collapsable … and a bit more noticable")', () => {
+  it("a press folds an open group and opens a folded one, kept in the groups' order", () => {
+    expect(toggleFolded([], "office")).toEqual(["office"]);
+    expect(toggleFolded(["office"], "not_started")).toEqual(["not_started", "office"]);
+    expect(toggleFolded(["not_started", "office"], "office")).toEqual(["not_started"]);
+  });
+  it("reads back what the browser remembered, and anything unreadable as nothing folded", () => {
+    expect(ATTENTION_FOLD_KEY).toBe("owner-attention-folded");
+    expect(parseFolded(JSON.stringify(["office", "not_started"]))).toEqual([
+      "not_started",
+      "office",
+    ]);
+    for (const raw of [null, "", "nope", "{}", '"office"', '["gone", 3]'])
+      expect(parseFolded(raw)).toEqual([]);
+  });
+  it("a header says the longest wait and how many are red, so a folded group still reads", () => {
+    const { rows } = attentionList(
+      base({
+        bids: [
+          bid(),
+          bid({ id: "b2", submitted_at: "2026-10-13T16:00:00Z" }),
+          bid({ id: "b3", submitted_at: "2026-10-22T16:00:00Z" }),
+        ],
+        tickets: [ticket({ stage: "done", stage_changed_at: "2026-11-12T15:00:00Z" })],
+      }),
+    );
+    expect(groupNote(groupRows(rows, "not_followed_up"))).toBe("longest 34 days · 2 red");
+    expect(groupNote(groupRows(rows, "office"))).toBe("longest 4 days");
+    expect(groupNote([])).toBe("");
+  });
+  it("the header is a button that says whether its group is open, and the rows go when it is shut", () => {
+    const box = readFileSync("src/components/owner-attention.tsx", "utf8").replace(/\s+/g, " ");
+    expect(box).toContain("aria-expanded={!shut}");
+    expect(box).toContain("onClick={() => fold(g.key)}");
+    expect(box).toContain("{!shut && ( <div id={`attention-${g.key}`}>");
+    expect(box).toContain("{groupNote(list)}");
+    // Remembered in this browser, and a blocked store never breaks the page.
+    expect(box).toContain("window.localStorage.setItem(ATTENTION_FOLD_KEY, JSON.stringify(next));");
+    expect(box).toContain(
+      "setFolded(parseFolded(window.localStorage.getItem(ATTENTION_FOLD_KEY)));",
+    );
+    // More noticeable: a bar with an accent edge, bold words and a solid count.
+    expect(box).toContain("border-l-4 border-primary bg-muted");
+    expect(box).toContain(
+      '<span className="text-sm font-bold uppercase tracking-wide">{g.label}</span>',
+    );
+    // The badge and the summary still count every row, folded or not.
+    expect(box).toContain("{attentionSummary(all)}");
+    expect(box).toContain("{all.length}");
   });
 });
 
