@@ -6,6 +6,7 @@
  * and the small glue around generating. Nothing here touches the database, the request or the
  * clock (times come in). Tested in server-pure.test.ts.
  */
+import { bidLink } from "@/lib/bid-kind";
 import { staleSavedAtText } from "@/lib/bid-stale-save";
 import {
   type ChecklistItem,
@@ -27,6 +28,8 @@ import {
   type RepairItemModule,
   type RepairListModule,
 } from "./model";
+import { isTradeData } from "@/lib/trade-bid";
+
 import { type DocumentSource, inspectionItems, type InspectionSnapshot } from "./variables";
 
 // ------------------------------------------------------------------------------- the bucket
@@ -237,15 +240,19 @@ export function recordLabel(
     : "Ticket";
 }
 
-/** Where the editor's Back goes: the bid in the estimator, or the ticket on Service. */
+/**
+ * Where the editor's Back goes: the bid in the estimator (a trade bid on Trade Bids, Nov 16),
+ * or the ticket on Service.
+ */
 export function backTo(
   kind: DocKind,
-  ids: { bidId: string | null; serviceJobId: string | null },
+  ids: { bidId: string | null; serviceJobId: string | null; bidKind?: string | null | undefined },
 ):
   | { to: "/estimate"; search: { bid: string } }
+  | { to: "/trade-bids"; search: { bid: string } }
   | { to: "/service"; search: { id: string } }
   | { to: "/documents"; search: Record<string, never> } {
-  if (kind === "bid" && ids.bidId) return { to: "/estimate", search: { bid: ids.bidId } };
+  if (kind === "bid" && ids.bidId) return bidLink({ id: ids.bidId, kind: ids.bidKind });
   if (kind === "ticket" && ids.serviceJobId)
     return { to: "/service", search: { id: ids.serviceJobId } };
   return { to: "/documents", search: {} };
@@ -298,6 +305,26 @@ export function bidFromSavedState(
   data: unknown,
   row: { name: string; grand_total: number | null; due_date: string | null },
 ): NonNullable<DocumentSource["bid"]> {
+  const total =
+    row.grand_total === null || !Number.isFinite(row.grand_total) ? null : row.grand_total;
+  // A trade bid (Nov 16) has no roof: the proposal names the job type and prints the scope the
+  // estimator typed. The price is the bid's own, as on a roofing bid.
+  if (isTradeData(data)) {
+    // Read leniently, as the roofing branch does: whatever the saved copy holds still prints.
+    const t = data as Record<string, unknown>;
+    const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const tradeName = text(t["trade_name"]);
+    return {
+      name: row.name,
+      total,
+      system: tradeName,
+      dueDate: row.due_date,
+      sections: [],
+      sqFt: null,
+      warranty: "",
+      trade: { name: tradeName, scope: text(t["scope"]) },
+    };
+  }
   const s = (data ?? {}) as Record<string, unknown>;
   const roofSystem = typeof s["roofSystem"] === "string" ? s["roofSystem"].trim() : "";
   const raw = Array.isArray(s["sections"]) ? (s["sections"] as unknown[]) : [];
@@ -318,7 +345,7 @@ export function bidFromSavedState(
   const sqFt = sections.reduce((a, x) => a + x.lengthFt * x.widthFt, 0);
   return {
     name: row.name,
-    total: row.grand_total === null || !Number.isFinite(row.grand_total) ? null : row.grand_total,
+    total,
     system,
     dueDate: row.due_date,
     sections,

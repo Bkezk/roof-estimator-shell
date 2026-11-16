@@ -65,7 +65,9 @@ function VariableChip({ node }: ReactNodeViewProps) {
       as="span"
       // A blank is a faint dashed placeholder (Nov 6): the PDF prints nothing for it.
       className={cn(
-        "doc-chip inline rounded-sm px-0.5 align-baseline",
+        // pre-line (Nov 16): a value of several lines (a trade bid's Scope of Work) shows its
+        // lines as the PDF prints them.
+        "doc-chip inline whitespace-pre-line rounded-sm px-0.5 align-baseline",
         blank
           ? "border border-dashed border-neutral-300 text-neutral-400 dark:border-neutral-300 dark:text-neutral-400"
           : "bg-sky-100 dark:bg-sky-100",

@@ -31,6 +31,7 @@ import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-st
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid, undoOpportunityFromBid } from "@/lib/opportunities.functions";
 import { syncInspectionOutcomeAfterBidChange } from "@/lib/service-inspection.functions";
+import { asTradeBidData, calcTradeBid, tradeFigures } from "@/lib/trade-bid";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -73,6 +74,8 @@ export const listBids = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("bids")
       .select(LIST_COLUMNS)
+      // Roofing bids only (Nov 16): a trade bid (kind 'trade') has its own list, Trade Bids.
+      .neq("kind", "trade")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .returns<RawListRow[]>();
@@ -179,7 +182,10 @@ export async function removeBidDocumentFiles(
 /** The "Recently deleted" bin: soft-deleted bids still inside the retention window. */
 export const listDeletedBids = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  // Each list has its own bin (Nov 16): Project Bids asks for nothing and gets roofing bids,
+  // Trade Bids asks for kind "trade". The purge of old ones covers both.
+  .validator((d) => z.object({ kind: z.enum(["roof", "trade"]).optional() }).parse(d ?? {}))
+  .handler(async ({ data: asked, context }) => {
     const cutoff = new Date(
       Date.now() - DELETED_BID_RETENTION_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -205,11 +211,12 @@ export const listDeletedBids = createServerFn({ method: "GET" })
         );
       if (purgeError) throw new Error(purgeError.message);
     }
-    const { data, error } = await context.supabase
+    let q = context.supabase
       .from("bids")
       .select("id, name, status, grand_total, updated_at, deleted_at")
-      .not("deleted_at", "is", null)
-      .order("deleted_at", { ascending: false });
+      .not("deleted_at", "is", null);
+    q = asked.kind === "trade" ? q.eq("kind", "trade") : q.neq("kind", "trade");
+    const { data, error } = await q.order("deleted_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data ?? [];
   });
@@ -338,12 +345,14 @@ export const saveBid = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
         .select(
-          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id",
+          "updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id, kind",
         )
         .eq("id", data.id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
       if (!cur) throw new Error("Not saved: this bid no longer exists.");
+      // The roofing estimator never writes over a trade bid (Nov 16): its numbers are its own.
+      if (cur.kind === "trade") throw new Error(TRADE_BID_NOT_SAVED_HERE);
       // A bid deleted from the Bids list while this tab had it open: refused, nothing written.
       if (cur.deleted_at) throw new Error(bidDeletedMessage(cur.deleted_at));
       if (data.expectUpdatedAt && bidSaveIsStale(data.expectUpdatedAt, cur))
@@ -442,13 +451,34 @@ export const saveBid = createServerFn({ method: "POST" })
     return bid;
   });
 
+/** saveBid's refusal for a trade bid: the roofing estimator cannot read or price one. */
+export const TRADE_BID_NOT_SAVED_HERE =
+  "Not saved: this is a trade bid. Open it from Trade Bids to change it.";
+
+/** What a copy of a trade bid carries beyond duplicateBidRow; nothing for a roofing bid. */
+function tradeCopyColumns(source: {
+  kind?: string | null;
+  trade_type_id?: string | null;
+  data: Json;
+}) {
+  if (source.kind !== "trade") return {};
+  const trade = asTradeBidData(source.data);
+  return {
+    kind: "trade",
+    trade_type_id: source.trade_type_id ?? null,
+    ...(trade
+      ? { figures: tradeFigures(calcTradeBid(trade.setup, trade.quantities)) as unknown as Json }
+      : {}),
+  };
+}
+
 /**
  * The name for an untitled save (bid-name.ts customerBidName): the customer the save links or
  * the bid already has (crm_accounts.name), else the customer typed on Setup; the placeholder
  * when there is neither. Live bids starting with that name, this one excluded, are the taken
  * names.
  */
-async function nameAfterCustomer(
+export async function nameAfterCustomer(
   sb: Parameters<typeof liveLockHeldElsewhere>[0],
   data: { id?: string | undefined; accountId?: string | null | undefined; data: unknown },
 ): Promise<string> {
@@ -606,6 +636,8 @@ export const listBidFolders = createServerFn({ method: "GET" })
       .from("bids")
       .select("folder")
       .not("folder", "is", null)
+      // Folders are the Project Bids list's (a trade bid is not filed in one).
+      .neq("kind", "trade")
       .is("deleted_at", null);
     if (error) throw new Error(error.message);
     return folderOptions(
@@ -838,15 +870,19 @@ export const duplicateBid = createServerFn({ method: "POST" })
       .maybeSingle();
     const { data: copy, error: insErr } = await context.supabase
       .from("bids")
-      .insert(
-        duplicateBidRow(
+      .insert({
+        ...duplicateBidRow(
           source,
           (me?.full_name ?? "").trim() || me?.email || null,
           new Date().toISOString(),
           data.name,
           data.dueDate,
         ),
-      )
+        // A copy of a trade bid is a trade bid (Nov 16), with the figures the Margin report
+        // reads worked out again from the numbers it copied (a roofing copy gets its figures
+        // at its first save in the estimator, as before).
+        ...tradeCopyColumns(source),
+      })
       .select()
       .single();
     if (insErr) throw new Error(insErr.message);

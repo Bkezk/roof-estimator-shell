@@ -87,6 +87,8 @@ describe("1. the slim list", () => {
         select: (cols: string) => {
           selects.push(`${table}: ${cols}`);
           const q = {
+            // Nov 16, Trade Bids: the list leaves trade bids out (.neq("kind", "trade")).
+            neq: () => q,
             is: () => q,
             order: () => q,
             returns: () => Promise.resolve({ data: [raw], error: null }),

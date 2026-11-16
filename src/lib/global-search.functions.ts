@@ -118,7 +118,7 @@ export const globalSearch = createServerFn({ method: "GET" })
         read("bid", () =>
           sb
             .from("bids")
-            .select("id, name, status, updated_at, account_id")
+            .select("id, name, kind, status, updated_at, account_id")
             .is("deleted_at", null)
             .or(searchFilter("bid", q))
             .order("updated_at", { ascending: false })
@@ -232,8 +232,13 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "bid",
         id: s(r["id"]),
         title: s(r["name"]),
-        subtitle: joinParts(nameOf(r), searchStatusLabel("bid", s(r["status"]))),
-        ...hitRoute("bid", { id: s(r["id"]) }),
+        // A trade bid says so: the tag on every bid hit reads "Project Bid".
+        subtitle: joinParts(
+          s(r["kind"]) === "trade" ? "Trade bid" : "",
+          nameOf(r),
+          searchStatusLabel("bid", s(r["status"])),
+        ),
+        ...hitRoute("bid", { id: s(r["id"]), bid_kind: s(r["kind"]) }),
       });
     for (const r of invoices)
       hits.push({

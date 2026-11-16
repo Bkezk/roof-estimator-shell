@@ -42,7 +42,8 @@ describe("bidCustomerProblem", () => {
 describe("the wiring", () => {
   it("saveBid guards both the insert and the update, reading the stored link", () => {
     const src = read("./bids.functions.ts");
-    expect(src).toContain('status_changed_at, deleted_at, account_id",');
+    // Nov 16, Trade Bids: the read also takes `kind`, so the save refuses a trade bid.
+    expect(src).toContain('status_changed_at, deleted_at, account_id, kind",');
     expect(src).toContain("accountId: data.accountId,\n        storedAccountId: cur.account_id,");
     expect(src).toContain("accountId: data.accountId ?? null,\n      storedAccountId: null,");
     const guard = src.indexOf(

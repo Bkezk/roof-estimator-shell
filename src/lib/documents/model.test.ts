@@ -5,7 +5,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { defaultTemplates, INSPECTION_REPORT_TEMPLATE, missingDefaultTemplates } from "./defaults";
+import {
+  defaultTemplates,
+  INSPECTION_REPORT_TEMPLATE,
+  missingDefaultTemplates,
+  TRADE_PROPOSAL_TEMPLATE,
+} from "./defaults";
 import {
   addModule,
   addPage,
@@ -351,19 +356,23 @@ describe("the Inspection report template (phase 2)", () => {
       { kind: "ticket", name: "Service letter", deleted_at: null },
     ];
     const added = missingDefaultTemplates(existing);
-    expect(added.map((t) => t.name)).toEqual([INSPECTION_REPORT_TEMPLATE]);
-    expect(added[0]!.isDefault).toBe(false);
+    // Nov 16, Trade Bids: the Trade proposal reaches the install the same way. This read
+    // [INSPECTION_REPORT_TEMPLATE] alone.
+    expect(added.map((t) => t.name)).toEqual([TRADE_PROPOSAL_TEMPLATE, INSPECTION_REPORT_TEMPLATE]);
+    expect(added.map((t) => t.isDefault)).toEqual([false, false]);
     // Removed by the office: stays removed.
     expect(
       missingDefaultTemplates([
         ...existing,
         { kind: "ticket", name: "inspection report", deleted_at: "2026-10-27T00:00:00Z" },
+        { kind: "bid", name: "trade proposal", deleted_at: "2026-11-17T00:00:00Z" },
       ]),
     ).toEqual([]);
     // A fresh install: everything, the first of each kind the default.
     const fresh = missingDefaultTemplates([]);
     expect(fresh.map((t) => [t.kind, t.isDefault])).toEqual([
       ["bid", true],
+      ["bid", false],
       ["bid", false],
       ["ticket", true],
       ["ticket", false],

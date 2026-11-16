@@ -43,6 +43,11 @@ export function NewDocumentDialog(props: {
   bidId?: string | undefined;
   serviceJobId?: string | undefined;
   recordLabel: string;
+  /**
+   * A template name to start on when it exists (Nov 16: a trade bid starts on the Trade
+   * proposal). The office's default is used when it is missing or was removed.
+   */
+  prefer?: string | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated?: ((id: string) => void) | undefined;
@@ -73,7 +78,11 @@ export function NewDocumentDialog(props: {
     }
   }, [props.open]);
 
-  const defaultTemplate = rows.find((t) => t.is_default) ?? rows[0] ?? null;
+  const defaultTemplate =
+    (props.prefer ? rows.find((t) => t.name === props.prefer) : undefined) ??
+    rows.find((t) => t.is_default) ??
+    rows[0] ??
+    null;
   const pickedId = templateId ?? defaultTemplate?.id ?? BLANK;
   const picked = pickedId === BLANK ? null : (rows.find((t) => t.id === pickedId) ?? null);
   const effTitle =

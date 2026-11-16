@@ -316,6 +316,8 @@ describe("listBids carries the inspection ticket with the row", () => {
       from: (table: string) => ({
         select: () => {
           const q = {
+            // Nov 16, Trade Bids: the list leaves trade bids out (.neq("kind", "trade")).
+            neq: () => q,
             is: () => q,
             order: () => q,
             returns: () =>

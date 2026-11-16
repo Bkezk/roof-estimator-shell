@@ -65,6 +65,7 @@ import {
   X,
 } from "lucide-react";
 
+import { bidLink } from "@/lib/bid-kind";
 import { useAuth } from "@/lib/auth-store";
 import { plainErrText } from "@/lib/plain-error";
 import { dispatchesTickets, isAdmin, seesEveryone, seesOpportunitiesList } from "@/lib/access";
@@ -2366,8 +2367,7 @@ function BidsSection({
                 {suggested.data.map((b) => (
                   <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
                     <Link
-                      to="/estimate"
-                      search={{ bid: b.id }}
+                      {...bidLink(b)}
                       className="min-w-0 flex-1 truncate text-sm font-medium underline-offset-2 hover:underline"
                       title="Open this bid"
                     >
@@ -2399,8 +2399,7 @@ function BidsSection({
               {bids.map((b) => (
                 <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
                   <Link
-                    to="/estimate"
-                    search={{ bid: b.id }}
+                    {...bidLink(b)}
                     className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
                     title="Open this bid"
                   >

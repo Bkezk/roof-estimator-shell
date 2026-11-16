@@ -28,6 +28,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ServiceRouteImport } from './routes/service'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
+import { Route as TradeBidsRouteImport } from './routes/trade-bids'
 import { Route as AdminCenterpointImportRouteImport } from './routes/admin.centerpoint-import'
 import { Route as AdminDocumentsRouteImport } from './routes/admin.documents'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
@@ -150,6 +151,11 @@ const SetupRoute = SetupRouteImport.update({
 const TakeoffRoute = TakeoffRouteImport.update({
   id: '/takeoff',
   path: '/takeoff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TradeBidsRoute = TradeBidsRouteImport.update({
+  id: '/trade-bids',
+  path: '/trade-bids',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCenterpointImportRoute = AdminCenterpointImportRouteImport.update({
@@ -313,6 +319,7 @@ export interface FileRoutesByFullPath {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/trade-bids': typeof TradeBidsRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -362,6 +369,7 @@ export interface FileRoutesByTo {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/trade-bids': typeof TradeBidsRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -412,6 +420,7 @@ export interface FileRoutesById {
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
+  '/trade-bids': typeof TradeBidsRoute
   '/admin/centerpoint-import': typeof AdminCenterpointImportRoute
   '/admin/documents': typeof AdminDocumentsRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -463,6 +472,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/trade-bids'
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
@@ -512,6 +522,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/trade-bids'
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
@@ -561,6 +572,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/setup'
     | '/takeoff'
+    | '/trade-bids'
     | '/admin/centerpoint-import'
     | '/admin/documents'
     | '/admin/duro-last'
@@ -611,6 +623,7 @@ export interface RootRouteChildren {
   ServiceRoute: typeof ServiceRouteWithChildren
   SetupRoute: typeof SetupRoute
   TakeoffRoute: typeof TakeoffRoute
+  TradeBidsRoute: typeof TradeBidsRoute
   AdminCenterpointImportRoute: typeof AdminCenterpointImportRoute
   AdminDocumentsRoute: typeof AdminDocumentsRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
@@ -771,6 +784,13 @@ declare module '@tanstack/react-router' {
       path: '/takeoff'
       fullPath: '/takeoff'
       preLoaderRoute: typeof TakeoffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trade-bids': {
+      id: '/trade-bids'
+      path: '/trade-bids'
+      fullPath: '/trade-bids'
+      preLoaderRoute: typeof TradeBidsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/centerpoint-import': {
@@ -1007,6 +1027,7 @@ const rootRouteChildren: RootRouteChildren = {
   ServiceRoute: ServiceRouteWithChildren,
   SetupRoute: SetupRoute,
   TakeoffRoute: TakeoffRoute,
+  TradeBidsRoute: TradeBidsRoute,
   AdminCenterpointImportRoute: AdminCenterpointImportRoute,
   AdminDocumentsRoute: AdminDocumentsRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,

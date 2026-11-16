@@ -12,6 +12,7 @@
  * else's work or everyone's; anyone else always gets their own, whatever they ask for.
  */
 import { seesEveryone } from "@/lib/access";
+import { bidHref } from "@/lib/bid-kind";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { notificationPath } from "@/lib/notification-link";
 
@@ -403,6 +404,8 @@ export interface UnassignedRows {
  */
 export interface BidIn {
   id: string;
+  /** "roof" or "trade" (Nov 16): where the row opens. */
+  kind?: string | null;
   name: string;
   status: string;
   /** When it must go out (YYYY-MM-DD); null on a bid from before due dates existed → Later. */
@@ -731,7 +734,7 @@ export function bidItem(b: BidIn, names: Record<string, string> = {}): WorkItem 
     date: b.due_date,
     status: BID_STATUS_LABELS.draft,
     done: false,
-    href: `/estimate?bid=${b.id}`,
+    href: bidHref(b),
     assigneeId: b.created_by,
     assigneeName: b.created_by ? (names[b.created_by] ?? null) : null,
     followup: null,

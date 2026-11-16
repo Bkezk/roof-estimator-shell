@@ -19,6 +19,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Link2, Loader2, MapPin, Pencil, Trash2, Wrench } from "lucide-react";
 
+import { bidLink } from "@/lib/bid-kind";
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets, seesOpportunitiesList } from "@/lib/access";
 import {
@@ -285,8 +286,7 @@ function PropertyBids({ bids }: { bids: LinkedBidRow[] }) {
           {bids.map((b) => (
             <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
               <Link
-                to="/estimate"
-                search={{ bid: b.id }}
+                {...bidLink(b)}
                 className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
                 title="Open this bid"
               >

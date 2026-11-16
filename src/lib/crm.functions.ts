@@ -299,6 +299,8 @@ export const listAccounts = createServerFn({ method: "GET" })
 
 export interface LinkedBidRow {
   id: string;
+  /** "roof" or "trade" (Nov 16): where the bid opens (bid-kind.ts). */
+  kind?: string | null;
   name: string;
   status: string;
   grand_total: number;
@@ -437,7 +439,7 @@ export const getAccount = createServerFn({ method: "GET" })
     if (canAccess(p, "estimate")) {
       const { data: b } = await sb
         .from("bids")
-        .select("id, name, status, grand_total, updated_at")
+        .select("id, name, kind, status, grand_total, updated_at")
         .eq("account_id", data.id)
         .is("deleted_at", null)
         .order("updated_at", { ascending: false })
@@ -617,7 +619,7 @@ export const getProperty = createServerFn({ method: "GET" })
     if (canAccess(p, "estimate")) {
       const { data: b } = await sb
         .from("bids")
-        .select("id, name, status, grand_total, updated_at")
+        .select("id, name, kind, status, grand_total, updated_at")
         .eq("site_id", data.id)
         .is("deleted_at", null)
         .order("updated_at", { ascending: false })
@@ -1163,7 +1165,7 @@ export const listUnlinkedBids = createServerFn({ method: "GET" })
     const q = data.q.replace(/[%_,]/g, " ").trim();
     const { data: rows, error } = await context.supabase
       .from("bids")
-      .select("id, name, status, grand_total, updated_at")
+      .select("id, name, kind, status, grand_total, updated_at")
       .is("deleted_at", null)
       .is("account_id", null)
       .ilike("name", q ? `%${q}%` : "%")
@@ -1195,7 +1197,9 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
     if (name.length < 3) return [];
     const { data: rows, error } = await sb
       .from("bids")
-      .select("id, name, status, grand_total, updated_at, customer_name:data->customer->>name")
+      .select(
+        "id, name, kind, status, grand_total, updated_at, customer_name:data->customer->>name",
+      )
       .is("deleted_at", null)
       .is("account_id", null)
       .order("updated_at", { ascending: false })
@@ -1212,6 +1216,7 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
       if (hit)
         out.push({
           id: r.id,
+          kind: r.kind ?? null,
           name: r.name,
           status: r.status,
           grand_total: r.grand_total,

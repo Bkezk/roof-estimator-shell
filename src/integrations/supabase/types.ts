@@ -337,6 +337,7 @@ export type Database = {
           from_job_id: string | null
           grand_total: number
           id: string
+          kind: string
           lost_reason: string | null
           name: string
           notified_due_at: string | null
@@ -352,6 +353,7 @@ export type Database = {
           status_changed_at: string | null
           submitted_at: string | null
           takeoff_id: string | null
+          trade_type_id: string | null
           updated_at: string
           updated_by_name: string | null
           won_on: string | null
@@ -370,6 +372,7 @@ export type Database = {
           from_job_id?: string | null
           grand_total?: number
           id?: string
+          kind?: string
           lost_reason?: string | null
           name: string
           notified_due_at?: string | null
@@ -385,6 +388,7 @@ export type Database = {
           status_changed_at?: string | null
           submitted_at?: string | null
           takeoff_id?: string | null
+          trade_type_id?: string | null
           updated_at?: string
           updated_by_name?: string | null
           won_on?: string | null
@@ -403,6 +407,7 @@ export type Database = {
           from_job_id?: string | null
           grand_total?: number
           id?: string
+          kind?: string
           lost_reason?: string | null
           name?: string
           notified_due_at?: string | null
@@ -418,6 +423,7 @@ export type Database = {
           status_changed_at?: string | null
           submitted_at?: string | null
           takeoff_id?: string | null
+          trade_type_id?: string | null
           updated_at?: string
           updated_by_name?: string | null
           won_on?: string | null
@@ -470,6 +476,13 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "crm_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bids_trade_type_id_fkey"
+            columns: ["trade_type_id"]
+            isOneToOne: false
+            referencedRelation: "trade_types"
             referencedColumns: ["id"]
           },
         ]
@@ -4629,6 +4642,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      trade_types: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          setup: Json
+          updated_at: string
+          updated_by_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          setup?: Json
+          updated_at?: string
+          updated_by_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          setup?: Json
+          updated_at?: string
+          updated_by_name?: string | null
+        }
+        Relationships: []
       }
       underlayment_board_group: {
         Row: {

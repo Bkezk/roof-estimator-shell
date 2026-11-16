@@ -182,6 +182,8 @@ export async function readBidReminderSettings(admin: Client): Promise<BidReminde
 type BidRow = {
   id: string;
   name: string;
+  /** "roof" or "trade": where the notice's link opens (bid-kind.ts). */
+  kind: string | null;
   status: string | null;
   due_date: string | null;
   created_by: string | null;
@@ -255,7 +257,7 @@ async function sendBidNotices(
 }
 
 const BID_COLUMNS =
-  "id, name, status, due_date, created_by, account_id, notified_due_at, notified_overdue_at, reminder_on, reminder_note, reminded_at";
+  "id, name, kind, status, due_date, created_by, account_id, notified_due_at, notified_overdue_at, reminder_on, reminder_note, reminded_at";
 
 /** 1. "Bid due": draft, dated, not yet noticed, due within `daysBefore` days (or already past). */
 async function dueNotices(

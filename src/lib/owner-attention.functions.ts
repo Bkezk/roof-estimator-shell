@@ -122,7 +122,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
             sb
               .from("bids")
               .select(
-                "id, name, status, due_date, submitted_at, status_changed_at, updated_at, reminder_on, grand_total, created_by",
+                "id, name, kind, status, due_date, submitted_at, status_changed_at, updated_at, reminder_on, grand_total, created_by",
               )
               .is("deleted_at", null)
               .not("status", "in", "(won,accepted,lost,denied)")

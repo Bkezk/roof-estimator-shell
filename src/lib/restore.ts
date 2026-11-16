@@ -218,6 +218,7 @@ export const USER_ID_COLUMNS_WITHOUT_FK: Readonly<Record<string, readonly string
   site_warranties: ["created_by"],
   takeoffs: ["created_by"],
   tasks: ["created_by"],
+  trade_types: ["created_by"],
   vehicle_drivers: ["created_by"],
   vendors: ["created_by"],
 };

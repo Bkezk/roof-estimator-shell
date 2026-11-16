@@ -16,6 +16,12 @@ import {
   type RichDoc,
 } from "./model";
 
+/**
+ * The trade proposal's template name (Nov 16): a trade bid's New document starts on it
+ * (new-document-dialog.tsx `prefer`), a roofing bid's on the Proposal as before.
+ */
+export const TRADE_PROPOSAL_TEMPLATE = "Trade proposal";
+
 /** The inspection report's template name: the ticket page's one-tap button finds it by this. */
 export const INSPECTION_REPORT_TEMPLATE = "Inspection report";
 
@@ -160,6 +166,59 @@ export function defaultTemplates(): DefaultTemplate[] {
     newModule("signature"),
   ]);
 
+  // A trade bid's proposal (owner, Nov 16: "Yes we need printed proposals"): the same letter with
+  // the job type and the scope the estimator typed in place of the roof, and the price as one
+  // line. No roof sections, so no pricing table.
+  const tradeLetter = newPage([
+    newModule("letterhead"),
+    newModule("hr"),
+    body(
+      paras(
+        [richLine([{ variable: "today" }])],
+        "",
+        [richLine([{ variable: "company.name" }])],
+        [richLine([{ variable: "company.contact" }])],
+        [richLine([{ variable: "property.address1" }])],
+        [richLine([{ variable: "property.address2" }])],
+        "",
+        [
+          richLine(
+            ["Re: ", { variable: "opportunity.trade" }, " at ", { variable: "property.name" }],
+            { bold: true },
+          ),
+        ],
+        "",
+        [richLine(["Dear ", { variable: "company.contact" }, ","])],
+        "",
+        [
+          richLine([
+            "Thank you for the opportunity to submit this proposal. JBK, Inc. proposes to furnish all labor, materials, equipment and supervision for the work described below.",
+          ]),
+        ],
+        "",
+        [richLine(["Scope of work"], { bold: true })],
+        [richLine([{ variable: "opportunity.scope" }])],
+        "",
+        [richLine(["Total: ", { variable: "opportunity.price" }], { bold: true })],
+        "",
+        "This proposal is valid for 30 days. Price excludes permits and work not listed above; any additional work will be quoted before it is performed.",
+        "",
+        "Sincerely,",
+        "",
+        [richLine([{ variable: "manager.name" }])],
+        [
+          richLine([
+            "JBK, Inc. · ",
+            { variable: "manager.phone" },
+            " · ",
+            { variable: "manager.email" },
+          ]),
+        ],
+      ),
+    ),
+    newModule("signature"),
+  ]);
+
   const ticketLetter = newPage([
     newModule("letterhead"),
     newModule("hr"),
@@ -275,6 +334,14 @@ export function defaultTemplates(): DefaultTemplate[] {
       description: "The proposal letter without the pricing table or total.",
       options: { ...DEFAULT_OPTIONS, prices: "none" },
       pages: [proposalLetter],
+    },
+    {
+      kind: "bid",
+      name: TRADE_PROPOSAL_TEMPLATE,
+      description:
+        "For a trade bid (painting, siding): the letter with the job type, the scope of work, the total and a signature.",
+      options: { ...DEFAULT_OPTIONS },
+      pages: [tradeLetter],
     },
     {
       kind: "ticket",

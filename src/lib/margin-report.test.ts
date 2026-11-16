@@ -1422,8 +1422,9 @@ describe("the component, pinned to its source", () => {
     );
   });
   it("the drill-down: a bid row links to the estimator with a Bid badge, reads Won, and its day is an editable Won on box; the column says Technician / estimator", () => {
-    expect(src).toContain('to="/estimate"');
-    expect(src).toContain("search={{ bid: i.id }}");
+    // Nov 16, Trade Bids: the link is built by bid-kind.ts (the estimator for a roofing bid,
+    // Trade Bids for a trade bid). This read 'to="/estimate"' and "search={{ bid: i.id }}".
+    expect(src).toContain("{...bidLink({ id: i.id, kind: i.bidKind })}");
     expect(src).toContain("<Badge");
     expect(src).toMatch(/>\s*Bid\s*<\/Badge>/);
     expect(src).toContain('import { STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";');
@@ -1449,7 +1450,8 @@ describe("the component, pinned to its source", () => {
     expect(flat).toMatch(
       /have no cost figures yet \(saved before Oct 21, 2026\) and are not counted: open each in the estimator and save it once\./,
     );
-    expect(src).toContain("search={{ bid: b.id }}");
+    // Nov 16, Trade Bids: built by bid-kind.ts. This read "search={{ bid: b.id }}".
+    expect(src).toContain("{...bidLink(b)}");
   });
   it("the Compare select offers Off, this year vs last year, this month vs the same month last year, Custom; the second From/To starts blank", () => {
     expect(src).toContain("COMPARE_MODES.map(");
@@ -1477,7 +1479,8 @@ describe("the server function, pinned to its source", () => {
   it("the won bids: live, won (the legacy accepted too), keyset-paged, the customer name as a JSON path (never the whole data blob), the won day filtered in code", () => {
     expect(fns).toContain(
       // Nov 16: two more JSON paths, the bid's tax mode (never the whole data blob).
-      '"id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name, own_tax_mode:data->>taxMaterialOnly, priced_tax_mode:data->adminSnapshot->settings->>taxMaterialOnly"',
+      // Nov 16, Trade Bids: `kind` too, so a won trade bid's row opens on Trade Bids.
+      '"id, name, kind, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name, own_tax_mode:data->>taxMaterialOnly, priced_tax_mode:data->adminSnapshot->settings->>taxMaterialOnly"',
     );
     expect(fns).toContain('.in("status", ["won", "accepted"])');
     expect(fns).toContain('.is("deleted_at", null)');

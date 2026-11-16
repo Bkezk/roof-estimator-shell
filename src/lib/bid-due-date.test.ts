@@ -249,7 +249,7 @@ describe("1. saveBid (the server)", () => {
   it("the server reads the row's due_date for the rule and keeps the other save behaviour", () => {
     const fn = read("src/lib/bids.functions.ts");
     expect(fn).toContain(
-      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id",',
+      '"updated_at, content_saved_at, updated_by_name, status, submitted_at, due_date, won_on, status_changed_at, deleted_at, account_id, kind",',
     );
     expect(fn).toMatch(/dueDate: z\s*\.string\(\)\s*\.regex\(/);
     expect(fn).toContain("...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),");
@@ -560,7 +560,8 @@ describe("4. Work Overview — listMyWork (the server)", () => {
     expect(fn).toContain('const estimator = canAccess(me, "estimate");');
     const q = fn.slice(fn.indexOf("const estimator = canAccess"), fn.indexOf("const bRows ="));
     expect(q).toContain('.from("bids")');
-    expect(q).toContain('.select("id, name, status, due_date, account_id, created_by")');
+    // Nov 16, Trade Bids: the read takes `kind` so a trade bid's row opens on Trade Bids.
+    expect(q).toContain('.select("id, name, kind, status, due_date, account_id, created_by")');
     expect(q).toContain('.is("deleted_at", null)');
     expect(q).toContain('.eq("status", "draft")');
     expect(q).toContain('.order("due_date", { ascending: true, nullsFirst: false })');

@@ -149,7 +149,7 @@ export interface TradeCustomer {
   jobState?: string | undefined;
   jobZip?: string | undefined;
   estimatorName?: string | undefined;
-  [key: string]: unknown;
+  [key: string]: string | undefined;
 }
 
 export const emptyCustomer = (): TradeCustomer => ({
@@ -239,7 +239,8 @@ export const tradeBidDataSchema = z.object({
       jobZip: text(20).optional(),
       estimatorName: text(120).optional(),
     })
-    .passthrough(),
+    // Any other customer field a link fills in (the client's own address) is text too.
+    .catchall(text(400)),
 });
 
 /** `bids.data` read back as a trade bid; null for a roofing bid or anything malformed. */

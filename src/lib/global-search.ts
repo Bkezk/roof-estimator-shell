@@ -8,6 +8,7 @@
  * security decides what each role sees — a technician finds their own tickets and nothing else.
  */
 import { ilikePattern, orIlike } from "@/lib/account-search";
+import { bidLink } from "@/lib/bid-kind";
 import { STATUS_LABELS as BID_STATUS_LABELS, type BidStatus } from "@/lib/bid-status";
 
 /** Invoice statuses as the Invoices page names them (components/service/invoice-utils.ts). */
@@ -168,7 +169,7 @@ export function searchFilter(kind: SearchKind, q: ParsedQuery): string {
 /** Where a hit opens. Properties and contacts open their customer (the Customers page shows both). */
 export function hitRoute(
   kind: SearchKind,
-  row: { id: string; account_id?: string | null },
+  row: { id: string; account_id?: string | null; bid_kind?: string | null },
 ): { to: string; search: Record<string, string> } {
   switch (kind) {
     case "ticket":
@@ -183,7 +184,8 @@ export function hitRoute(
     case "opportunity":
       return { to: "/opportunities", search: { id: row.id } };
     case "bid":
-      return { to: "/estimate", search: { bid: row.id } };
+      // A trade bid opens on Trade Bids, never in the roofing estimator (bid-kind.ts, Nov 16).
+      return bidLink({ id: row.id, kind: row.bid_kind });
     case "invoice":
       return { to: "/service/invoices", search: { id: row.id } };
     case "vendor":

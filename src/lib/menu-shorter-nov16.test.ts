@@ -59,6 +59,15 @@ describe("Estimate: Takeoffs, Project Bids, Estimate Pricing, Inventory", () => 
     expect(rows).toBeGreaterThan(0);
     expect(pricing).toBeGreaterThan(rows);
     expect(inventory).toBeGreaterThan(pricing);
+    // Trade Bids (owner, later Nov 16: "Not under estimate pricing dropdown but under estimate
+    // pricing above inventory on the nav bar"): a fifth row, after the Estimate Pricing row and
+    // before Inventory, with Estimate access like Project Bids.
+    const trade = group.indexOf('{can("estimate") && tradeBidsRow}');
+    expect(trade).toBeGreaterThan(pricing);
+    expect(trade).toBeGreaterThan(group.indexOf("</Collapsible>"));
+    expect(inventory).toBeGreaterThan(trade);
+    expect(nav).toContain('<SidebarMenuItem data-nav="trade-bids">');
+    expect(nav).toContain("{!collapsed && <span>Trade Bids</span>}");
     expect(group).toContain(".filter((item) => can(item.page))");
   });
   it("has no Estimate Pricing group and no Inventory group of their own any more", () => {

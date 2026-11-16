@@ -242,6 +242,8 @@ export interface MarginInvoiceIn {
   id: string;
   /** A service invoice, or a won bid (bidToMarginIn). */
   kind: MarginRowKind;
+  /** A bid's own kind, "roof" or "trade" (Nov 16): where its row opens (bid-kind.ts). */
+  bidKind?: string | null | undefined;
   /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel), or the bid's name. */
   number: string;
   /** YYYY-MM-DD (invoiceDay; bidWonDay for a bid). */
@@ -283,6 +285,8 @@ export interface MarginBidIn {
   estimator: string | null;
   estimatorId: string | null;
   figures: BidFigures;
+  /** "roof" or "trade" (bids.kind, Nov 16). A trade bid is counted by the same rules. */
+  bidKind?: string | null | undefined;
   /**
    * Was the bid priced with sales tax on material only? Its own setting, else the company
    * setting it was priced under; null when neither is known. Read only for figures saved before
@@ -314,6 +318,7 @@ export function bidToMarginIn(b: MarginBidIn): MarginInvoiceIn {
   return {
     id: b.id,
     kind: "bid",
+    bidKind: b.bidKind,
     number: b.name,
     day: bidWonDay(b),
     status: "won",
@@ -337,6 +342,8 @@ export function bidToMarginIn(b: MarginBidIn): MarginInvoiceIn {
 export interface MarginInvoiceRow {
   id: string;
   kind: MarginRowKind;
+  /** A bid's own kind, "roof" or "trade": a trade bid opens on Trade Bids. */
+  bidKind?: string | null | undefined;
   number: string;
   day: string;
   status: MarginRowStatus;
@@ -374,6 +381,7 @@ export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
   return {
     id: inv.id,
     kind: inv.kind,
+    ...(inv.bidKind === "trade" ? { bidKind: "trade" } : {}),
     number: inv.number,
     day: inv.day,
     status: inv.status,
@@ -435,7 +443,7 @@ export interface MarginReportResult extends MarginPeriod {
    * Won bids of the range whose figures column is null (saved before Oct 21, 2026): counted
    * nowhere, listed so each can be opened in the estimator and saved once.
    */
-  bidsWithoutFigures: { id: string; name: string; day: string }[];
+  bidsWithoutFigures: { id: string; name: string; day: string; kind?: string | null }[];
   /** When the numbers were read (ISO). */
   generatedAt: string;
   /** The comparison period, when one was asked for (the same groupBy and source). */

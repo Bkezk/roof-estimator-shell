@@ -126,7 +126,8 @@ describe("a save into a deleted bid is refused, saying so (nothing written)", ()
   });
   it("saveBid reads deleted_at and refuses before the stale check and the write", () => {
     const src = read("./bids.functions.ts");
-    expect(src).toContain('status_changed_at, deleted_at, account_id",');
+    // Nov 16, Trade Bids: the read also takes `kind`, so the save refuses a trade bid.
+    expect(src).toContain('status_changed_at, deleted_at, account_id, kind",');
     const gone = src.indexOf(
       "if (cur.deleted_at) throw new Error(bidDeletedMessage(cur.deleted_at));",
     );

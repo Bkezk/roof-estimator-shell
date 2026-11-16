@@ -49,6 +49,7 @@
  * Pure: plain rows and the viewer's day in, rows and words out. The server function is
  * owner-attention.functions.ts; components/owner-attention.tsx draws it.
  */
+import { bidHref } from "@/lib/bid-kind";
 import { asBidStatus } from "@/lib/bid-status";
 import { daysBetween, shortDay } from "@/lib/followup-rules";
 import { isFlagged, visibleChecklist, type InspectionGrade } from "@/lib/inspection";
@@ -157,6 +158,8 @@ export interface AttOpp {
 }
 export interface AttBid {
   id: string;
+  /** "roof" or "trade" (Nov 16): where the row opens. A trade bid is counted like any bid. */
+  kind?: string | null;
   name: string | null;
   status: string | null;
   due_date: string | null;
@@ -476,7 +479,7 @@ export function attentionList(i: AttentionIn): AttentionList {
       ageText: late(age),
       tone: toneOf(age, 1),
       amount: num(b.grand_total) || null,
-      href: `/estimate?bid=${b.id}`,
+      href: bidHref(b),
     });
   }
 
@@ -522,7 +525,7 @@ export function attentionList(i: AttentionIn): AttentionList {
       ageText: days(age),
       tone,
       amount: num(b.grand_total) || null,
-      href: `/estimate?bid=${b.id}`,
+      href: bidHref(b),
     });
   }
 

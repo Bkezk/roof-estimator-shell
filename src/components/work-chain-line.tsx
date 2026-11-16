@@ -18,6 +18,7 @@ import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Workflow } from "lucide-react";
 
+import { bidLink } from "@/lib/bid-kind";
 import { useAuth } from "@/lib/auth-store";
 import { chainText, type ChainKind, type ChainPart } from "@/lib/work-chain";
 import { getWorkChain } from "@/lib/work-chain.functions";
@@ -56,7 +57,7 @@ function Part({ p }: { p: ChainPart }) {
       </Link>
     );
   return (
-    <Link to="/estimate" search={{ bid: p.id }} className={cls} data-part={p.kind}>
+    <Link {...bidLink({ id: p.id, kind: p.bidKind })} className={cls} data-part={p.kind}>
       {text}
     </Link>
   );

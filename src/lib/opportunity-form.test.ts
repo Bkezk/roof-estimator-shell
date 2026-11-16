@@ -196,7 +196,9 @@ describe("the opportunity page (owner, Oct 1)", () => {
     // Owner, Oct 12: the linked bid is a small card (BidCard: name, status, total, when
     // submitted, the one-way rule) in the header's place.
     expect(header).toContain("<BidCard opp={opp} />");
-    expect(page).toContain("search={{ bid: opp.bid_id! }}");
+    // Nov 16, Trade Bids: the link is built by bid-kind.ts. This read
+    // "search={{ bid: opp.bid_id! }}".
+    expect(page).toContain("{...bidLink({ id: opp.bid_id!, kind: opp.bid_kind })}");
   });
 
   it("the site shows on the list card and in the header line", () => {

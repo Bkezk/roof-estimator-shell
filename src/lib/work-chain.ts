@@ -46,6 +46,8 @@ export interface ChainTicket {
 }
 export interface ChainBid {
   id: string;
+  /** "roof" or "trade" (Nov 16): where the bid's link opens (bid-kind.ts). */
+  kind?: string | null;
   name: string;
   status: string;
   deleted: boolean;
@@ -70,6 +72,8 @@ export interface ChainPart {
   current: boolean;
   /** Deleted: no link. */
   deleted: boolean;
+  /** A bid's kind, "roof" or "trade": a trade bid opens on Trade Bids. */
+  bidKind?: string | null;
 }
 /** The records at one step, side by side. */
 export type ChainStep = ChainPart[];
@@ -104,6 +108,7 @@ const bidPart = (b: ChainBid): Omit<ChainPart, "current"> => ({
   label: `Bid: ${b.name.trim() || "Untitled"}`,
   status: b.deleted ? CHAIN_DELETED : (BID_STATUS_LABELS[b.status as BidStatus] ?? b.status),
   deleted: b.deleted,
+  ...(b.kind === "trade" ? { bidKind: "trade" } : {}),
 });
 
 /** A ticket can only be so many steps from the top; a loop in the data stops here. */

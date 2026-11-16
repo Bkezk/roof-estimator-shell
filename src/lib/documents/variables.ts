@@ -99,6 +99,16 @@ export const VARIABLE_DEFS: VariableDef[] = [
   v("opportunity.sections", "Roof Sections", "Opportunity", "2", ["bid"]),
   v("opportunity.sqft", "Bid Square Feet", "Opportunity", "52,500", ["bid"]),
   v("opportunity.warranty", "Warranty", "Opportunity", "20 Yr NDL", ["bid"]),
+  // A trade bid (Nov 16: painting, siding): its job type and what the job covers. Blank on a
+  // roofing bid.
+  v("opportunity.trade", "Job Type", "Opportunity", "Painting", ["bid"]),
+  v(
+    "opportunity.scope",
+    "Scope of Work",
+    "Opportunity",
+    "Prepare and paint the exterior walls and trim, two coats.",
+    ["bid"],
+  ),
   // Ticket.
   v("ticket.number", "Ticket Number", "Ticket", "6012", ["ticket"]),
   v("ticket.description", "Ticket Description", "Ticket", "Leak over room 104", ["ticket"]),
@@ -187,6 +197,8 @@ export interface DocumentSource {
     sections: Array<{ name: string; lengthFt: number; widthFt: number; system: string }>;
     sqFt: number | null;
     warranty: string;
+    /** A trade bid's job type and scope of work (server-pure.ts bidFromSavedState). */
+    trade?: { name: string; scope: string } | null;
   } | null;
   ticket: {
     number: string;
@@ -350,6 +362,8 @@ export function resolveVariables(src: DocumentSource): Record<string, string> {
     out["opportunity.sections"] = String(b.sections.length);
     out["opportunity.sqft"] = int(b.sqFt);
     out["opportunity.warranty"] = b.warranty;
+    out["opportunity.trade"] = b.trade?.name ?? "";
+    out["opportunity.scope"] = b.trade?.scope ?? "";
   }
   if (src.kind === "ticket" && src.ticket) {
     const t = src.ticket;

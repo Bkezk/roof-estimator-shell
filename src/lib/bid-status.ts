@@ -3,6 +3,7 @@
  * Lost. The legacy Bid-Advantage pipeline (In Progress → Finished → Submitted → Review → Final →
  * Accepted / Denied) folds into these when an old value is read.
  */
+import { bidHref, bidOpenWords } from "@/lib/bid-kind";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 
@@ -307,7 +308,7 @@ export function bidDueNoticeDue(
  * estimator to finish and submit it." (no account: "Due …").
  */
 export function bidDueNotice(
-  bid: { id: string; name: string; due_date: string },
+  bid: { id: string; name: string; due_date: string; kind?: string | null },
   accountName: string | null | undefined,
   today: string,
 ): { kind: string; title: string; body: string; url: string } {
@@ -325,8 +326,9 @@ export function bidDueNotice(
   return {
     kind: BID_DUE_NOTICE_KIND,
     title: `${head}: ${bid.name}`,
-    body: `${who ? `${who} · due` : "Due"} ${longDay(due)}. Open the estimator to finish and submit it.`,
-    url: `/estimate?bid=${bid.id}`,
+    body: `${who ? `${who} · due` : "Due"} ${longDay(due)}. ${bidOpenWords(bid.kind)} to finish and submit it.`,
+    // A trade bid opens on Trade Bids, a roofing bid in the estimator (bid-kind.ts, Nov 16).
+    url: bidHref(bid),
   };
 }
 
@@ -360,7 +362,7 @@ export function bidOverdueNoticeDue(
  * Open the estimator to submit it, or mark it won or lost." (one day: "1 day past due").
  */
 export function bidOverdueNotice(
-  bid: { id: string; name: string; due_date: string },
+  bid: { id: string; name: string; due_date: string; kind?: string | null },
   accountName: string | null | undefined,
   today: string,
 ): { kind: string; title: string; body: string; url: string } {
@@ -369,8 +371,9 @@ export function bidOverdueNotice(
   return {
     kind: BID_OVERDUE_NOTICE_KIND,
     title: `Bid past due: ${bid.name}`,
-    body: `${days} day${days === 1 ? "" : "s"} past due (due ${longDay(bid.due_date)})${who ? ` · ${who}` : ""}. Open the estimator to submit it, or mark it won or lost.`,
-    url: `/estimate?bid=${bid.id}`,
+    body: `${days} day${days === 1 ? "" : "s"} past due (due ${longDay(bid.due_date)})${who ? ` · ${who}` : ""}. ${bidOpenWords(bid.kind)} to submit it, or mark it won or lost.`,
+    // A trade bid opens on Trade Bids, a roofing bid in the estimator (bid-kind.ts, Nov 16).
+    url: bidHref(bid),
   };
 }
 
@@ -393,7 +396,12 @@ export function bidReminderDue(
  * this bid today." — with the account's name when there is one), linking to the estimator.
  */
 export function bidReminderNotice(
-  bid: { id: string; name: string; reminder_note: string | null | undefined },
+  bid: {
+    id: string;
+    name: string;
+    reminder_note: string | null | undefined;
+    kind?: string | null;
+  },
   accountName: string | null | undefined,
 ): { kind: string; title: string; body: string; url: string } {
   const note = (bid.reminder_note ?? "").trim();
@@ -402,7 +410,8 @@ export function bidReminderNotice(
     kind: BID_REMINDER_KIND,
     title: `Bid reminder: ${bid.name}`,
     body: note || `You asked to be reminded about this bid today.${who ? ` ${who}.` : ""}`,
-    url: `/estimate?bid=${bid.id}`,
+    // A trade bid opens on Trade Bids, a roofing bid in the estimator (bid-kind.ts, Nov 16).
+    url: bidHref(bid),
   };
 }
 

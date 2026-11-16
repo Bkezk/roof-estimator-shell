@@ -279,7 +279,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     let bq = estimator
       ? sb
           .from("bids")
-          .select("id, name, status, due_date, account_id, created_by")
+          .select("id, name, kind, status, due_date, account_id, created_by")
           .is("deleted_at", null)
           .eq("status", "draft")
           .order("due_date", { ascending: true, nullsFirst: false })
@@ -493,7 +493,7 @@ export const listMyWork = createServerFn({ method: "GET" })
 /** The bid columns Work Overview reads (`listMyWork`). */
 type BidRow = Pick<
   Database["public"]["Tables"]["bids"]["Row"],
-  "id" | "name" | "status" | "due_date" | "account_id" | "created_by"
+  "id" | "name" | "kind" | "status" | "due_date" | "account_id" | "created_by"
 >;
 
 /**

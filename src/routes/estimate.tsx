@@ -1126,6 +1126,13 @@ function EstimatePage() {
     queryFn: () => getBidFn({ data: { id: bidParam! } }),
     enabled: authed && !!bidParam,
   });
+  // A trade bid (Nov 16: painting, siding) is not this screen's. An old link to one, or an
+  // address typed by hand, opens it on Trade Bids; nothing of it is loaded here.
+  const loadedTradeId = loadedBid?.kind === "trade" ? loadedBid.id : null;
+  useEffect(() => {
+    if (loadedTradeId)
+      void navigate({ to: "/trade-bids", search: { bid: loadedTradeId }, replace: true });
+  }, [loadedTradeId, navigate]);
   // The opportunity this bid was started from (bids.opportunity_id; owner, Oct 12): "From
   // opportunity: <title>" under the Status select, linking back. Read under the opportunity's own
   // RLS (Estimate access reads them all).
@@ -1273,6 +1280,8 @@ function EstimatePage() {
   };
   useEffect(() => {
     if (!loadedBid || hydratedFor.current === loadedBid.id) return;
+    // A trade bid (Nov 16) is never loaded into the roofing estimator: see the redirect below.
+    if (loadedBid.kind === "trade") return;
     const d = loadedBid.data as unknown as Partial<SavedBidState> | null;
     setLoadedBidEmpty(!(d && Array.isArray(d.sections)));
     if (d && Array.isArray(d.sections)) {

@@ -28,6 +28,7 @@ import {
   ListTodo,
   Settings2,
   CircleDollarSign,
+  PaintRoller,
 } from "lucide-react";
 
 import logoSmall from "@/assets/jbk-logo-360.webp";
@@ -303,6 +304,13 @@ const adminItems: {
   },
 ];
 
+/**
+ * Trade Bids (owner, Nov 16: "Not under estimate pricing dropdown but under estimate pricing
+ * above inventory on the nav bar"): a row of its own in the Estimate group, between the
+ * Estimate Pricing row and Inventory.
+ */
+const TRADE_BIDS_PATH = "/trade-bids";
+
 /** Is this one of the Estimate Pricing pages (the five rows and the pages their sub-lists open)? */
 const isPricingPath = (pathname: string): boolean =>
   adminItems.some(
@@ -518,6 +526,18 @@ export function AppSidebar() {
       )}
     </>
   );
+  // Trade Bids: its own row under Estimate Pricing and above Inventory (owner, Nov 16). It is a
+  // page for bidding, so it shows with Estimate access, as Project Bids does.
+  const tradeBidsRow = (
+    <SidebarMenuItem data-nav="trade-bids">
+      <SidebarMenuButton asChild isActive={isActive(TRADE_BIDS_PATH)} tooltip="Trade Bids">
+        <Link to={TRADE_BIDS_PATH}>
+          <PaintRoller className="h-4 w-4" />
+          {!collapsed && <span>Trade Bids</span>}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
   const inventoryRows = inventoryItems.map((item) => (
     <SidebarMenuItem key={item.title}>
       <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
@@ -674,6 +694,7 @@ export function AppSidebar() {
                     </SidebarMenuItem>
                   </Collapsible>
                 ))}
+              {can("estimate") && tradeBidsRow}
               {can("inventory") && inventoryRows}
             </SidebarMenu>
           </NavGroup>

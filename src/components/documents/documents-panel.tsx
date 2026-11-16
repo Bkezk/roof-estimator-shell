@@ -51,6 +51,8 @@ export function DocumentsPanel(props: {
   bidId?: string | undefined;
   serviceJobId?: string | undefined;
   recordLabel: string;
+  /** The template a new document starts on, by name (a trade bid: the Trade proposal). */
+  prefer?: string | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -79,6 +81,7 @@ export function DocumentsPanel(props: {
         bidId={props.bidId}
         serviceJobId={props.serviceJobId}
         recordLabel={props.recordLabel}
+        prefer={props.prefer}
         open={newOpen}
         onOpenChange={setNewOpen}
         onCreated={() => props.onOpenChange(false)}

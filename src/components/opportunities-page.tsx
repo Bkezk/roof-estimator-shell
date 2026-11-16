@@ -62,6 +62,7 @@ import {
   X,
 } from "lucide-react";
 
+import { bidLink } from "@/lib/bid-kind";
 import { useAuth } from "@/lib/auth-store";
 import {
   canAccess,
@@ -1544,8 +1545,7 @@ function BidCard({ opp }: { opp: OpportunityWithNames }) {
     >
       <div className="flex flex-wrap items-center gap-2">
         <Link
-          to="/estimate"
-          search={{ bid: opp.bid_id! }}
+          {...bidLink({ id: opp.bid_id!, kind: opp.bid_kind })}
           className="flex min-w-0 items-center gap-1 font-medium hover:underline"
           title="Open the linked bid"
         >

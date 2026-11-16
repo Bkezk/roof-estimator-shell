@@ -223,7 +223,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
           afterId(
             sb
               .from("bids")
-              .select("id, name, status, due_date, account_id, created_by")
+              .select("id, name, kind, status, due_date, account_id, created_by")
               .is("deleted_at", null)
               .eq("status", "draft")
               .order("id")
@@ -541,7 +541,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
         afterId(
           sb
             .from("bids")
-            .select("id, name, status, due_date, account_id, created_by")
+            .select("id, name, kind, status, due_date, account_id, created_by")
             .is("deleted_at", null)
             .eq("status", "draft")
             .eq("created_by", userId)

@@ -21,7 +21,7 @@ import {
 } from "@/lib/work-chain";
 
 const TICKET_COLS = "id, number, service_type, stage, deleted_at, from_opportunity_id, from_job_id";
-const BID_COLS = "id, name, status, deleted_at, opportunity_id, from_job_id";
+const BID_COLS = "id, name, kind, status, deleted_at, opportunity_id, from_job_id";
 type TicketRow = {
   id: string;
   number: number;
@@ -33,6 +33,7 @@ type TicketRow = {
 };
 type BidRow = {
   id: string;
+  kind?: string | null;
   name: string;
   status: string;
   deleted_at: string | null;
@@ -50,6 +51,7 @@ const asTicket = (r: TicketRow): ChainTicket => ({
 });
 const asBid = (r: BidRow): ChainBid => ({
   id: r.id,
+  kind: r.kind ?? null,
   name: r.name,
   status: r.status,
   deleted: !!r.deleted_at,

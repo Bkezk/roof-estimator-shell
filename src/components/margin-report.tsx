@@ -64,6 +64,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { bidLink } from "@/lib/bid-kind";
 import { useAuth } from "@/lib/auth-store";
 import { STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { setBidWonOn } from "@/lib/bids.functions";
@@ -219,8 +220,7 @@ function InvoiceRows({ invoices, source }: { invoices: MarginInvoiceRow[]; sourc
                 {i.kind === "bid" ? (
                   <span className="inline-flex items-center gap-1.5">
                     <Link
-                      to="/estimate"
-                      search={{ bid: i.id }}
+                      {...bidLink({ id: i.id, kind: i.bidKind })}
                       className="font-medium underline-offset-2 hover:underline"
                     >
                       {i.number || "Bid"}
@@ -498,11 +498,7 @@ export function MarginReport() {
           {d.bidsWithoutFigures.map((b, n) => (
             <Fragment key={b.id}>
               {n > 0 && ", "}
-              <Link
-                to="/estimate"
-                search={{ bid: b.id }}
-                className="font-medium underline-offset-2 hover:underline"
-              >
+              <Link {...bidLink(b)} className="font-medium underline-offset-2 hover:underline">
                 {b.name || "Bid"}
               </Link>
             </Fragment>

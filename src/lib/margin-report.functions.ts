@@ -285,6 +285,8 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
 /** A won bid as the read answers it (the select below; the JSON path alias is a plain text column). */
 interface WonBidRead {
   id: string;
+  /** "roof" or "trade" (Nov 16): a won trade bid is in the report like a won roofing bid. */
+  kind?: string | null;
   name: string;
   status: string;
   status_changed_at: string | null;
@@ -322,7 +324,7 @@ async function readWonBids(sb: Sb, from: string, to: string): Promise<PeriodRead
             // own_tax_mode / priced_tax_mode: was the bid priced with sales tax on material
             // only (its own setting, else the company setting in its pricing snapshot)? Read
             // for figures saved before Nov 16, which do not say (bid-figures.ts bidMaterialTax).
-            "id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name, own_tax_mode:data->>taxMaterialOnly, priced_tax_mode:data->adminSnapshot->settings->>taxMaterialOnly",
+            "id, name, kind, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name, own_tax_mode:data->>taxMaterialOnly, priced_tax_mode:data->adminSnapshot->settings->>taxMaterialOnly",
           )
           .in("status", ["won", "accepted"])
           .is("deleted_at", null)
@@ -353,7 +355,12 @@ async function readWonBids(sb: Sb, from: string, to: string): Promise<PeriodRead
   for (const b of inRange) {
     const figures = asBidFigures(b.figures);
     if (!figures) {
-      bidsWithoutFigures.push({ id: b.id, name: b.name, day: bidWonDay(b) });
+      bidsWithoutFigures.push({
+        id: b.id,
+        name: b.name,
+        day: bidWonDay(b),
+        ...(b.kind === "trade" ? { kind: "trade" } : {}),
+      });
       continue;
     }
     rows.push(
@@ -369,6 +376,7 @@ async function readWonBids(sb: Sb, from: string, to: string): Promise<PeriodRead
           estimator: b.created_by ? (estimatorName.get(b.created_by) ?? null) : null,
           estimatorId: b.created_by,
           figures,
+          bidKind: b.kind,
           taxMaterialOnly: jsonFlag(b.own_tax_mode) ?? jsonFlag(b.priced_tax_mode),
         }),
       ),

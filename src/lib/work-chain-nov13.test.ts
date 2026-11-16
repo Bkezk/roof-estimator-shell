@@ -389,7 +389,8 @@ describe("2. readChain: the same chain from each of the four records", () => {
       'const TICKET_COLS = "id, number, service_type, stage, deleted_at, from_opportunity_id, from_job_id";',
     );
     expect(fn).toContain(
-      'const BID_COLS = "id, name, status, deleted_at, opportunity_id, from_job_id";',
+      // Nov 16, Trade Bids: `kind` added, so a trade bid's part opens on Trade Bids.
+      'const BID_COLS = "id, name, kind, status, deleted_at, opportunity_id, from_job_id";',
     );
   });
 });
@@ -401,7 +402,9 @@ describe("3. the line and where it stands", () => {
   it("each part links to its record; the current one is bold and not a link; a deleted one has no link", () => {
     expect(comp).toContain('<Link to="/opportunities" search={{ id: p.id }}');
     expect(comp).toContain('<Link to="/service" search={{ id: p.id }}');
-    expect(comp).toContain('<Link to="/estimate" search={{ bid: p.id }}');
+    // Nov 16, Trade Bids: the bid's link is built by bid-kind.ts (the estimator for a roofing
+    // bid, Trade Bids for a trade bid). This read '<Link to="/estimate" search={{ bid: p.id }}'.
+    expect(comp).toContain("<Link {...bidLink({ id: p.id, kind: p.bidKind })}");
     const current = comp.slice(comp.indexOf("if (p.current)"), comp.indexOf("if (p.deleted)"));
     expect(current).toContain('className="font-semibold"');
     expect(current).toContain('aria-current="true"');

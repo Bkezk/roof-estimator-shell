@@ -362,6 +362,9 @@ export function pageForPath(pathname: string): RoutePage | null {
   // were a manager's; since Nov 10 they are for everyone with Documents access (RLS too).
   if (pathname.startsWith("/admin/documents")) return "documents";
   if (pathname.startsWith("/admin")) return "pricing";
+  // Trade Bids (Nov 16): bids for other trades are bids, the estimators' like Project Bids.
+  // Without this line the address would be open to every signed-in person.
+  if (pathname.startsWith("/trade-bids")) return "estimate";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";
   if (pathname.startsWith("/takeoff")) return "takeoff";

@@ -61,6 +61,8 @@ export type OpportunityWithNames = OpportunityRow & {
   site_name: string | null;
   /** The linked bid's name (bid_id), when the caller may read it. */
   bid_name: string | null;
+  /** The linked bid's kind, "roof" or "trade" (Nov 16): where its card opens (bid-kind.ts). */
+  bid_kind?: string | null;
   /** The linked bid's status (draft / submitted / won / lost), when the caller may read it. */
   bid_status: string | null;
   /** The linked bid's grand total as last saved. */
@@ -234,6 +236,7 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
       account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
       site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,
       bid_name: bid?.name ?? null,
+      bid_kind: bid?.kind ?? null,
       bid_status: bid?.status ?? null,
       bid_grand_total: bid ? Number(bid.grand_total ?? 0) : null,
       bid_submitted_at: bid?.submitted_at ?? null,
@@ -244,6 +247,8 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
 /** What the opportunity page and list show of the linked bid (the bid card, the status chip). */
 interface LinkedBid {
   id: string;
+  /** "roof" or "trade" (Nov 16); null before the column existed. */
+  kind?: string | null;
   name: string;
   status: string | null;
   grand_total: number | null;
@@ -256,7 +261,7 @@ interface LinkedBid {
 async function linkedBids(sb: SupabaseClient<Database>, ids: string[]) {
   const full = await sb
     .from("bids")
-    .select("id, name, status, grand_total, submitted_at")
+    .select("id, name, kind, status, grand_total, submitted_at")
     .in("id", ids);
   if (!full.error) return { data: (full.data ?? []) as LinkedBid[] };
   if (full.error.code !== "42703") throw new Error(full.error.message);

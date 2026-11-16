@@ -995,11 +995,17 @@ export interface DocumentBundle {
   siteCoverUrl: string | null;
 }
 
-/** The record's label for a document row (its bid's name or "Ticket <number>"). */
-async function labelOf(sb: Client, doc: Pick<DocumentRow, "kind" | "bid_id" | "service_job_id">) {
+/**
+ * The record's label for a document row (its bid's name or "Ticket <number>"), and the bid's
+ * kind (Nov 16: the editor's Back opens a trade bid on Trade Bids).
+ */
+async function labelOf(
+  sb: Client,
+  doc: Pick<DocumentRow, "kind" | "bid_id" | "service_job_id">,
+): Promise<{ label: string; bidKind: string | null }> {
   if (doc.kind === "bid" && doc.bid_id) {
-    const { data } = await sb.from("bids").select("name").eq("id", doc.bid_id).maybeSingle();
-    return recordLabel("bid", data);
+    const { data } = await sb.from("bids").select("name, kind").eq("id", doc.bid_id).maybeSingle();
+    return { label: recordLabel("bid", data), bidKind: data?.kind ?? null };
   }
   if (doc.service_job_id) {
     const { data } = await sb
@@ -1007,9 +1013,9 @@ async function labelOf(sb: Client, doc: Pick<DocumentRow, "kind" | "bid_id" | "s
       .select("number")
       .eq("id", doc.service_job_id)
       .maybeSingle();
-    return recordLabel("ticket", data);
+    return { label: recordLabel("ticket", data), bidKind: null };
   }
-  return recordLabel(doc.kind as DocKind, null);
+  return { label: recordLabel(doc.kind as DocKind, null), bidKind: null };
 }
 
 export const getDocument = createServerFn({ method: "POST" })
@@ -1019,7 +1025,7 @@ export const getDocument = createServerFn({ method: "POST" })
     await whoami(context);
     const sb = context.supabase;
     const doc = await documentRow(sb, data.id, true);
-    const [label, photos, contacts, template, site] = await Promise.all([
+    const [{ label, bidKind }, photos, contacts, template, site] = await Promise.all([
       labelOf(sb, doc),
       ticketPhotos(sb, doc),
       doc.account_id
@@ -1041,7 +1047,11 @@ export const getDocument = createServerFn({ method: "POST" })
       document: doc,
       photos,
       recordLabel: label,
-      backTo: backTo(doc.kind as DocKind, { bidId: doc.bid_id, serviceJobId: doc.service_job_id }),
+      backTo: backTo(doc.kind as DocKind, {
+        bidId: doc.bid_id,
+        serviceJobId: doc.service_job_id,
+        bidKind,
+      }),
       contacts: (contacts.data ?? [])
         .filter((c) => s(c.email))
         .map((c) => ({ name: s(c.name), email: s(c.email) })),

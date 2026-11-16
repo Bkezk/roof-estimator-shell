@@ -718,7 +718,8 @@ describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real fun
   it("the queries read bids the way listMyWork does: the same columns and filters, every row by page", () => {
     const src = read("src/lib/owner-view.functions.ts");
     const mine = read("src/lib/my-work.functions.ts");
-    const cols = '.select("id, name, status, due_date, account_id, created_by")';
+    // Nov 16, Trade Bids: `kind` rides with the row so a trade bid opens on Trade Bids.
+    const cols = '.select("id, name, kind, status, due_date, account_id, created_by")';
     expect(mine).toContain(cols);
     expect(src.match(/\.from\("bids"\)/g)).toHaveLength(2); // listOwnerView, getOwnerPersonDetail
     const list = src.slice(

@@ -41,6 +41,8 @@ describe("per-page access", () => {
     expect(pageForPath("/bids")).toBe("estimate");
     expect(pageForPath("/estimate")).toBe("estimate");
     expect(pageForPath("/proposal")).toBe("estimate");
+    // Trade Bids (Nov 16) is a bidding page: the menu row under Estimate Pricing.
+    expect(pageForPath("/trade-bids")).toBe("estimate");
     expect(pageForPath("/inventory")).toBe("inventory");
     expect(pageForPath("/admin/settings")).toBe("pricing");
     expect(pageForPath("/admin/price-import")).toBe("pricing");
