@@ -122,10 +122,29 @@ Afterwards the temporary rows were removed and the counts checked against the st
 entries, 0 counts, 0 count lines, 0 prices, 5 places, the audit log unchanged, the test login as
 it was.
 
+## Later the same day
+
+Owner: "yes clear the test entries" … "they are real and yes change the plate costs".
+
+- **Test entries.** 34 of the 36 were cleared, after each was looked at: entries with no job,
+  on deleted test tickets and on three draft bids. The other 2 are material taken for a live
+  ticket; the owner confirmed they are real, so they stay. A copy of all 36 was kept outside
+  the repo first. Tickets, bids, places and the audit log were unchanged by the clearing.
+- **Plates.** Three plates on Setup › Material pricing are counted against a box in Estimate
+  Pricing, and a linked material's cost follows the catalog, so their cost was the price of a
+  box while the invoice reads a cost as the price of one piece. Each plate now says how much of
+  the box it is (1/1000 or 1/500), as an ISO board says it is 32 sq ft, so its cost is the box
+  price over the plates in a box and still follows the catalog. Typing a cost alone was tried
+  in a rolled-back run and snapped back to the box price, which is why the link was changed
+  and not the number. No invoice had used these items.
+- **Setup history bug, found on the way.** Saving any change to a material's stock link was
+  refused: the history recorder added an untyped word to a list and Postgres could not read
+  it. Fixed in `20261116180000_setup_materials_stock_link_history.sql`, applied by hand and
+  checked: the three plate changes saved and each wrote its line to Setup › History.
+- Tests: `plate-cost-nov16.test.ts` (4).
+
 ## Left for the owner
 
-- The 36 entries in inventory today are test entries. They are still there: nothing is cleared
-  without a yes.
 - Opening stock is loaded with an opening count. Loading it from the spreadsheet is a data
   import and waits for a yes too.
 - The method is average cost. If the accountant files first in, first out, only the calculation
