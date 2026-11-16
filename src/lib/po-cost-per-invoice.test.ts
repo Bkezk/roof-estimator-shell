@@ -87,7 +87,11 @@ describe("the editor counts the POs once (invoice-editor.tsx)", () => {
     expect(hook).toContain("invoicesFn({ data: { job_id: jobId } })");
     // (owner, Oct 14: a PO that is a line on this invoice is left out — its cost is in the
     // lines; splitPosByLines in invoice-totals.ts, invoice-workflow-oct14.test.ts)
-    expect(hook).toContain("splitPosByLines(q.data.pos, lines)");
+    // Nov 16: the split also leaves out a PO billed on another live invoice of the ticket
+    // (po-counted-once-nov16.test.ts).
+    expect(hook.replace(/\s+/g, " ")).toContain(
+      "splitPosByLines( q.data.pos, lines, posBilledElsewhere(invoiceId, invoices.data), )",
+    );
     // (owner, Oct 28: every PO counts, approved or not — poTotal, never approvedPoTotal)
     expect(hook).toContain("poCostForInvoice(invoiceId, invoices.data, poTotal(offInvoice))");
     expect(hook).not.toContain("poTotal(q.data.pos)");

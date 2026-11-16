@@ -513,7 +513,11 @@ describe("4. purchase orders in the editor (invoice-editor.tsx)", () => {
   it("the Internal fold leaves out the POs that are lines and says how many are on the invoice", () => {
     const hook = ed.slice(ed.indexOf("function usePoCost("), ed.indexOf("function Totals("));
     expect(hook).toContain("lines: readonly { source: string | null }[],");
-    expect(hook).toContain("const { onInvoice, offInvoice } = splitPosByLines(q.data.pos, lines);");
+    // Nov 16: the split also leaves out a PO billed on another live invoice of the ticket
+    // (po-counted-once-nov16.test.ts).
+    expect(hook.replace(/\s+/g, " ")).toContain(
+      "const { onInvoice, offInvoice } = splitPosByLines( q.data.pos, lines, posBilledElsewhere(invoiceId, invoices.data), );",
+    );
     // Every PO that is a line counts (owner, Oct 28: no approval).
     expect(hook).toContain("onInvoice: onInvoice.length,");
     expect(draft).toContain("const po = usePoCost(job.id, inv.id, lines);");

@@ -52,6 +52,7 @@ import {
 import { comparedGroupBars, comparedMonthSeries } from "@/lib/margin-compare";
 import {
   MARGIN_GROUP_LABELS,
+  MARGIN_OTHER_NOTE,
   marginPctDomain,
   marginPctTicks,
   monthSeries,
@@ -152,6 +153,43 @@ function Panel({
       </figcaption>
       {children}
     </figure>
+  );
+}
+
+/**
+ * The cost mix's legend, with a hover note on Other (owner, Nov 16: "what does other contain?"
+ * … "add a hover note"). The same four swatches the stock legend draws; Other carries the
+ * note and a dotted underline that says so.
+ */
+function CostMixLegend({
+  payload,
+}: {
+  payload?: readonly { dataKey?: unknown; color?: string | undefined }[] | undefined;
+}) {
+  if (!payload?.length) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-4 pt-3" data-cost-mix-legend>
+      {payload.map((item) => {
+        const key = String(item.dataKey) as keyof typeof COST_MIX;
+        const noted = key === "other";
+        return (
+          <div key={key} className="flex items-center gap-1.5">
+            <div
+              className="h-2 w-2 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: item.color }}
+            />
+            <span
+              title={noted ? MARGIN_OTHER_NOTE : undefined}
+              className={
+                noted ? "cursor-help underline decoration-dotted underline-offset-4" : undefined
+              }
+            >
+              {COST_MIX[key]?.label ?? key}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -328,7 +366,7 @@ export function MarginCharts({ d }: { d: MarginReportResult }) {
             <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} />
             <YAxis tickLine={false} axisLine={false} width={52} tickFormatter={compactMoney} />
             <ChartTooltip content={<ChartTooltipContent formatter={formatRow(COST_MIX)} />} />
-            <ChartLegend content={<ChartLegendContent />} />
+            <ChartLegend content={<CostMixLegend />} />
             {/* A 2px stroke in the surface colour is the gap between stacked segments. */}
             <Bar
               dataKey="material"

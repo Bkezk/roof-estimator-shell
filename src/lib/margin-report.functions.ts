@@ -47,6 +47,7 @@ import { asBidFigures } from "@/lib/bid-figures";
 import { asBidStatus } from "@/lib/bid-status";
 import { readInChunks } from "@/lib/chunk-ids";
 import { invoiceLabel } from "@/lib/invoice-numbering";
+import { poIdOfLine } from "@/lib/invoice-po-lines";
 import type { TicketInvoiceRef } from "@/lib/invoice-totals";
 import {
   COUNTED_INVOICE_STATUSES,
@@ -212,10 +213,40 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
   const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
   const accountName = new Map(accounts.map((a) => [a.id, a.name]));
   const techName = new Map(profiles.map((p) => [p.id, nameOf(p)]));
+  // Which purchase orders each of those invoices bills as a line (Nov 16): a PO billed on
+  // another live invoice of the ticket is in that invoice's cost, so the carrying invoice must
+  // not count it again. The invoices of the range have their lines read already; the ticket's
+  // other invoices (another month, a draft) are read here, their PO lines only.
+  const others = ticketInvoices.filter((r) => !linesByInvoice.has(r.id) && r.status !== "void");
+  const otherLines = await byIds(
+    others.map((r) => r.id),
+    (chunk, after) =>
+      afterId(
+        sb
+          .from("invoice_lines")
+          .select("id, invoice_id, source")
+          .in("invoice_id", chunk)
+          .not("source", "is", null)
+          .order("id")
+          .limit(PAGE),
+        after,
+      ),
+  );
+  const poIdsByInvoice = new Map<string, string[]>();
+  for (const l of [...lines, ...otherLines]) {
+    const id = poIdOfLine(l);
+    if (id) poIdsByInvoice.set(l.invoice_id, [...(poIdsByInvoice.get(l.invoice_id) ?? []), id]);
+  }
   const refsByTicket = new Map<string, TicketInvoiceRef[]>();
   for (const r of ticketInvoices) {
     const list = refsByTicket.get(r.service_job_id) ?? [];
-    list.push({ id: r.id, label: invoiceLabel(r), status: r.status, created_at: r.created_at });
+    list.push({
+      id: r.id,
+      label: invoiceLabel(r),
+      status: r.status,
+      created_at: r.created_at,
+      po_ids: poIdsByInvoice.get(r.id) ?? [],
+    });
     refsByTicket.set(r.service_job_id, list);
   }
 

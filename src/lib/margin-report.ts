@@ -22,8 +22,8 @@
  *  - Hours = the labor and travel lines' qty, summed (what computeTotals calls `hours`).
  *  - Purchase orders = the ticket's purchase orders (every one; owner, Oct 28), counted toward
  *    exactly ONE invoice of the ticket, its earliest live one (invoice-totals.ts poCostForInvoice), and never when
- *    the PO is already a "po:<id>" line on the invoice — then it is in the material cost
- *    (splitPosByLines). Stored invoices.cost_total is the lines' cost only, so the POs are added
+ *    the PO is already a "po:<id>" line on the invoice, or on another live invoice of the
+ *    ticket (Nov 16) — then it is in that invoice's material cost (splitPosByLines). Stored invoices.cost_total is the lines' cost only, so the POs are added
  *    here, live, as the invoice page does.
  *  - Cost = material + labor & travel + other + purchase orders. Margin = revenue − cost.
  *    Margin % = margin / revenue as a percent with one decimal; blank (null) when revenue is 0,
@@ -59,7 +59,12 @@
  */
 import type { BidFigures } from "@/lib/bid-figures";
 import { poTotal, type PoLike } from "@/lib/purchase-orders";
-import { poCostForInvoice, splitPosByLines, type TicketInvoiceRef } from "@/lib/invoice-totals";
+import {
+  poCostForInvoice,
+  posBilledElsewhere,
+  splitPosByLines,
+  type TicketInvoiceRef,
+} from "@/lib/invoice-totals";
 import { TASK_TZ, localYmd } from "@/lib/tasks";
 
 /** Cents-rounded, like the server (invoices.server.ts r2). */
@@ -119,6 +124,19 @@ export const MARGIN_AVG_LABELS: Record<MarginSource, string> = {
   service: "Avg / invoice",
   bids: "Avg / bid",
 };
+
+/**
+ * Hover notes (owner, Nov 16: "what does other contain? … what does avg/item mean" … "add a
+ * hover note for both please"). What the average column divides, per Include; and what the
+ * Other cost holds, on the cost mix chart and the table.
+ */
+export const MARGIN_AVG_NOTES: Record<MarginSource, string> = {
+  both: "Revenue before tax, divided by the number of invoices and won bids in the row. An item is one invoice or one won bid.",
+  service: "Revenue before tax, divided by the number of invoices in the row.",
+  bids: "Revenue before tax, divided by the number of won bids in the row.",
+};
+export const MARGIN_OTHER_NOTE =
+  "Costs that are not material, labor and travel, or a purchase order. On a won bid: warranty, shipping, per diem and commission. On an invoice: the cost of the lines whose type is Other.";
 
 export const UNASSIGNED_LABEL = "Unassigned";
 export const NO_TICKET_LABEL = "No ticket";
@@ -209,7 +227,9 @@ export function poCostCarried(
   pos: readonly (PoLike & { id: string })[],
   lines: readonly { source?: string | null }[],
 ): number {
-  const { offInvoice } = splitPosByLines(pos, lines);
+  // Not the POs billed on this invoice, nor those billed on another live invoice of the ticket
+  // (Nov 16): each PO's cost is counted once.
+  const { offInvoice } = splitPosByLines(pos, lines, posBilledElsewhere(invoiceId, ticketInvoices));
   return poCostForInvoice(invoiceId, ticketInvoices, poTotal(offInvoice)).cost;
 }
 

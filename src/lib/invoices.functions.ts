@@ -22,6 +22,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
+import { poIdOfLine } from "@/lib/invoice-po-lines";
 import { clearsPayment, hasPayment, paidStatusFor } from "@/lib/invoice-payment";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
@@ -451,6 +452,8 @@ export interface TicketInvoiceSummary {
   status: string;
   total: number;
   created_at: string;
+  /** The purchase orders billed as a line on this invoice (invoice-totals.ts posBilledElsewhere). */
+  po_ids: string[];
 }
 export const listTicketInvoices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -463,12 +466,29 @@ export const listTicketInvoices = createServerFn({ method: "GET" })
       .eq("service_job_id", data.job_id)
       .order("created_at");
     if (error) throw new Error(error.message);
+    // Which purchase orders each invoice bills as a line (Nov 16): the Internal fold must not
+    // also carry those on the ticket's first invoice.
+    const ids = (rows ?? []).map((r) => r.id);
+    const poIds = new Map<string, string[]>();
+    if (ids.length) {
+      const { data: poLines, error: lErr } = await context.supabase
+        .from("invoice_lines")
+        .select("invoice_id, source")
+        .in("invoice_id", ids)
+        .not("source", "is", null);
+      if (lErr) throw new Error(lErr.message);
+      for (const l of poLines ?? []) {
+        const id = poIdOfLine(l);
+        if (id) poIds.set(l.invoice_id, [...(poIds.get(l.invoice_id) ?? []), id]);
+      }
+    }
     return (rows ?? []).map((r) => ({
       id: r.id,
       label: invoiceLabel(r),
       status: r.status,
       total: Number(r.total),
       created_at: r.created_at,
+      po_ids: poIds.get(r.id) ?? [],
     }));
   });
 

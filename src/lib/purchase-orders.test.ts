@@ -221,7 +221,8 @@ describe("the invoice's Internal fold: POs are cost, never the customer's total"
     expect(ed).not.toMatch(/\nfunction computeTotals\(/);
     // (owner, Oct 14: splitPosByLines joins the import — a PO that is a line is left out.)
     expect(ed).toMatch(
-      /import \{\s*computeTotals,\s*poCostForInvoice,\s*splitPosByLines,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
+      // Nov 16: posBilledElsewhere joins it (a PO billed on another invoice is not carried).
+      /import \{\s*computeTotals,\s*poCostForInvoice,\s*posBilledElsewhere,\s*splitPosByLines,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
     );
     // Each PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts); one that is a
     // line on the invoice is left out (owner, Oct 14; invoice-workflow-oct14.test.ts).

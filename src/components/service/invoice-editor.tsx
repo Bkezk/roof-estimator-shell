@@ -70,6 +70,7 @@ import { applyPoMarkup } from "@/lib/invoice-po-lines";
 import {
   computeTotals,
   poCostForInvoice,
+  posBilledElsewhere,
   splitPosByLines,
   storedTotals,
   type InvoiceTotals,
@@ -1759,7 +1760,13 @@ function usePoCost(
   // Until both are read nothing is added: never the whole total on every invoice "for now".
   if (!q.data || !invoices.data)
     return { cost: 0, countedOn: null, onInvoice: 0, error: q.error ?? invoices.error };
-  const { onInvoice, offInvoice } = splitPosByLines(q.data.pos, lines);
+  // A PO billed as a line on another live invoice of the ticket is in that invoice's cost, so
+  // it is not carried here (Nov 16; it used to be counted on both).
+  const { onInvoice, offInvoice } = splitPosByLines(
+    q.data.pos,
+    lines,
+    posBilledElsewhere(invoiceId, invoices.data),
+  );
   return {
     ...poCostForInvoice(invoiceId, invoices.data, poTotal(offInvoice)),
     onInvoice: onInvoice.length,

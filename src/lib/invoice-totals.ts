@@ -119,11 +119,18 @@ export function computeTotals(
  * the POs that have a "po:<id>" line here — their cost is in the lines already, so the Internal
  * row must not add them again; `offInvoice` are the rest (added after the draft was built, or
  * their line removed by hand), whose total still goes through poCostForInvoice.
+ *
+ * `billedElsewhere` (owner, Nov 16: "ensure the numbers on those pages are correct"): the POs
+ * that are a line on ANOTHER live invoice of the ticket (posBilledElsewhere). Their cost is in
+ * that invoice's lines, so they are not carried here either. Until then a PO added after the
+ * first invoice and billed on the second was counted twice: in the second invoice's material
+ * and in the first one's purchase orders (found with test invoices: $105 shown, $80 true).
  */
 export function splitPosByLines<T extends { id: string }>(
   pos: readonly T[],
   lines: readonly { source?: string | null }[],
-): { onInvoice: T[]; offInvoice: T[] } {
+  billedElsewhere?: ReadonlySet<string>,
+): { onInvoice: T[]; offInvoice: T[]; elsewhere: T[] } {
   const onLines = new Set<string>();
   for (const l of lines) {
     const id = poIdOfLine(l);
@@ -131,8 +138,10 @@ export function splitPosByLines<T extends { id: string }>(
   }
   const onInvoice: T[] = [];
   const offInvoice: T[] = [];
-  for (const p of pos) (onLines.has(p.id) ? onInvoice : offInvoice).push(p);
-  return { onInvoice, offInvoice };
+  const elsewhere: T[] = [];
+  for (const p of pos)
+    (onLines.has(p.id) ? onInvoice : billedElsewhere?.has(p.id) ? elsewhere : offInvoice).push(p);
+  return { onInvoice, offInvoice, elsewhere };
 }
 
 /**
@@ -171,6 +180,23 @@ export interface TicketInvoiceRef {
   label: string;
   status: string;
   created_at: string;
+  /** The purchase orders billed as a line on this invoice ("po:<id>" lines; Nov 16). */
+  po_ids?: readonly string[] | undefined;
+}
+
+/**
+ * The POs billed as a line on another live invoice of the ticket: not this one, not a void one
+ * (a void invoice's costs count nowhere, so its POs go back to being carried). A draft counts:
+ * the PO's cost is in that draft's lines and shows with the rest of it once it is finalised.
+ */
+export function posBilledElsewhere(
+  invoiceId: string,
+  invoicesOfTicket: readonly TicketInvoiceRef[],
+): Set<string> {
+  const out = new Set<string>();
+  for (const i of invoicesOfTicket)
+    if (i.id !== invoiceId && i.status !== "void") for (const id of i.po_ids ?? []) out.add(id);
+  return out;
 }
 
 /** Where an invoice's PO cost stands: what it carries, and where it is counted. */

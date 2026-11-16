@@ -79,6 +79,8 @@ import {
 } from "@/lib/margin-compare";
 import {
   MARGIN_AVG_LABELS,
+  MARGIN_AVG_NOTES,
+  MARGIN_OTHER_NOTE,
   MARGIN_COUNT_LABELS,
   MARGIN_GROUPS,
   MARGIN_GROUP_LABELS,
@@ -112,6 +114,9 @@ const change = (d: Delta) =>
   `${signed(d.amount, money)}${d.pct === null ? "" : ` (${signed(d.pct, (p) => `${p.toFixed(1)}%`)})`}`;
 
 const COLUMNS = 12;
+
+/** A heading with a hover note: a dotted underline says there is one (owner, Nov 16). */
+const NOTED = "cursor-help underline decoration-dotted underline-offset-4";
 
 /** The earlier figure and the change under a money cell (grey); "—" when the row has no earlier match. */
 function Earlier({ earlier, delta }: { earlier: number | null; delta: Delta | null }) {
@@ -523,11 +528,19 @@ export function MarginReport() {
                   <TableHead className="text-right">{MARGIN_COUNT_LABELS[d.source]}</TableHead>
                   <TableHead className="text-right">Hours</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead className="text-right">{MARGIN_AVG_LABELS[d.source]}</TableHead>
+                  <TableHead className="text-right">
+                    <span className={NOTED} title={MARGIN_AVG_NOTES[d.source]} data-note="avg">
+                      {MARGIN_AVG_LABELS[d.source]}
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Material</TableHead>
                   <TableHead className="text-right">Labor &amp; travel</TableHead>
                   <TableHead className="text-right">Purchase orders</TableHead>
-                  <TableHead className="text-right">Other</TableHead>
+                  <TableHead className="text-right">
+                    <span className={NOTED} title={MARGIN_OTHER_NOTE} data-note="other">
+                      Other
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Cost</TableHead>
                   <TableHead className="text-right">Margin</TableHead>
                   <TableHead className="text-right">Margin %</TableHead>
