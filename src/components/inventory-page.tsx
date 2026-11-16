@@ -23,6 +23,14 @@
  * packs and pieces exactly — so the admin card and its server functions were removed (the
  * inventory_settings table stays, unread).
  *
+ * Owner, Nov 16 ("as far as reporting for EOY stuff, is it as efficient and good as it could be
+ * especially with the reconciliation part" … "Go with all 6"): two more tabs for admins and
+ * managers. Count (inventory-count-tab.tsx) is a whole shelf or truck counted on one sheet and
+ * saved as one dated count; Year end (inventory-year-end-tab.tsx) is the year summary in
+ * dollars, at average cost, with the entries that still need a price. "Bought or delivered" on
+ * the Put in form records a Received entry, and an admin or a manager may type the price paid
+ * on it and on a leftover.
+ *
  * Owner, Oct 9 (after a review): History pages through the whole ledger and says how much is
  * shown; a Put-in's remembered job is an unmistakable "Left over from …" line (leftovers off one
  * bid, several in a row, are the normal case — owner: "very rarely if ever just ordering to have
@@ -39,8 +47,10 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   Boxes,
+  CalendarCheck,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   FileDown,
   History,
   Package,
@@ -100,6 +110,7 @@ import {
   type MovementRow,
   type StockRow,
 } from "@/lib/inventory.functions";
+import { fmtDollars, parsePrice } from "@/lib/inventory-cost";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import type { TargetRef } from "@/lib/item-number-targets";
 import {
@@ -110,7 +121,9 @@ import {
   plural,
   type PieceDef,
 } from "@/lib/stock-units";
+import { InventoryCountTab } from "@/components/inventory-count-tab";
 import { InventoryExportDialog } from "@/components/inventory-export-dialog";
+import { InventoryYearEndTab } from "@/components/inventory-year-end-tab";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -222,6 +235,8 @@ const TABS: readonly { tab: InventoryTab; title: string; icon: typeof Package }[
   { tab: "stock", title: "Stock", icon: Boxes },
   { tab: "history", title: "History", icon: History },
   { tab: "reconcile", title: "Reconcile", icon: Scale },
+  { tab: "count", title: "Count", icon: ClipboardList },
+  { tab: "year", title: "Year end", icon: CalendarCheck },
 ];
 
 export function InventoryPage(props: {
@@ -290,6 +305,10 @@ export function InventoryPage(props: {
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
     // The Reconcile card sums the same ledger (owner, Oct 9: it kept a fixed cell listed).
     void qc.invalidateQueries({ queryKey: ["inventory-reconcile"] });
+    // So do the count sheet, the saved counts' dollars and the year summary (Nov 16).
+    void qc.invalidateQueries({ queryKey: ["inventory-count-sheet"] });
+    void qc.invalidateQueries({ queryKey: ["inventory-counts"] });
+    void qc.invalidateQueries({ queryKey: ["inventory-year-end"] });
   };
   const targets: PriceTarget[] = useMemo(
     () => [...(targetsQ.data ?? []), ...serviceStockTargets(serviceNamesQ.data ?? [])],
@@ -724,6 +743,10 @@ export function InventoryPage(props: {
       )}
 
       {tab === "reconcile" && <ReconcileTab canSetCount={canSetCount} />}
+      {tab === "count" && (
+        <InventoryCountTab locations={locations} products={products} onSaved={refresh} />
+      )}
+      {tab === "year" && <InventoryYearEndTab onChanged={refresh} />}
 
       {dialog && (
         <RecordDialog
@@ -739,6 +762,7 @@ export function InventoryPage(props: {
           jobs={jobs}
           jobsLoaded={jobsQ.isFetched}
           myJobIds={myJobs.map((j) => j.id)}
+          canPrice={canSeeAll}
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
             refresh();
@@ -1073,6 +1097,8 @@ function RecordDialog(props: {
   jobsLoaded: boolean;
   /** My open tickets (service job ids), listed first. */
   myJobIds: string[];
+  /** The price paid may be typed (admins and managers: dollars in inventory are theirs). */
+  canPrice: boolean;
   onClose: () => void;
   onSaved: (saved: { id: number; message: string }) => void;
 }) {
@@ -1087,6 +1113,9 @@ function RecordDialog(props: {
   const [piecesText, setPiecesText] = useState("");
   const [purpose, setPurpose] = useState<Purpose | null>(props.initialPurpose);
   const [note, setNote] = useState("");
+  // The price paid for one stock unit, on stock coming in (owner, Nov 16); blank to start, and
+  // optional: an entry with no price is listed on the Year end tab for a manager to price.
+  const [priceText, setPriceText] = useState("");
   const [saving, setSaving] = useState(false);
   // How many entries this dialog has saved: it stays open for the next item (owner, Oct 9).
   const [savedCount, setSavedCount] = useState(0);
@@ -1148,7 +1177,13 @@ function RecordDialog(props: {
   // A job purpose needs its job, taking or leftover alike ("Bought or delivered" is the no-job
   // choice, owner Oct 9).
   const jobOk = purpose?.kind === "job" ? !!job : true;
-  const canSave = !!location && !!ref && amountOk && !!purpose && jobOk && !tooMany && !saving;
+  // A price goes on a leftover from a job and on something bought, never on a move or a take.
+  const pricing =
+    props.canPrice && !consumed && (purpose?.kind === "job" || purpose?.kind === "purchase");
+  const price = pricing && priceText.trim() ? parsePrice(priceText) : null;
+  const priceBad = pricing && priceText.trim() !== "" && price == null;
+  const canSave =
+    !!location && !!ref && amountOk && !!purpose && jobOk && !tooMany && !priceBad && !saving;
   // What a place holds, as the boxes count it: "2 boxes (2,000 fasteners)" / "3 pails".
   const fmtOnHand = (v: number) =>
     piece
@@ -1210,7 +1245,13 @@ function RecordDialog(props: {
             : `${moved} of ${product} put back in ${locName} off ${vehicle.name}`,
         };
       } else {
-        const reason = consumed ? "consumed" : "leftover";
+        // "Bought or delivered" is a Received entry since Nov 16 (it was a leftover with no job),
+        // so the year summary can tell what was bought from what came off a job.
+        const reason = consumed
+          ? "consumed"
+          : purpose.kind === "purchase"
+            ? "received"
+            : "leftover";
         // A ticket goes as service_job_id, a bid as bid_id — never both; "Bought or delivered"
         // names neither.
         const forJob = purpose.kind === "job" ? job : undefined;
@@ -1227,6 +1268,7 @@ function RecordDialog(props: {
             bid_id: forJob?.kind === "bid" ? forJob.id : null,
             service_job_id: forJob?.kind === "service" ? forJob.id : null,
             note: noteOrNull,
+            ...(pricing && price != null ? { unit_cost: price } : {}),
           },
         });
         if (forJob) writeLastJob(jobKey(forJob));
@@ -1245,6 +1287,7 @@ function RecordDialog(props: {
       setRef(null);
       clearAmount();
       setNote("");
+      setPriceText("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record that");
     } finally {
@@ -1476,6 +1519,32 @@ function RecordDialog(props: {
                 prefix={consumed ? "For" : "Left over from"}
                 onChange={setJobId}
               />
+            </div>
+          )}
+          {location && ref && pricing && (
+            <div className="space-y-1" data-price-paid>
+              <Label htmlFor="inventory-price-paid">Price paid per {unit} (optional)</Label>
+              <Input
+                id="inventory-price-paid"
+                inputMode="decimal"
+                className="h-11 w-40 text-lg"
+                value={priceText}
+                onChange={(e) => setPriceText(e.target.value)}
+                placeholder="$"
+                aria-invalid={priceBad}
+              />
+              {priceBad ? (
+                <p className="text-sm text-destructive">Type the price as a number, like 98.75.</p>
+              ) : price != null && count ? (
+                <p className="text-sm font-medium" data-price-total>
+                  = {fmtDollars(price * count.packs)} for {describeStock(count.packs, unit, null)}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  What one {unit} cost. It keeps the value of inventory right when prices change.
+                  Leave it blank if you do not know it: it can be typed later on the Year end tab.
+                </p>
+              )}
             </div>
           )}
           {location && ref && purpose && (

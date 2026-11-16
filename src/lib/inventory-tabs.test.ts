@@ -60,8 +60,12 @@ describe("1 · the opened-box rule is gone", () => {
 
 // ---------------------------------------------------------------------------------------------
 describe("2 · ?tab= parsing (inventory-search.ts)", () => {
-  it("knows the three views; Stock is the default and is left out of the search", () => {
-    expect([...INVENTORY_TABS]).toEqual(["stock", "history", "reconcile"]);
+  // Nov 16: two more views, Count and Year end (owner: "as far as reporting for EOY stuff, is it
+  // as efficient and good as it could be especially with the reconciliation part").
+  it("knows the views; Stock is the default and is left out of the search", () => {
+    expect([...INVENTORY_TABS]).toEqual(["stock", "history", "reconcile", "count", "year"]);
+    expect(parseInventorySearch({ tab: "count" })).toEqual({ tab: "count" });
+    expect(parseInventorySearch({ tab: "year" })).toEqual({ tab: "year" });
     expect(parseInventorySearch({})).toEqual({});
     expect(parseInventorySearch({ tab: "stock" })).toEqual({});
     expect(parseInventorySearch({ tab: "history" })).toEqual({ tab: "history" });

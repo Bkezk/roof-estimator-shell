@@ -204,6 +204,8 @@ export const USER_ID_COLUMNS_WITHOUT_FK: Readonly<Record<string, readonly string
   crm_opportunities: ["created_by"],
   crm_opportunity_events: ["by_user"],
   crm_settings: ["escalate_user_ids"],
+  inventory_counts: ["created_by"],
+  inventory_movement_costs: ["set_by"],
   inventory_movements: ["created_by"],
   invoices: ["created_by"],
   price_import_runs: ["created_by", "reverted_by"],

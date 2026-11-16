@@ -224,7 +224,12 @@ describe("the four lists use the one read", () => {
   });
   it("the Export dialog's reports and the close-out's material list", () => {
     const x = read("src/lib/inventory-export.functions.ts");
-    expect(x).toContain("pieceDefsForCells(sb, cells)");
+    // Nov 16: the reports' dollars come from the cost rules; their one read of the packs is
+    // inventory-cost.functions.ts readSetupCost, still pieceDefsForCells and never per cell.
+    const c = read("src/lib/inventory-cost.functions.ts");
+    expect(c).toContain("pieceDefsForCells(sb, cells)");
+    expect(c).not.toContain("cellUnit");
+    expect(x).toContain("readCostContext(sb)");
     expect(x).not.toContain("cellUnit");
     const f = read("src/lib/service-field.functions.ts");
     const options = f.slice(f.indexOf("export const listServiceMaterialOptions"));

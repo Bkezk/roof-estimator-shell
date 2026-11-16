@@ -236,18 +236,29 @@ describe("B2 (revised) · Put-in keeps the remembered job and shows it unmistaka
     );
     expect(dialog).toContain('prefix={consumed ? "For" : "Left over from"}');
   });
-  it("a job purpose needs its job in both modes; 'Bought or delivered' sends neither bid nor ticket, reason leftover", () => {
+  // Nov 16: "Bought or delivered" was saved as a leftover with no job. It is a Received entry
+  // now (owner: "it's good to have that option to add stock"), so the year summary can tell
+  // what was bought from what came off a job; the reason list and the insert rule gained it.
+  it("a job purpose needs its job in both modes; 'Bought or delivered' sends neither bid nor ticket, reason received", () => {
     expect(dialog).toContain('const jobOk = purpose?.kind === "job" ? !!job : true;');
     expect(dialog).toContain("required\n");
     expect(dialog).not.toContain("optional — leave blank for a purchase");
-    expect(dialog).toContain('const reason = consumed ? "consumed" : "leftover";');
+    expect(dialog).toMatch(
+      /const reason = consumed\s*\? "consumed"\s*: purpose\.kind === "purchase"\s*\? "received"\s*: "leftover";/,
+    );
     expect(dialog).toContain('const forJob = purpose.kind === "job" ? job : undefined;');
     expect(dialog).toContain('bid_id: forJob?.kind === "bid" ? forJob.id : null,');
     expect(dialog).toContain('service_job_id: forJob?.kind === "service" ? forJob.id : null,');
     expect(dialog).toContain('" (bought or delivered)"');
-    // No new reason: the RLS insert policy's list is untouched.
     expect(fns).toMatch(
-      /reason: z\.enum\(\["leftover", "adjustment", "damaged", "consumed", "released"\]\)/,
+      /reason: z\.enum\(\["leftover", "adjustment", "damaged", "consumed", "released", "received"\]\)/,
+    );
+    const migration = readFileSync(
+      "supabase/migrations/20261116170000_inventory_year_end.sql",
+      "utf8",
+    );
+    expect(migration).toContain(
+      "reason = any (array['leftover', 'received', 'consumed', 'transfer_out', 'transfer_in'])",
     );
   });
 });

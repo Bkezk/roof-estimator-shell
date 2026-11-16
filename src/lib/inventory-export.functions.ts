@@ -4,9 +4,11 @@
  * and the row builders are inventory-export.ts. Everything is read under the caller's own RLS:
  * the ledger (every signed-in user may read it), the locations, the tickets with their customer
  * and site (office and managers read service_jobs / crm_accounts / crm_sites), and — only when
- * "Include value in dollars" is ticked — service_materials.cost, which policy
- * service_materials_read (20261006130000_service_materials.sql) opens to admins, managers and the
- * office. Stock on hand is readStock, the same aggregation the Inventory page shows.
+ * "Include value in dollars" is ticked — what the cost rules read (inventory-cost.functions.ts
+ * readCostContext, Nov 16: the prices paid, which only admins and managers read, and
+ * service_materials.cost as the stand-in for an entry with no price). Stock on hand as of today
+ * is readStock, the same aggregation the Inventory page shows; as of a past day it is the ledger
+ * summed up to the end of that day.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -24,18 +26,19 @@ import {
   EXPORT_REPORTS,
   exportFileName,
   exportWindow,
-  type CostLookup,
   type ExportJob,
   type ExportLocation,
   type ExportMovement,
   type ExportReport,
 } from "@/lib/inventory-export";
+import { cellKeyOf, replayLedger } from "@/lib/inventory-cost";
+import { readCostContext, readYearEnd } from "@/lib/inventory-cost.functions";
 import { readAllMovements } from "@/lib/inventory-reconcile.functions";
-import { categories, pieceDefsForCells, readStock } from "@/lib/inventory.functions";
+import { buildYearRows, endOfDay, stockAsOf } from "@/lib/inventory-year-end";
+import { categories, nameStockCells, readStock } from "@/lib/inventory.functions";
 import { toCsv } from "@/lib/review-export";
-import { materialForCell, materialsByCell, serviceLabel, type Cell } from "@/lib/service-materials";
-import { loadServiceMaterialLinks, loadServiceMaterials } from "@/lib/service-materials.server";
-import type { PieceDef } from "@/lib/stock-units";
+import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 type Client = SupabaseClient<Database>;
 
@@ -46,8 +49,12 @@ export const exportSchema = z.object({
   report: z.enum(EXPORT_REPORTS as [ExportReport, ...ExportReport[]]),
   from: ymd.optional(),
   to: ymd.optional(),
+  /** Stock on hand: the day it is as of (office time); today when left out. Never the future. */
+  as_of: ymd.optional(),
   with_value: z.boolean(),
 });
+
+export const STOCK_FUTURE = "Stock cannot be dated in the future";
 
 export interface InventoryExport {
   csv: string;
@@ -61,15 +68,6 @@ async function readLocations(sb: Client): Promise<ExportLocation[]> {
   const { data, error } = await sb.from("inventory_locations").select("id, name, sort");
   if (error) throw new Error(error.message);
   return (data ?? []).map((l) => ({ id: l.id, name: l.name, sort: Number(l.sort ?? 0) }));
-}
-
-/** The per-piece cost of a cell through the cell → service material link (service-materials.ts). */
-async function readCosts(sb: Client): Promise<CostLookup> {
-  const byCell = materialsByCell(await loadServiceMaterials(sb));
-  return (cell) => {
-    const m = materialForCell(byCell, cell);
-    return m && Number.isFinite(m.cost) ? m.cost : null;
-  };
 }
 
 /** PostgREST `in` lists go in the URL; a few hundred ids per request keeps it short. */
@@ -141,10 +139,6 @@ async function readWindowMovements(
     }));
 }
 
-/** The pack definition per distinct cell among the rows (one read: pieceDefsForCells, as readStock). */
-const piecesFor = (sb: Client, cells: readonly Cell[]): Promise<(c: Cell) => PieceDef | null> =>
-  pieceDefsForCells(sb, cells);
-
 /**
  * The export as a plain function (the server function below wraps it): the report's rows through
  * inventory-export.ts, then toCsv. `with_value` is the only reason service_materials is read.
@@ -156,34 +150,59 @@ export async function buildInventoryExport(
 ): Promise<InventoryExport> {
   let rows: string[][];
   if (data.report === "stock") {
-    const [stock, locations, costFor] = await Promise.all([
-      readStock(sb),
-      readLocations(sb),
-      data.with_value ? readCosts(sb) : null,
+    // As of a day (Nov 16): today reads the page's own sums; a past day sums the ledger up to
+    // the end of it. Dollars are the item's average cost on that day (inventory-cost.ts).
+    const today = easternYmd(now);
+    const asOf = data.as_of ?? today;
+    if (asOf > today) throw new Error(STOCK_FUTURE);
+    const past = asOf < today;
+    const ctx = data.with_value || past ? await readCostContext(sb) : null;
+    const until = past ? endOfDay(asOf) : undefined;
+    const [stock, locations] = await Promise.all([
+      past && ctx ? nameStockCells(sb, stockAsOf(ctx.movements, endOfDay(asOf))) : readStock(sb),
+      ctx ? ctx.locations : readLocations(sb),
     ]);
-    rows = buildStockRows({ stock, locations, costFor, withValue: data.with_value });
+    const items = data.with_value && ctx ? replayLedger({ ...ctx, until }).items : null;
+    rows = buildStockRows({
+      stock,
+      locations,
+      avgFor: items ? (cell) => items.get(cellKeyOf(cell)) : null,
+      withValue: data.with_value,
+    });
+  } else if (data.report === "year") {
+    exportWindow(data.from ?? "", data.to ?? "");
+    rows = buildYearRows(await readYearEnd(sb, data.from!, data.to!));
   } else {
     const window = exportWindow(data.from ?? "", data.to ?? "");
-    const movements = await readWindowMovements(sb, window);
+    // With dollars, every entry's cost comes from replaying the whole ledger (a take in the
+    // window is costed by what came in before it).
+    const ctx = data.with_value ? await readCostContext(sb) : null;
+    const costs = ctx ? replayLedger(ctx).entries : null;
+    const movements: ExportMovement[] = ctx
+      ? ctx.movements
+          .filter((m) => m.created_at >= window.since && m.created_at < window.until)
+          .map((m) => ({
+            ...m,
+            service_job_id: m.service_job_id ?? null,
+            service_job_name: m.service_job_name ?? null,
+            note: m.note ?? null,
+            created_by_name: m.created_by_name ?? null,
+          }))
+      : await readWindowMovements(sb, window);
     if (data.report === "movements") {
-      const locations = await readLocations(sb);
-      rows = buildMovementRows({ movements, locations, ...window });
+      const locations = ctx ? ctx.locations : await readLocations(sb);
+      rows = buildMovementRows({ movements, locations, ...window, costs });
     } else {
       const used = movements.filter(
         (m) => m.service_job_id && (m.reason === "consumed" || m.reason === "released"),
       );
       const jobIds = [...new Set(used.map((m) => m.service_job_id!))];
-      const [jobs, costFor, pieceFor] = await Promise.all([
-        readJobs(sb, jobIds),
-        data.with_value ? readCosts(sb) : null,
-        data.with_value ? piecesFor(sb, used) : () => null,
-      ]);
+      const jobs = await readJobs(sb, jobIds);
       rows = buildUsageRows({
         movements: used,
         ...window,
         jobs,
-        pieceFor,
-        costFor,
+        costs,
         withValue: data.with_value,
       });
     }
@@ -191,7 +210,7 @@ export async function buildInventoryExport(
   return {
     csv: toCsv(rows),
     count: rows.length - 1,
-    file_name: exportFileName(data.report, data.from, data.to, now),
+    file_name: exportFileName(data.report, data.from, data.to, now, data.as_of),
   };
 }
 

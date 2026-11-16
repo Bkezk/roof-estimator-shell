@@ -53,6 +53,9 @@ export const MOVEMENT_REASONS = [
   "transfer_out",
   "transfer_in",
   "vehicle_used",
+  // Nov 16 (year-end): stock bought or added with the price paid, and an opening count.
+  "received",
+  "opening",
 ] as const;
 export type MovementReason = (typeof MOVEMENT_REASONS)[number];
 /**
@@ -81,6 +84,8 @@ export const REASON_LABELS: Record<MovementReason, string> = {
   transfer_out: "Moved out",
   transfer_in: "Moved in",
   vehicle_used: "Used from the vehicle",
+  received: "Received",
+  opening: "Opening stock",
 };
 
 /**
@@ -220,8 +225,20 @@ export const listStock = createServerFn({ method: "GET" })
  * read whole, by page, and added up here.
  */
 export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[]> {
+  return nameStockCells(sb, readStockCells(sb));
+}
+
+/**
+ * Summed cells → the rows the page shows: category, service name, item numbers, pieces per pack.
+ * Its own function since Nov 16, so stock as of a past day and a count sheet (which sum the
+ * ledger themselves, up to a date) are named exactly as today's stock is.
+ */
+export async function nameStockCells(
+  sb: SupabaseClient<Database>,
+  summed: StockCell[] | Promise<StockCell[]>,
+): Promise<StockRow[]> {
   const [cells, cats, { data: nums, error }, materials] = await Promise.all([
-    readStockCells(sb),
+    summed,
     categories(sb),
     sb.from("catalog_item_numbers_map").select("screen_id, row_label, price_col, item_no"),
     loadServiceMaterialLinks(sb),
@@ -270,7 +287,7 @@ export async function readStock(sb: SupabaseClient<Database>): Promise<StockRow[
 }
 
 /** A row of inventory_stock_cells (20261103200000): one cell at one location, summed by the database. */
-interface StockCell {
+export interface StockCell {
   location_id: string;
   screen_id: string;
   row_label: string;
@@ -378,6 +395,9 @@ export const listMovements = createServerFn({ method: "GET" })
     }));
   });
 
+/** Dollars in inventory are an admin's and a manager's (owner, Oct 15). */
+export const PRICE_IS_MANAGERS = "Only an admin or a manager records a price";
+
 const addSchema = cellSchema.extend({
   /** Positive as counted; the reason decides the sign (damaged always subtracts). */
   qty: z.number().finite(),
@@ -393,7 +413,14 @@ const addSchema = cellSchema.extend({
    * the job: a bid (bid_id) or a service job (service_job_id). The old vehicle write-off is gone
    * (owner, Sep 26): material off a truck is always against a job.
    */
-  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released"]),
+  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released", "received"]),
+  /**
+   * The price paid for ONE stock unit (a box, a roll, each), on stock coming in: a leftover or a
+   * Received entry (owner, Nov 16). An admin's and a manager's to give: dollars in inventory are
+   * theirs (Oct 15), and the price table refuses anyone else. Kept in inventory_movement_costs,
+   * never on the ledger row, which every signed-in person reads.
+   */
+  unit_cost: z.number().finite().min(0).max(1_000_000).nullable().optional(),
   /** Where: "shop" (default) or a service vehicle's inventory_locations.id. */
   location_id: z.string().min(1).max(60).optional(),
   bid_id: z.string().uuid().nullable().optional(),
@@ -456,13 +483,20 @@ export const addMovement = createServerFn({ method: "POST" })
     // A service job's "released" (a tech putting a piece back on the truck) is allowed for
     // everyone who may log material; it may never exceed what that ticket took from the cell.
     const jobRelease = data.reason === "released" && !!data.service_job_id;
+    // "Bought or delivered" (a Received entry, Nov 16) is on the same form as a leftover.
     if (
       !canAccess(me, "estimate") &&
       data.reason !== "leftover" &&
+      data.reason !== "received" &&
       data.reason !== "consumed" &&
       !jobRelease
     )
       throw new Error("Only an estimator can adjust counts or write stock off");
+    if (data.unit_cost != null) {
+      if (!seesEveryone(me)) throw new Error(PRICE_IS_MANAGERS);
+      if (data.reason !== "leftover" && data.reason !== "received")
+        throw new Error("A price paid goes on stock coming in");
+    }
     const locationId = data.location_id ?? SHOP_LOCATION_ID;
     const location = await locationOf(sb, locationId);
     if (data.bid_id && data.service_job_id) throw new Error("Pick one job, not both");
@@ -565,6 +599,25 @@ export const addMovement = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (insErr) throw new Error(insErr.message);
+    if (data.unit_cost != null) {
+      // The price table is not in the generated types (Lovable's to regenerate): a loose client,
+      // the caller's own rights. An entry never stays without the price that was typed for it.
+      const { error: costErr } = await (sb as unknown as SupabaseClient)
+        .from("inventory_movement_costs")
+        .insert({
+          movement_id: inserted.id,
+          unit_cost: data.unit_cost,
+          source: "paid",
+          set_by: context.userId,
+          set_by_name: me?.full_name?.trim() || me?.email || null,
+        });
+      if (costErr) {
+        await sb.from("inventory_movements").delete().eq("id", inserted.id);
+        throw new Error(
+          `The price could not be saved, so nothing was recorded: ${costErr.message}`,
+        );
+      }
+    }
     // A material on the ticket clears its "Nothing used" mark (the Nov 4 check, finding 2): the
     // close-out clears its own draft too; this covers the office page and any other path.
     if (data.service_job_id && data.reason === "consumed") {
@@ -667,6 +720,20 @@ export async function pieceDefsForCells(
   cells: readonly StockCellRef[],
   materials?: MaterialLinks,
 ): Promise<(cell: StockCellRef) => PieceDef | null> {
+  const unitsOf = await cellUnitsForCells(sb, cells, materials);
+  return (cell) => unitsOf(cell)?.piece ?? null;
+}
+
+/**
+ * The stock unit AND the pieces-per-pack of every cell in a list, from the same one read (Nov 16:
+ * a count sheet names a hundred items at once and needs each one's unit). Null for a cell
+ * cellUnit would refuse: it is not on the catalog or the service material list any more.
+ */
+export async function cellUnitsForCells(
+  sb: SupabaseClient<Database>,
+  cells: readonly StockCellRef[],
+  materials?: MaterialLinks,
+): Promise<(cell: StockCellRef) => { unit: string; piece: PieceDef | null } | null> {
   const distinct = [...new Map(cells.map((c) => [cellKey(c), c])).values()];
   if (!distinct.length) return () => null;
   const screenIds = [
@@ -689,16 +756,16 @@ export async function pieceDefsForCells(
     })(),
     materials ?? loadServiceMaterialLinks(sb).catch(() => null),
   ]);
-  const out = new Map<string, PieceDef | null>();
+  const out = new Map<string, { unit: string; piece: PieceDef | null } | null>();
   for (const c of distinct) {
-    let piece: PieceDef | null = null;
+    let found: { unit: string; piece: PieceDef | null } | null = null;
     try {
       if (mats && (screens || c.screen_id === SERVICE_STOCK_SCREEN))
-        piece = cellUnitFrom(c, screens?.get(c.screen_id) ?? null, mats).piece;
+        found = cellUnitFrom(c, screens?.get(c.screen_id) ?? null, mats);
     } catch {
-      piece = null;
+      found = null;
     }
-    out.set(cellKey(c), piece);
+    out.set(cellKey(c), found);
   }
   return (cell) => out.get(cellKey(cell)) ?? null;
 }

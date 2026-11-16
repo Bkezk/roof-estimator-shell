@@ -1,10 +1,16 @@
 /**
  * Inventory › Export (owner, Oct 15): the dialog behind the Export button, for admins and managers
- * (the button renders only under the page's canSeeAll). Pick one of three reports — Stock on
- * hand, Movements, Usage by ticket (inventory-export.ts says what each holds) — a From..To for the
- * dated ones (this month to start with), and whether to include the value in dollars (on by
- * default; everyone who can open this may see it). Export downloads the CSV the server builds
- * (inventory-export.functions.ts), the Sage export's way (invoices-page.tsx ExportDialog).
+ * (the button renders only under the page's canSeeAll). Pick one of the reports — Stock on
+ * hand, Movements, Usage by ticket, Year summary (inventory-export.ts says what each holds) — a
+ * From..To for the dated ones (this month to start with), and whether to include the value in
+ * dollars (on by default; everyone who can open this may see it). Export downloads the CSV the
+ * server builds (inventory-export.functions.ts), the Sage export's way (invoices-page.tsx
+ * ExportDialog).
+ *
+ * Nov 16 (owner: "as far as reporting for EOY stuff, is it as efficient and good as it could
+ * be"): Stock on hand takes an "As of" day, today to start with, so December 31 can be exported
+ * again in January; the Year summary starts on this year, with last year one press away, and is
+ * always in dollars (it is the file for the accountant).
  */
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
@@ -33,6 +39,7 @@ import {
   type ExportReport,
 } from "@/lib/inventory-export";
 import { exportInventoryCsv } from "@/lib/inventory-export.functions";
+import { officeToday } from "@/lib/inventory-year-end";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -43,8 +50,17 @@ export function InventoryExportDialog({ onClose }: { onClose: () => void }) {
   const [from, setFrom] = useState(month.from);
   const [to, setTo] = useState(month.to);
   const [withValue, setWithValue] = useState(true);
-  const dated = EXPORT_REPORT_INFO[report].dated;
-  const valid = exportRangeValid(report, from, to);
+  const today = officeToday();
+  const [asOf, setAsOf] = useState(today);
+  const info = EXPORT_REPORT_INFO[report];
+  const dated = info.dated;
+  const valid = exportRangeValid(report, from, to, info.asOf ? asOf : null);
+  /** The Year summary's range: a calendar year, this one or the one before. */
+  const pickYear = (year: number) => {
+    setFrom(`${year}-01-01`);
+    setTo(`${year}-12-31`);
+  };
+  const thisYear = Number(today.slice(0, 4));
   const run = useMutation({
     mutationFn: () =>
       exportFn({
@@ -52,7 +68,8 @@ export function InventoryExportDialog({ onClose }: { onClose: () => void }) {
           report,
           from: dated ? from : undefined,
           to: dated ? to : undefined,
-          with_value: withValue,
+          as_of: info.asOf ? asOf : undefined,
+          with_value: info.alwaysValue ? true : withValue,
         },
       }),
     onSuccess: (r) => {
@@ -92,7 +109,11 @@ export function InventoryExportDialog({ onClose }: { onClose: () => void }) {
           onSubmit={(e) => {
             e.preventDefault();
             if (!valid) {
-              toast.error("Pick a from and to date (from on or before to)");
+              toast.error(
+                dated
+                  ? "Pick a from and to date (from on or before to)"
+                  : "Pick a day that is today or earlier",
+              );
               return;
             }
             run.mutate();
@@ -100,7 +121,12 @@ export function InventoryExportDialog({ onClose }: { onClose: () => void }) {
         >
           <RadioGroup
             value={report}
-            onValueChange={(v) => setReport(v as ExportReport)}
+            onValueChange={(v) => {
+              const next = v as ExportReport;
+              // The year summary starts on this calendar year; the others keep what was picked.
+              if (next === "year" && report !== "year") pickYear(thisYear);
+              setReport(next);
+            }}
             className="gap-3"
           >
             {EXPORT_REPORTS.map((id) => (
@@ -137,10 +163,44 @@ export function InventoryExportDialog({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <Checkbox checked={withValue} onCheckedChange={(v) => setWithValue(v === true)} />
-            Include value in dollars
-          </label>
+          {report === "year" && (
+            <div className="flex flex-wrap gap-2" data-export-years>
+              <Button type="button" variant="outline" size="sm" onClick={() => pickYear(thisYear)}>
+                This year ({thisYear})
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => pickYear(thisYear - 1)}
+              >
+                Last year ({thisYear - 1})
+              </Button>
+            </div>
+          )}
+          {info.asOf && (
+            <div className="space-y-1" data-export-as-of>
+              <Label htmlFor="inventory-export-as-of">As of the end of</Label>
+              <Input
+                id="inventory-export-as-of"
+                type="date"
+                className="w-44"
+                value={asOf}
+                max={today}
+                onChange={(e) => setAsOf(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Today, or an earlier day such as December 31. A count typed in later for that day is
+                included.
+              </p>
+            </div>
+          )}
+          {!info.alwaysValue && (
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox checked={withValue} onCheckedChange={(v) => setWithValue(v === true)} />
+              Include value in dollars
+            </label>
+          )}
         </form>
         <DialogFooter className="gap-2">
           <Button variant="outline" disabled={run.isPending} onClick={onClose}>

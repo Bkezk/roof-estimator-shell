@@ -2,12 +2,15 @@
  * /inventory's search params (src/routes/inventory.tsx validateSearch). Pure, so the parsing is
  * tested without the route.
  *
- *   ?tab=stock|history|reconcile  which view (owner, Oct 9: "make the history and reconcile
+ *   ?tab=stock|history|reconcile|count|year
+ *                                 which view (owner, Oct 9: "make the history and reconcile
  *                                 different tabs within the inventory page and only visible to
  *                                 managers and owners"). Anything else, or nothing, is Stock; the
  *                                 page itself sends anyone who is not an admin or manager to
  *                                 Stock whatever the URL says (the gate is the page's — it knows
- *                                 the profile — not the parser's).
+ *                                 the profile — not the parser's). Count and Year end (Nov 16:
+ *                                 "as far as reporting for EOY stuff … especially with the
+ *                                 reconciliation part") are under the same gate.
  *   ?bid=<id>                     the estimator's "Record leftovers for this bid" link preselects
  *                                 the job.
  *   ?job=<id>                     a service ticket's "Log material" link opens "Take from
@@ -15,7 +18,7 @@
  */
 import { z } from "zod";
 
-export const INVENTORY_TABS = ["stock", "history", "reconcile"] as const;
+export const INVENTORY_TABS = ["stock", "history", "reconcile", "count", "year"] as const;
 export type InventoryTab = (typeof INVENTORY_TABS)[number];
 
 export interface InventorySearch {

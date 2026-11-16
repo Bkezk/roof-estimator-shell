@@ -24,7 +24,6 @@ import {
   fmtExportQty,
   inWindow,
   itemColumns,
-  packCostOf,
   type ExportJob,
   type ExportMovement,
   type ExportStockRow,
@@ -34,6 +33,7 @@ import {
   exportInventoryCsv,
   FORBIDDEN,
 } from "@/lib/inventory-export.functions";
+import type { EntryCost } from "@/lib/inventory-cost";
 import { movementLabel, readStock } from "@/lib/inventory.functions";
 import { toCsv } from "@/lib/review-export";
 import { fakeSupabase } from "@/test/fake-supabase";
@@ -63,9 +63,27 @@ const FASTENERS = {
 const CAULK = { screen_id: "duro_last:sealants", row_label: "Duro-Caulk Plus", price_col: "White" };
 const ISO = { screen_id: "service", row_label: "ISO board", price_col: "price" };
 const BOX = { name: "fastener", perPack: 1000 };
-/** Costs per piece, as CenterPoint lists them: only the fasteners are priced. */
-const costFor = (c: { screen_id: string; row_label: string; price_col: string }) =>
-  c.screen_id === FASTENERS.screen_id && c.row_label === FASTENERS.row_label ? 0.091 : null;
+/**
+ * The average cost per stock unit on the day asked for (Nov 16: the dollars are the cost rules',
+ * inventory-cost.ts, no longer today's Setup cost × the pack). A box of fasteners averages $91
+ * on typed prices; the ISO board's $12.50 rests on an entry with no price; the caulk has none.
+ */
+const avgFor = (c: { screen_id: string; row_label: string; price_col: string }) =>
+  c.screen_id === FASTENERS.screen_id && c.row_label === FASTENERS.row_label
+    ? { avg: 91, estimated: false }
+    : c.screen_id === ISO.screen_id
+      ? { avg: 12.5, estimated: true }
+      : undefined;
+/** An entry's cost as replayLedger answers it. */
+const entryCost = (id: number, qty: number, unit: number | null, estimated = false): EntryCost => ({
+  id,
+  unit_cost: unit,
+  amount: unit == null ? null : qty * unit,
+  source: unit == null ? "none" : "average",
+  needsPrice: false,
+  estimated,
+  revalued: 0,
+});
 
 const stockRow = (over: Partial<ExportStockRow> & { location_id: string }): ExportStockRow => ({
   category: "Fasteners",
@@ -192,18 +210,19 @@ describe("report 1 · Stock on hand", () => {
     // No internal id anywhere.
     expect(rows.flat().join("\n")).not.toMatch(/duro_last:|service\b|[0-9a-f]{8}-[0-9a-f]{4}/);
   });
-  it("value in dollars: pack cost = piece cost × pieces per pack; blank, never 0, with no cost", () => {
-    const rows = buildStockRows({ stock, locations: LOCATIONS, costFor, withValue: true });
-    expect(rows[0]!.slice(-2)).toEqual(["Unit cost", "Value"]);
-    // A box of 1,000 at $0.091 is $91 a box; 3 boxes are $273; −2 boxes are −$182.
-    expect(rows[1]!.slice(-2)).toEqual(["91.00", "273.00"]);
-    expect(rows[4]!.slice(-2)).toEqual(["91.00", "-182.00"]);
-    expect(rows[2]!.slice(-2)).toEqual(["", ""]);
-    expect(rows[3]!.slice(-2)).toEqual(["", ""]);
-    expect(packCostOf(costFor, FASTENERS, BOX)).toBe(91);
-    expect(packCostOf(costFor, FASTENERS, null)).toBe(0.091);
-    expect(packCostOf(costFor, CAULK, null)).toBeNull();
-    expect(packCostOf(null, FASTENERS, BOX)).toBeNull();
+  // Nov 16: was "pack cost = piece cost × pieces per pack" (today's Setup cost). The value is
+  // now on hand × the item's average cost, with a note when that average is an estimate.
+  it("value in dollars: on hand × the average cost; blank, never 0, with no cost; a note on an estimate", () => {
+    const rows = buildStockRows({ stock, locations: LOCATIONS, avgFor, withValue: true });
+    expect(rows[0]!.slice(-3)).toEqual(["Average cost", "Value", "Cost note"]);
+    // A box averages $91: 3 boxes are $273; −2 boxes are −$182.
+    expect(rows[1]!.slice(-3)).toEqual(["91.00", "273.00", ""]);
+    expect(rows[4]!.slice(-3)).toEqual(["91.00", "-182.00", ""]);
+    expect(rows[2]!.slice(-3)).toEqual(["", "", "No cost known"]);
+    // 64.5 sq ft at $12.50 = $806.25, resting on an entry with no price typed.
+    expect(rows[3]!.slice(-3)).toEqual(["12.50", "806.25", "Estimate: an entry has no price"]);
+    const none = buildStockRows({ stock, locations: LOCATIONS, avgFor: null, withValue: true });
+    expect(none[1]!.slice(-3)).toEqual(["", "", "No cost known"]);
   });
   it("a location missing from the list (never happens: every location is read) sorts last under its id", () => {
     const rows = buildStockRows({
@@ -371,9 +390,8 @@ describe("report 3 · Usage by ticket", () => {
       service_job_name: "#6014 Bell County",
     }),
   ];
-  const pieceFor = (c: { screen_id: string }) => (c.screen_id === FASTENERS.screen_id ? BOX : null);
   it("nets consumed minus released per ticket + item, drops zero, groups by ticket then item", () => {
-    const rows = buildUsageRows({ movements: moves, ...OCT, jobs, pieceFor, withValue: false });
+    const rows = buildUsageRows({ movements: moves, ...OCT, jobs, withValue: false });
     expect(rows).toEqual([
       ["Ticket", "Customer", "Site", "Ticket date", "Item", "Colour", "Quantity", "Unit"],
       [
@@ -389,27 +407,34 @@ describe("report 3 · Usage by ticket", () => {
       ["#6015", "Acme", "Plant 2", "2026-10-08", "Plates, 2in", "", "0.5", "box"],
     ]);
   });
-  it("with value: unit cost is the pack cost, cost = quantity × that; blank without a cost", () => {
-    const rows = buildUsageRows({
+  // Nov 16: was "unit cost is the pack cost" (today's Setup cost). A ticket's usage now costs
+  // what its entries cost: each take at the average on the day it was taken, a put-back at
+  // what the ticket's takes cost.
+  it("with value: the cost is what the ticket's entries cost, net; blank without a cost", () => {
+    // Ticket A: 3 boxes taken at $91 (−$273) and 1 put back at $91 (+$91): 2 boxes, $182.
+    // Ticket B: half a box at $91 = $45.50.
+    const costs = new Map<number, EntryCost>(
+      moves.map((m) => [m.id, entryCost(m.id, Number(m.qty), 91)]),
+    );
+    const rows = buildUsageRows({ movements: moves, ...OCT, jobs, costs, withValue: true });
+    expect(rows[0]!.slice(-3)).toEqual(["Unit cost", "Cost", "Cost note"]);
+    expect(rows[1]!.slice(-3)).toEqual(["91.00", "182.00", ""]);
+    expect(rows[2]!.slice(-3)).toEqual(["91.00", "45.50", ""]);
+    const noCost = buildUsageRows({ movements: moves, ...OCT, jobs, costs: null, withValue: true });
+    expect(noCost[1]!.slice(-3)).toEqual(["", "", "No cost known"]);
+    // A take costed from an entry with no price typed says so; one entry with no cost blanks the row.
+    const estimated = new Map(costs);
+    estimated.set(moves[0]!.id, entryCost(moves[0]!.id, -3, 91, true));
+    estimated.set(moves[4]!.id, entryCost(moves[4]!.id, -0.5, null));
+    const flagged = buildUsageRows({
       movements: moves,
       ...OCT,
       jobs,
-      pieceFor,
-      costFor,
+      costs: estimated,
       withValue: true,
     });
-    expect(rows[0]!.slice(-2)).toEqual(["Unit cost", "Cost"]);
-    expect(rows[1]!.slice(-2)).toEqual(["91.00", "182.00"]);
-    expect(rows[2]!.slice(-2)).toEqual(["91.00", "45.50"]);
-    const noCost = buildUsageRows({
-      movements: moves,
-      ...OCT,
-      jobs,
-      pieceFor,
-      costFor: null,
-      withValue: true,
-    });
-    expect(noCost[1]!.slice(-2)).toEqual(["", ""]);
+    expect(flagged[1]!.slice(-3)).toEqual(["91.00", "182.00", "Estimate: an entry has no price"]);
+    expect(flagged[2]!.slice(-3)).toEqual(["", "", "No cost known"]);
   });
   it("a ticket the join does not know keeps its stored name with blank customer, site and date", () => {
     const rows = buildUsageRows({
@@ -423,7 +448,6 @@ describe("report 3 · Usage by ticket", () => {
       ],
       ...OCT,
       jobs: new Map(),
-      pieceFor,
       withValue: false,
     });
     expect(rows[1]).toEqual(["#6015 Acme", "", "", "", "Plates, 2in", "", "1", "box"]);
@@ -477,11 +501,28 @@ describe("CSV, names, file names", () => {
     expect(exportFileName("usage", "2026-10-01", "2026-10-31", now)).toBe(
       "inventory-usage-2026-10-01-to-2026-10-31.csv",
     );
+    // Nov 16: the stock file is named for the day it is as of; the year summary for its range.
+    expect(exportFileName("stock", undefined, undefined, now, "2025-12-31")).toBe(
+      "inventory-stock-2025-12-31.csv",
+    );
+    expect(exportFileName("year", "2026-01-01", "2026-12-31", now)).toBe(
+      "inventory-year-2026-01-01-to-2026-12-31.csv",
+    );
   });
   it("the dialog's rule: dated reports need From ≤ To; the stock report needs no range", () => {
-    expect(EXPORT_REPORTS).toEqual(["stock", "movements", "usage"]);
+    // Nov 16: a fourth report, the year summary; the stock report takes an "as of" day.
+    expect(EXPORT_REPORTS).toEqual(["stock", "movements", "usage", "year"]);
     expect(EXPORT_REPORT_INFO.stock.dated).toBe(false);
+    expect(EXPORT_REPORT_INFO.stock.asOf).toBe(true);
+    expect(EXPORT_REPORT_INFO.year.dated).toBe(true);
     expect(exportRangeValid("stock", "", "")).toBe(true);
+    const now = new Date("2026-10-15T23:30:00Z"); // Oct 15, office time
+    expect(exportRangeValid("stock", "", "", "2026-10-15", now)).toBe(true);
+    expect(exportRangeValid("stock", "", "", "2025-12-31", now)).toBe(true);
+    expect(exportRangeValid("stock", "", "", "2026-10-16", now)).toBe(false);
+    expect(exportRangeValid("stock", "", "", "Dec 31", now)).toBe(false);
+    expect(exportRangeValid("year", "2026-01-01", "2026-12-31")).toBe(true);
+    expect(exportRangeValid("year", "", "")).toBe(false);
     expect(exportRangeValid("movements", "", "2026-10-31")).toBe(false);
     expect(exportRangeValid("movements", "2026-10-31", "2026-10-01")).toBe(false);
     expect(exportRangeValid("usage", "2026-10-01", "2026-10-31")).toBe(true);
@@ -655,20 +696,24 @@ describe("exportInventoryCsv (the fake database)", () => {
     expect(r.file_name).toMatch(/^inventory-stock-\d{4}-\d{2}-\d{2}\.csv$/);
     const lines = r.csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "Location,Category,Item,Colour,Unit,On hand,Pieces per pack,Last movement,Item numbers,Unit cost,Value",
+      "Location,Category,Item,Colour,Unit,On hand,Pieces per pack,Last movement,Item numbers,Average cost,Value,Cost note",
     );
-    // 5 − 3 + 1 − 0.5 = 2.5 at the shop; −2.5 on the truck. No pack is known (the catalog screen
-    // data is empty here), so the unit cost is the piece cost itself.
+    // 5 − 3 + 1 − 0.5 = 2.5 at the shop; −2.5 on the truck. Nov 16: the dollars are the average
+    // cost. No entry here has a price typed, so the 5 that came in stand at the Setup cost (no
+    // pack is known, the catalog screen data is empty here, so that is the piece cost, $0.091),
+    // every later entry follows it, and the file says the number is an estimate.
+    // 2.5 × 0.091 = 0.2275, which is $0.23.
     expect(lines[1]).toBe(
-      "Shop,Fasteners,Plates 2in (box of 1000),,box,2.5,,2026-10-08 11:30 PM,1106,0.09,0.23",
+      "Shop,Fasteners,Plates 2in (box of 1000),,box,2.5,,2026-10-08 11:30 PM,1106,0.091,0.23,Estimate: an entry has no price",
     );
     expect(lines[2]).toBe(
-      "Truck 1,Fasteners,Plates 2in (box of 1000),,box,-2.5,,2026-10-09 8:00 AM,1106,0.09,-0.23",
+      "Truck 1,Fasteners,Plates 2in (box of 1000),,box,-2.5,,2026-10-09 8:00 AM,1106,0.091,-0.23,Estimate: an entry has no price",
     );
     const plain = (await call(world(ledger), ADMIN, { report: "stock", with_value: false })) as {
       csv: string;
     };
-    expect(plain.csv.split("\r\n")[0]).not.toContain("Unit cost");
+    expect(plain.csv.split("\r\n")[0]).not.toContain("Average cost");
+    expect(plain.csv).not.toContain("0.091");
   });
   it("stock reads the ledger whole past PostgREST's 1,000-row page (readStock)", async () => {
     const rows: Row[] = [];
@@ -718,14 +763,16 @@ describe("exportInventoryCsv (the fake database)", () => {
     expect(r.file_name).toBe("inventory-usage-2026-10-01-to-2026-10-31.csv");
     const lines = r.csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "Ticket,Customer,Site,Ticket date,Item,Colour,Quantity,Unit,Unit cost,Cost",
+      "Ticket,Customer,Site,Ticket date,Item,Colour,Quantity,Unit,Unit cost,Cost,Cost note",
     );
     // Ticket A: 3 taken, 1 put back = 2; its customer and site come from crm_accounts / crm_sites.
     // Ticket B has no stored name (its number stands in), no account or site (the ticket's own
     // words), no scheduled date (the day it was opened, office time: Oct 8, 7:30 pm).
+    // Nov 16: each take costs the average on the day it was taken ($0.091, an estimate here: the
+    // stock came in with no price typed). A: 3 × 0.091 − 1 × 0.091 = 0.182; B: 0.5 × 0.091 = 0.0455.
     expect(lines.slice(1)).toEqual([
-      "#6014 Bell County,Bell County Schools,Bell County Gym,2026-10-07,Plates 2in (box of 1000),,2,box,0.09,0.18",
-      "#6015,Walk-in,Their roof,2026-10-08,Plates 2in (box of 1000),,0.5,box,0.09,0.05",
+      "#6014 Bell County,Bell County Schools,Bell County Gym,2026-10-07,Plates 2in (box of 1000),,2,box,0.091,0.18,Estimate: an entry has no price",
+      "#6015,Walk-in,Their roof,2026-10-08,Plates 2in (box of 1000),,0.5,box,0.091,0.05,Estimate: an entry has no price",
     ]);
     expect(r.count).toBe(2);
   });
@@ -769,7 +816,15 @@ describe("wiring: the page, the dialog, the server function", () => {
     expect(dialog).toContain('type="date"');
     expect(dialog).toContain("const [withValue, setWithValue] = useState(true);");
     expect(dialog).toContain("Include value in dollars");
-    expect(dialog).toContain("const valid = exportRangeValid(report, from, to);");
+    // Nov 16: the stock report's "As of" day is part of the rule (today or earlier).
+    expect(dialog).toContain(
+      "const valid = exportRangeValid(report, from, to, info.asOf ? asOf : null);",
+    );
+    expect(dialog).toContain("max={today}");
+    expect(dialog).toContain("as_of: info.asOf ? asOf : undefined,");
+    // The year summary is always in dollars: its tick is not offered.
+    expect(dialog).toContain("with_value: info.alwaysValue ? true : withValue,");
+    expect(dialog).toContain("{!info.alwaysValue && (");
     expect(dialog).toContain("disabled={run.isPending || !valid}");
     expect(dialog).toContain(
       'downloadBlob(new Blob([r.csv], { type: "text/csv;charset=utf-8" }), r.file_name);',
@@ -781,7 +836,9 @@ describe("wiring: the page, the dialog, the server function", () => {
     expect(fns).toContain('export const exportInventoryCsv = createServerFn({ method: "POST" })');
     expect(fns).toContain(".middleware([requireSupabaseAuth])");
     expect(fns).toContain("if (!seesEveryone(me)) throw new Error(FORBIDDEN);");
-    expect(fns).toContain("data.with_value ? readCosts(sb) : null");
+    // Nov 16: the cost rules' inputs (inventory-cost.functions.ts), still only when asked.
+    expect(fns).toContain("const ctx = data.with_value ? await readCostContext(sb) : null;");
+    expect(fns).not.toContain("readCosts(");
     expect(fns).toContain('import { toCsv } from "@/lib/review-export";');
     expect(fns).not.toContain("function toCsv");
     // Stock on hand is the page's own aggregation, not a copy.
