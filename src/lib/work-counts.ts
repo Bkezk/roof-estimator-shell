@@ -33,6 +33,7 @@
 import { asBidStatus } from "@/lib/bid-status";
 import { isHeldOn } from "@/lib/my-work";
 import { localYmd as easternYmd } from "@/lib/tasks";
+import { isFinishedInspection } from "@/lib/ticket-stage";
 
 /**
  * The day to count against: the viewer's (`sent`, YYYY-MM-DD) when it is a real date within a
@@ -70,6 +71,16 @@ export const OPEN_OPP_STATUSES = ["open", "contacted", "quoted"] as const;
 
 export const isOpenTicketStage = (stage: string): boolean =>
   (OPEN_TICKET_STAGES as readonly string[]).includes(stage);
+/**
+ * Is the ticket still in progress? Its stage says so, except an inspection that ends at
+ * Authorized: that one is finished (audit, Nov 16, fix 6; ticket-stage.ts isFinishedInspection).
+ * The database twin beside `.in("stage", OPEN_TICKET_STAGES)` is NOT_FINISHED_INSPECTION_OR.
+ */
+export const isOpenTicket = (j: {
+  stage: string;
+  service_type?: string | null;
+  invoice_id?: string | null;
+}): boolean => isOpenTicketStage(j.stage) && !isFinishedInspection(j);
 export const isOverdueTicketStage = (stage: string): boolean =>
   (OVERDUE_TICKET_STAGES as readonly string[]).includes(stage);
 export const isOpenOppStatus = (status: string): boolean =>

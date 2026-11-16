@@ -4,6 +4,7 @@
  * are local calendar days (YYYY-MM-DD), never UTC midnight.
  */
 import { rateRank } from "@/lib/rate-urgency";
+import { isFinishedInspection } from "@/lib/ticket-stage";
 import { FINISHED_STAGES as ALL_FINISHED_STAGES, WORK_STAGES } from "@/lib/ticket-stages";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -162,7 +163,8 @@ export const FINISHED_STAGES: readonly string[] = ALL_FINISHED_STAGES;
  * the work with nobody's name on them — Done waiting for authorization, Authorized waiting for
  * an invoice, Invoiced waiting to be closed. They sat in no cell (no technician) and not in the
  * Unassigned rail (Open / Scheduled only), so the board hid them: seven of thirteen live
- * tickets on Nov 3. Closed is left out — it is over, and the group would only grow.
+ * tickets on Nov 3. Closed is left out — it is over, and the group would only grow. So is an
+ * inspection that ends at Authorized (ticket-stage.ts isFinishedInspection; audit, Nov 16).
  */
 export const FINISHED_UNASSIGNED_STAGES: readonly string[] = ["done", "authorized", "invoiced"];
 
@@ -171,6 +173,9 @@ interface FinishedJob {
   technician_id: string | null;
   stage_changed_at: string | null;
   updated_at: string;
+  /** With invoice_id: an inspection that ends at Authorized is finished, not waiting (Nov 16). */
+  service_type?: string | null;
+  invoice_id?: string | null;
 }
 
 /** When a ticket entered its stage — what the "Finished, no technician" group is ordered by, and the date its chip prints (owner, Nov 6). */
@@ -180,7 +185,13 @@ export const inStageSince = (j: Pick<FinishedJob, "stage_changed_at" | "updated_
 /** Those tickets, the one waiting longest in its stage first. */
 export function finishedUnassigned<T extends FinishedJob>(jobs: readonly T[]): T[] {
   return jobs
-    .filter((j) => !j.technician_id && FINISHED_UNASSIGNED_STAGES.includes(j.stage))
+    .filter(
+      (j) =>
+        !j.technician_id &&
+        FINISHED_UNASSIGNED_STAGES.includes(j.stage) &&
+        // Audit, Nov 16 (fix 6): an unbilled authorized inspection waits for nothing.
+        !isFinishedInspection(j),
+    )
     .sort((a, b) => inStageSince(a).localeCompare(inStageSince(b)));
 }
 

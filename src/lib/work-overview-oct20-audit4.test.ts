@@ -555,7 +555,10 @@ describe("d. landingDecision: retry for the profile, then home with a toast", ()
     expect(gate).toMatch(
       /if \(!session && !isLogin && !isReset\) \{\s*navigate\(\{ to: "\/login" \}\);/,
     );
-    expect(gate).toMatch(/\} else if \(session && blocked\) \{\s*navigate\(\{ to: home \}\);\s*\}/);
+    // Nov 16 audit fix 26: home, except Setup for a Documents-only person (closedTo).
+    expect(gate).toMatch(
+      /\} else if \(session && blocked\) \{[^}]*navigate\(\{ to: closedTo \}\);\s*\}/,
+    );
   });
   it("the Work Overview route asks for a missing profile once", () => {
     expect(route).toContain('import { useEffect, useRef } from "react";');

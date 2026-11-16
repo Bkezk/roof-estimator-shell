@@ -7,6 +7,7 @@ import {
   LogOut,
   UserRound,
   SlidersHorizontal,
+  SlidersVertical,
   Package,
   FileSpreadsheet,
   Layers,
@@ -43,9 +44,12 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   isSettingsPath,
+  livePricingPress,
+  pricingOpenFor,
   SETTINGS_HOME,
   SETUP_DOCUMENTS_PATH,
   setupHomeFor,
+  type PricingPress,
 } from "@/lib/menu-places";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -200,6 +204,8 @@ type AdminSub = { title: string; tab?: AdminTab; cat?: string; url?: string; adm
 
 // Mirrors the legacy Bid-Advantage admin tree (labels and order), flattened to
 // one submenu level. Category names must match the seeded pricing_catalog rows.
+// General has an icon of its own (Nov 16 audit, fix 27): it wore the gear, which is the Admin
+// group's Settings row.
 const adminItems: {
   title: string;
   url: string;
@@ -210,7 +216,7 @@ const adminItems: {
   {
     title: "General",
     url: "/admin/settings",
-    icon: Settings,
+    icon: SlidersVertical,
     defaultTab: "contractor",
     sub: [
       { title: "Contractor Information", tab: "contractor" },
@@ -402,7 +408,7 @@ export function AppSidebar() {
 
   // Manual open/close overrides; a section with the active page open by default.
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
-  const [pricingPressed, setPricingOpen] = useState<boolean | undefined>(undefined);
+  const [pricingPress, setPricingPress] = useState<PricingPress | undefined>(undefined);
 
   const handleSignOut = async () => {
     await signOut();
@@ -522,10 +528,15 @@ export function AppSidebar() {
       </SidebarMenuButton>
     </SidebarMenuItem>
   ));
-  // Estimate Pricing opens in place: open while a pricing page is showing, closed otherwise,
-  // until the row is pressed (the press wins for the rest of the visit).
+  // Estimate Pricing opens in place: open while a pricing page is showing, closed otherwise. A
+  // press on the row opens or closes it by hand, and holds until the visitor walks onto a pricing
+  // page or off them (Nov 16 audit, fix 24: it held for the rest of the visit, so the row stayed
+  // open after its pages were left). A press that has ended is dropped (state set during the
+  // render, as React allows for "what changed since the last one"), so it cannot come back.
   const onPricingPage = isPricingPath(pathname);
-  const pricingOpen = pricingPressed ?? onPricingPage;
+  const livePress = livePricingPress(pricingPress, onPricingPage);
+  if (pricingPress && !livePress) setPricingPress(undefined);
+  const pricingOpen = pricingOpenFor(livePress, onPricingPage);
 
   return (
     <Sidebar collapsible="icon">
@@ -630,13 +641,22 @@ export function AppSidebar() {
                   // Icons only: no room for a dropdown, so the five pricing pages are their icons.
                   pricingRows
                 ) : (
-                  <Collapsible asChild open={pricingOpen} onOpenChange={setPricingOpen}>
+                  <Collapsible
+                    asChild
+                    open={pricingOpen}
+                    onOpenChange={(open) => setPricingPress({ open, onPricingPage })}
+                  >
                     <SidebarMenuItem data-nav="estimate-pricing">
+                      {/* The button's class (Nov 16 audit, fix 27): open, the row holds the five
+                          pages' own carets, and the menu's button then keeps 32 px free on its
+                          right for a caret of its own. This row has none there, so its chevron
+                          jumped sideways; it keeps the 8 px it has when shut. */}
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
                           isActive={onPricingPage && !pricingOpen}
                           tooltip="Estimate Pricing"
                           title={pricingOpen ? "Close Estimate Pricing" : "Open Estimate Pricing"}
+                          className="group-has-[[data-sidebar=menu-action]]/menu-item:pr-2"
                         >
                           <CircleDollarSign className="h-4 w-4" />
                           <span>Estimate Pricing</span>

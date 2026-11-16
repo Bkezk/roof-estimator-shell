@@ -6,7 +6,7 @@
  * without a database. Money is read from the invoices as they stand — nothing is estimated.
  */
 import { asBidStatus } from "@/lib/bid-status";
-import { isInspectionType } from "@/lib/ticket-stage";
+import { awaitsInvoice } from "@/lib/ticket-stage";
 import { bidWonDay } from "@/lib/margin-report";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { OPEN_OPP_STATUSES, isOverdueTicket } from "@/lib/work-counts";
@@ -148,11 +148,17 @@ export const UNPAID_STATUSES: readonly string[] = ["final"];
 
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);
-  // Not an inspection: one that ends at its sign-off never waits for an invoice, and one that is
-  // billed has its invoice already (ticket-stage.ts awaitsInvoice; Nov 16).
+  // The Awaiting invoice queue's own rule (ticket-stage.ts awaitsInvoice): Authorized, and not
+  // an inspection that ends there. A ticket with a draft still waits — the queue, its badge and
+  // Work Overview count it, and until the Nov 16 audit (fix 7) this tile alone did not.
   const waiting = i.tickets.filter(
     (t) =>
-      TO_INVOICE_STAGES.includes(t.stage) && !t.invoice_id && !isInspectionType(t.service_type),
+      TO_INVOICE_STAGES.includes(t.stage) &&
+      awaitsInvoice({
+        stage: "authorized",
+        service_type: t.service_type,
+        invoice_id: t.invoice_id,
+      }),
   );
   const reviewing = i.tickets.filter((t) => TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id);
   const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));

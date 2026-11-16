@@ -3617,8 +3617,8 @@ function EstimatePage() {
                     </label>
                     <span className="pb-2 text-xs text-muted-foreground">
                       {salesTaxRate === null && taxMaterialOnly === null
-                        ? "Using Admin › General defaults for this bid."
-                        : "Bid-level override (Admin › General is the default)."}
+                        ? "Using Estimate Pricing › General defaults for this bid."
+                        : "Bid-level override (Estimate Pricing › General is the default)."}
                     </span>
                   </div>
                 </LegacyGroup>

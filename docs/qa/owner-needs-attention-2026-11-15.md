@@ -88,6 +88,11 @@ it folded; Enter on the header opened it again; a person filter worked with a gr
 and read back: both columns exist with 7 and 3 and their 0 to 365 checks. The published site
 keeps working with it: its settings save names only the older columns.
 
+## Changed on Nov 16
+
+Twelve rules on this list changed after the Nov 16 audit. The record is
+`audit-fixes-2026-11-16.md`. Where the two differ, that one is current.
+
 ## Not built, by the owner's choice
 
 - No morning brief.

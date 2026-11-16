@@ -561,8 +561,8 @@ function Board({ week }: { week?: string | undefined }) {
 
               {techRows.length === 0 && (
                 <div className="col-span-8 border-b p-4 text-sm text-muted-foreground">
-                  No technicians yet. An admin marks people as technicians on Admin › Users &amp;
-                  access.
+                  No technicians yet. An admin marks people as technicians on Admin › Settings ›
+                  Users &amp; access.
                 </div>
               )}
               {techRows.map((r, i) => (

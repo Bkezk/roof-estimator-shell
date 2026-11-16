@@ -121,14 +121,14 @@ export function OwnerBusiness() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Tile
           title="Authorized, not invoiced"
-          help="Tickets marked Authorized that have no invoice yet — the Invoices page's Awaiting invoice queue and Work Overview's Authorized — to invoice group. Aged from the day they were authorized."
+          help="Tickets marked Authorized that are not invoiced yet (one with a draft still counts) — the Invoices page's Awaiting invoice queue and Work Overview's Authorized — to invoice group. Aged from the day they were authorized."
           href={BUSINESS_HREFS.toInvoice}
           value={d ? (d.toInvoice.count === 0 ? "—" : d.toInvoice.count) : ""}
           sub={
             d ? (
               <>
                 {d.toInvoice.count
-                  ? `Authorized tickets with no invoice yet · ${days(d.toInvoice.oldestDays)}`
+                  ? `Authorized tickets not invoiced yet · ${days(d.toInvoice.oldestDays)}`
                   : "Nothing authorized is waiting for an invoice"}
                 {d.toAuthorize.count > 0 && (
                   <>

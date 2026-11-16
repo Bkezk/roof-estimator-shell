@@ -15,6 +15,7 @@
 import { longDay } from "@/lib/followup-rules";
 import { rosterDisplayName, technicianRoster } from "@/lib/roster.server";
 import { inspectionDoneTitle, parseInspection } from "@/lib/inspection";
+import { endsAtAuthorized } from "@/lib/ticket-stage";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { exceptActor, wantsOwnNotices } from "@/lib/own-notices.server";
 import { syncFollowup } from "@/lib/followups.server";
@@ -35,6 +36,8 @@ type JobRow = {
    * older caller without these fields gets the ticket wording.
    */
   service_type?: string | undefined;
+  /** The ticket's invoice: an inspection with one is billed like any ticket (Nov 16). */
+  invoice_id?: string | null | undefined;
   inspection?: unknown;
   recommend_new_roof?: boolean | undefined;
 };
@@ -143,8 +146,10 @@ export async function afterTicketStage(
         admin,
       );
   }
-  // An authorized inspection is complete: nothing to invoice, so nobody is told.
-  if (becameAuthorized && !inspection) {
+  // An authorized inspection is complete: nothing to invoice, so nobody is told — unless it is
+  // being billed (it has an invoice; audit, Nov 16, fix 8): then the office is told as for any
+  // ticket.
+  if (becameAuthorized && !endsAtAuthorized(row.service_type, !!row.invoice_id)) {
     // The manager invoices it next (the Invoices tab's To invoice queue).
     const others = await exceptActor(
       office.map((u) => u.id),

@@ -1,5 +1,12 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { createFileRoute, useBlocker, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  redirect,
+  useBlocker,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Loader2 } from "lucide-react";
@@ -17,7 +24,15 @@ import {
 } from "@/lib/setup-forms";
 import { ServiceRatesSettings } from "@/components/service-rates-settings";
 import { SetupHeading, SetupTabsList } from "@/components/setup-tabs";
-import { SETUP_DOCUMENTS_PATH, SETUP_TAB_TITLES } from "@/lib/menu-places";
+import {
+  cameBySetupTab,
+  SETUP_DOCUMENTS_PATH,
+  SETUP_STRIP_TABS,
+  SETUP_TAB_PRESSED,
+  SETUP_TAB_TITLES,
+  setupTabElsewhere,
+  type SetupStripTab,
+} from "@/lib/menu-places";
 import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
 import { MaterialPricingSettings } from "@/components/service/material-pricing-settings";
 import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
@@ -57,8 +72,17 @@ export const SETUP_TABS = ["rates", "materials", "inspection", "vehicles"] as co
 export type SetupTab = (typeof SETUP_TABS)[number];
 
 export const Route = createFileRoute("/setup")({
-  validateSearch: (search: Record<string, unknown>): { tab?: SetupTab } =>
-    SETUP_TABS.includes(search["tab"] as SetupTab) ? { tab: search["tab"] as SetupTab } : {},
+  // The four tabs of this page, and "documents": Setup's fifth tab is a page of its own, so
+  // /setup?tab=documents is sent there before anything is drawn (Nov 16 audit, fix 26: the value
+  // was dropped and the address showed Service rates).
+  validateSearch: (search: Record<string, unknown>): { tab?: SetupStripTab } => {
+    const tab = knownTab(search["tab"], SETUP_STRIP_TABS);
+    return tab ? { tab } : {};
+  },
+  beforeLoad: ({ search }) => {
+    const elsewhere = setupTabElsewhere(search.tab);
+    if (elsewhere) throw redirect({ to: elsewhere, replace: true });
+  },
   head: () => ({ meta: [{ title: "Setup — JBK Portal" }] }),
   component: SetupPage,
 });
@@ -79,6 +103,8 @@ function SetupPage() {
   // Documents, Setup's fifth tab: its own page, for everyone with Documents access.
   const canDocuments = hasDocumentsAccess(profile);
   const router = useRouter();
+  // Opened from the strip on the Documents page: the lit tab takes the keyboard focus.
+  const arrivedByTab = useRouterState({ select: (s) => cameBySetupTab(s.location.state) });
   // Someone who may not set drivers but lands on ?tab=vehicles (an old link) sees the rates.
   const active: SetupTab = tab === "vehicles" && !canSetDrivers ? "rates" : (tab ?? "rates");
   // ?tab=vehicles before the profile has arrived: wait, rather than paint the rates and switch.
@@ -166,11 +192,14 @@ function SetupPage() {
         ) : (
           <Tabs
             value={active}
+            activationMode="manual"
+            // Manual: arrow keys move along the strip; Enter, Space or a click opens a tab
+            // (setup-tabs.tsx).
             onValueChange={(v) =>
               // Documents is its own page: leaving for it asks about unsaved edits, as any
               // other page does.
               v === "documents"
-                ? void router.navigate({ to: SETUP_DOCUMENTS_PATH })
+                ? void router.navigate({ to: SETUP_DOCUMENTS_PATH, state: SETUP_TAB_PRESSED })
                 : void navigate({
                     search: v === "rates" ? {} : { tab: v as SetupTab },
                     replace: true,
@@ -181,6 +210,8 @@ function SetupPage() {
             <SetupTabsList
               money
               documents={canDocuments}
+              page="setup"
+              takeFocus={arrivedByTab}
               dot={(t) => (t === "documents" ? null : dot(t))}
             />
             {content("rates", <ServiceRatesSettings />)}

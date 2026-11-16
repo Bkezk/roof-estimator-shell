@@ -201,8 +201,11 @@ describe("Not started", () => {
       why: "Not started. Its date was Wed, Nov 11.",
       who: "Brian Folden",
       whoKey: BRIAN,
-      ageText: "5 days late",
-      tone: "red",
+      // Nov 16 audit fix 14: the limit counts working days, so the days late and the color do
+      // too. Wed Nov 11 to Mon Nov 16 is 3 working days with a limit of 2: amber, red at 4.
+      // This read "5 days late" and red, in calendar days.
+      ageText: "3 working days late",
+      tone: "amber",
     });
   });
   it("an opportunity with no contact logged, only past its limit", () => {
@@ -292,7 +295,12 @@ describe("Not followed up", () => {
       tone: "amber",
       amount: 235274,
     });
-    expect(only(base({ bids: [bid({ submitted_at: "2026-10-13T16:00:00Z" })] })).tone).toBe("red");
+    // Nov 16 audit fix 15: a submitted bid is aged from the latest time it became submitted
+    // (the later of submitted_at and status_changed_at), so this older bid carries both stamps.
+    const old = "2026-10-13T16:00:00Z";
+    expect(only(base({ bids: [bid({ submitted_at: old, status_changed_at: old })] })).tone).toBe(
+      "red",
+    );
     // Sent 6 days ago: not yet.
     expect(
       attentionList(base({ bids: [bid({ submitted_at: "2026-11-10T16:00:00Z" })] })).rows,
@@ -307,7 +315,16 @@ describe("Not followed up", () => {
     expect(passed.why).toBe("Its follow-up date was Sun, Nov 15. No new date is set.");
     expect(passed.tone).toBe("amber");
     expect(passed.ageText).toBe("3 days");
-    expect(only(base({ bids: [bid({ reminder_on: "2026-10-26" })] })).tone).toBe("red");
+    // Nov 16 audit fix 16: a follow-up date from before the day the bid was sent no longer
+    // counts, so this bid is sent (Oct 20) before its follow-up date (Oct 26).
+    const sent = "2026-10-20T16:00:00Z";
+    expect(
+      only(
+        base({
+          bids: [bid({ submitted_at: sent, status_changed_at: sent, reminder_on: "2026-10-26" })],
+        }),
+      ).tone,
+    ).toBe("red");
   });
   it("a won or lost bid is never listed, and an old status reads as the status it folds into", () => {
     for (const status of ["won", "lost", "accepted", "denied"])
@@ -348,9 +365,13 @@ describe("Not followed up", () => {
     // A repair ticket or a bid made from it: the next step exists.
     expect(attentionList(base({ tickets: [t], repairFrom: ["t9"] })).rows).toEqual([]);
     expect(attentionList(base({ tickets: [t], bidFrom: ["t9"] })).rows).toEqual([]);
-    expect(
-      attentionList(base({ tickets: [{ ...t, inspection_outcome: "repair_ticket" }] })).rows,
-    ).toEqual([]);
+    // Nov 16 audit fix 13: "Repair ticket" chosen but no live repair ticket from it (it was
+    // deleted) used to keep the inspection off the list for good. It comes back now.
+    const chosen = { ...t, inspection_outcome: "repair_ticket" };
+    expect(attentionList(base({ tickets: [chosen], repairFrom: ["t9"] })).rows).toEqual([]);
+    expect(only(base({ tickets: [chosen] })).why).toBe(
+      "Graded C with 4 problems found. Its repair ticket was deleted. Nobody has chosen what happens next.",
+    );
     // Nothing flagged: nothing to follow up.
     expect(attentionList(base({ tickets: [{ ...t, inspection: inspection(0) }] })).rows).toEqual(
       [],
@@ -523,6 +544,8 @@ describe("the list as a whole", () => {
         id: "b2",
         name: "Bank",
         submitted_at: "2026-10-22T16:00:00Z",
+        // Nov 16 audit fix 15: both stamps, so this is still the longer wait of the two.
+        status_changed_at: "2026-10-22T16:00:00Z",
         grand_total: 69008,
         created_by: GARRY,
       }),
@@ -603,8 +626,17 @@ describe('folding a group shut (owner: "collapsable … and a bit more noticable
       base({
         bids: [
           bid(),
-          bid({ id: "b2", submitted_at: "2026-10-13T16:00:00Z" }),
-          bid({ id: "b3", submitted_at: "2026-10-22T16:00:00Z" }),
+          // Nov 16 audit fix 15: both stamps, as a bid sent once has (the later one dates it).
+          bid({
+            id: "b2",
+            submitted_at: "2026-10-13T16:00:00Z",
+            status_changed_at: "2026-10-13T16:00:00Z",
+          }),
+          bid({
+            id: "b3",
+            submitted_at: "2026-10-22T16:00:00Z",
+            status_changed_at: "2026-10-22T16:00:00Z",
+          }),
         ],
         tickets: [ticket({ stage: "done", stage_changed_at: "2026-11-12T15:00:00Z" })],
       }),

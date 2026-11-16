@@ -68,8 +68,10 @@ describe("Estimate: Takeoffs, Project Bids, Estimate Pricing, Inventory", () => 
   });
   it("Estimate Pricing is one row that opens in place to the five pages, with their own lists", () => {
     expect(group).toContain('<SidebarMenuItem data-nav="estimate-pricing">');
+    // Nov 16 audit fix 24: onOpenChange was {setPricingOpen}; a press is now kept with the side
+    // of the pricing pages it was made on.
     expect(group).toContain(
-      "<Collapsible asChild open={pricingOpen} onOpenChange={setPricingOpen}>",
+      "<Collapsible asChild open={pricingOpen} onOpenChange={(open) => setPricingPress({ open, onPricingPage })} >",
     );
     expect(group).toContain("<span>Estimate Pricing</span>");
     expect(group).toContain("{pricingRows}");
@@ -85,10 +87,14 @@ describe("Estimate: Takeoffs, Project Bids, Estimate Pricing, Inventory", () => 
     expect(nav).toContain("const pricingRows = ( <> {adminItems.map((item) =>");
     expect(nav).toContain("<SidebarMenuSub>");
   });
-  it("starts shut, opens on a pricing page, and a press wins for the rest of the visit", () => {
+  // Nov 16 audit fix 24: this read "and a press wins for the rest of the visit", pinning
+  // `const pricingOpen = pricingPressed ?? onPricingPage;` and `useState<boolean | undefined>`.
+  // That kept the row open after its pages were left. A press now holds until the visitor walks
+  // onto a pricing page or off them (menu-fixes-nov16b.test.ts walks the cases).
+  it("starts shut, opens on a pricing page, and a press holds until the pricing pages are entered or left", () => {
     expect(nav).toContain("const onPricingPage = isPricingPath(pathname);");
-    expect(nav).toContain("const pricingOpen = pricingPressed ?? onPricingPage;");
-    expect(nav).toContain("useState<boolean | undefined>(undefined)");
+    expect(nav).toContain("const pricingOpen = pricingOpenFor(livePress, onPricingPage);");
+    expect(nav).toContain("useState<PricingPress | undefined>(undefined)");
     // Shut on a pricing page, the row itself is lit so the place is not lost.
     expect(group).toContain("isActive={onPricingPage && !pricingOpen}");
   });
@@ -120,7 +126,9 @@ describe("Admin: Owner and Settings", () => {
     expect(flat("src/routes/admin.reminders.tsx")).toContain('<SettingsTabs active="reminders" />');
     const strip = flat("src/components/settings-tabs.tsx");
     expect(strip).toContain("{SETTINGS_TABS.map((t) => {");
-    expect(strip).toContain("aria-selected={on}");
+    // Nov 16 audit fix 27: it pinned `aria-selected={on}` on links marked as tabs; the strip
+    // is navigation, and the page being shown is marked as the current page.
+    expect(strip).toContain('aria-current={on ? "page" : undefined}');
     expect(strip).toContain("to={t.to}");
   });
   it("both pages are still an admin's alone at the gate", () => {
@@ -174,17 +182,28 @@ describe("Documents is Setup's fifth tab", () => {
     const docs = flat("src/routes/admin.documents.tsx");
     expect(docs).toContain("<SetupHeading money={money} documents />");
     expect(docs).toContain('<Tabs value="documents"');
-    expect(docs).toContain("<SetupTabsList money={money} documents />");
+    // Nov 16 audit fix 25: it was `<SetupTabsList money={money} documents />`; the strip is now
+    // told which page it is on (no tab controls a panel here) and when to take the focus.
+    expect(docs).toContain(
+      '<SetupTabsList money={money} documents page="documents" takeFocus={arrivedByTab} />',
+    );
     expect(docs).toContain("const money = managesTickets(profile);");
-    expect(docs).toContain("router.navigate({ href: setupTabHref(v as SetupStripTab) })");
+    // Nov 16 audit fix 25: it was `router.navigate({ href: setupTabHref(v as SetupStripTab) })`;
+    // the press now also says it came from the strip, so the focus follows it.
+    expect(docs).toContain(
+      "router.navigate({ href: setupTabHref(v as SetupStripTab), state: SETUP_TAB_PRESSED, })",
+    );
     // Its own three tabs are as they were.
     expect(docs).toContain('<TabsTrigger value="templates">Templates</TabsTrigger>');
     expect(docs).toContain('createFileRoute("/admin/documents")');
   });
   it("on /setup, the Documents tab leaves for the Documents page (and so asks about unsaved edits)", () => {
     const setup = flat("src/routes/setup.tsx");
+    // Nov 16 audit fix 25: it was `router.navigate({ to: SETUP_DOCUMENTS_PATH })`; the press now
+    // also says it came from the strip, so the focus follows it. Still a page change the
+    // unsaved-edits question hears.
     expect(setup).toContain(
-      'v === "documents" ? void router.navigate({ to: SETUP_DOCUMENTS_PATH })',
+      'v === "documents" ? void router.navigate({ to: SETUP_DOCUMENTS_PATH, state: SETUP_TAB_PRESSED })',
     );
     expect(setup).toContain("const canDocuments = hasDocumentsAccess(profile);");
   });

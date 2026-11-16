@@ -136,8 +136,10 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
   it("the texts, as the owner wrote them", () => {
     expect(BUCKET_HELP).toEqual({
       // Oct 15: tasks named too (they have sat in the group since Oct 9).
+      // Nov 16 audit fix 23: it ended "set on Admin › Reminders."; Reminders is now a tab of
+      // the Admin group's Settings row.
       unassigned:
-        "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+        "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Settings › Reminders.",
       // Oct 20 (audit 4): every kind bucketOf puts there; today's items sit in This week.
       overdue:
         "Tickets, tasks, follow-ups, opportunities and draft bids past their day. The assignee is reminded on the Reminders schedule.",

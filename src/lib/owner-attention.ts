@@ -11,36 +11,52 @@
  *     - a ticket past its date with nobody on it (no date at all: entered longer ago than
  *       Setup's "needs assignment" limit);
  *     - a ticket past its date that its technician has not started (crm_untouched(), the
- *       "Untouched work" limit, in working days);
+ *       "Untouched work" limit, in working days; its days late and its color count working
+ *       days too);
  *     - an opportunity with no contact logged N days after it was assigned (the same list's
  *       opportunity half and its limit), and an open one nobody is on at all, past the "needs
  *       assignment" limit;
  *     - a draft bid past its due date (work-counts.ts isOverdueBid).
  *   Not followed up
- *     - a submitted bid with no follow-up date `bidDays` days after it was sent, or whose
- *       follow-up date ("Remind me on", bids.reminder_on) has passed;
- *     - an inspection that found problems and has no repair ticket or bid after it: nobody has
- *       chosen what happens next, or "No action needed" was chosen in the last 30 days.
+ *     - a submitted bid with no follow-up date `bidDays` days after it was sent (sent twice:
+ *       after the latest time), or whose follow-up date ("Remind me on", bids.reminder_on) has
+ *       passed; a follow-up date from before the day the bid was sent does not count;
+ *     - an inspection, Authorized or later, that found problems or was graded F and has no live
+ *       repair ticket or bid after it: nobody has chosen what happens next (or the repair
+ *       ticket or bid that was chosen has been deleted), counted from the day the inspection
+ *       was finished; or "No action needed" was chosen in the last 30 days.
  *   Waiting on the office
- *     - a Done ticket not authorized after `authorizeDays` days;
- *     - an invoice unpaid past its due date.
+ *     - a Done ticket not authorized `authorizeDays` days after the work was finished (an
+ *       inspection still at Done has this row only);
+ *     - an invoice unpaid past its due date, or, with no due date, late by the Invoices page's
+ *       own rule (invoice-list.ts invoiceDue: 30 days after its invoice date).
  *
  * A manager's hold takes a ticket or an opportunity off the list until the hold ends, as it does
  * everywhere else (work-counts.ts heldTicketIds / heldOppIds); the list says how many are held.
  *
- * Amber is past the limit; red is twice the limit or more (`redFrom`).
+ * Amber is past the limit; red is twice the limit or more (`redFrom`). A wait that began today
+ * reads "Today", never "0 days". A bid nobody is recorded as having made is filed under "No
+ * estimator", apart from "Nobody" (work with nobody on it, which the screen paints red).
+ *
+ * Owner, Nov 16 (the audit's fixes 11 to 22, each approved): the no-due-date invoice, the
+ * finished day as the start of an inspection's and a Done ticket's wait, the deleted repair
+ * ticket or bid, working days for the untouched ticket's color, the bid sent twice, the
+ * follow-up date from before the bid was sent, one row for a Done inspection, "Today", the F
+ * grade, "No estimator", and amber before red for a passed follow-up date. Pinned in
+ * owner-attention-nov16.test.ts.
  *
  * Pure: plain rows and the viewer's day in, rows and words out. The server function is
  * owner-attention.functions.ts; components/owner-attention.tsx draws it.
  */
 import { asBidStatus } from "@/lib/bid-status";
 import { daysBetween, shortDay } from "@/lib/followup-rules";
-import { isFlagged, visibleChecklist } from "@/lib/inspection";
+import { isFlagged, visibleChecklist, type InspectionGrade } from "@/lib/inspection";
+import { ON_RECEIPT_LATE_DAYS, invoiceDue } from "@/lib/invoice-list";
 import { addDays, isHeldOn } from "@/lib/my-work";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { isFinishedStage } from "@/lib/ticket-stages";
 import { bidOverdueDays, isOpenOppStatus } from "@/lib/work-counts";
-import { officeDay } from "@/lib/working-days";
+import { officeDay, workingDaysBetween } from "@/lib/working-days";
 
 export type AttentionGroup = "not_started" | "not_followed_up" | "office";
 export const ATTENTION_GROUPS: readonly { key: AttentionGroup; label: string }[] = [
@@ -110,6 +126,8 @@ export interface AttTicket {
   service_type: string | null;
   stage: string;
   stage_changed_at: string | null;
+  /** When the work was finished (the close-out stamp); cleared when the ticket is reopened. */
+  completed_at?: string | null;
   updated_at: string | null;
   created_at: string | null;
   scheduled_date: string | null;
@@ -158,6 +176,8 @@ export interface AttInvoice {
   total: number | string | null;
   paid_amount: number | string | null;
   due_date: string | null;
+  /** The invoice's own date: with no due date, it is late 30 days after this (invoiceDue). */
+  invoice_date?: string | null;
   /** The invoice's bill-to block (invoices.bill_to, json): its `name` is the title. */
   bill_to: unknown;
 }
@@ -205,13 +225,13 @@ export interface AttentionRow {
   title: string;
   /** What is wrong, in a sentence or two. */
   why: string;
-  /** Whose it is: a person, "Nobody" or "Office". */
+  /** Whose it is: a person, "Nobody", "Office" or, for a bid with no maker, "No estimator". */
   who: string;
-  /** The filter's key: a profile id, "nobody" or "office". */
+  /** The filter's key: a profile id, "nobody", "office" or "no_estimator". */
   whoKey: string;
-  /** Days it has waited (or is late). */
+  /** Days it has waited (or is late); working days for a ticket its technician has not started. */
   age: number;
-  /** "5 days" / "2 days late". */
+  /** "5 days" / "2 days late" / "2 working days late"; "Today" when the wait began today. */
   ageText: string;
   tone: "amber" | "red";
   /** Dollars riding on it (a bid's total, an invoice's balance); null when none. */
@@ -231,13 +251,21 @@ export interface AttentionList {
 
 export const WHO_NOBODY = "nobody";
 export const WHO_OFFICE = "office";
+/**
+ * A bid nobody is recorded as having made (owner, Nov 16, audit fix 19): its own key and the
+ * words "No estimator", so it is not painted red as work with "Nobody" on it.
+ */
+export const WHO_NO_ESTIMATOR = "no_estimator";
 
 const num = (v: number | string | null | undefined): number => {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 };
-const days = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
-const late = (n: number) => `${days(n)} late`;
+const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+/** "5 days". A wait that began today reads "Today", never "0 days" (owner, Nov 16, audit fix 17). */
+const days = (n: number) => (n === 0 ? "Today" : count(n, "day"));
+/** "2 days late", or "2 working days late" for a count of working days; "Today" for none. */
+const late = (n: number, unit = "day") => (n === 0 ? "Today" : `${count(n, unit)} late`);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const dayOf = (iso: string | null | undefined): string | null => {
   if (!iso) return null;
@@ -276,6 +304,18 @@ export function inspectionProblems(inspection: unknown): number {
 }
 
 const problemsText = (n: number) => `${n} problem${n === 1 ? "" : "s"} found`;
+/**
+ * The failing grade (inspection.ts INSPECTION_GRADES, A to F). An inspection graded F is
+ * followed up even with no checklist row flagged (owner, Nov 16, audit fix 18).
+ */
+const FAILING_GRADE: InspectionGrade = "F";
+/**
+ * When a ticket's work was finished: the close-out stamp, else the stage stamp, else the last
+ * update (owner, Nov 16, audit fixes 12 and 22: the stage stamp alone restarted the wait each
+ * time the ticket changed stage).
+ */
+const finishedAt = (t: Pick<AttTicket, "completed_at" | "stage_changed_at" | "updated_at">) =>
+  t.completed_at ?? t.stage_changed_at ?? t.updated_at;
 
 /** The rows, in group order, the longest wait first inside each group. */
 export function attentionList(i: AttentionIn): AttentionList {
@@ -287,6 +327,11 @@ export function attentionList(i: AttentionIn): AttentionList {
     return id && n ? { who: n, whoKey: id } : { who: "Nobody", whoKey: WHO_NOBODY };
   };
   const office = { who: "Office", whoKey: WHO_OFFICE };
+  /** A bid's maker; a bid with none (or one no longer known) is "No estimator", not "Nobody". */
+  const estimator = (id: string | null | undefined) => {
+    const p = person(id);
+    return p.whoKey === WHO_NOBODY ? { who: "No estimator", whoKey: WHO_NO_ESTIMATOR } : p;
+  };
   const toYmd = (iso: string) => dayOf(iso) ?? iso;
   const heldOf = (kind: string) =>
     new Set(
@@ -346,7 +391,10 @@ export function attentionList(i: AttentionIn): AttentionList {
         held += 1;
         continue;
       }
-      const age = Math.max(0, daysBetween(t.scheduled_date, today));
+      // Owner, Nov 16 (audit fix 14): the limit counts working days (crm_untouched()), so the
+      // days late and the color count them too. Counted in calendar days, a ticket was red on
+      // the first day it showed.
+      const age = workingDaysBetween(t.scheduled_date, today);
       rows.push({
         key: `ticket_untouched:${t.id}`,
         group: "not_started",
@@ -356,7 +404,7 @@ export function attentionList(i: AttentionIn): AttentionList {
         why: `Not started. Its date was ${shortDay(t.scheduled_date)}.`,
         ...person(u.assignee_id ?? t.technician_id, u.assignee_name),
         age,
-        ageText: late(age),
+        ageText: late(age, "working day"),
         tone: toneOf(age, Math.max(1, u.limit_days ?? 1)),
         amount: null,
         href: `/service?id=${t.id}`,
@@ -424,7 +472,7 @@ export function attentionList(i: AttentionIn): AttentionList {
       tag: "Draft bid",
       title: (b.name ?? "").trim() || "Untitled bid",
       why: `Still a draft. It was due ${shortDay(b.due_date!)}.`,
-      ...person(b.created_by),
+      ...estimator(b.created_by),
       age,
       ageText: late(age),
       tone: toneOf(age, 1),
@@ -436,17 +484,28 @@ export function attentionList(i: AttentionIn): AttentionList {
   // ── Not followed up ────────────────────────────────────────────────────────────────────────
   for (const b of i.bids) {
     if (asBidStatus(b.status) !== "submitted") continue;
-    const sent = dayOf(b.submitted_at ?? b.status_changed_at ?? b.updated_at);
+    // Owner, Nov 16 (audit fix 15): a bid sent a second time is aged from the latest time it
+    // became submitted. submitted_at keeps the first time (the database keeps the first stamp);
+    // on a submitted bid status_changed_at is the latest, so the later of the two days is it.
+    const stamps = [dayOf(b.submitted_at), dayOf(b.status_changed_at)]
+      .filter((d): d is string => d !== null)
+      .sort();
+    const sent = stamps[stamps.length - 1] ?? dayOf(b.updated_at);
     if (!sent) continue;
     const age = Math.max(0, daysBetween(sent, today));
-    const followUp = b.reminder_on && YMD.test(b.reminder_on) ? b.reminder_on : null;
+    // Owner, Nov 16 (audit fix 16): a follow-up date from before the day the bid was sent (set
+    // while it was a draft) is no follow-up on the sent bid: it reads as having none.
+    const followUp =
+      b.reminder_on && YMD.test(b.reminder_on) && b.reminder_on >= sent ? b.reminder_on : null;
     let why: string;
     let tone: "amber" | "red";
     if (followUp) {
       // A follow-up day today or ahead: someone has it in hand.
       if (followUp >= today) continue;
       why = `Its follow-up date was ${shortDay(followUp)}. No new date is set.`;
-      tone = daysBetween(followUp, today) >= Math.max(1, limits.bidDays) ? "red" : "amber";
+      // Owner, Nov 16 (audit fix 20): amber from the first day past it, red at twice the limit,
+      // as the other rows are. It used to turn red at one times the limit.
+      tone = toneOf(daysBetween(followUp, today), limits.bidDays);
     } else {
       if (age < limits.bidDays) continue;
       why = `No follow-up date. Sent ${shortDay(sent)}.`;
@@ -459,7 +518,7 @@ export function attentionList(i: AttentionIn): AttentionList {
       tag: "Bid sent",
       title: (b.name ?? "").trim() || "Untitled bid",
       why,
-      ...person(b.created_by),
+      ...estimator(b.created_by),
       age,
       ageText: days(age),
       tone,
@@ -470,17 +529,32 @@ export function attentionList(i: AttentionIn): AttentionList {
 
   const hasNext = new Set([...i.repairFrom, ...i.bidFrom]);
   for (const t of i.tickets) {
+    // A live repair ticket or bid came of it: the next step exists.
     if (!t.inspection || !isFinishedStage(t.stage) || hasNext.has(t.id)) continue;
+    // Owner, Nov 16 (audit fix 17): while the ticket is still Done its one row is the one that
+    // waits to be authorized (below); this row starts once it is Authorized or later.
+    if (t.stage === "done") continue;
     const problems = inspectionProblems(t.inspection);
-    if (problems === 0) continue;
-    const outcome = t.inspection_outcome ?? null;
-    // A repair ticket or a bid was chosen: the next step exists (or its own row covers it).
-    if (outcome && outcome !== "none") continue;
     const rawGrade = (t.inspection as { grade?: unknown }).grade;
     const grade = typeof rawGrade === "string" ? rawGrade.trim() : "";
-    const found = grade
-      ? `Graded ${grade} with ${problemsText(problems)}.`
-      : `${problemsText(problems)[0]!.toUpperCase()}${problemsText(problems).slice(1)}.`;
+    // Nothing flagged: nothing to follow up, unless it was graded F (audit fix 18).
+    if (problems === 0 && grade !== FAILING_GRADE) continue;
+    const outcome = t.inspection_outcome ?? null;
+    // Owner, Nov 16 (audit fix 13): a repair ticket or a bid was chosen, but none from this
+    // inspection is live any more (it was deleted, and deleting does not undo the choice).
+    const gone =
+      outcome === "repair_ticket"
+        ? "Its repair ticket was deleted. "
+        : outcome === "bid"
+          ? "Its bid was deleted. "
+          : "";
+    // A choice this list does not know: left out, never guessed.
+    if (outcome !== null && outcome !== "none" && !gone) continue;
+    const found = !problems
+      ? `Graded ${grade}.`
+      : grade
+        ? `Graded ${grade} with ${problemsText(problems)}.`
+        : `${problemsText(problems)[0]!.toUpperCase()}${problemsText(problems).slice(1)}.`;
     let age: number;
     let why: string;
     let owner: { who: string; whoKey: string };
@@ -492,8 +566,10 @@ export function attentionList(i: AttentionIn): AttentionList {
       const by = person(t.inspection_outcome_by);
       owner = by.whoKey === WHO_NOBODY ? office : by;
     } else {
-      age = since(t.stage_changed_at ?? t.updated_at, today) ?? 0;
-      why = `${found} Nobody has chosen what happens next.`;
+      // From the day the inspection was finished (audit fix 12): authorizing the ticket used
+      // to restart the wait at 1 day.
+      age = since(finishedAt(t), today) ?? 0;
+      why = `${found} ${gone}Nobody has chosen what happens next.`;
       owner = office;
     }
     rows.push({
@@ -520,7 +596,7 @@ export function attentionList(i: AttentionIn): AttentionList {
   );
   for (const t of i.tickets) {
     if (t.stage !== "done") continue;
-    const age = since(t.stage_changed_at ?? t.updated_at, today);
+    const age = since(finishedAt(t), today);
     if (age === null || age < limits.authorizeDays) continue;
     if (heldReviews.has(t.id)) {
       held += 1;
@@ -544,11 +620,20 @@ export function attentionList(i: AttentionIn): AttentionList {
   }
 
   for (const v of i.invoices) {
-    if (v.status !== "final" || !v.due_date || !YMD.test(v.due_date) || !(v.due_date < today))
-      continue;
+    if (v.status !== "final") continue;
+    const due = v.due_date && YMD.test(v.due_date) ? v.due_date : null;
+    const invoiced = (v.invoice_date ?? "").slice(0, 10);
+    // Owner, Nov 16 (audit fix 11): an invoice with no due date was never listed. The Invoices
+    // page's own rule decides when it is late (invoice-list.ts invoiceDue: owed on receipt,
+    // late ON_RECEIPT_LATE_DAYS after its invoice date), and it is aged from that day.
+    if (!due && !YMD.test(invoiced)) continue;
+    const age = invoiceDue(
+      { status: v.status, invoice_date: invoiced, due_date: due },
+      today,
+    ).lateDays;
+    if (age <= 0) continue;
     const balance = Math.round((num(v.total) - num(v.paid_amount)) * 100) / 100;
     if (balance <= 0) continue;
-    const age = daysBetween(v.due_date, today);
     const billName = (v.bill_to as { name?: unknown } | null | undefined)?.name;
     const billTo = typeof billName === "string" ? billName.trim() : "";
     const no = (v.display_number ?? "").trim() || (v.number !== null ? String(v.number) : "");
@@ -558,7 +643,9 @@ export function attentionList(i: AttentionIn): AttentionList {
       kind: "invoice_unpaid",
       tag: "Invoice",
       title: [no ? `#${no}` : "", billTo].filter(Boolean).join(" ") || "Invoice",
-      why: `Unpaid. It was due ${shortDay(v.due_date)}.`,
+      why: due
+        ? `Unpaid. It was due ${shortDay(due)}.`
+        : `Unpaid. No due date. Invoiced ${shortDay(invoiced)}, over ${ON_RECEIPT_LATE_DAYS} days ago.`,
       ...office,
       age,
       ageText: late(age),
@@ -611,13 +698,15 @@ export const toggleFolded = (
   GROUP_KEYS.filter((k) => (k === g ? !folded.includes(k) : folded.includes(k)));
 /**
  * What a group's header says beside its count: the longest wait in it and how many are red —
- * "longest 33 days · 4 red" — so a folded group still tells the owner how bad it is.
+ * "longest 33 days · 4 red" — so a folded group still tells the owner how bad it is. When every
+ * wait in it began today it reads "all today" (Nov 16, audit fix 17: no "0 days").
  */
 export function groupNote(rows: readonly AttentionRow[]): string {
   if (!rows.length) return "";
   const longest = rows.reduce((a, b) => (b.age > a.age ? b : a));
   const red = rows.filter((r) => r.tone === "red").length;
-  return `longest ${longest.ageText}${red ? ` · ${red} red` : ""}`;
+  const head = longest.age === 0 ? "all today" : `longest ${longest.ageText}`;
+  return `${head}${red ? ` · ${red} red` : ""}`;
 }
 
 /** Dollars in submitted bids nobody has a follow-up date on. */
@@ -655,7 +744,8 @@ export interface AttentionPerson {
 }
 /**
  * The filter's choices, from the rows: each person by first name (the full name when two share
- * one), the busiest first, then Office, then Nobody.
+ * one), the busiest first, then Office, then No estimator (bids with no maker; Nov 16, audit fix
+ * 19), then Nobody.
  */
 export function attentionPeople(rows: readonly AttentionRow[]): AttentionPerson[] {
   const by = new Map<string, { who: string; count: number }>();
@@ -665,7 +755,12 @@ export function attentionPeople(rows: readonly AttentionRow[]): AttentionPerson[
     else by.set(r.whoKey, { who: r.who, count: 1 });
   }
   const first = (s: string) => s.split(/\s+/)[0] ?? s;
-  const people = [...by].filter(([k]) => k !== WHO_NOBODY && k !== WHO_OFFICE);
+  const fixed = [
+    [WHO_OFFICE, "Office"],
+    [WHO_NO_ESTIMATOR, "No estimator"],
+    [WHO_NOBODY, "Nobody"],
+  ] as const;
+  const people = [...by].filter(([k]) => !fixed.some(([f]) => f === k));
   const firsts = new Map<string, number>();
   for (const [, p] of people) firsts.set(first(p.who), (firsts.get(first(p.who)) ?? 0) + 1);
   const out: AttentionPerson[] = people
@@ -675,10 +770,7 @@ export function attentionPeople(rows: readonly AttentionRow[]): AttentionPerson[
       count: p.count,
     }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-  for (const [key, label] of [
-    [WHO_OFFICE, "Office"],
-    [WHO_NOBODY, "Nobody"],
-  ] as const) {
+  for (const [key, label] of fixed) {
     const p = by.get(key);
     if (p) out.push({ key, label, count: p.count });
   }

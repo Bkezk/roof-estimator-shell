@@ -362,6 +362,29 @@ async function liveInvoices(sb: SupabaseClient<Database>, jobId: string) {
   return data ?? [];
 }
 
+/**
+ * After an invoice is deleted or voided the ticket must not keep pointing at it (audit, Nov 16,
+ * fix 5). A person with Customers and Invoices but no Service access cannot write the ticket:
+ * the update above then changes no row and reports no error, and an inspection stayed "billed"
+ * for good. The database now moves the pointer itself (trigger invoices_ticket_pointer); this
+ * reads the ticket back and says so if it still names the dead invoice.
+ */
+async function pointerCleared(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  deadInvoiceId: string,
+  failed: (m: string) => Error,
+) {
+  const { data: t, error } = await sb
+    .from("service_jobs")
+    .select("invoice_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw failed(error.message);
+  if (t && t.invoice_id === deadInvoiceId)
+    throw failed("it still points at this invoice. Tell a manager");
+}
+
 /** The ticket's invoice, created as a draft from its time and materials on first call. */
 export const getOrCreateInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -480,9 +503,13 @@ async function createInvoiceFor(
   if (!INVOICE_STAGES.includes(job.stage)) throw new Error(INVOICE_NEEDS_AUTH);
   // An inspection is not invoiced unless a manager chooses to bill it (owner, Nov 16): its
   // first invoice is a manager's to start ("Invoice this inspection" on the ticket). Once it
-  // has one, it is billed like any ticket.
-  if (isInspectionType(job.service_type) && !job.invoice_id && !actor.manages)
-    throw new Error(INSPECTION_BILL_MANAGER);
+  // has one, it is billed like any ticket. "Has one" is read from the invoices themselves, not
+  // from the ticket's pointer (audit, Nov 16, fix 4): a pointer left on a deleted invoice let
+  // anyone through. The database says the same (trigger invoices_inspection_rule).
+  if (isInspectionType(job.service_type) && !actor.manages) {
+    const live = await liveInvoices(sb, job.id);
+    if (!live.length) throw new Error(INSPECTION_BILL_MANAGER);
+  }
   const [{ data: account }, { data: site }] = await Promise.all([
     job.account_id
       ? sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()
@@ -552,7 +579,15 @@ async function createInvoiceFor(
       .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
     if (lErr) throw new Error(lErr.message);
   }
-  await sb.from("service_jobs").update({ invoice_id: inv.id }).eq("id", job.id);
+  // The ticket points at its newest invoice. The database sets the pointer too when the ticket
+  // had none (trigger invoices_ticket_pointer), so someone without Service access still leaves
+  // the ticket right; a refusal here is said, never dropped (audit, Nov 16, fix 5).
+  const { error: pErr } = await sb
+    .from("service_jobs")
+    .update({ invoice_id: inv.id })
+    .eq("id", job.id);
+  if (pErr)
+    throw new Error(`The invoice was made, but the ticket was not updated: ${pErr.message}`);
   return withLines(sb, inv);
 }
 
@@ -1148,6 +1183,7 @@ export const voidInvoice = createServerFn({ method: "POST" })
         .update({ invoice_id: other.id, updated_by_name: nameOf(p) })
         .eq("id", inv.service_job_id);
       if (oErr) throw ticketFailed(oErr.message);
+      await pointerCleared(sb, inv.service_job_id, inv.id, ticketFailed);
       return;
     }
     // Back to Authorized, not Done (owner, Oct 5): the work was reviewed already. Authorized is
@@ -1158,6 +1194,7 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .update({ invoice_id: null, updated_by_name: nameOf(p) })
       .eq("id", inv.service_job_id);
     if (uErr) throw ticketFailed(uErr.message);
+    await pointerCleared(sb, inv.service_job_id, inv.id, ticketFailed);
     if (backToAuthorized) {
       const { error: sErr } = await databaseRpc(sb)("set_ticket_stage_from_invoice", {
         p_job: inv.service_job_id,

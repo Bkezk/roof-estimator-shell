@@ -13,6 +13,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 
+import { NOT_FINISHED_INSPECTION_OR } from "@/lib/ticket-stage";
+
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import {
   OPEN_OPP_STATUSES,
@@ -50,7 +52,9 @@ export const getWorkCounts = createServerFn({ method: "GET" })
         .from("service_jobs")
         .select("id", { count: "exact", head: true })
         .is("deleted_at", null)
-        .in("stage", [...OPEN_TICKET_STAGES]),
+        .in("stage", [...OPEN_TICKET_STAGES])
+        // Not an inspection that ends at Authorized: it is finished (audit, Nov 16, fix 6).
+        .or(NOT_FINISHED_INSPECTION_OR),
       sb
         .from("service_jobs")
         .select("id, stage, scheduled_date, technician_id")

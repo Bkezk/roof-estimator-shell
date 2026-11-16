@@ -90,6 +90,57 @@ export const awaitsInvoice = (j: {
 /** The same rule as a database filter (PostgREST `or`), beside `.eq("stage", "authorized")`. */
 export const AWAITS_INVOICE_OR = "service_type.neq.inspection,invoice_id.not.is.null";
 
+/**
+ * A finished inspection (audit, Nov 16, fix 6): Authorized, and it ends there — nobody billed
+ * it. It is not open work. Until now the Tickets in progress tile, the Open work filter, the
+ * Customers list count, the Tech Board's "Finished, no technician" group and the rule that
+ * stops a customer being deleted all counted it for good (one live ticket on Nov 16, whose
+ * customer could not be deleted: "close or move them first", which the server refuses).
+ */
+export const isFinishedInspection = (j: {
+  stage: string;
+  service_type?: string | null | undefined;
+  invoice_id?: string | null | undefined;
+}): boolean => j.stage === "authorized" && endsAtAuthorized(j.service_type, !!j.invoice_id);
+/**
+ * "Not a finished inspection" as a database filter (PostgREST `or`), beside a stage filter that
+ * lets Authorized through: not Authorized, or not an inspection, or billed.
+ */
+export const NOT_FINISHED_INSPECTION_OR =
+  "stage.neq.authorized,service_type.neq.inspection,invoice_id.not.is.null";
+
+/**
+ * The Type lock (audit, Nov 16, fix 1). Only a manager starts an inspection's first invoice, but
+ * anyone in the office could change an authorized inspection's Type to Repair, make the invoice
+ * and change it back (proven in the browser as a Sales login). And an authorized repair retyped
+ * as Inspection dropped out of every waiting-for-invoice list. So once a ticket is Authorized or
+ * later, or has an invoice, its Type moves to or from Inspection only by a manager's hand.
+ * Between the other types (Repair, Warranty, …) anyone who may edit the ticket still changes it.
+ * The database says the same (trigger service_jobs_type_rule, 20261116150000).
+ */
+export const TYPE_LOCK_MESSAGE =
+  "Only a manager changes a ticket to or from Inspection once it is Authorized or has an invoice";
+export const TYPE_LOCK_NOTE = "Only a manager changes the type of an authorized inspection.";
+/** Is the ticket's Type locked for `p` where Inspection is concerned? */
+export const typeLockedFor = (
+  p: AccessLike | null | undefined,
+  t: { stage: string | null | undefined; invoice_id?: string | null | undefined },
+): boolean =>
+  !managesTickets(p) && (OFFICE_STAGES.includes(t.stage as ServiceStage) || !!t.invoice_id);
+/** Why `p` may not change the ticket's type from what it is to `next` (null = they may). */
+export function typeChangeProblem(
+  p: AccessLike | null | undefined,
+  prev: {
+    service_type: string | null | undefined;
+    stage: string | null | undefined;
+    invoice_id?: string | null | undefined;
+  },
+  next: string | null | undefined,
+): string | null {
+  if (isInspectionType(prev.service_type) === isInspectionType(next)) return null;
+  return typeLockedFor(p, prev) ? TYPE_LOCK_MESSAGE : null;
+}
+
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";
 export const MANAGER_STAGE_MESSAGE = "Only a manager authorizes, invoices or closes a ticket";

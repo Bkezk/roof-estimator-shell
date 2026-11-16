@@ -240,9 +240,11 @@ describe("3. activeTab: a pick survives its group emptying; the preset's own tab
 // ---- 4. the Unassigned help ---------------------------------------------------------------------
 
 describe("4. BUCKET_HELP.unassigned is role-neutral", () => {
-  it("names the tick and Assign to; keeps Admin › Reminders", () => {
+  // Nov 16 audit fix 23: the help ended "set on Admin › Reminders." (and this test's name said
+  // "keeps Admin › Reminders"); Reminders is now a tab of the Admin group's Settings row.
+  it("names the tick and Assign to; keeps the Reminders page, where the menu has it now", () => {
     expect(BUCKET_HELP.unassigned).toBe(
-      "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+      "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Settings › Reminders.",
     );
     expect(BUCKET_HELP.unassigned).not.toContain("Claim one to take it");
     // Still one or two sentences, as the fold test requires of every help.

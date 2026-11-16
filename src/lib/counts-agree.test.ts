@@ -252,12 +252,16 @@ describe("Owner › Business", () => {
       snoozed: 0,
       untouched: null,
     });
-    expect(n.toInvoice).toEqual({ count: 2, oldestDays: 10 });
+    // Nov 16 audit fix 7: the Authorized ticket with a draft ("inv", authorized Sep 1) counts
+    // too — the Awaiting invoice queue, its badge and Work Overview always counted it, and this
+    // tile alone left it out. It was { count: 2, oldestDays: 10 }.
+    expect(n.toInvoice).toEqual({ count: 3, oldestDays: 41 });
     expect(n.toAuthorize).toEqual({ count: 1, oldestDays: 7 });
     expect(BUSINESS_HREFS.toInvoice).toBe("/service/invoices?tab=to-invoice");
     const biz = read("src/components/owner-business.tsx");
     expect(biz).toContain('title="Authorized, not invoiced"');
-    expect(biz).toContain('help="Tickets marked Authorized that have no invoice yet');
+    // Nov 16 audit fix 7: "not invoiced yet (one with a draft still counts)".
+    expect(biz).toContain('help="Tickets marked Authorized that are not invoiced yet');
     expect(biz).toContain("done, awaiting authorization");
     expect(biz).not.toContain("Waiting to invoice");
   });
@@ -357,7 +361,8 @@ describe("listOwnerBusiness (fake client)", () => {
         context: unknown;
       }) => Promise<ReturnType<typeof businessNumbers>>
     )({ data: { today: TODAY }, context: { supabase: e.db, userId: ME } });
-    expect(r.toInvoice).toEqual({ count: 1, oldestDays: 3 });
+    // Nov 16 audit fix 7: an Authorized ticket with a draft counts (it was { count: 1 }).
+    expect(r.toInvoice).toEqual({ count: 2, oldestDays: 3 });
     expect(r.toAuthorize).toEqual({ count: 1, oldestDays: 1 });
     expect(r.stale.pastDue).toBe(1);
     expect(r.stale.snoozed).toBe(1);

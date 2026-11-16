@@ -31,7 +31,7 @@ import {
   type UnassignedRows,
 } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
-import { awaitsInvoice } from "@/lib/ticket-stage";
+import { AWAITS_INVOICE_OR, awaitsInvoice } from "@/lib/ticket-stage";
 import { normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
 
 export interface WorkPerson {
@@ -247,6 +247,9 @@ export const listMyWork = createServerFn({ method: "GET" })
           )
           .is("deleted_at", null)
           .eq("stage", TO_INVOICE_STAGE)
+          // Filtered in the database (audit, Nov 16, fix 9): finished inspections stay at
+          // Authorized for good and are the oldest rows, so they would fill the limit first.
+          .or(AWAITS_INVOICE_OR)
           .order("stage_changed_at", { ascending: true, nullsFirst: false })
           .limit(LIMIT)
       : Promise.resolve({ data: [] as TicketIn[], error: null });

@@ -140,7 +140,11 @@ describe("3. an inspection ends at Authorized", () => {
     expect(src).toContain(
       "marked it done. Review it and mark it Authorized; that completes the inspection.",
     );
-    expect(src).toContain("if (becameAuthorized && !inspection) {");
+    // Nov 16 audit fix 8: nobody is told about an inspection that ends there; one being billed
+    // (it has an invoice) tells the office like any ticket.
+    expect(src).toContain(
+      "if (becameAuthorized && !endsAtAuthorized(row.service_type, !!row.invoice_id)) {",
+    );
     expect(src).toContain('assigneeId: row.stage === "done" && live ? assignee : null,');
     expect(src).toContain('closing: row.stage !== "done" || !!row.deleted_at,');
     expect(src).not.toContain("an inspection ends at Done");

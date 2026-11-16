@@ -43,8 +43,10 @@ describe("the /setup page", () => {
       "vehicles",
       "documents",
     ]);
-    expect(read("src/components/setup-tabs.tsx")).toContain(
-      '<TabsTrigger key={tab} value={tab} className="gap-1.5">',
+    // Nov 16 audit fix 25: the tag ended after className (one line); it now also drops the
+    // "controls a panel" claim from a tab with no panel on the page.
+    expect(read("src/components/setup-tabs.tsx").replace(/\s+/g, " ")).toContain(
+      '<TabsTrigger key={tab} value={tab} className="gap-1.5" {...(setupTabHasPanel(tab, props.page) ? null : NO_PANEL)} >',
     );
     expect(setup).toMatch(/const active: SetupTab = [\s\S]*?\(tab \?\? "rates"\)/);
   });
@@ -69,8 +71,10 @@ describe("the /setup page", () => {
     );
   });
   it("deep-links its tab with ?tab= and is titled Setup", () => {
+    // Nov 16 audit fix 26: the type was `{ tab?: SetupTab }`. The address may now also say
+    // "documents", which the route sends on to Documents' own page before anything is drawn.
     expect(setup).toMatch(
-      /validateSearch: \(search: Record<string, unknown>\): \{ tab\?: SetupTab \}/,
+      /validateSearch: \(search: Record<string, unknown>\): \{ tab\?: SetupStripTab \}/,
     );
     expect(setup).toContain('title: "Setup — JBK Portal"');
     // The heading is shared with the Documents page since Nov 16 (components/setup-tabs.tsx).

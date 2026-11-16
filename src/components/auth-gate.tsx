@@ -5,7 +5,8 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
-import { canAccess, homeFor, pageForPath } from "@/lib/access";
+import { canAccess, hasDocumentsAccess, homeFor, pageForPath } from "@/lib/access";
+import { closedPageGoesTo } from "@/lib/menu-places";
 import {
   blockedForProfile,
   gateDecision,
@@ -155,6 +156,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const page = pageForPath(pathname);
   const blocked = gateDecision(session, profile, profileFailed, page) === "blocked";
   const home = homeFor(profile);
+  const closedTo = closedPageGoesTo(pathname, { documents: hasDocumentsAccess(profile) }, home);
 
   // Oct 20 (d): a signed-in visitor of /login with no profile yet is not sent anywhere — the
   // profile is asked for again, a few times (landingDecision; refreshProfile runs loadProfile's
@@ -188,9 +190,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
       // "retry": the effect below asks for the profile again.
     } else if (session && blocked) {
-      navigate({ to: home });
+      // Home, except Setup for a person whose one Setup tab is Documents: they land there
+      // (Nov 16 audit, fix 26; menu-places.ts closedPageGoesTo).
+      navigate({ to: closedTo });
     }
-  }, [loading, session, pathname, isLogin, isReset, recovery, blocked, home, navigate, decision]);
+  }, [
+    loading,
+    session,
+    pathname,
+    isLogin,
+    isReset,
+    recovery,
+    blocked,
+    home,
+    closedTo,
+    navigate,
+    decision,
+  ]);
 
   // One ask per try, PROFILE_RETRY_MS after the last answer (`tries` moves when it settles).
   useEffect(() => {

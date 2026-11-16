@@ -7,10 +7,17 @@
  *
  * Who sees which tab, the names and the addresses: lib/menu-places.ts.
  */
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ClipboardList, Files, Package, Receipt, Settings2, Truck } from "lucide-react";
 
-import { SETUP_TAB_TITLES, setupBlurb, setupTabsFor, type SetupStripTab } from "@/lib/menu-places";
+import {
+  SETUP_TAB_TITLES,
+  setupBlurb,
+  setupTabHasPanel,
+  setupTabsFor,
+  type SetupStripPage,
+  type SetupStripTab,
+} from "@/lib/menu-places";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const ICONS = {
@@ -32,19 +39,46 @@ export function SetupHeading(props: { money: boolean; documents: boolean }) {
   );
 }
 
-/** The strip itself; it goes inside a <Tabs> whose value is the lit tab. */
+/** A tab with no panel on this page claims none (the tab library names one for every tab). */
+const NO_PANEL = { "aria-controls": undefined };
+
+/**
+ * The strip itself; it goes inside a <Tabs activationMode="manual"> whose value is the lit tab.
+ *
+ * Manual (Nov 16 audit, fix 25): the arrow keys only move the highlight along the strip, and
+ * Enter, Space or a click opens a tab. Left to open on arrow, Right from Vehicles & drivers
+ * landed on Documents and changed the page under the keyboard.
+ */
 export function SetupTabsList(props: {
   money: boolean;
   documents: boolean;
+  /** Which of Setup's two pages this is: only the tabs with a panel on it say they control one. */
+  page: SetupStripPage;
   /** A marker after a tab's name (Setup's "unsaved changes" dot). */
   dot?: (tab: SetupStripTab) => ReactNode;
+  /**
+   * The page was opened from the strip on Setup's other page (menu-places.ts cameBySetupTab):
+   * the lit tab takes the keyboard focus the pressed one had.
+   */
+  takeFocus?: boolean;
 }) {
+  const { takeFocus } = props;
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!takeFocus) return;
+    list.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')?.focus();
+  }, [takeFocus]);
   return (
-    <TabsList className="h-auto flex-wrap" data-setup-tabs>
+    <TabsList ref={list} className="h-auto flex-wrap" data-setup-tabs>
       {setupTabsFor(props).map((tab) => {
         const Icon = ICONS[tab];
         return (
-          <TabsTrigger key={tab} value={tab} className="gap-1.5">
+          <TabsTrigger
+            key={tab}
+            value={tab}
+            className="gap-1.5"
+            {...(setupTabHasPanel(tab, props.page) ? null : NO_PANEL)}
+          >
             <Icon className="h-4 w-4" aria-hidden /> {SETUP_TAB_TITLES[tab]}
             {props.dot?.(tab)}
           </TabsTrigger>

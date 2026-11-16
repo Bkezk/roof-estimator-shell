@@ -104,9 +104,13 @@ describe("waiting for an invoice", () => {
     }
   });
   it("Work Overview's Authorized — to invoice group uses it", () => {
-    // In code, after the read: the rows carry the ticket's type and its invoice.
+    // In code, after the read: the rows carry the ticket's type and its invoice. Since the
+    // Nov 16 audit (fix 9) the read itself filters too, so finished inspections never fill it.
     const work = flat("src/lib/my-work.functions.ts");
-    expect(work).toContain('import { awaitsInvoice } from "@/lib/ticket-stage";');
+    expect(work).toContain(
+      'import { AWAITS_INVOICE_OR, awaitsInvoice } from "@/lib/ticket-stage";',
+    );
+    expect(work).toMatch(/\.eq\("stage", TO_INVOICE_STAGE\)[^;]*\.or\(AWAITS_INVOICE_OR\)/);
     expect(work).toMatch(
       /toInvoice: \(\(toInvoice\.data \?\? \[\]\) as [^)]*\)\[\]\)\.filter\( awaitsInvoice, \),/,
     );
@@ -156,8 +160,10 @@ describe("the server", () => {
     );
   });
   it("only a manager starts an inspection's first invoice; after that it is billed like any ticket", () => {
+    // Nov 16 audit fix 4: "has an invoice" is read from the invoices, not from the ticket's
+    // pointer (inspection-billing-rules-nov16b.test.ts runs it).
     expect(inv).toContain(
-      "if (isInspectionType(job.service_type) && !job.invoice_id && !actor.manages) throw new Error(INSPECTION_BILL_MANAGER);",
+      "if (isInspectionType(job.service_type) && !actor.manages) { const live = await liveInvoices(sb, job.id); if (!live.length) throw new Error(INSPECTION_BILL_MANAGER); }",
     );
     // After the stage check (a Done inspection is still reviewed first), before anything is made.
     const make = inv.slice(inv.indexOf("async function createInvoiceFor("));

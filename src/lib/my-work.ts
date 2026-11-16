@@ -13,6 +13,7 @@
  */
 import { seesEveryone } from "@/lib/access";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
+import { notificationPath } from "@/lib/notification-link";
 
 export type WorkKind = "ticket" | "inspection" | "task" | "followup" | "opportunity" | "bid";
 
@@ -704,7 +705,9 @@ export function followupItem(
           : "Open",
     done: false,
     // Only an in-app path (the follow-up's own link); anything else stays on Work Overview.
-    href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/my-work",
+    // The notifications' own rule (notification-link.ts; audit, Nov 16, fix 28): "/\\host" passed
+    // the old check here and opened another site in a new tab.
+    href: notificationPath(f.url) ?? "/my-work",
     assigneeId: f.assignee_id,
     assigneeName: names[f.assignee_id] ?? null,
     followup: workFollowup(f),
@@ -937,7 +940,7 @@ export const BUCKET_HELP: Record<WorkBucket, string> = {
   // Oct 15: tasks too (they have sat here since Oct 9). Oct 20: role-neutral — only people
   // ticked Technician can Claim (canClaim); everyone else puts someone on it with Assign to.
   unassigned:
-    "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+    "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Settings › Reminders.",
   // Oct 20: every kind bucketOf puts here (tasks and follow-ups were missing), by its day.
   overdue:
     "Tickets, tasks, follow-ups, opportunities and draft bids past their day. The assignee is reminded on the Reminders schedule.",

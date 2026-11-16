@@ -518,12 +518,12 @@ async function createUserOp(
     if (firstAdminPasswordUsed)
       return fail(
         409,
-        "a first-admin password was already set this run; set the rest from Admin › Users & access",
+        "a first-admin password was already set this run; set the rest from Admin › Settings › Users & access",
       );
     if ((await d.adminCount()) > 0)
       return fail(
         409,
-        "the project already has an admin: sign in as them and set passwords from Admin › Users & access",
+        "the project already has an admin: sign in as them and set passwords from Admin › Settings › Users & access",
       );
     password = given;
     initial = true;

@@ -46,11 +46,14 @@ import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
   AWAITS_INVOICE_OR,
   INSPECTION_STAGE_MESSAGE,
+  isInspectionType,
+  NOT_FINISHED_INSPECTION_OR,
   reopensTicket,
   stageProblem,
   stagesForType,
   TECH_LOCKED_MESSAGE,
   techStageLocked,
+  typeChangeProblem,
 } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { assignedStage, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
@@ -120,7 +123,7 @@ export type ServiceJobWithTech = ServiceJobRow & {
  * 20261103170000 (item 41: they used to be a second query on every read).
  */
 export const LIST_JOB_COLUMNS =
-  "id, number, stage, service_type, scheduled_date, arrival_window, technician_id, account_id, site_id, customer_name, site_name, site_address, site_city, site_state, location_id, location_name, description, po_number, job_number, centerpoint_ticket, centerpoint_invoice, labor_rate_kind, field_status, stage_changed_at, completed_at, created_at, updated_at, updated_by_name, deleted_at, helper_count" as const;
+  "id, number, stage, service_type, scheduled_date, arrival_window, technician_id, account_id, site_id, customer_name, site_name, site_address, site_city, site_state, location_id, location_name, description, po_number, job_number, centerpoint_ticket, centerpoint_invoice, labor_rate_kind, field_status, stage_changed_at, completed_at, created_at, updated_at, updated_by_name, deleted_at, helper_count, invoice_id" as const;
 type ListJobColumn =
   | "id"
   | "number"
@@ -151,7 +154,8 @@ type ListJobColumn =
   | "updated_at"
   | "updated_by_name"
   | "deleted_at"
-  | "helper_count";
+  | "helper_count"
+  | "invoice_id";
 /** One ticket as the lists read it (LIST_JOB_COLUMNS), with its technician's name. */
 export type ServiceJobListRow = Pick<ServiceJobRow, ListJobColumn> & {
   technician_name: string | null;
@@ -278,6 +282,8 @@ export const listBoardJobs = createServerFn({ method: "GET" })
         .is("deleted_at", null)
         .is("technician_id", null)
         .in("stage", [...FINISHED_UNASSIGNED_STAGES])
+        // Not an inspection that ends at Authorized: it is finished (audit, Nov 16, fix 6).
+        .or(NOT_FINISHED_INSPECTION_OR)
         .order("stage_changed_at", { ascending: true, nullsFirst: false })
         .limit(BOARD_WEEK_LIMIT),
     ]);
@@ -565,7 +571,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (id) {
       const { data: cur, error: cErr } = await sb
         .from("service_jobs")
-        .select("technician_id, stage, scheduled_date")
+        .select("technician_id, stage, scheduled_date, service_type, invoice_id")
         .eq("id", id)
         .maybeSingle();
       // (technician_id and scheduled_date also feed the technician's reassigned / date-moved
@@ -580,6 +586,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Owner, Oct 6: a technician cannot change a ticket once it is Authorized, Invoiced or
       // Closed (RLS service_jobs_update says the same, 20261006190000); the office still may.
       if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);
+      // Audit, Nov 16 (fix 1): to or from Inspection is a manager's once the ticket is Authorized
+      // or has an invoice (ticket-stage.ts typeChangeProblem; trigger service_jobs_type_rule).
+      const typeProblem = typeChangeProblem(p, cur, fields.service_type);
+      if (typeProblem) throw new Error(typeProblem);
       // Owner, Oct 1: once a ticket has a date, a technician does not move it; Oct 9: the office
       // and managers do (logged on the Timeline below and in History by the database).
       const moveProblem = dateMoveProblem({
@@ -782,6 +792,21 @@ export const setServiceStage = createServerFn({ method: "POST" })
     // server did not (Nov 4, bug 16). One that has been billed (Nov 16) has every stage.
     if (!stagesForType(prev.service_type, !!prev.invoice_id).includes(data.stage))
       throw new Error(INSPECTION_STAGE_MESSAGE);
+    // The pointer alone is not proof (audit, Nov 16, fix 4): an inspection goes past Authorized
+    // only with a live invoice of its own (a draft counts; a void or deleted one does not).
+    if (
+      isInspectionType(prev.service_type) &&
+      prev.stage !== data.stage &&
+      (data.stage === "invoiced" || data.stage === "closed")
+    ) {
+      const { count, error: liveErr } = await context.supabase
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("service_job_id", data.id)
+        .neq("status", "void");
+      if (liveErr) throw new Error(liveErr.message);
+      if (!count) throw new Error(INSPECTION_STAGE_MESSAGE);
+    }
     const { stopped } =
       prev.stage !== data.stage
         ? await stopClocksForOffice(

@@ -34,7 +34,7 @@
        checked against the manifest. restore-report.txt / .json land in the slot folder; the exit
        code is non-zero if anything would fail.
     4. -Apply: first the missing user accounts (-CreateUsers: made WITHOUT a usable password —
-       passwords are in no backup; the admin sets them from Admin › Users & access. In a fresh
+       passwords are in no backup; the admin sets them from Admin › Settings › Users & access. In a fresh
        project with no admin yet you are asked, once, which restored admin signs in first and
        for that one account's initial password, typed here, sent over HTTPS, never logged or
        written anywhere). Then the tables in the portal's order, page by page (≤ 1,000 rows a
@@ -575,7 +575,7 @@ if ($isApply) {
       $admins = @($missingUsers | Where-Object { [string]$_.role -eq 'admin' })
       if ($admins.Count -gt 0) {
         Write-Host ""
-        Write-Host "This project has no admin account yet. Passwords are in no backup, so one restored admin needs an initial password to sign in and set everyone else's (Admin › Users & access)." -ForegroundColor Yellow
+        Write-Host "This project has no admin account yet. Passwords are in no backup, so one restored admin needs an initial password to sign in and set everyone else's (Admin › Settings › Users & access)." -ForegroundColor Yellow
         Write-Host "Restored admins:"
         foreach ($a in $admins) { Write-Host "  $($a.email)" }
         $pick = Read-Host "Which admin signs in first? [Enter = $($admins[0].email)]"
@@ -596,7 +596,7 @@ if ($isApply) {
         Write-Log "No admin among the missing accounts: the project stays without an admin until one is made"
       }
     } else {
-      Write-Log "The project already has $($id.live_admins) admin account(s): passwords are set from Admin › Users & access"
+      Write-Log "The project already has $($id.live_admins) admin account(s): passwords are set from Admin › Settings › Users & access"
     }
     foreach ($m in $missingUsers) {
       $req = [ordered]@{ op = 'create_user'; project = $Project; email = [string]$m.email; full_name = $m.full_name }
@@ -604,7 +604,7 @@ if ($isApply) {
       if ($isFirst -and $firstPassword) { $req.password = $firstPassword }
       $ans = Invoke-Door (ConvertTo-Json -InputObject $req -Compress) "create_user" 1
       $req = $null
-      $note = 'created — set their password under Admin › Users & access'
+      $note = 'created — set their password under Admin › Settings › Users & access'
       if ($isFirst) { $note = 'created — initial password set by the operator' }
       if (-not $ans.created) { $note = 'already existed' }
       Write-Log "User $($m.email): $note"

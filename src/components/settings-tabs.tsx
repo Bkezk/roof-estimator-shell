@@ -18,7 +18,9 @@ export function SettingsTabs({ active }: { active: SettingsTab }) {
       <p className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
         <Settings className="h-4 w-4" aria-hidden /> Settings
       </p>
-      <div className="inline-flex flex-wrap rounded-md border p-0.5" role="tablist">
+      {/* Links to two pages, so navigation, not tabs (Nov 16 audit, fix 27): the page being
+          shown is marked as the current page. */}
+      <nav className="inline-flex flex-wrap rounded-md border p-0.5" aria-label="Settings">
         {SETTINGS_TABS.map((t) => {
           const on = t.key === active;
           const Icon = ICONS[t.key];
@@ -26,8 +28,7 @@ export function SettingsTabs({ active }: { active: SettingsTab }) {
             <Link
               key={t.key}
               to={t.to}
-              role="tab"
-              aria-selected={on}
+              aria-current={on ? "page" : undefined}
               className={`inline-flex h-8 items-center gap-1.5 rounded px-3 text-sm font-medium transition-colors ${
                 on ? "bg-primary text-primary-foreground" : "hover:bg-muted"
               }`}
@@ -36,7 +37,7 @@ export function SettingsTabs({ active }: { active: SettingsTab }) {
             </Link>
           );
         })}
-      </div>
+      </nav>
     </div>
   );
 }

@@ -11,7 +11,7 @@
  * deletes. "Restore defaults" is not needed: the server seeds a kind with none the first time it
  * is asked for them, so an empty table only says so.
  */
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
@@ -59,7 +59,12 @@ import {
 import { shortDate } from "@/lib/stage-dates";
 import { managesTickets } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
-import { setupTabHref, type SetupStripTab } from "@/lib/menu-places";
+import {
+  cameBySetupTab,
+  SETUP_TAB_PRESSED,
+  setupTabHref,
+  type SetupStripTab,
+} from "@/lib/menu-places";
 import { SetupHeading, SetupTabsList } from "@/components/setup-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,18 +121,26 @@ function DocumentsAdminPage() {
   const router = useRouter();
   const { profile } = useAuth();
   const money = managesTickets(profile);
+  // Opened from the strip on /setup: the Documents tab takes the keyboard focus.
+  const arrivedByTab = useRouterState({ select: (s) => cameBySetupTab(s.location.state) });
   return (
     <div className="space-y-4">
       {/* Setup's fifth tab (owner, Nov 16): the same heading and strip as /setup, Documents lit.
-          The four service tabs show only for an admin or a manager and open /setup. */}
+          The four service tabs show only for an admin or a manager and open /setup. Arrow keys
+          move along the strip; Enter, Space or a click opens a tab (setup-tabs.tsx). */}
       <SetupHeading money={money} documents />
       <Tabs
         value="documents"
+        activationMode="manual"
         onValueChange={(v) => {
-          if (v !== "documents") void router.navigate({ href: setupTabHref(v as SetupStripTab) });
+          if (v !== "documents")
+            void router.navigate({
+              href: setupTabHref(v as SetupStripTab),
+              state: SETUP_TAB_PRESSED,
+            });
         }}
       >
-        <SetupTabsList money={money} documents />
+        <SetupTabsList money={money} documents page="documents" takeFocus={arrivedByTab} />
       </Tabs>
       <div>
         <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">

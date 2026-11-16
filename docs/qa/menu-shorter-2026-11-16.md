@@ -28,7 +28,8 @@ should fall under the setup page as another tab option, what do you think?"
 Details:
 
 - Estimate Pricing starts shut. It is open while a pricing page is showing. A press on the row
-  wins for the rest of the visit.
+  holds until the visitor enters or leaves the pricing pages (changed later on Nov 16, see
+  `audit-fixes-2026-11-16.md`; it used to hold for the rest of the visit).
 - The icon-only menu has no room for a dropdown, so it shows the five pricing pages as icons, and
   Sign out as its own icon.
 - Someone with Inventory and none of the estimate pages, a technician, gets Inventory as a plain

@@ -52,7 +52,8 @@ function DocumentsRoute() {
     <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
       <p className="font-medium">Documents open from a bid or a ticket.</p>
       <p className="text-sm text-muted-foreground">
-        Use "Documents" on the bid or ticket to make or open one. Templates are under Admin.
+        Use "Documents" on the bid or ticket to make or open one. Templates are under Setup ›
+        Documents.
       </p>
       <Button asChild variant="outline">
         <a href={TEMPLATES_ADMIN_PATH}>Manage Templates</a>

@@ -96,7 +96,15 @@ import {
   seesInvoices,
 } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
-import { canCloseOut, stageChoices, stageLocked, stagesForType } from "@/lib/ticket-stage";
+import {
+  canCloseOut,
+  isInspectionType,
+  stageChoices,
+  stageLocked,
+  stagesForType,
+  TYPE_LOCK_NOTE,
+  typeLockedFor,
+} from "@/lib/ticket-stage";
 import { FIELD_DETAILS_NOTE, fieldNotesInput, isFieldTicketPage } from "@/lib/field-ticket-page";
 import {
   deleteServiceJob,
@@ -2102,6 +2110,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   );
   // Type, date and (office) labor rate, then the technician and crew. The Board keeps the week
   // grid; here the select and the date set them (owner, Oct 1).
+  // Audit, Nov 16 (fix 1): once the ticket is Authorized or has an invoice, to or from
+  // Inspection is a manager's (ticket-stage.ts typeLockedFor; the server and the database say
+  // the same). An inspection's box is greyed with a note; on any other ticket only the
+  // Inspection choice is.
+  const typeLocked = !!job && typeLockedFor(profile, job);
+  const typeBoxLocked = typeLocked && isInspectionType(job?.service_type);
   const whatAndWhen = (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -2109,20 +2123,34 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           <Label htmlFor="ticket-type">Type</Label>
           <Select
             value={draft.service_type}
-            disabled={ro}
+            disabled={ro || typeBoxLocked}
             onValueChange={(v) => set("service_type", v as ServiceType)}
           >
-            <SelectTrigger id="ticket-type">
+            <SelectTrigger
+              id="ticket-type"
+              aria-describedby={typeBoxLocked ? "ticket-type-note" : undefined}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {SERVICE_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>
+                <SelectItem
+                  key={t}
+                  value={t}
+                  disabled={
+                    typeLocked && isInspectionType(t) !== isInspectionType(job?.service_type)
+                  }
+                >
                   {TYPE_LABELS[t]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {typeBoxLocked && !ro && (
+            <p id="ticket-type-note" className="text-xs text-muted-foreground" data-type-lock>
+              {TYPE_LOCK_NOTE}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label htmlFor="ticket-date">Date</Label>

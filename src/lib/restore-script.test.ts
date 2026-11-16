@@ -109,7 +109,7 @@ describe("scripts/backup/jbk-restore.ps1", () => {
     expect(src).toContain("if ($isFirst -and $firstPassword) { $req.password = $firstPassword }");
     expect(src).toContain("$firstPassword = $null");
     expect(src).toContain("'created — initial password set by the operator'");
-    expect(src).toContain("'created — set their password under Admin › Users & access'");
+    expect(src).toContain("'created — set their password under Admin › Settings › Users & access'");
     expect(src).toContain("[int]$id.live_admins -eq 0");
     expect(src).toContain('"id_map":\' + $idMapJson');
     // The log never gets a request body (which may hold rows or, once, a password).

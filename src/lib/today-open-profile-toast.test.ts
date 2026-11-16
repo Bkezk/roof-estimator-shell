@@ -75,7 +75,10 @@ describe("the gate (components/auth-gate.tsx)", () => {
       /useEffect\(\(\) => \{\s*if \(loading \|\| !profileBlock\) return;\s*toast\.warning\(PROFILE_MISSING_TOAST, \{\s*action: \{ label: "Try again", onClick: \(\) => void refreshRef\.current\(\) \},\s*\}\);\s*\}, \[loading, profileBlock\]\);/,
     );
     // The redirect itself is as it was (the toast is beside it, not instead of it).
-    expect(gate).toMatch(/\} else if \(session && blocked\) \{\s*navigate\(\{ to: home \}\);\s*\}/);
+    // Nov 16 audit fix 26: home, except Setup for a Documents-only person (closedTo).
+    expect(gate).toMatch(
+      /\} else if \(session && blocked\) \{[^}]*navigate\(\{ to: closedTo \}\);\s*\}/,
+    );
     expect(gate).toContain("if (blocked) return <Waiting />;");
   });
 });

@@ -46,6 +46,7 @@ import {
   type AccountInput,
   type QuickAccountInput,
 } from "@/lib/crm-account";
+import { NOT_FINISHED_INSPECTION_OR } from "@/lib/ticket-stage";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { namesLookAlike } from "@/lib/name-match";
 import {
@@ -286,6 +287,8 @@ export const listAccounts = createServerFn({ method: "GET" })
         .is("sites.deleted_at", null)
         .is("jobs.deleted_at", null)
         .in("jobs.stage", [...OPEN_TICKET_STAGES])
+        // Not an inspection that ends at Authorized (audit, Nov 16, fix 6).
+        .or(NOT_FINISHED_INSPECTION_OR, { referencedTable: "jobs" })
         .order("name")
         .order("id")
         .range(from, to)
@@ -974,6 +977,8 @@ export const deleteAccount = createServerFn({ method: "POST" })
         .eq("account_id", data.id)
         .is("deleted_at", null)
         .in("stage", [...OPEN_TICKET_STAGES])
+        // A finished, unbilled inspection does not hold its customer (audit, Nov 16, fix 6).
+        .or(NOT_FINISHED_INSPECTION_OR)
         .limit(1000),
       sb
         .from("crm_opportunities")

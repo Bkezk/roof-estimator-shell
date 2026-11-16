@@ -12,6 +12,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { businessNumbers, type BusinessNumbers } from "@/lib/owner-business";
 import { visibleToOwner } from "@/lib/owner-view";
+import { NOT_FINISHED_INSPECTION_OR } from "@/lib/ticket-stage";
 import { heldTicketIds, parseTodayInput, viewerToday } from "@/lib/work-counts";
 
 const LIMIT = 1000;
@@ -65,6 +66,9 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         )
         .is("deleted_at", null)
         .in("stage", ["open", "scheduled", "done", "authorized"])
+        // Finished inspections never fill the read (audit, Nov 16, fix 9): they are filtered
+        // here, not after the row limit.
+        .or(NOT_FINISHED_INSPECTION_OR)
         .limit(LIMIT),
       sb.from("invoices").select("status, total, invoice_date, paid_amount").limit(LIMIT),
       sb

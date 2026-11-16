@@ -27,4 +27,4 @@ export function findInspectionTemplate<T extends { name: string; kind: string }>
 }
 
 /** The message when an install has no such template (Admin › Documents seeds it on the next list). */
-export const NO_INSPECTION_TEMPLATE = `There is no "${INSPECTION_REPORT_TEMPLATE}" template (Admin › Documents)`;
+export const NO_INSPECTION_TEMPLATE = `There is no "${INSPECTION_REPORT_TEMPLATE}" template (Setup › Documents)`;

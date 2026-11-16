@@ -99,6 +99,7 @@ describe("the wiring", () => {
     );
     expect(gate).not.toMatch(/const blocked =\s*!!profile &&/);
     expect(gate).toContain("if (blocked) return <Waiting />;");
-    expect(gate).toMatch(/else if \(session && blocked\) \{\s*navigate\(\{ to: home \}\);/);
+    // Nov 16 audit fix 26: home, except Setup for a Documents-only person (closedTo).
+    expect(gate).toMatch(/else if \(session && blocked\) \{[^}]*navigate\(\{ to: closedTo \}\);/);
   });
 });

@@ -187,7 +187,10 @@ describe("every path reaches it once", () => {
       svc.indexOf("export const saveServiceJob"),
       svc.indexOf("async function saveCrew"),
     );
-    expect(save).toContain('.select("technician_id, stage, scheduled_date")');
+    // Nov 16 audit fix 1: the same read carries the type and the invoice, for the Type lock.
+    expect(save).toContain(
+      '.select("technician_id, stage, scheduled_date, service_type, invoice_id")',
+    );
     expect(save).toContain(
       "await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);",
     );

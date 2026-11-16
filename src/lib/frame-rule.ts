@@ -19,12 +19,22 @@ export const FRAME_HEADERS: Readonly<Record<string, string>> = {
 
 const PREVIEW_NAME = /^(?:id-preview(?:-[a-z0-9]+)?|project)--[0-9a-f-]{36}(?:-dev)?\./i;
 const PREVIEW_ZONES = [".lovableproject.com", ".lovableproject-dev.com"];
+/**
+ * Where a preview NAME is believed (audit, Nov 16, fix 28): only under Lovable's own domains.
+ * The name alone used to do, so "project--<id>.anything.example" read as a preview. Tested on
+ * the published site on Nov 16: a forged forwarded-host header did not remove the rule there
+ * (the edge replaces it), so this narrows the code to what it means, nothing more.
+ */
+const PREVIEW_NAME_ZONES = [".lovable.app", ".lovable.dev", ...PREVIEW_ZONES];
 
 /** Is `host` one of Lovable's preview addresses for a project (never the published site)? */
 export function isLovablePreviewHost(host: string | null | undefined): boolean {
   const h = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "");
   if (!h) return false;
-  return PREVIEW_NAME.test(h) || PREVIEW_ZONES.some((z) => h.endsWith(z));
+  return (
+    (PREVIEW_NAME.test(h) && PREVIEW_NAME_ZONES.some((z) => h.endsWith(z))) ||
+    PREVIEW_ZONES.some((z) => h.endsWith(z))
+  );
 }
 
 /** The headers a response from `host` carries: the frame rule, or none on a preview address. */

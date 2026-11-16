@@ -105,7 +105,7 @@ function AccountPage() {
             {/* Owner, Oct 12: the list of pages this login can open is gone from here (it is
                 the sidebar, after all); an admin still sees it under Users & access. */}
             <p className="text-xs text-muted-foreground">
-              An admin changes names, roles and pages under Admin › Users &amp; access.
+              An admin changes names, roles and pages under Admin › Settings › Users &amp; access.
             </p>
           </CardContent>
         </Card>

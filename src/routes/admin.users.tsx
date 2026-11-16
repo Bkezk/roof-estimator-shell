@@ -64,7 +64,7 @@ export const Route = createFileRoute("/admin/users")({
 });
 
 const BILL_RATE_HELP =
-  "What this technician bills per labor hour on a ticket's crew when the ticket's own $ box is blank. Blank here: the rate table (Admin › Service rates; tech rate as the lead, helper rate otherwise).";
+  "What this technician bills per labor hour on a ticket's crew when the ticket's own $ box is blank. Blank here: the rate table (Setup › Service rates; tech rate as the lead, helper rate otherwise).";
 
 const TECHNICIAN_HELP =
   "Appears on the service board, can be assigned tickets and vehicles; edits only their own tickets";

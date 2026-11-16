@@ -298,8 +298,10 @@ describe("7. Owner view task lines: the map only for a task with a building", ()
 
 describe("9. wording", () => {
   it("the Unassigned help names tasks", () => {
+    // Nov 16 audit fix 23: it ended "set on Admin › Reminders."; Reminders is now a tab of the
+    // Admin group's Settings row.
     expect(BUCKET_HELP.unassigned).toBe(
-      "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Reminders.",
+      "Tickets, tasks and opportunities with nobody on them yet. Claim one if you are ticked Technician, or put someone on it with Assign to; they turn red after the number of days set on Admin › Settings › Reminders.",
     );
   });
   it("an Authorize follow-up row reads Done — to authorize", () => {

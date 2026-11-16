@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
 import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
+import { notificationPath } from "@/lib/notification-link";
 import {
   ticketEscalationDue,
   ticketNextRemindAt,
@@ -198,9 +199,14 @@ export const emailText = (msg: Outgoing, link: string, signature: string) =>
  * category (tasks, mentions, the test) reaches everyone asked. Lead notices are narrowed at the
  * source as well (leads.server.ts, lead_notice_user_ids); notify_leads is honoured here too.
  */
-export async function notify(userIds: string[], msg: Outgoing, sb: Client): Promise<number> {
+export async function notify(userIds: string[], sent: Outgoing, sb: Client): Promise<number> {
   const requested = [...new Set(userIds.filter(Boolean))];
   if (!requested.length) return 0;
+  // A link that is not a page of this site is dropped; the notice still goes out (audit, Nov 16,
+  // fix 28). The database refuses a row with such a link (notifications_url_internal), so one
+  // bad link on a follow-up used to fail its reminder on every pass, and the "not started"
+  // warning to managers with it.
+  const msg: Outgoing = { ...sent, url: notificationPath(sent.url) };
   const admin = await serverClient(sb);
   // Recipients' channels and category switches: a SECURITY DEFINER read (profiles RLS hides
   // other users' rows).

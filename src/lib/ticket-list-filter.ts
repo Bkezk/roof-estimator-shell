@@ -6,7 +6,7 @@
  * person's tickets by the lead technician, the same person the Tech Board files the ticket under;
  * "unassigned" is tickets with nobody on them.
  */
-import { isOpenTicketStage, isOverdueTicket, SERVICE_OPEN_WORK } from "@/lib/work-counts";
+import { isOpenTicket, isOverdueTicket, SERVICE_OPEN_WORK } from "@/lib/work-counts";
 
 /** The Technician filter: everyone, nobody assigned, or one technician's id. */
 export const TECH_ALL = "all";
@@ -19,6 +19,8 @@ export interface ListTicket {
   number: number;
   stage: string;
   service_type: string;
+  /** The ticket's invoice: an inspection without one ends at Authorized (not open work). */
+  invoice_id?: string | null;
   scheduled_date: string | null;
   technician_id: string | null;
   technician_name: string | null;
@@ -70,7 +72,7 @@ export function filterTickets<T extends ListTicket>(jobs: T[], f: TicketListFilt
   return jobs.filter((j) => {
     if (f.mineId && j.technician_id !== f.mineId) return false;
     if (f.stage === SERVICE_OPEN_WORK) {
-      if (!isOpenTicketStage(j.stage)) return false;
+      if (!isOpenTicket(j)) return false;
     } else if (f.stage !== "all" && j.stage !== f.stage) return false;
     if (f.overdueOnly && !isOverdueTicket(j, f.today)) return false;
     if (f.type !== "all" && j.service_type !== f.type) return false;

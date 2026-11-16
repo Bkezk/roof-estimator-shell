@@ -451,9 +451,17 @@ export const ACCOUNT_DELETED = "This customer was deleted; an admin or a manager
  * (work-counts.ts) stays at three: the owner keeps those lists as they are.
  */
 export const OPEN_TICKET_STAGES = ["open", "scheduled", "done", "authorized"] as const;
-/** A ticket at this stage keeps its customer (the pure twin of the delete query's `.in`). */
-export const keepsCustomer = (stage: string): boolean =>
-  (OPEN_TICKET_STAGES as readonly string[]).includes(stage);
+/**
+ * A ticket at this stage keeps its customer (the pure twin of the delete query's filters). An
+ * inspection that ends at Authorized does not (audit, Nov 16, fix 6): it is finished, and the
+ * message "close or move them first" asked for a Closed the server refuses an unbilled inspection.
+ */
+export const keepsCustomer = (
+  stage: string,
+  ticket?: { service_type?: string | null; invoice_id?: string | null },
+): boolean =>
+  (OPEN_TICKET_STAGES as readonly string[]).includes(stage) &&
+  !(stage === "authorized" && ticket?.service_type === "inspection" && !ticket.invoice_id);
 /** Opportunity statuses that keep a customer from being deleted. */
 export const OPEN_OPPORTUNITY_STATUSES = ["open", "contacted", "quoted"] as const;
 

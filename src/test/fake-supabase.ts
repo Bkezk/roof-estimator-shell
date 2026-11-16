@@ -2,7 +2,7 @@
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
  * the server functions under test (select / insert / upsert with onConflict / update / delete
  * with eq, neq, in, is, not is / not in / not like, ilike, or(ilike… / like / not.like / is.null /
- * not.is.null / in / not.in / eq), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
+ * not.is.null / in / not.in / eq / neq; on a counted child list with referencedTable), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
  * single; rpc technician_options, crm_user_options, the follow-up functions as missing, any
  * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
  * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
@@ -185,6 +185,10 @@ const orPart = (part: string): ((r: Row) => boolean) => {
     const vs = inListValues(value);
     p = (r) => vs.includes(String(r[col]));
   } else if (op === "eq") p = (r) => String(r[col]) === value;
+  // Nov 16: `stage.neq.authorized` (ticket-stage.ts NOT_FINISHED_INSPECTION_OR). A fixture row
+  // that leaves the column out is "not that value": the columns compared are NOT NULL in the
+  // database, and the older fixtures never wrote them.
+  else if (op === "neq") p = (r) => String(r[col]) !== value;
   else throw new Error(`fake: or(${part})`);
   return neg ? (r) => !p(r) : p;
 };
@@ -459,9 +463,20 @@ export function fakeSupabase(
       },
       ilike: (c: string, pattern: string) =>
         filter(`ilike ${c}=${pattern}`, (r) => likeToRegExp(pattern).test(String(r[c] ?? ""))),
-      or: (expr: string) => {
+      or: (expr: string, opts?: { referencedTable?: string }) => {
         const parts = splitOr(expr).map(orPart);
-        return filter(`or ${expr}`, (r) => parts.some((p) => p(r)));
+        const any = (r: Row) => parts.some((p) => p(r));
+        // On a counted child list of this select (Nov 16: the Customers list's open tickets
+        // leave out a finished inspection): it narrows the children counted, never the parents.
+        const embed = opts?.referencedTable
+          ? countEmbeds.find((e) => e.as === opts.referencedTable)
+          : undefined;
+        if (opts?.referencedTable && !embed)
+          throw new Error(`fake: or(…, { referencedTable: ${opts.referencedTable} })`);
+        if (!embed) return filter(`or ${expr}`, any);
+        filters.push(`or ${embed.as}.(${expr})`);
+        embedPreds.set(embed.as, [...(embedPreds.get(embed.as) ?? []), any]);
+        return b;
       },
       gte: (c: string, v: string) => filter(`gte ${c}`, (r) => String(r[c] ?? "") >= v),
       gt: (c: string, v: string) => filter(`gt ${c}`, (r) => String(r[c] ?? "") > v),

@@ -446,8 +446,10 @@ describe("the Account page", () => {
     expect(flat(src)).toContain(
       '<span className="text-muted-foreground">Email: </span> {profile.email}',
     );
+    // Nov 16 audit fix 23: it read "under Admin › Users &amp; access", a menu row until that
+    // day; the page is now a tab of the Admin group's Settings row.
     expect(src).toContain(
-      "An admin changes names, roles and pages under Admin › Users &amp; access.",
+      "An admin changes names, roles and pages under Admin › Settings › Users &amp; access.",
     );
     for (const kept of [
       "<CardTitle>Change password</CardTitle>",

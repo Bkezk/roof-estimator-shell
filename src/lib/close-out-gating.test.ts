@@ -57,9 +57,8 @@ describe("canCloseOut: the server's rule (setJobCrew / ownJob)", () => {
 describe("the ticket page uses it for the Close out button", () => {
   const src = readFileSync("src/components/service-page.tsx", "utf8");
   it("the button shows on canCloseOut(profile, job), not on canEdit", () => {
-    expect(src).toContain(
-      'import { canCloseOut, stageChoices, stageLocked, stagesForType } from "@/lib/ticket-stage";',
-    );
+    // Nov 16 audit fix 1: the import grew (the Type lock), so the pin names what this test needs.
+    expect(src).toMatch(/import \{[^}]*\bcanCloseOut,[^}]*\} from "@\/lib\/ticket-stage";/);
     expect(src).toContain("const showCloseOut = canCloseOut(profile, job);");
     expect(src).not.toContain("const canCloseOut = !!job && canEdit;");
     const btn = src.indexOf("<ClipboardCheck");

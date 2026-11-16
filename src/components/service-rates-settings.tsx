@@ -286,9 +286,9 @@ export function ServiceRatesSettings() {
               )}
               <p className="text-xs text-muted-foreground">
                 On a ticket with named technicians, each one&apos;s labor bills at the $ typed
-                beside their name, else their default bill rate (Admin › Users & access), else the
-                Tech / Helper labor rate below. Travel and the cost side always come from this
-                table.
+                beside their name, else their default bill rate (Admin › Settings › Users & access),
+                else the Tech / Helper labor rate below. Travel and the cost side always come from
+                this table.
               </p>
 
               <div className="hidden overflow-x-auto md:block">
