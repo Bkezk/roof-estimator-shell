@@ -168,7 +168,9 @@ describe("the wiring", () => {
     expect(ui).toContain("shouldFilter={false}");
     expect(ui).toContain("router.navigate({ href })");
     // Every row says what it is.
-    expect(ui).toContain("{SEARCH_KIND_ONE[h.kind]}");
+    // Nov 16, Trade Bids: the tag is the hit's own when it has one (a trade bid reads "Trade
+    // Bid"), else its kind's. This read "{SEARCH_KIND_ONE[h.kind]}".
+    expect(ui).toContain("{searchHitTag(h)}");
   });
   it("the server function reads every kind with the caller's client (row security), each capped and never deleted rows", () => {
     const fn = read("./global-search.functions.ts");

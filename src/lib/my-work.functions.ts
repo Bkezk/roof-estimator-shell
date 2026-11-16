@@ -479,6 +479,8 @@ export const listMyWork = createServerFn({ method: "GET" })
       toAuthorize: (toAuthorize.data ?? []) as TicketIn[],
       bids: (bids.data ?? []).map((b): BidIn => ({
         id: b.id,
+        // "roof" or "trade" (Nov 16): the row opens the estimator or Trade Bids (bid-kind.ts).
+        kind: b.kind,
         name: b.name,
         status: b.status,
         due_date: b.due_date,

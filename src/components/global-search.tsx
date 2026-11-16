@@ -27,7 +27,7 @@ import {
   hitHref,
   parseGlobalQuery,
   SEARCH_KIND_LABELS,
-  SEARCH_KIND_ONE,
+  searchHitTag,
   SEARCH_MIN,
 } from "@/lib/global-search";
 
@@ -143,7 +143,7 @@ export function GlobalSearch() {
                               variant="outline"
                               className="shrink-0 px-1.5 py-0 text-[10px] font-normal"
                             >
-                              {SEARCH_KIND_ONE[h.kind]}
+                              {searchHitTag(h)}
                             </Badge>
                           </span>
                           {h.subtitle && (

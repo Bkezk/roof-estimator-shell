@@ -92,7 +92,16 @@ export interface SearchHit {
   /** Where the row opens: a path and its search params. */
   to: string;
   search: Record<string, string>;
+  /**
+   * The tag when it is not the kind's own (Nov 16): a trade bid is a bid, and its tag reads
+   * "Trade Bid", not "Project Bid" (searchHitTag).
+   */
+  tag?: string;
 }
+
+/** The tag on a result: its own when it has one, else its kind's. */
+export const searchHitTag = (h: Pick<SearchHit, "kind" | "tag">): string =>
+  h.tag ?? SEARCH_KIND_ONE[h.kind];
 
 export interface ParsedQuery {
   text: string;

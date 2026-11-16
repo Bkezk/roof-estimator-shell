@@ -555,6 +555,17 @@ describe("4. Work Overview — listMyWork (the server)", () => {
     ).toBe("later");
     expect(items.map((i) => i.key)).not.toContain("bid:b-sub");
   });
+  // Nov 16, Trade Bids: a draft trade bid is someone's to-do like any draft, and its row opens
+  // on Trade Bids. The server dropped `kind` on the way to the page, so the row opened the
+  // roofing estimator (seen in the browser run).
+  it("a draft trade bid is listed too and opens on Trade Bids", async () => {
+    tables["bids"]!.push(bidRow({ id: "b-trade", name: "Shop repaint", kind: "trade" }));
+    const r = await run(EST);
+    expect(r.bids.find((b) => b.id === "b-trade")).toMatchObject({ kind: "trade" });
+    const items = mergeWork(r);
+    expect(items.find((i) => i.key === "bid:b-trade")!.href).toBe("/trade-bids?bid=b-trade");
+    expect(items.find((i) => i.key === `bid:${BID}`)!.href).toBe(`/estimate?bid=${BID}`);
+  });
   it("the query: drafts, not deleted, by due date, gated on Estimate access", () => {
     const fn = read("src/lib/my-work.functions.ts");
     expect(fn).toContain('const estimator = canAccess(me, "estimate");');

@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
+import { bidKindLabel } from "@/lib/bid-kind";
 import {
   hitRoute,
   parseGlobalQuery,
@@ -232,12 +233,9 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "bid",
         id: s(r["id"]),
         title: s(r["name"]),
-        // A trade bid says so: the tag on every bid hit reads "Project Bid".
-        subtitle: joinParts(
-          s(r["kind"]) === "trade" ? "Trade bid" : "",
-          nameOf(r),
-          searchStatusLabel("bid", s(r["status"])),
-        ),
+        subtitle: joinParts(nameOf(r), searchStatusLabel("bid", s(r["status"]))),
+        // A trade bid's tag says so (the kind's own reads "Project Bid").
+        ...(s(r["kind"]) === "trade" ? { tag: bidKindLabel("trade") } : {}),
         ...hitRoute("bid", { id: s(r["id"]), bid_kind: s(r["kind"]) }),
       });
     for (const r of invoices)

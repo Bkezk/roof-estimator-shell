@@ -322,7 +322,7 @@ function GoesBy(props: {
   id: string;
   line: { basis: TradeBasis; measure_id: string | null };
   measures: readonly TradeMeasure[];
-  /** The set-amount choice in this section's words ("A set number of hours"). */
+  /** The set-amount choice in this section's words ("Set hours": short enough to show whole in a narrow box). */
   setLabel: string;
   disabled: boolean;
   onPick: (patch: { basis: TradeBasis; measure_id: string | null }) => void;
@@ -572,7 +572,7 @@ function LaborRow(props: {
             id={`${id}-by`}
             line={l}
             measures={props.measures}
-            setLabel="A set number of hours"
+            setLabel="Set hours"
             disabled={props.disabled}
             onPick={props.onPatch}
           />

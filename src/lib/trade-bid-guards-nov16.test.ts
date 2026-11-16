@@ -115,3 +115,55 @@ describe("the estimator page and a trade bid", () => {
     expect(mark).toBeGreaterThan(skip);
   });
 });
+
+describe("the search box and a trade bid", () => {
+  it("a result's tag is its own when it has one, else its kind's", async () => {
+    const { searchHitTag } = await import("./global-search");
+    expect(searchHitTag({ kind: "bid" })).toBe("Project Bid");
+    expect(searchHitTag({ kind: "bid", tag: "Trade Bid" })).toBe("Trade Bid");
+    expect(searchHitTag({ kind: "ticket" })).toBe("Ticket");
+  });
+  it("a trade bid's hit carries the Trade Bid tag; the screen draws the hit's tag", () => {
+    const fn = flat(read("./global-search.functions.ts"));
+    expect(fn).toContain('...(s(r["kind"]) === "trade" ? { tag: bidKindLabel("trade") } : {}),');
+    const ui = flat(read("../components/global-search.tsx"));
+    expect(ui).toContain("{searchHitTag(h)}");
+    expect(ui).not.toContain("SEARCH_KIND_ONE[h.kind]");
+  });
+});
+
+describe("a scope of work of several lines on the proposal", () => {
+  const scope = "Prepare and paint the walls.\nPaint all trim.\nPaint six doors.";
+  it("prints as three lines in the PDF (the variable's own line breaks force a line)", async () => {
+    const { inlineRuns, wrapRuns } = await import("./documents/pdf-layout");
+    const runs = inlineRuns(
+      {
+        type: "paragraph",
+        content: [{ type: "variable", attrs: { key: "opportunity.scope" } }],
+      },
+      { "opportunity.scope": scope },
+      (k) => k,
+    );
+    // 6 points a character at any size: the widest line is 28 characters, 168 points of 500.
+    const lines = wrapRuns(runs, 500, 10, (text) => text.length * 6);
+    expect(lines.map((l) => l.segments.map((s) => s.text).join(""))).toEqual([
+      "Prepare and paint the walls.",
+      "Paint all trim.",
+      "Paint six doors.",
+    ]);
+  });
+  it("shows its lines in the editor too: the value sits in a pre-line span inside the chip", () => {
+    const ui = flat(read("../components/documents/editor/rich-text.tsx"));
+    expect(ui).toContain('<span className="whitespace-pre-line">{text}</span>');
+  });
+});
+
+describe("the labor line's Goes by choice", () => {
+  // Seen in the browser run: "A set number of hours" was cut to "A set number of ho" in the
+  // box at four columns. The words are short enough to show whole.
+  it("reads Set hours", () => {
+    const ui = flat(read("../components/trade/trade-lines-editor.tsx"));
+    expect(ui).toContain('setLabel="Set hours"');
+    expect(ui).not.toContain('setLabel="A set number of hours"');
+  });
+});
