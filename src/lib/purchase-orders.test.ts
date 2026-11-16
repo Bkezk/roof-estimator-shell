@@ -190,15 +190,16 @@ describe("the invoice's Internal fold: POs are cost, never the customer's total"
     expect(after.margin).toBe(Math.round((before.margin - 312.51) * 100) / 100);
     expect(after.hours).toBe(3);
     expect(after.perHour).toBeCloseTo(after.margin / 3, 10);
-    // The numbers: 385 + 6 tax = 391; cost 180 (+ 312.51 POs).
+    // The numbers: 385 + 6 tax = 391; cost 180 (+ 312.51 POs). Nov 16: margin is BEFORE tax,
+    // 385 − 180 = 205 (it was 211, the $6 of sales tax counted as margin).
     expect(before).toMatchObject({
       subtotal: 385,
       tax: 6,
       total: 391,
       cost_total: 180,
-      margin: 211,
+      margin: 205,
     });
-    expect(after).toMatchObject({ cost_total: 492.51, margin: -101.51 });
+    expect(after).toMatchObject({ cost_total: 492.51, margin: -107.51 });
   });
   it("every PO: poTotal feeds it (owner, Oct 28)", () => {
     const pos = [{ price: 300 }, { price: 999 }];
@@ -211,8 +212,9 @@ describe("the invoice's Internal fold: POs are cost, never the customer's total"
       live,
     );
     expect(t).toMatchObject({ subtotal: 385, tax: 6, total: 391, po_cost: 100, cost_total: 280 });
-    expect(t.margin).toBe(111);
-    expect(t.perHour).toBeCloseTo(37, 10);
+    // Nov 16: before tax, 385 − 280 (it was 111, off the total with tax).
+    expect(t.margin).toBe(105);
+    expect(t.perHour).toBeCloseTo(35, 10);
   });
 
   const ed = read("src/components/service/invoice-editor.tsx");

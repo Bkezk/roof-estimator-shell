@@ -19,6 +19,14 @@
  *              commission count as cost whether or not they are "in markup" — they are real money
  *              paid out either way.
  *  - hours   = laborSubtotal1Hours, the direct-labor hours (the report's Hours column).
+ *  - materialTax (Nov 16) = the part of `tax` that is the material-only tax: sales tax PAID to
+ *              the supplier on purchases (d8 − d4..d7, which is taxCharged − d19). It is a cost
+ *              of the job, not money passed on, so the report counts it as revenue and as
+ *              material cost (margin-report.ts bidToMarginIn; owner: "which would be most
+ *              accurate?" … "go for both"). 0 when the bid charges sales tax at the end of the
+ *              chain instead (d19), which the customer pays on top and the state receives.
+ *              Optional: figures saved before Nov 16 do not carry it, and the report then reads
+ *              the bid's own tax mode (`bidMaterialTax`).
  *
  * So margin = revenue − (material + labor + other) is the markup value (d14) in every markup
  * mode, give or take a cent of rounding: with per diem and commission outside the markup, revenue
@@ -51,6 +59,8 @@ export interface BidFigures {
   tax: number;
   /** The bid total (grandTotal, d20). */
   total: number;
+  /** The material-only tax inside `tax` (paid on purchases; a cost). Absent before Nov 16. */
+  materialTax?: number | undefined;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -70,7 +80,22 @@ export function bidFigures(r: Pick<EstimateResult, "laborSubtotal1Hours" | "mone
     hours: r2(num(r.laborSubtotal1Hours)),
     tax,
     total,
+    // What is left of the tax once the end-of-chain sales tax (d19) is taken off.
+    materialTax: r2(Math.max(0, num(r.money.taxCharged) - num(d[19]))),
   };
+}
+
+/**
+ * The material-only tax of a bid's figures: the stored figure, else — for figures saved before
+ * Nov 16 — all of `tax` when the bid was priced with tax on material only, none of it
+ * otherwise. `materialOnly` is the bid's own setting, else the company setting it was priced
+ * under (data.taxMaterialOnly, data.adminSnapshot.settings.taxMaterialOnly); the two kinds of
+ * tax never mix on one bid (engine/money.ts). Unknown mode: none, as the report read it before.
+ */
+export function bidMaterialTax(f: BidFigures, materialOnly: boolean | null | undefined): number {
+  if (typeof f.materialTax === "number" && Number.isFinite(f.materialTax))
+    return r2(Math.min(Math.max(0, f.materialTax), Math.max(0, f.tax)));
+  return materialOnly ? r2(Math.max(0, f.tax)) : 0;
 }
 
 const money = z.number().finite();
@@ -84,6 +109,7 @@ export const bidFiguresSchema = z.object({
   hours: money,
   tax: money,
   total: money,
+  materialTax: money.optional(),
 });
 
 /** The column read back: the figures, or null for a missing column, another version or garbage. */

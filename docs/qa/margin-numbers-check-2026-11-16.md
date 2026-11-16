@@ -78,16 +78,49 @@ $545 of cost, $410 of margin and 42.9%, and the first invoice's fold read $80.
 Tests: `po-counted-once-nov16.test.ts`, built from the invoices that found it. Ten of the 14
 new tests fail on the old code.
 
-## Two things left as they are, for the owner to decide
+## Two definitions the owner settled
 
-- **A bid's margin %.** The report divides by revenue before tax. A bid priced at a gross
-  profit % that includes material sales tax in its total reads slightly higher in the report
-  than on the bid. The dollars of margin are the same.
-- **The invoice page's fold.** It takes margin off the invoice total including sales tax; the
-  report takes it off the subtotal before tax. On a taxed invoice the fold reads higher by the
-  tax collected.
+The check found two places where margin was defined differently. The owner asked "which would
+be most accurate?" and, on the answer, said "go for both".
+
+### A bid's sales tax on materials is a cost
+
+A bid priced with sales tax on material only pays that tax to the supplier, and the price the
+customer pays already includes it. It is a cost of the job, not money passed on. The report
+used to leave it out of both revenue and cost, so a bid priced at a 30% gross profit read
+30.7%.
+
+| For such a bid | Before | Now |
+|---|---|---|
+| Revenue | bid total less the material tax | the bid total |
+| Material | without the tax | with the tax paid on it |
+| Cost | below the bid's Subtotal 1 by the tax | the bid's Subtotal 1 |
+| Margin | the bid's markup value | the same, to the cent |
+| Margin % | higher than the bid was priced at | the bid's own % |
+
+A bid that charges sales tax to the customer on top of the price is unchanged: that tax is
+collected and passed on, so it stays out of both sides.
+
+New saves store the material tax with the bid's figures. Figures saved earlier do not carry
+it, so the report reads the bid's tax mode instead: its own setting, else the company setting
+it was priced under. No existing bid was changed.
+
+On the live won bid the report now reads the bid's own Subtotal 1 as cost, its markup value as
+margin, and 30.0%.
+
+### The invoice page's margin is before tax
+
+The "Internal — cost and margin" box took margin off the invoice total including sales tax.
+Sales tax is collected from the customer and sent to the state, so it is not margin. The box
+now uses the subtotal before tax and the row reads "Margin, before tax", the same figure the
+Margin report shows for the invoice. Margin / hour follows it.
+
+On a test invoice of $825.00 plus $49.50 tax with $480.00 of cost, the box read $394.50 before
+and reads $345.00 now.
+
+Tests: `margin-tax-nov16.test.ts`, 12 tests, 10 of which fail on the old code.
 
 ## Checks
 
-prettier, eslint (0 errors, the same 16 warnings), tsc and build clean. vitest: 569 files,
-7,583 tests, all pass. Every temporary row was removed and the counts match the start.
+prettier, eslint (0 errors, the same 16 warnings), tsc and build clean. vitest: 570 files,
+7,595 tests, all pass. Every temporary row was removed and the counts match the start.

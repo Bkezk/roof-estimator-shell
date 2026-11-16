@@ -1416,8 +1416,9 @@ describe("the component, pinned to its source", () => {
     expect(src).toMatch(/queryKey: \["margin-report", from, to, groupBy, source,/);
     expect(src.indexOf('id="margin-group"')).toBeLessThan(src.indexOf('id="margin-source"'));
     const flat = src.replace(/\s+/g, " ");
+    // Nov 16: the two kinds of sales tax are told apart (margin-tax-nov16.test.ts).
     expect(flat).toContain(
-      "Won bids count too (Include): revenue is the bid total before tax; cost is the bid&apos;s material, labor, subs and services, warranty, shipping, per diem and commission; counted on its Won-on day (editable here and in the estimator).",
+      "Won bids count too (Include): revenue is the bid total, less any sales tax charged to the customer on top of the price; cost is the bid&apos;s material, labor, subs and services, warranty, shipping, per diem and commission. Sales tax paid on materials is a cost: it is part of the material cost and stays in the revenue, so a bid&apos;s margin % is the one it was priced at. A bid is counted on its Won-on day (editable here and in the estimator).",
     );
   });
   it("the drill-down: a bid row links to the estimator with a Bid badge, reads Won, and its day is an editable Won on box; the column says Technician / estimator", () => {
@@ -1475,7 +1476,8 @@ describe("the server function, pinned to its source", () => {
   });
   it("the won bids: live, won (the legacy accepted too), keyset-paged, the customer name as a JSON path (never the whole data blob), the won day filtered in code", () => {
     expect(fns).toContain(
-      '"id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name"',
+      // Nov 16: two more JSON paths, the bid's tax mode (never the whole data blob).
+      '"id, name, status, status_changed_at, updated_at, created_at, account_id, created_by, grand_total, figures, won_on, customer_name:data->customer->>name, own_tax_mode:data->>taxMaterialOnly, priced_tax_mode:data->adminSnapshot->settings->>taxMaterialOnly"',
     );
     expect(fns).toContain('.in("status", ["won", "accepted"])');
     expect(fns).toContain('.is("deleted_at", null)');

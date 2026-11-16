@@ -1865,7 +1865,9 @@ function Totals({
               <div
                 className={`flex justify-between gap-2 font-medium ${t.margin < 0 ? "text-destructive" : "text-foreground"}`}
               >
-                <dt>Margin</dt>
+                <dt title="The subtotal before tax, less the cost. Sales tax is collected and passed on, so it is not margin.">
+                  Margin, before tax
+                </dt>
                 <dd className="tabular-nums">{money(t.margin)}</dd>
               </div>
               <div className="flex justify-between gap-2">

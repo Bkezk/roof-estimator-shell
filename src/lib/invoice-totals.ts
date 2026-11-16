@@ -1,7 +1,8 @@
 /**
  * The invoice page's totals (invoice-editor.tsx): Subtotal / Tax / Total as the server computes
  * them (invoices.server.ts totals()), and the internal side — Cost, Margin, Margin / hour — that
- * only admins and managers see, folded ("Internal — cost and margin").
+ * only admins and managers see, folded ("Internal — cost and margin"). Margin is the subtotal
+ * BEFORE tax less the cost (Nov 16): the same figure the Margin report shows for the invoice.
  *
  * Purchase orders (owner, Oct 1; purchase-orders.ts): the ticket's PO total — every PO, approved
  * or not (owner, Oct 28: "PO's should count to internal cost regardless as they happened") — is
@@ -101,7 +102,10 @@ export function computeTotals(
   const total = r2(subtotal + tax);
   const po_cost = r2(Number.isFinite(poCost) ? poCost : 0);
   const cost_total = r2(cost + po_cost);
-  const margin = r2(total - cost_total);
+  // Before tax (owner, Nov 16: "which would be most accurate?" … "go for both"): sales tax is
+  // collected from the customer and sent to the state, so it is not margin. Until then the fold
+  // took margin off the total including tax and read higher than the Margin report by the tax.
+  const margin = r2(subtotal - cost_total);
   return {
     subtotal,
     tax,
@@ -158,11 +162,13 @@ export function storedTotals(
   live: InvoiceTotals,
 ): InvoiceTotals {
   const total = Number(inv.total);
+  const subtotal = Number(inv.subtotal);
   const cost_total = r2(Number(inv.cost_total) + live.po_cost);
-  const margin = r2(total - cost_total);
+  // Before tax, as computeTotals and the Margin report (Nov 16).
+  const margin = r2(subtotal - cost_total);
   return {
     ...live,
-    subtotal: Number(inv.subtotal),
+    subtotal,
     tax: Number(inv.tax_amount),
     total,
     cost_total,

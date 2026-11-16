@@ -85,6 +85,9 @@ describe("bidFigures: the estimator's money figures for the Margin report", () =
       labor: 550, // d10 + d11
       other: 335, // warranty 50 + shipping 75 + per diem 90 + commission 120
       hours: 18,
+      // Nov 16: the material-only tax inside `tax`. This bid charges sales tax at the end of
+      // the chain (d19), so none of it is material tax (margin-tax-nov16.test.ts has the rest).
+      materialTax: 0,
     });
     expect(BID_FIGURES_VERSION).toBe(1);
   });

@@ -348,12 +348,14 @@ export function MarginReport() {
         <p className="text-sm text-muted-foreground">
           Final and paid invoices only. Revenue is the invoice subtotal, before tax. Cost = material
           + labor &amp; travel + other lines + the ticket&apos;s purchase orders (each counted once,
-          on the ticket&apos;s first invoice). Margin = revenue − cost; Margin % = margin ÷ revenue.
-          Hours are the labor and travel hours on the invoices. Compare shows the earlier period in
-          grey and the change beside each figure. Won bids count too (Include): revenue is the bid
-          total before tax; cost is the bid&apos;s material, labor, subs and services, warranty,
-          shipping, per diem and commission; counted on its Won-on day (editable here and in the
-          estimator).
+          on the invoice that bills it, else on the ticket&apos;s first invoice). Margin = revenue −
+          cost; Margin % = margin ÷ revenue. Hours are the labor and travel hours on the invoices.
+          Compare shows the earlier period in grey and the change beside each figure. Won bids count
+          too (Include): revenue is the bid total, less any sales tax charged to the customer on top
+          of the price; cost is the bid&apos;s material, labor, subs and services, warranty,
+          shipping, per diem and commission. Sales tax paid on materials is a cost: it is part of
+          the material cost and stays in the revenue, so a bid&apos;s margin % is the one it was
+          priced at. A bid is counted on its Won-on day (editable here and in the estimator).
         </p>
       </div>
 

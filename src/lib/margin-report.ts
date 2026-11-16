@@ -14,8 +14,7 @@
  *    made (`invoiceDay`), read from the date STRING: no time zone math.
  *  - Revenue = the invoice's subtotal, BEFORE tax. Tax is collected and passed on; it is not
  *    margin. (The per-invoice "Internal — cost and margin" fold, invoice-totals.ts computeTotals,
- *    takes margin off the total INCLUDING tax, so a taxed invoice reads a little higher there
- *    than here. The report's way is the honest one for a margin; the fold is left as it was.)
+ *    reads the same since Nov 16; until then it took margin off the total INCLUDING tax.)
  *    Every figure, chart and comparison here is before tax; there is no toggle.
  *  - Material cost = the material lines' cost_total; Labor & travel = the labor and travel lines'
  *    (their cost_rate comes from the rate table, invoice-labor.ts); Other = the other lines'.
@@ -42,9 +41,12 @@
  *    Include select (MARGIN_SOURCES) asks for service and bids (the default), service only, or
  *    bids only; the comparison period follows the same choice.
  *  - Its money is the estimator's stored figures (bid-figures.ts, bids.figures, written at every
- *    save): revenue = the bid total BEFORE tax; material, labor (direct + subs and services) and
- *    other (warranty, shipping, per diem, commission) are the cost; hours the direct-labor hours;
- *    no purchase orders. A won bid saved before the figures existed (null column) is counted
+ *    save): revenue = the bid total less the sales tax CHARGED to the customer; material, labor
+ *    (direct + subs and services) and other (warranty, shipping, per diem, commission) are the
+ *    cost; hours the direct-labor hours; no purchase orders. Sales tax PAID on materials (a bid
+ *    priced with tax on material only) is not passed on: it stays in the revenue and is part of
+ *    the material cost (Nov 16, owner: "go for both"), so the margin % is the one the bid was
+ *    priced at. The margin in dollars is the same either way. A won bid saved before the figures existed (null column) is counted
  *    nowhere — not a row, not the totals, not the charts, not the CSV — and only listed
  *    (MarginReportResult.bidsWithoutFigures) so it can be opened and saved once.
  *  - Its day is the day it was won (`bidWonDay`): bids.won_on, the business day the office picked
@@ -57,7 +59,7 @@
  *  - The status split gains a Won bids tile (counted as bids). The CSV is left as it was: its
  *    rows are groups, and a group mixes invoices and bids; Include says what the file covers.
  */
-import type { BidFigures } from "@/lib/bid-figures";
+import { bidMaterialTax, type BidFigures } from "@/lib/bid-figures";
 import { poTotal, type PoLike } from "@/lib/purchase-orders";
 import {
   poCostForInvoice,
@@ -281,6 +283,12 @@ export interface MarginBidIn {
   estimator: string | null;
   estimatorId: string | null;
   figures: BidFigures;
+  /**
+   * Was the bid priced with sales tax on material only? Its own setting, else the company
+   * setting it was priced under; null when neither is known. Read only for figures saved before
+   * Nov 16, which do not say (bid-figures.ts bidMaterialTax).
+   */
+  taxMaterialOnly?: boolean | null | undefined;
 }
 
 /**
@@ -300,19 +308,22 @@ export function bidWonDay(b: {
 /** A won bid as a report row input: the rules at the top of the file. */
 export function bidToMarginIn(b: MarginBidIn): MarginInvoiceIn {
   const f = b.figures;
+  // Sales tax paid on materials is a cost of the job and part of what the customer paid, so it
+  // counts on both sides (Nov 16). Sales tax charged on top of the price stays out of both.
+  const materialTax = bidMaterialTax(f, b.taxMaterialOnly);
   return {
     id: b.id,
     kind: "bid",
     number: b.name,
     day: bidWonDay(b),
     status: "won",
-    subtotal: f.revenue,
+    subtotal: r2(f.revenue + materialTax),
     customer: (b.accountName ?? "").trim() || (b.dataCustomerName ?? "").trim(),
     technician: b.estimator,
     technicianId: b.estimatorId,
     ticket: true,
     hours: f.hours,
-    material: f.material,
+    material: r2(f.material + materialTax),
     labor: f.labor,
     other: f.other,
     purchaseOrders: 0,

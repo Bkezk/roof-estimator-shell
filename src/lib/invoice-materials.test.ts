@@ -222,7 +222,8 @@ describe("the editor: each line's cost for the office; cost and margin folded fo
     expect(sub).toBeGreaterThan(-1);
     expect(sub).toBeLessThan(fold);
     expect(totals.indexOf("<dt>Total</dt>")).toBeLessThan(fold);
-    for (const label of ["<dt>Cost</dt>", "<dt>Margin</dt>", "<dt>Margin / hour"])
+    // Nov 16: the Margin row says "before tax" (it is the subtotal less the cost now).
+    for (const label of ["<dt>Cost</dt>", "Margin, before tax", "<dt>Margin / hour"])
       expect(totals.indexOf(label)).toBeGreaterThan(totals.indexOf("{open && ("));
   });
   it("a hand edit of qty / unit / rate on a ticket line rescales its cost; a new line costs 0", () => {
