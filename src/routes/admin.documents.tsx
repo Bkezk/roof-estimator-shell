@@ -57,6 +57,10 @@ import {
   templateEditorHref,
 } from "@/lib/documents/admin-helpers";
 import { shortDate } from "@/lib/stage-dates";
+import { managesTickets } from "@/lib/access";
+import { useAuth } from "@/lib/auth-store";
+import { setupTabHref, type SetupStripTab } from "@/lib/menu-places";
+import { SetupHeading, SetupTabsList } from "@/components/setup-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -109,12 +113,26 @@ export const DOCUMENT_ASSETS_KEY = ["document-assets"] as const;
 function DocumentsAdminPage() {
   const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
+  const router = useRouter();
+  const { profile } = useAuth();
+  const money = managesTickets(profile);
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Setup's fifth tab (owner, Nov 16): the same heading and strip as /setup, Documents lit.
+          The four service tabs show only for an admin or a manager and open /setup. */}
+      <SetupHeading money={money} documents />
+      <Tabs
+        value="documents"
+        onValueChange={(v) => {
+          if (v !== "documents") void router.navigate({ href: setupTabHref(v as SetupStripTab) });
+        }}
+      >
+        <SetupTabsList money={money} documents />
+      </Tabs>
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <Files className="h-6 w-6" /> Documents
-        </h1>
+        <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+          <Files className="h-5 w-5" /> Documents
+        </h2>
         <p className="text-sm text-muted-foreground">
           The templates proposals and letters start from, the snippets saved from inside the editor,
           and the PDF library inserted into documents. Documents themselves are made from a bid (the

@@ -121,8 +121,9 @@ describe("1. unsaved edits survive a tab switch; leaving asks", () => {
     expect(page).toContain(
       "const marked = useMemo(() => new Set(dirtyKeys.map(tabOfFormKey)), [dirtyKeys]);",
     );
-    for (const t of ["rates", "materials", "inspection", "vehicles"])
-      expect(page).toContain(`{dot("${t}")}`);
+    // Since Nov 16 the shared strip asks for each tab's dot (Documents, its own page, has none).
+    expect(page).toContain('dot={(t) => (t === "documents" ? null : dot(t))}');
+    expect(read("src/components/setup-tabs.tsx")).toContain("{props.dot?.(tab)}");
     expect(page).toContain('aria-label="unsaved changes"');
   });
 });

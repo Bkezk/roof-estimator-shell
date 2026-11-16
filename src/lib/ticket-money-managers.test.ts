@@ -84,20 +84,18 @@ describe("the gate and the Admin group", () => {
     // Owner, Oct 5: Service Rates became Setup, under Opportunities in the Customers group; with
     // it gone the Admin group holds only admin pages (setup-page.test.ts has the detail).
     const nav = read("src/components/app-sidebar.tsx");
-    // Since Oct 26 the group also opens for managers, for Documents alone; Users & access and
-    // Reminders stay admin-only (owner-page.test.ts).
-    expect(nav).toMatch(
-      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
-    );
-    expect(nav).toMatch(
-      /title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true/,
-    );
-    expect(nav).toMatch(
-      /title: "Reminders", url: "\/admin\/reminders", icon: BellRing, adminOnly: true/,
-    );
+    // Nov 16 (the shorter menu): the group is admins only again — Owner and Settings, whose two
+    // tabs are Users & access and Reminders (lib/menu-places.ts) — and the gate still keeps
+    // everyone else off both pages.
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    const places = read("src/lib/menu-places.ts");
+    expect(places).toContain('{ key: "users", label: "Users & access", to: "/admin/users" }');
+    expect(places).toContain('{ key: "reminders", label: "Reminders", to: "/admin/reminders" }');
     expect(nav).not.toContain("/admin/service-rates");
+    // The Setup row shows to everyone with Documents access (Documents is its fifth tab); only
+    // an admin or a manager is sent to /setup itself, and the gate is unchanged.
     expect(nav).toMatch(
-      /title: "Setup", url: "\/setup", icon: Settings2, page: null, visible: managesTickets/,
+      /title: "Setup",\s*url: "\/setup",\s*icon: Settings2,\s*page: null,\s*visible: hasDocumentsAccess,\s*urlFor: \(p\) => setupHomeFor\(\{ money: managesTickets\(p\) \}\),/,
     );
   });
 });

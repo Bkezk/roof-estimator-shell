@@ -480,7 +480,9 @@ describe("Source: admin-only on the client and the server", () => {
   it("the nav item (Oct 21: the Owner view moved to /owner) sits in the admins-only Admin group", () => {
     // Until Oct 21 the pin was "no new nav item": the view was a toggle on Work Overview.
     const nav = read("src/components/app-sidebar.tsx");
-    expect(nav).toContain('{ title: "Owner", url: "/owner", icon: Crown, adminOnly: true },');
+    // Nov 16: the group itself is admins only (it lost Documents), so the row needs no flag.
+    expect(nav).toContain('{ title: "Owner", url: "/owner", icon: Crown },');
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
     expect(nav).not.toMatch(/my-work\?view=owner|view: "owner"/);
   });
 });

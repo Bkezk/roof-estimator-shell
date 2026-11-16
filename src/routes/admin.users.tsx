@@ -35,6 +35,7 @@ import {
 import { TECH_NEEDS_SERVICE, technicianNeedsService, withService } from "@/lib/dispatch-access";
 import { useAuth } from "@/lib/auth-store";
 import { signOutAllConfirm, signOutAllDone, signOutAllTitle } from "@/lib/sign-out-everywhere";
+import { SettingsTabs } from "@/components/settings-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -347,6 +348,7 @@ function UsersPage() {
 
   return (
     <div className="space-y-8">
+      <SettingsTabs active="users" />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Users &amp; access</h1>
         <p className="text-sm text-muted-foreground">

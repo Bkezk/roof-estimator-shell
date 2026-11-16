@@ -575,7 +575,11 @@ describe("managers set drivers (owner, Oct 9)", () => {
   it("the Setup tab shows for managers too", () => {
     const setup = read("src/routes/setup.tsx");
     expect(setup).toContain("const canSetDrivers = seesEveryone(profile);");
-    expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsTrigger value="vehicles"/);
+    // Since Nov 16 the strip is the shared one (components/setup-tabs.tsx): Vehicles & drivers
+    // shows with the other service tabs, for whoever may open /setup — admins and managers.
+    expect(read("src/lib/menu-places.ts")).toContain(
+      '...(who.money ? (["rates", "materials", "inspection", "vehicles"] as const) : []),',
+    );
     expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsContent value="vehicles"/);
     expect(setup).toContain("enabled: canSetDrivers,");
     expect(setup).not.toContain('role === "admin"');

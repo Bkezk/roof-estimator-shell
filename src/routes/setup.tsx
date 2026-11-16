@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useBlocker, useNavigate, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ClipboardList, Loader2, Package, Receipt, Settings2, Truck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
-import { seesEveryone } from "@/lib/access";
+import { hasDocumentsAccess, seesEveryone } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { listLocations } from "@/lib/inventory.functions";
 import {
@@ -16,6 +16,8 @@ import {
   type SetupFormsRegistry,
 } from "@/lib/setup-forms";
 import { ServiceRatesSettings } from "@/components/service-rates-settings";
+import { SetupHeading, SetupTabsList } from "@/components/setup-tabs";
+import { SETUP_DOCUMENTS_PATH, SETUP_TAB_TITLES } from "@/lib/menu-places";
 import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
 import { MaterialPricingSettings } from "@/components/service/material-pricing-settings";
 import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
@@ -30,7 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 
 /**
  * Setup (owner, Oct 5): the Service Rates page renamed and moved from the Admin group to the
@@ -64,12 +66,7 @@ export const Route = createFileRoute("/setup")({
 /** A visited tab's card: kept mounted, hidden while another tab is active. */
 const KEEP = "mt-4 data-[state=inactive]:hidden";
 
-const TAB_TITLES: Record<SetupTab, string> = {
-  rates: "Service rates",
-  materials: "Material pricing",
-  inspection: "Inspection checklist",
-  vehicles: "Vehicles & drivers",
-};
+const TAB_TITLES: Record<SetupTab, string> = SETUP_TAB_TITLES;
 
 function SetupPage() {
   const { profile } = useAuth();
@@ -79,6 +76,9 @@ function SetupPage() {
   // Admins and managers set the drivers (owner, Oct 9); the gate already keeps everyone else off
   // the page, so this only guards a stale profile.
   const canSetDrivers = seesEveryone(profile);
+  // Documents, Setup's fifth tab: its own page, for everyone with Documents access.
+  const canDocuments = hasDocumentsAccess(profile);
+  const router = useRouter();
   // Someone who may not set drivers but lands on ?tab=vehicles (an old link) sees the rates.
   const active: SetupTab = tab === "vehicles" && !canSetDrivers ? "rates" : (tab ?? "rates");
   // ?tab=vehicles before the profile has arrived: wait, rather than paint the rates and switch.
@@ -158,16 +158,7 @@ function SetupPage() {
   return (
     <SetupFormsContext.Provider value={registry}>
       <div className="max-w-5xl space-y-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Settings2 className="h-6 w-6" /> Setup
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            How service work is priced and run: the rates and material prices invoices are built
-            from, what an inspection asks about
-            {canSetDrivers ? ", and who drives each vehicle" : ""}.
-          </p>
-        </div>
+        <SetupHeading money documents={canDocuments} />
         {settling ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -176,29 +167,22 @@ function SetupPage() {
           <Tabs
             value={active}
             onValueChange={(v) =>
-              void navigate({ search: v === "rates" ? {} : { tab: v as SetupTab }, replace: true })
+              // Documents is its own page: leaving for it asks about unsaved edits, as any
+              // other page does.
+              v === "documents"
+                ? void router.navigate({ to: SETUP_DOCUMENTS_PATH })
+                : void navigate({
+                    search: v === "rates" ? {} : { tab: v as SetupTab },
+                    replace: true,
+                  })
             }
           >
-            <TabsList className="h-auto flex-wrap">
-              <TabsTrigger value="rates" className="gap-1.5">
-                <Receipt className="h-4 w-4" aria-hidden /> {TAB_TITLES.rates}
-                {dot("rates")}
-              </TabsTrigger>
-              <TabsTrigger value="materials" className="gap-1.5">
-                <Package className="h-4 w-4" aria-hidden /> {TAB_TITLES.materials}
-                {dot("materials")}
-              </TabsTrigger>
-              <TabsTrigger value="inspection" className="gap-1.5">
-                <ClipboardList className="h-4 w-4" aria-hidden /> {TAB_TITLES.inspection}
-                {dot("inspection")}
-              </TabsTrigger>
-              {canSetDrivers && (
-                <TabsTrigger value="vehicles" className="gap-1.5">
-                  <Truck className="h-4 w-4" aria-hidden /> Vehicles &amp; drivers
-                  {dot("vehicles")}
-                </TabsTrigger>
-              )}
-            </TabsList>
+            {/* The strip is shared with the Documents page, Setup's fifth tab (Nov 16). */}
+            <SetupTabsList
+              money
+              documents={canDocuments}
+              dot={(t) => (t === "documents" ? null : dot(t))}
+            />
             {content("rates", <ServiceRatesSettings />)}
             {content("materials", <MaterialPricingSettings />)}
             {content("inspection", <InspectionChecklistSettings />)}

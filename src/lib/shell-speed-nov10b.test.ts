@@ -410,10 +410,12 @@ describe("Documents: technicians kept off, office users let in (owner, Nov 10)",
   });
   it("the menu shows Documents to everyone who may open it, and the tile title names it", () => {
     const nav = read("src/components/app-sidebar.tsx");
-    expect(nav).toContain('{(role === "admin" || hasDocumentsAccess(profile)) && (');
+    // Nov 16: Documents is Setup's fifth tab, so the menu row that leads to it is Setup, shown to
+    // everyone with Documents access (it was the Admin group's Documents row).
+    expect(nav).toContain("visible: hasDocumentsAccess,");
     expect(nav).not.toContain('{(role === "admin" || managesTickets(profile)) && (');
-    // The admin-only items stay the admins'.
-    expect(nav).toContain('.filter((item) => !item.adminOnly || role === "admin")');
+    // The Admin group is the admins' alone.
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
     expect(read("src/lib/work-tile-access.ts")).toContain('page === "documents"');
     // (No tile links to Documents today; the helper still answers for it.)
     expect(typeof tileBlockedTitle).toBe("function");

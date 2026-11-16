@@ -124,21 +124,16 @@ describe("source: the sidebar", () => {
     nav.indexOf("const adminGroupItems"),
     nav.indexOf("// Admin pages with"),
   );
-  it("the Admin group reads Owner, Users & access, Reminders — admins only", () => {
+  it("the Admin group reads Owner, Settings — admins only (Nov 16, the shorter menu)", () => {
+    // It read Owner, Users & access, Reminders, Documents. Users & access and Reminders are now
+    // the two tabs of Settings; Documents is Setup's fifth tab (menu-shorter-nov16.test.ts).
     expect(adminItems).toMatch(
-      /\{ title: "Owner", url: "\/owner", icon: Crown, adminOnly: true \},\s*\{ title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true \},\s*\{ title: "Reminders", url: "\/admin\/reminders", icon: BellRing, adminOnly: true \},/,
+      /\{ title: "Owner", url: "\/owner", icon: Crown \},\s*\{ title: "Settings", url: SETTINGS_HOME, icon: Settings, lit: isSettingsPath \},/,
     );
-    // Plus Documents (Oct 26), the one item a manager sees too.
-    expect(adminItems.match(/title: "/g)).toHaveLength(4);
-    expect(adminItems).toMatch(
-      /title: "Documents", url: "\/admin\/documents", icon: Files, adminOnly: false/,
-    );
-    // The group renders for admins, and for managers since Oct 26 (Documents); every other item
-    // in it stays the admins'.
-    expect(nav).toMatch(
-      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
-    );
-    expect(nav).toContain('.filter((item) => !item.adminOnly || role === "admin")');
+    expect(adminItems.match(/title: "/g)).toHaveLength(2);
+    // With Documents gone from it, the group is the admins' alone again.
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    expect(nav).not.toContain("adminOnly: false");
     // Owner is not a second item under Work Overview.
     expect(nav.match(/"\/owner"/g)).toHaveLength(1);
   });

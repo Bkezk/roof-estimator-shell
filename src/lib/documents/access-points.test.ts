@@ -261,16 +261,17 @@ describe("Admin › Documents", () => {
 });
 
 describe("the sidebar and the gate", () => {
-  it("lists Documents in the Admin group for everyone with Documents access (Nov 10; it was managers and admins)", () => {
-    expect(sidebar).toContain(
-      '{ title: "Documents", url: "/admin/documents", icon: Files, adminOnly: false },',
+  it("leads everyone with Documents access to Documents through Setup (Nov 16; it was a row of the Admin group)", () => {
+    // Documents is Setup's fifth tab, on its own page and address. The Setup row shows to
+    // everyone with Documents access and is lit on /admin/documents too.
+    expect(sidebar).not.toContain('title: "Documents"');
+    expect(sidebar).toContain("visible: hasDocumentsAccess,");
+    expect(sidebar).toContain("alsoLit: [SETUP_DOCUMENTS_PATH],");
+    expect(readFileSync("src/lib/menu-places.ts", "utf8")).toContain(
+      'export const SETUP_DOCUMENTS_PATH = "/admin/documents";',
     );
-    // The group opens for anyone with Documents access so the one non-admin item shows.
-    expect(sidebar).toContain('{(role === "admin" || hasDocumentsAccess(profile)) && (');
-    expect(sidebar).toContain('.filter((item) => !item.adminOnly || role === "admin")');
-    // The three admin-only entries stay the admins'.
-    for (const t of ["Owner", "Users & access", "Reminders"])
-      expect(sidebar).toMatch(new RegExp(`title: "${t.replace("&", "&")}".*adminOnly: true`));
+    // The Admin group is the admins' alone: Owner and Settings.
+    expect(sidebar).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
   });
   it("maps /admin/documents and the editor to Documents access (Nov 10; they were managers and every signed-in user)", () => {
     expect(pageForPath("/admin/documents")).toBe("documents");

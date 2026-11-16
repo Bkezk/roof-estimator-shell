@@ -26,7 +26,7 @@ import {
   CalendarDays,
   ListTodo,
   Settings2,
-  Files,
+  CircleDollarSign,
 } from "lucide-react";
 
 import logoSmall from "@/assets/jbk-logo-360.webp";
@@ -41,6 +41,12 @@ import {
   type Page,
 } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  isSettingsPath,
+  SETTINGS_HOME,
+  SETUP_DOCUMENTS_PATH,
+  setupHomeFor,
+} from "@/lib/menu-places";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Sidebar,
@@ -92,6 +98,10 @@ type ServiceItem = {
   lit?: string;
   /** Paths under `url` that belong to another item (My tickets has its own entry). */
   except?: string[];
+  /** Where the row goes for this person, when it is not `url` for everyone. */
+  urlFor?: (p: AccessLike | null | undefined) => string;
+  /** Other path prefixes the row is lit on. */
+  alsoLit?: string[];
 };
 const customerItems: ServiceItem[] = [
   {
@@ -124,7 +134,18 @@ const customerItems: ServiceItem[] = [
   },
   // Service rates, the inspection checklist and (admins) vehicles & drivers: ticket money and
   // setup are a manager's (owner, Oct 1), so the same gate as Service Rates had.
-  { title: "Setup", url: "/setup", icon: Settings2, page: null, visible: managesTickets },
+  // Nov 16: Setup also holds Documents (its fifth tab, on its own page), so everyone with
+  // Documents access sees the row; someone who may not open the service tabs lands on Documents
+  // (`urlFor`). Lit on both addresses.
+  {
+    title: "Setup",
+    url: "/setup",
+    icon: Settings2,
+    page: null,
+    visible: hasDocumentsAccess,
+    urlFor: (p) => setupHomeFor({ money: managesTickets(p) }),
+    alsoLit: [SETUP_DOCUMENTS_PATH],
+  },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [
@@ -134,22 +155,20 @@ const prospectItems = [
   // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
   { title: "Bid Board", url: "/prospect/leads", icon: Radar },
 ];
-// The Admin group: the Owner section (the team's work today and the margin; owner, Oct 21: "owner
-// should be its own tab", first in the group), then who can sign in and which pages each person
-// may open, and the reminder and untouched-work rules — admins only. (Service Rates moved out to
-// Setup, under Opportunities, owner Oct 5.) Owner, Sep 28: their own pages under Admin, not tabs
-// of Estimate Pricing › General.
-const adminGroupItems = [
-  { title: "Owner", url: "/owner", icon: Crown, adminOnly: true },
-  { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
-  { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
-  // Documents (owner, Oct 26: the CenterPoint-style document generator): the templates proposals
-  // and letters start from, saved modules and the PDF library. For everyone with Documents access
-  // since Nov 10 (pageForPath: /admin/documents → documents), so the group shows for an office
-  // user with this one item.
-  { title: "Documents", url: "/admin/documents", icon: Files, adminOnly: false },
-  // Oct 21: the CenterPoint import (Oct 13) left the menu, not the code — its page still opens by
-  // address (admin/centerpoint-import) and can be listed here again if needed.
+// The Admin group (owner, Nov 16, the shorter menu): Owner — the team's work and the margin
+// (Oct 21: "owner should be its own tab") — and Settings, one row for Users & access and
+// Reminders, which are the two tabs of it (components/settings-tabs.tsx; each keeps its page and
+// address). Admins only. Documents left the group for Setup, as its fifth tab; the CenterPoint
+// import (Oct 13) still opens by address (admin/centerpoint-import) and is not listed.
+const adminGroupItems: {
+  title: string;
+  url: string;
+  icon: typeof Crown;
+  /** Lit on these paths instead of `url` (Settings: both of its pages). */
+  lit?: (pathname: string) => boolean;
+}[] = [
+  { title: "Owner", url: "/owner", icon: Crown },
+  { title: "Settings", url: SETTINGS_HOME, icon: Settings, lit: isSettingsPath },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
@@ -278,6 +297,14 @@ const adminItems: {
   },
 ];
 
+/** Is this one of the Estimate Pricing pages (the five rows and the pages their sub-lists open)? */
+const isPricingPath = (pathname: string): boolean =>
+  adminItems.some(
+    (item) =>
+      pathname.startsWith(item.url) ||
+      (item.sub ?? []).some((sub) => !!sub.url && pathname.startsWith(sub.url)),
+  );
+
 /** Which menu groups the user folded up, remembered per browser. */
 const NAV_KEY = "bid-o-matic:nav-collapsed";
 const readNavCollapsed = (): string[] => {
@@ -375,6 +402,7 @@ export function AppSidebar() {
 
   // Manual open/close overrides; a section with the active page open by default.
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
+  const [pricingPressed, setPricingOpen] = useState<boolean | undefined>(undefined);
 
   const handleSignOut = async () => {
     await signOut();
@@ -394,18 +422,110 @@ export function AppSidebar() {
             isActive={
               item.exact
                 ? pathname === item.url
-                : isActive(item.lit ?? item.url) &&
+                : (isActive(item.lit ?? item.url) || (item.alsoLit ?? []).some(isActive)) &&
                   !(item.except ?? []).some((p) => pathname.startsWith(p))
             }
             tooltip={item.title}
           >
-            <Link to={item.url}>
+            <Link to={item.urlFor ? item.urlFor(profile) : item.url}>
               <item.icon className="h-4 w-4" />
               {!collapsed && <span>{item.title}</span>}
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ));
+
+  // The five Estimate Pricing pages, each with its own caret and sub-list as before.
+  const pricingRows = (
+    <>
+      {adminItems.map((item) =>
+        item.sub && !collapsed ? (
+          <Collapsible
+            key={item.title}
+            asChild
+            open={
+              openMenus[item.title] ??
+              (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
+            }
+            onOpenChange={(open) => setOpenMenus((prev) => ({ ...prev, [item.title]: open }))}
+          >
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                <Link to={item.url}>
+                  <item.icon className="h-4 w-4" />
+                  <span>{item.title}</span>
+                </Link>
+              </SidebarMenuButton>
+              <CollapsibleTrigger asChild>
+                <SidebarMenuAction className="transition-transform data-[state=open]:rotate-90">
+                  <ChevronRight className="h-4 w-4" />
+                  <span className="sr-only">Toggle {item.title}</span>
+                </SidebarMenuAction>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarMenuSub>
+                  {item.sub
+                    .filter((sub) => !sub.adminOnly || role === "admin")
+                    .map((sub) => {
+                      const active = sub.url
+                        ? isActive(sub.url)
+                        : isActive(item.url) &&
+                          (sub.cat
+                            ? searchCat === sub.cat
+                            : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
+                      // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
+                      const search = sub.cat
+                        ? item.url === "/admin/duro-last"
+                          ? { tab: "catalog" as const, cat: sub.cat }
+                          : { cat: sub.cat }
+                        : { tab: sub.tab! };
+                      return (
+                        <SidebarMenuSubItem key={sub.title}>
+                          <SidebarMenuSubButton asChild isActive={active}>
+                            {sub.url ? (
+                              <Link to={sub.url}>
+                                <span>{sub.title}</span>
+                              </Link>
+                            ) : (
+                              <Link to={item.url} search={search}>
+                                <span>{sub.title}</span>
+                              </Link>
+                            )}
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                </SidebarMenuSub>
+              </CollapsibleContent>
+            </SidebarMenuItem>
+          </Collapsible>
+        ) : (
+          <SidebarMenuItem key={item.title}>
+            <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+              <Link to={item.url}>
+                <item.icon className="h-4 w-4" />
+                {!collapsed && <span>{item.title}</span>}
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ),
+      )}
+    </>
+  );
+  const inventoryRows = inventoryItems.map((item) => (
+    <SidebarMenuItem key={item.title}>
+      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+        <Link to={item.url}>
+          <item.icon className="h-4 w-4" />
+          {!collapsed && <span>{item.title}</span>}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  ));
+  // Estimate Pricing opens in place: open while a pricing page is showing, closed otherwise,
+  // until the row is pressed (the press wins for the rest of the visit).
+  const onPricingPage = isPricingPath(pathname);
+  const pricingOpen = pricingPressed ?? onPricingPage;
 
   return (
     <Sidebar collapsible="icon">
@@ -485,7 +605,12 @@ export function AppSidebar() {
           </NavGroup>
         )}
 
-        {(can("estimate") || can("takeoff")) && (
+        {/* Estimate (owner, Nov 16: "takeoffs, projects bids, estimate pricing (with the
+            dropdown …), inventory"): the pricing pages sit behind one Estimate Pricing row that
+            opens in place, and Inventory is the group's last row. Each row shows only with its
+            own access. Someone with Inventory and none of the estimate pages (a technician)
+            gets Inventory as a plain row, with no "Estimate" header over it. */}
+        {can("estimate") || can("takeoff") || can("pricing") ? (
           <NavGroup label="Estimate" id="estimate" iconMode={collapsed}>
             <SidebarMenu>
               {estimatorItems
@@ -500,97 +625,57 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-            </SidebarMenu>
-          </NavGroup>
-        )}
-
-        {can("pricing") && (
-          <NavGroup label="Estimate Pricing" id="estimate-pricing" iconMode={collapsed}>
-            <SidebarMenu>
-              {adminItems.map((item) =>
-                item.sub && !collapsed ? (
-                  <Collapsible
-                    key={item.title}
-                    asChild
-                    open={
-                      openMenus[item.title] ??
-                      (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
-                    }
-                    onOpenChange={(open) =>
-                      setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
-                    }
-                  >
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                        <Link to={item.url}>
-                          <item.icon className="h-4 w-4" />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
+              {can("pricing") &&
+                (collapsed ? (
+                  // Icons only: no room for a dropdown, so the five pricing pages are their icons.
+                  pricingRows
+                ) : (
+                  <Collapsible asChild open={pricingOpen} onOpenChange={setPricingOpen}>
+                    <SidebarMenuItem data-nav="estimate-pricing">
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuAction className="transition-transform data-[state=open]:rotate-90">
-                          <ChevronRight className="h-4 w-4" />
-                          <span className="sr-only">Toggle {item.title}</span>
-                        </SidebarMenuAction>
+                        <SidebarMenuButton
+                          isActive={onPricingPage && !pricingOpen}
+                          tooltip="Estimate Pricing"
+                          title={pricingOpen ? "Close Estimate Pricing" : "Open Estimate Pricing"}
+                        >
+                          <CircleDollarSign className="h-4 w-4" />
+                          <span>Estimate Pricing</span>
+                          <ChevronRight
+                            className={`ml-auto h-4 w-4 transition-transform ${pricingOpen ? "rotate-90" : ""}`}
+                            aria-hidden
+                          />
+                        </SidebarMenuButton>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
-                        <SidebarMenuSub>
-                          {item.sub
-                            .filter((sub) => !sub.adminOnly || role === "admin")
-                            .map((sub) => {
-                              const active = sub.url
-                                ? isActive(sub.url)
-                                : isActive(item.url) &&
-                                  (sub.cat
-                                    ? searchCat === sub.cat
-                                    : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
-                              // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
-                              const search = sub.cat
-                                ? item.url === "/admin/duro-last"
-                                  ? { tab: "catalog" as const, cat: sub.cat }
-                                  : { cat: sub.cat }
-                                : { tab: sub.tab! };
-                              return (
-                                <SidebarMenuSubItem key={sub.title}>
-                                  <SidebarMenuSubButton asChild isActive={active}>
-                                    {sub.url ? (
-                                      <Link to={sub.url}>
-                                        <span>{sub.title}</span>
-                                      </Link>
-                                    ) : (
-                                      <Link to={item.url} search={search}>
-                                        <span>{sub.title}</span>
-                                      </Link>
-                                    )}
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              );
-                            })}
-                        </SidebarMenuSub>
+                        <SidebarMenu className="ml-2.5 mt-0.5 w-auto border-l pl-0.5">
+                          {pricingRows}
+                        </SidebarMenu>
                       </CollapsibleContent>
                     </SidebarMenuItem>
                   </Collapsible>
-                ) : (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ),
-              )}
+                ))}
+              {can("inventory") && inventoryRows}
             </SidebarMenu>
           </NavGroup>
+        ) : (
+          can("inventory") && (
+            <SidebarGroup>
+              <SidebarMenu>{inventoryRows}</SidebarMenu>
+            </SidebarGroup>
+          )
         )}
 
-        {can("inventory") && (
-          <NavGroup label="Inventory" id="inventory" iconMode={collapsed}>
+        {/* Admins only (Nov 16): Owner and Settings. */}
+        {role === "admin" && (
+          <NavGroup label="Admin" id="admin" iconMode={collapsed}>
             <SidebarMenu>
-              {inventoryItems.map((item) => (
+              {adminGroupItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={item.lit ? item.lit(pathname) : isActive(item.url)}
+                    tooltip={item.title}
+                  >
                     <Link to={item.url}>
                       <item.icon className="h-4 w-4" />
                       {!collapsed && <span>{item.title}</span>}
@@ -601,29 +686,6 @@ export function AppSidebar() {
             </SidebarMenu>
           </NavGroup>
         )}
-
-        {/* Admins; managers too since Oct 26, for Documents alone (the `adminOnly` items stay the
-            admins'). Since Nov 10 (owner: "Allow office users to have access") everyone with
-            Documents access sees the group with that one item — hasDocumentsAccess, the gate's
-            rule for /admin/documents, so the link never bounces. */}
-        {(role === "admin" || hasDocumentsAccess(profile)) && (
-          <NavGroup label="Admin" id="admin" iconMode={collapsed}>
-            <SidebarMenu>
-              {adminGroupItems
-                .filter((item) => !item.adminOnly || role === "admin")
-                .map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
-          </NavGroup>
-        )}
       </SidebarContent>
 
       <SidebarFooter onClick={onMenuClick}>
@@ -631,13 +693,15 @@ export function AppSidebar() {
           {/* Owner, Sep 28: the account link (info, password, notifications) sits in the footer
               so the menu has one item fewer. Owner, Oct 12: it reads "My account"; the name is
               the small second line (the footer row was already two lines). */}
-          {profile && (
-            <SidebarMenuItem>
+          {/* Nov 16 (the shorter menu): Sign out sits beside My account, as words, on one row.
+              In the icon-only menu each is its own icon. */}
+          <SidebarMenuItem className={collapsed ? undefined : "flex items-center gap-1"}>
+            {profile && (
               <SidebarMenuButton
                 asChild
                 isActive={isActive("/account")}
                 tooltip="My account"
-                className="h-auto py-1.5"
+                className={collapsed ? "h-auto py-1.5" : "h-auto min-w-0 flex-1 py-1.5"}
               >
                 <Link to="/account" title="My account: info, password, notifications">
                   <UserRound className="h-4 w-4 shrink-0" />
@@ -651,14 +715,25 @@ export function AppSidebar() {
                   )}
                 </Link>
               </SidebarMenuButton>
+            )}
+            {!collapsed && (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                data-nav="sign-out"
+                className="flex h-9 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm text-sidebar-foreground outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2"
+              >
+                <LogOut className="h-4 w-4" aria-hidden /> Sign out
+              </button>
+            )}
+          </SidebarMenuItem>
+          {collapsed && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={handleSignOut} tooltip="Sign out">
+                <LogOut className="h-4 w-4" />
+              </SidebarMenuButton>
             </SidebarMenuItem>
           )}
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleSignOut} tooltip="Sign out">
-              <LogOut className="h-4 w-4" />
-              {!collapsed && <span>Sign out</span>}
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           {/* Dark mode (owner, Oct 2): the sun / moon toggle sits to the right of Collapse menu;
               in the icon-only sidebar it is its own icon row beneath it. */}
           <SidebarMenuItem className={collapsed ? undefined : "flex items-center gap-1"}>

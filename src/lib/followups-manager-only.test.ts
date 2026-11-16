@@ -23,7 +23,14 @@ describe("1. The Follow-ups page is folded into My Work", () => {
     const nav = read("src/components/app-sidebar.tsx");
     expect(nav).not.toMatch(/title:\s*"Follow-ups"/);
     expect(nav).not.toMatch(/url:\s*"\/followups"/);
-    expect(nav).toMatch(/url:\s*"\/admin\/reminders"/);
+    // Since Nov 16 Reminders is a tab of Admin › Settings (lib/menu-places.ts); its page and
+    // address are as they were.
+    expect(nav).toContain(
+      '{ title: "Settings", url: SETTINGS_HOME, icon: Settings, lit: isSettingsPath }',
+    );
+    expect(read("src/lib/menu-places.ts")).toContain(
+      '{ key: "reminders", label: "Reminders", to: "/admin/reminders" }',
+    );
   });
   it("/followups redirects to /my-work (emails and push link there)", () => {
     const route = read("src/routes/followups.tsx");

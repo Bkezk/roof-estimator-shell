@@ -9,6 +9,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { setupHomeFor, setupTabsFor } from "@/lib/menu-places";
+
 import { pageForPath } from "./access";
 import { canOpenPath } from "./work-tile-access";
 
@@ -31,10 +33,19 @@ describe("the /setup page", () => {
     expect(setup).toMatch(
       /SETUP_TABS = \["rates", "materials", "inspection", "vehicles"\] as const/,
     );
-    expect(setup).toContain('<TabsTrigger value="rates"');
-    expect(setup).toContain('<TabsTrigger value="materials"');
-    expect(setup).toContain('<TabsTrigger value="inspection"');
-    expect(setup).toContain('<TabsTrigger value="vehicles"');
+    // Since Nov 16 the strip is drawn by the shared SetupTabsList (Documents is its fifth tab,
+    // on its own page), from the order in lib/menu-places.ts.
+    expect(setup).toContain("<SetupTabsList");
+    expect(setupTabsFor({ money: true, documents: true })).toEqual([
+      "rates",
+      "materials",
+      "inspection",
+      "vehicles",
+      "documents",
+    ]);
+    expect(read("src/components/setup-tabs.tsx")).toContain(
+      '<TabsTrigger key={tab} value={tab} className="gap-1.5">',
+    );
     expect(setup).toMatch(/const active: SetupTab = [\s\S]*?\(tab \?\? "rates"\)/);
   });
   it("hosts the three existing cards unchanged — nothing was rewritten", () => {
@@ -45,7 +56,9 @@ describe("the /setup page", () => {
     expect(setup).toContain('queryKey: ["inventory-locations"]');
   });
   it("shows Vehicles & drivers to admins and managers (owner, Oct 9; setVehicleDrivers takes both)", () => {
-    expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsTrigger value="vehicles"/);
+    // The tab itself comes with the other service tabs, for whoever may open /setup (Nov 16).
+    expect(setupTabsFor({ money: true, documents: false })).toContain("vehicles");
+    expect(setupTabsFor({ money: false, documents: true })).not.toContain("vehicles");
     expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsContent value="vehicles"/);
     expect(setup).toContain("const canSetDrivers = seesEveryone(profile);");
     expect(setup).not.toContain("isAdmin");
@@ -60,7 +73,11 @@ describe("the /setup page", () => {
       /validateSearch: \(search: Record<string, unknown>\): \{ tab\?: SetupTab \}/,
     );
     expect(setup).toContain('title: "Setup — JBK Portal"');
-    expect(setup).toMatch(/<h1[^>]*>\s*<Settings2[^>]*\/> Setup\s*<\/h1>/);
+    // The heading is shared with the Documents page since Nov 16 (components/setup-tabs.tsx).
+    expect(setup).toContain("<SetupHeading money documents={canDocuments} />");
+    expect(read("src/components/setup-tabs.tsx")).toMatch(
+      /<h1[^>]*>\s*<Settings2[^>]*\/> Setup\s*<\/h1>/,
+    );
   });
 });
 
@@ -87,7 +104,7 @@ describe("who may open it", () => {
 });
 
 describe("the sidebar", () => {
-  it("lists Setup right under Opportunities in the Customers group, for managers and admins", () => {
+  it("lists Setup right under Opportunities in the Customers group", () => {
     const items = nav.slice(
       nav.indexOf("const customerItems"),
       nav.indexOf("const inventoryItems"),
@@ -96,26 +113,27 @@ describe("the sidebar", () => {
     const setupAt = items.indexOf('title: "Setup"');
     expect(opps).toBeGreaterThan(0);
     expect(setupAt).toBeGreaterThan(opps);
+    // Managers and admins until Nov 16; now everyone with Documents access, since Documents is
+    // Setup's fifth tab. Whoever may not open /setup is sent straight to Documents.
     expect(items).toMatch(
-      /\{ title: "Setup", url: "\/setup", icon: Settings2, page: null, visible: managesTickets \}/,
+      /title: "Setup",\s*url: "\/setup",\s*icon: Settings2,\s*page: null,\s*visible: hasDocumentsAccess,\s*urlFor: \(p\) => setupHomeFor\(\{ money: managesTickets\(p\) \}\),/,
     );
+    expect(setupHomeFor({ money: true })).toBe("/setup");
+    expect(setupHomeFor({ money: false })).toBe("/admin/documents");
     // Nothing follows Setup in that group.
     expect(items.slice(setupAt).match(/title: "/g)).toHaveLength(1);
   });
   it("no longer lists Service Rates, and the Admin group is admins only", () => {
     expect(nav).not.toMatch(/title: "Service Rates"/);
     expect(nav).not.toContain("/admin/service-rates");
-    // Since Oct 26 the group also opens for managers, for Documents alone (owner-page.test.ts).
-    expect(nav).toMatch(
-      /\{\(role === "admin" \|\| hasDocumentsAccess\(profile\)\) && \(\s*<NavGroup label="Admin"/,
-    );
+    // Admins only again since Nov 16: Documents, the one item others saw, moved to Setup.
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
     const adminItems = nav.slice(
       nav.indexOf("const adminGroupItems"),
       nav.indexOf("// Admin pages with"),
     );
-    // Owner (Oct 21), Users & access, Reminders — the CenterPoint import (Oct 13) left the menu the
-    // same day — plus Documents (Oct 26; owner-page.test.ts has the order).
-    expect(adminItems.match(/title: "/g)).toHaveLength(4);
+    // Owner and Settings (Nov 16; owner-page.test.ts has the order).
+    expect(adminItems.match(/title: "/g)).toHaveLength(2);
   });
 });
 
