@@ -49,24 +49,21 @@ describe("the rules", () => {
     expect(paidSumOf(rows)).toBe(800);
     expect(openSumOf(rows)).toBe(26.57);
   });
-  it("the Owner view's unpaid tile counts what is still owed", () => {
+  // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info").
+  // Until then the Unpaid tile was pinned here: two invoices, 26.57 still owed.
+  it("the Owner view has no unpaid tile; the Needs attention list shows what is still owed", () => {
     const n = businessNumbers({
       today: "2026-11-09",
       now: "2026-11-09T12:00:00Z",
       tickets: [],
-      invoices: [
-        { status: "final", total: "711.57", invoice_date: "2026-11-09", paid_amount: "700" },
-        { status: "final", total: "15", invoice_date: "2026-11-09" },
-        { status: "paid", total: "100", invoice_date: "2026-11-09", paid_amount: "100" },
-      ],
       opps: [],
       bids: [],
       snoozed: 0,
-      untouched: null,
     });
-    expect(n.unpaid).toMatchObject({ count: 2, total: 26.57 });
-    expect(read("src/lib/owner-business.functions.ts")).toContain(
-      'select("status, total, invoice_date, paid_amount")',
+    expect(n).not.toHaveProperty("unpaid");
+    expect(read("src/lib/owner-business.functions.ts")).not.toContain('.from("invoices")');
+    expect(read("src/lib/owner-attention.ts")).toContain(
+      "const balance = Math.round((num(v.total) - num(v.paid_amount)) * 100) / 100;",
     );
   });
 });

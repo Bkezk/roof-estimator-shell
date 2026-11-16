@@ -215,7 +215,7 @@ describe("getWorkCounts (the strip; fake client)", () => {
 });
 
 describe("Owner › Business", () => {
-  it("Authorized, not invoiced: TO_INVOICE_STAGES is the Awaiting invoice stage; aged from stage_changed_at; the Done tickets on a second line", () => {
+  it("Authorized, not invoiced: TO_INVOICE_STAGES is the Awaiting invoice stage; aged from stage_changed_at; no Done line since Nov 16", () => {
     expect([...TO_INVOICE_STAGES]).toEqual([AWAITING_INVOICE_STAGE]);
     expect([...TO_INVOICE_STAGES]).toEqual([TO_INVOICE_STAGE]);
     const n = businessNumbers({
@@ -225,68 +225,60 @@ describe("Owner › Business", () => {
         {
           stage: "authorized",
           stage_changed_at: "2026-10-02T12:00:00Z",
-          scheduled_date: null,
           invoice_id: null,
         },
         {
           stage: "authorized",
           stage_changed_at: "2026-10-10T12:00:00Z",
-          scheduled_date: null,
           invoice_id: null,
         },
         {
           stage: "authorized",
           stage_changed_at: "2026-09-01T12:00:00Z",
-          scheduled_date: null,
           invoice_id: "inv",
         },
         {
           stage: "done",
           stage_changed_at: "2026-10-05T12:00:00Z",
-          scheduled_date: null,
           invoice_id: null,
         },
       ],
-      invoices: [],
       opps: [],
       snoozed: 0,
-      untouched: null,
     });
     // Nov 16 audit fix 7: the Authorized ticket with a draft ("inv", authorized Sep 1) counts
     // too — the Awaiting invoice queue, its badge and Work Overview always counted it, and this
     // tile alone left it out. It was { count: 2, oldestDays: 10 }.
     expect(n.toInvoice).toEqual({ count: 3, oldestDays: 41 });
-    expect(n.toAuthorize).toEqual({ count: 1, oldestDays: 7 });
+    // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info"). The Done line was { count: 1, oldestDays: 7 }.
+    expect(n).not.toHaveProperty("toAuthorize");
     expect(BUSINESS_HREFS.toInvoice).toBe("/service/invoices?tab=to-invoice");
     const biz = read("src/components/owner-business.tsx");
     expect(biz).toContain('title="Authorized, not invoiced"');
     // Nov 16 audit fix 7: "not invoiced yet (one with a draft still counts)".
     expect(biz).toContain('help="Tickets marked Authorized that are not invoiced yet');
-    expect(biz).toContain("done, awaiting authorization");
+    expect(biz).not.toContain("done, awaiting authorization");
     expect(biz).not.toContain("Waiting to invoice");
   });
-  it("Past due is the tile's rule: no unassigned ticket, no held ticket", () => {
-    const late = { stage: "scheduled", stage_changed_at: null, scheduled_date: PAST };
+  // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info").
+  // Until then this pinned Past due = 1 of four late tickets (one unassigned, one held, one Done).
+  it("Past due left the Business tab; the rule lives on in the Overdue tickets count", () => {
     const n = businessNumbers({
       today: TODAY,
       now: `${TODAY}T15:00:00Z`,
-      tickets: [
-        { id: "a", ...late, technician_id: TECH },
-        { id: "b", ...late, technician_id: null },
-        { id: "c", ...late, technician_id: TECH },
-        { id: "d", ...late, technician_id: TECH, stage: "done" },
-      ],
-      invoices: [],
+      tickets: [],
       opps: [],
       snoozed: 0,
-      untouched: null,
-      heldTickets: new Set(["c"]),
     });
-    expect(n.stale.pastDue).toBe(1);
+    expect(n.stale).toEqual({ snoozed: 0 });
+    expect(read("src/lib/owner-business.ts")).not.toContain("isOverdueTicket");
+    expect(read("src/lib/work-counts.ts")).toContain("export const isOverdueTicket = (");
   });
-  it("the untouched links open the pages whose Needs action strip lists them (no filter param exists)", () => {
-    expect(BUSINESS_HREFS.untouchedTickets).toBe("/service");
-    expect(BUSINESS_HREFS.untouchedOpps).toBe("/opportunities");
+  // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info"):
+  // the two untouched counts and their links are gone; each page's own strip still lists them.
+  it("the untouched counts left the Business tab; the pages' Needs action strips still list them", () => {
+    expect(BUSINESS_HREFS).not.toHaveProperty("untouchedTickets");
+    expect(BUSINESS_HREFS).not.toHaveProperty("untouchedOpps");
     expect(BUSINESS_HREFS).not.toHaveProperty("untouched");
     expect(read("src/components/service-page.tsx")).toContain(
       '<NeedsActionStrip kinds={["ticket"]} />',
@@ -296,9 +288,7 @@ describe("Owner › Business", () => {
     );
     expect(read("src/lib/service-search.ts")).not.toMatch(/untouched|needs/);
     const biz = read("src/components/owner-business.tsx");
-    expect(biz).toContain("href={BUSINESS_HREFS.untouchedTickets}");
-    expect(biz).toContain("href={BUSINESS_HREFS.untouchedOpps}");
-    expect(biz).not.toContain("BUSINESS_HREFS.untouched}");
+    expect(biz).not.toContain("BUSINESS_HREFS.untouched");
   });
 });
 
@@ -316,7 +306,7 @@ describe("listOwnerBusiness (fake client)", () => {
     deleted_at: null,
     ...over,
   });
-  it("reads the Authorized tickets for the tile and the ticket holds for Past due", async () => {
+  it("reads the Authorized tickets for the tile and the holds for the snoozed count", async () => {
     const e = fakeSupabase({
       profiles: [{ id: ME, role: "admin", access: [], full_name: "B", email: "b@x" }],
       service_jobs: [
@@ -363,8 +353,9 @@ describe("listOwnerBusiness (fake client)", () => {
     )({ data: { today: TODAY }, context: { supabase: e.db, userId: ME } });
     // Nov 16 audit fix 7: an Authorized ticket with a draft counts (it was { count: 1 }).
     expect(r.toInvoice).toEqual({ count: 2, oldestDays: 3 });
-    expect(r.toAuthorize).toEqual({ count: 1, oldestDays: 1 });
-    expect(r.stale.pastDue).toBe(1);
-    expect(r.stale.snoozed).toBe(1);
+    // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info"):
+    // the Done line ({ count: 1 }) and Past due (1) are no longer read.
+    expect(r).not.toHaveProperty("toAuthorize");
+    expect(r.stale).toEqual({ snoozed: 1 });
   });
 });

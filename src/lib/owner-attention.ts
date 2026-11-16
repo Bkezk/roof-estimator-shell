@@ -24,7 +24,8 @@
  *     - an inspection, Authorized or later, that found problems or was graded F and has no live
  *       repair ticket or bid after it: nobody has chosen what happens next (or the repair
  *       ticket or bid that was chosen has been deleted), counted from the day the inspection
- *       was finished; or "No action needed" was chosen in the last 30 days.
+ *       was finished. "No action needed" on the ticket takes it off at once (owner, Nov 16;
+ *       it used to stay 30 days).
  *   Waiting on the office
  *     - a Done ticket not authorized `authorizeDays` days after the work was finished (an
  *       inspection still at Done has this row only);
@@ -91,8 +92,6 @@ export const ATTENTION_DEFAULTS: Readonly<AttentionLimits> = {
   unassignedDays: 1,
 };
 export const ATTENTION_DAYS_MAX = 365;
-/** "No action needed" on an inspection with problems stays on the list this long. */
-export const INSPECTION_WINDOW_DAYS = 30;
 
 const wholeDays = (v: unknown, fallback: number): number =>
   Number.isInteger(v) && (v as number) >= 0 && (v as number) <= ATTENTION_DAYS_MAX
@@ -548,30 +547,21 @@ export function attentionList(i: AttentionIn): AttentionList {
         : outcome === "bid"
           ? "Its bid was deleted. "
           : "";
-    // A choice this list does not know: left out, never guessed.
-    if (outcome !== null && outcome !== "none" && !gone) continue;
+    // "No action needed" was chosen (owner, Nov 16: "make it leave after no action needed is
+    // pressed"): the choice is made, so the row leaves at once. Until then it stayed 30 days as
+    // "Closed with no repair ticket or bid". A choice this list does not know is left out too,
+    // never guessed.
+    if (outcome !== null && !gone) continue;
     const found = !problems
       ? `Graded ${grade}.`
       : grade
         ? `Graded ${grade} with ${problemsText(problems)}.`
         : `${problemsText(problems)[0]!.toUpperCase()}${problemsText(problems).slice(1)}.`;
-    let age: number;
-    let why: string;
-    let owner: { who: string; whoKey: string };
-    if (outcome === "none") {
-      const chosen = since(t.inspection_outcome_at ?? t.stage_changed_at, today);
-      if (chosen === null || chosen > INSPECTION_WINDOW_DAYS) continue;
-      age = chosen;
-      why = `${found} Closed with no repair ticket or bid.`;
-      const by = person(t.inspection_outcome_by);
-      owner = by.whoKey === WHO_NOBODY ? office : by;
-    } else {
-      // From the day the inspection was finished (audit fix 12): authorizing the ticket used
-      // to restart the wait at 1 day.
-      age = since(finishedAt(t), today) ?? 0;
-      why = `${found} ${gone}Nobody has chosen what happens next.`;
-      owner = office;
-    }
+    // From the day the inspection was finished (audit fix 12): authorizing the ticket used to
+    // restart the wait at 1 day.
+    const age = since(finishedAt(t), today) ?? 0;
+    const why = `${found} ${gone}Nobody has chosen what happens next.`;
+    const owner = office;
     rows.push({
       key: `inspection_no_next:${t.id}`,
       group: "not_followed_up",

@@ -75,8 +75,9 @@ Twelve rule gaps, in `owner-attention.ts` and its server read. Tests:
 | 22 | A Done ticket's wait runs from when it was completed |
 
 How an inspection with problems leaves the list: a repair ticket or bid is made from it, or
-"No action needed" is chosen on the ticket. After "No action needed" it stays for 30 days,
-reading "Closed with no repair ticket or bid", then leaves.
+"No action needed" is chosen on the ticket. Either way it leaves at once. Until later on
+Nov 16 the second way kept it for 30 days as "Closed with no repair ticket or bid"; the owner
+asked for that to go ("make it leave after no action needed is pressed").
 
 In the browser on live data: 11 rows, every chip on one line, no console errors.
 
@@ -106,9 +107,24 @@ Tests: `menu-fixes-nov16b.test.ts`, 25 tests.
 - After the browser runs every temporary row was removed. Counts match the start of the day,
   plus one real change made by staff. The test login is an admin again.
 
-## Waiting on the owner
+## The Business tab, later the same day
 
-The Business tab shows three numbers the Needs attention list also shows: Done tickets awaiting
-authorization, tickets untouched, opportunities untouched. The owner asked to see the tab
-without them before anything is removed. A before and after picture was sent. Fix 29 (the
-"opportunities untouched" count) is part of that decision and is not changed yet.
+The owner saw the tab with and without its doubles and said to remove everything the Needs
+attention list already shows: "i dont want double info".
+
+| Left the tab | Where it is now |
+|---|---|
+| "N done, awaiting authorization" under the first tile | Needs attention, Waiting on the office |
+| The Unpaid tile | Needs attention, Waiting on the office (the late ones) |
+| Tickets past their scheduled day | Needs attention, Not started |
+| Tickets untouched past Setup's limit | Needs attention, Not started |
+| Opportunities untouched past Setup's limit | Needs attention, Not started |
+
+What stays: Authorized, not invoiced; Pipeline; Won / Lost this month; and the follow-ups on
+hold, under the heading "On hold" (it was the last line of "Going stale").
+
+The server reads less for it: no invoice, no Open, Scheduled or Done ticket, and no untouched
+work. Fix 29 of the audit, the wrong "opportunities untouched" count, went with that line.
+
+In the browser on live data: three tiles and the hold line, every link in place, no sideways
+scroll at phone width, no console errors. The Needs attention list read 10 rows.

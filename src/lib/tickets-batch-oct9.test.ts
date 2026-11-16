@@ -98,10 +98,9 @@ describe("B1. the Awaiting invoice queue lists the Authorized tickets", () => {
     expect([...TO_INVOICE_STAGES]).toEqual(["authorized"]);
     expect(BUSINESS_HREFS.toInvoice).toBe("/service/invoices?tab=to-invoice");
     expect(parseServiceSearch({ stage: "done" })).toEqual({ stage: "done" });
-    // The query behind it reads the Authorized rows too (owner-business.functions.ts).
-    expect(read("src/lib/owner-business.functions.ts")).toContain(
-      '.in("stage", ["open", "scheduled", "done", "authorized"])',
-    );
+    // The query behind it reads the Authorized rows (owner-business.functions.ts); since
+    // Nov 16 only those, the other stages' numbers having left the Business tab.
+    expect(read("src/lib/owner-business.functions.ts")).toContain('.eq("stage", "authorized")');
   });
 });
 

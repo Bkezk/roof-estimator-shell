@@ -77,23 +77,18 @@ describe("where it applies", () => {
     expect(counts).toContain('.in("stage", [...OVERDUE_TICKET_STAGES])');
     expect(counts).toContain('.lt("scheduled_date", today)');
   });
-  it("the Owner view's Past due is the same rule (a Done ticket past its day is not stale)", () => {
+  // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info").
+  // Until then the Owner view's Past due was pinned here as the same rule (2 of 4 tickets).
+  it("the Owner view no longer counts Past due (the Needs attention list has the late tickets)", () => {
     const n = businessNumbers({
       today: TODAY,
       now: `${TODAY}T15:00:00Z`,
-      tickets: [
-        { stage: "scheduled", stage_changed_at: null, scheduled_date: PAST },
-        { stage: "open", stage_changed_at: null, scheduled_date: PAST },
-        { stage: "done", stage_changed_at: `${PAST}T12:00:00Z`, scheduled_date: PAST },
-        { stage: "scheduled", stage_changed_at: null, scheduled_date: TODAY },
-      ],
-      invoices: [],
+      tickets: [],
       opps: [],
       snoozed: 0,
-      untouched: null,
     });
-    expect(n.stale.pastDue).toBe(2);
-    expect(read("src/lib/owner-business.ts")).toContain("isOverdueTicket(t, i.today) &&");
+    expect(n.stale).toEqual({ snoozed: 0 });
+    expect(read("src/lib/owner-business.ts")).not.toContain("isOverdueTicket");
   });
   it("Work Overview puts a Done ticket in no group — never Overdue, whatever its day (Oct 12: no Done group)", () => {
     const done = ticketItem({

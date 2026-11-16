@@ -416,10 +416,8 @@ describe("fixes 7 and 9: the Owner tile agrees with the lists, and the lists fil
         t({ service_type: "repair", invoice_id: INV }),
         t({ service_type: "repair" }),
       ] as never,
-      invoices: [],
       opps: [],
       snoozed: 0,
-      untouched: null,
     });
     expect(n.toInvoice.count).toBe(3);
   });
@@ -429,8 +427,9 @@ describe("fixes 7 and 9: the Owner tile agrees with the lists, and the lists fil
     expect(flat("src/lib/my-work.functions.ts")).toMatch(
       /\.eq\("stage", TO_INVOICE_STAGE\)[^;]*\.or\(AWAITS_INVOICE_OR\)[^;]*\.limit\(LIMIT\)/,
     );
+    // Later on Nov 16 the Owner page's read shrank to the Authorized tickets alone.
     expect(flat("src/lib/owner-business.functions.ts")).toMatch(
-      /\.in\("stage", \["open", "scheduled", "done", "authorized"\]\)[^;]*\.or\(NOT_FINISHED_INSPECTION_OR\) \.limit\(LIMIT\)/,
+      /\.eq\("stage", "authorized"\)[^;]*\.or\(AWAITS_INVOICE_OR\) \.limit\(LIMIT\)/,
     );
   });
 });

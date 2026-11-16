@@ -122,10 +122,8 @@ describe("waiting for an invoice", () => {
     const base = {
       today: "2026-11-16",
       now: "2026-11-16T15:00:00Z",
-      invoices: [],
       opps: [],
       snoozed: 0,
-      untouched: null,
     };
     const ticket = (over: Record<string, unknown>) => ({
       id: "t",
@@ -144,8 +142,9 @@ describe("waiting for an invoice", () => {
         tickets: [ticket({}), ticket({ id: "i", service_type: "inspection" })],
       }).toInvoice.count,
     ).toBe(1);
+    // Later on Nov 16 the tab kept only this tile's read (the Authorized tickets).
     expect(flat("src/lib/owner-business.functions.ts")).toContain(
-      '"id, stage, stage_changed_at, scheduled_date, invoice_id, technician_id, service_type"',
+      '.select("id, stage, stage_changed_at, invoice_id, service_type")',
     );
   });
 });

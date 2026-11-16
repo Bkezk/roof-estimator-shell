@@ -1,35 +1,30 @@
 /**
  * The Owner view's Business tab (owner, Oct 8: "From an owner perspective is there any data
  * that would be useful to see on work overview?"): the money and the pipeline, which the People
- * tab never showed, and what is going stale. Pure: the server (owner-business.functions.ts)
- * hands in plain rows and the viewer's day; everything here is arithmetic, so it is tested
- * without a database. Money is read from the invoices as they stand — nothing is estimated.
+ * tab never showed. Pure: the server (owner-business.functions.ts) hands in plain rows and the
+ * viewer's day; everything here is arithmetic, so it is tested without a database.
+ *
+ * Owner, Nov 16: "if there is something that is on the business tab that is also present on the
+ * needs attention list. remove it from the business tab as i dont want double info". Five
+ * numbers left this tab that day, each a row of the People tab's Needs attention list
+ * (owner-attention.ts): the Done tickets awaiting authorization, the Unpaid tile, tickets past
+ * their scheduled day, and the tickets and opportunities untouched past Setup's limit. What
+ * stays is what that list does not show: Authorized tickets not invoiced (left off the list as
+ * noise, Nov 15), the pipeline, Won / Lost this month, and the follow-ups on hold right now.
  */
 import { asBidStatus } from "@/lib/bid-status";
 import { awaitsInvoice } from "@/lib/ticket-stage";
 import { bidWonDay } from "@/lib/margin-report";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
-import { OPEN_OPP_STATUSES, isOverdueTicket } from "@/lib/work-counts";
+import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 
 export interface BizTicket {
-  /** The row's id — needed to tell a ticket whose follow-up is on hold (`heldTickets`). */
-  id?: string;
   stage: string;
-  /** When the ticket reached its stage (the Authorized and Done queues' ages). */
+  /** When the ticket reached its stage (the Authorized queue's age). */
   stage_changed_at: string | null;
-  scheduled_date: string | null;
   invoice_id?: string | null;
-  /** Null: nobody's — Unassigned on Work Overview, never Past due (owner, Oct 12, item 6). */
-  technician_id?: string | null;
   /** An inspection ends at Authorized unless it is billed: it never waits for an invoice (Nov 16). */
   service_type?: string | null;
-}
-export interface BizInvoice {
-  status: string;
-  total: number | string | null;
-  invoice_date: string | null;
-  /** A payment recorded short of the total (owner, Nov 9): the tile counts what is still owed. */
-  paid_amount?: number | string | null;
 }
 /** A won or lost bid (bids; owner, Oct 21: the Won / Lost tile counts bids, not opportunities). */
 export interface BizBid {
@@ -50,43 +45,26 @@ export interface BusinessIn {
   today: string;
   /** When the rows were read (ISO). */
   now: string;
+  /** The live Authorized tickets. */
   tickets: readonly BizTicket[];
-  invoices: readonly BizInvoice[];
   opps: readonly BizOpp[];
   /** The live won / lost bids (absent in older callers: nothing won or lost). */
   bids?: readonly BizBid[];
   /** Open follow-ups snoozed past now. */
   snoozed: number;
-  /** crm_untouched(): items past Setup's untouched limits, by kind; null when the rpc is absent. */
-  untouched: { tickets: number; opps: number } | null;
-  /**
-   * Tickets whose follow-up is on hold today (work-counts.ts heldTicketIds): left out of Past due,
-   * as Work Overview files them under Waiting (owner, Oct 12, item 6). Absent: nothing is held.
-   */
-  heldTickets?: ReadonlySet<string>;
-}
-
-export interface MoneyTile {
-  count: number;
-  total: number;
-  /** Days since the oldest item entered the queue; null when the queue is empty. */
-  oldestDays: number | null;
 }
 
 export interface BusinessNumbers {
   today: string;
   at: string;
   /**
-   * Authorized tickets with no invoice yet (owner, Oct 12, item 6) — the set Work Overview's
+   * Authorized tickets not invoiced yet (owner, Oct 12, item 6) — the set Work Overview's
    * "Authorized — to invoice" group and the Invoices page's Awaiting invoice badge show. Aged from
    * when they reached Authorized (stage_changed_at).
    */
   toInvoice: { count: number; oldestDays: number | null };
-  /** Done tickets waiting to be authorized (the tile's second line), aged the same way. */
-  toAuthorize: { count: number; oldestDays: number | null };
-  /** Final or sent invoices not marked paid. */
-  unpaid: MoneyTile;
   // No purchase-order tile since Oct 28 (owner: approval is gone; every PO is a cost already).
+  // No Unpaid tile and no Done line since Nov 16 (the Needs attention list has them).
   pipeline: {
     open: { count: number; value: number };
     closingThisMonth: { count: number; value: number };
@@ -94,16 +72,8 @@ export interface BusinessNumbers {
     wonThisMonth: number;
     lostThisMonth: number;
   };
-  stale: {
-    /**
-     * Open / Scheduled tickets with a technician past their scheduled day, whose follow-up is not
-     * on hold (work-counts.ts isOverdueTicket + heldTicketIds) — the Overdue tickets tile's rule.
-     */
-    pastDue: number;
-    untouchedTickets: number | null;
-    untouchedOpps: number | null;
-    snoozed: number;
-  };
+  /** Open follow-ups on hold right now (the one line left of "Going stale"; Nov 16). */
+  stale: { snoozed: number };
 }
 
 const num = (v: number | string | null | undefined): number => {
@@ -142,9 +112,6 @@ const oldest = (dates: readonly (string | null | undefined)[], now: string): num
  * Until Oct 12 it counted the Done tickets, which the Awaiting invoice badge never showed.
  */
 export const TO_INVOICE_STAGES: readonly string[] = ["authorized"];
-/** The tile's second line: Done tickets still to be reviewed (Work Overview's Needs authorization). */
-export const TO_AUTHORIZE_STAGES: readonly string[] = ["done"];
-export const UNPAID_STATUSES: readonly string[] = ["final"];
 
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);
@@ -160,8 +127,6 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
         invoice_id: t.invoice_id,
       }),
   );
-  const reviewing = i.tickets.filter((t) => TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id);
-  const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));
   const sumBy = <T>(rows: readonly T[], f: (r: T) => number) =>
     round2(rows.reduce((s, r) => s + f(r), 0));
   const openOpps = i.opps.filter((o) =>
@@ -180,13 +145,6 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
       asBidStatus(b.status) === "lost" &&
       inRange(localYmd(new Date(b.status_changed_at || b.updated_at), TASK_TZ), month),
   ).length;
-  // The one "overdue ticket" rule — the Overdue tickets tile's (owner, Oct 12, items 6 and 11):
-  // Open / Scheduled past its day, with a technician (one without is Unassigned, not overdue),
-  // not on hold (a held follow-up waits); a Done ticket is waiting to be invoiced, never overdue.
-  const held = i.heldTickets ?? new Set<string>();
-  const pastDue = i.tickets.filter(
-    (t) => isOverdueTicket(t, i.today) && !(t.id !== undefined && held.has(t.id)),
-  ).length;
   return {
     today: i.today,
     at: i.now,
@@ -197,33 +155,13 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
         i.now,
       ),
     },
-    toAuthorize: {
-      count: reviewing.length,
-      oldestDays: oldest(
-        reviewing.map((t) => t.stage_changed_at),
-        i.now,
-      ),
-    },
-    unpaid: {
-      count: unpaid.length,
-      total: sumBy(unpaid, (v) => Math.max(0, num(v.total) - num(v.paid_amount))),
-      oldestDays: oldest(
-        unpaid.map((v) => v.invoice_date),
-        i.now,
-      ),
-    },
     pipeline: {
       open: { count: openOpps.length, value: sumBy(openOpps, (o) => num(o.est_value)) },
       closingThisMonth: { count: closing.length, value: sumBy(closing, (o) => num(o.est_value)) },
       wonThisMonth: wonBids,
       lostThisMonth: lostBids,
     },
-    stale: {
-      pastDue,
-      untouchedTickets: i.untouched ? i.untouched.tickets : null,
-      untouchedOpps: i.untouched ? i.untouched.opps : null,
-      snoozed: i.snoozed,
-    },
+    stale: { snoozed: i.snoozed },
   };
 }
 
@@ -231,17 +169,9 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
 export const BUSINESS_HREFS = {
   // The Authorized tickets the tile counts: the Invoices page's Awaiting invoice queue.
   toInvoice: "/service/invoices?tab=to-invoice",
-  unpaid: "/service/invoices?status=unpaid",
   pipeline: "/opportunities?status=allopen",
   // Won / Lost this month: the bids (owner, Oct 21).
   bids: "/bids",
-  pastDue: "/service?overdue=1",
-  // The untouched items have no list page of their own: each page's "Needs action" strip
-  // (components/crm/contact-log.tsx NeedsActionStrip) lists them at the top, and the Service
-  // and Opportunities pages take no filter for it, so the links open those pages (owner, Oct 12,
-  // item 6; until then both pointed at Work Overview's Overdue group, which is another set).
-  untouchedTickets: "/service",
-  untouchedOpps: "/opportunities",
   snoozed: "/my-work",
 } as const;
 

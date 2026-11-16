@@ -413,20 +413,21 @@ describe("Nov 16 audit fix 18: an inspection graded F with nothing flagged", () 
       who: "Office",
       ageText: "10 days",
     });
-    const closed = only(
-      base({
-        tickets: [
-          inspected({
-            inspection: inspection(0, "F"),
-            inspection_outcome: "none",
-            inspection_outcome_at: "2026-11-09T15:00:00Z",
-            inspection_outcome_by: LEE,
-          }),
-        ],
-      }),
-    );
-    expect(closed.why).toBe("Graded F. Closed with no repair ticket or bid.");
-    expect(closed.who).toBe("Lee Marsh");
+    // Owner, later on Nov 16: "No action needed" takes the row off at once.
+    expect(
+      rowsOf(
+        base({
+          tickets: [
+            inspected({
+              inspection: inspection(0, "F"),
+              inspection_outcome: "none",
+              inspection_outcome_at: "2026-11-09T15:00:00Z",
+              inspection_outcome_by: LEE,
+            }),
+          ],
+        }),
+      ),
+    ).toEqual([]);
   });
   it("only the failing grade counts by itself; with problems the words are as before", () => {
     for (const grade of ["A", "B", "C", "D", null])

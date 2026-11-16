@@ -14,7 +14,6 @@ import {
   ATTENTION_DEFAULTS,
   ATTENTION_FOLD_KEY,
   ATTENTION_GROUPS,
-  INSPECTION_WINDOW_DAYS,
   attentionLimits,
   attentionList,
   attentionPeople,
@@ -334,7 +333,10 @@ describe("Not followed up", () => {
       [],
     );
   });
-  it("an inspection that found problems and was closed with no next step, for 30 days", () => {
+  // Owner, Nov 16 ("make it leave after no action needed is pressed"): this row used to stay 30
+  // days as "Closed with no repair ticket or bid". Now the choice takes it off at once; with no
+  // choice yet it reads "Nobody has chosen what happens next".
+  it("an inspection that found problems: listed until a next step is chosen; No action needed takes it off", () => {
     const t = ticket({
       id: "t9",
       number: 6040,
@@ -342,9 +344,6 @@ describe("Not followed up", () => {
       stage: "authorized",
       technician_id: GARRY,
       inspection: inspection(4),
-      inspection_outcome: "none",
-      inspection_outcome_at: "2026-11-09T15:00:00Z",
-      inspection_outcome_by: GARRY,
     });
     const r = only(base({ tickets: [t] }));
     expect(r).toMatchObject({
@@ -352,16 +351,25 @@ describe("Not followed up", () => {
       kind: "inspection_no_next",
       tag: "Inspection",
       title: "#6040 Acme Tire",
-      why: "Graded C with 4 problems found. Closed with no repair ticket or bid.",
-      who: "Garry Peters",
-      ageText: "7 days",
-      tone: "amber",
+      why: "Graded C with 4 problems found. Nobody has chosen what happens next.",
+      who: "Office",
     });
-    expect(INSPECTION_WINDOW_DAYS).toBe(30);
-    expect(
-      attentionList(base({ tickets: [{ ...t, inspection_outcome_at: "2026-10-15T15:00:00Z" }] }))
-        .rows,
-    ).toEqual([]);
+    // "No action needed", chosen today or a month ago: gone.
+    for (const at of ["2026-11-16T15:00:00Z", "2026-11-09T15:00:00Z", "2026-10-15T15:00:00Z"])
+      expect(
+        attentionList(
+          base({
+            tickets: [
+              {
+                ...t,
+                inspection_outcome: "none",
+                inspection_outcome_at: at,
+                inspection_outcome_by: GARRY,
+              },
+            ],
+          }),
+        ).rows,
+      ).toEqual([]);
     // A repair ticket or a bid made from it: the next step exists.
     expect(attentionList(base({ tickets: [t], repairFrom: ["t9"] })).rows).toEqual([]);
     expect(attentionList(base({ tickets: [t], bidFrom: ["t9"] })).rows).toEqual([]);

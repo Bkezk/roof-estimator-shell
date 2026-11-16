@@ -170,12 +170,13 @@ describe("3. an inspection ends at Authorized", () => {
           service_type: "inspection",
         },
       ],
-      invoices: [],
       opps: [],
       bids: [],
-      untouched: null,
     };
-    expect(businessNumbers(base as never).toAuthorize.count).toBe(2);
+    // Owner, Nov 16: the Business tab dropped what the Needs attention list shows ("i dont want double info"):
+    // the Owner page's Done count (it was 2 here) is the list's "Waiting to be authorized" rows now.
+    expect(businessNumbers(base as never)).not.toHaveProperty("toAuthorize");
+    expect(read("src/lib/owner-attention.ts")).toContain('why: "Done. Waiting to be authorized."');
     expect(read("src/lib/owner-business.ts")).not.toContain('service_type !== "inspection"');
   });
   it("the migration reopens the Authorize timers the Done-only rule closed, through the sync's flag", () => {

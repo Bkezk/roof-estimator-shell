@@ -2,8 +2,10 @@
  * The Owner view's Business tab — the server side (src/lib/owner-business.ts has the arithmetic).
  * Admins only, the same rule as listOwnerView: the caller's own profile row decides, never a
  * flag from the client. Reads run under the caller's client (admins read everything by RLS).
- * crm_untouched() is read defensively: if the rpc is missing or refuses, the untouched counts
- * read as "not available" rather than 0.
+ *
+ * Since Nov 16 it reads less: the owner took off this tab what the Needs attention list already
+ * shows (owner-business.ts), so no invoice, no Open / Scheduled / Done ticket and no
+ * crm_untouched() is read here any more.
  */
 import { createServerFn } from "@tanstack/react-start";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -12,8 +14,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { businessNumbers, type BusinessNumbers } from "@/lib/owner-business";
 import { visibleToOwner } from "@/lib/owner-view";
-import { NOT_FINISHED_INSPECTION_OR } from "@/lib/ticket-stage";
-import { heldTicketIds, parseTodayInput, viewerToday } from "@/lib/work-counts";
+import { AWAITS_INVOICE_OR } from "@/lib/ticket-stage";
+import { parseTodayInput, viewerToday } from "@/lib/work-counts";
 
 const LIMIT = 1000;
 type Sb = SupabaseClient<Database>;
@@ -21,22 +23,6 @@ type Sb = SupabaseClient<Database>;
 function must<T>(label: string, r: { data: T | null; error: { message: string } | null }): T {
   if (r.error) throw new Error(`${label}: ${r.error.message}`);
   return (r.data ?? []) as T;
-}
-
-async function untouchedCounts(sb: Sb): Promise<{ tickets: number; opps: number } | null> {
-  try {
-    const { data, error } = await sb.rpc("crm_untouched");
-    if (error || !Array.isArray(data)) return null;
-    let tickets = 0;
-    let opps = 0;
-    for (const r of data as { kind?: string }[]) {
-      if (r.kind === "ticket") tickets += 1;
-      else if (r.kind === "opportunity") opps += 1;
-    }
-    return { tickets, opps };
-  } catch {
-    return null;
-  }
 }
 
 export const listOwnerBusiness = createServerFn({ method: "GET" })
@@ -55,22 +41,21 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
     const now = new Date();
     const today = viewerToday(data.today, now);
 
-    const [tickets, invoices, opps, bids, snoozed, untouched] = await Promise.all([
-      // Open / Scheduled for Past due, Done for the "awaiting authorization" line, Authorized for
-      // the Waiting to invoice tile (owner, Oct 12, item 6: the Authorized queue, as Work
-      // Overview and the Invoices badge count it).
+    const [tickets, opps, bids, snoozed] = await Promise.all([
+      // The Authorized tickets, for the "Authorized, not invoiced" tile (owner, Oct 12, item 6:
+      // the queue as Work Overview and the Invoices badge count it). Since Nov 16 this is the
+      // only ticket number on the tab: Past due and the Done line left it (owner: "i dont want
+      // double info"; the Needs attention list has them), and no invoice is read (the Unpaid
+      // tile went the same way).
       sb
         .from("service_jobs")
-        .select(
-          "id, stage, stage_changed_at, scheduled_date, invoice_id, technician_id, service_type",
-        )
+        .select("id, stage, stage_changed_at, invoice_id, service_type")
         .is("deleted_at", null)
-        .in("stage", ["open", "scheduled", "done", "authorized"])
-        // Finished inspections never fill the read (audit, Nov 16, fix 9): they are filtered
-        // here, not after the row limit.
-        .or(NOT_FINISHED_INSPECTION_OR)
+        .eq("stage", "authorized")
+        // Filtered here, not after the row limit (audit, Nov 16, fix 9): finished inspections
+        // stay at Authorized for good.
+        .or(AWAITS_INVOICE_OR)
         .limit(LIMIT),
-      sb.from("invoices").select("status, total, invoice_date, paid_amount").limit(LIMIT),
       sb
         .from("crm_opportunities")
         .select("status, est_value, expected_close, updated_at")
@@ -83,29 +68,22 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
         .is("deleted_at", null)
         .in("status", ["won", "accepted", "lost", "denied"])
         .limit(LIMIT),
-      // Every open follow-up with a hold: the "snoozed right now" count, and the ticket holds
-      // that keep a ticket out of Past due (work-counts.ts heldTicketIds).
+      // Every open follow-up with a hold: the "snoozed right now" count.
       sb
         .from("crm_followups")
-        .select("kind, item_id, status, snoozed_until")
+        .select("snoozed_until")
         .eq("status", "open")
         .not("snoozed_until", "is", null)
         .limit(LIMIT),
-      untouchedCounts(sb),
     ]);
     const nowIso = now.toISOString();
-    const holds = must<
-      { kind: string; item_id: string; status: string; snoozed_until: string | null }[]
-    >("follow-ups", snoozed);
+    const holds = must<{ snoozed_until: string | null }[]>("follow-ups", snoozed);
     return businessNumbers({
       today,
       now: nowIso,
       tickets: must("tickets", tickets),
-      invoices: must("invoices", invoices),
       opps: must("opportunities", opps),
       bids: must("bids", bids),
       snoozed: holds.filter((f) => !!f.snoozed_until && f.snoozed_until > nowIso).length,
-      untouched,
-      heldTickets: heldTicketIds(holds, today),
     });
   });

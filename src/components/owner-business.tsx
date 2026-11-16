@@ -1,12 +1,14 @@
 /**
  * The Owner view's Business tab (owner, Oct 8): the money in flight — Authorized, not invoiced
- * (the Awaiting invoice queue, with the Done tickets still to be authorized as its second line;
- * owner, Oct 12, item 6), Unpaid, Pipeline, Won / Lost — and a "Going stale" strip. "Invoiced
- * this month" left on Oct 21 (owner: redundant — the margin report under these tiles has the
- * month, before tax, with its cost); "Purchase orders waiting for approval" left on Oct 28
- * (owner: approval is gone, every PO is a cost). Every tile is a link to the list already
- * filtered to what it counts. Blank until the numbers arrive (never a placeholder 0); an empty
- * queue reads "—".
+ * (the Awaiting invoice queue; owner, Oct 12, item 6), Pipeline, Won / Lost — and the follow-ups
+ * on hold. "Invoiced this month" left on Oct 21 (owner: redundant — the margin report under
+ * these tiles has the month, before tax, with its cost); "Purchase orders waiting for approval"
+ * left on Oct 28 (owner: approval is gone, every PO is a cost). On Nov 16 the owner took off
+ * everything the People tab's Needs attention list already shows ("i dont want double info"):
+ * the Done tickets awaiting authorization, the Unpaid tile, tickets past their day and the
+ * untouched tickets and opportunities. Every tile is a link to the list already filtered to
+ * what it counts. Blank until the numbers arrive (never a placeholder 0); an empty queue reads
+ * "—".
  */
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -118,43 +120,20 @@ export function OwnerBusiness() {
     n === undefined ? "" : `${n} ${word}${n === 1 ? "" : "s"}`;
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Tile
           title="Authorized, not invoiced"
           help="Tickets marked Authorized that are not invoiced yet (one with a draft still counts) — the Invoices page's Awaiting invoice queue and Work Overview's Authorized — to invoice group. Aged from the day they were authorized."
           href={BUSINESS_HREFS.toInvoice}
           value={d ? (d.toInvoice.count === 0 ? "—" : d.toInvoice.count) : ""}
           sub={
-            d ? (
-              <>
-                {d.toInvoice.count
-                  ? `Authorized tickets not invoiced yet · ${days(d.toInvoice.oldestDays)}`
-                  : "Nothing authorized is waiting for an invoice"}
-                {d.toAuthorize.count > 0 && (
-                  <>
-                    <br />
-                    {`${d.toAuthorize.count} done, awaiting authorization · ${days(d.toAuthorize.oldestDays)}`}
-                  </>
-                )}
-              </>
-            ) : (
-              ""
-            )
-          }
-          tone={d && d.toInvoice.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
-        />
-        <Tile
-          title="Unpaid"
-          href={BUSINESS_HREFS.unpaid}
-          value={d ? money(d.unpaid.total, d.unpaid.count) : ""}
-          sub={
             d
-              ? d.unpaid.count
-                ? `${count(d.unpaid.count, "invoice")} · ${days(d.unpaid.oldestDays)}`
-                : "Nothing outstanding"
+              ? d.toInvoice.count
+                ? `Authorized tickets not invoiced yet · ${days(d.toInvoice.oldestDays)}`
+                : "Nothing authorized is waiting for an invoice"
               : ""
           }
-          tone={d && d.unpaid.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
+          tone={d && d.toInvoice.count > 0 ? "border-amber-300 dark:border-amber-700" : ""}
         />
         <Tile
           title="Pipeline"
@@ -178,42 +157,17 @@ export function OwnerBusiness() {
           sub={d ? "Bids, by the Won-on day · lost by status change" : ""}
         />
       </div>
-      <section className="rounded-lg border p-3">
-        <h2 className="text-sm font-semibold">Going stale</h2>
-        <ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-          <li>
-            <Go
-              href={BUSINESS_HREFS.pastDue}
-              className="hover:underline"
-              title="Open or Scheduled tickets with a technician whose day has passed and whose follow-up is not on hold — the Overdue tickets tile's rule"
-            >
-              <span className="font-semibold tabular-nums">{d ? d.stale.pastDue : ""}</span> tickets
-              past their scheduled day
-            </Go>
-          </li>
-          <li>
-            <Go href={BUSINESS_HREFS.untouchedTickets} className="hover:underline">
-              <span className="font-semibold tabular-nums">
-                {d ? (d.stale.untouchedTickets ?? "n/a") : ""}
-              </span>{" "}
-              tickets untouched past Setup&apos;s limit
-            </Go>
-          </li>
-          <li>
-            <Go href={BUSINESS_HREFS.untouchedOpps} className="hover:underline">
-              <span className="font-semibold tabular-nums">
-                {d ? (d.stale.untouchedOpps ?? "n/a") : ""}
-              </span>{" "}
-              opportunities untouched past Setup&apos;s limit
-            </Go>
-          </li>
-          <li>
-            <Go href={BUSINESS_HREFS.snoozed} className="hover:underline">
-              <span className="font-semibold tabular-nums">{d ? d.stale.snoozed : ""}</span>{" "}
-              follow-ups snoozed right now
-            </Go>
-          </li>
-        </ul>
+      {/* Owner, Nov 16: tickets past their day and the untouched tickets and opportunities left
+          this strip (the Needs attention list on the People tab has them). The holds stay:
+          that list only says how many of ITS rows are held. */}
+      <section className="rounded-lg border p-3" data-business-holds>
+        <h2 className="text-sm font-semibold">On hold</h2>
+        <p className="mt-2 text-sm">
+          <Go href={BUSINESS_HREFS.snoozed} className="hover:underline">
+            <span className="font-semibold tabular-nums">{d ? d.stale.snoozed : ""}</span>{" "}
+            follow-ups snoozed right now
+          </Go>
+        </p>
       </section>
     </div>
   );

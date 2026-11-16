@@ -82,14 +82,6 @@ describe("businessNumbers", () => {
       { stage: "open", stage_changed_at: null, scheduled_date: "2026-09-15", invoice_id: null },
       { stage: "closed", stage_changed_at: null, scheduled_date: "2026-09-01", invoice_id: "x" },
     ],
-    invoices: [
-      { status: "final", total: "1200.50", invoice_date: "2026-10-02" },
-      { status: "final", sent_at: "2026-09-10T12:00:00Z", total: 800, invoice_date: "2026-09-10" },
-      { status: "paid", total: 500, invoice_date: "2026-10-05" },
-      { status: "paid", total: 2000, invoice_date: "2026-09-25" },
-      { status: "draft", total: 999, invoice_date: "2026-10-06" },
-      { status: "void", total: 999, invoice_date: "2026-10-06" },
-    ],
     opps: [
       {
         status: "open",
@@ -124,15 +116,18 @@ describe("businessNumbers", () => {
       { status: "lost", est_value: 100, expected_close: null, updated_at: "2026-10-04T00:00:00Z" },
     ],
     snoozed: 3,
-    untouched: { tickets: 2, opps: 1 },
   };
   const n = businessNumbers(input);
-  it("Authorized, not invoiced: Authorized tickets with no invoice (the Awaiting invoice queue), oldest first; Done tickets on the second line", () => {
+  it("Authorized, not invoiced: the Authorized tickets (the Awaiting invoice queue), oldest first", () => {
     expect(n.toInvoice).toEqual({ count: 1, oldestDays: 6 });
-    expect(n.toAuthorize).toEqual({ count: 2, oldestDays: 7 });
   });
-  it("Unpaid: final + sent, their total and the oldest invoice date", () => {
-    expect(n.unpaid).toEqual({ count: 2, total: 2000.5, oldestDays: 28 });
+  // Owner, Nov 16: "if there is something that is on the business tab that is also present on
+  // the needs attention list. remove it from the business tab as i dont want double info". The
+  // Done line ({ count: 2, oldestDays: 7 }) and the Unpaid tile ({ count: 2, total: 2000.5 })
+  // were tested here until then.
+  it("the Done line and the Unpaid tile left the tab (the Needs attention list has them)", () => {
+    expect(n).not.toHaveProperty("toAuthorize");
+    expect(n).not.toHaveProperty("unpaid");
   });
   it("Invoiced this month is no longer a tile (owner, Oct 21: the margin report has the month)", () => {
     expect(n).not.toHaveProperty("invoiced");
@@ -202,20 +197,19 @@ describe("businessNumbers", () => {
     // The opportunities' won / lost no longer feed the tile (two won opps this month in `input`).
     expect(businessNumbers({ ...input, bids: [] }).pipeline.wonThisMonth).toBe(0);
   });
-  it("Going stale: open / scheduled past their day; untouched from the rpc; snoozed as given", () => {
-    expect(n.stale).toEqual({ pastDue: 2, untouchedTickets: 2, untouchedOpps: 1, snoozed: 3 });
-    expect(businessNumbers({ ...input, untouched: null }).stale.untouchedTickets).toBeNull();
+  // Nov 16: past due and the two untouched counts left with them; it was
+  // { pastDue: 2, untouchedTickets: 2, untouchedOpps: 1, snoozed: 3 }.
+  it("On hold: the follow-ups snoozed right now, as given, and nothing else", () => {
+    expect(n.stale).toEqual({ snoozed: 3 });
   });
   it("nothing at all: counts 0, totals 0, no oldest", () => {
     const empty = businessNumbers({
       ...input,
       tickets: [],
-      invoices: [],
       opps: [],
       snoozed: 0,
     });
     expect(empty.toInvoice).toEqual({ count: 0, oldestDays: null });
-    expect(empty.unpaid).toEqual({ count: 0, total: 0, oldestDays: null });
     expect(empty.pipeline.open).toEqual({ count: 0, value: 0 });
   });
 });
@@ -337,13 +331,17 @@ describe("listOwnerBusiness (server)", () => {
       data: { today: "2026-10-08" },
       context: { supabase: env.db, userId: ME },
     });
-  it("an admin gets the numbers: deleted rows left out, the rpc's untouched counts, snoozed = still snoozed; no purchase orders read", async () => {
+  it("an admin gets the numbers: deleted rows left out, snoozed = still snoozed; no purchase orders, invoices or untouched work read", async () => {
     const r = await call(world("admin"));
     expect(r.today).toBe("2026-10-08");
-    // j1 is Done (the second line); nothing Authorized in this world.
+    // j1 is Done; nothing Authorized in this world. Nov 16: the Done line, the Unpaid tile and
+    // the untouched counts are not read any more (the Needs attention list has them).
     expect(r.toInvoice.count).toBe(0);
-    expect(r.toAuthorize.count).toBe(1);
-    expect(r.unpaid).toMatchObject({ count: 1, total: 100 });
+    expect(r).not.toHaveProperty("toAuthorize");
+    expect(r).not.toHaveProperty("unpaid");
+    const server = read("src/lib/owner-business.functions.ts");
+    expect(server).not.toContain('.from("invoices")');
+    expect(server).not.toContain("sb.rpc(");
     expect(r).not.toHaveProperty("pos");
     expect(read("src/lib/owner-business.functions.ts")).not.toContain(
       "service_job_purchase_orders",
@@ -351,7 +349,7 @@ describe("listOwnerBusiness (server)", () => {
     expect(r.pipeline.open).toEqual({ count: 1, value: 300 });
     expect(r.pipeline.wonThisMonth).toBe(1);
     expect(r.pipeline.lostThisMonth).toBe(1);
-    expect(r.stale).toMatchObject({ untouchedTickets: 1, untouchedOpps: 2, snoozed: 1 });
+    expect(r.stale).toEqual({ snoozed: 1 });
   });
   it("anyone else is refused, like the People tab", async () => {
     await expect(call(world("manager"))).rejects.toThrow("Forbidden: admin only");
@@ -389,15 +387,11 @@ describe("the click-throughs", () => {
     expect(BUSINESS_HREFS).toEqual({
       // The Authorized tickets it counts: the Awaiting invoice queue (owner, Oct 12, item 6).
       toInvoice: "/service/invoices?tab=to-invoice",
-      unpaid: "/service/invoices?status=unpaid",
       pipeline: "/opportunities?status=allopen",
       // Won / Lost this month: the bids (owner, Oct 21).
       bids: "/bids",
       // (No purchase-order tile since Oct 28; po-waiting.test.ts pins its absence.)
-      pastDue: "/service?overdue=1",
-      // The untouched items sit in each page's Needs action strip; neither page takes a filter.
-      untouchedTickets: "/service",
-      untouchedOpps: "/opportunities",
+      // Nov 16: unpaid, pastDue, untouchedTickets and untouchedOpps went with their numbers.
       snoozed: "/my-work",
     });
   });
@@ -408,11 +402,17 @@ describe("the click-throughs", () => {
     const biz = read("src/components/owner-business.tsx");
     expect(biz).toContain("enabled: !!session && visibleToOwner(profile),");
     expect(biz).toContain('title="Authorized, not invoiced"');
-    expect(biz).toContain('title="Unpaid"');
+    // Nov 16: no Unpaid tile, no Done line, no past-due or untouched counts.
+    expect(biz).not.toContain('title="Unpaid"');
+    expect(biz).not.toContain("done, awaiting authorization");
+    expect(biz).not.toContain("past their scheduled day");
+    expect(biz).not.toContain("untouched past Setup");
     expect(biz).toContain('title="Pipeline"');
     expect(biz).toContain('title="Won / Lost this month"');
     expect(biz).toContain("href={BUSINESS_HREFS.bids}");
     expect(biz).not.toContain("By the opportunity's last update");
-    expect(biz).toContain("Going stale");
+    expect(biz).not.toContain(">Going stale<");
+    expect(biz).toContain(">On hold<");
+    expect(biz).toContain("follow-ups snoozed right now");
   });
 });
