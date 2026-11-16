@@ -44,6 +44,7 @@ import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
+  AWAITS_INVOICE_OR,
   INSPECTION_STAGE_MESSAGE,
   reopensTicket,
   stageProblem,
@@ -318,6 +319,8 @@ export const listAwaitingInvoice = createServerFn({ method: "GET" })
       .from("service_jobs")
       .select(LIST_JOB_COLUMNS, { count: "exact" })
       .eq("stage", "authorized")
+      // Not an inspection that ends at its sign-off (ticket-stage.ts awaitsInvoice; Nov 16).
+      .or(AWAITS_INVOICE_OR)
       .is("deleted_at", null)
       .order("completed_at", { ascending: true, nullsFirst: false })
       .order("updated_at", { ascending: true })
@@ -343,6 +346,7 @@ export const countAwaitingInvoice = createServerFn({ method: "GET" })
       .from("service_jobs")
       .select("id", { count: "exact", head: true })
       .eq("stage", "authorized")
+      .or(AWAITS_INVOICE_OR)
       .is("deleted_at", null);
     if (error) throw new Error(error.message);
     return { count: count ?? 0 };
@@ -765,7 +769,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
     // (Nov 4, bug 15 of the Nov 3 review).
     const { data: prev, error: prevErr } = await context.supabase
       .from("service_jobs")
-      .select("stage, number, service_type")
+      .select("stage, number, service_type, invoice_id")
       .eq("id", data.id)
       .maybeSingle();
     if (prevErr) throw new Error(prevErr.message);
@@ -775,8 +779,8 @@ export const setServiceStage = createServerFn({ method: "POST" })
     const problem = stageProblem(p, data.stage, prev.stage);
     if (problem) throw new Error(problem);
     // An inspection ends at Authorized (ticket-stage.ts stagesForType) — the picker knew, the
-    // server did not (Nov 4, bug 16).
-    if (!stagesForType(prev.service_type).includes(data.stage))
+    // server did not (Nov 4, bug 16). One that has been billed (Nov 16) has every stage.
+    if (!stagesForType(prev.service_type, !!prev.invoice_id).includes(data.stage))
       throw new Error(INSPECTION_STAGE_MESSAGE);
     const { stopped } =
       prev.stage !== data.stage

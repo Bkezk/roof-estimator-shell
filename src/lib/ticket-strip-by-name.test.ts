@@ -49,8 +49,9 @@ describe("ticket stage strip: by <name> under each stage date", () => {
     expect(strip).toMatch(/\{c\.by && \(/);
     expect(strip).toContain("by {c.by}");
     const page = readFileSync("src/components/service-page.tsx", "utf8");
-    expect(page).toContain(
-      "ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))",
+    // Since Nov 16 the strip's stages also follow the ticket's invoice (a billed inspection).
+    expect(page.replace(/\s+/g, " ")).toContain(
+      "ticketStageStrip( asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type, !!job.invoice_id), )",
     );
   });
 });

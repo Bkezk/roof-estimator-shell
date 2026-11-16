@@ -60,7 +60,9 @@ export const listOwnerBusiness = createServerFn({ method: "GET" })
       // Overview and the Invoices badge count it).
       sb
         .from("service_jobs")
-        .select("id, stage, stage_changed_at, scheduled_date, invoice_id, technician_id")
+        .select(
+          "id, stage, stage_changed_at, scheduled_date, invoice_id, technician_id, service_type",
+        )
         .is("deleted_at", null)
         .in("stage", ["open", "scheduled", "done", "authorized"])
         .limit(LIMIT),

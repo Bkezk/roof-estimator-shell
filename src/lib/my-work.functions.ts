@@ -31,6 +31,7 @@ import {
   type UnassignedRows,
 } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
+import { awaitsInvoice } from "@/lib/ticket-stage";
 import { normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
 
 export interface WorkPerson {
@@ -242,7 +243,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       ? sb
           .from("service_jobs")
           .select(
-            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, stage_changed_at",
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, stage_changed_at, invoice_id",
           )
           .is("deleted_at", null)
           .eq("stage", TO_INVOICE_STAGE)
@@ -467,7 +468,11 @@ export const listMyWork = createServerFn({ method: "GET" })
         : null,
       unassignedOverdueDays,
       invoicer,
-      toInvoice: (toInvoice.data ?? []) as TicketIn[],
+      // Not an inspection that ends at its sign-off: it never waits for an invoice (Nov 16;
+      // ticket-stage.ts awaitsInvoice — the rows carry the ticket's type and its invoice).
+      toInvoice: ((toInvoice.data ?? []) as (TicketIn & { invoice_id?: string | null })[]).filter(
+        awaitsInvoice,
+      ),
       toAuthorize: (toAuthorize.data ?? []) as TicketIn[],
       bids: (bids.data ?? []).map((b): BidIn => ({
         id: b.id,

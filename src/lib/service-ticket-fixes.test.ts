@@ -133,6 +133,15 @@ function fakeDb(
         return b;
       },
       eq: (c: string, v: unknown) => filter("eq", c, v, (r) => r[c] === v),
+      // The one `or` the code sends (Nov 16; ticket-stage.ts AWAITS_INVOICE_OR): not an
+      // inspection, or one that has an invoice.
+      or: (expr: string) => {
+        if (expr !== "service_type.neq.inspection,invoice_id.not.is.null")
+          throw new Error(`fake: or(${expr})`);
+        q.filters.push(`or ${expr}`);
+        preds.push((r) => r["service_type"] !== "inspection" || r["invoice_id"] != null);
+        return b;
+      },
       neq: (c: string, v: unknown) => filter("neq", c, v, (r) => r[c] !== v),
       in: (c: string, vs: unknown[]) => filter("in", c, vs, (r) => vs.includes(r[c])),
       is: (c: string, v: unknown) => filter("is", c, v, (r) => (r[c] ?? null) === v),
@@ -383,7 +392,12 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     const r = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
     const counted = env.queries.find((q) => q.selectOpts?.["count"] === "exact");
     expect(counted).toMatchObject({ table: "service_jobs", selectOpts: { count: "exact" } });
-    expect(counted!.filters).toEqual(["eq stage=authorized", "is deleted_at=null"]);
+    // Nov 16: and not an inspection that ends at its sign-off (ticket-stage.ts awaitsInvoice).
+    expect(counted!.filters).toEqual([
+      "eq stage=authorized",
+      "or service_type.neq.inspection,invoice_id.not.is.null",
+      "is deleted_at=null",
+    ]);
     expect(r.count).toBe(2);
     expect(r.rows.map((j) => j["id"])).toEqual(["job-1", "job-2"]);
   });
@@ -395,7 +409,12 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
       table: "service_jobs",
       selectOpts: { count: "exact", head: true },
     });
-    expect(counted!.filters).toEqual(["eq stage=authorized", "is deleted_at=null"]);
+    // Nov 16: and not an inspection that ends at its sign-off (ticket-stage.ts awaitsInvoice).
+    expect(counted!.filters).toEqual([
+      "eq stage=authorized",
+      "or service_type.neq.inspection,invoice_id.not.is.null",
+      "is deleted_at=null",
+    ]);
     expect(r).toEqual({ count: 2 });
   });
   it("more than 1,000 Authorized tickets: the count is the database's 1,350, the rows are capped", async () => {
@@ -404,6 +423,20 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     const r = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
     expect(r.count).toBe(1350);
     expect(r.rows).toHaveLength(AWAITING_INVOICE_LIMIT);
+  });
+  it("an authorized inspection is not waiting for an invoice, until someone bills it (Nov 16)", async () => {
+    env = fakeDb({
+      profiles: [manager],
+      service_jobs: [
+        done(1),
+        { ...done(2), service_type: "inspection", invoice_id: null },
+        { ...done(3), service_type: "inspection", invoice_id: "inv-3" },
+      ],
+    });
+    const list = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
+    expect(list.count).toBe(2);
+    expect(list.rows.map((j) => j["id"])).toEqual(["job-1", "job-3"]);
+    expect(await call<{ count: number }>(countAwaitingInvoice)).toEqual({ count: 2 });
   });
   it("other stages and deleted tickets are not counted", async () => {
     env = fakeDb({

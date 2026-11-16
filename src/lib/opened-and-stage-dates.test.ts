@@ -441,8 +441,9 @@ describe("the ticket page: the stage strip under the header carries the opened d
       'queryKey: fieldKeys.events(job?.id ?? "new"), queryFn: () => eventsFn({ data: { id: job!.id } })',
     );
     // Since Nov 3 the strip takes the ticket's stages (an inspection ends at Done).
-    expect(src).toContain(
-      "ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))",
+    // Since Nov 16 also the ticket's invoice: a billed inspection has every stage.
+    expect(src.replace(/\s+/g, " ")).toContain(
+      "ticketStageStrip( asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type, !!job.invoice_id), )",
     );
     // Owner, Oct 21: "the opened date is shown twice; the one on the timeline is sufficient" —
     // no separate Opened line; the strip's Open cell (date, "by <name>") is the one place.

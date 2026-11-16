@@ -458,9 +458,13 @@ describe("invoices.functions.ts: billing a vendor", () => {
     const fn = serverFn(src, "createAnotherInvoice");
     expect(fn).toContain("bill_to_vendor_id: z.string().uuid().nullable().optional(),");
     expect(fn).toContain("data.bill_to_vendor_id ?? null,");
-    expect(serverFn(src, "getOrCreateInvoice")).toContain(
-      "return createInvoiceFor(sb, data.job_id, { id: context.userId, name: nameOf(p) }, true);",
+    // Nov 16: both pass whether the caller is a manager (an inspection's first invoice is a
+    // manager's to start); getOrCreateInvoice still names no vendor.
+    const first = serverFn(src, "getOrCreateInvoice").replace(/\s+/g, " ");
+    expect(first).toContain(
+      "return createInvoiceFor( sb, data.job_id, { id: context.userId, name: nameOf(p), manages: managesTickets(p) }, true, );",
     );
+    expect(first).not.toContain("bill_to_vendor_id");
   });
   it("saveInvoice: a draft's Bill To may change and is snapshotted again; a final one is locked", () => {
     expect(src).toContain("bill_to_vendor_id: z.string().uuid().nullable().optional(),\n  lines:");

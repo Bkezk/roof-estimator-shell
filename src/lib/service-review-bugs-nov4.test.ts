@@ -259,15 +259,17 @@ describe("15 + 16. setServiceStage reads first, and an inspection ends at Author
       service.indexOf("export const assignServiceJob"),
     );
     expect(fn).toContain("const { data: prev, error: prevErr } = await context.supabase");
-    expect(fn).toContain('.select("stage, number, service_type")');
+    // Nov 16: and its invoice — an inspection that has been billed may go past Authorized.
+    expect(fn).toContain('.select("stage, number, service_type, invoice_id")');
     expect(fn).toContain("if (prevErr) throw new Error(prevErr.message);");
     expect(fn).toContain('if (!prev) throw new Error("Ticket not found");');
     expect(fn).toContain(
-      "if (!stagesForType(prev.service_type).includes(data.stage))\n      throw new Error(INSPECTION_STAGE_MESSAGE);",
+      "if (!stagesForType(prev.service_type, !!prev.invoice_id).includes(data.stage))\n      throw new Error(INSPECTION_STAGE_MESSAGE);",
     );
     expect(fn).not.toContain("prev?.stage");
     expect(INSPECTION_STAGE_MESSAGE).toBe(
-      "An inspection ends at Authorized — it is not invoiced or closed",
+      // Nov 16: the words now say how the rare paid one is billed.
+      "An inspection ends at Authorized. To bill it, press Invoice this inspection on the ticket first",
     );
   });
 });

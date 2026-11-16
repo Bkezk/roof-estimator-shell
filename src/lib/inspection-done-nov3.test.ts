@@ -103,23 +103,34 @@ describe("3. an inspection ends at Authorized", () => {
     expect(ticketStageStrip("done", events as never)).toHaveLength(6);
   });
   it("the ticket page: the strip and the picker take the type; the Needs authorization card stays", () => {
-    const page = read("src/components/service-page.tsx");
-    expect(page).toContain("stageChoices(profile, jobStage, job?.service_type)");
+    // Nov 16: both also take the ticket's invoice, since a billed inspection has every stage
+    // (inspection-billing-nov16.test.ts).
+    const page = read("src/components/service-page.tsx").replace(/\s+/g, " ");
+    expect(page).toMatch(
+      /stageChoices\( profile, jobStage, job\?\.service_type, \/\/[^!]*!!job\?\.invoice_id, \)/,
+    );
     expect(page).toContain(
-      "ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))",
+      "ticketStageStrip( asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type, !!job.invoice_id), )",
     );
     expect(page).toContain('{jobStage === "done" && <InvoiceBlock job={job} />}');
     expect(page).not.toContain("inspectionTicket");
   });
   it("the card: asks for the sign-off and says nothing is invoiced; no invoice card after it", () => {
     const block = read("src/components/service/invoice-block.tsx");
-    expect(block).toContain("const signOff = endsAtAuthorized(job.service_type);");
+    // Nov 16: an inspection that has been billed no longer ends at its sign-off.
+    expect(block).toContain(
+      "const signOff = endsAtAuthorized(job.service_type, !!job.invoice_id);",
+    );
     expect(block).toContain(
       'if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} signOff={signOff} />;',
     );
-    expect(block).toContain("if (signOff) return null;");
+    // After the sign-off there is still no invoice card: a manager is offered "Invoice this
+    // inspection" for the rare paid one (Nov 16), and nothing else.
     expect(block).toContain(
-      '"The inspection is done. Once it is reviewed and authorized, it is complete — nothing is invoiced."',
+      'if (signOff) return job.stage === "authorized" ? <BillInspectionCard job={job} /> : null;',
+    );
+    expect(block).toContain(
+      '"The inspection is done. Once it is reviewed and authorized, it is complete. Nothing is invoiced unless a manager then chooses to bill it."',
     );
     expect(block).toContain("`Inspection #${job.number} authorized — complete`");
   });

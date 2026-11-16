@@ -43,6 +43,13 @@ const ALL_STAGES: readonly ServiceStage[] = [...TECH_STAGES, ...OFFICE_STAGES];
  * done", then "we may need the authorized step just so the owner can see it was completed and
  * signed off on it"): Open, Scheduled, Done, Authorized — the sign-off is the end. No invoice,
  * no Closed. Everything else has them all.
+ *
+ * The rare paid inspection (owner, Nov 16: "occasionally they do charge for those although
+ * rarely" … "yes build it that way"): a manager presses "Invoice this inspection" on the
+ * authorized ticket, which makes its draft invoice. An inspection WITH an invoice (the ticket's
+ * invoice_id; a deleted draft clears it) has every stage, as a repair does, and goes on to
+ * Invoiced and Closed. One nobody bills still ends at Authorized. Every rule below takes the
+ * ticket's invoice for that reason (`hasInvoice`).
  */
 export const INSPECTION_STAGES: readonly ServiceStage[] = [
   "open",
@@ -50,13 +57,38 @@ export const INSPECTION_STAGES: readonly ServiceStage[] = [
   "done",
   "authorized",
 ];
-/** The server's refusal when an inspection is pushed past Authorized (Nov 4, bug 16). */
+/** The server's refusal when an unbilled inspection is pushed past Authorized (Nov 4, bug 16). */
 export const INSPECTION_STAGE_MESSAGE =
-  "An inspection ends at Authorized — it is not invoiced or closed";
-export const endsAtAuthorized = (serviceType: string | null | undefined): boolean =>
+  "An inspection ends at Authorized. To bill it, press Invoice this inspection on the ticket first";
+/** The button on an authorized inspection, and who it is for (Nov 16). */
+export const INSPECTION_BILL_LABEL = "Invoice this inspection";
+export const INSPECTION_BILL_MANAGER = "Only a manager can bill an inspection";
+export const isInspectionType = (serviceType: string | null | undefined): boolean =>
   serviceType === "inspection";
-export const stagesForType = (serviceType: string | null | undefined): readonly ServiceStage[] =>
-  endsAtAuthorized(serviceType) ? INSPECTION_STAGES : ALL_STAGES;
+/** Does the ticket end at its sign-off? An inspection, unless it has been billed. */
+export const endsAtAuthorized = (
+  serviceType: string | null | undefined,
+  hasInvoice = false,
+): boolean => isInspectionType(serviceType) && !hasInvoice;
+export const stagesForType = (
+  serviceType: string | null | undefined,
+  hasInvoice = false,
+): readonly ServiceStage[] =>
+  endsAtAuthorized(serviceType, hasInvoice) ? INSPECTION_STAGES : ALL_STAGES;
+
+/**
+ * Is the ticket waiting for an invoice (the Invoices page's Awaiting invoice queue and badge,
+ * Work Overview's "Authorized — to invoice", the Owner page's tile)? Authorized, and not an
+ * inspection that ends there: until Nov 16 an authorized inspection sat in those lists for good,
+ * though it could never be invoiced.
+ */
+export const awaitsInvoice = (j: {
+  stage: string;
+  service_type: string | null | undefined;
+  invoice_id?: string | null | undefined;
+}): boolean => j.stage === "authorized" && !endsAtAuthorized(j.service_type, !!j.invoice_id);
+/** The same rule as a database filter (PostgREST `or`), beside `.eq("stage", "authorized")`. */
+export const AWAITS_INVOICE_OR = "service_type.neq.inspection,invoice_id.not.is.null";
 
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";
@@ -127,8 +159,11 @@ export function stageChoices(
   p: AccessLike | null | undefined,
   current: ServiceStage | null,
   serviceType?: string | null,
+  hasInvoice = false,
 ): ServiceStage[] {
-  return stagesForType(serviceType).filter((s) => s === current || !stageProblem(p, s, current));
+  return stagesForType(serviceType, hasInvoice).filter(
+    (s) => s === current || !stageProblem(p, s, current),
+  );
 }
 
 /** The ticket sits at a stage `p` may not set (Invoiced / Closed for a non-manager): read-only. */

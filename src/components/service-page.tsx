@@ -1476,7 +1476,13 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // ticket's current stage, and then the picker is read-only (the server and the database
   // refuse the same; an invoice sets them through its own path).
   // An inspection ends at Authorized (owner, Nov 3): its picker and strip stop there.
-  const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage, job?.service_type);
+  const stageOptions: readonly ServiceStage[] = stageChoices(
+    profile,
+    jobStage,
+    job?.service_type,
+    // A billed inspection has every stage (ticket-stage.ts; Nov 16).
+    !!job?.invoice_id,
+  );
   const lockedStage = stageLocked(profile, jobStage);
 
   // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD. A saved
@@ -1643,7 +1649,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     void qc.invalidateQueries({ queryKey: fieldKeys.events(job.id) });
   }, [job, qc]);
   const stageCells = job
-    ? ticketStageStrip(asStage(job.stage), eventsQ.data ?? [], stagesForType(job.service_type))
+    ? ticketStageStrip(
+        asStage(job.stage),
+        eventsQ.data ?? [],
+        stagesForType(job.service_type, !!job.invoice_id),
+      )
     : [];
   // No separate "Opened <date> by <name>" line any more (owner, Oct 21: "the opened date is
   // shown twice; the one on the timeline is sufficient") — the strip's Open cell carries it.

@@ -26,7 +26,12 @@ import { clearsPayment, hasPayment, paidStatusFor } from "@/lib/invoice-payment"
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
-import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
+import {
+  INSPECTION_BILL_MANAGER,
+  INVOICE_NEEDS_AUTH,
+  INVOICE_STAGES,
+  isInspectionType,
+} from "@/lib/ticket-stage";
 import { stopClocksForOffice } from "@/lib/clock-close.server";
 import {
   lineFlagsChanged,
@@ -90,7 +95,12 @@ async function office(ctx: Ctx) {
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
 /** Who is making the invoice (created_by, updated_by_name). */
-type Actor = { id: string; name: string };
+type Actor = {
+  id: string;
+  name: string;
+  /** An admin or a manager: who may start an inspection's first invoice (Nov 16). */
+  manages?: boolean;
+};
 
 /**
  * Mark the invoice's ticket Invoiced (finalised; the ticket then points at this invoice) or
@@ -361,7 +371,12 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const [existing] = await liveInvoices(sb, data.job_id);
     if (existing) return withLines(sb, existing);
-    return createInvoiceFor(sb, data.job_id, { id: context.userId, name: nameOf(p) }, true);
+    return createInvoiceFor(
+      sb,
+      data.job_id,
+      { id: context.userId, name: nameOf(p), manages: managesTickets(p) },
+      true,
+    );
   });
 
 /**
@@ -384,7 +399,7 @@ export const createAnotherInvoice = createServerFn({ method: "POST" })
     return createInvoiceFor(
       context.supabase,
       data.job_id,
-      { id: context.userId, name: nameOf(p) },
+      { id: context.userId, name: nameOf(p), manages: managesTickets(p) },
       false,
       data.bill_to_vendor_id ?? null,
     );
@@ -463,6 +478,11 @@ async function createInvoiceFor(
   if (!job) throw new Error("Ticket not found");
   // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced.
   if (!INVOICE_STAGES.includes(job.stage)) throw new Error(INVOICE_NEEDS_AUTH);
+  // An inspection is not invoiced unless a manager chooses to bill it (owner, Nov 16): its
+  // first invoice is a manager's to start ("Invoice this inspection" on the ticket). Once it
+  // has one, it is billed like any ticket.
+  if (isInspectionType(job.service_type) && !job.invoice_id && !actor.manages)
+    throw new Error(INSPECTION_BILL_MANAGER);
   const [{ data: account }, { data: site }] = await Promise.all([
     job.account_id
       ? sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()

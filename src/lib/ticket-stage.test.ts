@@ -135,8 +135,9 @@ describe("the server functions apply stageProblem", () => {
 describe("the stage picker offers Invoiced / Closed only to managers", () => {
   const page = read("src/components/service-page.tsx");
   it("options come from stageChoices; the select is read-only on a locked stage", () => {
-    expect(page).toContain(
-      "const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage, job?.service_type);",
+    // Since Nov 16 it also takes the ticket's invoice: a billed inspection has every stage.
+    expect(page.replace(/\s+/g, " ")).toMatch(
+      /const stageOptions: readonly ServiceStage\[\] = stageChoices\( profile, jobStage, job\?\.service_type, \/\/[^!]*!!job\?\.invoice_id, \);/,
     );
     expect(page).toContain("const lockedStage = stageLocked(profile, jobStage);");
     expect(page).toMatch(

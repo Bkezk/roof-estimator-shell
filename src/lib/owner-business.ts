@@ -6,6 +6,7 @@
  * without a database. Money is read from the invoices as they stand — nothing is estimated.
  */
 import { asBidStatus } from "@/lib/bid-status";
+import { isInspectionType } from "@/lib/ticket-stage";
 import { bidWonDay } from "@/lib/margin-report";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { OPEN_OPP_STATUSES, isOverdueTicket } from "@/lib/work-counts";
@@ -20,6 +21,8 @@ export interface BizTicket {
   invoice_id?: string | null;
   /** Null: nobody's — Unassigned on Work Overview, never Past due (owner, Oct 12, item 6). */
   technician_id?: string | null;
+  /** An inspection ends at Authorized unless it is billed: it never waits for an invoice (Nov 16). */
+  service_type?: string | null;
 }
 export interface BizInvoice {
   status: string;
@@ -145,7 +148,12 @@ export const UNPAID_STATUSES: readonly string[] = ["final"];
 
 export function businessNumbers(i: BusinessIn): BusinessNumbers {
   const month = monthRange(i.today);
-  const waiting = i.tickets.filter((t) => TO_INVOICE_STAGES.includes(t.stage) && !t.invoice_id);
+  // Not an inspection: one that ends at its sign-off never waits for an invoice, and one that is
+  // billed has its invoice already (ticket-stage.ts awaitsInvoice; Nov 16).
+  const waiting = i.tickets.filter(
+    (t) =>
+      TO_INVOICE_STAGES.includes(t.stage) && !t.invoice_id && !isInspectionType(t.service_type),
+  );
   const reviewing = i.tickets.filter((t) => TO_AUTHORIZE_STAGES.includes(t.stage) && !t.invoice_id);
   const unpaid = i.invoices.filter((v) => UNPAID_STATUSES.includes(v.status));
   const sumBy = <T>(rows: readonly T[], f: (r: T) => number) =>

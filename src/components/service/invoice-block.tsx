@@ -33,7 +33,7 @@ import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, ShieldCheck, Trash2 } 
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets, seesInvoices } from "@/lib/access";
-import { INVOICE_STAGES, endsAtAuthorized } from "@/lib/ticket-stage";
+import { INSPECTION_BILL_LABEL, INVOICE_STAGES, endsAtAuthorized } from "@/lib/ticket-stage";
 import { setServiceStage } from "@/lib/service.functions";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
@@ -77,11 +77,67 @@ export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
   // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced. An
   // inspection ends at that sign-off (owner, Nov 3: "the authorized step just so the owner can
   // see it was completed and signed off on it"): the card asks for it, and nothing is invoiced.
-  const signOff = endsAtAuthorized(job.service_type);
+  // The rare paid inspection (owner, Nov 16: "occasionally they do charge for those although
+  // rarely"): once it is authorized, a manager can press "Invoice this inspection"; with an
+  // invoice it is billed like any ticket (ticket-stage.ts endsAtAuthorized).
+  const signOff = endsAtAuthorized(job.service_type, !!job.invoice_id);
   if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} signOff={signOff} />;
-  if (signOff) return null;
+  if (signOff) return job.stage === "authorized" ? <BillInspectionCard job={job} /> : null;
   if (!INVOICE_STAGES.includes(job.stage) && !job.invoice_id) return null;
   return <InvoiceCard job={job} />;
+}
+
+/**
+ * An authorized inspection (owner, Nov 16): it is complete and nothing is invoiced — unless a
+ * manager chooses to bill this one. The button makes its draft invoice from the ticket's time
+ * and materials and opens it, where a line such as a flat inspection fee can be added by hand.
+ * Anyone else who sees invoices is told it is complete, with no button.
+ */
+function BillInspectionCard({ job }: { job: ServiceJobWithTech }) {
+  const { profile } = useAuth();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const makeFn = useServerFn(getOrCreateInvoice);
+  const make = useMutation({
+    mutationFn: () => makeFn({ data: { job_id: job.id } }),
+    onSuccess: (r) => {
+      qc.setQueryData(invoicePageKey(r.invoice.id), r);
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      void qc.invalidateQueries({ queryKey: ticketInvoicesKey(job.id) });
+      void qc.invalidateQueries({ queryKey: ["service-job", job.id] });
+      void qc.invalidateQueries({ queryKey: ["service-jobs"] });
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+      toast.success(`Invoice #${invoiceLabel(r.invoice)} made for the inspection`);
+      void navigate({ to: "/service/invoices", search: { id: r.invoice.id } });
+    },
+    onError: (e) => toast.error(`Could not make the invoice: ${errText(e)}`),
+  });
+  return (
+    <section
+      className={`space-y-3 rounded-lg border p-4 ${SECTION_TONES["invoice"]!.edge}`}
+      aria-label="Invoice"
+      data-inspection-billing
+    >
+      <h2 className="flex items-center gap-2 font-semibold">
+        <ShieldCheck className="h-4 w-4" /> Inspection authorized
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        This inspection is complete and nothing is invoiced.
+        {managesTickets(profile) &&
+          " If this one is being charged for, make its invoice here; a fee can be added to it as a line."}
+      </p>
+      {managesTickets(profile) && (
+        <Button variant="outline" disabled={make.isPending} onClick={() => make.mutate()}>
+          {make.isPending ? (
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          ) : (
+            <Receipt className="mr-1 h-4 w-4" />
+          )}
+          {INSPECTION_BILL_LABEL}
+        </Button>
+      )}
+    </section>
+  );
 }
 
 /**
@@ -116,7 +172,7 @@ function AuthorizeCard({ job, signOff }: { job: ServiceJobWithTech; signOff: boo
       </h2>
       <p className="text-sm text-muted-foreground">
         {signOff
-          ? "The inspection is done. Once it is reviewed and authorized, it is complete — nothing is invoiced."
+          ? "The inspection is done. Once it is reviewed and authorized, it is complete. Nothing is invoiced unless a manager then chooses to bill it."
           : "The work is done. Once it is reviewed and authorized, the invoice is made from the ticket's time and materials."}
       </p>
       {managesTickets(profile) ? (
