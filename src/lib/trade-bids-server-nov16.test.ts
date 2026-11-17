@@ -754,6 +754,60 @@ describe("saveTradeBid, a new bid: priced on the server from its own numbers", (
     expect(bid.name).toBe("Acme Hardware repaint");
   });
 
+  // Nov 17, subcontractor lines (the sum is worked by hand in trade-subs-nov17.test.ts): what
+  // the subs are paid and a line's own markup are priced on the server like everything else.
+  //   own costs 2,222.55; pressure washing 3,000 sq ft x $0.20 = 600.00 with its own 10% = 60.00;
+  //   scaffolding crew quoted 1,500.00 with none; cost 4,322.55; overhead and profit worked on
+  //   3,722.55 make 5,137.12 of it; price 5,137.12 + 600.00 + 60.00 = 5,797.12.
+  it("a bid with subcontractor lines: the price and the figures hold what the subs are paid", async () => {
+    const env = world();
+    const data = tradeData();
+    const withSubs: TradeBidData = {
+      ...data,
+      setup: {
+        ...data.setup,
+        subs: [
+          {
+            id: "wash",
+            name: "Pressure washing",
+            vendor_id: null,
+            vendor_name: "Clean Walls LLC",
+            basis: "measure",
+            measure_id: "walls",
+            rate: 0.2,
+            amount: null,
+            markup_pct: 10,
+          },
+          {
+            id: "scaffold",
+            name: "Scaffolding crew",
+            vendor_id: null,
+            vendor_name: "",
+            basis: "flat",
+            measure_id: null,
+            rate: null,
+            amount: 1500,
+            markup_pct: null,
+          },
+        ],
+      },
+    };
+    const bid = await call<TradeBid>(saveTradeBid, input({ data: withSubs }), env, EST);
+    const row = bidsOf(env)[0]!;
+    expect(row["grand_total"]).toBe(5797.12);
+    // The subs sit with the flat costs: lift 400 + subs 2,100 = 2,500. No tax and no hours for
+    // them: tax stays 6% of the materials, hours stay the crew's 37.
+    expect(row["figures"]).toEqual({
+      ...FIGURES,
+      other: 2500,
+      total: 5797.12,
+      // price less the tax paid on materials: 5,797.12 - 43.05
+      revenue: 5754.07,
+    });
+    // The lines are saved with the bid, as its own.
+    expect(bid.data.setup.subs).toEqual(withSubs.setup.subs);
+  });
+
   it("is a draft trade bid of its trade, the caller's, linked to the customer", async () => {
     const env = world();
     await call<TradeBid>(saveTradeBid, input(), env, EST);

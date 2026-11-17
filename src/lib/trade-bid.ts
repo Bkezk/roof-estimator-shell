@@ -24,10 +24,17 @@
  *   labor       each line: hours × hourly rate; hours = measured ÷ how much one person does
  *               in an hour
  *   flat costs  a lift, a permit, a dumpster
- *   cost        materials + tax + labor + flat costs
+ *   subs        work handed to a subcontractor (owner, Nov 17): the sub's quote for the job, or
+ *               the sub's rate × what the job measures. No sales tax (it is not a material) and
+ *               no hours (it is not our crew).
+ *   cost        materials + tax + labor + flat costs + subs
  *   overhead    cost × overhead %
  *   profit      (cost + overhead) × profit %
  *   price       cost + overhead + profit
+ *
+ * A sub line may carry a markup of its own. Then it stands apart: the bid's overhead and profit
+ * are worked on every other cost, and the line adds its cost plus its own markup to the price.
+ * With its markup left blank it is a cost like any other, and overhead and profit apply to it.
  *
  * Time is the labor hours, and the working days they are for the crew: hours ÷ (people on the
  * crew × hours in a day).
@@ -96,11 +103,38 @@ export interface TradeFixed {
   cost: number | null;
 }
 
+/** Work handed to a subcontractor (owner, Nov 17: "add the subcontractors line"). */
+export interface TradeSub {
+  id: string;
+  /** What is subbed out: "Pressure washing". */
+  name: string;
+  /**
+   * Who does it, picked from the vendor list. The name is kept beside the id so the bid still
+   * says who after the vendor is archived or renamed. Both blank when nobody is picked yet.
+   */
+  vendor_id: string | null;
+  vendor_name: string;
+  /** "flat": one quoted amount for the job. "measure": the sub's rate for each unit measured. */
+  basis: TradeBasis;
+  measure_id: string | null;
+  /** basis "measure": the sub's price for ONE unit of the measure ($0.20 a sq ft). */
+  rate: number | null;
+  /** basis "flat": the sub's quote for the job. */
+  amount: number | null;
+  /**
+   * The markup on this line alone, in percent. Blank: no markup of its own, so the bid's
+   * overhead and profit apply to it like any other cost.
+   */
+  markup_pct: number | null;
+}
+
 export interface TradeSetup {
   measures: TradeMeasure[];
   materials: TradeMaterial[];
   labor: TradeLabor[];
   fixed: TradeFixed[];
+  /** Subcontractor lines. Absent on a setup saved before they existed: none. */
+  subs?: TradeSub[] | undefined;
   /** Percent added to cost. */
   overhead_pct: number | null;
   /** Percent added on top of cost and overhead. */
@@ -164,6 +198,7 @@ export const emptySetup = (): TradeSetup => ({
   materials: [],
   labor: [],
   fixed: [],
+  subs: [],
   overhead_pct: null,
   profit_pct: null,
   tax_pct: null,
@@ -211,6 +246,23 @@ export const tradeSetupSchema = z.object({
     )
     .max(100),
   fixed: z.array(z.object({ id, name: text(120), cost: amount })).max(50),
+  // A setup saved before subcontractor lines existed has none, and is left as it is.
+  subs: z
+    .array(
+      z.object({
+        id,
+        name: text(120),
+        vendor_id: z.string().uuid().nullable(),
+        vendor_name: text(200),
+        basis,
+        measure_id: id.nullable(),
+        rate: amount,
+        amount,
+        markup_pct: pct,
+      }),
+    )
+    .max(50)
+    .optional(),
   overhead_pct: pct,
   profit_pct: pct,
   tax_pct: pct,
@@ -285,14 +337,36 @@ export interface FixedResult {
   problem: string | null;
 }
 
+export interface SubResult {
+  id: string;
+  /** What the sub is paid; 0 when it cannot be worked out. */
+  cost: number;
+  /**
+   * The line's own markup in dollars; null when it has none of its own (the bid's overhead and
+   * profit apply to it instead).
+   */
+  markup: number | null;
+  problem: string | null;
+}
+
 export interface TradeResult {
   materials: MaterialResult[];
   labor: LaborResult[];
   fixed: FixedResult[];
+  subs: SubResult[];
   materialTotal: number;
   tax: number;
   laborTotal: number;
   fixedTotal: number;
+  /** What the subs are paid, every line. */
+  subTotal: number;
+  /** The markups of the sub lines that carry their own, added up. */
+  subMarkup: number;
+  /**
+   * What overhead and profit are worked on: the cost, less the sub lines that carry their own
+   * markup. The same as `cost` when no sub line does.
+   */
+  markupBase: number;
   /** Labor hours, all lines. */
   hours: number;
   /** Working days for the crew; null when the crew or the day's hours are not set. */
@@ -384,6 +458,31 @@ export function calcTradeBid(
       : { id: f.id, cost: 0, problem: flag("Flat cost", f.name, "type the cost") },
   );
 
+  const subs: SubResult[] = (setup.subs ?? []).map((s) => {
+    const bad = (what: string): SubResult => ({
+      id: s.id,
+      cost: 0,
+      markup: null,
+      problem: flag("Subcontractor", s.name, what),
+    });
+    let cost: number;
+    if (s.basis === "flat") {
+      if (!has(s.amount)) return bad("type the quote");
+      cost = r2(s.amount);
+    } else {
+      const got = measured(setup, quantities, s.measure_id);
+      if ("problem" in got) return bad(got.problem);
+      if (!has(s.rate)) return bad("type the rate");
+      cost = r2(got.q * s.rate);
+    }
+    return {
+      id: s.id,
+      cost,
+      markup: has(s.markup_pct) ? r2((cost * s.markup_pct) / 100) : null,
+      problem: null,
+    };
+  });
+
   const sum = (rows: readonly { cost: number }[]) => r2(rows.reduce((n, r) => n + r.cost, 0));
   const materialTotal = sum(materials);
   const tax = r2((materialTotal * (has(setup.tax_pct) ? setup.tax_pct : 0)) / 100);
@@ -394,23 +493,36 @@ export function calcTradeBid(
     has(setup.crew_size) && has(setup.hours_per_day) ? setup.crew_size * setup.hours_per_day : 0;
   const crewDays = perDay > 0 ? Math.round((hours / perDay + 1e-9) * 10) / 10 : null;
 
-  const cost = r2(materialTotal + tax + laborTotal + fixedTotal);
+  const subTotal = sum(subs);
+  // The sub lines that carry their own markup stand apart from overhead and profit.
+  const apart = subs.filter((s) => s.markup !== null);
+  const apartCost = sum(apart);
+  const subMarkup = r2(apart.reduce((n, s) => n + (s.markup ?? 0), 0));
+
+  const cost = r2(materialTotal + tax + laborTotal + fixedTotal + subTotal);
+  const markupBase = r2(cost - apartCost);
   const overheadRate = (has(setup.overhead_pct) ? setup.overhead_pct : 0) / 100;
   const profitRate = (has(setup.profit_pct) ? setup.profit_pct : 0) / 100;
-  // The price is worked out in one go and the two lines are cut from it, so they add up to it.
-  const price = r2(cost * (1 + overheadRate) * (1 + profitRate));
-  const overhead = r2(cost * overheadRate);
-  const profit = r2(price - cost - overhead);
+  // The marked-up part is worked out in one go and the two lines are cut from it, so they add
+  // up to it; the sub lines with their own markup are then added at cost plus that markup.
+  const marked = r2(markupBase * (1 + overheadRate) * (1 + profitRate));
+  const overhead = r2(markupBase * overheadRate);
+  const profit = r2(marked - markupBase - overhead);
+  const price = r2(marked + apartCost + subMarkup);
   const marginPct = price > 0 ? Math.round(((price - cost) / price) * 1000) / 10 : null;
 
   return {
     materials,
     labor,
     fixed,
+    subs,
     materialTotal,
     tax,
     laborTotal,
     fixedTotal,
+    subTotal,
+    subMarkup,
+    markupBase,
     hours,
     crewDays,
     cost,
@@ -426,7 +538,8 @@ export function calcTradeBid(
  * The figures the Margin report reads (bid-figures.ts), so a trade bid sits in the same report
  * as a roofing bid. The tax here is tax PAID on materials, a cost: it is `materialTax`, which
  * the report counts as cost and as revenue (margin-report.ts bidToMarginIn), so the report's
- * revenue is the price and its margin is overhead + profit.
+ * revenue is the price and its margin is overhead + profit (and the subs' own markups). What
+ * the subs are paid is a cost of the job: it sits with the flat costs in `other`.
  */
 export function tradeFigures(r: TradeResult): BidFigures {
   return {
@@ -434,7 +547,7 @@ export function tradeFigures(r: TradeResult): BidFigures {
     revenue: r2(r.price - r.tax),
     material: r.materialTotal,
     labor: r.laborTotal,
-    other: r.fixedTotal,
+    other: r2(r.fixedTotal + r.subTotal),
     hours: r.hours,
     tax: r.tax,
     total: r.price,
@@ -451,6 +564,8 @@ export const copySetup = (s: TradeSetup): TradeSetup => ({
   materials: s.materials.map((x) => ({ ...x })),
   labor: s.labor.map((x) => ({ ...x })),
   fixed: s.fixed.map((x) => ({ ...x })),
+  // A setup with no sub lines stays as it is: no empty list is added to it.
+  ...(s.subs ? { subs: s.subs.map((x) => ({ ...x })) } : {}),
 });
 
 /** A new bid of a trade: the trade's setup copied in, every quantity blank. */
