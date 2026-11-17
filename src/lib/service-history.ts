@@ -68,18 +68,6 @@ export const historyItemSchema = z.object({
   status: text,
   note: text,
 });
-/**
- * Something a technician typed in the earlier ticket's Activity (owner, Nov 17): a Note, or the
- * words typed with Called / Texted / Emailed / Visited. The database hands over only what a
- * technician wrote (20261117170000_site_history_tech_notes.sql).
- */
-export const historyNoteSchema = z.object({
-  id: z.union([z.number(), z.string()]),
-  method: z.string(),
-  note: z.string(),
-  by_name: text,
-  at: z.string(),
-});
 export const historyTicketSchema = z.object({
   id: z.string(),
   number: z.number(),
@@ -93,10 +81,6 @@ export const historyTicketSchema = z.object({
   location_name: text,
   closing_notes: text,
   inspection_outcome: text,
-  /** The inspection's own notes box (Nov 17); absent from a JSON made before then. */
-  inspection_notes: text,
-  /** What a technician typed in the ticket's Activity (Nov 17); absent before then. */
-  tech_notes: z.array(historyNoteSchema).default([]),
   technician_name: text,
   inspection_items: z.array(historyItemSchema).default([]),
   repairs: z.array(historyRepairSchema).default([]),
@@ -122,7 +106,6 @@ export const siteHistorySummarySchema = z.object({
 });
 
 export type HistoryRepair = z.output<typeof historyRepairSchema>;
-export type HistoryNote = z.output<typeof historyNoteSchema>;
 export type HistoryItem = z.output<typeof historyItemSchema>;
 /**
  * A photo as the server function returns it: the row plus its signed links (null when signing
@@ -283,53 +266,4 @@ export function itemHistoryText(ticket: SiteHistoryTicket, itemKey: string): str
 export function lastTimeText(when: Date | null, text: string, today: Date = new Date()): string {
   const day = when ? `: ${dayText(when, today)}` : "";
   return text ? `Last time${day} — ${text}` : `Last time${day}`;
-}
-
-// ── What the technician found and wrote (owner, Nov 17) ────────────────────────────────────
-//
-// A technician-only login opened the history of a property and saw a date, a description and an
-// outcome: "its honestly not very useful. what would be useful for the techs would be something
-// that shows history as far as the previous tickets tech notes and photos". The row now leads
-// with what was found and written; these say what there is to show.
-
-/** The checklist rows the earlier inspection flagged, each with its note ("" when none). */
-export function flaggedHistoryItems(
-  ticket: Pick<SiteHistoryTicket, "inspection_items">,
-): { key: string; label: string; note: string }[] {
-  return ticket.inspection_items
-    .filter((i) => i.status === "issue")
-    .map((i, n) => ({
-      key: i.id ?? `item-${n}`,
-      label: (i.label ?? "").trim() || "Checklist item",
-      note: (i.note ?? "").trim(),
-    }));
-}
-
-const NOTE_WORDS: Record<string, string> = {
-  called: "Called",
-  texted: "Texted",
-  emailed: "Emailed",
-  visited: "Visited",
-};
-
-/** Who wrote a note and when: "Nov 10 · Ted Tech", with "Called" and the like when it was one. */
-export function historyNoteHead(n: HistoryNote, today: Date = new Date()): string {
-  const at = new Date(n.at);
-  const day = Number.isNaN(at.getTime()) ? "" : dayText(at, today);
-  return [day, (n.by_name ?? "").trim(), NOTE_WORDS[n.method] ?? ""].filter(Boolean).join(" · ");
-}
-
-/** The words shown when an earlier ticket has nothing written and no photo. */
-export const HISTORY_ROW_EMPTY = "No notes were written and no photos were taken on this ticket.";
-
-/** Is there nothing a technician wrote or photographed on this earlier ticket? */
-export function historyRowIsEmpty(ticket: SiteHistoryTicket): boolean {
-  return (
-    ticket.photos.length === 0 &&
-    ticket.tech_notes.length === 0 &&
-    ticket.repairs.length === 0 &&
-    flaggedHistoryItems(ticket).length === 0 &&
-    !(ticket.closing_notes ?? "").trim() &&
-    !(ticket.inspection_notes ?? "").trim()
-  );
 }

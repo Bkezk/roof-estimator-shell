@@ -11,11 +11,9 @@
  *    on the close-out's header.
  *  * HistoryFold — "History at this property (N)", a folding section that starts closed; the
  *    strip is its header summary. One row per earlier ticket at the same property, newest first,
- *    the same named spot first with a "same spot" tag: date, type, description, what an
- *    inspection flagged with the technician's note on each (Nov 17), each repair's problem →
- *    work completed, the closing notes, what a technician typed in that ticket's Activity
- *    (Nov 17), the inspection outcome, and ALL its photos as thumbnails. A row with nothing
- *    written and no photo says so. A tap opens the ticket's own viewer (photo-markup.tsx PhotoLightbox) read-only,
+ *    the same named spot first with a "same spot" tag: date, type, description, each repair's
+ *    problem → work completed, the closing notes, the inspection outcome, and ALL its photos as
+ *    thumbnails. A tap opens the ticket's own viewer (photo-markup.tsx PhotoLightbox) read-only,
  *    with arrows / a swipe between that ticket's photos. "Open" (the earlier ticket) only for
  *    someone who can read it — a technician-only user sees no link and the row says nothing
  *    about it: it already carries everything.
@@ -43,11 +41,7 @@ import type { SiteHistorySummary } from "@/lib/service-history";
 import {
   FIRST_TICKET,
   HISTORY_OPEN_PARAM,
-  HISTORY_ROW_EMPTY,
   dayText,
-  flaggedHistoryItems,
-  historyNoteHead,
-  historyRowIsEmpty,
   historyFoldSummary,
   historyFoldTitle,
   historyStrip,
@@ -303,7 +297,6 @@ function HistoryRow({
   refresh: () => void;
 }) {
   const when = historyWhen(ticket);
-  const flagged = flaggedHistoryItems(ticket);
   const outcome = ticket.inspection_outcome
     ? (OUTCOME_LABELS[ticket.inspection_outcome as InspectionOutcome] ?? ticket.inspection_outcome)
     : null;
@@ -337,29 +330,6 @@ function HistoryRow({
         )}
       </div>
       {ticket.description && <p className="whitespace-pre-line">{ticket.description}</p>}
-      {/* What the inspection flagged, each with the technician's note (owner, Nov 17: the row
-          showed an inspection's outcome and nothing of what was found). */}
-      {flagged.length > 0 && (
-        <div data-history="found">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Found on the inspection
-          </p>
-          <ul className="list-disc space-y-0.5 pl-5">
-            {flagged.map((f) => (
-              <li key={f.key}>
-                <span className="font-medium">{f.label}</span>
-                {f.note && <span className="whitespace-pre-line">: {f.note}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {ticket.inspection_notes && (
-        <p className="whitespace-pre-line" data-history="inspection-notes">
-          <span className="text-muted-foreground">Inspection notes: </span>
-          {ticket.inspection_notes}
-        </p>
-      )}
       {ticket.repairs.length > 0 && (
         <ul className="space-y-1">
           {ticket.repairs.map((r) => (
@@ -379,25 +349,9 @@ function HistoryRow({
       )}
       {ticket.closing_notes && (
         <p className="whitespace-pre-line">
-          <span className="text-muted-foreground">Closing notes: </span>
+          <span className="text-muted-foreground">Notes: </span>
           {ticket.closing_notes}
         </p>
-      )}
-      {/* What a technician typed in that ticket's Activity (owner, Nov 17). */}
-      {ticket.tech_notes.length > 0 && (
-        <div data-history="tech-notes">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Technician notes
-          </p>
-          <ul className="space-y-1.5">
-            {ticket.tech_notes.map((n) => (
-              <li key={n.id}>
-                <p className="text-xs text-muted-foreground">{historyNoteHead(n)}</p>
-                <p className="whitespace-pre-line">{n.note}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
       )}
       {outcome && (
         <p>
@@ -407,12 +361,6 @@ function HistoryRow({
       )}
       {ticket.photos.length > 0 && (
         <PhotoGrid ticket={ticket} photos={ticket.photos} refresh={refresh} />
-      )}
-      {/* Said out loud, so an empty row does not read as a page that failed to load. */}
-      {historyRowIsEmpty(ticket) && (
-        <p className="text-muted-foreground" data-history="empty">
-          {HISTORY_ROW_EMPTY}
-        </p>
       )}
     </li>
   );

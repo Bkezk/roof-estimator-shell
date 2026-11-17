@@ -72,8 +72,6 @@ const ticket = (over: Partial<SiteHistoryTicket> & { id: string }): SiteHistoryT
   location_name: null,
   closing_notes: null,
   inspection_outcome: null,
-  inspection_notes: null,
-  tech_notes: [],
   technician_name: null,
   inspection_items: [],
   repairs: [],
