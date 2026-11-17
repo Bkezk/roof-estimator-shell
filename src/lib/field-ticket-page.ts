@@ -28,9 +28,17 @@ export const isFieldTicketPage = (
 /** Where the field page's Back arrow goes: My tickets. */
 export const FIELD_BACK_TO = "/service/today";
 
+/**
+ * The name of the ticket's own text box (service_jobs.notes). "Notes" until Nov 17 (owner: "can
+ * we also changes notes on service tickets to special instructions as we already have the
+ * activity log"): what happened on a ticket is written in its Activity; this box is what the
+ * visit needs to know (the gate code, where to park).
+ */
+export const TICKET_NOTES_LABEL = "Special instructions";
+
 /** Under the read-only details, in the technician's words. */
 export const FIELD_DETAILS_NOTE =
-  "The office sets these. Your notes are below; the close-out marks the ticket Done.";
+  "The office sets these. Special instructions are below; the close-out marks the ticket Done.";
 
 const asType = (s: string): ServiceType =>
   (SERVICE_TYPES as readonly string[]).includes(s) ? (s as ServiceType) : "other";

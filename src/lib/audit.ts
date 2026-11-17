@@ -118,9 +118,18 @@ export const AUDIT_TICKET_WORDS: Readonly<Record<string, string>> = {
   labor_rate_kind: "urgency",
 };
 
+/**
+ * Words that are a ticket's alone. Its text box is "Special instructions" (owner, Nov 17;
+ * 20261117150000_history_special_instructions.sql); every other entity's `notes` stay "notes".
+ */
+export const AUDIT_TICKET_ONLY_WORDS: Readonly<Record<string, string>> = {
+  notes: "special instructions",
+};
+
 /** The readable name of a changed field, for an entity ("expected close"); the column otherwise. */
 export const auditFieldLabel = (entity: string, column: string): string =>
   (entity === "opportunity" || entity === "bid" ? AUDIT_FIELD_LABELS[entity][column] : undefined) ??
+  (entity === "ticket" ? AUDIT_TICKET_ONLY_WORDS[column] : undefined) ??
   AUDIT_PROPERTY_WORDS[column] ??
   AUDIT_TICKET_WORDS[column] ??
   column.replace(/_id$/, "").replace(/_/g, " ");

@@ -106,7 +106,12 @@ import {
   TYPE_LOCK_NOTE,
   typeLockedFor,
 } from "@/lib/ticket-stage";
-import { FIELD_DETAILS_NOTE, fieldNotesInput, isFieldTicketPage } from "@/lib/field-ticket-page";
+import {
+  FIELD_DETAILS_NOTE,
+  fieldNotesInput,
+  isFieldTicketPage,
+  TICKET_NOTES_LABEL,
+} from "@/lib/field-ticket-page";
 import {
   deleteServiceJob,
   getCrewRateDefaults,
@@ -2413,10 +2418,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       <p className="text-xs text-muted-foreground">{FIELD_DETAILS_NOTE}</p>
     </section>
   );
-  // Notes: two rows to start, growing as they are typed (owner, Oct 1).
+  // Two rows to start, growing as they are typed (owner, Oct 1). "Special instructions" since
+  // Nov 17 (owner: "changes notes on service tickets to special instructions as we already have
+  // the activity log"): what happened goes in Activity; this box is what the visit needs to know.
   const notesField = (
     <div className="space-y-1">
-      <Label htmlFor="ticket-notes">Notes</Label>
+      <Label htmlFor="ticket-notes">{TICKET_NOTES_LABEL}</Label>
       <AutoTextarea
         id="ticket-notes"
         rows={2}

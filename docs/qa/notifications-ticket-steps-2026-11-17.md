@@ -103,3 +103,42 @@ Opportunities and bids are as they were.
   That would have sent notices to real people. The server rule is covered by the checks above.
 
 Nothing in the data was changed. No database change was needed.
+
+## Later the same day
+
+### The mention: the likely cause
+
+The owner said the other three notices that morning did show on the phone. The mention was the
+only one that arrived while an earlier notice (14 minutes older) was probably still on the
+screen. Every notice carried the same tag, and a notice with the tag of one already showing
+replaces it with no sound and no banner. That fits what happened. It could not be proven on the
+phone from here. The shared tag is gone (section 1, point 2), so it cannot happen again that way.
+
+### The ticket's Notes box is "Special instructions"
+
+The owner's words: "can we also changes notes on service tickets to special instructions as we
+already have the activity log".
+
+A ticket had two things called notes: the box on the ticket, and the notes written in its
+Activity. The box is now "Special instructions". Activity keeps its notes.
+
+- The label on the ticket, for the office and on the technician's page.
+- The technician's line under the details: "The office sets these. Special instructions are
+  below; the close-out marks the ticket Done."
+- History: a change to the box reads "special instructions 'a' → 'b'" on a ticket. A customer's,
+  a property's and a purchase order's notes still read "notes". Database change
+  `20261117150000_history_special_instructions.sql`, applied and checked on the live database.
+  History already written is left as it is.
+
+Wording only. What is typed in the box is kept, it saves to the same place, and a technician can
+still type in it.
+
+Proof:
+
+- New checks: `src/lib/special-instructions-nov17.test.ts` (5).
+- Whole suite: 590 files, 8,324 tests pass. Lint, types and the build pass.
+- Live database, a trial that was rolled back: a ticket's change read "special instructions",
+  its urgency still read "urgency", a customer's still read "notes". The function kept its
+  settings and its 15 triggers.
+- Browser, 1500 px and 390 px: a new ticket and an existing one both show "Special
+  instructions", and no label on the form reads "Notes". Nothing was typed or saved.

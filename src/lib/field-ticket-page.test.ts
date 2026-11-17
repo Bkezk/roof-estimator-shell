@@ -52,7 +52,8 @@ describe("isFieldTicketPage", () => {
   });
   it("the note under the details is in the technician's words", () => {
     expect(FIELD_DETAILS_NOTE).not.toMatch(/office fixes|the app\b/i);
-    expect(FIELD_DETAILS_NOTE).toContain("notes");
+    // Nov 17: the box is "Special instructions" (it was "Your notes are below").
+    expect(FIELD_DETAILS_NOTE).toContain("Special instructions are below");
   });
 });
 
