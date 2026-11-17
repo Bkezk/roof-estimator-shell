@@ -1,43 +1,52 @@
-# History at this property: a short list, a pop-up per ticket, and "Viewable to technicians"
+# History at this property: a timeline, the ticket's photos, and "Viewable to technicians"
 
 Date: Nov 17, 2026
 
-The owner, with a picture of a short history row: "when the tech clicks history at this
-property i just want them to see this and then they can click the ticket and itll pop up its
-photos and notes from the tickets and on the activity log have a check box that says viewable
-to technicians and anything with that check box should also show".
+How the owner settled it, in his words and in order:
 
-An earlier attempt the same day put everything into the list itself. The owner had it undone
-("thats not exactly what i wanted"). This is the version he described.
+1. "its honestly not very useful. what would be useful for the techs would be something that
+   shows history as far as the previous tickets tech notes and photos"
+2. "when the tech clicks history at this property i just want them to see this and then they
+   can click the ticket and itll pop up its photos and notes from the tickets and on the
+   activity log have a check box that says viewable to technicians and anything with that check
+   box should also show"
+3. Of a pop-up that showed the earlier ticket whole: "again i dont really want them to see the
+   whole ticket just the history at this property and the activities that are check viewable to
+   the techs in a timeline like setup"
+4. Asked which layout: "i like the timeline but id like to be able to click the ticket to see
+   the photos". Asked what else to show: photos, the inspection's findings, the repairs and
+   closing notes.
 
-## The list
+Two earlier attempts the same day were wrong: the first put everything in the list and was
+undone; the second put the whole earlier ticket, its Special instructions included, in a
+pop-up. This is the third and matches points 3 and 4.
 
-One short row per earlier ticket at the property:
+## The timeline
 
-- the date, type, ticket number, stage, technician and named site
+History at this property is one timeline, a line down the left with a dot per earlier ticket,
+newest first. Each ticket shows, always in view:
+
+- its line: the date, type, ticket number, stage, technician and named site
 - the description
-- what an inspection flagged, by name
-- the outcome
-- what waits behind it: "2 photos · notes", "1 photo", "notes", or "no photos or notes"
+- **Found on the inspection:** each flagged row, with the note typed on it, and the outcome
+- **Inspection notes:** the inspection's own notes box
+- **Repairs:** what was wrong and what was done
+- **Closing notes**
+- under those, the Activity entries ticked "Viewable to technicians", drawn the way the
+  ticket's own Activity draws them: the icon, "Note" or "Called", when, who, and the words
 
-No photos and no notes in the row itself. The whole row is the button.
+Not shown: the earlier ticket's Special instructions, its other Activity entries, and anything
+about money, hours or materials. The database no longer hands the Special instructions over.
 
-## The pop-up
+## The photos
 
-A tap on a row opens that ticket's pop-up:
+The ticket's line is a button. It says how many photos are behind it ("3 photos", "no photos").
+A tap opens a pop-up with that ticket's photos and nothing else. A tap on a photo opens it full
+size, with arrows between that ticket's photos. With no photo the pop-up says "No photos were
+taken on this ticket."
 
-- **Photos:** every photo. A tap opens it full size, with arrows between that ticket's photos.
-- **Special instructions:** the ticket's own box.
-- **Found on the inspection:** each flagged row with the note typed on it.
-- **Inspection notes:** the inspection's own notes box.
-- **Repairs:** what was wrong and what was done.
-- **Closing notes.**
-- **From the ticket's activity:** the entries ticked "Viewable to technicians".
-- **Outcome.**
-- When there is nothing: "No photos were taken and no notes were written on this ticket."
-
-"Open the ticket" shows only for someone who can open it. A technician-only login never sees
-it. No price, rate, invoice, hours or materials are in the pop-up.
+"Open the ticket" is in the pop-up only for someone who can open it. A technician-only login
+never sees it.
 
 ## The checkbox
 
@@ -49,31 +58,33 @@ carries a tick: "Viewable to technicians".
   or taken off later.
 - **Who chooses:** an admin, a manager, or a Service user who is not technician-only. The
   database refuses anyone else.
-- **Technicians:** a technician-only login is shown no checkbox. What a technician writes is for
-  technicians, so it is always ticked.
-- **Nothing already written is ticked.** Every existing entry is as private as it was.
+- **Technicians:** a technician-only login is shown no checkbox. What a technician writes is
+  always ticked.
+- **Nothing already written is ticked.**
 - **Not tickable:** the lines the site writes itself and the close-out's own summary.
 
-The tick decides what shows in the history pop-up. On the ticket itself the Activity is
-unchanged: whoever could read it before still reads all of it.
+The tick decides what shows in the history. On the ticket itself the Activity is unchanged.
 
 ## Proof
 
-- Database change `20261117190000_history_popup_tech_visible.sql`, applied on the live database.
-  A trial that was rolled back: the history handed over 0 shared entries, then 1 after the tick;
-  the close-out summary could not be ticked; a technician-only login was refused; a call with
-  no sign-in was refused.
-- New checks: `src/lib/history-popup-nov17.test.ts` (21). Two older checks were updated with a
-  dated note each.
-- Whole suite: 591 files, 8,345 tests pass. Lint, types and the build pass.
-- Browser, 1500 px and 390 px, read only:
-  - the list shows short rows with no photos in them, and the hint "1 photo · notes";
-  - a tap opens the pop-up with the photo, the special instructions and the repair;
+- Database changes, both applied on the live database:
+  `20261117190000_history_popup_tech_visible.sql` (the tick, its setter, the history hand-over)
+  and `20261117210000_history_timeline_no_special_instructions.sql` (the Special instructions
+  are no longer handed over).
+- A trial that was rolled back: the history handed over 0 shared entries, then 1 after the
+  tick; the close-out summary could not be ticked; a technician-only login was refused; a call
+  with no sign-in was refused.
+- Checks: `src/lib/history-popup-nov17.test.ts` (24).
+- Whole suite: 591 files, 8,348 tests pass. Lint, types and the build pass.
+- Browser, 1500 px and 390 px, read only, on two tickets:
+  - one timeline, two tickets on it, no photos in the timeline itself;
+  - a repair shows its repair, what was wrong and what was done; an inspection shows what it
+    flagged and its outcome; neither says "Special instructions"; no dollar sign;
+  - the ticket's line says "1 photo" or "no photos"; a tap opens the pop-up with the photo and
+    no notes or repairs in it;
   - a tap on the photo opens the viewer, Escape returns to the pop-up, Close closes it;
-  - the pop-up fits the phone, with no sideways scroll and no dollar sign;
-  - the Activity shows the checkbox on the one person-made entry and under the note box,
-    unticked. Nothing was ticked or saved.
-- Not seen in the browser: an entry showing in the pop-up after a tick. Ticking a real entry
-  would have changed a real ticket. The rolled-back trial above covers it.
+  - no sideways scroll on the phone.
+- Not seen in the browser: a ticked entry on the timeline. Ticking a real entry would have
+  changed a real ticket. The rolled-back trial and the checks cover it.
 
 Nothing in the data was changed.

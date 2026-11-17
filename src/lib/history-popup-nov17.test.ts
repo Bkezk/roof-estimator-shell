@@ -1,24 +1,28 @@
 /**
- * Owner, Nov 17, with a picture of a short history row: "when the tech clicks history at this
- * property i just want them to see this and then they can click the ticket and itll pop up its
- * photos and notes from the tickets and on the activity log have a check box that says viewable
- * to technicians and anything with that check box should also show".
+ * History at this property, as the owner settled it on Nov 17, in three steps.
  *
- * So: the list is short rows; a tap on a row opens that ticket's pop-up with every photo and the
- * ticket's notes; an Activity entry carries a "Viewable to technicians" tick, and a ticked one
- * shows in the pop-up.
+ * "when the tech clicks history at this property i just want them to see this and then they can
+ * click the ticket and itll pop up its photos and notes from the tickets and on the activity log
+ * have a check box that says viewable to technicians and anything with that check box should
+ * also show". Then, of a pop-up that showed the earlier ticket whole: "again i dont really want
+ * them to see the whole ticket just the history at this property and the activities that are
+ * check viewable to the techs in a timeline like setup". And, asked: "i like the timeline but id
+ * like to be able to click the ticket to see the photos", with the inspection's findings and the
+ * repairs and closing notes shown too.
+ *
+ * So: one timeline; each earlier ticket carries what was found, the repairs, the closing notes
+ * and the Activity entries ticked "Viewable to technicians"; a tap on the ticket opens its
+ * photos and nothing else; the earlier ticket's Special instructions are not shown.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ContactLogRow } from "@/lib/contact-log.functions";
 import {
-  HISTORY_DETAIL_EMPTY,
+  HISTORY_NO_PHOTOS,
   flaggedHistoryItems,
-  historyDetailIsEmpty,
-  historyHasNotes,
-  historyNoteHead,
-  historyRowHint,
+  historyNoteLabel,
+  historyPhotosHint,
   historyTicketSchema,
   siteHistorySchema,
   type HistoryPhoto,
@@ -198,7 +202,6 @@ describe("the checkbox on an Activity entry", () => {
     );
     // The history hands over the ticked entries only.
     expect(sql).toContain("where l.kind = 'ticket' and l.item_id = j.id and l.tech_visible");
-    expect(sql).toContain("'special_instructions', nullif(trim(j.notes), ''),");
     expect(sql).toContain("'inspection_notes', nullif(trim(j.inspection->>'notes'), ''),");
     // Who may ask is as it was, and nothing about money is handed over.
     expect(sql).toContain("if not public.site_history_allowed(p_job_id) then");
@@ -211,26 +214,42 @@ describe("what the database hands the history", () => {
   it("a history made before this change still reads", () => {
     const [t] = siteHistorySchema.parse([fromDb()]);
     expect(t!.shared_notes).toEqual([]);
-    expect(t!.special_instructions).toBeNull();
     expect(t!.inspection_notes).toBeNull();
   });
 
-  it("the ticked entries, the special instructions and the inspection's notes come through", () => {
+  it("the ticked entries and the inspection's notes come through", () => {
     const [t] = siteHistorySchema.parse([
       fromDb({
-        special_instructions: "Park in back.",
         inspection_notes: "Ponding by the north drain.",
         shared_notes: [note(), note({ id: 42, method: "called", note: null })],
       }),
     ]);
-    expect(t!.special_instructions).toBe("Park in back.");
     expect(t!.inspection_notes).toBe("Ponding by the north drain.");
     expect(t!.shared_notes.map((n) => n.id)).toEqual([41, 42]);
   });
+
+  it("the earlier ticket's Special instructions are not handed over, nor read if they were", () => {
+    const sql = read(
+      "supabase/migrations/20261117210000_history_timeline_no_special_instructions.sql",
+    );
+    const fn = sql.slice(sql.indexOf("create or replace function public.site_history"));
+    expect(fn).not.toContain("special_instructions");
+    expect(fn).not.toContain("j.notes");
+    // The rest stands: the ticked entries, who may ask, every photo but the signature, no money.
+    expect(fn).toContain("where l.kind = 'ticket' and l.item_id = j.id and l.tech_visible");
+    expect(fn).toContain("if not public.site_history_allowed(p_job_id) then");
+    expect(fn).toContain(
+      "where ph.service_job_id = j.id and ph.role <> 'signature'), '[]'::jsonb)",
+    );
+    expect(fn).not.toMatch(/bill_rate|amount|invoice|price|cost/i);
+    // A JSON that still carried the key (an older database) loses it at the door.
+    const [t] = siteHistorySchema.parse([fromDb({ special_instructions: "Park in back." })]);
+    expect(Object.keys(t!)).not.toContain("special_instructions");
+  });
 });
 
-describe("the short row", () => {
-  it("lists what the inspection flagged, by name", () => {
+describe("the timeline", () => {
+  it("lists what the inspection flagged, each with its note", () => {
     const t = ticket({
       inspection_items: [
         { id: "a", label: "Membrane condition", status: "issue", note: " Blisters near the curb " },
@@ -244,112 +263,86 @@ describe("the short row", () => {
     ]);
   });
 
-  it("says what waits behind it", () => {
-    expect(historyRowHint(ticket())).toBe("no photos or notes");
-    expect(historyRowHint(ticket({}, [photo("p1")]))).toBe("1 photo");
-    expect(historyRowHint(ticket({ closing_notes: "Patched" }, [photo("p1"), photo("p2")]))).toBe(
-      "2 photos · notes",
-    );
-    expect(historyRowHint(ticket({ shared_notes: [note()] }))).toBe("notes");
-    expect(historyRowHint(ticket({ special_instructions: "Park in back." }))).toBe("notes");
+  it("a shared Activity entry is worded as the ticket's own Activity words it", () => {
+    expect(historyNoteLabel("comment")).toBe("Note");
+    expect(historyNoteLabel("called")).toBe("Called");
+    expect(historyNoteLabel("texted")).toBe("Texted");
+    expect(historyNoteLabel("emailed")).toBe("Emailed");
+    expect(historyNoteLabel("visited")).toBe("Visited");
+    expect(historyNoteLabel("other")).toBe("Contact");
   });
 
-  it("is short: no photos, repairs or notes in the row itself; the whole row opens the pop-up", () => {
+  it("is one list with a line down its side and a dot per earlier ticket", () => {
+    const src = read("src/components/service/site-history.tsx");
+    expect(src).toContain('data-history="timeline"');
+    expect(src).toMatch(/className="ml-1\.5 space-y-4 border-l"/);
+    expect(src).toContain("rounded-full border-2 border-background bg-primary");
+  });
+
+  it("each ticket shows what was found, the repairs, the closing notes and its ticked entries", () => {
     const src = read("src/components/service/site-history.tsx");
     const row = src.slice(
       src.indexOf("function HistoryRow({"),
-      src.indexOf("function HistoryDetail({"),
+      src.indexOf("function HistoryPhotos({"),
+    );
+    for (const part of ["found", "inspection-notes", "repairs", "closing-notes", "shared-notes"])
+      expect(row).toContain(`data-history="${part}"`);
+    expect(row).toContain("Found on the inspection");
+    expect(row).toContain("What was wrong: ");
+    expect(row).toContain("What was done: ");
+    expect(row).toContain("Closing notes: ");
+    expect(row).toContain("{historyNoteLabel(n.method)}");
+    expect(row).toContain("· {whenShort(n.at)}");
+    // Not the photos (they are behind the tap), and never the Special instructions.
+    expect(row).not.toContain("<PhotoGrid");
+    expect(src).not.toContain("special_instructions");
+    expect(src).not.toContain("Special instructions</p>");
+  });
+
+  it("the ticket's line is the button, and says how many photos are behind it", () => {
+    expect(historyPhotosHint(ticket())).toBe("no photos");
+    expect(historyPhotosHint(ticket({}, [photo("p1")]))).toBe("1 photo");
+    expect(historyPhotosHint(ticket({}, [photo("p1"), photo("p2")]))).toBe("2 photos");
+    const src = read("src/components/service/site-history.tsx");
+    const row = src.slice(
+      src.indexOf("function HistoryRow({"),
+      src.indexOf("function HistoryPhotos({"),
     );
     expect(row).toContain('data-history="row"');
     expect(row).toContain('aria-haspopup="dialog"');
     expect(row).toContain("setOpen(true);");
-    expect(row).toContain("Found on the inspection");
-    expect(row).toContain("{historyRowHint(ticket)}");
-    expect(row).not.toContain("<PhotoGrid");
-    expect(row).not.toContain("closing_notes");
-    expect(row).not.toContain("ticket.repairs");
-    expect(row).not.toContain("shared_notes");
+    expect(row).toContain("{historyPhotosHint(ticket)}");
   });
 });
 
-describe("the ticket's pop-up", () => {
-  it("knows a note when it sees one", () => {
-    expect(historyHasNotes(ticket())).toBe(false);
-    expect(historyHasNotes(ticket({ closing_notes: "  " }))).toBe(false);
-    expect(historyHasNotes(ticket({ closing_notes: "Patched" }))).toBe(true);
-    expect(historyHasNotes(ticket({ inspection_notes: "Ponding" }))).toBe(true);
-    expect(
-      historyHasNotes(
-        ticket({
-          repairs: [
-            {
-              id: "r",
-              name: "Curb",
-              problem_text: "Split seam",
-              resolution_text: null,
-              completed_on: null,
-            },
-          ],
-        }),
-      ),
-    ).toBe(true);
-    expect(
-      historyHasNotes(
-        ticket({
-          inspection_items: [{ id: "a", label: "Drains", status: "issue", note: "Clogged" }],
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("an entry from the Activity says who and when, and Called when it was one", () => {
-    expect(historyNoteHead(note(), TODAY)).toBe("Nov 10 · Dana Office");
-    expect(historyNoteHead(note({ method: "called" }), TODAY)).toBe(
-      "Nov 10 · Dana Office · Called",
-    );
-    expect(historyNoteHead(note({ at: "2025-06-12T15:00:00.000Z" }), TODAY)).toBe(
-      "Jun 12, 2025 · Dana Office",
-    );
-  });
-
-  it("says so when the ticket has no photo and nothing written", () => {
-    expect(HISTORY_DETAIL_EMPTY).toBe(
-      "No photos were taken and no notes were written on this ticket.",
-    );
-    expect(historyDetailIsEmpty(ticket())).toBe(true);
-    expect(historyDetailIsEmpty(ticket({}, [photo("p1")]))).toBe(false);
-    expect(historyDetailIsEmpty(ticket({ shared_notes: [note()] }))).toBe(false);
-    expect(
-      historyDetailIsEmpty(
-        ticket({ inspection_items: [{ id: "a", label: "Drains", status: "issue", note: null }] }),
-      ),
-    ).toBe(false);
-  });
-
-  it("shows every photo and every kind of note, and Open the ticket only to who may open it", () => {
+describe("the ticket's photos", () => {
+  it("the pop-up shows the photos and nothing else of the ticket", () => {
     const src = read("src/components/service/site-history.tsx");
-    const detail = src.slice(
-      src.indexOf("function HistoryDetail({"),
-      src.indexOf("// ── The photos"),
-    );
-    expect(detail).toContain(
-      "<PhotoGrid ticket={ticket} photos={ticket.photos} refresh={refresh} />",
-    );
-    for (const part of [
-      "special-instructions",
-      "found",
-      "inspection-notes",
-      "repairs",
-      "closing-notes",
-      "shared-notes",
-      "empty",
+    const pop = src.slice(src.indexOf("function HistoryPhotos({"), src.indexOf("// ── The photos"));
+    expect(pop).toContain("data-history-photos={ticket.id}");
+    expect(pop).toContain("<PhotoGrid ticket={ticket} photos={ticket.photos} refresh={refresh} />");
+    for (const gone of [
+      "closing_notes",
+      "ticket.repairs",
+      "shared_notes",
+      "inspection_notes",
+      "description",
     ])
-      expect(detail).toContain(`data-history="${part}"`);
-    expect(detail).toContain("What was wrong: ");
-    expect(detail).toContain("What was done: ");
-    expect(detail).toContain("{historyNoteHead(n)}");
-    expect(detail).toMatch(/\{canOpen && \(\s*<Button asChild/);
-    expect(detail).toContain("Open the ticket");
-    expect(detail).toContain("data-history-close");
+      expect(pop).not.toContain(gone);
+    expect(pop).toContain("data-history-close");
+  });
+
+  it("says so when there is no photo", () => {
+    expect(HISTORY_NO_PHOTOS).toBe("No photos were taken on this ticket.");
+    const src = read("src/components/service/site-history.tsx");
+    expect(src).toContain("{HISTORY_NO_PHOTOS}");
+  });
+
+  it("Open the ticket is offered only to someone who can open it", () => {
+    const src = read("src/components/service/site-history.tsx");
+    const pop = src.slice(src.indexOf("function HistoryPhotos({"), src.indexOf("// ── The photos"));
+    expect(pop).toMatch(/\{canOpen && \(\s*<Button asChild/);
+    expect(pop).toContain("Open the ticket");
+    expect(src).toContain("const canOpen = !!profile && !isFieldOnly(profile);");
   });
 });
