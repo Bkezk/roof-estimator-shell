@@ -50,12 +50,13 @@
  * on screen with a "Could not refresh" line; a new ticket no longer assigns itself to its
  * creator; the Done ticket's "Needs authorization" card leads the right column.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ServiceTabs } from "@/components/service/service-tabs";
 import { AuditHistory } from "@/components/audit-history";
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { MaterialsSection } from "@/components/service/materials-section";
 import { toast } from "sonner";
 import {
@@ -2433,8 +2434,48 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // Owner, Oct 6: a toggle by Delete puts the sections below the form instead (remembered).
   const stacked = twoPane && layout === "stacked";
 
+  const formId = useId();
+  // Save stays at the bottom of the window while the ticket is scrolled, as on a trade bid
+  // (owner, Nov 17: "make the save button on service behave the same way it does on the trade
+  // bids when you scrolled"). The bar is the last thing on the page, outside the form, so it is
+  // there beside the sections too; its button still submits the form (`form={formId}`), so
+  // Enter in a box and the button do one and the same thing.
+  const unsaved = fieldPage ? dirty : dirty || crewDirty;
+  const saveBar = !ro && (
+    <SaveBar>
+      <div className="min-w-0 flex-1 text-sm" data-save-note>
+        {!job ? (
+          <p className="text-muted-foreground">{TICKET_STAGE_HINT}</p>
+        ) : unsaved ? (
+          <p>You have changes that are not saved.</p>
+        ) : (
+          <p className="text-muted-foreground">All changes are saved.</p>
+        )}
+      </div>
+      <div className={SAVE_BAR_ACTIONS}>
+        <Button
+          type="submit"
+          form={formId}
+          className="h-10 min-w-24"
+          data-save
+          disabled={
+            // The field page saves the notes: a change is all it needs (the day and the
+            // customer are the office's, and go back as they are).
+            fieldPage
+              ? save.isPending || !dirty
+              : save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
+          }
+        >
+          {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+          {job ? "Save" : "Create ticket"}
+        </Button>
+      </div>
+    </SaveBar>
+  );
+
   const ticketForm = (
     <form
+      id={formId}
       className={`${isTech ? "max-w-3xl" : twoPane ? "max-w-5xl xl:max-w-none" : "max-w-5xl"} space-y-5`}
       onSubmit={(e) => {
         e.preventDefault();
@@ -2472,33 +2513,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           {notesField}
           {centerPointNumbers}
         </>
-      )}
-
-      {!ro && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="submit"
-            size="lg"
-            disabled={
-              // The field page saves the notes: a change is all it needs (the day and the
-              // customer are the office's, and go back as they are).
-              fieldPage
-                ? save.isPending || !dirty
-                : save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
-            }
-          >
-            {save.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-4 w-4" />
-            )}
-            {job ? "Save" : "Create ticket"}
-          </Button>
-          {job && (dirty || crewDirty) && (
-            <span className="text-sm text-muted-foreground">Unsaved changes</span>
-          )}
-          {!job && <span className="text-xs text-muted-foreground">{TICKET_STAGE_HINT}</span>}
-        </div>
       )}
     </form>
   );
@@ -2793,6 +2807,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </>
         )}
       </FoldAllContext.Provider>
+
+      {saveBar}
 
       {job && (
         <AlertDialog

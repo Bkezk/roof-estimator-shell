@@ -157,14 +157,19 @@ describe("the tighter layout (owner, Oct 1): two columns for the office, one for
 
   it("below the columns, full width: description and PO / Job #, notes, CenterPoint, then Create", () => {
     const office = form.slice(form.indexOf("md:grid-cols-2"));
-    const seq = [
-      "{descriptionAndNumbers}",
-      "{notesField}",
-      "{centerPointNumbers}",
-      "{TICKET_STAGE_HINT}",
-    ].map((p) => office.indexOf(p));
+    const seq = ["{descriptionAndNumbers}", "{notesField}", "{centerPointNumbers}"].map((p) =>
+      office.indexOf(p),
+    );
     expect(seq.every((i) => i > 0)).toBe(true);
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+    // Nov 17: Create (and Save) left the form for the bar that stays at the bottom of the window
+    // (save-bar.tsx; owner: "make the save button on service behave the same way it does on the
+    // trade bids"). The hint is the bar's words on a new ticket; the button submits this form.
+    expect(form).not.toContain("{TICKET_STAGE_HINT}");
+    expect(form).not.toContain('type="submit"');
+    const bar = src.slice(src.indexOf("const saveBar ="), src.indexOf("const ticketForm ="));
+    expect(bar).toContain("{TICKET_STAGE_HINT}");
+    expect(bar).toContain('{job ? "Save" : "Create ticket"}');
     const desc = constBody("descriptionAndNumbers");
     expect(desc.indexOf('id="ticket-po"')).toBeGreaterThan(desc.indexOf('id="ticket-description"'));
   });

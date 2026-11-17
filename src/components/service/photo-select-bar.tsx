@@ -168,7 +168,9 @@ export function PhotoSelectBar({
 
   return (
     <div
-      className="sticky bottom-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-2 shadow-md"
+      // Above the ticket's Save bar when one is on screen (save-bar.tsx keeps its height on the
+      // page; owner, Nov 17): two bars at the bottom of the window never cover each other.
+      className="sticky bottom-[calc(0.5rem+var(--jbk-save-bar,0px))] z-10 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-2 shadow-md"
       role="toolbar"
       aria-label="Selected photos"
       data-line="photo-select-bar"

@@ -299,11 +299,76 @@ when "Goes by" was switched.
 Afterwards the temporary rows were removed and the counts checked: 27 bids, 0 job types, 0
 invoices, 638 customers, 1 vendor, 55 tickets, the test login as it was.
 
+## Nov 17, later: a markup box per sub line, the rates popup, and Save always in reach
+
+Owner: "can you make the 10% mark up editable per line", then "can we have this be a button to
+the left of the save button that you can click and it pops up those forms. also would it be too
+much trouble to have this on the bids when you scroll down to where it goes off screen it stays
+at the top so wherever you are editing you can also navigate the bid and save it? can you also
+make the save button on service behave the same way it does on the trade bids when you scrolled.
+I like how you did that on trade bids and want to implement that broadly."
+
+What changed:
+
+- **A sub line's own markup** is a box on the bid's main screen, beside the quote. Blank is not
+  0: a blank line takes the bid's overhead and profit, and the sentence under the row says which
+  it is. The pricing rule did not change.
+- **Rates and lines** is a button in the bar at the bottom of a trade bid, left of Save. It opens
+  a popup holding the editor that was a folding section at the foot of the page. Changes go
+  straight into the bid on screen; the popup shows the price as it moves; Done closes it and the
+  bid's own Save saves. A deleted bid keeps the button, to read the lines, and has no Save.
+- **One Save bar** (`src/components/save-bar.tsx`) for every screen that has a Save: the trade
+  bid, the trade setup, the service ticket and the opportunity. It is the last thing in the
+  page's column and stays at the bottom of the window while the page is scrolled. On the ticket
+  and the opportunity the button moved out of the form and submits it by name, so Enter in a box
+  and the button still do the same thing, and Save is off exactly when it was.
+- **A project bid's bar** (the steps, the checks, Save, Update pricing & labor) stays at the top
+  of the window. On a phone the steps are one row that slides sideways, and the step shown is
+  slid into sight.
+- The selected-photos bar of a ticket sits above the Save bar instead of under it.
+
+Tests: `save-bar-nov17.test.ts` (27), five more in `trade-subs-ui-nov17.test.ts` and
+`trade-screens-nov16.test.ts`, and the older checks that pinned the moved parts updated with a
+dated note.
+
+Browser run at 1500 x 900 and 390 x 800, on the owner's test job type, a new project bid, a new
+ticket, a new opportunity and existing records that were read and scrolled only. Nothing was
+saved.
+
+| Check                                                    | Seen                                   |
+| -------------------------------------------------------- | -------------------------------------- |
+| Trade bid: the bar at the top, middle and foot of the page | in view each time                    |
+| Rates and lines is left of Save, on one row              | yes, both widths                       |
+| Sub markup 10 to 25 on 600.00 of washing                 | markup 150.00, price up by 90.00       |
+| Sub markup cleared                                       | "Takes the bid's overhead and profit." |
+| A word typed in the markup box                           | Save says one box is not a number      |
+| The popup: inside the window, scrolls inside itself      | yes, no sideways scroll                |
+| A material's cost raised by 10 in the popup              | the popup's price and the bid's moved together |
+| Escape in the open subcontractor list                    | closes the list, the popup stays       |
+| Project bid scrolled 900 px                              | the bar is at the top, Save and Update in view |
+| Review pressed from down the page                        | Review shown, page back at the top     |
+| Phone: steps row                                         | slides sideways, page does not         |
+| New ticket: Create with a date and no customer           | "Pick or add the customer first"       |
+| The same by Enter in a box                               | the same message                       |
+| Ticket and opportunity scrolled                          | the bar stays at the bottom            |
+| One picture selected on a ticket                         | its bar is wholly above the Save bar   |
+
+Found in the run and fixed before it went out: the popup opened with its first box selected, so
+the next key would have wiped a name; Escape in the subcontractor list closed the whole popup;
+on a phone the steps row made the page slide sideways.
+
+Afterwards the counts were checked: 28 bids, one of them a draft trade bid the owner made
+himself that morning, 1 job type (the owner's test), 55 tickets, 6 opportunities, 638 customers,
+0 invoices, the trade number series unused, the picture count of the ticket looked at unchanged,
+the test login as it was.
+
 ## Left for the owner
 
 - Whether a job gets one invoice or a deposit and a final. Both work today.
 - Whether customers are charged sales tax on trade work. Invoices start at 0%.
 - Overhead is a percent of cost and profit a percent of cost plus overhead (a markup). A
   gross-profit choice like the roofing calculator's can be added.
+- The Save bar can go on the remaining screens with a Save at the foot of a long page: the
+  Estimate Pricing pages and the Setup pages.
 - The vendor list's own words say "vendor" (for example "Clear the vendor") where a bid picks a
   subcontractor from it.

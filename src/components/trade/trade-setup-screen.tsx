@@ -29,6 +29,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { ArrowRight, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import {
   BackToList,
   FirstRead,
@@ -309,10 +310,7 @@ function SetupForm(props: { trade: TradeType | null }) {
         </Card>
       </div>
 
-      <div
-        className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background/95 px-3 py-3 backdrop-blur"
-        data-save-bar
-      >
+      <SaveBar>
         <div className="min-w-0 flex-1 space-y-0.5 text-sm" data-save-note>
           {problems.length > 0 ? (
             // Why Save is off. (A box holding a mistake is outlined in red where it is.)
@@ -326,26 +324,28 @@ function SetupForm(props: { trade: TradeType | null }) {
             Bids already started keep their own numbers. This changes new bids only.
           </p>
         </div>
-        {/* A saved trade with nothing changed: the next step is a bid, where the customer is
-            picked. Not offered with unsaved changes, so the bid starts from what is on screen. */}
-        {trade && !dirty && !gone && (
-          <Button asChild variant="outline" className="h-10">
-            <Link to="/trade-bids" search={{ new: trade.id }} data-start-bid-here>
-              Start a bid of this trade <ArrowRight />
-            </Link>
+        <div className={SAVE_BAR_ACTIONS}>
+          {/* A saved trade with nothing changed: the next step is a bid, where the customer is
+              picked. Not offered with unsaved changes, so the bid starts from what is on screen. */}
+          {trade && !dirty && !gone && (
+            <Button asChild variant="outline" className="h-10">
+              <Link to="/trade-bids" search={{ new: trade.id }} data-start-bid-here>
+                Start a bid of this trade <ArrowRight />
+              </Link>
+            </Button>
+          )}
+          <Button
+            type="button"
+            className="h-10 min-w-24"
+            data-save
+            disabled={save.isPending || remove.isPending || gone || problems.length > 0}
+            onClick={() => trySave(false)}
+          >
+            {save.isPending && <Loader2 className="animate-spin" />}
+            Save
           </Button>
-        )}
-        <Button
-          type="button"
-          className="h-10 min-w-24"
-          data-save
-          disabled={save.isPending || remove.isPending || gone || problems.length > 0}
-          onClick={() => trySave(false)}
-        >
-          {save.isPending && <Loader2 className="animate-spin" />}
-          Save
-        </Button>
-      </div>
+        </div>
+      </SaveBar>
 
       {trade && (
         <div className="border-t pt-4">

@@ -38,7 +38,7 @@
  * opportunity that is not theirs opens read-only with a line saying who may change it, instead
  * of a refusal after the form is filled.
  */
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
@@ -96,6 +96,7 @@ import {
   STATUS_LABELS as BID_STATUS_LABELS,
 } from "@/lib/bid-status";
 import { AuditHistory } from "@/components/audit-history";
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 // The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
 // so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
@@ -1055,6 +1056,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       </SelectContent>
     </Select>
   );
+  const formId = useId();
   const createHint = createReminderHint({ status: draft.status, assignee_id: draft.assignee_id });
 
   // The customer: the search box until one is picked, then one block with the name (× to
@@ -1111,8 +1113,49 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   // Owner, Oct 1 ("the tighter layout"): who / where / what on the left, the four short fields
   // on the right (one row of four when the column is wide enough, else two by two), Notes and
   // Create / Save below.
+  // Create / Save stay at the bottom of the window while the page is scrolled, as on a ticket
+  // and a trade bid (owner, Nov 17: "want to implement that broadly"; save-bar.tsx). The bar is
+  // the last thing in the page's column, outside the form, and its button submits the form.
+  const saveBar = !readOnly && (
+    <SaveBar>
+      <div className="min-w-0 flex-1 text-sm" data-save-note>
+        {!opp ? (
+          createHint && (
+            <p className="text-muted-foreground" data-hint="create-reminders">
+              {createHint}
+            </p>
+          )
+        ) : dirty ? (
+          <p>You have changes that are not saved.</p>
+        ) : (
+          <p className="text-muted-foreground">All changes are saved.</p>
+        )}
+      </div>
+      <div className={SAVE_BAR_ACTIONS}>
+        <Button
+          type="submit"
+          form={formId}
+          className="h-10 min-w-24"
+          data-save
+          disabled={
+            save.isPending ||
+            (!!opp && !dirty) ||
+            (!!opp && !draft.expected_close) ||
+            !!assigneeMessage ||
+            !!customerMessage ||
+            !!siteMessage
+          }
+        >
+          {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+          {opp ? "Save" : "Create opportunity"}
+        </Button>
+      </div>
+    </SaveBar>
+  );
+
   const oppForm = (
     <form
+      id={formId}
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
@@ -1242,35 +1285,6 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
 
         {/* No Notes box (owner, Nov 4): what the next person should know goes on the timeline
             (Comment, with @mentions). Notes saved before stay on the row, untouched by Save. */}
-        {!readOnly && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="submit"
-              size="lg"
-              disabled={
-                save.isPending ||
-                (!!opp && !dirty) ||
-                (!!opp && !draft.expected_close) ||
-                !!assigneeMessage ||
-                !!customerMessage ||
-                !!siteMessage
-              }
-            >
-              {save.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              {opp ? "Save" : "Create opportunity"}
-            </Button>
-            {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-            {!opp && createHint && (
-              <span className="text-xs text-muted-foreground" data-hint="create-reminders">
-                {createHint}
-              </span>
-            )}
-          </div>
-        )}
       </fieldset>
     </form>
   );
@@ -1449,6 +1463,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       ) : (
         oppForm
       )}
+
+      {saveBar}
 
       {opp && !deleted && can("customers") && (
         <div className="border-t pt-4 sm:hidden" data-delete="phone">

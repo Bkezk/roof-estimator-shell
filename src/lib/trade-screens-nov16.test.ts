@@ -910,8 +910,9 @@ describe("a bid, drawn", () => {
     // The status and the documents belong to a saved bid.
     expect(html).not.toContain("data-status");
     expect(html).not.toContain("Documents");
-    // The bid's own rates stay closed until asked for.
-    expect(html).toContain("rates and lines");
+    // The bid's own rates stay closed until asked for (Nov 17: a popup behind the Rates and
+    // lines button beside Save, where a folding section was).
+    expect(html).toContain("Rates and lines</button>");
     expect(html).not.toContain("data-material-row");
   });
 
@@ -947,6 +948,42 @@ describe("a bid, drawn", () => {
     for (const box of html.match(/<input[^>]*data-quantity="[^"]*"[^>]*>/g) ?? [])
       expect(box).toContain('disabled=""');
     expect(html).toContain("$3,067.12");
+  });
+
+  // Owner, Nov 17: "can we have this be a button to the left of the save button that you can
+  // click and it pops up those forms" (the bid's rates and lines were a folding section at the
+  // foot of the page).
+  it("the bar at the bottom: where the bid stands, then Rates and lines, then Save", () => {
+    auth.profile = OFFICE;
+    const { html } = drawScreen(React.createElement(TradeBidScreen, { bidId: BID_ID }), [
+      [["trade-bid", BID_ID], SMITH_BID],
+    ]);
+    const bar = html.slice(html.indexOf('data-save-bar="true"'));
+    expect(bar.length).toBeGreaterThan(100);
+    const note = bar.indexOf("All changes are saved.");
+    const rates = bar.indexOf('data-open-rates="true"');
+    const save = bar.indexOf('data-save="true"');
+    expect(note).toBeGreaterThan(-1);
+    expect(rates).toBeGreaterThan(note);
+    expect(save).toBeGreaterThan(rates);
+    expect(bar).toMatch(/<button[^>]*data-open-rates="true"[^>]*>.*?Rates and lines<\/button>/);
+    // It stays at the bottom of the window while the bid is scrolled.
+    expect(html).toMatch(/<div class="sticky bottom-0 z-10 [^"]*" data-save-bar="true">/);
+    // The popup is closed until the button is pressed: none of the editor is on the page.
+    expect(html).not.toContain("data-rates-dialog");
+    expect(html).not.toContain("data-material-row");
+    expect(html).not.toContain("Change this bid");
+  });
+
+  it("a deleted bid keeps Rates and lines, to read them, and has no Save", () => {
+    auth.profile = OFFICE;
+    const { html } = drawScreen(React.createElement(TradeBidScreen, { bidId: BID_ID }), [
+      [["trade-bid", BID_ID], { ...SMITH_BID, deleted_at: "2026-11-16T16:00:00.000Z" }],
+    ]);
+    const bar = html.slice(html.indexOf('data-save-bar="true"'));
+    expect(bar).toContain("A deleted bid can be read, not changed.");
+    expect(bar).toContain('data-open-rates="true"');
+    expect(saveButton(html)).toBe("");
   });
 
   it("a bid that cannot be found says so, with the way back", () => {

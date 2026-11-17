@@ -226,9 +226,11 @@ describe("the Opportunities page on a deleted opportunity (source)", () => {
     expect(page).toMatch(/<fieldset\s+disabled=\{readOnly\}/);
     expect(page).toContain("const readOnly = deleted || !mayWrite;");
     expect(page).toContain("if (!readOnly) submit();");
-    expect(page).toMatch(
-      /\{!readOnly && \(\s*<div className="flex flex-wrap items-center gap-3">\s*<Button\s+type="submit"/,
-    );
+    // Nov 17: Save left the form for the bar that stays at the bottom of the window
+    // (save-bar.tsx). A read-only opportunity has no bar, so it has no Save at all.
+    expect(page).toMatch(/const saveBar = !readOnly && \(\s*<SaveBar>/);
+    expect(page.match(/type="submit"/g)).toHaveLength(1);
+    expect(page.match(/\{saveBar\}/g)).toHaveLength(1);
     expect(page).toContain("disabled={statusMut.isPending || readOnly}");
   });
   it("hides Start a bid, Delete, the follow-up strip and the contact-log buttons", () => {

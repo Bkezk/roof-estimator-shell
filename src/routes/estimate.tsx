@@ -2727,6 +2727,15 @@ function EstimatePage() {
     setStep(Math.min(STEPS.length - 1, Math.max(0, i)));
     window.scrollTo(0, 0);
   };
+  // On a phone the steps are one row that slides sideways (the bar that stays at the top): the
+  // step being shown is slid into sight, so the row always says where you are.
+  useEffect(() => {
+    const strip = document.querySelector<HTMLElement>("[data-bid-steps]");
+    const tab = strip?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!strip || !tab || strip.scrollWidth <= strip.clientWidth) return;
+    const left = tab.offsetLeft - strip.offsetLeft;
+    strip.scrollTo({ left: Math.max(0, left - (strip.clientWidth - tab.offsetWidth) / 2) });
+  }, [step]);
   const stepCount = (key: string): number | null => {
     switch (key) {
       case "sections":
@@ -3312,80 +3321,99 @@ function EstimatePage() {
         )}
         <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
 
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-1.5">
-          {STEPS.map((st, i) => {
-            const n = stepCount(st.key);
-            return (
+        {/* The steps, Save and Update stay at the top of the window while the bid is scrolled
+            (owner, Nov 17: "when you scroll down to where it goes off screen it stays at the top
+            so wherever you are editing you can also navigate the bid and save it"). The outer
+            box is the page's own colour, so nothing shows through the tinted bar; it stops
+            below the iPhone's status bar (--jbk-top-gap, lib/top-gap.ts). On a phone the steps
+            are one row that slides sideways, so the bar stays two rows tall; that row is
+            "width 0, at least the full width", so it fills the bar and never widens the page. */}
+        <div
+          className="sticky top-[var(--jbk-top-gap,0px)] z-20 rounded-md bg-background"
+          data-bid-bar
+        >
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-1.5 shadow-sm">
+            <div
+              className="flex items-center gap-1.5 max-md:w-0 max-md:min-w-full max-md:overflow-x-auto md:contents"
+              data-bid-steps
+            >
+              {STEPS.map((st, i) => {
+                const n = stepCount(st.key);
+                return (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => goStep(i)}
+                    data-bid-step-tab={st.key}
+                    aria-current={step === i ? "step" : undefined}
+                    className={`shrink-0 whitespace-nowrap rounded-md px-4 py-2 text-base font-bold tracking-tight transition-colors ${
+                      step === i
+                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                        : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                    }`}
+                  >
+                    {st.label}
+                    {n !== null && n > 0 ? ` (${n})` : ""}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Save is always in reach here (owner: no scrolling to save). */}
+            {sanityWarnings.length > 0 && (
               <button
-                key={st.key}
                 type="button"
-                onClick={() => goStep(i)}
-                className={`rounded-md px-4 py-2 text-base font-bold tracking-tight transition-colors ${
-                  step === i
-                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
-                }`}
+                className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+                title={sanityWarnings.map((w) => w.title).join("\n")}
+                onClick={() => setSanityPrompt({ warnings: sanityWarnings })}
               >
-                {st.label}
-                {n !== null && n > 0 ? ` (${n})` : ""}
+                <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                {sanityWarnings.length} check{sanityWarnings.length === 1 ? "" : "s"}
               </button>
-            );
-          })}
-          {/* Save is always in reach here (owner: no scrolling to save). */}
-          {sanityWarnings.length > 0 && (
+            )}
+            <Button
+              className={sanityWarnings.length > 0 ? "" : "ml-auto"}
+              onClick={() => void handleSave()}
+              disabled={saving || readOnly}
+              title={
+                readOnly
+                  ? "Read only"
+                  : dirty
+                    ? "Unsaved changes — saves the bid and stays on this step"
+                    : "Saves the bid and stays on this step"
+              }
+            >
+              <Save className="mr-2 h-4 w-4" />
+              {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
+              {dirty && !saving && (
+                <span
+                  className="ml-1 h-2 w-2 rounded-full bg-amber-400"
+                  aria-label="Unsaved changes"
+                />
+              )}
+            </Button>
+            {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
+              on the right in black; the dot marks management data newer than the bid's copy. */}
             <button
               type="button"
-              className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
-              title={sanityWarnings.map((w) => w.title).join("\n")}
-              onClick={() => setSanityPrompt({ warnings: sanityWarnings })}
+              onClick={() => setUpdateOpen(true)}
+              disabled={readOnly}
+              title={
+                pricingStale
+                  ? `Management pricing / labor has changed since this bid was priced${frozenAsOf ? ` (${new Date(frozenAsOf).toLocaleDateString()})` : ""}`
+                  : "Update this bid from the current management data, template or formulas"
+              }
+              className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/85 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
             >
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-              {sanityWarnings.length} check{sanityWarnings.length === 1 ? "" : "s"}
+              <RefreshCw className="h-4 w-4" />
+              Update pricing &amp; labor
+              {pricingStale && (
+                <span
+                  className="h-2 w-2 rounded-full bg-amber-400"
+                  aria-label="Management data has changed since this bid was priced"
+                />
+              )}
             </button>
-          )}
-          <Button
-            className={sanityWarnings.length > 0 ? "" : "ml-auto"}
-            onClick={() => void handleSave()}
-            disabled={saving || readOnly}
-            title={
-              readOnly
-                ? "Read only"
-                : dirty
-                  ? "Unsaved changes — saves the bid and stays on this step"
-                  : "Saves the bid and stays on this step"
-            }
-          >
-            <Save className="mr-2 h-4 w-4" />
-            {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
-            {dirty && !saving && (
-              <span
-                className="ml-1 h-2 w-2 rounded-full bg-amber-400"
-                aria-label="Unsaved changes"
-              />
-            )}
-          </Button>
-          {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
-              on the right in black; the dot marks management data newer than the bid's copy. */}
-          <button
-            type="button"
-            onClick={() => setUpdateOpen(true)}
-            disabled={readOnly}
-            title={
-              pricingStale
-                ? `Management pricing / labor has changed since this bid was priced${frozenAsOf ? ` (${new Date(frozenAsOf).toLocaleDateString()})` : ""}`
-                : "Update this bid from the current management data, template or formulas"
-            }
-            className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/85 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Update pricing &amp; labor
-            {pricingStale && (
-              <span
-                className="h-2 w-2 rounded-full bg-amber-400"
-                aria-label="Management data has changed since this bid was priced"
-              />
-            )}
-          </button>
+          </div>
         </div>
 
         <div

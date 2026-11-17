@@ -110,7 +110,9 @@ describe("the thumbnail and the bar (pinned to their source)", () => {
   });
   it("the bar offers Remove (asks once), Attach to inspection item (loose photos only), Download and Cancel, and stays in reach (sticky)", () => {
     expect(bar).toContain('data-line="photo-select-bar"');
-    expect(bar).toMatch(/className="sticky bottom-2 z-10/);
+    // Nov 17: above the ticket's Save bar when one is on screen (save-bar.tsx); 0.5rem from
+    // the bottom of the window, as it was, when there is none.
+    expect(bar).toContain('className="sticky bottom-[calc(0.5rem+var(--jbk-save-bar,0px))] z-10');
     expect(bar).toMatch(/if \(!window\.confirm\(removeQuestion\(n\)\)\) return;/);
     expect(bar).toMatch(/const canAttach = attachable\(selected\);/);
     expect(bar).toMatch(/\{canAttach && \([\s\S]*?Attach to inspection item/);

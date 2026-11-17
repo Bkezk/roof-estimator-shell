@@ -17,9 +17,10 @@
  *  4. The price: what to buy, the hours, the subs, and the sum from materials down to the price,
  *     worked out as the boxes are typed in (trade-bid.ts; the server works it out again on Save
  *     and keeps its own answer). A line that is missing a number says which, in place of its cost.
- *  5. Change this bid's rates and lines: closed until asked for. It opens the same editor the
- *     trade is set up with, on this bid's OWN copy: the trade stays as it is. A sub line is
- *     switched between a set quote and a rate per measurement there, and given its own markup.
+ *  5. The bar that stays at the bottom of the window (save-bar.tsx): where the form stands, the
+ *     Rates and lines button and Save. Rates and lines opens a popup (owner, Nov 17) holding the
+ *     same editor the trade is set up with, on this bid's OWN copy: the trade stays as it is. A
+ *     sub line is switched between a set quote and a rate per measurement there.
  *
  * Under the price of a saved bid sits its Invoices block (owner, Nov 17; bid-invoices-card.tsx):
  * a won bid is invoiced from here. It is not part of this form: making an invoice saves nothing
@@ -43,10 +44,9 @@ import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   ArrowLeft,
-  ChevronDown,
-  ChevronRight,
   FileText,
   Loader2,
+  SlidersHorizontal,
   TriangleAlert,
   UserPlus,
 } from "lucide-react";
@@ -57,6 +57,7 @@ import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-
 import { SiteSelect } from "@/components/crm/site-select";
 import { DocumentsPanel } from "@/components/documents/documents-panel";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { BidInvoicesCard } from "@/components/trade/bid-invoices-card";
 import {
   BOX,
@@ -78,7 +79,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -96,6 +104,7 @@ import { getAccount, type AccountHit } from "@/lib/crm.functions";
 import { plainErrText } from "@/lib/plain-error";
 import {
   calcTradeBid,
+  fmtMoney,
   newTradeBid,
   type TradeBidData,
   type TradeResult,
@@ -107,6 +116,7 @@ import {
   customerToSend,
   fillJobAddress,
   isDirty,
+  listOpenAt,
   markupBaseNote,
   problemsNotice,
   resultRows,
@@ -967,7 +977,7 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
         </CardHeader>
         <CardContent>
           {/* These lines are part of this bid's own copy of the setup: a change here goes the
-              same way as one under "Change this bid's rates and lines", into what Save saves. */}
+              same way as one in the Rates and lines popup, into what Save saves. */}
           <InvalidBoxes onChange={setBadSubs}>
             <SubQuoteRows
               setup={draft.data.setup}
@@ -994,59 +1004,98 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
         <BidInvoicesCard bidId={bid.id} won={status === "won"} unsaved={dirty} deleted={deleted} />
       )}
 
-      <Collapsible open={ratesOpen} onOpenChange={setRatesOpen}>
-        <CollapsibleTrigger asChild>
+      {/* Save, and the bid's own rates and lines, always in reach (owner, Nov 17: "can we have
+          this be a button to the left of the save button that you can click and it pops up
+          those forms"). A deleted bid keeps the button, to read the lines, and has no Save. */}
+      <SaveBar>
+        <div className="min-w-0 flex-1 text-sm" data-save-note>
+          {deleted ? (
+            <p className="text-muted-foreground">A deleted bid can be read, not changed.</p>
+          ) : problems.length > 0 ? (
+            <p className={tried ? "font-medium text-destructive" : "text-muted-foreground"}>
+              {`Before you can save: ${sentences(problems)}`}
+            </p>
+          ) : dirty ? (
+            <p>You have changes that are not saved.</p>
+          ) : (
+            <p className="text-muted-foreground">
+              {isNew ? "Nothing is saved until you press Save." : "All changes are saved."}
+            </p>
+          )}
+        </div>
+        <div className={SAVE_BAR_ACTIONS}>
           <Button
             type="button"
             variant="outline"
-            className="h-auto min-h-10 w-full justify-start whitespace-normal text-left"
+            className="h-10"
             data-open-rates
+            onClick={() => setRatesOpen(true)}
           >
-            {ratesOpen ? <ChevronDown /> : <ChevronRight />}
-            Change this bid&apos;s rates and lines
+            <SlidersHorizontal /> Rates and lines
           </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-4">
-          <TradeLinesEditor
-            value={draft.data.setup}
-            onChange={setSetup}
-            disabled={locked}
-            note={`Only this bid changes. The ${tradeName} setup stays as it is.`}
-            onInvalidChange={setBadRates}
-          />
-        </CollapsibleContent>
-      </Collapsible>
-
-      {!deleted && (
-        <div
-          className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background/95 px-3 py-3 backdrop-blur"
-          data-save-bar
-        >
-          <div className="min-w-0 flex-1 text-sm" data-save-note>
-            {problems.length > 0 ? (
-              <p className={tried ? "font-medium text-destructive" : "text-muted-foreground"}>
-                {`Before you can save: ${sentences(problems)}`}
-              </p>
-            ) : dirty ? (
-              <p>You have changes that are not saved.</p>
-            ) : (
-              <p className="text-muted-foreground">
-                {isNew ? "Nothing is saved until you press Save." : "All changes are saved."}
-              </p>
-            )}
-          </div>
-          <Button
-            type="button"
-            className="h-10 min-w-24"
-            data-save
-            disabled={save.isPending}
-            onClick={() => trySave(false)}
-          >
-            {save.isPending && <Loader2 className="animate-spin" />}
-            Save
-          </Button>
+          {!deleted && (
+            <Button
+              type="button"
+              className="h-10 min-w-24"
+              data-save
+              disabled={save.isPending}
+              onClick={() => trySave(false)}
+            >
+              {save.isPending && <Loader2 className="animate-spin" />}
+              Save
+            </Button>
+          )}
         </div>
-      )}
+      </SaveBar>
+
+      {/* The bid's own copy of the setup, in a popup over the bid. Every change goes straight
+          into the bid on screen (the price behind it moves), and Save on the bid saves it:
+          Done only closes the popup. */}
+      <Dialog open={ratesOpen} onOpenChange={setRatesOpen}>
+        <DialogContent
+          className="flex max-h-[92svh] w-[calc(100vw-1rem)] max-w-6xl flex-col gap-0 p-0"
+          data-rates-dialog
+          // Opening it puts the cursor on the popup, not in its first box with the words
+          // selected, where the next key pressed would wipe out a name.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus();
+          }}
+          // Escape in an open list (the subcontractor picker) closes the list, not the popup.
+          onEscapeKeyDown={(e) => {
+            if (listOpenAt(document.activeElement)) e.preventDefault();
+          }}
+        >
+          <DialogHeader className="border-b px-4 py-3 pr-12 sm:px-6">
+            <DialogTitle>Change this bid&apos;s rates and lines</DialogTitle>
+            <DialogDescription>
+              {`Only this bid changes. The ${tradeName} setup stays as it is.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" data-rates-body>
+            <TradeLinesEditor
+              value={draft.data.setup}
+              onChange={setSetup}
+              disabled={locked}
+              onInvalidChange={setBadRates}
+            />
+          </div>
+          <DialogFooter className="flex-row items-center justify-between gap-3 border-t px-4 py-3 sm:justify-between sm:px-6">
+            <p className="min-w-0 text-sm" data-rates-price>
+              <span className="text-muted-foreground">Price </span>
+              <span className="font-semibold tabular-nums">{fmtMoney(result.price)}</span>
+            </p>
+            <Button
+              type="button"
+              className="h-10 min-w-24"
+              data-rates-done
+              onClick={() => setRatesOpen(false)}
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {bid && (
         <DocumentsPanel

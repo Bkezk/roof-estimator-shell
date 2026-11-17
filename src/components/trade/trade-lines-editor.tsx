@@ -4,7 +4,7 @@
  * type like fill it in for painting save it, fill it in for siding save it").
  *
  * One editor, two places: the trade's own setup (trade-setup-screen.tsx) and a single bid's copy
- * of it (trade-bid-screen.tsx, "Change this bid's rates and lines"; owner: "a saved bid should
+ * of it (trade-bid-screen.tsx, the Rates and lines popup; owner: "a saved bid should
  * keep its own numbers"). It is given a setup and hands back a new one on every change; it keeps
  * nothing itself, so whoever shows it decides what is saved and when.
  *
@@ -801,7 +801,7 @@ function AddButton(props: {
  * One sub line as the bid's main screen shows it: what, who, the number the office types when
  * the quote comes in (the quote of a set-quote line, the rate of a line charged by a measure)
  * and the line's own markup. Whether the line is a set quote or goes by a measure is the full
- * row's (`SubRow`, under "Change this bid's rates and lines").
+ * row's (`SubRow`, in the bid's Rates and lines popup).
  */
 function SubQuoteRow(props: {
   sub: TradeSub;
@@ -927,7 +927,7 @@ export function SubQuoteRows(props: {
       {subs.length > 0 && (
         <p className="text-xs text-muted-foreground">
           Leave a markup blank and the line takes the bid&apos;s overhead and profit. To charge by a
-          measurement, open Change this bid&apos;s rates and lines below.
+          measurement, press Rates and lines beside Save.
         </p>
       )}
       <Button

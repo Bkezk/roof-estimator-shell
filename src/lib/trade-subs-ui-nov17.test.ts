@@ -861,7 +861,7 @@ describe("a bid with nothing subbed out, drawn", () => {
     expect(card).not.toContain("data-sub-quote");
     expect(card).not.toMatch(/<input[^>]*role="combobox"/);
     // Nothing to point at under the rates yet.
-    expect(card).not.toContain("open Change this bid's rates and lines below");
+    expect(card).not.toContain("press Rates and lines beside Save");
   });
 
   it("the price is the Nov 16 price, with no line and no table for subs", () => {
@@ -939,9 +939,11 @@ describe("the painting bid with two subs, drawn", () => {
     expect(washRow).not.toContain("Takes the bid's overhead and profit.");
     expect(scaffoldRow).toContain("Takes the bid's overhead and profit.");
     expect(card).toContain(
-      "Leave a markup blank and the line takes the bid's overhead and profit. To charge by a measurement, open Change this bid's rates and lines below.",
+      "Leave a markup blank and the line takes the bid's overhead and profit. To charge by a measurement, press Rates and lines beside Save.",
     );
-    expect(html).toContain("Change this bid's rates and lines</button>");
+    // Nov 17, later the same day: the rates are a popup behind a button beside Save (owner:
+    // "a button to the left of the save button that you can click and it pops up those forms").
+    expect(html).toMatch(/<button[^>]*data-open-rates="true"[^>]*>.*?Rates and lines<\/button>/);
     // Both lines are priced: nothing is waiting.
     expect(card).not.toContain("data-sub-problem");
   });

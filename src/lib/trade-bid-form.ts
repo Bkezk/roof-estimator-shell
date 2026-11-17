@@ -701,3 +701,13 @@ export function fillJobAddress(
   if (site.zip?.trim()) next = setCustomerField(next, "jobZip", site.zip.trim());
   return next;
 }
+
+// ── The Rates and lines popup ──────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the box the cursor is in is a picker with its list open. Such a box owns Escape: the
+ * key closes its list, and the popup around it stays (found in the browser run of Nov 17, where
+ * Escape in the subcontractor picker closed the whole popup).
+ */
+export const listOpenAt = (el: Pick<Element, "getAttribute"> | null): boolean =>
+  !!el && el.getAttribute("role") === "combobox" && el.getAttribute("aria-expanded") === "true";
