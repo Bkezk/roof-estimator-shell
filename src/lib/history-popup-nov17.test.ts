@@ -346,3 +346,58 @@ describe("the ticket's photos", () => {
     expect(src).toContain("const canOpen = !!profile && !isFieldOnly(profile);");
   });
 });
+
+/**
+ * Owner, Nov 17, with a picture of the whole ticket page a technician landed on after tapping
+ * the history line: "this is what the tech sees when they click the previous tickets at this
+ * location button id really just like them to see the 'history at this property' part not the
+ * aerial, materials, etc. since theyre already seeing that in the ticket workflow".
+ */
+describe("the History here line opens the history on its own", () => {
+  const src = read("src/components/service/site-history.tsx");
+  const link = src.slice(
+    src.indexOf("export function HistoryLink({"),
+    src.indexOf("function HistoryTimeline({"),
+  );
+
+  it("is a button, not a link to the ticket page", () => {
+    expect(link).toContain('<button\n        type="button"');
+    expect(link).toContain('aria-haspopup="dialog"');
+    expect(link).toContain("onClick={() => setOpen(true)}");
+    expect(link).not.toContain("<Link");
+    expect(link).not.toContain("HISTORY_OPEN_PARAM");
+    expect(link).not.toContain('to="/service"');
+  });
+
+  it("the pop-up holds the timeline and Close, and nothing else of the ticket", () => {
+    expect(link).toContain("data-history-dialog={jobId}");
+    expect(link).toContain("<HistoryTimeline jobId={jobId} locationId={locationId} enabled />");
+    expect(link).toContain("data-history-dialog-close");
+    expect(link).toContain("{historyFoldTitle(count)}");
+    for (const gone of [
+      "Aerial",
+      "Materials",
+      "TicketActivity",
+      "Special instructions",
+      "Photos & repairs",
+    ])
+      expect(link).not.toContain(gone);
+  });
+
+  it("the ticket page's fold and the pop-up draw the same timeline", () => {
+    expect(src).toContain(
+      "<HistoryTimeline jobId={job.id} locationId={job.location_id} enabled={open} />",
+    );
+    expect(src.split("function HistoryTimeline(").length - 1).toBe(1);
+    expect(src.split('data-history="timeline"').length - 1).toBe(1);
+  });
+
+  it("My tickets and the close-out both use it", () => {
+    expect(read("src/components/service/today-page.tsx")).toContain(
+      '<HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />',
+    );
+    expect(read("src/components/service/closeout.tsx")).toContain(
+      '<HistoryLink jobId={job.id} whenNone="say" />',
+    );
+  });
+});

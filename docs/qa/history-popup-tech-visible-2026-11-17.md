@@ -88,3 +88,41 @@ The tick decides what shows in the history. On the ticket itself the Activity is
   changed a real ticket. The rolled-back trial and the checks cover it.
 
 Nothing in the data was changed.
+
+## Later: the "History here" line opens the history on its own
+
+The owner, with a picture of the whole ticket page: "this is what the tech sees when they
+click the previous tickets at this location button id really just like them to see the
+'history at this property' part not the aerial, materials, etc. since theyre already seeing
+that in the ticket workflow".
+
+That was the point all along. "I dont want them to see the whole ticket" meant the ticket page
+the line took them to, not the earlier ticket's details.
+
+- **Before:** the "History here: 2 earlier tickets…" line on My tickets and in the close-out's
+  header was a link to the ticket page with the History section open. A technician left the
+  work and landed on a page with the details, Activity, Special instructions, Aerial,
+  Materials & POs, Photos & repairs, Work and History.
+- **Now:** the line is a button. It opens the history timeline in a pop-up over the page the
+  technician is on. Close returns to exactly where they were. The address does not change.
+- The pop-up is the same timeline as the History section on the ticket page: one piece of
+  code, the same rows. A tap on a ticket still opens its photos.
+- On the ticket page itself nothing changed: the line under the property still opens the
+  History section there.
+
+Proof:
+
+- Checks: four more in `src/lib/history-popup-nov17.test.ts` (28 in all). Two older checks that
+  expected the link were updated with a dated note each.
+- Whole suite: 591 files, 8,352 tests pass. Lint, types and the build pass.
+- Browser, 1500 px and 390 px, on a ticket's close-out, read only:
+  - the line is a button; a tap opens "History at this property (2)" and the address is
+    unchanged;
+  - two tickets on the timeline; nothing in the pop-up says Aerial, Materials, Work, Special
+    instructions or Activity; no dollar sign;
+  - a tap on a ticket opens its photos over the history; a tap on the photo opens the viewer;
+    Escape and Close step back one at a time, ending on the close-out;
+  - no sideways scroll on the phone.
+- The ticket used for the check was read back afterwards: not changed, no clock started.
+- Not seen in the browser: the same button on a My tickets card. The test login has no ticket
+  assigned to it, and assigning one would change a real ticket. It is the same button.

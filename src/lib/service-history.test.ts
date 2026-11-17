@@ -432,7 +432,12 @@ describe("on the screens", () => {
       /<Box[\s\S]*?collapsible[\s\S]*?open=\{open\}[\s\S]*?defaultOpen=\{false\}/,
     );
     // Nov 3 (review item 46): the newest ten first, every ticket after "Show more" (`all`).
-    expect(comp).toMatch(/useHistory\(job\.id, open, all\)/);
+    // Nov 17: the rows are read by the timeline the fold and the pop-up share; the fold still
+    // asks only once it is open.
+    expect(comp).toMatch(/useHistory\(jobId, enabled, all\)/);
+    expect(comp).toContain(
+      "<HistoryTimeline jobId={job.id} locationId={job.location_id} enabled={open} />",
+    );
   });
   it("ALL photos: the grid maps the whole list, nothing sliced or capped", () => {
     expect(comp).toContain("{photos.map((p, i) => (");
@@ -444,7 +449,10 @@ describe("on the screens", () => {
     expect(today).toContain(
       '{j.site_id && <HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />}',
     );
-    expect(comp).toContain("search={{ id: jobId, open: HISTORY_OPEN_PARAM }}");
+    // Nov 17: the line is a button that opens the history on its own, in a pop-up. It was a
+    // link to the ticket with the fold open, which showed the technician the whole ticket page.
+    expect(comp).not.toContain("search={{ id: jobId, open: HISTORY_OPEN_PARAM }}");
+    expect(comp).toContain("onClick={() => setOpen(true)}");
     expect(comp).toContain('if (whenNone === "hide") return null;');
     // The close-out, where the technician works the ticket, carries the same line.
     expect(read("src/components/service/closeout.tsx")).toContain(

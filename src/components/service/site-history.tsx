@@ -6,9 +6,9 @@
  *  * HistoryStrip — one line under the property on the ticket page: "History here: 3 earlier
  *    tickets, last Jun 12 (leak at HVAC curb, patched). 7 photos." A tap opens the fold below.
  *    "First ticket at this property." (muted) when there is none.
- *  * HistoryLink — the same line as a link to the ticket with the fold open (?open=history):
- *    on My tickets under the address (left out when there is none — the card stays short) and
- *    on the close-out's header.
+ *  * HistoryLink — the same line as a button that opens the history on its own, in a pop-up
+ *    (Nov 17: it was a link to the whole ticket page): on My tickets under the address (left
+ *    out when there is none — the card stays short) and on the close-out's header.
  *  * HistoryFold — "History at this property (N)", a folding section that starts closed; the
  *    strip is its header summary. A TIMELINE (owner, Nov 17), one entry per earlier ticket at
  *    the same property, newest first, the same named spot first with a "same spot" tag: its
@@ -65,7 +65,6 @@ import type { SiteHistorySummary } from "@/lib/service-history";
 import {
   FIRST_TICKET,
   HISTORY_NO_PHOTOS,
-  HISTORY_OPEN_PARAM,
   dayText,
   flaggedHistoryItems,
   historyNoteLabel,
@@ -185,22 +184,31 @@ export function HistoryStrip({ jobId, onOpen }: { jobId: string; onOpen: () => v
 }
 
 /**
- * The strip as a link to the ticket with its History fold open — My tickets (whenNone "hide":
- * the card stays short when there is nothing before) and the close-out's header (whenNone
- * "say": the muted first-ticket line).
+ * The strip as a button that opens the history ON ITS OWN, in a pop-up (owner, Nov 17, with a
+ * picture of the whole ticket page a technician landed on: "id really just like them to see the
+ * 'history at this property' part not the aerial, materials, etc. since theyre already seeing
+ * that in the ticket workflow"). It was a link to the ticket with its History fold open, so a
+ * tap from My tickets or from the close-out left the work and showed the ticket's every
+ * section. Now nothing is left: the history timeline opens over the page and closes back to it.
+ * My tickets (whenNone "hide": the card stays short when there is nothing before) and the
+ * close-out's header (whenNone "say": the muted first-ticket line).
  */
 export function HistoryLink({
   jobId,
   whenNone,
   summary,
+  locationId,
 }: {
   jobId: string;
   whenNone: "hide" | "say";
   /** The numbers when the page already has them (My tickets reads them with the day, Nov 3). */
   summary?: SiteHistorySummary | null | undefined;
+  /** The ticket's named spot, when the page knows it: the same spot's tickets come first. */
+  locationId?: string | null | undefined;
 }) {
   const own = useHistorySummary(jobId, !summary);
   const data = summary ?? own.data;
+  const [open, setOpen] = useState(false);
   if (!data) return null;
   if (data.count === 0) {
     if (whenNone === "hide") return null;
@@ -214,20 +222,146 @@ export function HistoryLink({
     );
   }
   return (
-    <Link
-      to="/service"
-      search={{ id: jobId, open: HISTORY_OPEN_PARAM }}
-      className="-mx-1 flex min-h-10 items-center gap-1.5 rounded-md px-1 text-sm hover:bg-muted/40"
-      title="Open the history at this property"
-      data-line="history-strip"
-    >
-      <History className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
-      <span>{historyStrip(data)}</span>
-    </Link>
+    <>
+      <button
+        type="button"
+        className="-mx-1 flex min-h-10 w-full items-center gap-1.5 rounded-md px-1 text-left text-sm hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        title="See the history at this property"
+        aria-haspopup="dialog"
+        data-line="history-strip"
+        onClick={() => setOpen(true)}
+      >
+        <History className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
+        <span>{historyStrip(data)}</span>
+      </button>
+      {open && (
+        <HistoryDialog
+          jobId={jobId}
+          locationId={locationId ?? null}
+          count={data.count}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** The history by itself, over whatever page the technician is on: the timeline and Close. */
+function HistoryDialog({
+  jobId,
+  locationId,
+  count,
+  onClose,
+}: {
+  jobId: string;
+  locationId: string | null;
+  count: number;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[90svh] w-[calc(100vw-1rem)] max-w-2xl flex-col gap-0 p-0"
+        data-history-dialog={jobId}
+      >
+        <DialogHeader className="space-y-1 border-b px-4 py-3 text-left">
+          <DialogTitle>{historyFoldTitle(count)}</DialogTitle>
+          <DialogDescription>
+            Earlier tickets here, newest first. Tap a ticket to see its photos.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <HistoryTimeline jobId={jobId} locationId={locationId} enabled />
+        </div>
+        <DialogFooter className="flex-row items-center justify-end border-t px-4 py-3">
+          <Button
+            type="button"
+            className="h-10 min-w-24"
+            data-history-dialog-close
+            onClick={onClose}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 // ── The fold ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The timeline itself: the newest ten earlier tickets, "Show all" for the rest. The body of the
+ * History fold on the ticket page and of the pop-up the strip opens elsewhere (Nov 17), so both
+ * read the same rows from the same cache. It asks for the rows only once `enabled`.
+ */
+function HistoryTimeline({
+  jobId,
+  locationId,
+  enabled,
+}: {
+  jobId: string;
+  locationId: string | null;
+  enabled: boolean;
+}) {
+  const { profile } = useAuth();
+  // A technician-only user cannot read another technician's ticket: no Open link, nothing said.
+  // Nor until the profile is known (Oct 21: isFieldOnly(null) is false, and the link showed
+  // while it loaded).
+  const canOpen = !!profile && !isFieldOnly(profile);
+  const summary = useHistorySummary(jobId);
+  // The newest ten first; "Show more" reads every earlier ticket (Nov 3, review item 46).
+  const [all, setAll] = useState(false);
+  const q = useHistory(jobId, enabled, all);
+  const rows = useMemo(
+    () => (q.data ? orderHistory(q.data, locationId) : []),
+    [q.data, locationId],
+  );
+  const more = !all && (summary.data?.count ?? 0) > rows.length && rows.length > 0;
+  // The viewer asks for fresh links when the signed ones are near their end.
+  const refresh = () => {
+    if (q.data && Date.now() - q.dataUpdatedAt > LINKS_FRESH_MS) void q.refetch();
+  };
+  return q.error ? (
+    <p className="text-sm text-destructive">Could not load the history here: {errText(q.error)}</p>
+  ) : q.isLoading || !q.data ? (
+    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+    </p>
+  ) : rows.length === 0 ? (
+    <p className="text-sm text-muted-foreground">{FIRST_TICKET}</p>
+  ) : (
+    <>
+      {/* A timeline (owner, Nov 17): the line down the left, a dot per earlier ticket. */}
+      <ol
+        className="ml-1.5 space-y-4 border-l"
+        aria-label="Earlier tickets at this property"
+        data-history="timeline"
+      >
+        {rows.map((t) => (
+          <HistoryRow
+            key={t.id}
+            ticket={t}
+            sameSpot={isSameSpot(t, locationId)}
+            canOpen={canOpen}
+            refresh={refresh}
+          />
+        ))}
+      </ol>
+      {more && (
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-3 h-11 w-full"
+          data-line="history-more"
+          onClick={() => setAll(true)}
+        >
+          Show all {summary.data?.count} earlier tickets
+        </Button>
+      )}
+    </>
+  );
+}
 
 /**
  * "History at this property (N)": starts closed; the parent holds the open state (the strip
@@ -242,24 +376,7 @@ export function HistoryFold({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { profile } = useAuth();
-  // A technician-only user cannot read another technician's ticket: no Open link, nothing said.
-  // Nor until the profile is known (Oct 21: isFieldOnly(null) is false, and the link showed
-  // while it loaded).
-  const canOpen = !!profile && !isFieldOnly(profile);
   const summary = useHistorySummary(job.id);
-  // The newest ten first; "Show more" reads every earlier ticket (Nov 3, review item 46).
-  const [all, setAll] = useState(false);
-  const q = useHistory(job.id, open, all);
-  const rows = useMemo(
-    () => (q.data ? orderHistory(q.data, job.location_id) : []),
-    [q.data, job.location_id],
-  );
-  const more = !all && (summary.data?.count ?? 0) > rows.length && rows.length > 0;
-  // The viewer asks for fresh links when the signed ones are near their end.
-  const refresh = () => {
-    if (q.data && Date.now() - q.dataUpdatedAt > LINKS_FRESH_MS) void q.refetch();
-  };
   return (
     <div id={HISTORY_FOLD_ID}>
       <Box
@@ -278,47 +395,7 @@ export function HistoryFold({
           ) : null
         }
       >
-        {q.error ? (
-          <p className="text-sm text-destructive">
-            Could not load the history here: {errText(q.error)}
-          </p>
-        ) : q.isLoading || !q.data ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{FIRST_TICKET}</p>
-        ) : (
-          <>
-            {/* A timeline (owner, Nov 17): the line down the left, a dot per earlier ticket. */}
-            <ol
-              className="ml-1.5 space-y-4 border-l"
-              aria-label="Earlier tickets at this property"
-              data-history="timeline"
-            >
-              {rows.map((t) => (
-                <HistoryRow
-                  key={t.id}
-                  ticket={t}
-                  sameSpot={isSameSpot(t, job.location_id)}
-                  canOpen={canOpen}
-                  refresh={refresh}
-                />
-              ))}
-            </ol>
-            {more && (
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3 h-11 w-full"
-                data-line="history-more"
-                onClick={() => setAll(true)}
-              >
-                Show all {summary.data?.count} earlier tickets
-              </Button>
-            )}
-          </>
-        )}
+        <HistoryTimeline jobId={job.id} locationId={job.location_id} enabled={open} />
       </Box>
     </div>
   );

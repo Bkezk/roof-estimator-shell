@@ -55,9 +55,12 @@ describe("the ticket page on arrival at the history", () => {
     expect(flat(page)).toContain('?.scrollIntoView({ behavior: "smooth", block: "center" })');
     expect(page).not.toContain('block: "start" }),');
   });
-  it("the My tickets strip still links with ?open=history", () => {
-    expect(read("src/components/service/site-history.tsx")).toContain(
-      "search={{ id: jobId, open: HISTORY_OPEN_PARAM }}",
-    );
+  it("the My tickets strip no longer sends the technician to the ticket page", () => {
+    // Nov 17: it opens the history on its own, in a pop-up (owner: "id really just like them
+    // to see the 'history at this property' part not the aerial, materials, etc."). A ticket
+    // address that still carries ?open=history is honoured by the page, as above.
+    const strip = read("src/components/service/site-history.tsx");
+    expect(strip).not.toContain("search={{ id: jobId, open: HISTORY_OPEN_PARAM }}");
+    expect(strip).toContain("<HistoryTimeline jobId={jobId} locationId={locationId} enabled />");
   });
 });
