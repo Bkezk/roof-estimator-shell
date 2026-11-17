@@ -55,7 +55,7 @@ import { seesEveryone } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { plainErrText } from "@/lib/plain-error";
 import { calcTradeBid, emptySetup, type TradeSetup } from "@/lib/trade-bid";
-import { isDirty, setupSaveProblems, tidyQuantities } from "@/lib/trade-bid-form";
+import { isDirty, setupSaveProblems, subsAsSaved, tidyQuantities } from "@/lib/trade-bid-form";
 import {
   deleteTradeType,
   getTradeType,
@@ -163,7 +163,10 @@ function SetupForm(props: { trade: TradeType | null }) {
     if (blocker.status === "blocked") blocker.reset();
   };
 
-  const setSetup = (setup: TradeSetup) => {
+  const setSetup = (changed: TradeSetup) => {
+    // The last sub line taken out leaves "no sub lines" written the way the saved copy writes
+    // it, so adding a line and taking it out again is not a change to save.
+    const setup = subsAsSaved(changed, saved.setup);
     setDraft((d) => ({ ...d, setup }));
     // A measure taken out takes its sample number with it.
     setSample((s) => tidyQuantities(s, setup));

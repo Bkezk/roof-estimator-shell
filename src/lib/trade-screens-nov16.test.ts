@@ -661,8 +661,12 @@ describe("the setup editor, drawn", () => {
       "Overhead is added to the cost. Profit is added on top of cost and overhead.",
     );
     expect(html).toContain("Tax you pay the supplier. It is counted as a cost.");
-    // The note sits under the title of each of the four sections.
-    expect(count(html, "Only this bid changes.")).toBe(4);
+    // The note sits under the title of each section.
+    // Nov 17, subcontractor lines: this read `.toBe(4)`, "each of the four sections". The editor
+    // has a fifth, Subcontractors, between Labor and Flat costs and markup; the note sits under
+    // its title too. (The four Add buttons above are still one each; the fifth, and where the
+    // new section sits, are trade-subs-ui-nov17.test.ts.)
+    expect(count(html, "Only this bid changes.")).toBe(5);
   });
 
   it("one row per line, each with a way to remove it that says what it removes", () => {

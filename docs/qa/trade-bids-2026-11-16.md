@@ -247,9 +247,63 @@ Also on Nov 17, after the owner looked for the customer on a trade bid: the bid'
 has an "Add a new customer" button, the job type setup screen says the customer goes on each
 bid, and a saved job type offers "Start a bid of this trade".
 
+## Subcontractor lines (Nov 17)
+
+Owner: "can it be used when we sub stuff out?" … "Go ahead and add the subcontractors line and
+explain it". Also asked that trade prices stay "completely separate from project bids and
+estimate prices": they are. A trade's prices live in the job type and in each bid, nowhere else.
+
+A job type and a bid may hold subcontractor lines beside materials, labor and flat costs.
+
+- **What a line holds:** what is subbed out, who does it (picked from the vendor list), and
+  either one quote for the job or the sub's rate for each unit the job measures.
+- **No sales tax and no crew hours** are added for a sub line.
+- **Markup.** With "Its own markup" left blank the line is a cost like any other, and the bid's
+  overhead and profit apply to it. With a percent typed (0 counts) the line stands apart:
+  overhead and profit are worked on every other cost, and the line adds its cost plus its own
+  markup. The totals say what overhead and profit were worked on when the two differ.
+- **On the bid's main screen** a Subcontractor quotes card holds each line's name, the vendor
+  and the quote or rate box, so a quote is typed where the measurements are. The basis and the
+  markup are changed under "Change this bid's rates and lines".
+- **Margin report:** what the subs are paid sits with the flat costs in the bid's figures, so
+  the report's cost is the bid's cost.
+- A setup saved before sub lines existed is priced and saved exactly as before.
+
+Tests: `trade-subs-nov17.test.ts` (19, the sum, worked by hand) and `trade-subs-ui-nov17.test.ts`
+(51, the form helpers and the screens), plus one server test for a saved bid with sub lines.
+
+Browser run on a temporary customer, vendor, job type and bid (own costs $2,243.75, price
+$3,096.38 before any sub):
+
+| Check                                                | Expected by hand                 | Shown    |
+| ---------------------------------------------------- | -------------------------------- | -------- |
+| A $600 quote, markup blank                           | cost 2,843.75, price 3,924.38    | the same |
+| The same line with its own markup 10%                | price 3,096.38 + 660 = 3,756.38, margin 24.3% | the same |
+| Changed to $0.20 a sq ft of 3,000                    | still 600.00 and 3,756.38        | the same |
+| A second line, $1,500 quoted, markup blank           | overhead 561.56, profit 861.07, price 5,826.38, margin 25.4% | the same |
+| What overhead and profit were worked on              | $3,743.75                        | the same |
+| Labor hours with both subs                           | still 37                         | the same |
+| Job type with the washing line, sample 3,000 sq ft   | 3,067.12 + 660 = 3,727.12        | the same |
+
+Also seen: a new line's boxes start blank and a blank quote says "Type the quote." without
+pricing the line; a word in the quote box keeps Save off; the vendor is picked from the list and
+shows after a reload; leaving with a sub unsaved asks first; a line added and removed again is
+not an unsaved change; a saved bid keeps its own lines when the job type gains one, and a new bid
+of the job type starts with the job type's line; no sideways scroll at 390 px with the rates
+open.
+
+One older fault found by the helper and fixed with a test: a labor line's Hours box and its
+"One person does" box were one box to the screen, so a mistake typed in one showed in the other
+when "Goes by" was switched.
+
+Afterwards the temporary rows were removed and the counts checked: 27 bids, 0 job types, 0
+invoices, 638 customers, 1 vendor, 55 tickets, the test login as it was.
+
 ## Left for the owner
 
 - Whether a job gets one invoice or a deposit and a final. Both work today.
 - Whether customers are charged sales tax on trade work. Invoices start at 0%.
 - Overhead is a percent of cost and profit a percent of cost plus overhead (a markup). A
   gross-profit choice like the roofing calculator's can be added.
+- The vendor list's own words say "vendor" (for example "Clear the vendor") where a bid picks a
+  subcontractor from it.

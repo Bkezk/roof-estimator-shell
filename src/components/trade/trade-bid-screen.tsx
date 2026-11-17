@@ -10,11 +10,16 @@
  *  1. The job: its name, the customer, the due date, who is estimating, where it is and what the
  *     work is (those words print on the proposal).
  *  2. Measurements: one box for each thing this trade measures. This is all most bids type.
- *  3. The price: what to buy, the hours, and the sum from materials down to the price, worked
- *     out as the boxes are typed in (trade-bid.ts; the server works it out again on Save and
- *     keeps its own answer). A line that is missing a number says which, in place of its cost.
- *  4. Change this bid's rates and lines: closed until asked for. It opens the same editor the
- *     trade is set up with, on this bid's OWN copy: the trade stays as it is.
+ *  3. Subcontractor quotes (owner, Nov 17): the work handed to a sub, who does it (picked from
+ *     the vendor list) and the quote, typed here when it comes in. Always shown; a bid with
+ *     nothing subbed out says so and offers to add a line. The lines are part of this bid's OWN
+ *     copy of the setup, so they are saved by Save and asked about on leaving like the rest.
+ *  4. The price: what to buy, the hours, the subs, and the sum from materials down to the price,
+ *     worked out as the boxes are typed in (trade-bid.ts; the server works it out again on Save
+ *     and keeps its own answer). A line that is missing a number says which, in place of its cost.
+ *  5. Change this bid's rates and lines: closed until asked for. It opens the same editor the
+ *     trade is set up with, on this bid's OWN copy: the trade stays as it is. A sub line is
+ *     switched between a set quote and a rate per measurement there, and given its own markup.
  *
  * Under the price of a saved bid sits its Invoices block (owner, Nov 17; bid-invoices-card.tsx):
  * a won bid is invoiced from here. It is not part of this form: making an invoice saves nothing
@@ -57,6 +62,7 @@ import {
   BOX,
   InvalidBoxes,
   MeasureBoxes,
+  SubQuoteRows,
   TradeLinesEditor,
 } from "@/components/trade/trade-lines-editor";
 import {
@@ -101,10 +107,13 @@ import {
   customerToSend,
   fillJobAddress,
   isDirty,
+  markupBaseNote,
   problemsNotice,
   resultRows,
   resultTotals,
   setCustomerField,
+  subRows,
+  subsAsSaved,
   tidyQuantities,
   type CustomerField,
   type ResultRow,
@@ -258,11 +267,15 @@ function totalLine(t: TotalLine) {
 }
 
 function PriceTable(props: {
-  kind: "materials" | "labor" | "fixed";
+  kind: "materials" | "labor" | "fixed" | "subs";
   nameHead: string;
-  /** The middle column's heading; none for flat costs, which have no quantity. */
+  /** The middle column's heading; none for flat costs and sub lines, which have no quantity. */
   qtyHead?: string;
-  rows: ResultRow[];
+  /**
+   * A sub line says two things more, each a muted line: who does it, under its name (`under`),
+   * and its own markup, under its cost (`note`).
+   */
+  rows: (ResultRow & { under?: string | null; note?: string | null })[];
 }) {
   if (props.rows.length === 0) return null;
   return (
@@ -278,7 +291,10 @@ function PriceTable(props: {
       <tbody>
         {props.rows.map((r, i) => (
           <tr key={`${r.id}-${i}`} className="border-b align-top last:border-0">
-            <td className="break-words py-1.5 pr-2">{r.name}</td>
+            <td className="break-words py-1.5 pr-2">
+              {r.name}
+              {r.under && <span className="block text-xs text-muted-foreground">{r.under}</span>}
+            </td>
             {props.qtyHead && (
               <td className="break-words py-1.5 pr-2 tabular-nums">{r.qty || "—"}</td>
             )}
@@ -287,6 +303,7 @@ function PriceTable(props: {
                 // The line cannot be priced: what it is waiting for, where its cost would be.
                 <span className="font-medium text-amber-700 dark:text-amber-400">{r.problem}</span>
               )}
+              {r.note && <span className="block text-xs text-muted-foreground">{r.note}</span>}
             </td>
           </tr>
         ))}
@@ -297,16 +314,30 @@ function PriceTable(props: {
 
 /**
  * The price, laid out: what is missing (when something is), the materials, the labor, the flat
- * costs, then the sum down to the price, the time and the margin. Every word and number comes
- * from trade-bid-form.ts (resultRows, resultTotals), where it is tested.
+ * costs, the subcontractors (only when there are sub lines: what, who, what the sub is paid, and
+ * a line's own markup under its cost), then the sum down to the price, the time and the margin.
+ * Every word and number comes from trade-bid-form.ts (resultRows, subRows, resultTotals,
+ * markupBaseNote), where it is tested.
  */
 export function TradePrice(props: { setup: TradeSetup; result: TradeResult }) {
   const { setup, result } = props;
   const rows = resultRows(setup, result);
+  // A sub line in the table's own shape. Who does it sits under the line's name, not in a
+  // column of its own: on a phone a third column would cut "No subcontractor picked" mid-word.
+  const subs = subRows(setup, result).map((s) => ({
+    id: s.id,
+    name: s.name,
+    qty: "",
+    cost: s.cost,
+    problem: s.problem,
+    under: s.vendor,
+    note: s.markup,
+  }));
   const totals = resultTotals(setup, result);
   const sum = totals.filter((t) => !FACTS.has(t.key));
   const facts = totals.filter((t) => FACTS.has(t.key));
-  const nothing = rows.materials.length + rows.labor.length + rows.fixed.length === 0;
+  const baseNote = markupBaseNote(result);
+  const nothing = rows.materials.length + rows.labor.length + rows.fixed.length + subs.length === 0;
   return (
     <div className="space-y-4">
       {result.problems.length > 0 && (
@@ -326,7 +357,7 @@ export function TradePrice(props: { setup: TradeSetup; result: TradeResult }) {
       )}
       {nothing ? (
         <p className="text-sm text-muted-foreground">
-          Nothing to price yet: this trade has no materials, labor or flat costs.
+          Nothing to price yet: this trade has no materials, labor, flat costs or subcontractors.
         </p>
       ) : (
         <>
@@ -338,10 +369,18 @@ export function TradePrice(props: { setup: TradeSetup; result: TradeResult }) {
           />
           <PriceTable kind="labor" nameHead="Labor" qtyHead="Hours" rows={rows.labor} />
           <PriceTable kind="fixed" nameHead="Flat costs" rows={rows.fixed} />
+          <PriceTable kind="subs" nameHead="Subcontractors" rows={subs} />
         </>
       )}
       <div className="border-t pt-3 text-sm" data-price-totals>
         <div className="space-y-1">{sum.map(totalLine)}</div>
+        {/* Overhead and profit were not worked on the whole cost: said under the sum, so the
+            two lines can be checked by hand. */}
+        {baseNote && (
+          <p className="mt-2 text-xs text-muted-foreground" data-markup-base>
+            {baseNote}
+          </p>
+        )}
         {/* The time and the margin are facts about the price, not part of the sum. */}
         <div className="mt-3 space-y-1 border-t pt-3">{facts.map(totalLine)}</div>
       </div>
@@ -460,8 +499,10 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
-  // Number boxes holding something that is not a number: the measurements, and the editor's.
+  // Number boxes holding something that is not a number: the measurements, the subcontractor
+  // quotes, and the editor's.
   const [badQuantities, setBadQuantities] = useState(0);
+  const [badSubs, setBadSubs] = useState(0);
   const [badRates, setBadRates] = useState(0);
   // Save was pressed with something missing: what is missing turns red.
   const [tried, setTried] = useState(false);
@@ -479,7 +520,7 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
     isNew,
     accountId: draft.accountId,
     dueDate: draft.dueDate,
-    invalidBoxes: badQuantities + badRates,
+    invalidBoxes: badQuantities + badSubs + badRates,
   });
 
   const dirty = !deleted && isDirty(saved, draft);
@@ -507,9 +548,12 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
     setDraft((d) => ({ ...d, data: change(d.data) }));
   const setCustomer = (field: CustomerField, text: string) =>
     setData((data) => ({ ...data, customer: setCustomerField(data.customer, field, text) }));
-  // A change to this bid's own setup. A measure taken out takes its quantity with it.
-  const setSetup = (setup: TradeSetup) =>
+  // A change to this bid's own setup. A measure taken out takes its quantity with it, and the
+  // last sub line taken out leaves "no sub lines" written the way the saved copy writes it.
+  const setSetup = (changed: TradeSetup) => {
+    const setup = subsAsSaved(changed, saved.data.setup);
     setData((data) => ({ ...data, setup, quantities: tidyQuantities(data.quantities, setup) }));
+  };
   const setQuantity = (measureId: string, value: number | null) =>
     setData((data) => ({
       ...data,
@@ -908,6 +952,28 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
               quantities={draft.data.quantities}
               disabled={locked}
               onChange={setQuantity}
+            />
+          </InvalidBoxes>
+        </CardContent>
+      </Card>
+
+      <Card data-card="trade-bid-subs">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Subcontractor quotes</CardTitle>
+          <CardDescription>
+            Work you hand to a subcontractor. Type the quote here when it comes in. No sales tax and
+            no crew hours are added for it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/* These lines are part of this bid's own copy of the setup: a change here goes the
+              same way as one under "Change this bid's rates and lines", into what Save saves. */}
+          <InvalidBoxes onChange={setBadSubs}>
+            <SubQuoteRows
+              setup={draft.data.setup}
+              result={result}
+              disabled={locked}
+              onChange={setSetup}
             />
           </InvalidBoxes>
         </CardContent>

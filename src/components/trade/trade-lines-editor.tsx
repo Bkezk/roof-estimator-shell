@@ -8,12 +8,18 @@
  * keep its own numbers"). It is given a setup and hands back a new one on every change; it keeps
  * nothing itself, so whoever shows it decides what is saved and when.
  *
- * Four short sections, top to bottom, in the order a person thinks about a job:
+ * Five short sections, top to bottom, in the order a person thinks about a job:
  *
  *  1. What you measure: the amounts a bid asks for (walls in sq ft, doors each).
  *  2. Materials: what one costs and how far one goes.
  *  3. Labor: what an hour costs and how much one person gets done in it.
- *  4. Flat costs and markup: a lift or a permit, then overhead, profit, tax and the crew.
+ *  4. Subcontractors (owner, Nov 17): work handed to a sub. Who (picked from the vendor list),
+ *     their quote for the job or their rate for each unit measured, and a markup of the line's
+ *     own when it has one. No sales tax and no hours come of it (trade-bid.ts).
+ *  5. Flat costs and markup: a lift or a permit, then overhead, profit, tax and the crew.
+ *
+ * Also here, because it is built from the same boxes: a bid's subcontractor quotes as they sit
+ * on the bid's main screen (`SubQuoteRows`), the short form of section 4.
  *
  * The readers are office staff, so every box has its label printed above it (a phone has no
  * hover), each row stacks on a phone, and a sentence is written the way it is said: "One gallon
@@ -41,6 +47,7 @@ import {
 } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
+import { VendorPicker } from "@/components/crm/vendor-picker";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,7 +77,9 @@ import {
   type TradeLabor,
   type TradeMaterial,
   type TradeMeasure,
+  type TradeResult,
   type TradeSetup,
+  type TradeSub,
 } from "@/lib/trade-bid";
 import {
   BOX_MAX,
@@ -80,6 +89,7 @@ import {
   addLabor,
   addMaterial,
   addMeasure,
+  addSub,
   amountProblem,
   amountValue,
   followers,
@@ -89,6 +99,10 @@ import {
   pluralUnit,
   removeLine,
   removeMeasure,
+  subMarkupWords,
+  subQuoteLabel,
+  subRows,
+  subVendorPatch,
 } from "@/lib/trade-bid-form";
 import { cn } from "@/lib/utils";
 
@@ -279,11 +293,18 @@ function Field(props: {
   );
 }
 
-function SectionHead(props: { title: string; help: string; note: string | undefined }) {
+function SectionHead(props: {
+  title: string;
+  help: string;
+  /** A second line of help, for a section with a rule worth saying. */
+  more?: string;
+  note: string | undefined;
+}) {
   return (
     <CardHeader className="pb-3">
       <CardTitle className="text-base">{props.title}</CardTitle>
       <CardDescription>{props.help}</CardDescription>
+      {props.more && <CardDescription>{props.more}</CardDescription>}
       {props.note && <p className="text-sm font-medium">{props.note}</p>}
     </CardHeader>
   );
@@ -579,7 +600,11 @@ function LaborRow(props: {
         </Field>
         {l.basis === "flat" ? (
           <Field label="Hours" htmlFor={`${id}-hours`}>
+            {/* Keyed (Nov 17): this box and "One person does" are different numbers. Without
+                keys they were one box to React, so a mistake typed in one showed in the other
+                when "Goes by" was switched. */}
             <AmountBox
+              key="hours"
               id={`${id}-hours`}
               value={l.hours}
               max={BOX_MAX.amount}
@@ -590,6 +615,7 @@ function LaborRow(props: {
         ) : measure ? (
           <Field label="One person does" htmlFor={`${id}-does`} className="@3xl:col-span-2">
             <AmountBox
+              key="does"
               id={`${id}-does`}
               value={l.per_hour}
               max={BOX_MAX.amount}
@@ -601,6 +627,107 @@ function LaborRow(props: {
         ) : (
           <PickMeasure />
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One subcontractor line (owner, Nov 17). Laid out like a labor row: what and who on the first
+ * line, how it is charged on the second.
+ */
+function SubRow(props: {
+  sub: TradeSub;
+  measures: readonly TradeMeasure[];
+  disabled: boolean;
+  onPatch: (patch: Partial<Omit<TradeSub, "id">>) => void;
+  onRemove: () => void;
+}) {
+  const id = useId();
+  const s = props.sub;
+  const measure =
+    s.basis === "measure" ? (props.measures.find((x) => x.id === s.measure_id) ?? null) : null;
+  return (
+    <div className="space-y-3 rounded-md border p-3" data-sub-row={s.id}>
+      <div className="flex items-start gap-2">
+        <div className="grid min-w-0 flex-1 gap-3 @lg:grid-cols-2">
+          <Field label="What is subbed out" htmlFor={`${id}-name`}>
+            <Input
+              id={`${id}-name`}
+              className={BOX}
+              value={s.name}
+              maxLength={120}
+              placeholder="Pressure washing"
+              disabled={props.disabled}
+              onChange={(e) => props.onPatch({ name: e.target.value })}
+            />
+          </Field>
+          <Field label="Subcontractor" htmlFor={`${id}-who`}>
+            <VendorPicker
+              id={`${id}-who`}
+              value={s.vendor_id}
+              fallbackName={s.vendor_name}
+              disabled={props.disabled}
+              placeholder="Pick from your vendors…"
+              className={BOX}
+              onChange={(vendor) => props.onPatch(subVendorPatch(vendor))}
+            />
+          </Field>
+        </div>
+        <RemoveButton
+          label={`Remove ${s.name.trim() || "this subcontractor"}`}
+          disabled={props.disabled}
+          onClick={props.onRemove}
+        />
+      </div>
+      <div className="grid gap-3 @md:grid-cols-2 @3xl:grid-cols-4">
+        <Field label="Goes by" htmlFor={`${id}-by`}>
+          <GoesBy
+            id={`${id}-by`}
+            line={s}
+            measures={props.measures}
+            setLabel="A set quote"
+            disabled={props.disabled}
+            onPick={props.onPatch}
+          />
+        </Field>
+        {/* The quote and the rate are two numbers of the line: each box is its own (the keys),
+            so what was typed in one is never carried into the other. */}
+        {s.basis === "flat" ? (
+          <Field key="quote" label="Quote" htmlFor={`${id}-quote`}>
+            <AmountBox
+              id={`${id}-quote`}
+              before="$"
+              value={s.amount}
+              max={BOX_MAX.amount}
+              disabled={props.disabled}
+              onChange={(amount) => props.onPatch({ amount })}
+            />
+          </Field>
+        ) : measure ? (
+          <Field key="rate" label={subQuoteLabel(s, props.measures)} htmlFor={`${id}-rate`}>
+            <AmountBox
+              id={`${id}-rate`}
+              before="$"
+              value={s.rate}
+              max={BOX_MAX.amount}
+              disabled={props.disabled}
+              onChange={(rate) => props.onPatch({ rate })}
+            />
+          </Field>
+        ) : (
+          <PickMeasure />
+        )}
+        <Field label="Its own markup" htmlFor={`${id}-markup`}>
+          <AmountBox
+            id={`${id}-markup`}
+            value={s.markup_pct}
+            max={BOX_MAX.pct}
+            disabled={props.disabled}
+            after="%"
+            onChange={(markup_pct) => props.onPatch({ markup_pct })}
+          />
+        </Field>
       </div>
     </div>
   );
@@ -649,7 +776,7 @@ function FixedRow(props: {
 }
 
 function AddButton(props: {
-  kind: "measure" | "material" | "labor" | "fixed";
+  kind: "measure" | "material" | "labor" | "sub" | "fixed";
   disabled: boolean;
   onClick: () => void;
   children: ReactNode;
@@ -665,6 +792,141 @@ function AddButton(props: {
     >
       <Plus /> {props.children}
     </Button>
+  );
+}
+
+// ── A bid's subcontractor quotes ───────────────────────────────────────────────────────────────
+
+/**
+ * One sub line as the bid's main screen shows it: what, who, and the ONE number the office types
+ * when the quote comes in (the quote of a set-quote line, the rate of a line charged by a
+ * measure). Whether it is one or the other, and the line's own markup, are the full row's
+ * (`SubRow`, under "Change this bid's rates and lines"); here they are only said.
+ */
+function SubQuoteRow(props: {
+  sub: TradeSub;
+  measures: readonly TradeMeasure[];
+  /** What the line is waiting for before it can be priced ("Type the quote"); null for nothing. */
+  problem: string | null;
+  disabled: boolean;
+  onPatch: (patch: Partial<Omit<TradeSub, "id">>) => void;
+  onRemove: () => void;
+}) {
+  const id = useId();
+  const s = props.sub;
+  const flat = s.basis === "flat";
+  return (
+    <div className="space-y-2 rounded-md border p-3" data-sub-quote-row={s.id}>
+      <div className="flex items-start gap-2">
+        {/* By the width of the window, like the job's own boxes above it: this card is always
+            the full width of the bid. One column on a phone. */}
+        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="What is subbed out" htmlFor={`${id}-name`}>
+            <Input
+              id={`${id}-name`}
+              className={BOX}
+              value={s.name}
+              maxLength={120}
+              placeholder="Pressure washing"
+              disabled={props.disabled}
+              onChange={(e) => props.onPatch({ name: e.target.value })}
+            />
+          </Field>
+          <Field label="Subcontractor" htmlFor={`${id}-who`}>
+            <VendorPicker
+              id={`${id}-who`}
+              value={s.vendor_id}
+              fallbackName={s.vendor_name}
+              disabled={props.disabled}
+              placeholder="Pick from your vendors…"
+              className={BOX}
+              onChange={(vendor) => props.onPatch(subVendorPatch(vendor))}
+            />
+          </Field>
+          <Field label={subQuoteLabel(s, props.measures)} htmlFor={`${id}-quote`}>
+            <AmountBox
+              // The quote and the rate are two numbers of the line: a box of its own for each.
+              key={s.basis}
+              id={`${id}-quote`}
+              before="$"
+              value={flat ? s.amount : s.rate}
+              max={BOX_MAX.amount}
+              disabled={props.disabled}
+              hooks={{ "data-sub-quote": s.id }}
+              onChange={(n) => props.onPatch(flat ? { amount: n } : { rate: n })}
+            />
+          </Field>
+        </div>
+        <RemoveButton
+          label={`Remove ${s.name.trim() || "this subcontractor"}`}
+          disabled={props.disabled}
+          onClick={props.onRemove}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground" data-sub-markup={s.id}>
+        {subMarkupWords(s)}
+      </p>
+      {props.problem && (
+        // The line cannot be priced: what it is waiting for, in the colour the price uses.
+        <p
+          className="text-sm font-medium text-amber-700 dark:text-amber-400"
+          data-sub-problem={s.id}
+        >
+          {`${props.problem}.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A bid's subcontractor quotes (owner, Nov 17: the quote is typed on the bid's main screen): the
+ * bid screen's "Subcontractor quotes" card. It is given the bid's own setup and hands back a new
+ * one on every change, as the editor below does, so the same Save and the same question on
+ * leaving cover it.
+ */
+export function SubQuoteRows(props: {
+  setup: TradeSetup;
+  /** The price worked out from `setup`: each line's problem is read from it. */
+  result: TradeResult;
+  onChange: (next: TradeSetup) => void;
+  disabled?: boolean | undefined;
+}) {
+  const { setup, onChange } = props;
+  const disabled = !!props.disabled;
+  const subs = setup.subs ?? [];
+  const rows = subRows(setup, props.result);
+  return (
+    <div className="space-y-3">
+      {subs.length === 0 && <Empty>Nothing is subbed out on this bid.</Empty>}
+      {subs.map((s, i) => (
+        <SubQuoteRow
+          key={s.id}
+          sub={s}
+          measures={setup.measures}
+          problem={rows[i]?.problem ?? null}
+          disabled={disabled}
+          onPatch={(patch) => onChange(patchLine(setup, "subs", s.id, patch))}
+          onRemove={() => onChange(removeLine(setup, "subs", s.id))}
+        />
+      ))}
+      {subs.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          To charge by a measurement or set a line&apos;s own markup, open Change this bid&apos;s
+          rates and lines below.
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        className="h-10"
+        data-add-sub-here
+        disabled={disabled || subs.length >= LINE_MAX.subs}
+        onClick={() => onChange(addSub(setup))}
+      >
+        <Plus /> Add a subcontractor
+      </Button>
+    </div>
   );
 }
 
@@ -781,6 +1043,37 @@ export function TradeLinesEditor(props: {
               onClick={() => onChange(addLabor(value))}
             >
               Add a task
+            </AddButton>
+          </CardContent>
+        </Card>
+
+        {/* The Subcontractor box opens a list under itself. While the card is in use it sits
+            above the cards after it, so the list is not drawn under the next card's boxes. */}
+        <Card data-card="trade-subs" className="relative focus-within:z-[1]">
+          <SectionHead
+            title="Subcontractors"
+            help="Work you hand to a subcontractor. No sales tax and no crew hours are added for it."
+            more="Leave a line's markup blank and the bid's overhead and profit apply to it. Type one and that line is marked up on its own instead."
+            note={props.note}
+          />
+          <CardContent className="@container space-y-3">
+            {(value.subs ?? []).length === 0 && <Empty>No subcontractors yet.</Empty>}
+            {(value.subs ?? []).map((s) => (
+              <SubRow
+                key={s.id}
+                sub={s}
+                measures={value.measures}
+                disabled={disabled}
+                onPatch={(patch) => onChange(patchLine(value, "subs", s.id, patch))}
+                onRemove={() => onChange(removeLine(value, "subs", s.id))}
+              />
+            ))}
+            <AddButton
+              kind="sub"
+              disabled={disabled || (value.subs ?? []).length >= LINE_MAX.subs}
+              onClick={() => onChange(addSub(value))}
+            >
+              Add a subcontractor
             </AddButton>
           </CardContent>
         </Card>

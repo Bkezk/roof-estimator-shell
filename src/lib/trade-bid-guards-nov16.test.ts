@@ -214,3 +214,13 @@ describe("the Invoices list knows a trade bid is invoiced too (Nov 17)", () => {
     expect(ui).toContain("or from a Won trade bid (Make an invoice).");
   });
 });
+
+describe("a labor line's two number boxes are two boxes (Nov 17)", () => {
+  // "Hours" (a set number) and "One person does" (per measurement) swap places when Goes by is
+  // switched. Unkeyed they were one box to React: a mistake typed in one showed in the other.
+  it("each has its own key", () => {
+    const ui = flat(read("../components/trade/trade-lines-editor.tsx"));
+    expect(ui).toContain('<AmountBox key="hours" id={`${id}-hours`}');
+    expect(ui).toContain('<AmountBox key="does" id={`${id}-does`}');
+  });
+});

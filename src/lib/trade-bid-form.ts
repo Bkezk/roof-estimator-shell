@@ -13,6 +13,9 @@
  *  - adding, changing and removing a line of a setup, each returning a NEW setup (the screens
  *    compare the old one with the new one, so nothing here changes what it is given);
  *  - the rows and totals of the price as text, so the screen only lays them out;
+ *  - a subcontractor line's words (owner, Nov 17): who was picked, what its one number box is
+ *    called, how it is marked up, and what overhead and profit were worked on when a line
+ *    carries a markup of its own;
  *  - the wording of a unit ("1 gallon", "10 gallons", "2 boxes", "3,000 sq ft").
  *
  * Pure: no React, no database, no clock.
@@ -31,6 +34,7 @@ import {
   type TradeMeasure,
   type TradeResult,
   type TradeSetup,
+  type TradeSub,
 } from "@/lib/trade-bid";
 
 // ── Is there something to save? ────────────────────────────────────────────────────────────────
@@ -136,14 +140,21 @@ export const amountValue = (text: string, max?: number): number | null =>
 // ── Adding, changing and removing lines ────────────────────────────────────────────────────────
 
 /** The most lines of each kind the server accepts (trade-bid.ts tradeSetupSchema). */
-export const LINE_MAX = { measures: 30, materials: 100, labor: 100, fixed: 50 } as const;
+export const LINE_MAX = {
+  measures: 30,
+  materials: 100,
+  labor: 100,
+  fixed: 50,
+  subs: 50,
+} as const;
 
-export type LineKind = "measures" | "materials" | "labor" | "fixed";
+export type LineKind = "measures" | "materials" | "labor" | "fixed" | "subs";
 interface LineOf {
   measures: TradeMeasure;
   materials: TradeMaterial;
   labor: TradeLabor;
   fixed: TradeFixed;
+  subs: TradeSub;
 }
 
 /**
@@ -194,6 +205,59 @@ export const addFixed = (setup: TradeSetup, newId: () => string = lineId): Trade
   fixed: [...setup.fixed, { id: newId(), name: "", cost: null }],
 });
 
+/**
+ * A new subcontractor line (owner, Nov 17): a set quote with every number blank and nobody
+ * picked. It does not start out following a measure the way a material does: what a sub hands
+ * over is most often one amount for the job, and a rate per sq ft is picked when it is not.
+ *
+ * This is the ONLY thing that gives a setup its list of sub lines. A setup saved before they
+ * existed has no `subs` at all, and nothing else here adds one (an empty list on a setup that
+ * was never touched would read as a change to save).
+ */
+export const addSub = (setup: TradeSetup, newId: () => string = lineId): TradeSetup => ({
+  ...setup,
+  subs: [
+    ...(setup.subs ?? []),
+    {
+      id: newId(),
+      name: "",
+      vendor_id: null,
+      vendor_name: "",
+      basis: "flat",
+      measure_id: null,
+      rate: null,
+      amount: null,
+      markup_pct: null,
+    },
+  ],
+});
+
+/**
+ * "No sub lines" written the way the saved copy writes it. A setup saved before sub lines
+ * existed has no list of them; one saved since may hold an empty list. Adding a line and taking
+ * it out again leaves an empty list either way, which against a saved copy with no list at all
+ * would read as a change to save (and ask "Save your changes?" on the way out) though nothing
+ * is different. So when the saved copy has no list, an empty one is dropped again. The screens
+ * run every change to a setup through this; a list with a line in it is never touched.
+ */
+export function subsAsSaved(setup: TradeSetup, saved: TradeSetup): TradeSetup {
+  if (!setup.subs || setup.subs.length > 0 || saved.subs) return setup;
+  const { subs: _none, ...rest } = setup;
+  return rest;
+}
+
+/**
+ * What picking a vendor in a sub line's Subcontractor box changes on the line: the id and the
+ * name, always together (the name is what the bid still shows once the vendor is archived or
+ * renamed). Clearing the box clears both.
+ */
+export const subVendorPatch = (
+  vendor: { id: string; name: string } | null,
+): Pick<TradeSub, "vendor_id" | "vendor_name"> =>
+  vendor
+    ? { vendor_id: vendor.id, vendor_name: vendor.name }
+    : { vendor_id: null, vendor_name: "" };
+
 /** Change some of one line; every other line is the very same object as before. */
 export function patchLine<K extends LineKind>(
   setup: TradeSetup,
@@ -201,23 +265,30 @@ export function patchLine<K extends LineKind>(
   id: string,
   patch: Partial<Omit<LineOf[K], "id">>,
 ): TradeSetup {
-  const rows = setup[kind] as LineOf[K][];
+  const rows = setup[kind] as LineOf[K][] | undefined;
+  // No sub lines on this setup: there is no line to change, and it is not given a list.
+  if (!rows) return setup;
   return { ...setup, [kind]: rows.map((row) => (row.id === id ? { ...row, ...patch } : row)) };
 }
 
-/** Take a material, a labor line or a flat cost out. (A measure goes through removeMeasure.) */
+/**
+ * Take a material, a labor line, a flat cost or a sub line out. (A measure goes through
+ * removeMeasure.) Taking the last sub line out leaves an empty list, which is priced the same
+ * as none.
+ */
 export function removeLine(
   setup: TradeSetup,
   kind: Exclude<LineKind, "measures">,
   id: string,
 ): TradeSetup {
-  const rows = setup[kind] as { id: string }[];
+  const rows = setup[kind] as { id: string }[] | undefined;
+  if (!rows) return setup;
   return { ...setup, [kind]: rows.filter((row) => row.id !== id) };
 }
 
 /**
- * The names of the lines that go by a measure, materials first. Removing a measure these lines
- * follow asks first and names them.
+ * The names of the lines that go by a measure: materials first, then labor, then sub lines
+ * charged by it. Removing a measure these lines follow asks first and names them.
  */
 export function followers(setup: TradeSetup, measureId: string): string[] {
   const follows = (line: { basis: TradeBasis; measure_id: string | null }) =>
@@ -225,6 +296,9 @@ export function followers(setup: TradeSetup, measureId: string): string[] {
   return [
     ...setup.materials.filter(follows).map((m) => m.name.trim() || "a material with no name"),
     ...setup.labor.filter(follows).map((l) => l.name.trim() || "a task with no name"),
+    ...(setup.subs ?? [])
+      .filter(follows)
+      .map((s) => s.name.trim() || "a subcontractor line with no name"),
   ];
 }
 
@@ -243,6 +317,8 @@ export function removeMeasure(setup: TradeSetup, measureId: string): TradeSetup 
     measures: setup.measures.filter((m) => m.id !== measureId),
     materials: setup.materials.map(letGo),
     labor: setup.labor.map(letGo),
+    // A sub line charged by the measure lets go of it too. A setup with no sub lines gets no list.
+    ...(setup.subs ? { subs: setup.subs.map(letGo) } : {}),
   };
 }
 
@@ -387,14 +463,75 @@ export function resultRows(
   };
 }
 
+/** One row of the price's Subcontractors table. */
+export interface SubRow {
+  id: string;
+  /** What is subbed out; "Subcontractor" for a line with no name yet. */
+  name: string;
+  /** Who does it: the vendor's name as kept on the line, or NO_SUB_PICKED. */
+  vendor: string;
+  /** What the sub is paid, "$600.00"; null when the line has a problem. */
+  cost: string | null;
+  /** "plus $60.00 markup" for a line that carries its own markup; null for one that does not. */
+  markup: string | null;
+  /** What the line is waiting for ("Type the quote"); null when it is complete. */
+  problem: string | null;
+}
+
+export const NO_SUB_PICKED = "No subcontractor picked";
+
+/**
+ * The rows of the Subcontractors table (owner, Nov 17). Like the other tables, a line with a
+ * problem has no cost: it shows the problem there instead. A line's own markup is not part of
+ * its cost (the cost is what the sub is paid), so it is said beside it.
+ */
+export function subRows(setup: TradeSetup, result: TradeResult): SubRow[] {
+  return (setup.subs ?? []).map((s, i) => {
+    const r = result.subs[i];
+    const priced = !!r && !r.problem;
+    return {
+      id: s.id,
+      name: s.name.trim() || "Subcontractor",
+      vendor: s.vendor_name.trim() || NO_SUB_PICKED,
+      cost: priced ? fmtMoney(r.cost) : null,
+      markup: priced && r.markup !== null ? `plus ${fmtMoney(r.markup)} markup` : null,
+      problem: r?.problem ? sentence(r.problem) : null,
+    };
+  });
+}
+
+/**
+ * How a sub line is marked up, in one sentence under its quote on the bid's main screen. A
+ * markup typed as 0 is a markup of its own: the line is passed on at what the sub is paid.
+ */
+export const subMarkupWords = (sub: Pick<TradeSub, "markup_pct">): string =>
+  sub.markup_pct == null
+    ? "Takes the bid's overhead and profit."
+    : `Marked up ${fmtAmount(sub.markup_pct)}% on its own.`;
+
+/**
+ * What a sub line's one number box is called: "Quote" for a set quote, "Rate per sq ft" for a
+ * line charged by a measure (the unit is the measure's; "unit" while there is none to name).
+ */
+export function subQuoteLabel(
+  sub: Pick<TradeSub, "basis" | "measure_id">,
+  measures: readonly TradeMeasure[],
+): string {
+  if (sub.basis === "flat") return "Quote";
+  const unit = measures.find((m) => m.id === sub.measure_id)?.unit.trim();
+  return `Rate per ${unit || "unit"}`;
+}
+
 export type TotalKey =
   | "materials"
   | "tax"
   | "labor"
   | "fixed"
+  | "subs"
   | "cost"
   | "overhead"
   | "profit"
+  | "subMarkup"
   | "price"
   | "hours"
   | "days"
@@ -420,6 +557,12 @@ const withPct = (label: string, pct: number | null) =>
  * = Price; then the time (labor hours and the working days they are for the crew) and the
  * margin. The rates are printed beside the lines they make, so nobody has to open the setup to
  * see where $333.38 came from.
+ *
+ * Subcontractor lines (owner, Nov 17) add two lines, each only when it has something to say, so
+ * a bid with nothing subbed out reads exactly as it did: "Subcontractors" with the costs when
+ * the setup has a sub line, and "+ Subcontractor markup" after the profit when a line carries
+ * a markup of its own (even one of 0%: that line stands apart from overhead and profit). The
+ * sum still reads straight down: cost + overhead + profit + the subs' own markup = price.
  */
 export function resultTotals(setup: TradeSetup, result: TradeResult): TotalLine[] {
   const line = (
@@ -430,14 +573,20 @@ export function resultTotals(setup: TradeSetup, result: TradeResult): TotalLine[
     more: { strong?: boolean; hint?: string | null } = {},
   ): TotalLine => ({ key, sign, label, value, strong: !!more.strong, hint: more.hint ?? null });
   const crew = setup.crew_size;
+  const hasSubs = (setup.subs ?? []).length > 0;
+  const ownMarkup = result.subs.some((s) => s.markup !== null);
   return [
     line("materials", "", "Materials", fmtMoney(result.materialTotal)),
     line("tax", "", withPct("Sales tax on materials", setup.tax_pct), fmtMoney(result.tax)),
     line("labor", "", "Labor", fmtMoney(result.laborTotal)),
     line("fixed", "", "Flat costs", fmtMoney(result.fixedTotal)),
+    ...(hasSubs ? [line("subs", "", "Subcontractors", fmtMoney(result.subTotal))] : []),
     line("cost", "=", "Cost", fmtMoney(result.cost)),
     line("overhead", "+", withPct("Overhead", setup.overhead_pct), fmtMoney(result.overhead)),
     line("profit", "+", withPct("Profit", setup.profit_pct), fmtMoney(result.profit)),
+    ...(ownMarkup
+      ? [line("subMarkup", "+", "Subcontractor markup", fmtMoney(result.subMarkup))]
+      : []),
     line("price", "=", "Price", fmtMoney(result.price), { strong: true }),
     line("hours", "", "Labor hours", unitWords(result.hours, "hour")),
     line(
@@ -462,6 +611,17 @@ export function resultTotals(setup: TradeSetup, result: TradeResult): TotalLine[
     ),
   ];
 }
+
+/**
+ * The note under the totals when overhead and profit were NOT worked on the whole cost: a sub
+ * line with a markup of its own stands apart from them (trade-bid.ts). Without it, "Overhead
+ * (15%) $558.38" under a cost of $4,322.55 looks like a mistake. Null when they were worked on
+ * the whole cost, which is every bid with no such line.
+ */
+export const markupBaseNote = (result: TradeResult): string | null =>
+  result.markupBase !== result.cost
+    ? `Overhead and profit are worked on ${fmtMoney(result.markupBase)}: every cost except the subcontractor lines that carry their own markup.`
+    : null;
 
 /** The notice above an unfinished price. */
 export const problemsNotice = (count: number): string =>
