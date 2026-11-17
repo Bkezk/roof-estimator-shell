@@ -386,9 +386,14 @@ the height of one line, so the second line lay over the page under it and could 
 Browser run at 1500 x 900 and 390 x 800: all 27 tabs and pages opened and scrolled to the top,
 the middle and the foot, Save never pressed. On every one there is one bar, the button is in
 view at all three places (on Reminders, at the top and the middle), and no "Save changes" is
-left at the top. Seen and left as it was: on a phone, Roof Deck Labor and the two Adhesives
-pages slide sideways by 11 to 27 px. They did before this change too (checked against the old
-code); the bar is not what is wide.
+left at the top. Seen: on a phone, Roof Deck Labor and the two Adhesives pages slid sideways by 11 to 27 px.
+They did before this change too (checked against the old code); the bar was not what was wide.
+
+Fixed the same day (owner: "fix the sideways slide on those phone pages too"). Roof Deck
+Labor's row of three tabs could not wrap; on Adhesives the picker and Add adhesive could not
+wrap; one picker's box could be wider than a 320 px phone. All three wrap or shrink now. Checked
+in the browser at 320, 360, 390 and 1500 px on the three parts of Roof Deck Labor and both
+Adhesives pages: the page is exactly as wide as the window on every one.
 
 Afterwards: the history shows nothing changed by the test login since the morning's temporary
 rows. The one invoice and the trade bid now on file are the owner's own.

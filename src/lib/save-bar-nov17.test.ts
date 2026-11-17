@@ -416,3 +416,38 @@ describe("a row of tabs that wraps grows with its rows", () => {
     expect(read("src/components/ui/tabs.tsx")).toContain('"inline-flex h-9 items-center');
   });
 });
+
+// Owner, Nov 17: "fix the sideways slide on those phone pages too" (Roof Deck Labor and the two
+// Adhesives pages slid sideways by 11 to 27 px at 390 px).
+describe("the pricing pages that slid sideways on a phone", () => {
+  const RDL = read("src/components/rdl-editor.tsx");
+  const UNDER = read("src/components/rdl-underlayment-tearoff.tsx");
+  const ADHESIVES = read("src/components/adhesives-editor.tsx");
+
+  it("Roof Deck Labor: the row of three tabs wraps and grows with its lines", () => {
+    const tab = RDL.slice(RDL.indexOf("export function RoofDeckTab()"));
+    expect(tab).toContain('<TabsList className="h-auto flex-wrap justify-start">');
+    expect(tab).not.toContain("<TabsList>");
+  });
+
+  it("Adhesives: Add adhesive drops under the picker instead of pushing the page wider", () => {
+    expect(flat(ADHESIVES)).toContain(
+      '<div className="min-w-0 max-w-full space-y-1"> <Label>{data.master_label ?? "Adhesive"}</Label> <div className="flex flex-wrap items-center gap-2">',
+    );
+  });
+
+  it("Roof Deck Labor: the roof system picker's box is held to the page as well", () => {
+    expect(flat(RDL)).toContain(
+      '<div className="min-w-0 max-w-full space-y-2"> <Label className="text-sm">Roof system &amp; attachment</Label>',
+    );
+  });
+
+  it("no picker with a set width can outgrow a narrow phone", () => {
+    for (const src of [RDL, UNDER, ADHESIVES]) {
+      // The wide ones (280 px and up); a 140 px picker fits any phone.
+      const set = src.match(/<SelectTrigger className="w-\[(?:2[89]|[3-9]\d)\dpx\][^"]*">/g) ?? [];
+      expect(set.length).toBeGreaterThan(0);
+      for (const one of set) expect(one).toContain("max-w-full");
+    }
+  });
+});

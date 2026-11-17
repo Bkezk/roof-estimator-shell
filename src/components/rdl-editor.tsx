@@ -118,10 +118,12 @@ function MembraneEditor() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-2">
+        {/* max-w-full on the box as well as on the picker: the picker's "no wider than the
+            box" means nothing while the box is as wide as the picker wants (a 320 px phone). */}
+        <div className="min-w-0 max-w-full space-y-2">
           <Label className="text-sm">Roof system &amp; attachment</Label>
           <Select value={selected.id} onValueChange={(v) => setSelectedId(v)}>
-            <SelectTrigger className="w-[320px]">
+            <SelectTrigger className="w-[320px] max-w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -727,7 +729,9 @@ function ObjectGrid({
 export function RoofDeckTab() {
   return (
     <Tabs defaultValue="membrane" className="space-y-4">
-      <TabsList>
+      {/* The three names are wider than a phone: the row wraps and grows with its lines, so
+          the page never slides sideways (owner, Nov 17: "fix the sideways slide"). */}
+      <TabsList className="h-auto flex-wrap justify-start">
         <TabsTrigger value="membrane">Membrane Labor</TabsTrigger>
         <TabsTrigger value="underlayment">Underlayment Times</TabsTrigger>
         <TabsTrigger value="tearoff">Tearoff Times</TabsTrigger>

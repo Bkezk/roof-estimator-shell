@@ -142,11 +142,14 @@ export function AdhesivesTab({ productFilter, newProductGroup }: AdhesivesTabPro
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="space-y-1">
+        {/* On a phone the picker and Add adhesive are wider than the window side by side: the
+            button drops under the picker, and the picker never outgrows the page (owner,
+            Nov 17: "fix the sideways slide"). */}
+        <div className="min-w-0 max-w-full space-y-1">
           <Label>{data.master_label ?? "Adhesive"}</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={String(idx)} onValueChange={(v) => setSelIdx(Number(v))}>
-              <SelectTrigger className="w-[280px]">
+              <SelectTrigger className="w-[280px] max-w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

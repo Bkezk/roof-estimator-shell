@@ -244,7 +244,7 @@ export function UnderlaymentEditor() {
               <div className="space-y-2">
                 <Label className="text-sm">Adhesive</Label>
                 <Select value={String(selAdh)} onValueChange={(v) => setSelAdh(Number(v))}>
-                  <SelectTrigger className="w-[320px]">
+                  <SelectTrigger className="w-[320px] max-w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
