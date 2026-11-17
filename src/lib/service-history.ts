@@ -68,6 +68,17 @@ export const historyItemSchema = z.object({
   status: text,
   note: text,
 });
+/**
+ * An Activity entry the office ticked "Viewable to technicians" on the earlier ticket (owner,
+ * Nov 17; lib/tech-visible.ts): a Note, or Called / Texted / Emailed / Visited with its words.
+ */
+export const historyNoteSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  method: z.string(),
+  note: text,
+  by_name: text,
+  at: z.string(),
+});
 export const historyTicketSchema = z.object({
   id: z.string(),
   number: z.number(),
@@ -81,6 +92,12 @@ export const historyTicketSchema = z.object({
   location_name: text,
   closing_notes: text,
   inspection_outcome: text,
+  /** The earlier ticket's Special instructions box (Nov 17); absent from a JSON made before. */
+  special_instructions: text,
+  /** The inspection's own notes box (Nov 17); absent before. */
+  inspection_notes: text,
+  /** The Activity entries ticked "Viewable to technicians" (Nov 17); absent before. */
+  shared_notes: z.array(historyNoteSchema).default([]),
   technician_name: text,
   inspection_items: z.array(historyItemSchema).default([]),
   repairs: z.array(historyRepairSchema).default([]),
@@ -106,6 +123,7 @@ export const siteHistorySummarySchema = z.object({
 });
 
 export type HistoryRepair = z.output<typeof historyRepairSchema>;
+export type HistoryNote = z.output<typeof historyNoteSchema>;
 export type HistoryItem = z.output<typeof historyItemSchema>;
 /**
  * A photo as the server function returns it: the row plus its signed links (null when signing
@@ -267,3 +285,69 @@ export function lastTimeText(when: Date | null, text: string, today: Date = new 
   const day = when ? `: ${dayText(when, today)}` : "";
   return text ? `Last time${day} — ${text}` : `Last time${day}`;
 }
+
+// ── The short row and the ticket's pop-up (owner, Nov 17) ──────────────────────────────────
+//
+// "when the tech clicks history at this property i just want them to see this [a short row per
+// earlier ticket] and then they can click the ticket and itll pop up its photos and notes from
+// the tickets and on the activity log have a check box that says viewable to technicians and
+// anything with that check box should also show". The row is short: when, what kind, the
+// description, what an inspection flagged, the outcome. Everything else is in the pop-up.
+
+/** The checklist rows the earlier inspection flagged, each with its note ("" when none). */
+export function flaggedHistoryItems(
+  ticket: Pick<SiteHistoryTicket, "inspection_items">,
+): { key: string; label: string; note: string }[] {
+  return ticket.inspection_items
+    .filter((i) => i.status === "issue")
+    .map((i, n) => ({
+      key: i.id ?? `item-${n}`,
+      label: (i.label ?? "").trim() || "Checklist item",
+      note: (i.note ?? "").trim(),
+    }));
+}
+
+const NOTE_WORDS: Record<string, string> = {
+  called: "Called",
+  texted: "Texted",
+  emailed: "Emailed",
+  visited: "Visited",
+};
+
+/** Who wrote an Activity entry and when: "Nov 10 · Dana Office", with "Called" when it was one. */
+export function historyNoteHead(n: HistoryNote, today: Date = new Date()): string {
+  const at = new Date(n.at);
+  const day = Number.isNaN(at.getTime()) ? "" : dayText(at, today);
+  return [day, (n.by_name ?? "").trim(), NOTE_WORDS[n.method] ?? ""].filter(Boolean).join(" · ");
+}
+
+const has = (s: string | null | undefined) => !!(s ?? "").trim();
+
+/** Does the earlier ticket carry any written note the pop-up shows? */
+export function historyHasNotes(ticket: SiteHistoryTicket): boolean {
+  return (
+    has(ticket.special_instructions) ||
+    has(ticket.inspection_notes) ||
+    has(ticket.closing_notes) ||
+    ticket.shared_notes.length > 0 ||
+    ticket.repairs.some((r) => has(r.problem_text) || has(r.resolution_text)) ||
+    flaggedHistoryItems(ticket).some((f) => f.note !== "")
+  );
+}
+
+/** What waits behind a row, so the tap is worth it: "3 photos · notes", "notes", "1 photo". */
+export function historyRowHint(ticket: SiteHistoryTicket): string {
+  const parts: string[] = [];
+  if (ticket.photos.length) parts.push(plural(ticket.photos.length, "photo", "photos"));
+  if (historyHasNotes(ticket)) parts.push("notes");
+  return parts.length ? parts.join(" · ") : "no photos or notes";
+}
+
+/** The pop-up's words when the earlier ticket has no photo and nothing written. */
+export const HISTORY_DETAIL_EMPTY =
+  "No photos were taken and no notes were written on this ticket.";
+export const historyDetailIsEmpty = (ticket: SiteHistoryTicket): boolean =>
+  ticket.photos.length === 0 &&
+  !historyHasNotes(ticket) &&
+  ticket.repairs.length === 0 &&
+  flaggedHistoryItems(ticket).length === 0;

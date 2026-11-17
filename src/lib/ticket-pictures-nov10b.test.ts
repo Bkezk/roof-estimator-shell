@@ -569,7 +569,8 @@ describe("3b. the page seeds each section's cache from the one read", () => {
       /queryKey: \["service-job-materials", jobId\],\s*queryFn: \(\) => listFn\(\{ data: \{ id: jobId \} \}\),\s*enabled: !!session,[\s\S]{0,140}staleTime: FIELD_SEEDED_MS,/,
     );
     expect(read("src/components/service/ticket-activity.tsx")).toMatch(
-      /queryKey: \["contact-log", "ticket", jobId\],[\s\S]{0,260}staleTime: FIELD_SEEDED_MS,/,
+      // Nov 17: the key has a name (the "Viewable to technicians" tick updates the same cache).
+      /const contactsKey = \["contact-log", "ticket", jobId\];[\s\S]*?queryKey: contactsKey,[\s\S]{0,260}staleTime: FIELD_SEEDED_MS,/,
     );
     const sections = read("src/components/service/ticket-field-sections.tsx");
     expect(sections).toMatch(

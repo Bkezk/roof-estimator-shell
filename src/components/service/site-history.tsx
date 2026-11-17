@@ -10,13 +10,15 @@
  *    on My tickets under the address (left out when there is none — the card stays short) and
  *    on the close-out's header.
  *  * HistoryFold — "History at this property (N)", a folding section that starts closed; the
- *    strip is its header summary. One row per earlier ticket at the same property, newest first,
- *    the same named spot first with a "same spot" tag: date, type, description, each repair's
- *    problem → work completed, the closing notes, the inspection outcome, and ALL its photos as
- *    thumbnails. A tap opens the ticket's own viewer (photo-markup.tsx PhotoLightbox) read-only,
- *    with arrows / a swipe between that ticket's photos. "Open" (the earlier ticket) only for
- *    someone who can read it — a technician-only user sees no link and the row says nothing
- *    about it: it already carries everything.
+ *    strip is its header summary. One SHORT row per earlier ticket at the same property (owner,
+ *    Nov 17), newest first, the same named spot first with a "same spot" tag: date, type,
+ *    description, what an inspection flagged, the outcome. A tap on the row opens that ticket's
+ *    pop-up (HistoryDetail): ALL its photos as thumbnails, its Special instructions, each
+ *    repair's what was wrong and what was done, the closing notes, the inspection's notes, and
+ *    the Activity entries the office ticked "Viewable to technicians" (lib/tech-visible.ts). A
+ *    tap on a photo opens the ticket's own viewer (photo-markup.tsx PhotoLightbox) read-only,
+ *    with arrows / a swipe between that ticket's photos. "Open the ticket" only for someone who
+ *    can read it — a technician-only user sees no link: the pop-up carries everything.
  *  * LastTimeLine — under an inspection checklist item: "Last time: Jun 12 — Issue: cracked
  *    sealant" with the photo taken for that item on the earlier ticket (photos carry item_key,
  *    the checklist item's id, which is the same across tickets).
@@ -29,10 +31,18 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import { History, Loader2, MapPinned, PenLine } from "lucide-react";
+import { ChevronRight, History, Loader2, MapPinned, PenLine } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { isFieldOnly } from "@/lib/access";
 import { OUTCOME_LABELS, type InspectionOutcome } from "@/lib/inspection";
 import { marksSummary, parsePhotoMarkup, photoOrdinals } from "@/lib/photo-annotations";
@@ -40,8 +50,13 @@ import type { JobPhotoRow } from "@/lib/service-field.functions";
 import type { SiteHistorySummary } from "@/lib/service-history";
 import {
   FIRST_TICKET,
+  HISTORY_DETAIL_EMPTY,
   HISTORY_OPEN_PARAM,
   dayText,
+  flaggedHistoryItems,
+  historyDetailIsEmpty,
+  historyNoteHead,
+  historyRowHint,
   historyFoldSummary,
   historyFoldTitle,
   historyStrip,
@@ -285,6 +300,39 @@ export function HistoryFold({
   );
 }
 
+/** A small heading inside the row and the pop-up: "FOUND ON THE INSPECTION". */
+const HEAD = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
+
+/** "Nov 10 · Inspection · #6069 · Done · Ted Tech · North wing": the row's and the pop-up's line. */
+function TicketLine({ ticket, sameSpot }: { ticket: SiteHistoryTicket; sameSpot: boolean }) {
+  const when = historyWhen(ticket);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="font-semibold">{when ? dayText(when) : "No date"}</span>
+      <span className="text-muted-foreground">
+        · {TYPE_LABELS[ticket.service_type as ServiceType] ?? "Other"} · #{ticket.number} ·{" "}
+        {STAGE_LABELS[ticket.stage as ServiceStage] ?? ticket.stage}
+        {ticket.technician_name ? ` · ${ticket.technician_name}` : ""}
+        {ticket.location_name ? ` · ${ticket.location_name}` : ""}
+      </span>
+      {sameSpot && (
+        <span
+          className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+          title="The same spot on the property as this ticket"
+          data-tag="same-spot"
+        >
+          same spot
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One earlier ticket, short (owner, Nov 17: "i just want them to see this"): when and what kind,
+ * the description, what an inspection flagged, the outcome, and what waits behind it. The whole
+ * row is the button: a tap opens the ticket's pop-up with its photos and notes (HistoryDetail).
+ */
 function HistoryRow({
   ticket,
   sameSpot,
@@ -296,73 +344,210 @@ function HistoryRow({
   canOpen: boolean;
   refresh: () => void;
 }) {
-  const when = historyWhen(ticket);
+  const [open, setOpen] = useState(false);
+  const flagged = flaggedHistoryItems(ticket);
   const outcome = ticket.inspection_outcome
     ? (OUTCOME_LABELS[ticket.inspection_outcome as InspectionOutcome] ?? ticket.inspection_outcome)
     : null;
   return (
-    <li className="space-y-2 rounded-md border p-3 text-sm" data-ticket={ticket.id}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold">{when ? dayText(when) : "No date"}</span>
-        <span className="text-muted-foreground">
-          · {TYPE_LABELS[ticket.service_type as ServiceType] ?? "Other"} · #{ticket.number} ·{" "}
-          {STAGE_LABELS[ticket.stage as ServiceStage] ?? ticket.stage}
-          {ticket.technician_name ? ` · ${ticket.technician_name}` : ""}
-          {ticket.location_name ? ` · ${ticket.location_name}` : ""}
-        </span>
-        {sameSpot && (
-          <span
-            className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
-            title="The same spot on the property as this ticket"
-            data-tag="same-spot"
-          >
-            same spot
+    <li data-ticket={ticket.id}>
+      <button
+        type="button"
+        className="block w-full space-y-2 rounded-md border p-3 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-haspopup="dialog"
+        data-history="row"
+        onClick={() => {
+          // The photo links are signed for an hour: fresh ones before the pop-up shows them.
+          refresh();
+          setOpen(true);
+        }}
+      >
+        <TicketLine ticket={ticket} sameSpot={sameSpot} />
+        {ticket.description && <p className="whitespace-pre-line">{ticket.description}</p>}
+        {flagged.length > 0 && (
+          <div data-history="found">
+            <p className={HEAD}>Found on the inspection</p>
+            <ul className="list-disc pl-5">
+              {flagged.map((f) => (
+                <li key={f.key} className="font-medium">
+                  {f.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {outcome && (
+          <p>
+            <span className="text-muted-foreground">Outcome: </span>
+            {outcome}
+          </p>
+        )}
+        <p
+          className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+          data-history="hint"
+        >
+          <span>{historyRowHint(ticket)}</span>
+          <span className="inline-flex items-center gap-0.5 font-medium text-primary">
+            Photos and notes <ChevronRight className="h-3.5 w-3.5" aria-hidden />
           </span>
-        )}
-        {canOpen && (
-          <Link
-            to="/service"
-            search={{ id: ticket.id }}
-            className="ml-auto inline-flex min-h-10 items-center px-1 font-medium text-primary underline-offset-2 hover:underline"
-          >
-            Open
-          </Link>
-        )}
-      </div>
-      {ticket.description && <p className="whitespace-pre-line">{ticket.description}</p>}
-      {ticket.repairs.length > 0 && (
-        <ul className="space-y-1">
-          {ticket.repairs.map((r) => (
-            <li key={r.id}>
-              <span className="font-medium">{r.name}</span>
-              {(r.problem_text || r.resolution_text) && (
-                <span className="text-muted-foreground">
-                  {": "}
-                  {r.problem_text ?? ""}
-                  {r.problem_text && r.resolution_text ? " → " : ""}
-                  {r.resolution_text ?? ""}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {ticket.closing_notes && (
-        <p className="whitespace-pre-line">
-          <span className="text-muted-foreground">Notes: </span>
-          {ticket.closing_notes}
         </p>
-      )}
-      {outcome && (
-        <p>
-          <span className="text-muted-foreground">Outcome: </span>
-          {outcome}
-        </p>
-      )}
-      {ticket.photos.length > 0 && (
-        <PhotoGrid ticket={ticket} photos={ticket.photos} refresh={refresh} />
+      </button>
+      {open && (
+        <HistoryDetail
+          ticket={ticket}
+          sameSpot={sameSpot}
+          canOpen={canOpen}
+          refresh={refresh}
+          onClose={() => setOpen(false)}
+        />
       )}
     </li>
+  );
+}
+
+/**
+ * The earlier ticket's pop-up (owner, Nov 17: "they can click the ticket and itll pop up its
+ * photos and notes from the tickets … and anything with that check box should also show"):
+ * every photo, the ticket's Special instructions, what the inspection flagged with the note on
+ * each row, the inspection's notes, each repair's what was wrong and what was done, the closing
+ * notes, and the Activity entries ticked "Viewable to technicians". No price is in any of it.
+ * "Open the ticket" only for someone who can read it (never a technician-only login).
+ */
+function HistoryDetail({
+  ticket,
+  sameSpot,
+  canOpen,
+  refresh,
+  onClose,
+}: {
+  ticket: SiteHistoryTicket;
+  sameSpot: boolean;
+  canOpen: boolean;
+  refresh: () => void;
+  onClose: () => void;
+}) {
+  const flagged = flaggedHistoryItems(ticket);
+  const outcome = ticket.inspection_outcome
+    ? (OUTCOME_LABELS[ticket.inspection_outcome as InspectionOutcome] ?? ticket.inspection_outcome)
+    : null;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex max-h-[90svh] w-[calc(100vw-1rem)] max-w-2xl flex-col gap-0 p-0"
+        data-history-detail={ticket.id}
+      >
+        <DialogHeader className="space-y-1 border-b px-4 py-3 text-left">
+          <DialogTitle>
+            {TYPE_LABELS[ticket.service_type as ServiceType] ?? "Ticket"} #{ticket.number}
+          </DialogTitle>
+          <DialogDescription asChild>
+            <div className="text-sm">
+              <TicketLine ticket={ticket} sameSpot={sameSpot} />
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-sm">
+          {ticket.description && <p className="whitespace-pre-line">{ticket.description}</p>}
+          {ticket.photos.length > 0 && (
+            <section className="space-y-1.5" data-history="photos">
+              <p className={HEAD}>Photos ({ticket.photos.length})</p>
+              <PhotoGrid ticket={ticket} photos={ticket.photos} refresh={refresh} />
+            </section>
+          )}
+          {ticket.special_instructions && (
+            <section className="space-y-1" data-history="special-instructions">
+              <p className={HEAD}>Special instructions</p>
+              <p className="whitespace-pre-line">{ticket.special_instructions}</p>
+            </section>
+          )}
+          {flagged.length > 0 && (
+            <section className="space-y-1" data-history="found">
+              <p className={HEAD}>Found on the inspection</p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {flagged.map((f) => (
+                  <li key={f.key}>
+                    <span className="font-medium">{f.label}</span>
+                    {f.note && <span className="whitespace-pre-line">: {f.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {ticket.inspection_notes && (
+            <section className="space-y-1" data-history="inspection-notes">
+              <p className={HEAD}>Inspection notes</p>
+              <p className="whitespace-pre-line">{ticket.inspection_notes}</p>
+            </section>
+          )}
+          {ticket.repairs.length > 0 && (
+            <section className="space-y-1" data-history="repairs">
+              <p className={HEAD}>Repairs</p>
+              <ul className="space-y-1.5">
+                {ticket.repairs.map((r) => (
+                  <li key={r.id}>
+                    <p className="font-medium">{r.name}</p>
+                    {r.problem_text && (
+                      <p className="whitespace-pre-line">
+                        <span className="text-muted-foreground">What was wrong: </span>
+                        {r.problem_text}
+                      </p>
+                    )}
+                    {r.resolution_text && (
+                      <p className="whitespace-pre-line">
+                        <span className="text-muted-foreground">What was done: </span>
+                        {r.resolution_text}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {ticket.closing_notes && (
+            <section className="space-y-1" data-history="closing-notes">
+              <p className={HEAD}>Closing notes</p>
+              <p className="whitespace-pre-line">{ticket.closing_notes}</p>
+            </section>
+          )}
+          {ticket.shared_notes.length > 0 && (
+            <section className="space-y-1" data-history="shared-notes">
+              <p className={HEAD}>From the ticket's activity</p>
+              <ul className="space-y-1.5">
+                {ticket.shared_notes.map((n) => (
+                  <li key={n.id}>
+                    <p className="text-xs text-muted-foreground">{historyNoteHead(n)}</p>
+                    {n.note && <p className="whitespace-pre-line">{n.note}</p>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {outcome && (
+            <p>
+              <span className="text-muted-foreground">Outcome: </span>
+              {outcome}
+            </p>
+          )}
+          {historyDetailIsEmpty(ticket) && (
+            <p className="text-muted-foreground" data-history="empty">
+              {HISTORY_DETAIL_EMPTY}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="flex-row items-center justify-end gap-2 border-t px-4 py-3">
+          {canOpen && (
+            <Button asChild variant="outline" className="h-10">
+              <Link to="/service" search={{ id: ticket.id }}>
+                Open the ticket
+              </Link>
+            </Button>
+          )}
+          <Button type="button" className="h-10 min-w-24" data-history-close onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

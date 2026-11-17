@@ -44,6 +44,7 @@ const contacts: ContactLogRow[] = [
     by_user: "u2",
     by_name: "Bob Tech",
     at: "2026-10-22T09:30:00+00:00",
+    tech_visible: false,
   },
   {
     id: 1,
@@ -54,6 +55,7 @@ const contacts: ContactLogRow[] = [
     by_user: "u1",
     by_name: "Dana Office",
     at: "2026-10-20T14:00:00+00:00",
+    tech_visible: false,
   },
 ];
 const events: JobEventRow[] = [

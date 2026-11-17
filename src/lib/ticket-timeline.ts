@@ -22,6 +22,7 @@ import {
   type ContactLogRow,
 } from "@/lib/contact-log.functions";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
+import { canBeTechVisible } from "@/lib/tech-visible";
 import type { JobEventRow } from "@/lib/service-field.functions";
 
 /** What the row's icon stands for; the component maps each to a lucide icon. */
@@ -55,6 +56,12 @@ export interface TimelineEntry {
   icon: TimelineIcon;
   /** A "Service done" row stands out (owner, Oct 14). */
   done: boolean;
+  /**
+   * "Viewable to technicians" (owner, Nov 17; lib/tech-visible.ts): the contact log row's id and
+   * its tick, on an entry a person made. Absent on everything else (the site's own lines, the
+   * close-out's summary, the ticket's events), which carry no tick.
+   */
+  share?: { id: number; on: boolean } | undefined;
 }
 
 /** About eight rows' height, then the list scrolls inside its own box (owner, Oct 27). */
@@ -105,7 +112,9 @@ const sameKind = (a: TimelineEntry, b: TimelineEntry) =>
   a.text === null &&
   b.text === null &&
   !a.done &&
-  !b.done;
+  !b.done &&
+  // A ticked entry and an unticked one are not look-alikes (Nov 17).
+  (a.share?.on ?? false) === (b.share?.on ?? false);
 
 /**
  * Collapse consecutive look-alike entries (newest first in, newest first out). A row with text
@@ -183,6 +192,7 @@ export function contactEntry(r: ContactLogRow): TimelineEntry {
     byName: r.by_name ?? null,
     icon: contactIcon(r.method),
     done: r.method === SERVICE_DONE_METHOD,
+    ...(canBeTechVisible(r.method) ? { share: { id: r.id, on: r.tech_visible === true } } : {}),
   };
 }
 

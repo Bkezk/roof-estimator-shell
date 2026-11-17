@@ -10,8 +10,9 @@
  * separate box; it writes a contact-log comment (logContact, method "comment"; @mentions tell
  * people), the path every viewer of the ticket already had.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import {
   CalendarDays,
   Camera,
@@ -30,7 +31,12 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { listContactLog } from "@/lib/contact-log.functions";
+import {
+  listContactLog,
+  setContactTechVisible,
+  type ContactLogRow,
+} from "@/lib/contact-log.functions";
+import { choosesTechVisible, TECH_VISIBLE_HELP, TECH_VISIBLE_LABEL } from "@/lib/tech-visible";
 import { listJobEvents } from "@/lib/service-field.functions";
 import {
   ACTIVITY_EMPTY,
@@ -72,11 +78,35 @@ const ICONS: Record<TimelineIcon, typeof Phone> = {
 
 /** The whole block: heading, the contact buttons, the note box, the list. */
 export function TicketActivity({ jobId }: { jobId: string }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
+  const qc = useQueryClient();
   const contactsFn = useServerFn(listContactLog);
+  const shareFn = useServerFn(setContactTechVisible);
+  const contactsKey = ["contact-log", "ticket", jobId];
+  // "Viewable to technicians" on an entry already written (owner, Nov 17; lib/tech-visible.ts):
+  // the office ticks or unticks it. The row changes at once and goes back if the save fails.
+  const share = useMutation({
+    mutationFn: (v: { id: number; on: boolean }) => shareFn({ data: v }),
+    onMutate: (v) => {
+      const before = qc.getQueryData<ContactLogRow[]>(contactsKey);
+      qc.setQueryData<ContactLogRow[]>(contactsKey, (old) =>
+        old?.map((r) => (r.id === v.id ? { ...r, tech_visible: v.on } : r)),
+      );
+      return { before };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.before) qc.setQueryData(contactsKey, ctx.before);
+      toast.error(`Could not change who sees that entry: ${errText(e)}`, { duration: 12_000 });
+    },
+    onSuccess: (r) =>
+      toast.success(
+        r.tech_visible ? "Technicians can see that entry" : "Technicians can no longer see it",
+      ),
+    onSettled: () => void qc.invalidateQueries({ queryKey: contactsKey }),
+  });
   const eventsFn = useServerFn(listJobEvents);
   const contacts = useQuery({
-    queryKey: ["contact-log", "ticket", jobId],
+    queryKey: contactsKey,
     queryFn: () => contactsFn({ data: { kind: "ticket", item_id: jobId } }),
     enabled: !!session,
     // The ticket's one read brought these (Nov 10): no second ask as the block mounts.
@@ -100,6 +130,7 @@ export function TicketActivity({ jobId }: { jobId: string }) {
         entries={entries}
         error={contacts.error ?? events.error}
         loading={!entries && (contacts.isLoading || events.isLoading)}
+        onShare={choosesTechVisible(profile) ? (id, on) => share.mutate({ id, on }) : undefined}
       />
     </section>
   );
@@ -114,10 +145,16 @@ export function ActivityList({
   entries,
   error,
   loading,
+  onShare,
 }: {
   entries: readonly TimelineEntry[] | null;
   error?: unknown;
   loading?: boolean | undefined;
+  /**
+   * The office's "Viewable to technicians" checkbox on each entry a person made (Nov 17). Left
+   * out for a technician-only login, who is shown no checkbox.
+   */
+  onShare?: ((id: number, on: boolean) => void) | undefined;
 }) {
   if (error)
     return (
@@ -158,6 +195,22 @@ export function ActivityList({
                   {r.byName ? ` · ${r.byName}` : ""}
                 </span>
                 {r.text ? <span className="whitespace-pre-line"> — {r.text}</span> : null}
+                {/* One entry, not a run of look-alikes: a run has no single tick to show. */}
+                {onShare && r.share && r.count === 1 && (
+                  <label
+                    className="mt-0.5 flex w-fit cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+                    title={TECH_VISIBLE_HELP}
+                    data-share={r.share.id}
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-primary"
+                      checked={r.share.on}
+                      onChange={(e) => onShare(r.share!.id, e.target.checked)}
+                    />
+                    {TECH_VISIBLE_LABEL}
+                  </label>
+                )}
               </div>
             </li>
           );

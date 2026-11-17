@@ -969,6 +969,7 @@ export type Database = {
           kind: string
           method: string
           note: string | null
+          tech_visible: boolean
         }
         Insert: {
           at?: string
@@ -979,6 +980,7 @@ export type Database = {
           kind: string
           method: string
           note?: string | null
+          tech_visible?: boolean
         }
         Update: {
           at?: string
@@ -989,6 +991,7 @@ export type Database = {
           kind?: string
           method?: string
           note?: string | null
+          tech_visible?: boolean
         }
         Relationships: []
       }
@@ -5372,6 +5375,10 @@ export type Database = {
         Returns: string
       }
       county_code_site_count: { Args: { p_id: string }; Returns: number }
+      contact_log_set_tech_visible: {
+        Args: { p_id: number; p_on: boolean }
+        Returns: boolean
+      }
       crm_last_dispatch_at: { Args: never; Returns: string }
       crm_untouched: {
         Args: never

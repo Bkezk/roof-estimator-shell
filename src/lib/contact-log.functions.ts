@@ -35,6 +35,7 @@ import {
 } from "@/lib/followup-holds";
 import { canManageFollowup } from "@/lib/followup-rules";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
+import { techVisibleOnSave } from "@/lib/tech-visible";
 import { ticketLate } from "@/lib/ticket-reminders";
 import { officeDay } from "@/lib/working-days";
 
@@ -91,12 +92,13 @@ type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 async function myProfile(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
-    .select("role, access, full_name, email")
+    .select("role, access, technician, full_name, email")
     .eq("id", ctx.userId)
     .maybeSingle();
   return {
     role: data?.role ?? null,
     access: data?.access ?? null,
+    technician: data?.technician ?? false,
     name: (data?.full_name ?? "").trim() || data?.email || null,
   };
 }
@@ -142,6 +144,11 @@ const logSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  /**
+   * "Viewable to technicians" (owner, Nov 17; lib/tech-visible.ts): the office's checkbox on a
+   * ticket entry. A technician-only writer's entry is always viewable, whatever is sent.
+   */
+  tech_visible: z.boolean().optional(),
 });
 export type LogContactInput = z.input<typeof logSchema>;
 export const COMMENT_NEEDS_TEXT = "Write the comment first.";
@@ -228,6 +235,12 @@ export const logContact = createServerFn({ method: "POST" })
         note: data.note,
         by_user: context.userId,
         by_name,
+        tech_visible: techVisibleOnSave({
+          profile: p,
+          kind: data.kind,
+          method: data.method,
+          ticked: data.tech_visible,
+        }),
       })
       .select("*")
       .single();
@@ -277,6 +290,26 @@ export const logContact = createServerFn({ method: "POST" })
       await clearFollowupHold(context.supabase, followup.id);
     }
     return { ...row, ...mentions, hold: null };
+  });
+
+/**
+ * Tick or untick "Viewable to technicians" on an entry already on a ticket (owner, Nov 17). The
+ * database decides who may (the office; contact_log_set_tech_visible) and answers what the entry
+ * now holds; its refusal reaches the screen in its own plain words.
+ */
+export const setContactTechVisible = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.number().int().positive(), on: z.boolean() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ id: number; tech_visible: boolean }> => {
+    const { data: now, error } = await context.supabase.rpc("contact_log_set_tech_visible", {
+      p_id: data.id,
+      p_on: data.on,
+    });
+    if (error) throw new Error(error.message);
+    if (now !== data.on) throw new Error("The change was not saved. Try again.");
+    return { id: data.id, tech_visible: now };
   });
 
 export const listContactLog = createServerFn({ method: "GET" })

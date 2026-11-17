@@ -72,6 +72,9 @@ const ticket = (over: Partial<SiteHistoryTicket> & { id: string }): SiteHistoryT
   location_name: null,
   closing_notes: null,
   inspection_outcome: null,
+  special_instructions: null,
+  inspection_notes: null,
+  shared_notes: [],
   technician_name: null,
   inspection_items: [],
   repairs: [],
@@ -453,7 +456,11 @@ describe("on the screens", () => {
     // Oct 21: the field page — no link until the profile is known either (isFieldOnly(null) is
     // false, and the link showed while the profile loaded).
     expect(comp).toContain("const canOpen = !!profile && !isFieldOnly(profile);");
-    expect(comp).toMatch(/\{canOpen && \(\s*<Link[\s\S]*?>\s*Open\s*<\/Link>\s*\)\}/);
+    // Nov 17: the link moved into the ticket's pop-up ("Open the ticket"), still only for
+    // someone who can open it.
+    expect(comp).toMatch(
+      /\{canOpen && \(\s*<Button asChild[\s\S]*?<Link to="\/service"[\s\S]*?Open the ticket\s*<\/Link>/,
+    );
     expect(comp).not.toMatch(/office fixes|the app\b/i);
   });
   it("the inspection step: Last time under an item, on the ticket page and the close-out", () => {

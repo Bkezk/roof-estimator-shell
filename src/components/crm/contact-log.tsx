@@ -42,6 +42,7 @@ import { useAuth } from "@/lib/auth-store";
 import { HOLD_REASON_MAX, holdDateBounds, holdDateProblem } from "@/lib/followup-holds";
 import { shortDay } from "@/lib/followup-rules";
 import { toldSuffix } from "@/lib/mentions";
+import { choosesTechVisible, TECH_VISIBLE_HELP, TECH_VISIBLE_LABEL } from "@/lib/tech-visible";
 import { localYmd } from "@/lib/my-work";
 import {
   COMMENT_METHOD,
@@ -60,6 +61,7 @@ import {
 import { dayText } from "@/lib/ticket-reminders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
@@ -139,6 +141,12 @@ export function LogContactButtons({
   const [note, setNote] = useState("");
   // Owner, Oct 9: "They asked to try again on" — optional; with it, the note is the hold's reason.
   const [tryAgain, setTryAgain] = useState("");
+  // "Viewable to technicians" (owner, Nov 17; lib/tech-visible.ts): on a ticket the office ticks
+  // it to put the entry in the pop-up technicians open from History at this property. A
+  // technician-only login is not asked (their entries always are).
+  const { profile } = useAuth();
+  const asksTechVisible = kind === "ticket" && choosesTechVisible(profile);
+  const [techVisible, setTechVisible] = useState(false);
   const today = localYmd(new Date());
   const bounds = holdDateBounds(today);
   const dateProblem = tryAgain ? holdDateProblem(tryAgain, today) : null;
@@ -161,6 +169,7 @@ export function LogContactButtons({
           method,
           ...(n ? { note: n } : {}),
           ...(tryAgain ? { try_again_on: tryAgain } : {}),
+          ...(asksTechVisible && techVisible ? { tech_visible: true } : {}),
         },
       });
     },
@@ -176,6 +185,7 @@ export function LogContactButtons({
       if (row.mention_error) toast.error(row.mention_error, { duration: 12_000 });
       setNote("");
       setTryAgain("");
+      setTechVisible(false);
       setPicked(null);
       for (const queryKey of REFRESH_KEYS) void qc.invalidateQueries({ queryKey });
       onLogged?.(method);
@@ -280,6 +290,21 @@ export function LogContactButtons({
                     ? `The follow-up waits until ${shortDay(tryAgain)}; this note is the reason.`
                     : "Optional. With a date, the follow-up is on hold until then and this note is the reason.")}
               </p>
+            </div>
+          )}
+          {asksTechVisible && (
+            <div className="space-y-0.5" data-field="tech-visible">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id={`contact-tech-visible-${kind}`}
+                  checked={techVisible}
+                  onCheckedChange={(v) => setTechVisible(v === true)}
+                />
+                <Label htmlFor={`contact-tech-visible-${kind}`} className="text-xs">
+                  {TECH_VISIBLE_LABEL}
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">{TECH_VISIBLE_HELP}</p>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">

@@ -36,6 +36,7 @@ const contact = (
   note: null,
   by_user: BOB,
   by_name: "Bob Tech",
+  tech_visible: false,
   ...over,
 });
 const event = (over: Partial<JobEventRow> & Pick<JobEventRow, "id" | "at">): JobEventRow => ({
