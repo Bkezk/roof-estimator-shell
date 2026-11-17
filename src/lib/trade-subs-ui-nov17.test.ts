@@ -284,6 +284,20 @@ describe("adding, changing and removing a subcontractor line", () => {
     expect(calcTradeBid(blank, JOB).price).toBe(5965.12);
   });
 
+  it("a markup changed on one line moves that line's markup and no other line's", () => {
+    const next = patchLine(WITH_SUBS, "subs", "wash", { markup_pct: 25 });
+    expect(next.subs![0]).toEqual({ ...WASH, markup_pct: 25 });
+    expect(next.subs![1]).toBe(SCAFFOLD);
+    const before = calcTradeBid(WITH_SUBS, JOB);
+    const after = calcTradeBid(next, JOB);
+    // 600.00 of washing at 25% is 150.00 where 10% was 60.00: the price moves by the 90.00.
+    expect(after.subs[0]).toEqual({ ...before.subs[0], markup: 150 });
+    expect(after.subs[1]).toEqual(before.subs[1]);
+    expect(after.markupBase).toBe(before.markupBase);
+    expect(after.price).toBe(5887.12);
+    expect(isDirty(WITH_SUBS, next)).toBe(true);
+  });
+
   it("picking the sub keeps the vendor's id and name together; clearing drops both", () => {
     expect(subVendorPatch({ id: VENDOR, name: "Clean Walls LLC" })).toEqual({
       vendor_id: VENDOR,
@@ -645,6 +659,9 @@ const between = (html: string, from: string, to: string) => {
 const numberBoxes = (html: string) => html.match(/<input[^>]*inputMode="decimal"[^>]*>/g) ?? [];
 const quoteBox = (html: string, id: string) =>
   html.match(new RegExp(`<input[^>]*data-sub-quote="${id}"[^>]*>`))?.[0] ?? "";
+/** The markup box of one line on the bid's main screen (given that line's row). */
+const markupBox = (row: string) =>
+  row.match(/<input[^>]*data-sub-markup-box="[^"]*"[^>]*>/)?.[0] ?? "";
 /** The amount on one line of the totals. */
 const total = (html: string, key: string) =>
   html.match(new RegExp(`data-total="${key}"[\\s\\S]*?tabular-nums">([^<]*)<`))?.[1] ?? null;
@@ -886,8 +903,17 @@ describe("the painting bid with two subs, drawn", () => {
       expect(row).toContain(">What is subbed out</label>");
       expect(row).toContain(">Subcontractor</label>");
       expect(row).toContain('placeholder="Pick from your vendors…"');
-      // One number box a line: the rest is under the bid's rates and lines.
-      expect(numberBoxes(row)).toHaveLength(1);
+      // Two number boxes a line: the quote, and the line's own markup (owner, Nov 17, later
+      // the same day: "can you make the 10% mark up editable per line"; one box before).
+      expect(numberBoxes(row)).toHaveLength(2);
+      expect(row).toContain(">Its own markup</label>");
+    }
+    // The markup box holds the line's own 10; a line with none is blank, never 0.
+    expect(markupBox(washRow)).toContain('value="10"');
+    expect(markupBox(scaffoldRow)).toContain('value=""');
+    for (const row of [washRow, scaffoldRow]) {
+      expect(markupBox(row)).toContain('inputMode="decimal"');
+      expect(markupBox(row)).not.toContain('disabled=""');
     }
     expect(washRow).toContain('aria-label="Remove Pressure washing"');
     expect(scaffoldRow).toContain('aria-label="Remove Scaffolding crew"');
@@ -913,7 +939,7 @@ describe("the painting bid with two subs, drawn", () => {
     expect(washRow).not.toContain("Takes the bid's overhead and profit.");
     expect(scaffoldRow).toContain("Takes the bid's overhead and profit.");
     expect(card).toContain(
-      "To charge by a measurement or set a line's own markup, open Change this bid's rates and lines below.",
+      "Leave a markup blank and the line takes the bid's overhead and profit. To charge by a measurement, open Change this bid's rates and lines below.",
     );
     expect(html).toContain("Change this bid's rates and lines</button>");
     // Both lines are priced: nothing is waiting.
@@ -1207,14 +1233,40 @@ describe("pins on the source", () => {
     expect(flat(rows)).toMatch(
       /value=\{s\.markup_pct\} max=\{BOX_MAX\.pct\} disabled=\{props\.disabled\} after="%"/,
     );
-    // The main screen's row: the one box.
+    // The main screen's row: the quote, and the line's own markup (owner, Nov 17, later the
+    // same day: "can you make the 10% mark up editable per line"; it was one box before).
     const quoteRow = EDITOR.slice(
       EDITOR.indexOf("function SubQuoteRow("),
       EDITOR.indexOf("export function SubQuoteRows("),
     );
-    expect(quoteRow.match(/<AmountBox/g)).toHaveLength(1);
+    expect(quoteRow.match(/<AmountBox/g)).toHaveLength(2);
     expect(quoteRow).toContain('hooks={{ "data-sub-quote": s.id }}');
     expect(quoteRow).toContain("max={BOX_MAX.amount}");
+  });
+
+  it("the markup of a sub line is typed on the bid's main screen, line by line", () => {
+    const quoteRow = EDITOR.slice(
+      EDITOR.indexOf("function SubQuoteRow("),
+      EDITOR.indexOf("export function SubQuoteRows("),
+    );
+    // A percent box of its own on each row, held to the same most as every percent box.
+    expect(flat(quoteRow)).toMatch(
+      /<Field label="Its own markup" htmlFor=\{`\$\{id\}-markup`\}> <AmountBox id=\{`\$\{id\}-markup`\} value=\{s\.markup_pct\} max=\{BOX_MAX\.pct\} disabled=\{props\.disabled\} after="%"/,
+    );
+    expect(quoteRow).toContain('hooks={{ "data-sub-markup-box": s.id }}');
+    // It changes that line only, and blank is handed on as blank (null), never as 0.
+    expect(quoteRow).toContain("onChange={(markup_pct) => props.onPatch({ markup_pct })}");
+    // The sentence under the row still says which way the line is priced.
+    expect(quoteRow).toContain("{subMarkupWords(s)}");
+    // The note under the rows no longer sends anyone elsewhere for the markup.
+    const rows = EDITOR.slice(
+      EDITOR.indexOf("export function SubQuoteRows("),
+      EDITOR.indexOf("// ── The editor"),
+    );
+    expect(flat(rows)).toContain(
+      "Leave a markup blank and the line takes the bid&apos;s overhead and profit.",
+    );
+    expect(flat(rows)).not.toContain("set a line&apos;s own markup, open");
   });
 
   it("nothing new has a fixed width: on a 390 px phone the rows stack and wrap", () => {

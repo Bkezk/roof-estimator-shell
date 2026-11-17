@@ -798,10 +798,10 @@ function AddButton(props: {
 // ── A bid's subcontractor quotes ───────────────────────────────────────────────────────────────
 
 /**
- * One sub line as the bid's main screen shows it: what, who, and the ONE number the office types
- * when the quote comes in (the quote of a set-quote line, the rate of a line charged by a
- * measure). Whether it is one or the other, and the line's own markup, are the full row's
- * (`SubRow`, under "Change this bid's rates and lines"); here they are only said.
+ * One sub line as the bid's main screen shows it: what, who, the number the office types when
+ * the quote comes in (the quote of a set-quote line, the rate of a line charged by a measure)
+ * and the line's own markup. Whether the line is a set quote or goes by a measure is the full
+ * row's (`SubRow`, under "Change this bid's rates and lines").
  */
 function SubQuoteRow(props: {
   sub: TradeSub;
@@ -820,7 +820,7 @@ function SubQuoteRow(props: {
       <div className="flex items-start gap-2">
         {/* By the width of the window, like the job's own boxes above it: this card is always
             the full width of the bid. One column on a phone. */}
-        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="What is subbed out" htmlFor={`${id}-name`}>
             <Input
               id={`${id}-name`}
@@ -854,6 +854,20 @@ function SubQuoteRow(props: {
               disabled={props.disabled}
               hooks={{ "data-sub-quote": s.id }}
               onChange={(n) => props.onPatch(flat ? { amount: n } : { rate: n })}
+            />
+          </Field>
+          {/* The line's own markup, typed here too (owner, Nov 17: "can you make the 10% mark up
+              editable per line"). Blank is not 0: a blank line takes the bid's overhead and
+              profit, and the sentence under the row says which it is. */}
+          <Field label="Its own markup" htmlFor={`${id}-markup`}>
+            <AmountBox
+              id={`${id}-markup`}
+              value={s.markup_pct}
+              max={BOX_MAX.pct}
+              disabled={props.disabled}
+              after="%"
+              hooks={{ "data-sub-markup-box": s.id }}
+              onChange={(markup_pct) => props.onPatch({ markup_pct })}
             />
           </Field>
         </div>
@@ -912,8 +926,8 @@ export function SubQuoteRows(props: {
       ))}
       {subs.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          To charge by a measurement or set a line&apos;s own markup, open Change this bid&apos;s
-          rates and lines below.
+          Leave a markup blank and the line takes the bid&apos;s overhead and profit. To charge by a
+          measurement, open Change this bid&apos;s rates and lines below.
         </p>
       )}
       <Button
