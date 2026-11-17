@@ -274,6 +274,12 @@
 .text-\[13px\] {
   font-size: calc(13px * var(--jbk-text-scale, 1));
 }
+.text-\[15px\] {
+  font-size: calc(15px * var(--jbk-text-scale, 1));
+}
+.text-\[16px\] {
+  font-size: calc(16px * var(--jbk-text-scale, 1));
+}
 .text-\[0\.8rem\] {
   font-size: calc(0.8rem * var(--jbk-text-scale, 1));
 }

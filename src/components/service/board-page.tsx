@@ -14,8 +14,12 @@
  * Oct 9, the office's (`dispatchesTickets`; owner: "lets make office users able to create,
  * dispatch, and move a tickets date but make that activity logged" — the database logs every
  * ticket write to its History and a date move to its Timeline); assignServiceJob refuses anyone
- * else. Drag and drop is native HTML5 (desktop); on a phone the grid scrolls sideways and a tap
- * opens the ticket.
+ * else. Drag and drop on the week grid is native HTML5 (a mouse).
+ *
+ * On a phone the board is another screen (owner, Nov 17; lib/board-phone.ts,
+ * components/service/board-phone.tsx): one day at a time, tickets moved by holding and dragging
+ * with a finger, and a tap opens the ticket's details over the board. It draws the same tickets
+ * and makes the same single write (`assign` below).
  *
  * Owner, Oct 9: a chip dropped on "Prev" / "Next" moves the ticket a week back or forward for
  * the same technician in one drag (one write, the stage stays Scheduled); a chip opens the
@@ -32,6 +36,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { PhoneBoard } from "@/components/service/board-phone";
 import { RateBadge } from "@/components/service/rate-badge";
 import { ServiceTabs } from "@/components/service/service-tabs";
 import { toast } from "sonner";
@@ -57,6 +62,14 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets } from "@/lib/access";
+import {
+  NEXT_WEEK_KEY,
+  PHONE_BOARD_HINT,
+  PHONE_BOARD_HINT_READ,
+  PREV_WEEK_KEY,
+  moveSummary,
+  type MovePlan,
+} from "@/lib/board-phone";
 import { cellTone, rowHeaderTone, shadedRow } from "@/lib/board-rows";
 import { weekLabel } from "@/lib/board-week";
 import {
@@ -81,6 +94,7 @@ import { Input } from "@/components/ui/input";
 import { chipBadge, chipDescription, chipFacts, chipPlace, chipTitleLines } from "@/lib/board-chip";
 import { sortCell } from "@/lib/rate-urgency";
 import { plainErrText } from "@/lib/plain-error";
+import { usePhoneBoard } from "@/hooks/use-phone-board";
 
 const errText = plainErrText;
 const asStage = (s: string): ServiceStage =>
@@ -123,6 +137,8 @@ interface Assign {
   technician_id: string | null;
   technician_name: string | null;
   scheduled_date: string | null;
+  /** Said once the move is saved (the phone board: the ticket may have left the screen). */
+  say?: string;
 }
 
 export function BoardPage({ week }: { week?: string | undefined }) {
@@ -133,6 +149,8 @@ function Board({ week }: { week?: string | undefined }) {
   const { session, profile } = useAuth();
   // Dispatch is a manager's and the office's (owner, Oct 1 / Oct 9); a technician reads the board.
   const dispatch = dispatchesTickets(profile);
+  // A phone gets its own board (owner, Nov 17); undefined until the browser has said which.
+  const phone = usePhoneBoard();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const listFn = useServerFn(listBoardJobs);
@@ -198,10 +216,11 @@ function Board({ week }: { week?: string | undefined }) {
       if (ctx?.prev) qc.setQueryData(boardKey, ctx.prev);
       toast.error(`Could not move ticket #${a.job.number}: ${errText(e)}`, { duration: 10_000 });
     },
-    onSuccess: (row) => {
+    onSuccess: (row, a) => {
       qc.setQueryData<ServiceJobWithTech[]>(boardKey, (old) =>
         (old ?? []).map((j) => (j.id === row.id ? row : j)),
       );
+      if (a.say) toast.success(a.say);
     },
     onSettled: (_r, _e, a) => {
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
@@ -348,6 +367,20 @@ function Board({ week }: { week?: string | undefined }) {
       scheduled_date: shiftDays(job.scheduled_date, weeks * 7),
     });
   };
+  // The phone board's move (a finger's drop, or Move in the details pop-up): the same write.
+  const movePhone = (job: ServiceJobWithTech, plan: MovePlan) => {
+    const name = plan.technician_id
+      ? (nameOf(plan.technician_id) ??
+        (plan.technician_id === job.technician_id ? job.technician_name : null))
+      : null;
+    assign.mutate({
+      job,
+      technician_id: plan.technician_id,
+      technician_name: name,
+      scheduled_date: plan.scheduled_date,
+      say: moveSummary(job.number, name, plan),
+    });
+  };
   const weekDropClass = (key: string) =>
     over === key ? "border-primary bg-primary/10 ring-2 ring-primary" : "";
 
@@ -362,9 +395,13 @@ function Board({ week }: { week?: string | undefined }) {
             <CalendarDays className="h-6 w-6" /> Tech Board
           </h1>
           <p className="text-sm text-muted-foreground">
-            {dispatch
-              ? "Drag a ticket onto a technician's day to schedule it; drag it back to the left to unassign. Click a ticket to open it."
-              : "Who is where this week. Click a ticket to open it."}
+            {phone
+              ? dispatch
+                ? PHONE_BOARD_HINT
+                : PHONE_BOARD_HINT_READ
+              : dispatch
+                ? "Drag a ticket onto a technician's day to schedule it; drag it back to the left to unassign. Click a ticket to open it."
+                : "Who is where this week. Click a ticket to open it."}
           </p>
           <div className="mt-2">
             <ServiceTabs />
@@ -386,7 +423,8 @@ function Board({ week }: { week?: string | undefined }) {
           variant="outline"
           size="sm"
           aria-label="Previous week"
-          className={weekDropClass("prev-week")}
+          data-drop={dispatch ? PREV_WEEK_KEY : undefined}
+          className={`${weekDropClass("prev-week")} ${phone ? "h-[44px] px-3" : ""}`}
           title={
             dispatch ? "Previous week. Drop a ticket here to move it a week earlier." : undefined
           }
@@ -401,6 +439,7 @@ function Board({ week }: { week?: string | undefined }) {
           variant="outline"
           size="sm"
           disabled={days.includes(today)}
+          className={phone ? "h-[44px] px-3" : undefined}
           onClick={() => goWeek(null)}
         >
           This week
@@ -409,7 +448,8 @@ function Board({ week }: { week?: string | undefined }) {
           variant="outline"
           size="sm"
           aria-label="Next week"
-          className={weekDropClass("next-week")}
+          data-drop={dispatch ? NEXT_WEEK_KEY : undefined}
+          className={`${weekDropClass("next-week")} ${phone ? "h-[44px] px-3" : ""}`}
           title={dispatch ? "Next week. Drop a ticket here to move it a week later." : undefined}
           onClick={() => goWeek(addDays(monday, 7))}
           onDragOver={(e) => allowDrop(e, "next-week")}
@@ -430,10 +470,31 @@ function Board({ week }: { week?: string | undefined }) {
         <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           Could not load the board ({errText(error)}). Try refreshing, or sign in again.
         </p>
-      ) : loading || !jobsQ.data || !techsQ.data ? (
+      ) : loading || phone === undefined || !jobsQ.data || !techsQ.data ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the board…
         </p>
+      ) : phone ? (
+        <PhoneBoard
+          days={days}
+          today={today}
+          jobs={jobs}
+          techRows={techRows}
+          otherRows={otherRows}
+          rail={rail}
+          finished={finished}
+          unassignedTotal={unassignedTotal}
+          finishedTotal={finishedTotal}
+          search={search}
+          onSearch={setSearch}
+          dispatch={dispatch}
+          cellJobs={cellJobs}
+          onMove={movePhone}
+          dragId={dragId}
+          over={over}
+          onDragId={setDragId}
+          onOver={setOver}
+        />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
           {/* Unassigned rail — above the grid on a phone. */}

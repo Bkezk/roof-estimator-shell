@@ -344,8 +344,13 @@ describe("S10. cross-week reschedule in one drag", () => {
     expect(board).toMatch(
       /aria-label="Next week"[\s\S]*?onDragOver=\{\(e\) => allowDrop\(e, "next-week"\)\}[\s\S]*?onDrop=\{\(e\) => dropWeek\(e, 1\)\}/,
     );
-    expect(board).toContain('className={weekDropClass("prev-week")}');
-    expect(board).toContain('className={weekDropClass("next-week")}');
+    // Nov 17: the class also carries the phone board's taller button (board-phone-nov17.test.ts).
+    expect(board).toContain(
+      'className={`${weekDropClass("prev-week")} ${phone ? "h-[44px] px-3" : ""}`}',
+    );
+    expect(board).toContain(
+      'className={`${weekDropClass("next-week")} ${phone ? "h-[44px] px-3" : ""}`}',
+    );
   });
 });
 
