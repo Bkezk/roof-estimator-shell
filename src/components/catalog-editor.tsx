@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, Save, Lock, X } from "lucide-react";
+import { Plus, Trash2, Lock, X } from "lucide-react";
 
 import {
   deleteItemNumber,
@@ -17,6 +17,7 @@ import {
   savePricingScreen,
   type CatalogScreenData,
 } from "@/lib/admin-pricing.functions";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -253,13 +254,6 @@ export function CatalogEditor({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
-
       {!hideHeader && (
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
@@ -555,6 +549,7 @@ export function CatalogEditor({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }

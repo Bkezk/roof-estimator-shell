@@ -2,12 +2,11 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnderlaymentEditor, TearoffEditor } from "@/components/rdl-underlayment-tearoff";
 
 import { getRdlCombos, saveRdlCombo, type RdlData } from "@/lib/admin-rdl.functions";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,13 +117,6 @@ function MembraneEditor() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
-
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-2">
           <Label className="text-sm">Roof system &amp; attachment</Label>
@@ -668,6 +660,7 @@ function MembraneEditor() {
           </Card>
         )}
       </div>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }

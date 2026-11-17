@@ -158,7 +158,7 @@ function DocumentsAdminPage() {
         onValueChange={(v) => navigate({ search: { tab: v as DocumentsTab }, replace: true })}
         className="space-y-4"
       >
-        <TabsList className="flex-wrap">
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="modules">Saved snippets</TabsTrigger>
           <TabsTrigger value="pdfs">PDF library</TabsTrigger>

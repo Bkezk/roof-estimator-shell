@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { ADHESIVE_COVERAGE_GROUPS, ADHESIVE_GROUPS_LIST_ID } from "@/lib/adhesive-groups";
 import { getPricingScreen, savePricingScreen } from "@/lib/admin-pricing.functions";
@@ -11,6 +11,7 @@ import {
   mergeAdhesiveProducts,
   type AdhesiveProduct,
 } from "@/lib/non-dl-adhesives";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -168,10 +169,6 @@ export function AdhesivesTab({ productFilter, newProductGroup }: AdhesivesTabPro
             </Button>
           </div>
         </div>
-        <Button onClick={save} disabled={saving || !draft}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
       </div>
 
       {product && (
@@ -342,6 +339,7 @@ export function AdhesivesTab({ productFilter, newProductGroup }: AdhesivesTabPro
           </CardContent>
         </Card>
       )}
+      <SaveChangesBar saving={saving} onSave={save} disabled={!draft} />
     </div>
   );
 }

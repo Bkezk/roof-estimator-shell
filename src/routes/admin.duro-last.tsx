@@ -39,7 +39,7 @@ function DuroLastPage() {
         onValueChange={(v) => navigate({ search: { tab: v as DlTab }, replace: true })}
         className="space-y-4"
       >
-        <TabsList className="flex-wrap">
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="catalog">Catalog</TabsTrigger>
           <TabsTrigger value="adhesives">Adhesives</TabsTrigger>
           <TabsTrigger value="metals">Exceptional Metals</TabsTrigger>

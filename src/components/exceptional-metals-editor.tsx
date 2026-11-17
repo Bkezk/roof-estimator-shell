@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { getPricingScreen, savePricingScreen } from "@/lib/admin-pricing.functions";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -215,15 +216,8 @@ export function ExceptionalMetalsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving || !draft}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
-
       <Tabs defaultValue="gutters" className="space-y-4">
-        <TabsList className="flex-wrap">
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="gutters">Gutters</TabsTrigger>
           <TabsTrigger value="downspouts">Downspouts</TabsTrigger>
           <TabsTrigger value="pitch_pans">Pitch Pans</TabsTrigger>
@@ -433,6 +427,7 @@ export function ExceptionalMetalsTab() {
           </Card>
         </TabsContent>
       </Tabs>
+      <SaveChangesBar saving={saving} onSave={save} disabled={!draft} />
     </div>
   );
 }

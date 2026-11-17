@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import {
   getLaborEngines,
@@ -15,6 +15,7 @@ import {
   type LaborEngines,
   type LaborTemplate,
 } from "@/lib/admin-labor.functions";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,17 +53,6 @@ export const Route = createFileRoute("/admin/labor")({
 
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 
-function SaveBar({ saving, onSave }: { saving: boolean; onSave: () => void }) {
-  return (
-    <div className="flex justify-end">
-      <Button onClick={onSave} disabled={saving}>
-        <Save className="mr-2 h-4 w-4" />
-        {saving ? "Saving…" : "Save changes"}
-      </Button>
-    </div>
-  );
-}
-
 function LaborPage() {
   const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -92,7 +82,7 @@ function LaborPage() {
         onValueChange={(v) => navigate({ search: { tab: v as LaborTab }, replace: true })}
         className="space-y-4"
       >
-        <TabsList className="flex-wrap">
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="setup">Setup Times</TabsTrigger>
           <TabsTrigger value="inspection">Inspection Times</TabsTrigger>
           <TabsTrigger value="templates">Labor Templates</TabsTrigger>
@@ -148,8 +138,6 @@ function SetupTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void }
   };
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Setup times</CardTitle>
@@ -232,6 +220,7 @@ function SetupTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void }
           </Button>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -256,8 +245,6 @@ function InspectionTab({ data, onSaved }: { data: LaborEngines; onSaved: () => v
   };
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Inspection times</CardTitle>
@@ -328,6 +315,7 @@ function InspectionTab({ data, onSaved }: { data: LaborEngines; onSaved: () => v
           </Button>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -363,8 +351,6 @@ function TemplatesTab({ data, onSaved }: { data: LaborEngines; onSaved: () => vo
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <p className="text-sm text-muted-foreground">
         A template is a set of percent adjustments, one per labor area, written into every item of a
         bid when the template is selected (and seeded into new items): 0 = no change, 10 = 10% more
@@ -438,6 +424,7 @@ function TemplatesTab({ data, onSaved }: { data: LaborEngines; onSaved: () => vo
           </CardContent>
         </Card>
       ))}
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -473,8 +460,6 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
   };
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Curb labor</CardTitle>
@@ -588,6 +573,7 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
           </div>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -621,8 +607,6 @@ function ParapetTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void
   };
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Parapet labor</CardTitle>
@@ -677,6 +661,7 @@ function ParapetTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void
           </Table>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }

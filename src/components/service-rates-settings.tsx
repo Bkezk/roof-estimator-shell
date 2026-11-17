@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { SETUP_HISTORY_KEY, SetupHistory } from "@/components/setup-history";
 import { Check, Loader2, Save } from "lucide-react";
 
@@ -466,17 +467,28 @@ export function ServiceRatesSettings() {
               </div>
             </section>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" disabled={!dirty || save.isPending}>
-                {save.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            {/* Save stays at the bottom of the window while the rates are scrolled (owner,
+                Nov 17: the same bar as a trade bid's, save-bar.tsx). */}
+            <SaveBar>
+              <div className="min-w-0 flex-1 text-sm" data-save-note>
+                {dirty ? (
+                  <p>You have changes that are not saved.</p>
                 ) : (
-                  <Save className="mr-2 h-4 w-4" />
+                  <p className="text-muted-foreground">All changes are saved.</p>
                 )}
-                Save
-              </Button>
-              {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
-            </div>
+              </div>
+              <div className={SAVE_BAR_ACTIONS}>
+                <Button
+                  type="submit"
+                  className="h-10 min-w-24"
+                  data-save
+                  disabled={!dirty || save.isPending}
+                >
+                  {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+                  Save
+                </Button>
+              </div>
+            </SaveBar>
           </form>
         )}
         <SetupHistory tab="rates" />

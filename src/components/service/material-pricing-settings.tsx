@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { SETUP_HISTORY_KEY, SetupHistory } from "@/components/setup-history";
 import {
   Check,
@@ -216,22 +217,6 @@ export function MaterialPricingSettings() {
       return next;
     });
 
-  const saveButton = (
-    <Button
-      type="button"
-      size="sm"
-      disabled={!dirty || save.isPending}
-      onClick={() => save.mutate()}
-    >
-      {save.isPending ? (
-        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-      ) : (
-        <Save className="mr-1 h-4 w-4" />
-      )}
-      Save material pricing
-    </Button>
-  );
-
   return (
     <Card>
       <CardHeader>
@@ -303,12 +288,6 @@ export function MaterialPricingSettings() {
                   />
                   Show {hiddenCount} hidden
                 </label>
-              )}
-              {dirty && (
-                <div className="flex items-center gap-2">
-                  {saveButton}
-                  <span className="text-xs text-muted-foreground">Unsaved changes</span>
-                </div>
               )}
             </div>
             <datalist id="material-groups">
@@ -470,7 +449,30 @@ export function MaterialPricingSettings() {
                 {searching ? `No material matches “${filter}”.` : "No material to show."}
               </p>
             )}
-            {dirty && <div className="flex justify-end">{saveButton}</div>}
+            {/* Save stays at the bottom of the window while the long list is scrolled (owner,
+                Nov 17: the same bar as a trade bid's, save-bar.tsx). It took the place of a Save
+                button above the list and another under it, both shown only after a change. */}
+            <SaveBar>
+              <div className="min-w-0 flex-1 text-sm" data-save-note>
+                {dirty ? (
+                  <p>You have changes that are not saved.</p>
+                ) : (
+                  <p className="text-muted-foreground">All changes are saved.</p>
+                )}
+              </div>
+              <div className={SAVE_BAR_ACTIONS}>
+                <Button
+                  type="button"
+                  className="h-10 min-w-24"
+                  data-save
+                  disabled={!dirty || save.isPending}
+                  onClick={() => save.mutate()}
+                >
+                  {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+                  Save material pricing
+                </Button>
+              </div>
+            </SaveBar>
           </>
         )}
         <SetupHistory tab="materials" />

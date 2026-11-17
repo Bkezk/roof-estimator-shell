@@ -56,6 +56,7 @@ import { blankOrNumber } from "@/lib/number-field-view";
 import { ATTENTION_DEFAULTS } from "@/lib/owner-attention";
 import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
 import { listAssigneeOptions } from "@/lib/opportunities.functions";
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -348,17 +349,6 @@ export function RemindersSettings() {
     save.mutate();
   };
 
-  const saveButton = (
-    <Button type="submit" form="reminder-settings" disabled={save.isPending || !settings.data}>
-      {save.isPending ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <Save className="mr-2 h-4 w-4" />
-      )}
-      Save
-    </Button>
-  );
-
   return (
     <div className="space-y-6">
       <Card>
@@ -374,7 +364,6 @@ export function RemindersSettings() {
               numbers apply from its next reminder.
             </CardDescription>
           </div>
-          {saveButton}
         </CardHeader>
         <CardContent>
           {settings.error ? (
@@ -544,7 +533,25 @@ export function RemindersSettings() {
                   authorized.
                 </Line>
               </Section>
-              <div className="flex justify-end pt-4">{saveButton}</div>
+              {/* Save stays at the bottom of the window while the page is scrolled (owner,
+                  Nov 17: the same bar as a trade bid's, save-bar.tsx). It took the place of a
+                  Save at the top of the card and another at its foot. */}
+              <SaveBar className="mt-4">
+                <div className="min-w-0 flex-1 text-sm text-muted-foreground" data-save-note>
+                  <p>These numbers are saved when you press Save.</p>
+                </div>
+                <div className={SAVE_BAR_ACTIONS}>
+                  <Button
+                    type="submit"
+                    className="h-10 min-w-24"
+                    data-save
+                    disabled={save.isPending || !settings.data}
+                  >
+                    {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+                    Save
+                  </Button>
+                </div>
+              </SaveBar>
             </form>
           )}
         </CardContent>

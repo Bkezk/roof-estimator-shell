@@ -123,10 +123,15 @@ describe("Reminders page layout", () => {
     expect(src).not.toContain('className="space-y-4 rounded-lg border p-4"');
     expect(src).not.toContain("function DaysField(");
   });
-  it("Save in the header and at the end of the form, bound by form id", () => {
-    expect(src).toContain('form="reminder-settings"');
+  // Nov 17: one Save, in the bar that stays at the bottom of the window (save-bar.tsx), where
+  // there was one in the header and one at the end of the form. It is inside the form, so it
+  // needs no form id to submit it.
+  it("Save in the bar at the end of the form, always in reach", () => {
     expect(src).toContain('id="reminder-settings"');
-    expect(src.match(/\{saveButton\}/g)?.length).toBe(2);
+    expect(src).not.toContain("{saveButton}");
+    expect(src.match(/type="submit"/g)).toHaveLength(1);
+    const form = src.slice(src.indexOf('id="reminder-settings"'), src.indexOf("</form>"));
+    expect(form).toMatch(/<SaveBar className="mt-4">[\s\S]*type="submit"[\s\S]*<\/SaveBar>/);
   });
   it("the page uses the full width, with a wider label column on large screens", () => {
     // Owner (Oct 9): "we're only using half the page here, make the panels wider".

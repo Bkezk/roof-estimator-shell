@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
+import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { SETUP_HISTORY_KEY, SetupHistory } from "@/components/setup-history";
 import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from "lucide-react";
 
@@ -200,21 +201,30 @@ export function InspectionChecklistSettings() {
               >
                 <Plus className="mr-1 h-4 w-4" /> Add item
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!dirty || save.isPending}
-                onClick={() => save.mutate()}
-              >
-                {save.isPending ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-1 h-4 w-4" />
-                )}
-                Save checklist
-              </Button>
-              {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
             </div>
+            {/* Save stays at the bottom of the window while the list is scrolled (owner,
+                Nov 17: the same bar as a trade bid's, save-bar.tsx). */}
+            <SaveBar>
+              <div className="min-w-0 flex-1 text-sm" data-save-note>
+                {dirty ? (
+                  <p>You have changes that are not saved.</p>
+                ) : (
+                  <p className="text-muted-foreground">All changes are saved.</p>
+                )}
+              </div>
+              <div className={SAVE_BAR_ACTIONS}>
+                <Button
+                  type="button"
+                  className="h-10 min-w-24"
+                  data-save
+                  disabled={!dirty || save.isPending}
+                  onClick={() => save.mutate()}
+                >
+                  {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+                  Save checklist
+                </Button>
+              </div>
+            </SaveBar>
           </>
         )}
         <SetupHistory tab="inspection" />

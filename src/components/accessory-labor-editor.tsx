@@ -2,10 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
 
 import { getAccessoryLabor, saveAccessoryCategory } from "@/lib/admin-rdl.functions";
-import { Button } from "@/components/ui/button";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,13 +76,6 @@ export function AccessoryLaborTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
-
       <div className="space-y-2">
         <Label className="text-sm">Accessory category</Label>
         <Select value={selected.id} onValueChange={(v) => setSelId(v)}>
@@ -143,6 +135,7 @@ export function AccessoryLaborTab() {
           </Table>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }

@@ -109,10 +109,11 @@ describe("1. unsaved edits survive a tab switch; leaving asks", () => {
     expect(rates).toMatch(
       /const dirty =\s*!!loaded &&\s*!!s &&\s*JSON\.stringify\(\{ rates, s \}\) !==/,
     );
-    expect(rates).toContain('<Button type="submit" disabled={!dirty || save.isPending}>');
-    expect(rates).toContain(
-      '{dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}',
-    );
+    // Nov 17: Save and the words are in the bar that stays at the bottom of the window
+    // (save-bar.tsx); the rule for when Save is on did not change.
+    expect(rates).toContain("disabled={!dirty || save.isPending}");
+    expect(rates).toContain("<p>You have changes that are not saved.</p>");
+    expect(rates).toContain('<p className="text-muted-foreground">All changes are saved.</p>');
     // A refetch never overwrites unsaved edits; a save refills the boxes.
     expect(rates).toContain("if (!loaded || (dirtyRef.current && !refillRef.current)) return;");
     expect(rates).toContain("refillRef.current = true;");

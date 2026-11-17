@@ -19,7 +19,13 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SAVE_BAR_ACTIONS, SAVE_BAR_CLASS, SAVE_BAR_VAR, SaveBar } from "@/components/save-bar";
+import {
+  SAVE_BAR_ACTIONS,
+  SAVE_BAR_CLASS,
+  SAVE_BAR_VAR,
+  SaveBar,
+  SaveChangesBar,
+} from "@/components/save-bar";
 import { listOpenAt } from "@/lib/trade-bid-form";
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -58,13 +64,18 @@ describe("the bar that keeps Save in reach", () => {
 
   it("keeps its height on the page while it is shown, and takes it away when it goes", () => {
     expect(SAVE_BAR_VAR).toBe("--jbk-save-bar");
+    // More than one bar can be on a page (a page of several parts): the tallest one counts,
+    // and the number goes only when the last bar does.
     expect(flat(BAR)).toContain(
-      "page.style.setProperty(SAVE_BAR_VAR, `${Math.ceil(el.getBoundingClientRect().height)}px`)",
+      "for (const el of shown) most = Math.max(most, Math.ceil(el.getBoundingClientRect().height));",
+    );
+    expect(flat(BAR)).toContain(
+      "if (shown.size === 0) page.style.removeProperty(SAVE_BAR_VAR); else page.style.setProperty(SAVE_BAR_VAR, `${most}px`);",
     );
     // It follows the bar as the words wrap, and leaves nothing behind on the next screen.
-    expect(BAR).toContain("new ResizeObserver(keep)");
+    expect(BAR).toContain("new ResizeObserver(keepHeight)");
     expect(flat(BAR)).toContain(
-      "return () => { watch?.disconnect(); page.style.removeProperty(SAVE_BAR_VAR); };",
+      "return () => { watch?.disconnect(); shown.delete(el); keepHeight(); };",
     );
   });
 
@@ -283,5 +294,125 @@ describe("a project bid: the steps, Save and Update stay at the top of the windo
     // Popups, menus and the pickers are z-50; the phone's Bid total strip is z-20 at the bottom.
     expect(bar).toContain(" z-20 ");
     expect(bar).not.toMatch(/z-(?:30|40|50)\b/);
+  });
+});
+
+// Owner, Nov 17, to "the Estimate Pricing pages and the Setup pages still have Save … do you want
+// the same bar on those too?": "yes pls".
+describe("the Estimate Pricing pages: Save changes is in the bar, on every tab", () => {
+  const PRICING: [string, number][] = [
+    ["src/routes/admin.settings.tsx", 6],
+    ["src/routes/admin.labor.tsx", 5],
+    ["src/components/rdl-editor.tsx", 1],
+    ["src/components/rdl-underlayment-tearoff.tsx", 2],
+    ["src/components/accessory-labor-editor.tsx", 1],
+    ["src/components/catalog-editor.tsx", 1],
+    ["src/components/adhesives-editor.tsx", 1],
+    ["src/components/exceptional-metals-editor.tsx", 1],
+  ];
+
+  it("the ready-made bar: Save changes on the right, off while a save is under way", () => {
+    const html = (props: Parameters<typeof SaveChangesBar>[0]) =>
+      renderToString(React.createElement(SaveChangesBar, props));
+    const idle = html({ saving: false, onSave: () => {} });
+    expect(idle).toContain(`<div class="${SAVE_BAR_CLASS}" data-save-bar="true">`);
+    expect(idle).toMatch(/<button[^>]*data-save="true"[^>]*>.*Save changes<\/button>/);
+    expect(idle.match(/<button[^>]*>/)![0]).not.toContain('disabled=""');
+    const busy = html({ saving: true, onSave: () => {} });
+    expect(busy).toContain("Saving…");
+    expect(busy.match(/<button[^>]*>/)![0]).toContain('disabled=""');
+    // Nothing loaded yet: Save is off, and it still says Save changes.
+    const empty = html({ saving: false, onSave: () => {}, disabled: true });
+    expect(empty.match(/<button[^>]*>/)![0]).toContain('disabled=""');
+    expect(empty).toContain("Save changes");
+  });
+
+  it.each(PRICING)("%s: every tab's Save is the bar (%i)", (path, count) => {
+    const src = read(path);
+    expect(src.match(/<SaveChangesBar /g)).toHaveLength(count);
+    // The button at the top right of each tab is gone, with the small parts that drew it.
+    expect(src).not.toContain('{saving ? "Saving…" : "Save changes"}');
+    expect(src).not.toMatch(/function Save(?:Bar|Button)\(/);
+    expect(src).not.toMatch(/<Save(?:Bar|Button) saving/);
+  });
+
+  it.each(PRICING)("%s: the bar is the last thing in its tab", (path) => {
+    const src = read(path);
+    // Each one closes its tab: the bar, then the tab's own closing tag.
+    const bars = src.match(/<SaveChangesBar [^\n]*\/>\n {4}<\/div>\n {2}\);/g) ?? [];
+    expect(bars).toHaveLength(src.match(/<SaveChangesBar /g)!.length);
+  });
+
+  it("a tab with nothing loaded yet keeps Save off, as before", () => {
+    for (const path of [
+      "src/components/adhesives-editor.tsx",
+      "src/components/exceptional-metals-editor.tsx",
+    ])
+      expect(read(path)).toContain(
+        "<SaveChangesBar saving={saving} onSave={save} disabled={!draft} />",
+      );
+  });
+});
+
+describe("the Setup pages: Save is in the bar", () => {
+  const RATES = read("src/components/service-rates-settings.tsx");
+  const MATERIALS = read("src/components/service/material-pricing-settings.tsx");
+  const CHECKLIST = read("src/components/service/inspection-checklist-settings.tsx");
+  const REMINDERS = read("src/components/reminders-settings.tsx");
+
+  it.each([
+    ["service rates", RATES, "Save"],
+    ["material pricing", MATERIALS, "Save material pricing"],
+    ["the inspection checklist", CHECKLIST, "Save checklist"],
+  ])("%s: one bar, the words on the left, Save off until something changed", (_n, src, label) => {
+    expect(src.match(/<SaveBar>/g)).toHaveLength(1);
+    const bar = src.slice(src.indexOf("<SaveBar>"), src.indexOf("</SaveBar>"));
+    expect(bar).toContain("<p>You have changes that are not saved.</p>");
+    expect(bar).toContain('<p className="text-muted-foreground">All changes are saved.</p>');
+    expect(bar).toContain("disabled={!dirty || save.isPending}");
+    expect(flat(bar)).toContain(`${label} </Button>`);
+    expect(src).not.toContain("Unsaved changes</span>");
+  });
+
+  it("material pricing: the two Save buttons that showed only after a change are gone", () => {
+    expect(MATERIALS).not.toContain("saveButton");
+    expect(MATERIALS.match(/Save material pricing/g)).toHaveLength(1);
+  });
+
+  it("the inspection checklist: Add item stays under the list, Save is in the bar", () => {
+    const add = CHECKLIST.indexOf("Add item");
+    const bar = CHECKLIST.indexOf("<SaveBar>");
+    expect(add).toBeGreaterThan(-1);
+    expect(bar).toBeGreaterThan(add);
+    expect(CHECKLIST.slice(bar)).toContain("onClick={() => save.mutate()}");
+  });
+
+  it("reminders: one Save, inside the form, in the bar", () => {
+    expect(REMINDERS.match(/<SaveBar /g)).toHaveLength(1);
+    expect(REMINDERS).not.toContain("saveButton");
+    const bar = REMINDERS.slice(REMINDERS.indexOf("<SaveBar "), REMINDERS.indexOf("</SaveBar>"));
+    expect(bar).toContain('type="submit"');
+    expect(bar).toContain("disabled={save.isPending || !settings.data}");
+    expect(REMINDERS.indexOf("</form>")).toBeGreaterThan(REMINDERS.indexOf("</SaveBar>"));
+  });
+});
+
+// Found in the phone run of Nov 17: a row of tabs that wraps kept the height of ONE row, so its
+// second row lay over the page under it and could not be pressed (Warranties on a phone).
+describe("a row of tabs that wraps grows with its rows", () => {
+  it.each([
+    "src/routes/admin.settings.tsx",
+    "src/routes/admin.labor.tsx",
+    "src/routes/admin.duro-last.tsx",
+    "src/routes/admin.documents.tsx",
+    "src/components/exceptional-metals-editor.tsx",
+  ])("%s", (path) => {
+    const src = read(path);
+    expect(src).toContain('<TabsList className="h-auto flex-wrap justify-start">');
+    expect(src).not.toContain('<TabsList className="flex-wrap">');
+  });
+
+  it("the shared row is one row tall unless told otherwise, which is why these say h-auto", () => {
+    expect(read("src/components/ui/tabs.tsx")).toContain('"inline-flex h-9 items-center');
   });
 });

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import {
   getGeneralSettings,
@@ -21,6 +21,7 @@ import {
 import { parseStreetAddress } from "@/lib/aerial-address";
 import { officeAddressLine } from "@/lib/travel-estimate";
 import { ALL_SYSTEMS, ROOF_SYSTEMS, systemsFromValue, systemsValue } from "@/lib/warranty-systems";
+import { SaveChangesBar } from "@/components/save-bar";
 import { CountyCodesSettings } from "@/components/crm/county-codes-settings";
 import { LeadSourcesSettings } from "@/components/crm/lead-sources-settings";
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,7 @@ function SettingsPage() {
         onValueChange={(v) => navigate({ search: { tab: v as SettingsTab }, replace: true })}
         className="space-y-4"
       >
-        <TabsList className="flex-wrap">
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="contractor">Contractor Information</TabsTrigger>
           <TabsTrigger value="shipping">Shipping Costs</TabsTrigger>
           <TabsTrigger value="salestax">Sales Tax</TabsTrigger>
@@ -263,8 +264,6 @@ function ContractorTab({ initial, onSaved }: CompanyTabProps) {
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Contractor information</CardTitle>
@@ -369,6 +368,7 @@ function ContractorTab({ initial, onSaved }: CompanyTabProps) {
           </div>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -378,8 +378,6 @@ function SalesTaxTab({ initial, onSaved }: CompanyTabProps) {
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Sales tax</CardTitle>
@@ -409,6 +407,7 @@ function SalesTaxTab({ initial, onSaved }: CompanyTabProps) {
           </div>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -418,8 +417,6 @@ function BasicLaborTab({ initial, onSaved }: CompanyTabProps) {
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Basic labor settings</CardTitle>
@@ -453,6 +450,7 @@ function BasicLaborTab({ initial, onSaved }: CompanyTabProps) {
           </Field>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -516,8 +514,6 @@ function ShippingTab({
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Shipping method</CardTitle>
@@ -625,6 +621,7 @@ function ShippingTab({
           </Button>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -664,8 +661,6 @@ function MarkupTab({ initial, onSaved }: { initial: MarkupOption[]; onSaved: () 
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <p className="text-sm text-muted-foreground">
         Named labor-rate and markup presets. One is the default applied to new bids.
       </p>
@@ -769,6 +764,7 @@ function MarkupTab({ initial, onSaved }: { initial: MarkupOption[]; onSaved: () 
           <Plus className="mr-1 h-4 w-4" /> Add preset
         </Button>
       </div>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -827,8 +823,6 @@ function WarrantiesTab({
 
   return (
     <div className="space-y-6">
-      <SaveBar saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Warranties</CardTitle>
@@ -1021,6 +1015,7 @@ function WarrantiesTab({
           </Table>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -1030,17 +1025,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-2">
       <Label className="text-sm">{label}</Label>
       {children}
-    </div>
-  );
-}
-
-function SaveBar({ saving, onSave }: { saving: boolean; onSave: () => void }) {
-  return (
-    <div className="flex justify-end">
-      <Button onClick={onSave} disabled={saving}>
-        <Save className="mr-2 h-4 w-4" />
-        {saving ? "Saving…" : "Save changes"}
-      </Button>
     </div>
   );
 }

@@ -327,7 +327,7 @@ What changed:
   slid into sight.
 - The selected-photos bar of a ticket sits above the Save bar instead of under it.
 
-Tests: `save-bar-nov17.test.ts` (27), five more in `trade-subs-ui-nov17.test.ts` and
+Tests: `save-bar-nov17.test.ts` (27 then; 57 with the pricing and Setup pages below), five more in `trade-subs-ui-nov17.test.ts` and
 `trade-screens-nov16.test.ts`, and the older checks that pinned the moved parts updated with a
 dated note.
 
@@ -362,13 +362,42 @@ himself that morning, 1 job type (the owner's test), 55 tickets, 6 opportunities
 0 invoices, the trade number series unused, the picture count of the ticket looked at unchanged,
 the test login as it was.
 
+## Nov 17, later still: the same bar on the Estimate Pricing and Setup pages
+
+Owner, asked whether the Estimate Pricing pages and the Setup pages should get the bar too:
+"yes pls".
+
+- **Estimate Pricing** (General, Advanced Labor with Roof Deck Labor's three parts, Duro-Last,
+  Non-Duro-Last, EPDM, TPO, Membrane, Adhesives): each tab had "Save changes" at its top right,
+  out of sight once the tab was scrolled. It is now in the bar at the foot of the tab, which
+  stays at the bottom of the window. 18 tabs in 8 files, one ready-made bar
+  (`SaveChangesBar` in `save-bar.tsx`). When Save is on or off did not change.
+- **Setup**: Service rates, Material pricing and Inspection checklist have the bar with the
+  words "All changes are saved." or "You have changes that are not saved." Material pricing had
+  two Save buttons that showed only after a change; they are the one bar now. Reminders had a
+  Save at the top of its card and one at the foot; it has the bar.
+- On Reminders the bar belongs to the settings card: it stays in view while any of that card is,
+  and goes with it when the page is scrolled on to the cards below, which it does not save.
+
+Found in the phone run and fixed with a test: a row of tabs that wraps onto a second line kept
+the height of one line, so the second line lay over the page under it and could not be pressed
+(Warranties on a phone, in General). The five rows of that kind now grow with their lines.
+
+Browser run at 1500 x 900 and 390 x 800: all 27 tabs and pages opened and scrolled to the top,
+the middle and the foot, Save never pressed. On every one there is one bar, the button is in
+view at all three places (on Reminders, at the top and the middle), and no "Save changes" is
+left at the top. Seen and left as it was: on a phone, Roof Deck Labor and the two Adhesives
+pages slide sideways by 11 to 27 px. They did before this change too (checked against the old
+code); the bar is not what is wide.
+
+Afterwards: the history shows nothing changed by the test login since the morning's temporary
+rows. The one invoice and the trade bid now on file are the owner's own.
+
 ## Left for the owner
 
 - Whether a job gets one invoice or a deposit and a final. Both work today.
 - Whether customers are charged sales tax on trade work. Invoices start at 0%.
 - Overhead is a percent of cost and profit a percent of cost plus overhead (a markup). A
   gross-profit choice like the roofing calculator's can be added.
-- The Save bar can go on the remaining screens with a Save at the foot of a long page: the
-  Estimate Pricing pages and the Setup pages.
 - The vendor list's own words say "vendor" (for example "Clear the vendor") where a bid picks a
   subcontractor from it.

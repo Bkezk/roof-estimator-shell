@@ -2,11 +2,10 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
 
 import { getLaborTables, saveLaborTable } from "@/lib/admin-rdl.functions";
+import { SaveChangesBar } from "@/components/save-bar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,17 +51,6 @@ interface TearoffData {
 function useTables() {
   const getFn = useServerFn(getLaborTables);
   return useQuery({ queryKey: ["rdl-labor-tables"], queryFn: () => getFn() });
-}
-
-function SaveButton({ saving, onSave }: { saving: boolean; onSave: () => void }) {
-  return (
-    <div className="flex justify-end">
-      <Button onClick={onSave} disabled={saving}>
-        <Save className="mr-2 h-4 w-4" />
-        {saving ? "Saving…" : "Save changes"}
-      </Button>
-    </div>
-  );
 }
 
 export function UnderlaymentEditor() {
@@ -118,8 +106,6 @@ export function UnderlaymentEditor() {
 
   return (
     <div className="space-y-6">
-      <SaveButton saving={saving} onSave={save} />
-
       <Tabs defaultValue="layout" className="space-y-4">
         <TabsList>
           <TabsTrigger value="layout">Layout &amp; Mechanical</TabsTrigger>
@@ -332,6 +318,7 @@ export function UnderlaymentEditor() {
           </Card>
         </TabsContent>
       </Tabs>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -370,8 +357,6 @@ export function TearoffEditor() {
 
   return (
     <div className="space-y-6">
-      <SaveButton saving={saving} onSave={save} />
-
       <Card>
         <CardHeader>
           <CardTitle>Tearoff times</CardTitle>
@@ -421,6 +406,7 @@ export function TearoffEditor() {
           </Table>
         </CardContent>
       </Card>
+      <SaveChangesBar saving={saving} onSave={save} />
     </div>
   );
 }
