@@ -103,9 +103,12 @@ describe("the editor counts the POs once (invoice-editor.tsx)", () => {
   it("the draft and the final invoice both pass their own id", () => {
     const calls = ed.match(/usePoCost\([^)]*\)/g) ?? [];
     // (owner, Oct 14: the hook also takes the lines, to leave out the POs that are lines.)
+    // Nov 17, trade bid invoices: these read "usePoCost(job.id, inv.id, lines)" and
+    // "usePoCost(job.id, inv.id, data.lines)". A trade bid's invoice has no ticket (`job` is
+    // null) and so no purchase orders: the fourth argument switches the hook's reads off there.
     expect(calls.filter((c) => !c.includes("jobId: string"))).toEqual([
-      "usePoCost(job.id, inv.id, lines)",
-      "usePoCost(job.id, inv.id, data.lines)",
+      'usePoCost(job?.id ?? "", inv.id, lines, !!job)',
+      'usePoCost(job?.id ?? "", inv.id, data.lines, !!job)',
     ]);
     expect(ed).not.toContain("usePoCost(job.id)");
     expect(ed).toMatch(

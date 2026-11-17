@@ -26,7 +26,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Loader2, Trash2 } from "lucide-react";
+import { ArrowRight, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -251,6 +251,13 @@ function SetupForm(props: { trade: TradeType | null }) {
       <h1 className="break-words text-2xl font-bold tracking-tight">
         {isNew ? "Set up a trade" : draft.name.trim() || trade.name}
       </h1>
+      {/* Owner, Nov 17: "when you're making a trade bid I didn't see a place to associate a
+          customer". This screen is the kind of job, set up once; the customer goes on each bid.
+          Said here, with the way to a bid in the bar below once the trade is saved. */}
+      <p className="max-w-prose text-sm text-muted-foreground" data-setup-what>
+        This sets up a kind of job once: what it measures, what it costs and what is added on top.
+        The customer, the due date and the measurements go on each bid.
+      </p>
 
       <Card data-card="trade-name">
         <CardContent className="space-y-1.5 pt-6">
@@ -316,6 +323,15 @@ function SetupForm(props: { trade: TradeType | null }) {
             Bids already started keep their own numbers. This changes new bids only.
           </p>
         </div>
+        {/* A saved trade with nothing changed: the next step is a bid, where the customer is
+            picked. Not offered with unsaved changes, so the bid starts from what is on screen. */}
+        {trade && !dirty && !gone && (
+          <Button asChild variant="outline" className="h-10">
+            <Link to="/trade-bids" search={{ new: trade.id }} data-start-bid-here>
+              Start a bid of this trade <ArrowRight />
+            </Link>
+          </Button>
+        )}
         <Button
           type="button"
           className="h-10 min-w-24"

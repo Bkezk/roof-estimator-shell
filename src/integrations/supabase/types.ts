@@ -353,6 +353,7 @@ export type Database = {
           status_changed_at: string | null
           submitted_at: string | null
           takeoff_id: string | null
+          trade_number: number | null
           trade_type_id: string | null
           updated_at: string
           updated_by_name: string | null
@@ -388,6 +389,7 @@ export type Database = {
           status_changed_at?: string | null
           submitted_at?: string | null
           takeoff_id?: string | null
+          trade_number?: number | null
           trade_type_id?: string | null
           updated_at?: string
           updated_by_name?: string | null
@@ -423,6 +425,7 @@ export type Database = {
           status_changed_at?: string | null
           submitted_at?: string | null
           takeoff_id?: string | null
+          trade_number?: number | null
           trade_type_id?: string | null
           updated_at?: string
           updated_by_name?: string | null
@@ -2082,6 +2085,7 @@ export type Database = {
       }
       invoices: {
         Row: {
+          bid_id: string | null
           bill_to: Json
           bill_to_vendor_id: string | null
           cost_total: number
@@ -2110,7 +2114,7 @@ export type Database = {
           sent_at: string | null
           sent_by_name: string | null
           sent_to: Json | null
-          service_job_id: string
+          service_job_id: string | null
           share_created_at: string | null
           share_last_viewed_at: string | null
           share_token: string | null
@@ -2124,6 +2128,7 @@ export type Database = {
           updated_by_name: string | null
         }
         Insert: {
+          bid_id?: string | null
           bill_to?: Json
           bill_to_vendor_id?: string | null
           cost_total?: number
@@ -2152,7 +2157,7 @@ export type Database = {
           sent_at?: string | null
           sent_by_name?: string | null
           sent_to?: Json | null
-          service_job_id: string
+          service_job_id: string | null
           share_created_at?: string | null
           share_last_viewed_at?: string | null
           share_token?: string | null
@@ -2166,6 +2171,7 @@ export type Database = {
           updated_by_name?: string | null
         }
         Update: {
+          bid_id?: string | null
           bill_to?: Json
           bill_to_vendor_id?: string | null
           cost_total?: number
@@ -2194,7 +2200,7 @@ export type Database = {
           sent_at?: string | null
           sent_by_name?: string | null
           sent_to?: Json | null
-          service_job_id?: string
+          service_job_id?: string | null
           share_created_at?: string | null
           share_last_viewed_at?: string | null
           share_token?: string | null
@@ -2208,6 +2214,13 @@ export type Database = {
           updated_by_name?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "invoices_bid_id_fkey"
+            columns: ["bid_id"]
+            isOneToOne: false
+            referencedRelation: "bids"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "invoices_bill_to_vendor_id_fkey"
             columns: ["bill_to_vendor_id"]
@@ -5733,6 +5746,7 @@ export type Database = {
         Args: { p_county: string; p_keep_m?: number; p_limit?: number }
         Returns: number
       }
+      trade_bid_number: { Args: { p_bid: string }; Returns: number }
       unassigned_overdue_days: { Args: never; Returns: number }
       undo_opportunity_from_bid: { Args: { p_bid: string }; Returns: Json }
       upsert_buildings: { Args: { rows: Json }; Returns: number }

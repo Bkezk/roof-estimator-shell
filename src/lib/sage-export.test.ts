@@ -122,9 +122,12 @@ describe("6. stamped after the download, never twice", () => {
     );
     expect(fn).not.toContain("sage_exported_at: now");
     expect(fn).not.toContain(".update({ sage_exported_at");
-    expect(fn).toContain(
-      "const filled = fillSageIds(invs ?? [], await sageLookups(sb, invs ?? []));",
-    );
+    // Nov 17, trade bid invoices: this read
+    // "const filled = fillSageIds(invs ?? [], await sageLookups(sb, invs ?? []));". The rows go
+    // through sageKeyed first now: an invoice made from a trade bid has no ticket to look its
+    // customer up by, so it is looked up by its bid (invoices.functions.ts sageKeyed).
+    expect(fn).toContain("const keyed = (invs ?? []).map(sageKeyed);");
+    expect(fn).toContain("const filled = fillSageIds(keyed, await sageLookups(sb, keyed));");
     expect(fn).toContain("missing: missingSageIds(filled),");
     expect(fn).toContain("ids,");
   });

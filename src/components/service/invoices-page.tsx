@@ -505,7 +505,8 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
           {anyFilter
             ? "No invoices match these filters."
-            : "No invoices yet. Make one from an Authorized ticket's invoice card (Make the invoice)."}
+            : // Nov 17: a won trade bid is invoiced too (its Invoices block, Make an invoice).
+              "No invoices yet. Make one from an Authorized ticket's invoice card (Make the invoice), or from a Won trade bid (Make an invoice)."}
         </div>
       ) : (
         // min-w-0 (Nov 3): the table's minimum width used to push the page itself wider on a

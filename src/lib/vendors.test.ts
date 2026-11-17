@@ -524,7 +524,13 @@ describe("the invoice editor's Bill to (invoice-editor.tsx)", () => {
       /<BillTo\s+inv=\{inv\}\s+draft=\{\{\s+vendorId: head\.bill_to_vendor_id,\s+onChange: \(v\) => setH\("bill_to_vendor_id", v\),\s+preview: billPreview,/,
     );
     expect(ed).toContain("? pickedVendor && vendorBillTo(pickedVendor)");
-    expect(ed).toContain(": accountBillTo(account, job.customer_name);");
+    // Nov 17, trade bid invoices: this read ": accountBillTo(account, job.customer_name);". A
+    // trade bid's invoice has no ticket, so the name comes through `customerName`: the ticket's
+    // customer name as before, or (a bid's invoice) the Bill To name saved on the invoice.
+    expect(ed).toContain(": accountBillTo(account, customerName);");
+    expect(ed).toMatch(
+      /const customerName = job \? job\.customer_name : inv\.bill_to_vendor_id \? null : billToName\(inv\);/,
+    );
     expect(billTo).toContain("<BillToChoice");
     expect(billTo).toContain("const b = (draft?.preview ?? inv.bill_to ?? {})");
   });

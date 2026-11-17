@@ -192,3 +192,25 @@ describe("adding a customer from a trade bid (owner, Nov 17)", () => {
     expect(ui).toContain("Not on file yet? Press Add a new customer.");
   });
 });
+
+describe("the job type setup says where the customer goes (owner, Nov 17)", () => {
+  // "when you're making a trade bid I didn't see a place to associate a customer": the setup
+  // screen is the kind of job, with no customer on it. It now says so and leads to a bid.
+  const ui = flat(read("../components/trade/trade-setup-screen.tsx"));
+  it("a line under the heading says the customer goes on each bid", () => {
+    expect(ui).toContain("data-setup-what");
+    expect(ui).toContain("The customer, the due date and the measurements go on each bid.");
+  });
+  it("a saved trade with nothing changed offers Start a bid of this trade", () => {
+    expect(ui).toContain("{trade && !dirty && !gone && (");
+    expect(ui).toContain('<Link to="/trade-bids" search={{ new: trade.id }} data-start-bid-here>');
+    expect(ui).toContain("Start a bid of this trade");
+  });
+});
+
+describe("the Invoices list knows a trade bid is invoiced too (Nov 17)", () => {
+  it("its empty state names both ways to make one", () => {
+    const ui = flat(read("../components/service/invoices-page.tsx"));
+    expect(ui).toContain("or from a Won trade bid (Make an invoice).");
+  });
+});

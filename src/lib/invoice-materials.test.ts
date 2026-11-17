@@ -193,7 +193,11 @@ describe("the editor: each line's cost for the office; cost and margin folded fo
   it("a Cost column and box on each line, for managesTickets only", () => {
     expect(header).toContain("Rate");
     expect(header).toContain('{internal && <span className="text-right">Cost</span>}');
-    expect(ed).toContain("const internal = managesTickets(profile);");
+    // Nov 17, trade bid invoices: this read "const internal = managesTickets(profile);". Cost
+    // is still the office's on a ticket's invoice; a trade bid's invoice shows none (its cost
+    // and margin are the bid's).
+    expect(ed).toContain("const internal = managesTickets(profile) && !ctx.bid;");
+    expect(ed).toContain("const internal = managesTickets(profile) && !bid;");
     expect(ed).toMatch(/\{internal && \(\s*<div>\s*<CellLabel>Cost<\/CellLabel>/);
     expect(ed).toContain("label={`Line ${i + 1} cost`}");
     expect(ed).toContain("onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}");
@@ -213,7 +217,9 @@ describe("the editor: each line's cost for the office; cost and margin folded fo
   });
   it("Subtotal / Tax / Total stay; Cost, Margin, Margin / hour sit in a closed fold for managesTickets", () => {
     const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
-    expect(totals).toContain("const internal = managesTickets(profile);");
+    // Nov 17, trade bid invoices: this read "const internal = managesTickets(profile);".
+    // `pos` is false only on a trade bid's invoice, which shows no cost or margin.
+    expect(totals).toContain("const internal = managesTickets(profile) && pos;");
     expect(totals).toContain("const [open, setOpen] = useState(false);");
     expect(totals).toContain('localStorage.getItem(INTERNAL_OPEN_KEY) === "1"');
     expect(totals).toContain("Internal — cost and margin");

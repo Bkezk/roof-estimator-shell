@@ -520,8 +520,13 @@ describe("4. purchase orders in the editor (invoice-editor.tsx)", () => {
     );
     // Every PO that is a line counts (owner, Oct 28: no approval).
     expect(hook).toContain("onInvoice: onInvoice.length,");
-    expect(draft).toContain("const po = usePoCost(job.id, inv.id, lines);");
-    expect(final).toContain("const po = usePoCost(job.id, inv.id, data.lines);");
+    // Nov 17, trade bid invoices: these read "const po = usePoCost(job.id, inv.id, lines);" and
+    // "const po = usePoCost(job.id, inv.id, data.lines);". A trade bid's invoice has no ticket
+    // (`job` is null), and a hook is not called conditionally: the fourth argument switches the
+    // read off there. A ticket's invoice passes its ticket's id and reads as before.
+    expect(draft).toContain('const po = usePoCost(job?.id ?? "", inv.id, lines, !!job);');
+    expect(final).toContain('const po = usePoCost(job?.id ?? "", inv.id, data.lines, !!job);');
+    expect(hook).toContain("enabled: enabled && hasTicket,");
     const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
     expect(totals).toContain("poOnInvoice?: number;");
     expect(totals).toContain('{poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}');

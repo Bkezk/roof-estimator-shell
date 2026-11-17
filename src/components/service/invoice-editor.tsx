@@ -32,6 +32,15 @@
  *
  * Admins, managers and sales / project managers (`seesInvoices`; the Invoices page gates it);
  * every write is logged on the server (audit_log), and admins and managers see it in History.
+ *
+ * A trade bid's invoice (owner, Nov 17: "Go with option 1, T-1001 format"; bid-invoices.ts)
+ * belongs to a won trade bid, which has no ticket (`Owner` below: the ticket or the bid, never
+ * both). The same page, the same Draft → Final → Paid / Void, the same PDF and payments. What
+ * differs: no ticket is read, so the page opens as soon as the invoice is; the header names the
+ * bid ("Trade bid T-1001 · <bid name>", a link for whoever may open bids); "Another invoice"
+ * bills what the bid has left; the chips are the bid's invoices; and everything that comes from
+ * a ticket is left out (the photos, Rebuild from ticket, the purchase orders). After a Void or
+ * a deleted draft the page goes back to the bid.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -66,6 +75,9 @@ import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
+import type { InvoiceBidRef } from "@/lib/bid-invoices";
+import { createBidInvoice, listBidInvoices } from "@/lib/bid-invoices.functions";
+import { bidLink } from "@/lib/bid-kind";
 import { applyPoMarkup } from "@/lib/invoice-po-lines";
 import {
   computeTotals,
@@ -222,9 +234,40 @@ function KindBadge({ kind }: { kind: LineKind }) {
   );
 }
 
+/**
+ * What the invoice belongs to (Nov 17): its service ticket, or the won trade bid it was made
+ * from, which has no ticket. One of the two, never both, as on the row (invoices.service_job_id
+ * / invoices.bid_id). Everything that only a ticket has is behind `job`.
+ */
+type Owner = { job: ServiceJobWithTech; bid: null } | { job: null; bid: InvoiceBidRef };
+
+/**
+ * The trade bid of a bid's invoice. getInvoice sends it (`bid`); should an answer come without
+ * it the page still opens: the job number is read off the invoice's own ("T-1001.2" is job
+ * T-1001) and the bid is not linked.
+ */
+const bidRefOf = (data: InvoiceWithLines, bidId: string): InvoiceBidRef =>
+  data.bid ?? {
+    id: bidId,
+    name: "",
+    trade_name: "",
+    job_label: invoiceLabel(data.invoice).replace(/\.\d+$/, ""),
+    account_id: null,
+    readable: false,
+  };
+
+/** Null while the ticket is still being read. A trade bid's invoice waits for nothing more. */
+function ownerOf(
+  data: InvoiceWithLines,
+  ticket: ServiceJobWithTech | null | undefined,
+): Owner | null {
+  const bidId = data.invoice.bid_id;
+  if (bidId) return { job: null, bid: bidRefOf(data, bidId) };
+  return ticket ? { job: ticket, bid: null } : null;
+}
+
 /** Everything the editor needs to report a changed invoice back to the page. */
-interface Ctx {
-  job: ServiceJobWithTech;
+type Ctx = Owner & {
   /**
    * Put the server's answer in the page's cache. The Invoices list, the ticket's chips and
    * History are re-read too — unless `quiet` (the autosave; Nov 3, review item 47: every saved
@@ -237,7 +280,7 @@ interface Ctx {
   onVoided: (voidedId: string) => void;
   /** A draft was just finalised (owner, Oct 14): the page asks "Send it now?". */
   askSend: (invoiceId: string) => void;
-}
+};
 
 // ---- The page -------------------------------------------------------------------------------
 
@@ -257,6 +300,9 @@ export function InvoiceEditorPage({
   const jobFn = useServerFn(getServiceJob);
   const listFn = useServerFn(listTicketInvoices);
   const anotherFn = useServerFn(createAnotherInvoice);
+  // A trade bid's invoice (Nov 17): its chips and its "Another invoice" are the bid's.
+  const bidListFn = useServerFn(listBidInvoices);
+  const bidAnotherFn = useServerFn(createBidInvoice);
 
   const q = useQuery({
     queryKey: invoicePageKey(id),
@@ -265,6 +311,8 @@ export function InvoiceEditorPage({
     retry: 1,
   });
   const jobId = q.data?.invoice.service_job_id ?? null;
+  // A trade bid's invoice has no ticket (Nov 17): `bidId` is set instead and no ticket is read.
+  const bidId = q.data?.invoice.bid_id ?? null;
   // The same cache as the ticket page.
   const jobQ = useQuery({
     queryKey: ["service-job", jobId],
@@ -275,6 +323,12 @@ export function InvoiceEditorPage({
     queryKey: ticketInvoicesKey(jobId ?? ""),
     queryFn: () => listFn({ data: { job_id: jobId! } }),
     enabled: !!session && !!jobId,
+  });
+  // The same cache as the Invoices block on the bid's own screen (bid-invoices-card.tsx).
+  const bidAll = useQuery({
+    queryKey: ["bid-invoices", bidId],
+    queryFn: () => bidListFn({ data: { bid_id: bidId! } }),
+    enabled: !!session && !!bidId,
   });
 
   const refreshTicket = (jid: string) => {
@@ -289,6 +343,15 @@ export function InvoiceEditorPage({
     void qc.invalidateQueries({ queryKey: ["invoices"], refetchType });
     void qc.invalidateQueries({ queryKey: ticketInvoicesKey(jid), refetchType });
     void qc.invalidateQueries({ queryKey: invoiceKey(jid), refetchType });
+    void qc.invalidateQueries({ queryKey: ["audit"], refetchType });
+  };
+  // A trade bid's invoice (Nov 17) has no ticket to refresh. What shows it is re-read instead:
+  // the bid's Invoices block and these chips (what is left to bill), the bid, the Invoices list.
+  const refreshBid = (bid: string, refetch = true) => {
+    const refetchType = refetch ? "active" : "none";
+    void qc.invalidateQueries({ queryKey: ["invoices"], refetchType });
+    void qc.invalidateQueries({ queryKey: ["bid-invoices", bid], refetchType });
+    void qc.invalidateQueries({ queryKey: ["trade-bid", bid], refetchType });
     void qc.invalidateQueries({ queryKey: ["audit"], refetchType });
   };
   const openInvoice = (invoiceId: string, replace = false) =>
@@ -308,9 +371,22 @@ export function InvoiceEditorPage({
     },
     onError: (e) => toast.error(`Could not make another invoice: ${errText(e)}`),
   });
+  // The same button on a trade bid's invoice: a new draft for what the bid has left to bill.
+  const anotherBid = useMutation({
+    mutationFn: (bid: string) => bidAnotherFn({ data: { bid_id: bid } }),
+    onSuccess: (r, bid) => {
+      refreshBid(bid);
+      toast.success("Invoice made for what the bid has left to bill");
+      openInvoice(r.id);
+    },
+    // The server refuses in plain words ("This bid is billed in full. …"): said as they are.
+    onError: (e) => toast.error(errText(e)),
+  });
 
   const data = q.data;
-  const job = jobQ.data;
+  // The ticket once it is read, or the trade bid: that one needs no second read (Nov 17; the
+  // page used to wait for a ticket that a bid's invoice does not have).
+  const owner = data ? ownerOf(data, jobQ.data) : null;
   const backToList = (
     <Link
       to="/service/invoices"
@@ -339,23 +415,41 @@ export function InvoiceEditorPage({
         </p>
       </div>
     );
-  if (!data || !job)
+  if (!data || !owner)
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading the invoice…
       </p>
     );
 
+  const { job, bid } = owner;
+  // A save's answer does not say which bid (only getInvoice does): the one in hand is kept, so
+  // the header keeps its link.
+  const keepBid = (r: InvoiceWithLines): InvoiceWithLines =>
+    r.bid === undefined && data.bid && r.invoice.bid_id === data.bid.id
+      ? { ...r, bid: data.bid }
+      : r;
+  // A trade bid's invoice voided, or its draft deleted (Nov 17): back to the bid, whose Invoices
+  // block shows what is left to bill again; for someone who may not open bids, the Invoices list.
+  const bidVoided = (b: InvoiceBidRef, voidedId: string) => {
+    qc.removeQueries({ queryKey: invoicePageKey(voidedId) });
+    refreshBid(b.id);
+    if (b.readable) void navigate({ ...bidLink({ id: b.id, kind: "trade" }), replace: true });
+    else void navigate({ to: "/service/invoices", search: listSearch, replace: true });
+  };
+
   const ctx: Ctx = {
-    job,
+    ...owner,
     applied: (r, opts) => {
-      qc.setQueryData(invoicePageKey(r.invoice.id), r);
+      qc.setQueryData(invoicePageKey(r.invoice.id), keepBid(r));
+      if (!job) return refreshBid(bid.id, !opts?.quiet);
       refreshLists(job.id, !opts?.quiet);
       if (opts?.stage) refreshTicket(job.id);
     },
     refresh: () => void qc.invalidateQueries({ queryKey: invoicePageKey(id) }),
     askSend: (invoiceId) => setSendNow({ id: invoiceId, step: "ask" }),
     onVoided: (voidedId) => {
+      if (!job) return bidVoided(bid, voidedId);
       qc.removeQueries({ queryKey: invoiceKey(job.id) });
       refreshTicket(job.id);
       void qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -388,26 +482,60 @@ export function InvoiceEditorPage({
 
   const inv = data.invoice;
   const status = asInvoiceStatus(inv.status);
-  const siblings = all.data ?? [];
+  // The chips: the ticket's invoices, or the trade bid's (voided ones too, greyed).
+  const siblings = job
+    ? (all.data ?? [])
+    : (bidAll.data?.invoices ?? []).map((x) => ({
+        id: x.id,
+        label: x.display_number,
+        status: x.status,
+      }));
+  const making = another.isPending || anotherBid.isPending;
+  // Which of the ticket's photos (with their marks) print on this invoice (owner, Oct 1). A
+  // trade bid has no ticket and so no photos to pick from (Nov 17).
+  const photos = job && (
+    <InvoicePhotos invoiceId={inv.id} ticketNumber={job.number} editable={status === "draft"} />
+  );
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        {/* Back to the Invoices list; the title opens the ticket (owner, Oct 8). */}
+        {/* Back to the Invoices list; the title opens the ticket (owner, Oct 8). A trade bid's
+            invoice (Nov 17) has no ticket: the words beside the title name the bid and open it,
+            for whoever may open bids. */}
         {backToList}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="text-2xl font-bold tracking-tight tabular-nums">
-            <Link
-              to="/service"
-              search={{ id: job.id }}
-              title={`Open ticket #${job.number}`}
-              className="underline-offset-4 hover:underline"
-            >
-              Invoice #{invoiceLabel(inv)}
-            </Link>
+            {job ? (
+              <Link
+                to="/service"
+                search={{ id: job.id }}
+                title={`Open ticket #${job.number}`}
+                className="underline-offset-4 hover:underline"
+              >
+                Invoice #{invoiceLabel(inv)}
+              </Link>
+            ) : (
+              `Invoice #${invoiceLabel(inv)}`
+            )}
           </h1>
-          <span className="text-sm text-muted-foreground">
-            Ticket #{job.number}
-            {job.customer_name ? ` · ${job.customer_name}` : ""}
+          <span className="text-sm text-muted-foreground" data-invoice-owner>
+            {job ? (
+              <>
+                Ticket #{job.number}
+                {job.customer_name ? ` · ${job.customer_name}` : ""}
+              </>
+            ) : bid.readable ? (
+              <Link
+                {...bidLink({ id: bid.id, kind: "trade" })}
+                title="Open the bid"
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                Trade bid {bid.job_label}
+                {bid.name ? ` · ${bid.name}` : ""}
+              </Link>
+            ) : (
+              `Trade bid ${bid.job_label}`
+            )}
           </span>
           <InvoiceStatusBadge status={inv.status} />
           {inv.updated_by_name && (
@@ -420,11 +548,15 @@ export function InvoiceEditorPage({
             size="sm"
             variant="outline"
             className="sm:ml-auto"
-            disabled={another.isPending}
-            title={`Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`}
-            onClick={() => another.mutate(job.id)}
+            disabled={making}
+            title={
+              job
+                ? `Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`
+                : `Make another invoice for trade bid ${bid.job_label}: it bills what the bid has left to bill`
+            }
+            onClick={() => (job ? another.mutate(job.id) : anotherBid.mutate(bid.id))}
           >
-            {another.isPending ? (
+            {making ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
             ) : (
               <Plus className="mr-1 h-4 w-4" />
@@ -433,7 +565,11 @@ export function InvoiceEditorPage({
           </Button>
         </div>
         {siblings.length > 1 && (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="This ticket's invoices">
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="group"
+            aria-label={job ? "This ticket's invoices" : "This bid's invoices"}
+          >
             {siblings.map((x) => {
               const active = x.id === inv.id;
               return (
@@ -495,8 +631,7 @@ export function InvoiceEditorPage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {/* Which of the ticket's photos (with their marks) print on this invoice (owner, Oct 1). */}
-      <InvoicePhotos invoiceId={inv.id} ticketNumber={job.number} editable={status === "draft"} />
+      {photos}
       <AuditHistory entity="invoice" entityId={data.invoice.id} />
     </div>
   );
@@ -659,12 +794,16 @@ function CellLabel({ children }: { children: React.ReactNode }) {
 }
 
 function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
-  const { job } = ctx;
+  // `job` is null on a trade bid's invoice (Nov 17): then `bid` is the bid, and what only a
+  // ticket has (Rebuild, the purchase orders) is left out.
+  const { job, bid } = ctx;
   const inv = data.invoice;
   const no = invoiceLabel(inv);
   // The office (admins, managers) sees and types each line's cost (owner, Oct 8).
   const { profile } = useAuth();
-  const internal = managesTickets(profile);
+  // On a trade bid's invoice (Nov 17) cost and margin are not shown: they are the bid's, and
+  // the Margin report counts the won bid, never its invoices.
+  const internal = managesTickets(profile) && !ctx.bid;
   const deleteFn = useServerFn(voidInvoice);
   const saveFn = useServerFn(saveInvoice);
   const rebuildFn = useServerFn(rebuildInvoiceLines);
@@ -729,12 +868,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const [busy, setBusy] = useState<null | "rebuild" | "final" | "delete">(null);
   const [confirm, setConfirm] = useState<null | "rebuild" | "final" | "delete">(null);
 
-  const account = useAccount(job.account_id);
+  const account = useAccount(job ? job.account_id : bid.account_id);
+  // The customer's name where the account's is not at hand: the ticket's; on a trade bid's
+  // invoice, the Bill To name saved on the invoice (while it is billed to the customer).
+  const customerName = job ? job.customer_name : inv.bill_to_vendor_id ? null : billToName(inv);
   // Still the day the draft was made (the database's UTC day or the local one): not chosen.
   const dateUntouched = (ymd: string) =>
     ymd === toYmd(new Date(inv.created_at)) || ymd === inv.created_at.slice(0, 10);
   const taxExempt = !!account?.tax_exempt;
-  const po = usePoCost(job.id, inv.id, lines);
+  const po = usePoCost(job?.id ?? "", inv.id, lines, !!job);
   const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
   // Bill to changed here and not saved yet: show whom it will be billed to.
   const vendors = useVendors();
@@ -744,7 +886,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       ? null
       : head.bill_to_vendor_id
         ? pickedVendor && vendorBillTo(pickedVendor)
-        : accountBillTo(account, job.customer_name);
+        : accountBillTo(account, customerName);
 
   /** What stops the lines being saved ("Line 2 needs a quantity and a rate"), or null. */
   const lineProblem = (ls: readonly LineDraft[]): string | null => {
@@ -924,7 +1066,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         const r = await finalizeFn({ data: { id: inv.id } });
         setConfirm(null);
         ctx.applied(r, { stage: true });
-        toast.success(`Invoice #${invoiceLabel(r.invoice)} is final; the ticket is Invoiced`);
+        toast.success(
+          `Invoice #${invoiceLabel(r.invoice)} is final${job ? "; the ticket is Invoiced" : ""}`,
+        );
         // Owner, Oct 14: "Send it now?" follows, on the final invoice (the page asks).
         ctx.askSend(r.invoice.id);
       },
@@ -1008,7 +1152,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           vendorId: head.bill_to_vendor_id,
           onChange: (v) => setH("bill_to_vendor_id", v),
           preview: billPreview,
-          customerName: job.customer_name,
+          customerName,
           sendTo: head.send_to,
           onSendTo: (s) => setH("send_to", s),
         }}
@@ -1104,22 +1248,27 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               inputMode="decimal"
               onChange={setMarkup}
             />
-            {/* Owner, Oct 14: the markup applied to the purchase-order lines, or not. */}
-            <div className="flex items-center gap-2 pt-1">
-              <Switch
-                id="inv-po-markup"
-                checked={head.po_markup}
-                onCheckedChange={setPoMarkup}
-                aria-label="Mark up purchase orders"
-              />
-              <Label htmlFor="inv-po-markup" className="text-xs font-normal">
-                Mark up purchase orders
-              </Label>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              On: a purchase order on this invoice bills at what it cost plus the markup above. Off:
-              at what it cost. A price typed by hand stays either way.
-            </p>
+            {/* Owner, Oct 14: the markup applied to the purchase-order lines, or not. A trade
+                bid's invoice has no purchase orders (Nov 17). */}
+            {job && (
+              <>
+                <div className="flex items-center gap-2 pt-1">
+                  <Switch
+                    id="inv-po-markup"
+                    checked={head.po_markup}
+                    onCheckedChange={setPoMarkup}
+                    aria-label="Mark up purchase orders"
+                  />
+                  <Label htmlFor="inv-po-markup" className="text-xs font-normal">
+                    Mark up purchase orders
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  On: a purchase order on this invoice bills at what it cost plus the markup above.
+                  Off: at what it cost. A price typed by hand stays either way.
+                </p>
+              </>
+            )}
           </div>
         </div>
         <div className="space-y-1">
@@ -1164,8 +1313,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               </div>
               {lines.length === 0 && (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                  No lines. The ticket has no time or material yet: add a line, or record the time
-                  in Close out and rebuild from the ticket.
+                  {job
+                    ? "No lines. The ticket has no time or material yet: add a line, or record the time in Close out and rebuild from the ticket."
+                    : "No lines. Add a line for what this invoice bills."}
                 </p>
               )}
               <div className="space-y-2 lg:space-y-0">
@@ -1352,13 +1502,17 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </Button>
           </section>
           <div className={TOTALS_ASIDE}>
-            <Totals
-              t={t}
-              taxPct={head.tax_pct}
-              poError={po.error}
-              poCountedOn={po.countedOn}
-              poOnInvoice={po.onInvoice}
-            />
+            {job ? (
+              <Totals
+                t={t}
+                taxPct={head.tax_pct}
+                poError={po.error}
+                poCountedOn={po.countedOn}
+                poOnInvoice={po.onInvoice}
+              />
+            ) : (
+              <Totals t={t} taxPct={head.tax_pct} pos={false} />
+            )}
           </div>
         </div>
       </div>
@@ -1393,12 +1547,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem
-              title="Throw away these lines and build them again from the ticket's time and materials"
-              onSelect={() => setConfirm("rebuild")}
-            >
-              <RefreshCw className="h-4 w-4" /> Rebuild from ticket
-            </DropdownMenuItem>
+            {/* A trade bid's invoice has no ticket to rebuild from (Nov 17). */}
+            {job && (
+              <DropdownMenuItem
+                title="Throw away these lines and build them again from the ticket's time and materials"
+                onSelect={() => setConfirm("rebuild")}
+              >
+                <RefreshCw className="h-4 w-4" /> Rebuild from ticket
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
               onSelect={() => setConfirm("delete")}
@@ -1438,8 +1595,10 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               {confirm === "rebuild"
                 ? "The lines are built again from the ticket's time entries, materials and purchase orders at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
                 : confirm === "delete"
-                  ? deleteDraftNote(job.number, no)
-                  : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}
+                  ? job
+                    ? deleteDraftNote(job.number, no)
+                    : `The draft and its lines are removed. The next invoice made for this bid takes number ${no}.`
+                  : `The invoice is frozen at ${money(t.total)} and its PDF stored${job ? "; the ticket moves to Invoiced" : ""}. To change it afterwards, void it.`}
               {confirm === "final" && dirty ? " Your unsaved changes are saved first." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1465,6 +1624,10 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     </div>
   );
 }
+
+/** The Bill To name saved on the invoice (its own copy, taken when it was made or last saved). */
+const billToName = (inv: InvoiceRow): string | null =>
+  (inv.bill_to as { name?: string } | null)?.name ?? null;
 
 function useAccount(accountId: string | null) {
   const { session } = useAuth();
@@ -1502,7 +1665,7 @@ function BillTo({
   const cityLine = [b["city"], [b["state"], b["zip"]].filter(Boolean).join(" ")]
     .filter(Boolean)
     .join(", ");
-  const savedName = (inv.bill_to as { name?: string } | null)?.name ?? null;
+  const savedName = billToName(inv);
   const toVendor = draft ? !!draft.vendorId : !!inv.bill_to_vendor_id;
   return (
     <div className="grid gap-3 text-sm sm:grid-cols-2">
@@ -1742,6 +1905,11 @@ function usePoCost(
   jobId: string,
   invoiceId: string,
   lines: readonly { source: string | null }[],
+  /**
+   * False on a trade bid's invoice, Nov 17: it has no ticket and so no purchase orders. Nothing
+   * is read and the cost is $0 (a hook is not called conditionally, so it is switched off here).
+   */
+  hasTicket = true,
 ): { cost: number; countedOn: string | null; onInvoice: number; error: unknown } {
   const { session, profile } = useAuth();
   const listFn = useServerFn(listPurchaseOrders);
@@ -1750,12 +1918,12 @@ function usePoCost(
   const q = useQuery({
     queryKey: fieldKeys.pos(jobId),
     queryFn: () => listFn({ data: { jobId } }),
-    enabled,
+    enabled: enabled && hasTicket,
   });
   const invoices = useQuery({
     queryKey: ticketInvoicesKey(jobId),
     queryFn: () => invoicesFn({ data: { job_id: jobId } }),
-    enabled,
+    enabled: enabled && hasTicket,
   });
   // Until both are read nothing is added: never the whole total on every invoice "for now".
   if (!q.data || !invoices.data)
@@ -1780,9 +1948,12 @@ function Totals({
   poError,
   poCountedOn,
   poOnInvoice,
+  pos = true,
 }: {
   t: InvoiceTotals;
   taxPct: number;
+  /** False on a trade bid's invoice (Nov 17): no ticket, so the Purchase orders row is left out. */
+  pos?: boolean;
   /** The purchase orders could not be read: Cost and Margin leave them out, and say so. */
   poError?: unknown;
   /** The ticket's POs are counted on that other invoice ("6000"); $0 here. */
@@ -1793,7 +1964,9 @@ function Totals({
   const { profile } = useAuth();
   // Cost and margin are internal (owner, Oct 1: the invoice goes out to a customer): folded,
   // closed by default, and only for admins and managers.
-  const internal = managesTickets(profile);
+  // On a trade bid's invoice (Nov 17) cost and margin are not shown: they are the bid's, and
+  // the Margin report counts the won bid, never its invoices.
+  const internal = managesTickets(profile) && pos;
   const [open, setOpen] = useState(false);
   useEffect(() => {
     try {
@@ -1844,20 +2017,22 @@ function Totals({
           </button>
           {open && (
             <dl id="invoice-internal" className="mt-1.5 space-y-1">
-              <div className="flex justify-between gap-2">
-                <dt>
-                  Purchase orders
-                  {poCountedOn ? ` — counted on #${poCountedOn}` : ""}
-                  {poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}
-                </dt>
-                <dd className="tabular-nums">
-                  {poError ? (
-                    <span className="text-destructive">could not load: {errText(poError)}</span>
-                  ) : (
-                    money(t.po_cost)
-                  )}
-                </dd>
-              </div>
+              {pos && (
+                <div className="flex justify-between gap-2">
+                  <dt>
+                    Purchase orders
+                    {poCountedOn ? ` — counted on #${poCountedOn}` : ""}
+                    {poOnInvoice ? ` · ${poOnInvoice} on the invoice` : ""}
+                  </dt>
+                  <dd className="tabular-nums">
+                    {poError ? (
+                      <span className="text-destructive">could not load: {errText(poError)}</span>
+                    ) : (
+                      money(t.po_cost)
+                    )}
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between gap-2">
                 <dt>Cost</dt>
                 <dd className="tabular-nums">{money(t.cost_total)}</dd>
@@ -1896,16 +2071,19 @@ function FinalInvoice({
   openSend?: boolean;
   onSendClosed?: () => void;
 }) {
-  const { job } = ctx;
+  // `job` is null on a trade bid's invoice (Nov 17): then `bid` is the bid.
+  const { job, bid } = ctx;
   const inv = data.invoice;
   const status: InvoiceStatus = asInvoiceStatus(inv.status);
   const { profile } = useAuth();
-  const internal = managesTickets(profile);
+  // On a trade bid's invoice (Nov 17) cost and margin are not shown: they are the bid's, and
+  // the Margin report counts the won bid, never its invoices.
+  const internal = managesTickets(profile) && !bid;
   const renderFn = useServerFn(renderInvoice);
   const sendFn = useServerFn(sendInvoice);
   const paidFn = useServerFn(markInvoicePaid);
   const voidFn = useServerFn(voidInvoice);
-  const account = useAccount(job.account_id);
+  const account = useAccount(job ? job.account_id : bid.account_id);
   const [dialog, setDialog] = useState<null | "send" | "paid" | "void">(null);
   const shownDialog = dialog ?? (openSend && status !== "void" ? "send" : null);
   const closeDialog = () => {
@@ -1913,7 +2091,7 @@ function FinalInvoice({
     onSendClosed?.();
   };
 
-  const po = usePoCost(job.id, inv.id, data.lines);
+  const po = usePoCost(job?.id ?? "", inv.id, data.lines, !!job);
   const t = computeTotals(
     data.lines.map((l) => ({
       kind: l.kind,
@@ -1963,7 +2141,7 @@ function FinalInvoice({
       // Nov 10: a $0 amount takes the payment off; the invoice is a plain Final again.
       toast.success(
         r.invoice.status === "paid"
-          ? `Invoice #${invoiceLabel(r.invoice)} marked paid; close the ticket from its stage when it is finished`
+          ? `Invoice #${invoiceLabel(r.invoice)} marked paid${job ? "; close the ticket from its stage when it is finished" : ""}`
           : !hasPayment(r.invoice)
             ? `Payment taken off invoice #${invoiceLabel(r.invoice)}; it is Final again with ${money(balanceDue(r.invoice))} due`
             : `Payment of ${money(r.invoice.paid_amount)} recorded on invoice #${invoiceLabel(r.invoice)}; balance due ${money(balanceDue(r.invoice))}, so it stays Final`,
@@ -2000,14 +2178,32 @@ function FinalInvoice({
       {/* Only a draft is edited (owner, Oct 8: "i dont see how you can edit an invoice"). */}
       {status === "void" && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          This invoice is void. It stays on record under its number and is left out of the Sage
-          export. To bill this ticket, open it (the title above) and choose Make the invoice.
+          {job ? (
+            <>
+              This invoice is void. It stays on record under its number and is left out of the Sage
+              export. To bill this ticket, open it (the title above) and choose Make the invoice.
+            </>
+          ) : (
+            <>
+              This invoice is void. It stays on record under its number and is left out of the Sage
+              export. What it billed is left to bill again: choose Another invoice above.
+            </>
+          )}
         </p>
       )}
       {status === "final" && !hasPayment(inv) && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change
-          it, Void it below and make a new invoice from the ticket.
+          {job ? (
+            <>
+              This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To
+              change it, Void it below and make a new invoice from the ticket.
+            </>
+          ) : (
+            <>
+              This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To
+              change it, Void it below and make a new one with Another invoice above.
+            </>
+          )}
         </p>
       )}
       {status === "final" && hasPayment(inv) && (
@@ -2119,13 +2315,17 @@ function FinalInvoice({
             </p>
           )}
         </div>
-        <Totals
-          t={stored}
-          taxPct={toPct(inv.tax_rate)}
-          poError={po.error}
-          poCountedOn={po.countedOn}
-          poOnInvoice={po.onInvoice}
-        />
+        {job ? (
+          <Totals
+            t={stored}
+            taxPct={toPct(inv.tax_rate)}
+            poError={po.error}
+            poCountedOn={po.countedOn}
+            poOnInvoice={po.onInvoice}
+          />
+        ) : (
+          <Totals t={stored} taxPct={toPct(inv.tax_rate)} pos={false} />
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
@@ -2171,7 +2371,7 @@ function FinalInvoice({
           title={`Send invoice #${invoiceLabel(inv)}`}
           note={inv.sent_at ? "The final PDF is emailed again." : "The final PDF is emailed."}
           inv={inv}
-          accountId={job.account_id}
+          accountId={job ? job.account_id : bid.account_id}
           vendorId={inv.bill_to_vendor_id}
           busy={send.isPending}
           onClose={closeDialog}
@@ -2198,8 +2398,10 @@ function FinalInvoice({
             <AlertDialogDescription>
               Use this for a mistake. The invoice stays on record as Void (it cannot be un-voided)
               and is left out of the Sage export; its number is free for the next invoice on this
-              ticket. The ticket goes back to Authorized unless another of its invoices is still
-              live.
+              {/* A trade bid has no ticket to move back (Nov 17). */}
+              {job
+                ? " ticket. The ticket goes back to Authorized unless another of its invoices is still live."
+                : " bid, and what it billed is left to bill again."}
               {inv.sent_at ? " The customer already has the emailed copy; let them know." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -2482,7 +2684,8 @@ function SendDialog(props: {
             <Label>To</Label>
             {!accountId ? (
               <p className="text-xs text-muted-foreground">
-                The ticket is not linked to a customer profile; type the address below.
+                {props.inv.bid_id ? "The bid" : "The ticket"} is not linked to a customer profile;
+                type the address below.
               </p>
             ) : contactsQ.error ? (
               <p className="text-xs text-destructive">
@@ -2623,10 +2826,17 @@ function PaidDialog(props: {
             {again ? "Edit the payment" : "Mark paid"} · invoice #{invoiceLabel(inv)}
           </DialogTitle>
           <DialogDescription>
-            Records the payment here (Sage stays the ledger). The ticket&apos;s stage does not
-            change — close it from the stage picker when it is finished. Total {money(inv.total)}.
-            An amount that covers the total marks it paid; a smaller one is recorded and the invoice
-            stays final with the balance due.
+            {/* A trade bid's invoice has no ticket and no stage (Nov 17). */}
+            {inv.bid_id ? (
+              "Records the payment here (Sage stays the ledger)."
+            ) : (
+              <>
+                Records the payment here (Sage stays the ledger). The ticket&apos;s stage does not
+                change — close it from the stage picker when it is finished.
+              </>
+            )}{" "}
+            Total {money(inv.total)}. An amount that covers the total marks it paid; a smaller one
+            is recorded and the invoice stays final with the balance due.
             {again ? " To take this payment off, set the amount to 0." : ""}
           </DialogDescription>
         </DialogHeader>

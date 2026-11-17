@@ -16,6 +16,11 @@
  *  4. Change this bid's rates and lines: closed until asked for. It opens the same editor the
  *     trade is set up with, on this bid's OWN copy: the trade stays as it is.
  *
+ * Under the price of a saved bid sits its Invoices block (owner, Nov 17; bid-invoices-card.tsx):
+ * a won bid is invoiced from here. It is not part of this form: making an invoice saves nothing
+ * of the bid and never makes it "not saved". It is only told whether the bid is Won and whether
+ * there are changes not saved, because an invoice bills the saved price.
+ *
  * What saves when:
  *  - Nothing of a new bid is saved until Save. The server needs the customer and, for a new
  *    bid, the due date; the screen asks for both in plain words before it sends anything.
@@ -47,6 +52,7 @@ import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-
 import { SiteSelect } from "@/components/crm/site-select";
 import { DocumentsPanel } from "@/components/documents/documents-panel";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
+import { BidInvoicesCard } from "@/components/trade/bid-invoices-card";
 import {
   BOX,
   InvalidBoxes,
@@ -578,6 +584,8 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
       void qc.invalidateQueries({ queryKey: ["trade-bids"] });
       void qc.invalidateQueries({ queryKey: ["my-work"] });
       if (row.account_id) void qc.invalidateQueries({ queryKey: ["account", row.account_id] });
+      // A changed price changes what is left to bill (the Invoices block below).
+      void qc.invalidateQueries({ queryKey: ["bid-invoices", row.id] });
       adopt(row);
       // Saved: nothing is pending any more, whichever way the screen goes next.
       dirtyRef.current = false;
@@ -913,6 +921,12 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
           <TradePrice setup={draft.data.setup} result={result} />
         </CardContent>
       </Card>
+
+      {/* A saved bid's invoices (owner, Nov 17). Not part of this form: nothing here is saved by
+          Save, and nothing here makes the bid "not saved". */}
+      {bid && (
+        <BidInvoicesCard bidId={bid.id} won={status === "won"} unsaved={dirty} deleted={deleted} />
+      )}
 
       <Collapsible open={ratesOpen} onOpenChange={setRatesOpen}>
         <CollapsibleTrigger asChild>

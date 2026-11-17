@@ -12,6 +12,11 @@
  * The ticket's stage: finalising (or sending a draft) marks it Invoiced, marking the invoice paid
  * marks it Closed. Those two stages are a manager's (ticket-stage.ts), so the invoice path sets
  * them through `set_ticket_stage_from_invoice` (ticketStageFromInvoice below).
+ *
+ * An invoice may belong to a won trade bid instead of a ticket (owner, Nov 17; invoices.bid_id
+ * with service_job_id null, made by bid-invoices.functions.ts createBidInvoice). It is the same
+ * invoice in every other way. Everything here that reads or moves a ticket sits behind one check,
+ * `ofTicket`: an invoice with no ticket skips those steps and is never refused for lacking one.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -19,6 +24,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { tradeJobLabel, type InvoiceBidRef } from "@/lib/bid-invoices";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
@@ -80,7 +86,11 @@ export const RATE_KIND_LABELS: Record<(typeof RATE_KINDS)[number], string> = {
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
-async function office(ctx: Ctx) {
+/**
+ * The gate of every invoice function: the caller's profile, or a refusal. Exported for the
+ * invoices made from a trade bid (bid-invoices.functions.ts), so the rule is one, not a copy.
+ */
+export async function office(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
     .select("role, access, technician, full_name, email")
@@ -93,8 +103,48 @@ async function office(ctx: Ctx) {
   if (!seesInvoices(data)) throw new Error("Invoices are a manager's or sales'");
   return data;
 }
-const nameOf = (p: { full_name: string | null; email: string }) =>
+export const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
+
+/**
+ * Does the invoice belong to a service ticket? Every invoice has exactly one parent (the check
+ * invoices_one_parent, 20261117090000): a ticket, or a won trade bid (bid_id). The ticket steps
+ * (the ticket's stage and `set_ticket_stage_from_invoice`, its pointer service_jobs.invoice_id,
+ * its stage events and follow-up, its clocks, Rebuild from ticket, its photos and purchase
+ * orders) all sit behind this one check; a bid's invoice skips them and is never refused for
+ * having no ticket. True also tells the compiler the ticket's id is there.
+ */
+export function ofTicket<T extends { service_job_id: string | null }>(
+  inv: T,
+): inv is T & { service_job_id: string } {
+  return inv.service_job_id !== null;
+}
+
+/** Rebuild from ticket on an invoice that has no ticket. */
+export const INVOICE_NO_TICKET_TO_REBUILD =
+  "This invoice was made from a trade bid. It has no ticket to rebuild from.";
+
+/**
+ * The trade job's label read off one of its invoice numbers: "T-1001.2" is job "T-1001". For
+ * someone who may not read the bid itself (no Estimate access), whose own number is then not
+ * to be had; "" when there is no number to go by.
+ */
+export const bidJobLabelOf = (displayNumber: string | null | undefined): string =>
+  (displayNumber ?? "").trim().replace(/\.\d+$/, "");
+
+/** The name in a Bill To snapshot (vendors.ts BillToSnapshot), "" when none. */
+const billToName = (billTo: unknown): string => {
+  const name = (billTo as { name?: unknown } | null)?.name;
+  return typeof name === "string" ? name : "";
+};
+
+/**
+ * Whom the emailed invoice says it is for (sendInvoice): the property's name, else the ticket's
+ * customer. An invoice with no ticket (a trade bid's, Nov 17) names its Bill To there instead.
+ */
+const emailedFor = (b: InvoiceBundle): string =>
+  (b.invoice.property as { name?: string }).name ??
+  (b.job ? b.job.customer_name : billToName(b.invoice.bill_to));
 /** Who is making the invoice (created_by, updated_by_name). */
 type Actor = {
   id: string;
@@ -206,6 +256,9 @@ export function invoiceKeepsTicketStage(stage: string | null | undefined): boole
  * stores the PDF; stamps the invoice final; moves the ticket to Invoiced through the rpc
  * (ticketStageFromInvoice: sales / project managers too); runs the stage automation (the
  * invoice follow-up) and closes the ticket's follow-up.
+ *
+ * An invoice made from a trade bid (Nov 17) has no ticket: it is checked, drawn, stored and
+ * stamped final the same way, and every ticket step below is skipped (`ofTicket`).
  */
 async function finalizeDraft(
   sb: SupabaseClient<Database>,
@@ -215,7 +268,7 @@ async function finalizeDraft(
   if (b.invoice.status !== "draft") throw new Error("Already final");
   if (!b.lines.length) throw new Error("The invoice has no lines");
   // The ticket's stage as loaded with the bundle (loadBundle reads it fresh for this call).
-  const stageProblem = finalizeStageProblem(b.invoice.service_job_id ? b.job.stage : null);
+  const stageProblem = finalizeStageProblem(ofTicket(b.invoice) ? b.job?.stage : null);
   if (stageProblem) throw new Error(stageProblem);
   const { renderInvoicePdf } = await import("@/lib/invoices.server");
   const pdf = await renderInvoicePdf(sb, b);
@@ -236,26 +289,30 @@ async function finalizeDraft(
     .select("*")
     .single();
   if (error) throw new Error(error.message);
-  // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc) — unless
-  // it is Closed already: a second invoice never reopens it (owner, Oct 12, item 6). A
-  // technician's clock still running on it is stopped first and its time written
-  // (clock-close.server.ts, Oct 28); a clock that cannot be stopped refuses the stage change,
-  // the invoice itself being saved already.
-  if (!invoiceKeepsTicketStage(b.job.stage)) {
-    try {
-      await stopClocksForOffice(sb, { id: b.job.id, number: b.job.number }, "invoiced", {
-        id: actor.id,
-        name: actor.name,
-      });
-    } catch (e) {
-      throw new Error(
-        `The invoice is saved, but the ticket was not marked Invoiced: ${e instanceof Error ? e.message : String(e)}`,
-      );
+  // The ticket's steps, for an invoice that has a ticket (a trade bid's has none: it is final
+  // now and that is all).
+  if (ofTicket(b.invoice) && b.job) {
+    // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc) —
+    // unless it is Closed already: a second invoice never reopens it (owner, Oct 12, item 6). A
+    // technician's clock still running on it is stopped first and its time written
+    // (clock-close.server.ts, Oct 28); a clock that cannot be stopped refuses the stage change,
+    // the invoice itself being saved already.
+    if (!invoiceKeepsTicketStage(b.job.stage)) {
+      try {
+        await stopClocksForOffice(sb, { id: b.job.id, number: b.job.number }, "invoiced", {
+          id: actor.id,
+          name: actor.name,
+        });
+      } catch (e) {
+        throw new Error(
+          `The invoice is saved, but the ticket was not marked Invoiced: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
     }
-    await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
+    await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);
+    await closeTicketFollowup(sb, b.job, actor, "stage invoiced");
   }
-  await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);
-  await closeTicketFollowup(sb, b.job, actor, "stage invoiced");
   return updated;
 }
 
@@ -302,6 +359,11 @@ export async function invoicePdf(
 export interface InvoiceWithLines {
   invoice: InvoiceRow;
   lines: InvoiceLineRow[];
+  /**
+   * The trade bid the invoice belongs to (Nov 17, bid-invoices.ts); null or absent on a ticket's
+   * invoice. Set by getInvoice.
+   */
+  bid?: InvoiceBidRef | null;
 }
 async function withLines(
   sb: SupabaseClient<Database>,
@@ -493,7 +555,7 @@ export const listTicketInvoices = createServerFn({ method: "GET" })
   });
 
 /** Postgres unique violation on the live display-number index (two creates at once). */
-const numberTaken = (e: { code?: string; message: string }) =>
+export const numberTaken = (e: { code?: string; message: string }) =>
   e.code === "23505" && /display_number/.test(e.message);
 
 /**
@@ -623,12 +685,63 @@ export const getInvoice = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
-    return withLines(context.supabase, inv);
+    const [shownInvoice, bid] = await Promise.all([
+      withLines(context.supabase, inv),
+      invoiceBidRef(context.supabase, inv),
+    ]);
+    return { ...shownInvoice, bid };
   });
 
 /**
+ * The trade bid an invoice belongs to, for the invoice page (Nov 17); null for a ticket's
+ * invoice. Read with the caller's own client: the Invoices tick does not come with Estimate
+ * access, and row level security then answers no bid. That person still opens the invoice; the
+ * page is told the bid is not theirs to open (`readable: false`) and the job's label is read
+ * off the invoice's own number.
+ */
+async function invoiceBidRef(
+  sb: SupabaseClient<Database>,
+  inv: InvoiceRow,
+): Promise<InvoiceBidRef | null> {
+  if (!inv.bid_id) return null;
+  const { data, error } = await sb
+    .from("bids")
+    .select("id, name, account_id, trade_number, trade_name:data->>trade_name")
+    .eq("id", inv.bid_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  // The JSON path's alias is a plain text column in the answer.
+  const bid = data as unknown as {
+    id: string;
+    name: string | null;
+    account_id: string | null;
+    trade_number: number | null;
+    trade_name: string | null;
+  } | null;
+  const fromNumber = bidJobLabelOf(invoiceLabel(inv));
+  if (!bid)
+    return {
+      id: inv.bid_id,
+      name: "",
+      trade_name: "",
+      job_label: fromNumber,
+      account_id: null,
+      readable: false,
+    };
+  return {
+    id: bid.id,
+    name: bid.name ?? "",
+    trade_name: bid.trade_name ?? "",
+    job_label: bid.trade_number != null ? tradeJobLabel(bid.trade_number) : fromNumber,
+    account_id: bid.account_id ?? null,
+    readable: true,
+  };
+}
+
+/**
  * Rebuild a draft's lines from the ticket (after its time or material was corrected). Lines
- * added by hand on the invoice and prices changed by hand are kept (invoice-rebuild.ts).
+ * added by hand on the invoice and prices changed by hand are kept (invoice-rebuild.ts). An
+ * invoice made from a trade bid has no ticket to rebuild from: refused in plain words.
  */
 export const rebuildInvoiceLines = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -643,6 +756,7 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
+    if (!ofTicket(inv)) throw new Error(INVOICE_NO_TICKET_TO_REBUILD);
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
     const built = await buildLinesFromJob(sb, inv.service_job_id, {
@@ -863,7 +977,7 @@ export const saveInvoice = createServerFn({ method: "POST" })
       if (data.bill_to_vendor_id) {
         const vendor = await billableVendor(sb, data.bill_to_vendor_id);
         patch.bill_to = billToFor(vendor, null, null) as unknown as Json;
-      } else {
+      } else if (ofTicket(inv)) {
         const { data: job, error: jErr } = await sb
           .from("service_jobs")
           .select("account_id, customer_name")
@@ -876,6 +990,20 @@ export const saveInvoice = createServerFn({ method: "POST" })
           : { data: null, error: null };
         if (aErr) throw new Error(aErr.message);
         patch.bill_to = accountBillTo(account, job.customer_name) as unknown as Json;
+      } else {
+        // A trade bid's invoice (Nov 17): the customer is the bid's account, else the name
+        // typed on the bid. Someone who may not read the bid (no Estimate access) cannot be
+        // told who that is, so the Bill To stays as stored, the vendor and its snapshot
+        // together (the column set above is taken back), rather than a customer column over a
+        // vendor's address.
+        const customer = await bidCustomer(sb, inv.bid_id);
+        if (customer) {
+          const { data: account, error: aErr } = customer.account_id
+            ? await sb.from("crm_accounts").select("*").eq("id", customer.account_id).maybeSingle()
+            : { data: null, error: null };
+          if (aErr) throw new Error(aErr.message);
+          patch.bill_to = accountBillTo(account, customer.customer_name) as unknown as Json;
+        } else delete patch.bill_to_vendor_id;
       }
     }
     // Send To edited on this invoice only: over the copy just taken, else the saved one.
@@ -892,6 +1020,28 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (uErr) throw new Error(uErr.message);
     return withLines(sb, updated);
   });
+
+/**
+ * Whom a trade bid's work is for: its customer account and the customer's name as typed on the
+ * bid (the JSON path, so the bid's whole data never crosses the wire). Null when the caller may
+ * not read the bid (row level security: no Estimate access) or it is gone.
+ */
+async function bidCustomer(
+  sb: SupabaseClient<Database>,
+  bidId: string | null,
+): Promise<{ account_id: string | null; customer_name: string | null } | null> {
+  if (!bidId) return null;
+  const { data, error } = await sb
+    .from("bids")
+    .select("account_id, customer_name:data->customer->>name")
+    .eq("id", bidId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const bid = data as unknown as { account_id: string | null; customer_name: string | null } | null;
+  return bid
+    ? { account_id: bid.account_id ?? null, customer_name: bid.customer_name ?? null }
+    : null;
+}
 
 /** The PDF as base64 (for preview / download in the browser). */
 export const renderInvoice = createServerFn({ method: "POST" })
@@ -1052,7 +1202,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
     const pdf = await invoicePdf(sb, b);
     const label = invoiceLabel(b.invoice);
     const subject = b.settings.email_subject.replace("{number}", label);
-    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}${shareLine}`;
+    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${emailedFor(b)}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}${shareLine}`;
     const r = await emailInvoice({
       to: data.to,
       subject,
@@ -1143,7 +1293,12 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     return { ...(await withLines(sb, inv)), ticket_closed: false };
   });
 
-/** Void an invoice (a mistake); the ticket goes back to Authorized and a new draft can be made. */
+/**
+ * Void an invoice (a mistake); the ticket goes back to Authorized and a new draft can be made.
+ * An invoice made from a trade bid (Nov 17) is deleted or voided the same way and that is all:
+ * it has no ticket to point elsewhere or to send back (`ofTicket`), and its number and its
+ * amount are the bid's to bill again.
+ */
 export const voidInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
@@ -1165,13 +1320,16 @@ export const voidInvoice = createServerFn({ method: "POST" })
       throw new Error("A payment is recorded on this invoice, so it cannot be voided");
     // The ticket's stage before this, for the stage automation (audit, Oct 2: a hard-coded
     // "invoiced" re-sent "done — invoice ready" when a draft was deleted on a Done ticket).
-    const { data: jobBefore, error: jErr } = await sb
-      .from("service_jobs")
-      .select("stage")
-      .eq("id", inv.service_job_id)
-      .maybeSingle();
-    if (jErr) throw new Error(jErr.message);
-    const prevStage = jobBefore?.stage ?? null;
+    let prevStage: string | null = null;
+    if (ofTicket(inv)) {
+      const { data: jobBefore, error: jErr } = await sb
+        .from("service_jobs")
+        .select("stage")
+        .eq("id", inv.service_job_id)
+        .maybeSingle();
+      if (jErr) throw new Error(jErr.message);
+      prevStage = jobBefore?.stage ?? null;
+    }
     if (inv.status === "draft") {
       // A draft is deleted outright; its number is free for the next invoice on the ticket.
       const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
@@ -1191,6 +1349,8 @@ export const voidInvoice = createServerFn({ method: "POST" })
         .eq("id", inv.id);
       if (vErr) throw new Error(vErr.message);
     }
+    // Everything below is the ticket's (its pointer, its stage): a trade bid's invoice has none.
+    if (!ofTicket(inv)) return;
     const gone = inv.status === "draft" ? "deleted" : "void";
     const ticketFailed = (m: string) =>
       new Error(`The invoice is ${gone}, but the ticket was not updated: ${m}`);
@@ -1323,7 +1483,9 @@ export const exportSageCsv = createServerFn({ method: "POST" })
       const { data: lines } = ids.length
         ? await sb.from("invoice_lines").select("*").in("invoice_id", ids).order("sort")
         : { data: [] as InvoiceLineRow[] };
-      const filled = fillSageIds(invs ?? [], await sageLookups(sb, invs ?? []));
+      // Keyed by parent for the lookup (sageKeyed): a trade bid's invoice has no ticket.
+      const keyed = (invs ?? []).map(sageKeyed);
+      const filled = fillSageIds(keyed, await sageLookups(sb, keyed));
       const { sageCsv } = await import("@/lib/invoices.server");
       const csv = sageCsv(
         filled.map((invoice) => ({
@@ -1341,17 +1503,36 @@ export const exportSageCsv = createServerFn({ method: "POST" })
     },
   );
 
-/** The current Sage numbers for the invoices whose snapshot has none (the vendor's, or the ticket's customer's). */
-async function sageLookups(sb: Ctx["supabase"], invs: readonly InvoiceRow[]): Promise<SageLookups> {
+/**
+ * The key an invoice's customer is looked up under in the Sage export. sage-export.ts looks a
+ * blank customer number up by the invoice's ticket (`service_job_id`, SageLookups
+ * accountIdsByJob). An invoice made from a trade bid (Nov 17) has no ticket; it is looked up by
+ * its bid instead, under "bid:<id>", which no ticket's id can be. Only the lookup reads this
+ * copy's service_job_id: the CSV never prints it and nothing is written back.
+ */
+const SAGE_BID_KEY = "bid:";
+type SageKeyed = InvoiceRow & { service_job_id: string };
+const sageKeyed = (i: InvoiceRow): SageKeyed => ({
+  ...i,
+  service_job_id: i.service_job_id ?? `${SAGE_BID_KEY}${i.bid_id ?? ""}`,
+});
+
+/** The current Sage numbers for the invoices whose snapshot has none (the vendor's, or the ticket's customer's; for a trade bid's invoice, the bid's customer's). */
+async function sageLookups(sb: Ctx["supabase"], invs: readonly SageKeyed[]): Promise<SageLookups> {
   const blank = invs.filter(
     (i) => !((i.bill_to ?? {}) as { external_id?: string }).external_id?.trim(),
   );
   const vendorIds = [
     ...new Set(blank.map((i) => i.bill_to_vendor_id).filter((v): v is string => !!v)),
   ];
-  const jobIds = [
-    ...new Set(blank.filter((i) => !i.bill_to_vendor_id).map((i) => i.service_job_id)),
-  ];
+  const toCustomer = blank.filter((i) => !i.bill_to_vendor_id);
+  const jobIds = [...new Set(toCustomer.filter((i) => !i.bid_id).map((i) => i.service_job_id))];
+  // The bids' accounts, read with the caller's client: someone who may not read bids (no
+  // Estimate access) gets none, and the number then stays blank and is listed as missing.
+  const bidIds = [...new Set(toCustomer.map((i) => i.bid_id).filter((b): b is string => !!b))];
+  const bids = bidIds.length
+    ? await sb.from("bids").select("id, account_id").in("id", bidIds)
+    : { data: [] as { id: string; account_id: string | null }[] };
   const [vendors, jobs] = await Promise.all([
     vendorIds.length
       ? // sage_customer_id (20261104150000) is newer than the generated types: a loose read.
@@ -1365,7 +1546,11 @@ async function sageLookups(sb: Ctx["supabase"], invs: readonly InvoiceRow[]): Pr
       : Promise.resolve({ data: [] as { id: string; account_id: string | null }[] }),
   ]);
   const accountIds = [
-    ...new Set((jobs.data ?? []).map((j) => j.account_id).filter((a): a is string => !!a)),
+    ...new Set(
+      [...(jobs.data ?? []), ...(bids.data ?? [])]
+        .map((j) => j.account_id)
+        .filter((a): a is string => !!a),
+    ),
   ];
   const accounts = accountIds.length
     ? await sb.from("crm_accounts").select("id, external_id").in("id", accountIds)
@@ -1378,9 +1563,15 @@ async function sageLookups(sb: Ctx["supabase"], invs: readonly InvoiceRow[]): Pr
         v.sage_customer_id,
       ]),
     ),
-    accountIdsByJob: new Map(
-      (jobs.data ?? []).map((j) => [j.id, j.account_id ? byAccount.get(j.account_id) : null]),
-    ),
+    accountIdsByJob: new Map([
+      ...(jobs.data ?? []).map(
+        (j) => [j.id, j.account_id ? byAccount.get(j.account_id) : null] as const,
+      ),
+      ...(bids.data ?? []).map(
+        (b) =>
+          [`${SAGE_BID_KEY}${b.id}`, b.account_id ? byAccount.get(b.account_id) : null] as const,
+      ),
+    ]),
   };
 }
 

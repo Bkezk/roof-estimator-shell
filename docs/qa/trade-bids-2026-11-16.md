@@ -95,7 +95,7 @@ Proven on the live database in a run that was rolled back:
 | `trade-bids-server-nov16.test.ts` | 100   | server functions, links, documents, migration, menu   |
 | `trade-screens-nov16.test.ts`     | 51    | the setup and bid screens and their helpers           |
 | `trade-bids-list-nov16.test.ts`   | 52    | the list and its helpers                              |
-| `trade-bid-guards-nov16.test.ts`  | 10    | the estimator guards, search tag, scope lines         |
+| `trade-bid-guards-nov16.test.ts`  | 16    | the estimator guards, search tag, scope lines, customer |
 
 Chain: eslint 0 errors, tsc clean, 580 files / 8,022 tests pass, production build succeeds.
 
@@ -155,12 +155,101 @@ opportunities; the test login as it was. The history log keeps its lines about t
 rows. One row stays on purpose: the "Trade proposal" template, added to the templates the same
 way the Inspection report was.
 
-## Not built yet
+## Invoices (Nov 17)
 
-- **Invoices for trade bids.** An invoice today belongs to a service ticket: its number is the
-  ticket's, and the Margin report counts it through the ticket. A trade job has no ticket, and
-  the owner was not sure it should ("idk if what we are doing will need service tickets the
-  same way a roof does"). This waits for the owner's choice between an invoice made straight
-  from a won trade bid and a ticket per job.
-- The Estimate group's menu row is the only way in besides links. Nothing is sent or created
-  on its own.
+Owner: "Go with option 1, T-1001 format, and im not sure on that yet" (on whether a job gets one
+invoice or a deposit and a final).
+
+An invoice is made straight from a Won trade bid. No ticket is made.
+
+- **Same invoices as a ticket's.** The same table, list, Draft, Final, Paid and Void, the same
+  PDF, payment and share link. What differs is the parent: `invoices.bid_id` in place of the
+  ticket (`service_job_id` may now be blank; exactly one of the two is set).
+- **Numbers.** A bid takes a job number from a series that starts at 1001 the first time it is
+  invoiced, shown "T-1001". A second invoice on the same bid is "T-1001.2", as a ticket's second
+  is "6012.2". A voided invoice frees its number.
+- **One invoice or several.** Left open on purpose. A new invoice starts at what the bid has
+  left to bill (its price less its live invoices before tax), so one invoice bills it all and a
+  second is only ever the remainder. The amount can be changed on the draft for a deposit.
+- **The bid screen** has an Invoices block on a Won bid: each invoice, what is left to bill,
+  and Make an invoice. It shows only to people who may invoice (an admin, a manager, or Service
+  with the Invoices tick).
+- **Tax** starts at 0% (a trade bid's price already holds the sales tax paid on materials). The
+  Tax % box on the draft is the office's to set.
+- **No cost on a bid's invoice.** The job's cost and margin are the bid's. The Margin report
+  counts the won bid from its own figures and leaves its invoices out, so nothing is counted
+  twice. The invoice page shows no cost or margin for one.
+- **A bid with a live invoice cannot be deleted**, as a ticket with one cannot. The words say
+  which invoice to void. Voided invoices go with a bid when it is removed for good.
+- **Every ticket step is skipped** for an invoice with no ticket (stages, the ticket's pointer,
+  rebuild from the ticket, ticket photos, purchase orders). A ticket's invoice behaves exactly
+  as before: the existing invoice tests pass unchanged apart from dated pin updates.
+
+Database: `supabase/migrations/20261117090000_trade_bid_invoices.sql`, applied to the live
+database by hand and checked. Proven there in runs that were rolled back:
+
+- a draft bid and a roofing bid are refused a job number, in plain words;
+- a won trade bid gets 1001 and the same number when asked again;
+- two invoices and a line save; an invoice with no parent and the same number twice are refused;
+- Final then Paid works with no ticket (the ticket triggers tolerate the blank);
+- deleting the bid is refused while an invoice is live, for a manager and for an estimator who
+  cannot see invoices; with every invoice voided the bid deletes and purges, taking them with it;
+- an estimator sees no invoices and cannot take a number or make one;
+- someone with the Invoices tick and no Estimate access sees the invoices but not the bid.
+
+Tests added: `bid-invoices-nov17.test.ts` (10, the numbering and what is left to bill),
+`trade-invoices-db-nov17.test.ts` (10, the database change), `trade-invoices-server-nov17.test.ts`
+(64, server functions, the PDF, the Margin report rule) and `trade-invoices-ui-nov17.test.ts`
+(36, the Invoices block and the invoice page without a ticket).
+
+Browser run on a temporary customer, job type and bid (price $3,096.38):
+
+| Check                                              | Result                                    |
+| -------------------------------------------------- | ----------------------------------------- |
+| Draft bid                                          | "Mark the bid Won to invoice it."         |
+| Won bid                                            | Invoices block, Left to bill $3,096.38    |
+| Unsaved change on the bid                          | button off, "Save the bid first."         |
+| Make an invoice                                    | #T-1001, one line for $3,096.38, tax 0%   |
+| Header                                             | "Trade bid T-1001" and the bid's name, linking to the bid |
+| Ticket-only parts (photos, Rebuild, cost, margin)  | not shown                                 |
+| Amount changed to a $1,000 deposit, reloaded       | saved, total $1,000.00                    |
+| Preview, Finalise, Download PDF                    | PDF titled Invoice, #T-1001, with the scope of work |
+| Mark paid, $1,000                                  | Paid                                      |
+| Back on the bid                                    | T-1001 Paid $1,000.00, Left to bill $2,096.38 |
+| Make another invoice                               | #T-1001.2 for $2,096.38, "per proposal, balance", printed as its own line |
+| Another with nothing left                          | refused: "This bid is billed in full…"    |
+| Invoices list                                      | both, in their status groups; found by "T-1001" in search |
+| Deleting the bid                                   | refused, naming T-1001 and T-1001.2       |
+| Margin report                                      | the won bid once ($3,096.38, cost $2,243.75, 27.5%); no invoice rows |
+| Void #T-1001.2                                     | Void on record; $2,096.38 left to bill again; the next invoice takes T-1001.2 |
+| Delete a draft                                     | asks first, then back on the bid          |
+| 390 px wide: the bid with invoices, an invoice     | no sideways scroll                        |
+| Estimator (no Invoices tick)                       | no Invoices block; cannot open an invoice; cannot delete the invoiced bid |
+| Office user (Service and Invoices, no Estimate)    | sees and opens the invoices; "Trade bid T-1001" is plain text, no link |
+
+Found in this run and fixed, each with a test:
+
+- The one line was folded into "Services and materials" on the customer's copy. It prints in
+  its own words.
+- The invoice carried the whole job's cost, so a deposit read as a loss. A bid's invoice now
+  carries no cost and shows none.
+- A deleted bid with only voided invoices could not have been purged, which would have stopped
+  the clean-up of old deleted bids. The link was changed before anything used it.
+
+Chain after the invoice work: eslint 0 errors, tsc clean, 584 files / 8,149 tests pass, production
+build succeeds.
+
+Afterwards the temporary rows and the two stored PDFs were removed and the counts checked: 27
+bids, 0 job types, 0 invoices, 45 documents, 638 customers, 55 tickets, the number series back
+at 1001 and unused, the test login as it was.
+
+Also on Nov 17, after the owner looked for the customer on a trade bid: the bid's Customer box
+has an "Add a new customer" button, the job type setup screen says the customer goes on each
+bid, and a saved job type offers "Start a bid of this trade".
+
+## Left for the owner
+
+- Whether a job gets one invoice or a deposit and a final. Both work today.
+- Whether customers are charged sales tax on trade work. Invoices start at 0%.
+- Overhead is a percent of cost and profit a percent of cost plus overhead (a markup). A
+  gross-profit choice like the roofing calculator's can be added.

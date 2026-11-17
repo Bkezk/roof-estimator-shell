@@ -464,7 +464,11 @@ async function download(sb: Client, path: string): Promise<Uint8Array | null> {
 export interface InvoiceBundle {
   invoice: InvoiceRow;
   lines: InvoiceLineRow[];
-  job: Database["public"]["Tables"]["service_jobs"]["Row"];
+  /**
+   * The invoice's ticket; null for an invoice made from a trade bid (Nov 17: invoices.bid_id,
+   * service_job_id null), which has no ticket, repairs or ticket photos.
+   */
+  job: Database["public"]["Tables"]["service_jobs"]["Row"] | null;
   repairs: Database["public"]["Tables"]["service_job_repairs"]["Row"][];
   photos: Database["public"]["Tables"]["service_job_photos"]["Row"][];
   company: {
@@ -486,6 +490,10 @@ export async function loadBundle(sb: Client, invoiceId: string): Promise<Invoice
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!invoice) throw new Error("Invoice not found");
+  // The ticket, its repairs and its photos are read only when the invoice has a ticket: an
+  // invoice made from a trade bid (Nov 17) has none, and loads with job null and no repairs or
+  // photos rather than being refused.
+  const jobId = invoice.service_job_id;
   const [
     { data: lines },
     { data: job },
@@ -495,17 +503,15 @@ export async function loadBundle(sb: Client, invoiceId: string): Promise<Invoice
     settings,
   ] = await Promise.all([
     sb.from("invoice_lines").select("*").eq("invoice_id", invoiceId).order("sort"),
-    sb.from("service_jobs").select("*").eq("id", invoice.service_job_id).maybeSingle(),
-    sb
-      .from("service_job_repairs")
-      .select("*")
-      .eq("service_job_id", invoice.service_job_id)
-      .order("sort"),
-    sb
-      .from("service_job_photos")
-      .select("*")
-      .eq("service_job_id", invoice.service_job_id)
-      .order("created_at"),
+    jobId
+      ? sb.from("service_jobs").select("*").eq("id", jobId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    jobId
+      ? sb.from("service_job_repairs").select("*").eq("service_job_id", jobId).order("sort")
+      : Promise.resolve({ data: [] as InvoiceBundle["repairs"] }),
+    jobId
+      ? sb.from("service_job_photos").select("*").eq("service_job_id", jobId).order("created_at")
+      : Promise.resolve({ data: [] as InvoiceBundle["photos"] }),
     // The price-free view (Oct 20): an invoicer with the Invoices tick alone reads no settings row.
     sb
       .from("company_settings_public")
@@ -514,11 +520,11 @@ export async function loadBundle(sb: Client, invoiceId: string): Promise<Invoice
       .maybeSingle(),
     loadSettings(sb),
   ]);
-  if (!job) throw new Error("The invoice's ticket is gone");
+  if (jobId && !job) throw new Error("The invoice's ticket is gone");
   return {
     invoice,
     lines: lines ?? [],
-    job,
+    job: job ?? null,
     repairs: repairs ?? [],
     photos: photos ?? [],
     company,
@@ -542,6 +548,10 @@ type Property = { name?: string; address?: string };
  * Page 1 + one Work Completed page per printed repair (with its chosen photos) + a closing
  * Photos page when other photos were chosen (invoice-photos.ts); photos carry their marks.
  * Returns the PDF bytes.
+ *
+ * An invoice made from a trade bid (Nov 17) has no ticket (`job` null): page 1 is the same but
+ * titled "Invoice" (it is no service call), and the pages that come from the ticket (the
+ * signature, who was checked in with, the repairs, the photos) are not drawn.
  */
 export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Uint8Array> {
   const doc = await Doc.create();
@@ -595,7 +605,8 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     doc.y = top - 78;
   };
 
-  header("Service Invoice");
+  if (job) header("Service Invoice");
+  else header("Invoice");
   doc.y -= 10;
   // Send to / property
   const colY = doc.y;
@@ -690,6 +701,9 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     doc.y -= 12;
     doc.paragraph(invoice.description, M, right - M, 10);
   }
+
+  // Everything from here on is the ticket's: an invoice with no ticket ends with page 1.
+  if (!job) return doc.pdf.save();
 
   // Work Completed pages. The photos are the invoice's chosen ones (invoices.photo_ids, or the
   // default: each printed repair's first Before and After), with their marks.

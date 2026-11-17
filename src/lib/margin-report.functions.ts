@@ -35,6 +35,11 @@
  * is a page or two. The account's name (crm_accounts) and the estimator's (profiles, created_by)
  * are resolved with the same chunked reads. A won bid in the range whose figures column is null
  * (saved before the column existed) is reported in `bidsWithoutFigures` and counted nowhere.
+ *
+ * Invoices made from a trade bid (Nov 17; invoices.bid_id): a won trade bid is counted above,
+ * from the bid's own figures, so its invoices are left out of the invoices read here or the job
+ * would be in the report twice. Left out in code after the read (`bid_id` is selected and the
+ * rows that carry one dropped), not as a database filter.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -118,14 +123,14 @@ function byIds<T extends { id: RowId }>(
 
 /** The counted invoices of from..to as lean per-invoice rows (the reads described at the top). */
 async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInvoiceRow[]> {
-  const invoices = must(
+  const read = must(
     "invoices",
     await readAll((after) =>
       afterId(
         sb
           .from("invoices")
           .select(
-            "id, number, display_number, status, sent_at, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id",
+            "id, number, display_number, status, sent_at, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id, bid_id",
           )
           .in("status", [...COUNTED_INVOICE_STATUSES])
           .gte("invoice_date", from)
@@ -136,8 +141,14 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       ),
     ),
   );
+  // A trade bid's invoices are not counted: the won bid is, from its own figures (readWonBids).
+  // Every invoice left is a ticket's (the check invoices_one_parent); `ticket` is its id, ""
+  // for a row with none, which then finds no ticket and no purchase orders below.
+  const invoices = read
+    .filter((i) => !i.bid_id)
+    .map((i) => ({ ...i, ticket: i.service_job_id ?? "" }));
   const invoiceIds = invoices.map((i) => i.id);
-  const ticketIds = uniq(invoices.map((i) => i.service_job_id));
+  const ticketIds = uniq(invoices.map((i) => i.ticket));
 
   const [tickets, lines, pos] = await Promise.all([
     readInChunks(ticketIds, (chunk) =>
@@ -189,7 +200,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
   const accountIds = uniq(
     invoices
       .filter((i) => blankName(i) && !i.bill_to_vendor_id)
-      .map((i) => ticketById.get(i.service_job_id)?.account_id),
+      .map((i) => ticketById.get(i.ticket)?.account_id),
   );
   const techIds = uniq(tickets.map((t) => t.technician_id));
   const [vendors, accounts, profiles, ticketInvoices] = await Promise.all([
@@ -239,6 +250,8 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
   }
   const refsByTicket = new Map<string, TicketInvoiceRef[]>();
   for (const r of ticketInvoices) {
+    // Read by ticket id, so each has one; the type alone allows none.
+    if (!r.service_job_id) continue;
     const list = refsByTicket.get(r.service_job_id) ?? [];
     list.push({
       id: r.id,
@@ -251,9 +264,9 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
   }
 
   return invoices.map((i) => {
-    const ticket = ticketById.get(i.service_job_id);
+    const ticket = ticketById.get(i.ticket);
     const myLines = linesByInvoice.get(i.id) ?? [];
-    const myPos = posByTicket.get(i.service_job_id) ?? [];
+    const myPos = posByTicket.get(i.ticket) ?? [];
     const costs = lineCosts(myLines);
     const customer =
       billToName(i.bill_to) ||
@@ -276,7 +289,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       ticket: !!ticket,
       ...costs,
       purchaseOrders: myPos.length
-        ? poCostCarried(i.id, refsByTicket.get(i.service_job_id) ?? [], myPos, myLines)
+        ? poCostCarried(i.id, refsByTicket.get(i.ticket) ?? [], myPos, myLines)
         : 0,
     });
   });

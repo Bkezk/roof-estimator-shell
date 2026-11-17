@@ -235,7 +235,11 @@ describe("the invoice's Internal fold: POs are cost, never the customer's total"
     expect(ed).toMatch(/Number\(inv\.tax_rate\),\s*po\.cost,\s*\)/);
   });
   it('"Purchase orders" is its own line inside the closed Internal fold', () => {
-    const line = totals.indexOf("<dt>\n                  Purchase orders\n");
+    // Nov 17, trade bid invoices: this read "<dt>\n                  Purchase orders\n". The row
+    // is inside `{pos && (` now (a trade bid's invoice has no ticket and so no purchase orders,
+    // and leaves the row out), which sets it two spaces deeper. A ticket's invoice shows it.
+    const line = totals.indexOf("<dt>\n                    Purchase orders\n");
+    expect(line).toBeGreaterThan(totals.indexOf("{pos && ("));
     expect(line).toBeGreaterThan(totals.indexOf("{internal && ("));
     expect(line).toBeGreaterThan(totals.indexOf("{open && ("));
     expect(line).toBeLessThan(totals.indexOf("<dt>Cost</dt>"));
