@@ -167,3 +167,28 @@ describe("the labor line's Goes by choice", () => {
     expect(ui).not.toContain('setLabel="A set number of hours"');
   });
 });
+
+describe("adding a customer from a trade bid (owner, Nov 17)", () => {
+  // "i also dont see where you can add a customer": the picker offered it only once a name not
+  // on file had been typed. The same dialog now sits behind a button that is always in sight.
+  const ui = flat(read("../components/trade/trade-bid-screen.tsx"));
+  it("has an Add a new customer button beside the Customer box", () => {
+    const field = ui.slice(
+      ui.indexOf('data-field="customer"'),
+      ui.indexOf('data-field="property"'),
+    );
+    expect(field).toContain("data-add-customer");
+    expect(field).toContain("Add a new customer");
+    expect(field).toContain("onClick={() => setAddingCustomer(true)}");
+    // Before the picker, so it is seen without typing anything.
+    expect(field.indexOf("data-add-customer")).toBeLessThan(field.indexOf("<AccountPicker"));
+  });
+  it("opens the customer dialog the rest of the site uses, and the new customer is picked", () => {
+    expect(ui).toContain(
+      '<QuickAddCustomerDialog open={addingCustomer} initialName="" onOpenChange={setAddingCustomer} onCreated={(hit) => { setAddingCustomer(false); pickCustomer(hit); }} />',
+    );
+  });
+  it("the hint under the box names the button", () => {
+    expect(ui).toContain("Not on file yet? Press Add a new customer.");
+  });
+});

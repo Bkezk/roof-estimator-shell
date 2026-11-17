@@ -38,11 +38,12 @@ import {
   FileText,
   Loader2,
   TriangleAlert,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { z } from "zod";
 
-import { AccountPicker } from "@/components/crm/account-picker";
+import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { SiteSelect } from "@/components/crm/site-select";
 import { DocumentsPanel } from "@/components/documents/documents-panel";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
@@ -447,6 +448,10 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
   const [status, setStatus] = useState<BidStatus>(asBidStatus(props.bid?.status));
   const [lostReason, setLostReason] = useState<string | null>(props.bid?.lost_reason ?? null);
   const [askLost, setAskLost] = useState(false);
+  // Owner, Nov 17: "i also dont see where you can add a customer". The picker adds one when a
+  // name is typed that is not on file, which nobody sees until they type. This is the same
+  // dialog behind a button that is always in sight.
+  const [addingCustomer, setAddingCustomer] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
   // Number boxes holding something that is not a number: the measurements, and the editor's.
@@ -743,7 +748,20 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
               />
             </div>
             <div className="space-y-1.5" data-field="customer">
-              <Label htmlFor="trade-bid-customer">Customer</Label>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <Label htmlFor="trade-bid-customer">Customer</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  disabled={locked}
+                  onClick={() => setAddingCustomer(true)}
+                  data-add-customer
+                >
+                  <UserPlus /> Add a new customer
+                </Button>
+              </div>
               <AccountPicker
                 id="trade-bid-customer"
                 value={
@@ -762,7 +780,8 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
               ) : (
                 !draft.accountId && (
                   <p className="text-xs text-muted-foreground">
-                    Needed to save. Not in the list? Type the name and choose to add them.
+                    Needed to save. Search for the customer here. Not on file yet? Press Add a new
+                    customer.
                   </p>
                 )
               )}
@@ -970,6 +989,15 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
           }}
         />
       )}
+      <QuickAddCustomerDialog
+        open={addingCustomer}
+        initialName=""
+        onOpenChange={setAddingCustomer}
+        onCreated={(hit) => {
+          setAddingCustomer(false);
+          pickCustomer(hit);
+        }}
+      />
       <LeaveDialog
         open={blocker.status === "blocked" && !leaving}
         what="this bid"
