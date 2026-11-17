@@ -30,7 +30,8 @@ export const NOTICE_CATEGORY_LABELS: Readonly<Record<NoticeCategory, string>> = 
 export const NOTICE_CATEGORY_HELP: Readonly<Record<NoticeCategory, string>> = {
   leads: "New leads from the bid boards. Off unless you work them.",
   opportunities: "Follow-ups, untouched and assignment notices on opportunities.",
-  service: "Ticket assignments, reminders, date moves, done and ready-to-invoice notices.",
+  service:
+    "Ticket assignments, reminders, date moves, done and ready-to-invoice notices. Admins and managers: every step of every ticket.",
   bids: "Bid due, past due and your own bid reminders.",
   storms: "Storm reports for roofs in your counties. Off unless you work them.",
 };
@@ -52,7 +53,8 @@ export type NoticeFlags = Partial<Record<NoticeFlagColumn, boolean | null>>;
  * modules hand notify(): bids-notify.server.ts (bid_due / bid_overdue / bid_reminder),
  * leads.server.ts (lead) with the older lead kinds bid / rfp, storms.server.ts (storm: its own
  * "Storm alerts" switch, off by default, not a lead notice), ticket-events.server.ts
- * (ticket_done / ticket_authorized / reassigned / date_moved) and the office's ready_to_invoice.
+ * (ticket_done / ticket_authorized / reassigned / date_moved / ticket_watch) and the office's
+ * ready_to_invoice.
  */
 export const KIND_CATEGORIES: Readonly<Record<string, NoticeCategory>> = {
   bid_due: "bids",
@@ -67,6 +69,8 @@ export const KIND_CATEGORIES: Readonly<Record<string, NoticeCategory>> = {
   ready_to_invoice: "service",
   reassigned: "service",
   date_moved: "service",
+  // Every step of every ticket, to the admins and the managers (owner, Nov 17; ticket-watch.ts).
+  ticket_watch: "service",
 };
 
 /**

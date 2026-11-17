@@ -5,6 +5,7 @@
  * read when it is clicked. Polls once a minute while the tab is visible — React Query pauses the
  * interval in a background tab — and refreshes at once when the service worker reports an
  * incoming push. Also registers the service worker (public/sw.js) once per page load.
+ * The top of the popover says when this device is not set to get notifications (Nov 17).
  */
 import { useEffect, useState, type MouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,10 +24,11 @@ import {
   type NotificationRow,
 } from "@/lib/notifications.functions";
 import { notificationPath } from "@/lib/notification-link";
-import { registerServiceWorker } from "@/lib/push-client";
+import { keepPushHere, registerServiceWorker } from "@/lib/push-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { PushHereHint } from "@/components/push-here-hint";
 
 /** The latest rows (the bell's list); the page's queries live under it, so one invalidation does all. */
 export const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
@@ -78,6 +80,13 @@ export function NotificationsBell() {
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, [qc]);
+
+  // Once a day, a device with notifications on tells the server its current push address
+  // (push-client.ts keepPushHere; owner, Nov 17).
+  const userId = session?.user.id;
+  useEffect(() => {
+    if (userId) void keepPushHere(userId);
+  }, [userId]);
 
   const settle = () => void qc.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 
@@ -152,6 +161,9 @@ export function NotificationsBell() {
             Mark all read
           </Button>
         </div>
+        {/* Whether THIS device gets notifications, with a Turn on button when it does not
+            (owner, Nov 17; lib/push-hint.ts). */}
+        <PushHereHint userId={userId} />
         <div className="max-h-[min(24rem,70svh)] overflow-y-auto">
           {q.isPending ? (
             <div className="flex justify-center p-6">

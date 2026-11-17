@@ -166,11 +166,21 @@ export interface PushResult {
   error?: string;
 }
 
+/**
+ * How hard the push service tries to deliver at once (RFC 8030, section 5.3). "normal" is held
+ * back while the phone is low on battery; only "high" is delivered then. Every notice here is
+ * for a person (a mention, an assignment, a reminder) and there are a few a day, so they go
+ * "high" (owner, Nov 17: "someone tagged me in a note and it didnt come up as a notification on
+ * my phone" — the server had sent it and Apple had taken it; it went "normal").
+ */
+export type PushUrgency = "very-low" | "low" | "normal" | "high";
+export const PUSH_URGENCY: PushUrgency = "high";
+
 /** POST an encrypted, VAPID-signed message to the subscription's push service. */
 export async function sendWebPush(
   sub: { endpoint: string; p256dh: string; auth: string },
   payload: string,
-  opts: { keys: VapidKeys; subject: string; ttlSeconds?: number },
+  opts: { keys: VapidKeys; subject: string; ttlSeconds?: number; urgency?: PushUrgency },
 ): Promise<PushResult> {
   const audience = new URL(sub.endpoint).origin;
   const jwt = await vapidJwt(audience, opts.subject, opts.keys);
@@ -183,7 +193,7 @@ export async function sendWebPush(
       "Content-Type": "application/octet-stream",
       "Content-Length": String(body.length),
       TTL: String(opts.ttlSeconds ?? 86400),
-      Urgency: "normal",
+      Urgency: opts.urgency ?? PUSH_URGENCY,
     },
     body: buf(body),
   });

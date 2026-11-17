@@ -101,9 +101,8 @@ describe("every sender uses it", () => {
   it("a ticket marked done, and one authorized", () => {
     const t = read("src/lib/ticket-events.server.ts");
     expect(t).toContain("const others = await exceptActor(reviewers, actor.id, admin);");
-    expect(t).toMatch(
-      /const others = await exceptActor\(\s*office\.map\(\(u\) => u\.id\),\s*actor\.id,\s*admin,\s*\);/,
-    );
+    // Nov 17: "ready to invoice" goes to the office and to every admin and manager (`told`).
+    expect(t).toContain("const others = await exceptActor(told, actor.id, admin);");
     expect(t).not.toContain(".filter((id) => id !== actor.id)");
   });
   it("a ticket reassigned, and its day moved", () => {

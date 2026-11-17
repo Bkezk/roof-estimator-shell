@@ -112,8 +112,9 @@ describe("the claim server functions", () => {
     expect(body).toContain('.is("technician_id", null)');
     expect(body).toContain("if (!row) throw new Error(CLAIM_TAKEN);");
     expect(body).toContain("await syncCrewLead(sb, row.id, row.technician_id);");
+    // Nov 17: the row as it was rides along, so the admins and managers hear of the claim.
     expect(body).toContain(
-      "await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);",
+      "await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);",
     );
     expect(body).not.toContain("managesTickets");
   });

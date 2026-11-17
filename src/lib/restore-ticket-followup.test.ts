@@ -204,7 +204,10 @@ describe("source", () => {
     );
     const sync = src.slice(src.indexOf("async function syncTicketFollowup"));
     // Oct 21, eighth audit: `reopened` joined `quiet` in the options (setServiceStage's reopen).
-    expect(sync.slice(0, 1800)).toContain("opts: { quiet?: boolean; reopened?: boolean } = {}");
+    // Nov 17: `deleted` joined them (the delete tells the admins and the managers).
+    expect(sync.slice(0, 1800)).toContain(
+      "opts: { quiet?: boolean; reopened?: boolean; deleted?: boolean } = {}",
+    );
     expect(sync.slice(0, 1800)).toContain("...(opts.quiet ? { quiet: true } : {})");
   });
 });

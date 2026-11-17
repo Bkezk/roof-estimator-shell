@@ -731,16 +731,18 @@ async function syncTicketFollowup(
   sb: SupabaseClient<Database>,
   prevStage: string | null,
   before?: { technician_id: string | null; scheduled_date: string | null },
-  opts: { quiet?: boolean; reopened?: boolean } = {},
+  opts: { quiet?: boolean; reopened?: boolean; deleted?: boolean } = {},
 ): Promise<SyncResult> {
   const { syncFollowup } = await import("@/lib/followups.server");
   const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
   // The stage notices and the Authorize timer (afterTicketStage) only when the stage moved, the
   // ticket was deleted, or it came back (a restore re-syncs, `quiet`) — Nov 3, review item 44:
   // it ran on every save and dispatch, three or four round trips for nothing.
-  if (prevStage !== row.stage || !!row.deleted_at || opts.quiet)
-    await afterTicketStage(row, prevStage, actor, sb);
-  if (before) await afterTicketDispatch(row, before, actor, sb);
+  // `deleted` (Nov 17): this step deleted the ticket, and the admins and managers are told so.
+  const stageMoved = prevStage !== row.stage;
+  if (stageMoved || !!row.deleted_at || opts.quiet)
+    await afterTicketStage(row, prevStage, actor, sb, opts.deleted ? { deleted: true } : {});
+  if (before) await afterTicketDispatch(row, before, actor, sb, { stageMoved });
   return syncFollowup(
     {
       kind: "ticket",
@@ -1047,7 +1049,9 @@ export const claimServiceJob = createServerFn({ method: "POST" })
     });
     const { syncCrewLead } = await import("@/lib/service-crew.server");
     await syncCrewLead(sb, row.id, row.technician_id);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
+    // `cur` rides along (Nov 17) so the admins and managers hear of a claim that left the stage
+    // where it was; the technician's own notices need a technician before, and there was none.
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
     return withTechName(sb, row);
   });
 
@@ -1088,6 +1092,8 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
         { id: context.userId, name: nameOf(p) },
         context.supabase,
         row.stage,
+        undefined,
+        { deleted: true },
       );
   });
 

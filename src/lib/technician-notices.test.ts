@@ -179,7 +179,10 @@ describe("every path reaches it once", () => {
     expect(svc).toContain(
       "before?: { technician_id: string | null; scheduled_date: string | null },",
     );
-    expect(svc).toContain("if (before) await afterTicketDispatch(row, before, actor, sb);");
+    // Nov 17: it is told whether the stage moved too (the admins' and managers' notice).
+    expect(svc).toContain(
+      "if (before) await afterTicketDispatch(row, before, actor, sb, { stageMoved });",
+    );
     expect(svc.split("afterTicketDispatch(").length - 1).toBe(1); // the one call
   });
   it("the save and the Board's drop hand it the technician and day they read first", () => {

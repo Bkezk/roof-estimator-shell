@@ -171,8 +171,11 @@ describe("44. a ticket save: the roster once, the notices only when the stage mo
     expect(events).not.toContain('await sb.rpc("technician_options")');
   });
   it("afterTicketStage runs only when the stage moved, the ticket was deleted or restored", () => {
+    // Nov 17: the same rule, with the stage test named (the dispatch notice reads it too) and
+    // the delete handed on.
+    expect(service).toContain("const stageMoved = prevStage !== row.stage;");
     expect(service).toContain(
-      "if (prevStage !== row.stage || !!row.deleted_at || opts.quiet)\n    await afterTicketStage(row, prevStage, actor, sb);",
+      "if (stageMoved || !!row.deleted_at || opts.quiet)\n    await afterTicketStage(row, prevStage, actor, sb, opts.deleted ? { deleted: true } : {});",
     );
     expect(service).not.toContain("\n  await afterTicketStage(row, prevStage, actor, sb);");
   });

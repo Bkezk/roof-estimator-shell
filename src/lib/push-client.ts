@@ -157,3 +157,42 @@ export async function disablePushHere(): Promise<void> {
   await sub.unsubscribe().catch(() => false);
   await removePushSubscription({ data: { endpoint } });
 }
+
+/** localStorage: the day this device's subscription was last saved again, per person. */
+const KEPT_KEY = "jbk-push-kept";
+const today = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Keep the server's copy of this device current (owner, Nov 17: a mention that the server sent
+ * and the phone never showed). A phone can change its push address or keys without telling the
+ * site, and the server then sends to an address nothing listens on. Once a day, when the app is
+ * opened on a device that has notifications on, the device's own address and keys are saved
+ * again for the signed-in person (the same save "Turn on" makes; it also clears a "gone" mark).
+ *
+ * Never turns notifications on for a device that has them off: that is the person's own choice,
+ * made with a click. Never throws; answers the state of push on this device.
+ */
+export async function keepPushHere(userId: string): Promise<PushState> {
+  const state = await pushStateHere();
+  if (state !== "on" || !userId) return state;
+  try {
+    const sub = await currentSubscription();
+    const json = sub?.toJSON();
+    const p256dh = json?.keys?.["p256dh"];
+    const auth = json?.keys?.["auth"];
+    if (!json?.endpoint || !p256dh || !auth) return state;
+    const mark = `${userId}|${json.endpoint}|${today()}`;
+    if (window.localStorage.getItem(KEPT_KEY) === mark) return state;
+    await savePushSubscription({
+      data: {
+        endpoint: json.endpoint,
+        keys: { p256dh, auth },
+        user_agent: navigator.userAgent.slice(0, 300),
+      },
+    });
+    window.localStorage.setItem(KEPT_KEY, mark);
+  } catch (e) {
+    console.warn("Could not refresh this device's notification details", e);
+  }
+  return state;
+}

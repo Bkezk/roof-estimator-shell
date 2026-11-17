@@ -30,6 +30,7 @@ import {
   pushStateHere,
   type PushState,
 } from "@/lib/push-client";
+import { PUSH_HINT_OFF_KEY } from "@/lib/push-hint";
 import {
   TOP_GAP_DEFAULT,
   TOP_GAP_MAX,
@@ -297,6 +298,11 @@ function NotificationsCard() {
     setBusy(true);
     try {
       await enablePush();
+      try {
+        window.localStorage.removeItem(PUSH_HINT_OFF_KEY);
+      } catch {
+        /* private mode */
+      }
       if (prefs.data && !prefs.data.notify_push) await setFn({ data: { notify_push: true } });
       toast.success("Notifications are on for this device");
     } catch (e) {
@@ -312,6 +318,12 @@ function NotificationsCard() {
     setBusy(true);
     try {
       await disablePushHere();
+      // Turned off here on purpose: the bell does not ask about this device again.
+      try {
+        window.localStorage.setItem(PUSH_HINT_OFF_KEY, "1");
+      } catch {
+        /* private mode */
+      }
       toast.success("Notifications are off for this device");
     } catch (e) {
       toast.error(errText(e));

@@ -209,8 +209,9 @@ describe("the bell and the per-person switches", () => {
     expect(noticeCategory("followup", "/service?id=abc")).toBe("service");
     expect(noticeCategory("untouched", "/service?id=abc")).toBe("service");
     expect(noticeCategory("followup", "/opportunities?id=abc")).toBe("opportunities");
+    // Nov 17: the admins' and managers' ticket steps joined the line (ticket-watch.ts).
     expect(NOTICE_CATEGORY_HELP.service).toBe(
-      "Ticket assignments, reminders, date moves, done and ready-to-invoice notices.",
+      "Ticket assignments, reminders, date moves, done and ready-to-invoice notices. Admins and managers: every step of every ticket.",
     );
   });
 });

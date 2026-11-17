@@ -246,7 +246,9 @@ describe("the shared helpers", () => {
     expect(kindLabel("test")).toBe("Other");
     expect(kindLabel("")).toBe("Other");
     expect(kindLabel(null)).toBe("Other");
-    expect(new Set(Object.values(KIND_LABELS)).size).toBe(15);
+    // Nov 17: every ticket step, to the admins and the managers (ticket-watch.ts).
+    expect(kindLabel("ticket_watch")).toBe("Ticket update");
+    expect(new Set(Object.values(KIND_LABELS)).size).toBe(16);
   });
   it("chips: one per label present, in the owner's order, carrying the raw kinds", () => {
     expect(

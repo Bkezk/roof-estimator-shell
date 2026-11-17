@@ -11,6 +11,11 @@
  * <day>"), from every path that changes the technician or the date (saveServiceJob,
  * assignServiceJob — the Tech Board's drops — and claimServiceJob through syncTicketFollowup).
  * No notice to the person who made the change, none for a PO or for Closed (owner).
+ *
+ * And since Nov 17 (owner: "managers and owner should get all notifications, like when a ticket
+ * is opened then when scheduled, done etc."): every admin and manager hears every step of every
+ * ticket — opened, scheduled, reassigned, a moved day, authorized, invoiced, closed, reopened,
+ * deleted — once per change (`tellWatchers`; the words and who is left out are ticket-watch.ts).
  */
 import { longDay } from "@/lib/followup-rules";
 import { rosterDisplayName, technicianRoster } from "@/lib/roster.server";
@@ -19,6 +24,12 @@ import { endsAtAuthorized } from "@/lib/ticket-stage";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { exceptActor, wantsOwnNotices } from "@/lib/own-notices.server";
 import { syncFollowup } from "@/lib/followups.server";
+import {
+  dispatchWatchNotice,
+  stageWatchNotice,
+  TICKET_WATCH_KIND,
+  type WatchNotice,
+} from "@/lib/ticket-watch";
 
 type JobRow = {
   id: string;
@@ -30,6 +41,8 @@ type JobRow = {
   technician_id: string | null;
   created_by: string | null;
   deleted_at: string | null;
+  /** The ticket's day, for the admins' and managers' notice (every caller holds the whole row). */
+  scheduled_date?: string | null | undefined;
   /**
    * The Done notice of an INSPECTION (owner, Oct 12) counts its issues and names what it
    * recommends from the row every caller already holds (service_jobs.*: no extra read); an
@@ -97,6 +110,44 @@ export async function authorizerIds(sb: Client): Promise<string[]> {
  */
 export interface StageEventOptions {
   reason?: "void";
+  /** This step deleted the ticket: the admins and the managers are told so (Nov 17). */
+  deleted?: boolean;
+}
+
+/**
+ * The admins and the managers hear every step of every ticket (owner, Nov 17; ticket-watch.ts).
+ * They are the people ticket_authorizers() lists: every admin and every manager. Left out: the
+ * people this same change already tells another way (`notice.skip`), and the person who made the
+ * change unless they have "My own changes" on. Best effort: the ticket is already saved, so a
+ * notice that could not be sent is logged, never a failed save.
+ */
+async function tellWatchers(
+  admin: Client,
+  notice: WatchNotice | null,
+  row: { id: string; number: number },
+  actor: { id: string },
+): Promise<void> {
+  if (!notice) return;
+  try {
+    const left = new Set(notice.skip);
+    const watchers = (await authorizerIds(admin)).filter((id) => !left.has(id));
+    const ids = await exceptActor(watchers, actor.id, admin);
+    if (!ids.length) return;
+    await notify(
+      ids,
+      {
+        kind: TICKET_WATCH_KIND,
+        title: notice.title,
+        body: notice.body,
+        url: `/service?id=${row.id}`,
+      },
+      admin,
+    );
+  } catch (e) {
+    console.error(
+      `tellWatchers: ticket #${row.number} — the admins' and managers' notice was not sent: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }
 
 export async function afterTicketStage(
@@ -150,12 +201,11 @@ export async function afterTicketStage(
   // being billed (it has an invoice; audit, Nov 16, fix 8): then the office is told as for any
   // ticket.
   if (becameAuthorized && !endsAtAuthorized(row.service_type, !!row.invoice_id)) {
-    // The manager invoices it next (the Invoices tab's To invoice queue).
-    const others = await exceptActor(
-      office.map((u) => u.id),
-      actor.id,
-      admin,
-    );
+    // The manager invoices it next (the Invoices tab's To invoice queue). The admins and the
+    // managers hear it too (owner, Nov 17), each person once: an admin ticked Technician is not
+    // an office user, and was not told.
+    const told = [...new Set([...office.map((u) => u.id), ...(await authorizerIds(admin))])];
+    const others = await exceptActor(told, actor.id, admin);
     // A void sent it back here (owner, Oct 6): say so, not "authorized — ready to invoice".
     const voided = opts.reason === "void";
     if (others.length)
@@ -174,6 +224,24 @@ export async function afterTicketStage(
         admin,
       );
   }
+  // Every other step, to the admins and the managers (owner, Nov 17; ticket-watch.ts): opened,
+  // scheduled, authorized (an inspection: complete), invoiced, closed, reopened, deleted. Done
+  // and "ready to invoice" are the two notices above, which they already get.
+  const readyToInvoice = becameAuthorized && !endsAtAuthorized(row.service_type, !!row.invoice_id);
+  if (opts.deleted || (live && !readyToInvoice))
+    await tellWatchers(
+      admin,
+      stageWatchNotice({
+        row,
+        prevStage,
+        deleted: !!opts.deleted,
+        who: actor.name ?? "The office",
+        techName: row.technician_id ? await rosterName(admin, row.technician_id) : null,
+        endsHere: inspection,
+      }),
+      row,
+      actor,
+    );
   // The review timer (follow-up kind "invoice"): open while the ticket sits at Done, closed
   // otherwise; on the authorizer's Work Overview under "Needs authorization". One follow-up per
   // ticket (syncFollowup keys on it), so one assignee: the first authorizer. The order is the
@@ -233,8 +301,37 @@ export async function afterTicketDispatch(
   before: DispatchBefore,
   actor: { id: string; name: string | null },
   sb: Client,
+  opts: { stageMoved?: boolean } = {},
 ): Promise<void> {
   if (row.deleted_at) return;
+  await technicianDispatchNotice(row, before, actor, sb);
+  // The admins and the managers (owner, Nov 17): a new technician or a moved day, when the stage
+  // stayed. A change that also moved the stage (Open to Scheduled) was told by afterTicketStage.
+  if (opts.stageMoved) return;
+  try {
+    const admin = await serverClient(sb);
+    const notice = dispatchWatchNotice({
+      row,
+      before,
+      who: actor.name ?? "The office",
+      techName: row.technician_id ? await rosterName(admin, row.technician_id) : null,
+      oldTechName: before.technician_id ? await rosterName(admin, before.technician_id) : null,
+    });
+    await tellWatchers(admin, notice, row, actor);
+  } catch (e) {
+    console.error(
+      `afterTicketDispatch: ticket #${row.number} — the admins' and managers' notice was not sent: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
+/** The technician's own notice of a reassignment or a moved day (the Oct 12 rule above). */
+async function technicianDispatchNotice(
+  row: JobRow & { scheduled_date: string | null },
+  before: DispatchBefore,
+  actor: { id: string; name: string | null },
+  sb: Client,
+): Promise<void> {
   const who = actor.name ?? "The office";
   const url = `/service?id=${row.id}`;
   try {

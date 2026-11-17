@@ -40,7 +40,9 @@ describe("the four categories", () => {
     expect(NOTICE_CATEGORY_HELP).toEqual({
       leads: "New leads from the bid boards. Off unless you work them.",
       opportunities: "Follow-ups, untouched and assignment notices on opportunities.",
-      service: "Ticket assignments, reminders, date moves, done and ready-to-invoice notices.",
+      // Nov 17: the admins' and managers' ticket steps joined the line (ticket-watch.ts).
+      service:
+        "Ticket assignments, reminders, date moves, done and ready-to-invoice notices. Admins and managers: every step of every ticket.",
       bids: "Bid due, past due and your own bid reminders.",
       storms: "Storm reports for roofs in your counties. Off unless you work them.",
     });
@@ -171,6 +173,7 @@ describe("the helpers the sender and the inbox reads use", () => {
       "ready_to_invoice",
       "reassigned",
       "date_moved",
+      "ticket_watch", // Nov 17: every ticket step, to the admins and the managers
     ]);
     expect(kindsOfCategory("opportunities")).toEqual([]);
     expect(urlPrefixOfCategory("leads")).toBeNull();
@@ -237,6 +240,7 @@ describe("the helpers the sender and the inbox reads use", () => {
         "ready_to_invoice",
         "reassigned",
         "date_moved",
+        "ticket_watch",
         "bid_due",
         "bid_overdue",
         "bid_reminder",

@@ -173,7 +173,11 @@ export async function sendPush(
         title: payload.title,
         body: payload.body ?? "",
         url: payload.url ? `${appUrl()}${payload.url}` : appUrl() || "/",
-        tag: payload.tag ?? "bid-o-matic",
+        // No shared tag (Nov 17): every notice went out tagged "bid-o-matic", and a notice with
+        // the tag of one already on the screen REPLACES it without a sound or a banner (Android
+        // and desktop browsers; the Notifications standard). A second notice was a silent swap.
+        // Each notice now carries its own tag (pushTag), or none.
+        ...(payload.tag ? { tag: payload.tag } : {}),
       }),
       { keys, subject: contactSubject(), ttlSeconds: 60 * 60 * 24 },
     );
@@ -183,6 +187,10 @@ export async function sendPush(
     return { ok: false, gone: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/** One notice's own tag, from its inbox row: never shared, so a notice never replaces another. */
+export const pushTag = (notificationId: number): string | undefined =>
+  notificationId > 0 ? `jbk-${notificationId}` : undefined;
 
 /** A reminder email's text: title, body, the link, and the company's name to sign it. */
 export const emailText = (msg: Outgoing, link: string, signature: string) =>
@@ -271,10 +279,12 @@ export async function notify(userIds: string[], sent: Outgoing, sb: Client): Pro
       // write "no device has push turned on" to push_error; the Oct 12 migration clears those.)
       let sent = 0;
       for (const s of mine) {
+        const tag = pushTag(row.id);
         const r = await sendPush(s, {
           title: msg.title,
           body: msg.body ?? null,
           url: msg.url ?? null,
+          ...(tag ? { tag } : {}),
         });
         if (r.ok) {
           sent++;
