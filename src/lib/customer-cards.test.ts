@@ -25,7 +25,11 @@ describe("the list: one full-width card per customer, opening its own page", () 
     expect(page).toContain("<AccountCard key={a.id} a={a} managerName=");
     expect(card).toContain('to="/customers/$id"');
     expect(card).toContain("params={{ id: a.id }}");
-    expect(card).toContain('{a.kind === "individual" ? "Individual" : "Company"}');
+    // Nov 17 (owner: "on any of the customer menus we dont need to differentiate between
+    // company and individual"): the card no longer carries the kind. This pinned the badge
+    // '{a.kind === "individual" ? "Individual" : "Company"}'.
+    expect(card).not.toContain('"Individual"');
+    expect(card).not.toContain("a.kind");
     expect(card).toContain(
       'const address = [a.address1, [a.city, a.state].filter(Boolean).join(", "), a.zip]',
     );

@@ -34,7 +34,9 @@ describe("a crm_sites row is a Property", () => {
     expect(list).toContain('<dt className="text-xs text-muted-foreground">Properties</dt>');
     expect(list).not.toContain('site${a.site_count === 1 ? "" : "s"}');
     const picker = read("src/components/crm/account-picker.tsx");
-    expect(picker).toContain("` · ${h.site_count} properties`");
+    // Nov 17: the "(company)" beside the name is gone, so the count is its own span. This read
+    // "` · ${h.site_count} properties`".
+    expect(picker).toContain("· {h.site_count} properties</span>");
     expect(picker).not.toContain("} sites`");
   });
   it("the inner Sites of a property keep their word", () => {

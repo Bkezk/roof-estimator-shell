@@ -59,7 +59,6 @@ import {
   Trash2,
   Truck,
   Unlink,
-  User,
   Users,
   Wrench,
   X,
@@ -173,7 +172,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MENTION_HINT, MentionTextarea } from "@/components/mention-textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const errText = plainErrText;
 const money = (n: number) =>
@@ -331,11 +329,9 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            {a.kind === "individual" ? (
-              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-            )}
+            {/* One icon, and no Company / Individual badge (owner, Nov 17: "on any of the customer
+                menus we dont need to differentiate between company and individual"). */}
+            <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
             <Link
               to="/customers/$id"
               params={{ id: a.id }}
@@ -344,9 +340,6 @@ function AccountCard({ a, managerName }: { a: AccountListRow; managerName: strin
             >
               {a.name}
             </Link>
-            <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
-              {a.kind === "individual" ? "Individual" : "Company"}
-            </Badge>
             {/* Owner, Oct 13: a customer imported from CenterPoint may have no email or phone;
                 the badge asks the office to fill one in (NoContactInfoBadge). The list holds
                 live customers only (listAccounts), so there is no deleted one to leave out. */}
@@ -919,9 +912,6 @@ function AccountSummary(props: {
         <div className="min-w-0">
           <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
             <span className="min-w-0 truncate">{a.name}</span>
-            <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
-              {a.kind === "individual" ? "Individual" : "Company"}
-            </Badge>
             {!a.deleted_at && !hasContactMethod(a) && <NoContactInfoBadge />}
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -1135,7 +1125,9 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+      {/* No Company / Individual choice (owner, Nov 17). The form still carries the customer's
+          stored kind, so saving an existing customer leaves it as it was. */}
+      <div className="grid gap-3">
         <div className="space-y-1">
           <Label htmlFor="acct-name">Name</Label>
           <Input
@@ -1145,20 +1137,6 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
             value={f.name}
             onChange={(e) => set("name", e.target.value)}
           />
-        </div>
-        <div className="space-y-1">
-          <Label>Kind</Label>
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            value={f.kind}
-            onValueChange={(v) => {
-              if (v === "company" || v === "individual") set("kind", v);
-            }}
-          >
-            <ToggleGroupItem value="company">Company</ToggleGroupItem>
-            <ToggleGroupItem value="individual">Individual</ToggleGroupItem>
-          </ToggleGroup>
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">

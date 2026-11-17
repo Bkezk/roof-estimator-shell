@@ -18,7 +18,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { AlertTriangle, Building2, Loader2, Plus, User, X } from "lucide-react";
+import { AlertTriangle, Building2, Loader2, Plus, X } from "lucide-react";
 
 import {
   quickCreateAccount,
@@ -55,7 +55,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export interface AccountPickerValue {
   account_id: string;
@@ -260,17 +259,14 @@ export function AccountPicker(props: {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pick(h)}
             >
-              {h.kind === "individual" ? (
-                <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              )}
+              {/* One icon and no "(company)" (owner, Nov 17: "on any of the customer menus we
+                  dont need to differentiate between company and individual"). */}
+              <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0">
                 <span className="font-medium">{h.account_name}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  ({h.kind}){h.site_count > 1 ? ` · ${h.site_count} properties` : ""}
-                </span>
+                {h.site_count > 1 && (
+                  <span className="text-muted-foreground"> · {h.site_count} properties</span>
+                )}
               </span>
             </div>
           ))}
@@ -336,7 +332,9 @@ export function QuickAddCustomerDialog(props: {
   const qc = useQueryClient();
   const createFn = useServerFn(quickCreateAccount);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"company" | "individual">("company");
+  // The Company / Individual choice is gone from the form (owner, Nov 17: "we dont need to
+  // differentiate"). The column stays; a new customer takes its default.
+  const kind = "company" as const;
   const [contact, setContact] = useState("");
   const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
@@ -380,7 +378,6 @@ export function QuickAddCustomerDialog(props: {
   useEffect(() => {
     if (!props.open) return;
     setName(props.initialName);
-    setKind("company");
     setContact("");
     setEmail("");
     setMobile("");
@@ -463,7 +460,7 @@ export function QuickAddCustomerDialog(props: {
             save.mutate();
           }}
         >
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <div className="grid gap-3">
             <div className="space-y-1">
               <Label htmlFor="qa-name">Name</Label>
               <Input
@@ -474,20 +471,6 @@ export function QuickAddCustomerDialog(props: {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Bell County BOE"
               />
-            </div>
-            <div className="space-y-1">
-              <Label>Kind</Label>
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                value={kind}
-                onValueChange={(v) => {
-                  if (v === "company" || v === "individual") setKind(v);
-                }}
-              >
-                <ToggleGroupItem value="company">Company</ToggleGroupItem>
-                <ToggleGroupItem value="individual">Individual</ToggleGroupItem>
-              </ToggleGroup>
             </div>
           </div>
           {lookalikes.length > 0 && (
