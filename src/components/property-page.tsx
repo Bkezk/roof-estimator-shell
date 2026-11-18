@@ -20,6 +20,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Link2, Loader2, MapPin, Pencil, Trash2, Wrench } from "lucide-react";
 
 import { bidLink } from "@/lib/bid-kind";
+import { bidFacts } from "@/lib/property-rows";
 import { useAuth } from "@/lib/auth-store";
 import { dispatchesTickets, seesOpportunitiesList } from "@/lib/access";
 import {
@@ -219,12 +220,13 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
         )}
       </section>
 
-      <PropertyTickets jobs={d.jobs} counts={d.job_counts} />
+      <PropertyTickets jobs={d.jobs} counts={d.job_counts} extras={d.job_extras} />
       {seesOpportunitiesList(profile) && (
         <OpportunitiesSection
           opportunities={d.opportunities}
           page="property"
           emptyText="No opportunities at this property."
+          detail
         />
       )}
       {can("estimate") && <PropertyBids bids={d.bids} />}
@@ -245,9 +247,11 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
 function PropertyTickets({
   jobs,
   counts,
+  extras,
 }: {
   jobs: PropertyDetail["jobs"];
   counts: PropertyDetail["job_counts"];
+  extras: PropertyDetail["job_extras"];
 }) {
   const fold = useSectionFold("property", "tickets", jobs.length);
   return (
@@ -262,7 +266,7 @@ function PropertyTickets({
       {!fold.open ? null : jobs.length === 0 ? (
         <p className="text-sm text-muted-foreground">No service tickets at this property.</p>
       ) : (
-        <TicketRows jobs={jobs} showSite={false} />
+        <TicketRows jobs={jobs} showSite={false} extras={extras ?? {}} />
       )}
     </section>
   );
@@ -291,19 +295,25 @@ function PropertyBids({ bids }: { bids: LinkedBidRow[] }) {
       ) : (
         <div className={`divide-y rounded-md border ${INNER_BOX}`}>
           {bids.map((b) => (
-            <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-              <Link
-                {...bidLink(b)}
-                className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
-                title="Open this bid"
-              >
-                {b.name}
-              </Link>
-              <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
-                {b.status}
-              </Badge>
-              <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
-              <span className="text-xs text-muted-foreground">{shortDate(b.updated_at)}</span>
+            <div key={b.id} className="px-3 py-2" data-bid-row={b.id}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <Link
+                  {...bidLink(b)}
+                  className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
+                  title="Open this bid"
+                >
+                  {b.name}
+                </Link>
+                <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
+                  {b.status}
+                </Badge>
+                <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
+                <span className="text-xs text-muted-foreground">{shortDate(b.updated_at)}</span>
+              </div>
+              {/* The second line (owner, Nov 18): kind, due day, whose it is. */}
+              <p className="mt-0.5 text-xs text-muted-foreground" data-row-facts>
+                {bidFacts(b)}
+              </p>
             </div>
           ))}
         </div>

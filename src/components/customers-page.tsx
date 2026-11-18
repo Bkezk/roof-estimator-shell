@@ -70,6 +70,7 @@ import { plainErrText } from "@/lib/plain-error";
 import { dispatchesTickets, isAdmin, seesEveryone, seesOpportunitiesList } from "@/lib/access";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { OPP_STATUS_LABELS, type OppStatus } from "@/lib/opportunities.functions";
+import { opportunityDates, opportunityFacts } from "@/lib/property-rows";
 import { AuditHistory } from "@/components/audit-history";
 import { DocumentsList } from "@/components/documents/documents-panel";
 import { FoldHeader } from "@/components/section-fold";
@@ -2024,11 +2025,18 @@ export function OpportunitiesSection({
   opportunities,
   page = "customer",
   emptyText = "No opportunities for this customer.",
+  detail = false,
 }: {
   opportunities: AccountDetail["opportunities"];
   /** Whose folds to remember: the customer's page (default) or the property's. */
   page?: "customer" | "property";
   emptyText?: string;
+  /**
+   * The property's page (owner, Nov 18: "more detail on the tickets and bids and opps"): under
+   * the title, what it is worth, where it came from and who follows it up, then its dates
+   * (lib/property-rows.ts). Left out: one line, as before.
+   */
+  detail?: boolean;
 }) {
   const [showClosed, setShowClosed] = useState(false);
   const fold = useSectionFold(page, "opportunities", opportunities.length);
@@ -2042,22 +2050,36 @@ export function OpportunitiesSection({
       key={o.id}
       to="/opportunities"
       search={{ id: o.id }}
-      className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm hover:bg-muted/60"
+      className="block px-3 py-2 text-sm hover:bg-muted/60"
       data-opportunity={o.id}
     >
-      <span className="min-w-0 flex-1 truncate font-medium">{o.title}</span>
-      <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
-        {o.deleted_at ? "Deleted" : label(o.status)}
-      </Badge>
-      {o.bid_id && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
-          Bid: {BID_STATUS_LABELS[asBidStatus(o.bid_status)]}
+      <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+        <span className="min-w-0 flex-1 truncate font-medium">{o.title}</span>
+        <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+          {o.deleted_at ? "Deleted" : label(o.status)}
         </Badge>
-      )}
-      <span className="text-xs text-muted-foreground">
-        {o.assignee_name ?? "Unassigned"}
-        {o.expected_close ? ` · Expected close ${day(o.expected_close)}` : ""}
+        {o.bid_id && (
+          <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
+            Bid: {BID_STATUS_LABELS[asBidStatus(o.bid_status)]}
+          </Badge>
+        )}
+        {!detail && (
+          <span className="text-xs text-muted-foreground">
+            {o.assignee_name ?? "Unassigned"}
+            {o.expected_close ? ` · Expected close ${day(o.expected_close)}` : ""}
+          </span>
+        )}
       </span>
+      {detail && (
+        <>
+          <span className="mt-0.5 block text-xs text-muted-foreground" data-row-facts>
+            {opportunityFacts(o)}
+          </span>
+          <span className="block text-xs text-muted-foreground" data-row-dates>
+            {opportunityDates(o)}
+          </span>
+        </>
+      )}
     </Link>
   );
   return (

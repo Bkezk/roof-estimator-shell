@@ -305,6 +305,13 @@ export interface LinkedBidRow {
   status: string;
   grand_total: number;
   updated_at: string;
+  /** The property's page only (owner, Nov 18: more detail on its rows; lib/property-rows.ts). */
+  trade_number?: number | null;
+  due_date?: string | null;
+  estimator_name?: string | null;
+  updated_by_name?: string | null;
+  submitted_at?: string | null;
+  won_on?: string | null;
 }
 /**
  * One of the customer's opportunities for the Opportunities section (owner, Oct 12): title,
@@ -321,6 +328,11 @@ export interface AccountOpportunity {
   bid_status: string | null;
   deleted_at: string | null;
   updated_at: string;
+  /** The property's page only (owner, Nov 18: more detail on its rows; lib/property-rows.ts). */
+  est_value?: number | null;
+  lead_source?: string | null;
+  contacted_at?: string | null;
+  referred_by?: string | null;
 }
 
 /**
@@ -487,20 +499,28 @@ export const getAccount = createServerFn({ method: "GET" })
   });
 
 /** The customer's opportunities with the assignee's name and the linked bid's status, ordered. */
+/** Everyone's display name by id, for whoever may read it (crm_user_options decides). */
+async function peopleNames(sb: SupabaseClient<Database>): Promise<Map<string, string>> {
+  const { data: people } = await sb.rpc("crm_user_options");
+  const names = new Map<string, string>();
+  for (const u of people ?? []) names.set(u.id, (u.full_name ?? "").trim() || u.email);
+  return names;
+}
+
 async function accountOpportunities(
   sb: SupabaseClient<Database>,
   rows: readonly Omit<AccountOpportunity, "assignee_name" | "bid_status">[],
+  /** The people's names, when the caller has read them already (the property's page). */
+  known?: Map<string, string>,
 ): Promise<AccountOpportunity[]> {
   if (!rows.length) return [];
   const bidIds = [...new Set(rows.map((r) => r.bid_id).filter((x): x is string => !!x))];
-  const [{ data: people }, { data: bids }] = await Promise.all([
-    sb.rpc("crm_user_options"),
+  const [names, { data: bids }] = await Promise.all([
+    known ?? peopleNames(sb),
     bidIds.length
       ? sb.from("bids").select("id, status").in("id", bidIds)
       : Promise.resolve({ data: [] as { id: string; status: string }[] }),
   ]);
-  const names = new Map<string, string>();
-  for (const u of people ?? []) names.set(u.id, (u.full_name ?? "").trim() || u.email);
   const bidStatus = new Map<string, string>();
   for (const b of bids ?? []) bidStatus.set(b.id, b.status);
   return orderAccountOpportunities(
@@ -519,6 +539,10 @@ async function accountOpportunities(
  * stage), the opportunities, the bids (Estimate access only, as on the customer) and the tasks
  * RLS lets the reader see. Takeoffs link by customer and building only, so none here.
  */
+export interface PropertyJobExtra {
+  technician_name: string | null;
+  repairs: { name: string | null; resolution_text: string | null }[];
+}
 export interface PropertyDetail {
   /** Deleted too (deleted_at set): an old link shows it with a banner, read-only. */
   site: SiteRow;
@@ -528,6 +552,12 @@ export interface PropertyDetail {
   jobs: Database["public"]["Tables"]["service_jobs"]["Row"][];
   /** How many of `jobs` are at each stage ("open" → 2); a stage with none is left out. */
   job_counts: Record<string, number>;
+  /**
+   * By ticket id (owner, Nov 18: "more detail on the tickets"): who is on it and what was
+   * repaired, for the row's second line (lib/property-rows.ts). The reader's own sign-in reads
+   * them, so a ticket whose repairs they may not read has none here.
+   */
+  job_extras: Record<string, PropertyJobExtra>;
   opportunities: AccountOpportunity[];
   /** Bids linked to the property — empty when the reader has no Estimate access. */
   bids: LinkedBidRow[];
@@ -608,7 +638,9 @@ export const getProperty = createServerFn({ method: "GET" })
           .limit(200),
         sb
           .from("crm_opportunities")
-          .select("id, title, status, assignee_id, expected_close, bid_id, deleted_at, updated_at")
+          .select(
+            "id, title, status, assignee_id, expected_close, bid_id, deleted_at, updated_at, est_value, lead_source, contacted_at, referred_by",
+          )
           .eq("site_id", data.id)
           .order("updated_at", { ascending: false })
           .limit(200),
@@ -619,14 +651,42 @@ export const getProperty = createServerFn({ method: "GET" })
     if (canAccess(p, "estimate")) {
       const { data: b } = await sb
         .from("bids")
-        .select("id, name, kind, status, grand_total, updated_at")
+        .select(
+          "id, name, kind, status, grand_total, updated_at, trade_number, due_date, updated_by_name, submitted_at, won_on, estimator_name:data->customer->>estimatorName",
+        )
         .eq("site_id", data.id)
         .is("deleted_at", null)
         .order("updated_at", { ascending: false })
         .limit(200);
-      bids = (b ?? []) as LinkedBidRow[];
+      bids = (b ?? []) as unknown as LinkedBidRow[];
     }
-    const opportunities = await accountOpportunities(sb, oppRows ?? []);
+    // The second line of each ticket's row (owner, Nov 18): the technician's name and what was
+    // repaired. Two reads for the whole page, whatever the number of tickets.
+    const jobIds = (jobs ?? []).map((j) => j.id);
+    const [names, { data: repairs }] = await Promise.all([
+      peopleNames(sb),
+      jobIds.length
+        ? sb
+            .from("service_job_repairs")
+            .select("service_job_id, name, resolution_text, sort")
+            .in("service_job_id", jobIds)
+            .order("sort", { ascending: true })
+        : Promise.resolve({ data: [] }),
+    ]);
+    const job_extras: Record<string, PropertyJobExtra> = {};
+    for (const j of jobs ?? [])
+      job_extras[j.id] = {
+        technician_name: j.technician_id ? (names.get(j.technician_id) ?? null) : null,
+        repairs: [],
+      };
+    // In the order the ticket lists them, whatever order they came back in.
+    const inOrder = [...(repairs ?? [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+    for (const r of inOrder)
+      job_extras[r.service_job_id]?.repairs.push({
+        name: r.name ?? null,
+        resolution_text: r.resolution_text ?? null,
+      });
+    const opportunities = await accountOpportunities(sb, oppRows ?? [], names);
     const job_counts: Record<string, number> = {};
     for (const [stage, n] of countBy(jobs ?? [], (j) => j.stage)) job_counts[stage] = n;
     return {
@@ -634,6 +694,7 @@ export const getProperty = createServerFn({ method: "GET" })
       account,
       jobs: jobs ?? [],
       job_counts,
+      job_extras,
       opportunities,
       bids,
       tasks: tasks ?? [],

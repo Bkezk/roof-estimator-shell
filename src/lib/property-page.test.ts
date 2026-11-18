@@ -245,7 +245,8 @@ describe("the route and the page (source)", () => {
   it("the sections: Tickets with the counts line, Opportunities and Bids behind their gates, Tasks on the property, History of the site", () => {
     const page = read("src/components/property-page.tsx");
     expect(page).toContain("summary={stageCountsLine(counts)}");
-    expect(page).toContain("<TicketRows jobs={jobs} showSite={false} />");
+    // (Nov 18: each row has a second line of detail, `extras`; property-rows-nov18.test.tsx.)
+    expect(page).toContain("<TicketRows jobs={jobs} showSite={false} extras={extras ?? {}} />");
     expect(page).toContain("{seesOpportunitiesList(profile) && (");
     expect(page).toContain('{can("estimate") && <PropertyBids bids={d.bids} />}');
     expect(page).toContain("site={{ id: s.id, name: s.name }}");
