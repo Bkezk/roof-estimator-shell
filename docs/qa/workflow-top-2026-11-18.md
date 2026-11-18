@@ -45,8 +45,8 @@ Top to bottom, the workflow now opens with:
 
 ## Proof
 
-Tests: `src/components/service/closeout-top-nov18.test.tsx` (18). Older pins updated with a
-dated note in four files.
+Tests: `src/components/service/closeout-top-nov18.test.tsx` (19). Older pins updated with a
+dated note in six files.
 
 Browser, local build against the live database, every write blocked, as a technician-only login.
 Three temporary tickets at the test customer: one with a long description, eight lines of
