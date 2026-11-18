@@ -207,8 +207,10 @@ describe("the crew box is still the gate (step 1)", () => {
   it("nothing after it renders until the question is answered; the reads then settle before the steps show", () => {
     expect(form).toContain("const waiting = crewQuestionPending(job);");
     // Oct 28: not on an inspection — its flow has no crew step, and nothing waits on it there.
+    // Nov 18: the one thing under the card while waiting is the bar of the two Roof Care
+    // buttons (owner: "im not seeing the two buttons here"). No step of the ticket shows.
     expect(form).toMatch(
-      /\{!inspection && \(\s*<StepCard \{\.\.\.card\("crew"\)\} icon=\{Users\}>\s*<CrewBox job=\{job\} embedded \/>\s*<\/StepCard>\s*\)\}\s*\{waiting && !inspection \? null : !ready \? \(/,
+      /\{!inspection && \(\s*<StepCard \{\.\.\.card\("crew"\)\} icon=\{Users\}>\s*<CrewBox job=\{job\} embedded \/>\s*<\/StepCard>\s*\)\}[^]{0,500}?\{\(\(waiting && !inspection\) \|\| !ready\) && <PlanBar job=\{job\} \/>\}\s*\{waiting && !inspection \? null : !ready \? \(/,
     );
     // Owner, Oct 9 (later): the paragraph under step 1 repeated the strip and the crew card's
     // own line; while waiting, nothing renders below the card.

@@ -1051,6 +1051,35 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
       '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big className="mt-2" />',
     );
   });
+  it("are there from the workflow's first screen, before Who is here is answered", () => {
+    // Owner, Nov 18, with a picture of a ticket still on step 1: "im not seeing the two buttons
+    // here about care plan and additonal services?" The bar they sat in belongs to the part of
+    // the ticket that opens only after that answer, so a fresh repair ticket showed neither.
+    const closeout = flat(read("src/components/service/closeout.tsx"));
+    const gate = closeout.indexOf("{waiting && !inspection ? null : !ready ? (");
+    const early = closeout.indexOf(
+      "{((waiting && !inspection) || !ready) && <PlanBar job={job} />}",
+    );
+    expect(early).toBeGreaterThan(-1);
+    // Outside the gated part, right before it.
+    expect(early).toBeLessThan(gate);
+    expect(gate - early).toBeLessThan(120);
+    const bar = closeout.slice(closeout.indexOf("function PlanBar({ job }"));
+    expect(bar).toContain("sticky bottom-0 z-10");
+    expect(bar).toContain(
+      "<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />",
+    );
+  });
+  it("stay on a ticket that is not this person's to close out", () => {
+    const closeout = flat(read("src/components/service/closeout.tsx"));
+    const screen = closeout.slice(
+      closeout.indexOf("export function CloseoutScreen("),
+      closeout.indexOf("function PlanBar({ job }"),
+    );
+    const locked = screen.slice(screen.indexOf("<CloseoutForm key={job.id} job={job} />"));
+    expect(locked).toContain("only they or the office can close it out.");
+    expect(locked).toContain("<PlanBar job={job} />");
+  });
   it("are under Open ticket and the stage on a ticket, and no longer inside it", () => {
     const page = read("src/components/service-page.tsx");
     const f = flat(page);

@@ -412,13 +412,36 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
       {canEdit ? (
         <CloseoutForm key={job.id} job={job} />
       ) : (
-        <p className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
-          <Lock className="h-4 w-4 shrink-0" />
-          {officeStage
-            ? `${officeStageMessage(job.stage)}; ask the office if something needs changing.`
-            : `This ticket is assigned to ${job.technician_name ?? "someone else"}; only they or the office can close it out.`}
-        </p>
+        <>
+          <p className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <Lock className="h-4 w-4 shrink-0" />
+            {officeStage
+              ? `${officeStageMessage(job.stage)}; ask the office if something needs changing.`
+              : `This ticket is assigned to ${job.technician_name ?? "someone else"}; only they or the office can close it out.`}
+          </p>
+          {/* A ticket that can no longer be changed here still has its property: the two
+              buttons stay. */}
+          <PlanBar job={job} />
+        </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Care Plan and Additional Services by themselves, pinned to the bottom (owner, Nov 18: "two
+ * buttons that stay pinned to the bottom of the screen"), on the screens of the workflow that
+ * have no Complete bar: before "Who is here" is answered, while the ticket loads, and on a
+ * ticket that is not this person's to close out. Once the rest of the ticket is open the
+ * Complete bar carries them.
+ */
+function PlanBar({ job }: { job: ServiceJobWithTech }) {
+  return (
+    <div
+      className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      data-plan-bar
+    >
+      <RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />
     </div>
   );
 }
@@ -1147,6 +1170,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           <CrewBox job={job} embedded />
         </StepCard>
       )}
+
+      {/* Before the rest of the ticket opens there is no Complete bar, so the two buttons had
+          nowhere to be (owner, Nov 18, of a ticket still on "Who is here": "im not seeing the
+          two buttons here"). They are pinned from the first screen on. */}
+      {((waiting && !inspection) || !ready) && <PlanBar job={job} />}
 
       {waiting && !inspection ? null : !ready ? (
         <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">

@@ -115,3 +115,33 @@ is an admin again.
   property's picture.
 - Nothing was pressed that saves, so no real sign-up or request was made.
 - Nothing was tried on a real phone.
+
+## Later on Nov 18: the two buttons were missing on the workflow's first screen
+
+The owner sent a picture of ticket #6070 on step 1, "Who is here": "im not seeing the two buttons
+here about care plan and additonal services?"
+
+**Cause.** The buttons sat in the Complete bar. That bar belongs to the part of a repair ticket
+that opens only after "Who is here" is answered. A fresh repair ticket showed neither button. The
+first check of the buttons ran on tickets that were already past that step, so it missed this.
+
+**Fix.** A bar of its own, `PlanBar` in `src/components/service/closeout.tsx`, carries the two
+buttons wherever the workflow has no Complete bar:
+
+- before "Who is here" is answered,
+- while the ticket loads,
+- on a ticket that is not this person's to close out, or that the office has taken over.
+
+Once the rest of the ticket is open, the Complete bar carries them as before.
+
+**Proof.** Two tests in `src/lib/roof-care-plan-nov18.test.ts`. Browser, as a technician-only
+login, every write blocked, three temporary tickets, at 390 and 810 wide:
+
+| Ticket                              | Buttons          | Which bar    |
+| ----------------------------------- | ---------------- | ------------ |
+| A fresh repair, step 1 not answered | Both. Each opens | The new bar  |
+| An authorized repair, locked        | Both             | The new bar  |
+| An inspection, which has no step 1  | Both             | Complete bar |
+
+On a short screen like step 1 the bar sits right under the card, since there is nothing to scroll.
+The temporary tickets were removed after. No notices were written.
