@@ -71,11 +71,13 @@ A service material linked to an Estimate Pricing row that is priced by the box t
 and multiplied it by the pieces in the box. Its cost on an invoice and its Setup value in inventory
 are now the box price. A row priced by the piece is still multiplied.
 
-### 10. A purchase order is billed once
+### 10. A purchase order is billed once (taken back the same day)
 
-A second invoice made from a ticket took every purchase order again. It now leaves out an order
-that another invoice of the ticket already carries. A void invoice bills nothing. Rebuilding a
-draft keeps that draft's own orders.
+This was built and then undone. The fix left a purchase order off a second invoice when another
+invoice of the ticket already carried it. Asked whether time and materials should follow, the
+owner chose the opposite for all three: "id rather it have everything and they can just take it
+off as needed". A second invoice now starts with the ticket's whole time, materials and purchase
+orders, as it always had. The office removes the lines it does not want.
 
 ### 12. Entries not ticked "Viewable to technicians"
 

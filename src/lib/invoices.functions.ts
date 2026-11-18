@@ -763,8 +763,6 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       markup: inv.material_markup == null ? null : Number(inv.material_markup),
       // The PO lines follow this draft's Mark up switch (owner, Oct 14).
       poMarkup: inv.po_markup !== false,
-      // Its own PO lines are its own; only another invoice's count as billed (Nov 18).
-      forInvoiceId: inv.id,
     });
     const { data: oldLines, error: oErr } = await sb
       .from("invoice_lines")

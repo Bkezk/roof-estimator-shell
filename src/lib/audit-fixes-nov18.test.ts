@@ -3,7 +3,7 @@
  * of their own:
  *
  *   9   a material priced by the box is valued at the box's price, not that times its pieces
- *  10   a purchase order already billed is not put on a second invoice of the same ticket
+ *  10   taken back the same day: a second invoice brings everything, purchase orders too
  *  12   an Activity entry not ticked "Viewable to technicians" is not readable by a technician
  *
  * The others are beside the code they change: reminders at 8:00 and trade bid notices in
@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { billedPoIds, poIdOfLine, unbilledOrders } from "@/lib/invoice-po-lines";
+import { poIdOfLine } from "@/lib/invoice-po-lines";
 import { buildLinesFromJob } from "@/lib/invoices.server";
 import { packCostFor, stockUnitCost, type ServiceMaterialLink } from "@/lib/service-materials";
 import { priceIsPerPack, type PieceDef } from "@/lib/stock-units";
@@ -87,13 +87,17 @@ describe("9. a material priced by the box", () => {
 });
 
 // ── 10 ───────────────────────────────────────────────────────────────────────────────────────
+// Taken back the same day. The audit's finding was that a second invoice on a ticket brought
+// every purchase order again; the fix left off the ones already billed. The owner then chose
+// the opposite for all three kinds of line: "id rather it have everything and they can just
+// take it off as needed". So a second invoice starts with the ticket's whole time, materials
+// and purchase orders, as it always had.
 
-describe("10. a purchase order is billed once", () => {
+describe("10. a second invoice brings everything, purchase orders included (owner, Nov 18)", () => {
   const JOB = "11111111-1111-4111-8111-111111111111";
   const PO_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const PO_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const INV_1 = "22222222-2222-4222-8222-222222222221";
-  const INV_2 = "22222222-2222-4222-8222-222222222222";
   const po = (id: string, number: string, price: number): Row => ({
     id,
     service_job_id: JOB,
@@ -125,58 +129,24 @@ describe("10. a purchase order is billed once", () => {
     );
   const poIds = (lines: Awaited<ReturnType<typeof buildLinesFromJob>>) =>
     lines.map((l) => poIdOfLine(l)).filter((id): id is string => !!id);
-  const build = (env: ReturnType<typeof world>, forInvoiceId?: string) =>
-    buildLinesFromJob(env.db as unknown as Client, JOB, {
-      poMarkup: true,
-      ...(forInvoiceId ? { forInvoiceId } : {}),
-    });
 
-  it("the pure rule: the ids other invoices' PO lines name, and the orders left", () => {
-    const billed = billedPoIds([
-      { source: `po:${PO_A}` },
-      { source: "time:12" },
-      { source: null },
-      { source: `po:${PO_A}` },
-    ]);
-    expect([...billed]).toEqual([PO_A]);
-    expect(unbilledOrders([{ id: PO_A }, { id: PO_B }], billed)).toEqual([{ id: PO_B }]);
-    expect(unbilledOrders([{ id: PO_A }], new Set())).toEqual([{ id: PO_A }]);
-  });
-  it("the first invoice of a ticket takes every purchase order", async () => {
-    expect(poIds(await build(world()))).toEqual([PO_A, PO_B]);
-  });
-  it("a second invoice leaves out the order the first one billed; a void first invoice bills nothing", async () => {
-    const first = (status: string) => ({
-      invoices: [{ id: INV_1, service_job_id: JOB, status }],
+  it("a purchase order already on another invoice of the ticket is on the new one too", async () => {
+    const env = world({
+      invoices: [{ id: INV_1, service_job_id: JOB, status: "final" }],
       invoice_lines: [{ id: 1, invoice_id: INV_1, source: `po:${PO_A}` }],
     });
-    for (const status of ["draft", "final", "paid"])
-      expect(poIds(await build(world(first(status))))).toEqual([PO_B]);
-    expect(poIds(await build(world(first("void"))))).toEqual([PO_A, PO_B]);
+    const lines = await buildLinesFromJob(env.db as unknown as Client, JOB, { poMarkup: true });
+    expect(poIds(lines)).toEqual([PO_A, PO_B]);
   });
-  it("Rebuild keeps a draft's own orders: only ANOTHER invoice's count as billed", async () => {
-    const env = world({
-      invoices: [
-        { id: INV_1, service_job_id: JOB, status: "final" },
-        { id: INV_2, service_job_id: JOB, status: "draft" },
-      ],
-      invoice_lines: [
-        { id: 1, invoice_id: INV_1, source: `po:${PO_A}` },
-        { id: 2, invoice_id: INV_2, source: `po:${PO_B}` },
-        // A time line of the other invoice names no order.
-        { id: 3, invoice_id: INV_1, source: "time:7" },
-      ],
-    });
-    expect(poIds(await build(env, INV_2))).toEqual([PO_B]);
-    expect(poIds(await build(env, INV_1))).toEqual([PO_A]);
-    expect(flat("src/lib/invoices.functions.ts")).toContain("forInvoiceId: inv.id,");
-  });
-  it("another ticket's invoice does not count", async () => {
-    const env = world({
-      invoices: [{ id: INV_1, service_job_id: "another-ticket", status: "final" }],
-      invoice_lines: [{ id: 1, invoice_id: INV_1, source: `po:${PO_A}` }],
-    });
-    expect(poIds(await build(env))).toEqual([PO_A, PO_B]);
+  it("the builder does not look at the ticket's other invoices at all", () => {
+    const server = read("src/lib/invoices.server.ts");
+    const build = server.slice(
+      server.indexOf("export async function buildLinesFromJob("),
+      server.indexOf("export function totals("),
+    );
+    expect(build).toContain("const orders = pos ?? [];");
+    expect(build).not.toContain('.from("invoices")');
+    expect(build).not.toContain("forInvoiceId");
   });
 });
 

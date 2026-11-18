@@ -65,22 +65,39 @@ after each. What each includes is on the flyer.
 
 **Not part of this**
 
-- A second invoice on a ticket keeps bringing everything from the ticket. The office takes off
-  what it does not want. (Purchase orders already billed are left off, since Nov 18.)
+- A second invoice on a ticket keeps bringing everything from the ticket, purchase orders
+  included. The office takes off what it does not want.
+
+## Decided later on Nov 18
+
+**The travel rule.** At cost. The list price covers a 2 hour, 100 mile round trip. For a building
+further from the office, each trip of the plan year adds the hours over 2 at the crew's pay and the
+miles over 100 at the vehicle's cost per mile. A closer building pays the list price, never less.
+Trips a year: Roof Watch 2, Roof Care 2, Roof Guard 4 (the two visits, one leak call, one storm
+inspection).
+
+**The first visit.** The person signing the customer up is often already on site for a service
+call, so sign-up offers three choices: do the inspection now, push it back a number of days, or
+wait for the next window. The windows are mid March to mid May, and mid October to the end of
+December.
+
+**The plan year.** Twelve months from the plan's own sign-up, not the calendar year. With half
+billed at each visit, that is why nothing needs pro-rating (owner: "pay per visit kind of fixes
+that").
+
+**Pushed back.** Anyone in the office can push a care plan inspection up to 30 days. More than
+that needs a manager and a reason. The next inspection moves back with it. If the second visit
+would land after the plan year ends, the renewal date moves with it and the Owner page lists the
+plan as running late.
 
 ## Open
 
-1. **The exact travel rule.** Proposed: for a round trip over 2 hours, each trip of the plan year
-   adds the extra crew time and the extra miles, at cost. Not confirmed.
-2. **When the first visit happens** after sign-up, and whether visits follow the seasons or the
-   sign-up date.
-3. **Pushed back too far.** What happens when a pushed visit would land outside the plan year.
-4. **The list of services** for the request form. The leave-behind's list is not right and the
+1. **The list of services** for the request form. The leave-behind's list is not right and the
    owner is not sure yet. Ask before building the tick boxes.
-5. **The sign-up's terms.** What the customer agrees to when they sign.
-6. **The web address in the QR codes.** Printed codes are permanent. The owner does not know how
+2. **The sign-up's terms.** What the customer agrees to when they sign.
+3. **The web address in the QR codes.** Printed codes are permanent. The owner does not know how
    to set up a forwarding address on flatroofonline.com and needs step-by-step help.
-7. **Referral credit.** What "credit" means in practice: a name on the record, a report, a payout.
+4. **Referral credit.** What "credit" means in practice: a name on the record, a report, a payout.
 
 ## Build order
 
