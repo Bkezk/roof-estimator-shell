@@ -144,6 +144,15 @@ plan as running late.
 - The Owner page counts Roof Care as its own line of business:
   `docs/qa/owner-lines-of-business-2026-11-18.md`.
 
+**Later on Nov 18: the two buttons, the terms, technicians.** Record:
+`docs/qa/care-plan-buttons-and-technicians-2026-11-18.md`.
+
+- The buttons are **Care Plan** and **Additional Services** (`RoofCareButtons`): pinned at the
+  bottom of the ticket workflow, under Open ticket and the stage on a ticket, under New ticket on
+  a property. The owner chose the names and the places.
+- A technician-only login works a ticket in the workflow and nowhere else. The ticket page is
+  the office's.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".
@@ -156,34 +165,24 @@ plan as running late.
 3. **The office's list of sign-ups waiting to be matched** to a customer.
 4. **Renewal.** A plan is one plan year. Nothing yet starts the next year or re-prices it. The
    first plan cannot reach its renewal before Nov 18, 2027.
-5. **The terms** on the sign-up, once the owner has settled them.
+5. ~~The terms on the sign-up.~~ Done, Nov 18.
 6. **The tick boxes of services** on the request, once the owner has settled the list.
 7. **The roof's size from the building's outline**, where the site has it. It is typed for now.
 8. **An "Opened" notice** for a ticket the morning check makes. Today it shows as unassigned work
    and the "Nobody is on it" reminder covers it.
 
-## A draft of the terms, for the owner to change
+## The terms: agreed
 
-Put to the owner on Nov 18 after "idk what should the customer agree to?". Nothing here is agreed.
-
-1. What the plan includes, by its name, as on the flyer.
-2. The yearly price, billed half at each of the two inspections.
-3. The plan runs twelve months from the day it is signed.
-4. The price is an estimate until the roof is measured, and may be corrected once.
-5. Minor repairs are valued at standard rates. An unused amount does not carry over.
-6. Repairs beyond what the plan includes are quoted first and billed separately.
-7. The customer gives roof access on the agreed day. A missed visit is rescheduled once at no
-   charge.
-8. A storm inspection is asked for by the customer after the storm.
-9. Either side can end the plan in writing. What has been done is billed. Nothing is refunded
-   for a visit already made.
-10. The plan is not a warranty and does not cover the roof's replacement.
+The owner, Nov 18: "i like all 10 you came up with". They are `ROOF_CARE_TERMS` in
+`src/lib/roof-care-plan.ts`, dated by `ROOF_CARE_TERMS_VERSION`. The sign-up shows them with a
+tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
+Change a line: change the date too.
 
 ## Open
 
 1. **The list of services** for the request form. On hold at the owner's word (Nov 18). The
    leave-behind's list is not right. Ask before building the tick boxes.
-2. **The sign-up's terms.** What the customer agrees to when they sign. A draft is with the owner.
+2. ~~The sign-up's terms.~~ Agreed on Nov 18: see "The terms: agreed".
 3. **The web address in the QR codes.** Printed codes are permanent. The owner does not know how
    to set up a forwarding address on flatroofonline.com and needs step-by-step help.
 

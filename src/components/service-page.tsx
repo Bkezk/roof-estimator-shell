@@ -152,7 +152,7 @@ import { SiteSelect } from "@/components/crm/site-select";
 import { PropertySiteSelect } from "@/components/crm/property-site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
-import { RoofCareCard } from "@/components/roof-care/plan-card";
+import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import type { ServiceSearch, StageFilter, TicketFrom, TypeValue } from "@/lib/service-search";
@@ -1049,7 +1049,17 @@ function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
       Could not refresh: {errText(job.error)}
     </p>
   ) : null;
-  if (closeout)
+  // A technician works a ticket in its workflow and nowhere else (owner, Nov 18: "techs should
+  // not be able to open this ticket screen"): any link to the ticket (a notice, the Service
+  // list, the clock's line) opens the workflow for a technician-only login. Until the profile
+  // is known nothing is shown, so the ticket page never flashes first.
+  if (!closeout && !profile)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
+      </p>
+    );
+  if (closeout || isFieldOnly(profile))
     return (
       <>
         {stale}
@@ -2047,11 +2057,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             }
             onContact={(v) => set("contact_id", v)}
           />
-          {/* Owner, Nov 18: the property's Roof Care plan, and this ticket's inspection when it
-              is one of the plan's. */}
-          {job?.site_id && (
-            <RoofCareCard siteId={job.site_id} visitId={job.roof_care_visit_id} short />
-          )}
           {/* What happened here before (owner, Oct 21): one line, a tap opens the fold below. */}
           {job?.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
         </>
@@ -2407,9 +2412,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </p>
         )}
         <WarrantyBadges siteId={job.site_id} />
-        {/* Owner, Nov 18: the property's Roof Care plan, this ticket's inspection when it is one,
-            and the sign-up for whoever is on the roof. */}
-        <RoofCareCard siteId={job.site_id} visitId={job.roof_care_visit_id} short />
         {job.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
       </div>
       <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 [&>dt]:text-muted-foreground [&>dd]:min-w-0">
@@ -2619,94 +2621,105 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             )}
           </h1>
           {job && (
-            <div className="flex flex-wrap items-center gap-2">
-              {showCloseOut && (
-                <Button asChild>
-                  <Link to="/service" search={{ id: job.id, closeout: 1 }}>
-                    <ClipboardCheck className="mr-1 h-4 w-4" /> Open ticket
-                  </Link>
-                </Button>
-              )}
-              {fieldPage ? (
-                // The field page (Oct 21): the stage as text, in the picker's words. Done comes
-                // from the close-out; Open and Scheduled from the office.
-                <span
-                  className="inline-flex min-h-10 items-center rounded-md border px-3 text-sm font-medium"
-                  aria-label="Stage"
-                >
-                  {STAGE_LABELS[asStage(job.stage)]}
-                </span>
-              ) : (
-                <>
-                  <Select
-                    value={asStage(job.stage)}
-                    disabled={ro || lockedStage || stageMut.isPending}
-                    onValueChange={(v) => stageMut.mutate(v as ServiceStage)}
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {showCloseOut && (
+                  <Button asChild>
+                    <Link to="/service" search={{ id: job.id, closeout: 1 }}>
+                      <ClipboardCheck className="mr-1 h-4 w-4" /> Open ticket
+                    </Link>
+                  </Button>
+                )}
+                {fieldPage ? (
+                  // The field page (Oct 21): the stage as text, in the picker's words. Done comes
+                  // from the close-out; Open and Scheduled from the office.
+                  <span
+                    className="inline-flex min-h-10 items-center rounded-md border px-3 text-sm font-medium"
+                    aria-label="Stage"
                   >
-                    <SelectTrigger className="w-[150px]" aria-label="Stage">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {stageOptions.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {STAGE_LABELS[s]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {dispatcher && repeatable && (
-                    <Button asChild variant="outline">
-                      <Link
-                        to="/service"
-                        search={{ new: 1, from: job.id }}
-                        title={
-                          job.site_id
-                            ? "New ticket for this property"
-                            : "New ticket for this customer"
-                        }
-                      >
-                        <CopyPlus className="mr-1 h-4 w-4" />
-                        Repeat
-                      </Link>
-                    </Button>
-                  )}
-                  {/* Owner, Oct 27: Documents (the icon, a count) to the left of Delete (the
+                    {STAGE_LABELS[asStage(job.stage)]}
+                  </span>
+                ) : (
+                  <>
+                    <Select
+                      value={asStage(job.stage)}
+                      disabled={ro || lockedStage || stageMut.isPending}
+                      onValueChange={(v) => stageMut.mutate(v as ServiceStage)}
+                    >
+                      <SelectTrigger className="w-[150px]" aria-label="Stage">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {stageOptions.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {STAGE_LABELS[s]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {dispatcher && repeatable && (
+                      <Button asChild variant="outline">
+                        <Link
+                          to="/service"
+                          search={{ new: 1, from: job.id }}
+                          title={
+                            job.site_id
+                              ? "New ticket for this property"
+                              : "New ticket for this customer"
+                          }
+                        >
+                          <CopyPlus className="mr-1 h-4 w-4" />
+                          Repeat
+                        </Link>
+                      </Button>
+                    )}
+                    {/* Owner, Oct 27: Documents (the icon, a count) to the left of Delete (the
                       trash icon alone). Documents where its fold was (the office's page);
                       Delete the manager's, the confirm dialog below. */}
-                  <TicketHeaderActions
-                    documents={
-                      officeOrAdmin
-                        ? {
-                            count: documents.data?.length ?? null,
-                            onOpen: () => setDocumentsOpen(true),
-                          }
-                        : null
-                    }
-                    onDelete={manager ? () => setConfirmDelete(true) : null}
-                  />
-                  {officeOrAdmin && (
-                    <TicketDocumentsDialog
-                      job={job}
-                      open={documentsOpen}
-                      onOpenChange={setDocumentsOpen}
+                    <TicketHeaderActions
+                      documents={
+                        officeOrAdmin
+                          ? {
+                              count: documents.data?.length ?? null,
+                              onOpen: () => setDocumentsOpen(true),
+                            }
+                          : null
+                      }
+                      onDelete={manager ? () => setConfirmDelete(true) : null}
                     />
-                  )}
-                  {twoPane && (
-                    // Only where the two layouts differ (xl and up; narrower screens always stack).
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="hidden xl:inline-flex"
-                      aria-pressed={stacked}
-                      aria-label={stacked ? "Sections beside the form" : "Sections below the form"}
-                      title={stacked ? "Sections beside the form" : "Sections below the form"}
-                      onClick={() => setLayout(stacked ? "side" : "stacked")}
-                    >
-                      {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
-                    </Button>
-                  )}
-                </>
-              )}
+                    {officeOrAdmin && (
+                      <TicketDocumentsDialog
+                        job={job}
+                        open={documentsOpen}
+                        onOpenChange={setDocumentsOpen}
+                      />
+                    )}
+                    {twoPane && (
+                      // Only where the two layouts differ (xl and up; narrower screens always stack).
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="hidden xl:inline-flex"
+                        aria-pressed={stacked}
+                        aria-label={
+                          stacked ? "Sections beside the form" : "Sections below the form"
+                        }
+                        title={stacked ? "Sections beside the form" : "Sections below the form"}
+                        onClick={() => setLayout(stacked ? "side" : "stacked")}
+                      >
+                        {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+              {/* Owner, Nov 18: Care Plan and Additional Services, under Open ticket and the
+                stage. They were on the property's line inside the ticket until then. */}
+              <RoofCareButtons
+                siteId={job.site_id}
+                visitId={job.roof_care_visit_id}
+                className="justify-end"
+              />
             </div>
           )}
         </div>

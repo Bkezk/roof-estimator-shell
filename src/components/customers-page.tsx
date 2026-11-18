@@ -118,7 +118,7 @@ import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties, warrantyKey } from "@/components/crm/site-warranties";
-import { RoofCareCard } from "@/components/roof-care/plan-card";
+import { RoofCareButtons, RoofCareCard } from "@/components/roof-care/plan-card";
 import { PropertySites, propertySitesKey, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
@@ -1907,42 +1907,46 @@ function SitesSection({
                 {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
                 <SiteCoverPhoto site={s} canEdit={!readOnly} />
               </div>
-              <div className="flex items-center gap-1">
-                {canNewTicket && (
-                  <Button
-                    asChild
-                    size="sm"
-                    variant="outline"
-                    title="New service ticket at this property"
-                  >
-                    <Link to="/service" search={{ new: 1, account: accountId, site: s.id }}>
-                      <Wrench className="mr-1 h-4 w-4" /> New ticket
-                    </Link>
-                  </Button>
-                )}
-                {!readOnly && (
-                  <>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex items-center gap-1">
+                  {canNewTicket && (
                     <Button
+                      asChild
                       size="sm"
-                      variant="ghost"
-                      title="Edit this property"
-                      aria-label={`Edit ${s.name}`}
-                      onClick={() => setEditing(s.id)}
+                      variant="outline"
+                      title="New service ticket at this property"
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Link to="/service" search={{ new: 1, account: accountId, site: s.id }}>
+                        <Wrench className="mr-1 h-4 w-4" /> New ticket
+                      </Link>
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      title="Delete this property"
-                      aria-label={`Delete ${s.name}`}
-                      onClick={() => setToDelete(s)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </>
-                )}
+                  )}
+                  {!readOnly && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Edit this property"
+                        aria-label={`Edit ${s.name}`}
+                        onClick={() => setEditing(s.id)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        title="Delete this property"
+                        aria-label={`Delete ${s.name}`}
+                        onClick={() => setToDelete(s)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {/* Owner, Nov 18: Care Plan and Additional Services, under New ticket. */}
+                {!readOnly && <RoofCareButtons siteId={s.id} className="justify-end" />}
               </div>
             </div>
           ),

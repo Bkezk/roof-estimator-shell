@@ -97,6 +97,10 @@ export interface SiteCoverSite {
 /** A few aerials at a time across the page's cards (a customer with 46 properties). */
 const aerialTurn = limitConcurrency(2);
 
+/** The picture's box: small under a property on the customer's page, large on its own page. */
+const COVER_BOX = "h-24 w-32";
+const COVER_BOX_LARGE = "h-56 w-80 max-w-full sm:h-72 sm:w-[28rem]";
+
 /**
  * The property's cover picture on its card (phase 2 of the documents, Oct 26; the aerial,
  * Nov 2): the thumbnail (a signed link, an hour) with "Aerial · KyFromAbove imagery" under an
@@ -106,7 +110,18 @@ const aerialTurn = limitConcurrency(2);
  * shows why, with "Try the aerial again". `site` is the row as the page loaded it; the card
  * follows its own changes from there.
  */
-export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit: boolean }) {
+export function SiteCoverPhoto({
+  site,
+  canEdit,
+  large = false,
+}: {
+  site: SiteCoverSite;
+  canEdit: boolean;
+  /** The property's own page (owner, Nov 18: "have the picture be bigger"). */
+  large?: boolean;
+}) {
+  const box = large ? COVER_BOX_LARGE : COVER_BOX;
+  const wide = large ? COVER_BOX_LARGE : "h-24 w-40";
   const { session } = useAuth();
   const qc = useQueryClient();
   const urlFn = useServerFn(siteCoverUrl);
@@ -200,7 +215,7 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
                   ? "The building from our aerial imagery: a document's cover page prints it until a photo is set"
                   : "The property's cover photo: the picture a document's cover page starts with"
               }
-              className="h-24 w-32 shrink-0 rounded-md border object-cover"
+              className={`${box} shrink-0 rounded-md border object-cover`}
               loading="lazy"
               data-cover-source={isAerial ? "aerial" : "photo"}
             />
@@ -211,11 +226,15 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
             )}
           </figure>
         ) : cover.isError ? (
-          <span className="flex h-24 w-32 shrink-0 items-center justify-center rounded-md border p-1 text-center text-[10px] text-destructive">
+          <span
+            className={`flex ${box} shrink-0 items-center justify-center rounded-md border p-1 text-center text-[10px] text-destructive`}
+          >
             Could not load
           </span>
         ) : (
-          <span className="flex h-24 w-32 shrink-0 items-center justify-center rounded-md border bg-muted">
+          <span
+            className={`flex ${box} shrink-0 items-center justify-center rounded-md border bg-muted`}
+          >
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </span>
         )
@@ -223,7 +242,7 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
         // Said plainly (owner: bugs announced loudly), never a quiet "No cover photo".
         <span
           role="alert"
-          className="flex h-24 w-40 shrink-0 items-center justify-center rounded-md border border-destructive/40 p-1 text-center text-[10px] text-destructive"
+          className={`flex ${wide} shrink-0 items-center justify-center rounded-md border border-destructive/40 p-1 text-center text-[10px] text-destructive`}
           title={errText(cover.error)}
           data-cover-error
         >
@@ -231,14 +250,14 @@ export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit
         </span>
       ) : cover.isPending && willMake ? (
         <span
-          className="flex h-24 w-32 shrink-0 items-center justify-center gap-1 rounded-md border border-dashed p-1 text-center text-[10px] text-muted-foreground"
+          className={`flex ${box} shrink-0 items-center justify-center gap-1 rounded-md border border-dashed p-1 text-center text-[10px] text-muted-foreground`}
           data-cover-making
         >
           <Loader2 className="h-3 w-3 animate-spin" /> Finding the aerial…
         </span>
       ) : (
         <span
-          className="flex h-24 w-32 shrink-0 items-center justify-center rounded-md border border-dashed p-1 text-center text-[10px] text-muted-foreground"
+          className={`flex ${box} shrink-0 items-center justify-center rounded-md border border-dashed p-1 text-center text-[10px] text-muted-foreground`}
           title={
             note
               ? `${NO_AERIAL_PREFIX}: ${note}`

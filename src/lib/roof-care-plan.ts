@@ -21,6 +21,10 @@ export const SECOND_VISIT_GAP_DAYS = 120;
 /** A ticket is made this many days before its inspection is due. */
 export const TICKET_LEAD_DAYS = 14;
 
+/** The two buttons' names (owner, Nov 18). */
+export const CARE_PLAN_LABEL = "Care Plan";
+export const ADDITIONAL_SERVICES_LABEL = "Additional Services";
+
 /** The cache key of a property's plans. */
 export const roofCarePlansKey = (siteId: string) => ["roof-care-plans", siteId] as const;
 
@@ -319,3 +323,25 @@ export function carePlanLineWords(plan: unknown, kind: VisitKind): string {
 
 /** The note on the ticket's own lines of a visit's invoice: they are covered by the plan. */
 export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
+
+// ── The terms ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the customer agrees to at sign-up (owner, Nov 18: "i like all 10 you came up with").
+ * The plan keeps which set was agreed (`terms_version`), so a later change to the wording does
+ * not rewrite what an earlier customer said yes to. Change a line: change the version too.
+ */
+export const ROOF_CARE_TERMS_VERSION = "2026-11-18";
+export const ROOF_CARE_TERMS: readonly string[] = [
+  "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+  "The yearly price is billed in two halves, one after each of the two inspections.",
+  "The plan runs for twelve months from the day it is signed.",
+  "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+  "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+  "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+  "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
+  "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+  "Either of us can end the plan in writing. Work already done is billed. Nothing is refunded for a visit already made.",
+  "The plan is not a warranty and does not cover replacing the roof.",
+];
+export const TERMS_NOT_AGREED = "The customer has to agree to the plan's terms";

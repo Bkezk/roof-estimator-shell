@@ -98,7 +98,8 @@ describe("the property card's cover photo (property-sites.tsx SiteCoverPhoto)", 
     const property = read("src/components/property-page.tsx");
     // The card takes the row since Nov 2 (its cover source, the aerial's note and time).
     expect(customers).toContain("<SiteCoverPhoto site={s} canEdit={!readOnly} />");
-    expect(property).toContain("<SiteCoverPhoto site={s} canEdit={!deleted} />");
+    // Nov 18: larger on the property's own page.
+    expect(property).toContain("<SiteCoverPhoto site={s} canEdit={!deleted} large />");
   });
   it("the documents editor offers the Property photo when the record's property has a cover, and the renderer reads the row's path", () => {
     const picker = read("src/components/documents/editor/photo-picker.tsx");

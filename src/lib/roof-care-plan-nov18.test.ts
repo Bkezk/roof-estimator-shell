@@ -43,12 +43,15 @@ vi.mock("@/lib/service.functions", () => ({
   moveCarePlanTicketDate: (...a: unknown[]) => moved(...a),
 }));
 
+import { isFieldOnly } from "@/lib/access";
 import { buildLinesFromJob } from "@/lib/invoices.server";
 import { attentionLimits, attentionList } from "@/lib/owner-attention";
 import { carePlanCovered, carePlanInvoiceLines, carePlanOwnLine } from "@/lib/roof-care-invoice";
 import {
   carePlanLineSource,
   carePlanLineWords,
+  ADDITIONAL_SERVICES_LABEL,
+  CARE_PLAN_LABEL,
   dueWords,
   nextWindow,
   planBadge,
@@ -57,7 +60,10 @@ import {
   PUSH_NEEDS_MANAGER,
   PUSH_NEEDS_REASON,
   readPriceAnswer,
+  ROOF_CARE_TERMS,
+  ROOF_CARE_TERMS_VERSION,
   runsLate,
+  TERMS_NOT_AGREED,
   visitsDone,
   visitsDoneWords,
   visitState,
@@ -522,6 +528,7 @@ describe("signing a customer up", () => {
     days: null,
     agreed_by: " Pat Smith ",
     notes: "",
+    terms_agreed: true,
   };
 
   it("the database is given the server's own drive, and the price is its to work out", async () => {
@@ -548,6 +555,7 @@ describe("signing a customer up", () => {
         p_days: 0,
         p_agreed_by: "Pat Smith",
         p_notes: "",
+        p_terms: ROOF_CARE_TERMS_VERSION,
       },
     ]);
     expect(made.plan).toBe("guard");
@@ -912,7 +920,7 @@ describe("another service asked for on site", () => {
       "Brought in by {opp.referred_by}",
     );
     expect(read("src/components/roof-care/plan-card.tsx")).toContain(
-      'data-action="service-request"',
+      'data-action="additional-services"',
     );
   });
 });
@@ -990,24 +998,177 @@ describe("the Owner page's Needs attention list", () => {
 });
 
 describe("where it shows", () => {
-  it("under each property on the customer, on the property, and on the ticket", () => {
+  const card = read("src/components/roof-care/plan-card.tsx");
+  it("the plan itself: under each property on the customer, and on the property", () => {
     expect(read("src/components/customers-page.tsx")).toContain(
       '<RoofCareCard siteId={s.id} className="mt-2" />',
     );
     expect(read("src/components/property-page.tsx")).toContain(
       "{!deleted && <RoofCareCard siteId={s.id} />}",
     );
-    // The office's ticket page and the technician's view of it.
-    expect(
-      read("src/components/service-page.tsx").split(
-        "<RoofCareCard siteId={job.site_id} visitId={job.roof_care_visit_id} short />",
-      ),
-    ).toHaveLength(3);
+    // A property that never had a plan shows nothing there.
+    expect(card).toContain("if (!plan) return null;");
+    expect(card).toContain("data-roof-care-badge={plan.plan}");
   });
   it("the sign-up's roof size and days boxes start blank", () => {
-    const card = read("src/components/roof-care/plan-card.tsx");
     expect(card).toContain('const [sqft, setSqft] = useState("");');
     expect(card).toContain('const [days, setDays] = useState("");');
-    expect(card).toContain("data-roof-care-badge={plan.plan}");
+  });
+});
+
+// ── Later on Nov 18: the two buttons, the terms, and technicians in the workflow ──────────────
+
+describe("Care Plan and Additional Services (owner, Nov 18)", () => {
+  // "lets have the two buttons 'Care Plan' and 'Additional Services' as two buttons under the
+  // open ticket and status dropdown instead of its current location in a ticket. same for this
+  // view have the two buttons under the new ticket button", and "on the ticket workflow lets
+  // have two buttons that stay pinned to the bottom of the screen".
+  const card = read("src/components/roof-care/plan-card.tsx");
+  it("are named as the owner named them", () => {
+    expect(CARE_PLAN_LABEL).toBe("Care Plan");
+    expect(ADDITIONAL_SERVICES_LABEL).toBe("Additional Services");
+    expect(card).toContain("{CARE_PLAN_LABEL}");
+    expect(card).toContain("{ADDITIONAL_SERVICES_LABEL}");
+    expect(card).not.toContain("Sign up for a Roof Care plan\n        </Button>");
+    expect(card).not.toContain("Customer wants another service");
+  });
+  it("Care Plan opens the plan when the property has one, and the sign-up when it has none", () => {
+    const f = flat(card);
+    expect(f).toContain(
+      '{open === "plan" && (active ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
+    );
+    // The button says which plan and how many inspections are done.
+    expect(f).toContain("{planName(active.plan)} · {done.visits}/2");
+    // It waits for the plans to be read, so it never opens the sign-up over a plan.
+    expect(f).toContain("disabled={!q.data && !q.error}");
+  });
+  it("are pinned at the bottom of the workflow", () => {
+    const closeout = flat(read("src/components/service/closeout.tsx"));
+    const bar = closeout.slice(closeout.indexOf('<div className="sticky bottom-0 z-10'));
+    expect(bar.indexOf("<RoofCareButtons")).toBeGreaterThan(0);
+    expect(bar.indexOf("<RoofCareButtons")).toBeLessThan(bar.indexOf("<AlertDialog"));
+    expect(bar).toContain(
+      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big className="mt-2" />',
+    );
+  });
+  it("are under Open ticket and the stage on a ticket, and no longer inside it", () => {
+    const page = read("src/components/service-page.tsx");
+    const f = flat(page);
+    expect(f).toContain(
+      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} className="justify-end" />',
+    );
+    expect(page.indexOf("<RoofCareButtons")).toBeGreaterThan(page.indexOf("Open ticket"));
+    expect(page.indexOf("<RoofCareButtons")).toBeGreaterThan(
+      page.indexOf('<SelectTrigger className="w-[150px]" aria-label="Stage">'),
+    );
+    expect(page).not.toContain("<RoofCareCard");
+  });
+  it("are under New ticket on the customer's properties and on the property's page", () => {
+    const cust = read("src/components/customers-page.tsx");
+    const prop = read("src/components/property-page.tsx");
+    for (const src of [cust, prop]) {
+      const at = src.indexOf("<RoofCareButtons siteId={s.id}");
+      expect(at).toBeGreaterThan(src.indexOf('title="New service ticket at this property"'));
+    }
+    expect(cust).toContain(
+      '{!readOnly && <RoofCareButtons siteId={s.id} className="justify-end" />}',
+    );
+    expect(prop).toContain(
+      '{!deleted && <RoofCareButtons siteId={s.id} className="justify-end" />}',
+    );
+  });
+});
+
+describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () => {
+  it("are ten, dated, and none of them names a price", () => {
+    expect(ROOF_CARE_TERMS).toHaveLength(10);
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-18");
+    expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
+    expect(ROOF_CARE_TERMS[1]).toBe(
+      "The yearly price is billed in two halves, one after each of the two inspections.",
+    );
+    expect(ROOF_CARE_TERMS[9]).toBe(
+      "The plan is not a warranty and does not cover replacing the roof.",
+    );
+  });
+  it("no plan is started without the tick", async () => {
+    const env = world({}, { roof_care_sign_up: () => PLAN });
+    const form = {
+      site_id: SITE,
+      plan: "guard",
+      sqft: 20000,
+      first: "now",
+      days: null,
+      agreed_by: "Pat Smith",
+      notes: "",
+    };
+    for (const terms_agreed of [undefined, false])
+      await expect(
+        (async () => call(signUpRoofCare, env, { ...form, terms_agreed }))(),
+      ).rejects.toThrow(TERMS_NOT_AGREED);
+    expect(env.rpcCalls).toEqual([]);
+  });
+  it("the form shows all ten and holds the button until the tick", () => {
+    const card = flat(read("src/components/roof-care/plan-card.tsx"));
+    expect(card).toContain("{ROOF_CARE_TERMS.map((t) => ( <li key={t}>{t}</li> ))}");
+    expect(card).toContain("const [agreed, setAgreed] = useState(false);");
+    expect(card).toContain("agreedBy.trim().length > 0 && agreed && plans.length > 0 && !stale;");
+    expect(card).toContain("The customer has read these terms and agrees to them.");
+  });
+  it("the plan keeps which terms were agreed, and the database refuses a sign-up without them", () => {
+    const sql = flat(read("supabase/migrations/20261118260000_roof_care_terms.sql"));
+    expect(sql).toContain(
+      "alter table public.roof_care_plans add column if not exists terms_version text;",
+    );
+    expect(sql).toContain(
+      "if coalesce(trim(p_terms), '') = '' then raise exception 'The customer has to agree to the plan''s terms'; end if;",
+    );
+    expect(sql).toContain("sold_by, sold_by_name, notes, terms_version)");
+    // One form of the function, not two.
+    expect(sql).toContain(
+      "drop function if exists public.roof_care_sign_up(uuid, text, numeric, numeric, numeric, boolean, text, integer, text, text);",
+    );
+    expect(sql).toContain("press Care Plan on the ticket and push it back.");
+  });
+});
+
+describe("a technician works in the workflow (owner, Nov 18)", () => {
+  // "techs should not be able to open this ticket screen, they currently can by clicking the
+  // customer name in this case 5k."
+  it("on My tickets the name is words for a technician and a link for the office", () => {
+    const today = flat(read("src/components/service/today-page.tsx"));
+    expect(today).toContain(
+      '{isFieldOnly(profile) ? ( <p className="flex min-h-11 items-center text-lg font-semibold leading-snug" data-card-title="plain" > #{j.number} · {j.customer_name} </p> ) : ( <Link to="/service" search={{ id: j.id }}',
+    );
+    // Open ticket is still the workflow.
+    expect(today).toContain(
+      'void navigate({ to: "/service", search: { id: j.id, closeout: 1 } });',
+    );
+  });
+  it("the running clock's line opens the workflow for a technician", () => {
+    const today = flat(read("src/components/service/today-page.tsx"));
+    expect(today).toContain(
+      "isFieldOnly(profile) ? { id: clock.service_job_id, closeout: 1 } : { id: clock.service_job_id }",
+    );
+  });
+  it("any link to a ticket opens the workflow for a technician, never the ticket page", () => {
+    const page = flat(read("src/components/service-page.tsx"));
+    expect(page).toContain(
+      "if (closeout || isFieldOnly(profile)) return ( <> {stale} <CloseoutScreen key={job.data.id} job={job.data} /> </> );",
+    );
+    // Nothing is shown before the profile is known, so the ticket page never flashes first.
+    expect(page.indexOf("if (!closeout && !profile)")).toBeLessThan(
+      page.indexOf("if (closeout || isFieldOnly(profile))"),
+    );
+    // isFieldOnly(null) is false: with no profile the rule above it holds the page.
+    expect(isFieldOnly(null)).toBe(false);
+    expect(isFieldOnly({ role: "user", access: ["service"], technician: true })).toBe(true);
+    expect(isFieldOnly({ role: "admin", access: [], technician: true })).toBe(false);
+  });
+  it("the workflow has no way back to the ticket page for a technician", () => {
+    const closeout = flat(read("src/components/service/closeout.tsx"));
+    expect(closeout).toContain(
+      '{!isTech && ( <Button asChild variant="ghost" size="sm" className="h-10" data-link="ticket-details">',
+    );
   });
 });

@@ -24,6 +24,8 @@ import {
   asPlanKey,
   FIRST_VISIT_CHOICES,
   readPriceAnswer,
+  ROOF_CARE_TERMS_VERSION,
+  TERMS_NOT_AGREED,
   VISIT_KINDS,
   type PlanVisit,
   type PriceAnswer,
@@ -242,6 +244,9 @@ const signUpInput = z.object({
     .min(1, "Type the name of the person who agreed to the plan")
     .max(120),
   notes: z.string().trim().max(2000).optional(),
+  // The customer agreed to the plan's terms (owner, Nov 18): the form's tick, and no plan
+  // without it. The database refuses it too.
+  terms_agreed: z.literal(true, { errorMap: () => ({ message: TERMS_NOT_AGREED }) }),
 });
 
 /** The tickets a plan's inspections have, to announce the ones just made. */
@@ -278,6 +283,7 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_days: data.first === "days" ? (data.days ?? 0) : 0,
       p_agreed_by: data.agreed_by,
       p_notes: data.notes ?? "",
+      p_terms: ROOF_CARE_TERMS_VERSION,
     });
     if (error) throw new Error(error.message);
     const { announceCarePlanTickets } = await import("@/lib/service.functions");

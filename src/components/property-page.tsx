@@ -38,7 +38,7 @@ import { TicketRows } from "@/components/crm/ticket-rows";
 import { OpportunitiesSection, TasksSection } from "@/components/customers-page";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties } from "@/components/crm/site-warranties";
-import { RoofCareCard } from "@/components/roof-care/plan-card";
+import { RoofCareButtons, RoofCareCard } from "@/components/roof-care/plan-card";
 import { PropertySites, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import { Badge } from "@/components/ui/badge";
@@ -167,29 +167,33 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
                   </Link>
                 </p>
               </div>
-              <div className="flex items-center gap-1">
-                {canNewTicket && (
-                  <Button
-                    asChild
-                    size="sm"
-                    variant="outline"
-                    title="New service ticket at this property"
-                  >
-                    <Link to="/service" search={{ new: 1, account: d.account.id, site: s.id }}>
-                      <Wrench className="mr-1 h-4 w-4" /> New ticket
-                    </Link>
-                  </Button>
-                )}
-                {!deleted && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    title="Edit this property"
-                    onClick={() => setEditing(true)}
-                  >
-                    <Pencil className="mr-1 h-4 w-4" /> Edit
-                  </Button>
-                )}
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex items-center gap-1">
+                  {canNewTicket && (
+                    <Button
+                      asChild
+                      size="sm"
+                      variant="outline"
+                      title="New service ticket at this property"
+                    >
+                      <Link to="/service" search={{ new: 1, account: d.account.id, site: s.id }}>
+                        <Wrench className="mr-1 h-4 w-4" /> New ticket
+                      </Link>
+                    </Button>
+                  )}
+                  {!deleted && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Edit this property"
+                      onClick={() => setEditing(true)}
+                    >
+                      <Pencil className="mr-1 h-4 w-4" /> Edit
+                    </Button>
+                  )}
+                </div>
+                {/* Owner, Nov 18: Care Plan and Additional Services, under New ticket. */}
+                {!deleted && <RoofCareButtons siteId={s.id} className="justify-end" />}
               </div>
             </div>
             {s.technician_instructions && (
@@ -210,7 +214,7 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
             {!deleted && <RoofCareCard siteId={s.id} />}
             <PropertySites propertyId={s.id} />
             {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
-            <SiteCoverPhoto site={s} canEdit={!deleted} />
+            <SiteCoverPhoto site={s} canEdit={!deleted} large />
           </>
         )}
       </section>

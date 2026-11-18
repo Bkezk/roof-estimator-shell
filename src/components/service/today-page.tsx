@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isFieldOnly } from "@/lib/access";
 import {
   myClock,
   myDay,
@@ -317,7 +318,12 @@ function ClockBanner({ clock, jobs }: { clock: MyClock; jobs: TodayJob[] }) {
         )}
         <Link
           to="/service"
-          search={{ id: clock.service_job_id }}
+          // A technician's way into a ticket is its workflow (owner, Nov 18).
+          search={
+            isFieldOnly(profile)
+              ? { id: clock.service_job_id, closeout: 1 }
+              : { id: clock.service_job_id }
+          }
           className="underline-offset-2 hover:underline"
         >
           {runningLabel(
@@ -475,13 +481,26 @@ function JobCard({
     >
       <div className="space-y-1">
         {urgency && <RateBadge kind={urgency} size="lg" />}
-        <Link
-          to="/service"
-          search={{ id: j.id }}
-          className="flex min-h-11 items-center text-lg font-semibold leading-snug underline-offset-2 hover:underline"
-        >
-          #{j.number} · {j.customer_name}
-        </Link>
+        {/* Owner, Nov 18: "techs should not be able to open this ticket screen, they currently
+            can by clicking the customer name". For a technician the name is words, not a link:
+            Open ticket below is the way in. The office still opens the ticket from here. */}
+        {isFieldOnly(profile) ? (
+          <p
+            className="flex min-h-11 items-center text-lg font-semibold leading-snug"
+            data-card-title="plain"
+          >
+            #{j.number} · {j.customer_name}
+          </p>
+        ) : (
+          <Link
+            to="/service"
+            search={{ id: j.id }}
+            className="flex min-h-11 items-center text-lg font-semibold leading-snug underline-offset-2 hover:underline"
+            data-card-title="link"
+          >
+            #{j.number} · {j.customer_name}
+          </Link>
+        )}
         {j.scheduled_date && (j.scheduled_date !== today || arrival) && (
           <p
             className={`flex items-center gap-1 text-xs ${overdue ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}

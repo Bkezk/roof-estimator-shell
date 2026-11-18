@@ -3427,6 +3427,7 @@ export type Database = {
           sold_by: string | null
           sold_by_name: string
           status: string
+          terms_version: string | null
           travel_price: number
           updated_at: string
         }
@@ -3455,6 +3456,7 @@ export type Database = {
           sold_by?: string | null
           sold_by_name?: string
           status?: string
+          terms_version?: string | null
           travel_price?: number
           updated_at?: string
         }
@@ -3483,6 +3485,7 @@ export type Database = {
           sold_by?: string | null
           sold_by_name?: string
           status?: string
+          terms_version?: string | null
           travel_price?: number
           updated_at?: string
         }
@@ -5848,6 +5851,7 @@ export type Database = {
           p_plan: string
           p_site: string
           p_sqft: number
+          p_terms: string
         }
         Returns: string
       }

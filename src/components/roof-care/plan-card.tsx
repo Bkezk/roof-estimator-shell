@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -34,12 +35,15 @@ import { easternYmd } from "@/lib/field-day";
 import { longDay } from "@/lib/followup-rules";
 import { NOT_PLACED_LINE, placedRoughly, roughPlaceLine } from "@/lib/roof-care-locate";
 import {
+  ADDITIONAL_SERVICES_LABEL,
+  CARE_PLAN_LABEL,
   dueWords,
   nextWindow,
   planBadge,
   planDates,
   planName,
   pushPreview,
+  ROOF_CARE_TERMS,
   roofCarePlansKey,
   runsLate,
   VISIT_LABEL,
@@ -195,8 +199,111 @@ function VisitRow({
 }
 
 /**
- * The property's Roof Care plan. `visitId`: on a ticket, the inspection this ticket is, so its
- * line leads; `short`: the ticket's form, with the plan's badge and no list.
+ * The two buttons (owner, Nov 18: "lets have the two buttons 'Care Plan' and 'Additional
+ * Services'"): pinned at the bottom of the ticket workflow, under Open ticket and the stage on a
+ * ticket, and under New ticket on a property. Care Plan opens the property's plan when it has
+ * one (its inspections, push back, storm inspection) and the sign-up when it has none; the
+ * button carries the plan's name and how many inspections are done. Additional Services takes
+ * down what else the customer wants. `big`: the workflow's bar, for a thumb.
+ */
+export function RoofCareButtons({
+  siteId,
+  visitId,
+  big = false,
+  className = "",
+}: {
+  siteId: string | null | undefined;
+  visitId?: string | null;
+  big?: boolean;
+  className?: string;
+}) {
+  const { profile } = useAuth();
+  const q = usePlans(siteId);
+  const [open, setOpen] = useState<"plan" | "service" | null>(null);
+  if (!siteId || !profile) return null;
+  const today = easternYmd();
+  const active = (q.data ?? []).find((p) => p.status === "active") ?? null;
+  const done = active ? visitsDone(active, today) : null;
+  // The workflow's bar: the two side by side on a phone, each tall enough for a thumb.
+  const size = big ? "h-12 min-w-0 px-2 text-sm font-semibold" : "";
+  return (
+    <div
+      className={`${big ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"} ${className}`}
+      data-roof-care-buttons={active ? active.plan : "none"}
+    >
+      <Button
+        type="button"
+        variant="outline"
+        size={big ? "lg" : "sm"}
+        className={size}
+        // Until the plans are read the button cannot know which of the two it opens.
+        disabled={!q.data && !q.error}
+        title={q.error ? `Could not load the Roof Care plan: ${errText(q.error)}` : undefined}
+        onClick={() => setOpen("plan")}
+        data-action="care-plan"
+      >
+        <span className={big ? "flex min-w-0 flex-col items-center leading-tight" : "contents"}>
+          <span className="flex items-center">
+            <ShieldCheck className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {CARE_PLAN_LABEL}
+          </span>
+          {active && done && (
+            <span
+              className={`rounded bg-emerald-600/15 px-1.5 font-medium text-emerald-800 dark:text-emerald-300 ${big ? "text-[10px]" : "ml-1.5 py-0.5 text-[11px]"}`}
+              data-care-plan-chip
+            >
+              {planName(active.plan)} · {done.visits}/2
+            </span>
+          )}
+        </span>
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size={big ? "lg" : "sm"}
+        className={size}
+        onClick={() => setOpen("service")}
+        data-action="additional-services"
+      >
+        <Plus className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {ADDITIONAL_SERVICES_LABEL}
+      </Button>
+      {open === "plan" &&
+        (active ? (
+          <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
+        ) : (
+          <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} />
+        ))}
+      {open === "service" && <ServiceRequestDialog siteId={siteId} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+/** The property's plan in a pop-up: what Care Plan opens when there is one. */
+function PlanDialog({
+  siteId,
+  visitId,
+  onClose,
+}: {
+  siteId: string;
+  visitId: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto" data-care-plan-dialog>
+        <DialogHeader>
+          <DialogTitle>{CARE_PLAN_LABEL}</DialogTitle>
+          <DialogDescription>This property’s Roof Care plan and its inspections.</DialogDescription>
+        </DialogHeader>
+        <RoofCareCard siteId={siteId} visitId={visitId} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The property's Roof Care plan, when it has one: the badge, who signed, and each inspection.
+ * `visitId`: on a ticket, the inspection this ticket is, so its line leads; `short`: the badge
+ * and that one line, no list. Nothing for a property that never had a plan.
  */
 export function RoofCareCard({
   siteId,
@@ -211,10 +318,8 @@ export function RoofCareCard({
 }) {
   const { profile } = useAuth();
   const q = usePlans(siteId);
-  const [signUp, setSignUp] = useState(false);
   const [push, setPush] = useState<PlanVisit | null>(null);
   const [ending, setEnding] = useState(false);
-  const [asking, setAsking] = useState(false);
   const refresh = useRefresh(siteId ?? "");
   const stormFn = useServerFn(addRoofCareStorm);
   const storm = useMutation({
@@ -235,6 +340,9 @@ export function RoofCareCard({
   if (!q.data) return null;
   const today = easternYmd();
   const plan = currentPlan(q.data);
+  // A property that never had a plan shows nothing here: the Care Plan button is where one
+  // starts (RoofCareButtons).
+  if (!plan) return null;
   const active = plan?.status === "active" ? plan : null;
   const office = !isFieldOnly(profile);
   const manager = managesTickets(profile);
@@ -310,31 +418,6 @@ export function RoofCareCard({
           )}
         </>
       )}
-      {!active && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => setSignUp(true)}
-          data-action="roof-care-sign-up"
-        >
-          <ShieldCheck className="mr-1 h-3.5 w-3.5" /> Sign up for a Roof Care plan
-        </Button>
-      )}
-      {/* Owner, Nov 18: anything else the customer asks for while someone is there. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 text-xs"
-        onClick={() => setAsking(true)}
-        data-action="service-request"
-      >
-        <Plus className="mr-1 h-3.5 w-3.5" /> Customer wants another service
-      </Button>
-      {asking && <ServiceRequestDialog siteId={siteId} onClose={() => setAsking(false)} />}
-      {signUp && <SignUpDialog siteId={siteId} today={today} onClose={() => setSignUp(false)} />}
       {push && (
         <PushBackDialog
           siteId={siteId}
@@ -377,6 +460,7 @@ function SignUpDialog({
   const [days, setDays] = useState("");
   const [agreedBy, setAgreedBy] = useState("");
   const [notes, setNotes] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const offerFn = useServerFn(roofCareOffer);
   const signFn = useServerFn(signUpRoofCare);
   const size = wholeNumber(sqft);
@@ -393,7 +477,13 @@ function SignUpDialog({
   const plans = answer?.ready && !answer.custom_quote ? answer.plans : [];
   const stale = pricedFor !== size;
   const ready =
-    !!plan && !!first && !!dates && agreedBy.trim().length > 0 && plans.length > 0 && !stale;
+    !!plan &&
+    !!first &&
+    !!dates &&
+    agreedBy.trim().length > 0 &&
+    agreed &&
+    plans.length > 0 &&
+    !stale;
   const sign = useMutation({
     mutationFn: () =>
       signFn({
@@ -405,6 +495,7 @@ function SignUpDialog({
           days: first === "days" ? dayCount : null,
           agreed_by: agreedBy.trim(),
           notes: notes.trim(),
+          terms_agreed: true as const,
         },
       }),
     onSuccess: (made) => {
@@ -567,6 +658,23 @@ function SignUpDialog({
                   value={agreedBy}
                   onChange={(e) => setAgreedBy(e.target.value)}
                 />
+              </div>
+              <div className="space-y-1.5" data-roof-care-terms>
+                <p className="font-medium">What the customer agrees to</p>
+                <ol className="max-h-48 list-decimal space-y-1 overflow-y-auto rounded-md border bg-muted/30 py-2 pl-8 pr-3 text-xs">
+                  {ROOF_CARE_TERMS.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ol>
+                <label className="flex cursor-pointer items-start gap-2">
+                  <Checkbox
+                    checked={agreed}
+                    onCheckedChange={(v) => setAgreed(v === true)}
+                    className="mt-0.5"
+                    data-terms-agreed
+                  />
+                  <span>The customer has read these terms and agrees to them.</span>
+                </label>
               </div>
               <div className="space-y-1">
                 <Label htmlFor="rc-notes">Notes (optional)</Label>
@@ -781,7 +889,7 @@ function ServiceRequestDialog({ siteId, onClose }: { siteId: string; onClose: ()
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md" data-service-request-dialog>
         <DialogHeader>
-          <DialogTitle>Customer wants another service</DialogTitle>
+          <DialogTitle>{ADDITIONAL_SERVICES_LABEL}</DialogTitle>
           <DialogDescription>
             It goes to the office as a new opportunity for this property.
           </DialogDescription>

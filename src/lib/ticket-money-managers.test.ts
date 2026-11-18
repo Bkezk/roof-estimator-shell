@@ -213,7 +213,9 @@ describe("creating tickets is the office's and a manager's (dispatchesTickets si
       /\{canNewTicket && \(\s*<Button asChild size="sm">\s*<Link to="\/service" search=\{\{ new: 1, account: a\.id \}\}>/,
     );
     expect(cust).toMatch(
-      /\{canNewTicket && \(\s*<Button[\s\S]{0,120}title="New service ticket at this property"/,
+      // Nov 18: the button sits one level deeper (Care Plan and Additional Services are under
+      // it), so there is more white space between the two.
+      /\{canNewTicket && \(\s*<Button[\s\S]{0,200}title="New service ticket at this property"/,
     );
   });
   it("the server refuses a technician-only user's create (the office creates since Oct 9) and a non-manager's repair ticket", () => {

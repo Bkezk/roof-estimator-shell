@@ -140,6 +140,7 @@ import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
 import { HistoryLink } from "@/components/service/site-history";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
+import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
@@ -358,11 +359,15 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
               <ArrowLeft className="mr-1 h-4 w-4" /> My tickets
             </Link>
           </Button>
-          <Button asChild variant="ghost" size="sm" className="h-10">
-            <Link to="/service" search={{ id: job.id }}>
-              Ticket details
-            </Link>
-          </Button>
+          {/* The office's way to the ticket. A technician has none (owner, Nov 18): the
+              workflow is their ticket. */}
+          {!isTech && (
+            <Button asChild variant="ghost" size="sm" className="h-10" data-link="ticket-details">
+              <Link to="/service" search={{ id: job.id }}>
+                Ticket details
+              </Link>
+            </Button>
+          )}
         </div>
         <h1 className="text-2xl font-bold leading-tight tracking-tight">
           Close out #{job.number} · {job.customer_name}
@@ -1449,6 +1454,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   ? "Finish"
                   : "Complete"}
             </Button>
+            {/* Owner, Nov 18: "two buttons that stay pinned to the bottom of the screen that say
+                care plan and additiontal services", so nobody leaves the workflow for them. */}
+            <RoofCareButtons
+              siteId={job.site_id}
+              visitId={job.roof_care_visit_id}
+              big
+              className="mt-2"
+            />
           </div>
           <AlertDialog open={missing.length > 0} onOpenChange={(o) => !o && setMissing([])}>
             <AlertDialogContent>

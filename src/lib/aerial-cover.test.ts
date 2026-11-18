@@ -603,8 +603,10 @@ describe("the document loader and the card", () => {
   });
   it("the card: takes the row, asks a few at a time, captions an aerial, Set a photo / Remove / Try the aerial again", () => {
     const src = read("src/components/crm/property-sites.tsx");
-    expect(src).toContain(
-      "export function SiteCoverPhoto({ site, canEdit }: { site: SiteCoverSite; canEdit: boolean })",
+    // Nov 18: the card gained `large`, for the property's own page (owner: "have the picture be
+    // bigger").
+    expect(src.replace(/\s+/g, " ")).toContain(
+      "export function SiteCoverPhoto({ site, canEdit, large = false, }: { site: SiteCoverSite; canEdit: boolean;",
     );
     expect(src).toContain("const aerialTurn = limitConcurrency(2);");
     expect(src).toContain("aerialTurn(() => ensureFn({ data: { siteId } }))");
@@ -616,7 +618,10 @@ describe("the document loader and the card", () => {
       "<SiteCoverPhoto site={s} canEdit={!readOnly} />",
     );
     expect(read("src/components/property-page.tsx")).toContain(
-      "<SiteCoverPhoto site={s} canEdit={!deleted} />",
+      "<SiteCoverPhoto site={s} canEdit={!deleted} large />",
     );
+    // The small box under a property on the customer's page is as it was.
+    expect(src).toContain('const COVER_BOX = "h-24 w-32";');
+    expect(src).toContain('const COVER_BOX_LARGE = "h-56 w-80 max-w-full sm:h-72 sm:w-[28rem]";');
   });
 });
