@@ -45,6 +45,7 @@ import { shortDay } from "@/lib/followup-rules";
 import { localYmd, type WorkItem } from "@/lib/my-work";
 import {
   assignKind,
+  claimShows,
   assignNeedsDay,
   assignPlan,
   assignedToast,
@@ -112,6 +113,8 @@ export interface WorkActions {
   markingDone: (item: WorkItem) => boolean;
   /** The "Assign to…" select for an Unassigned row; null when the viewer may not assign it. */
   assign: (item: WorkItem) => ReactNode;
+  /** Does this Unassigned row show Claim (Nov 18: only where it has no "Assign to…")? */
+  claimShows: (item: WorkItem) => boolean;
   /** The status select for a bid row (Nov 13); null for every other kind. */
   bidStatus: (item: WorkItem) => ReactNode;
   /**
@@ -474,6 +477,7 @@ export function useWorkActions(profile: UserProfile | null): {
       status.isPending &&
       status.variables?.status === "done" &&
       status.variables.id === workId(item),
+    claimShows: (item) => claimShows(item, profile),
     assign: (item) => {
       const kind = assignKind(item, profile);
       if (!kind) return null;

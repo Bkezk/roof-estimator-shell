@@ -298,13 +298,28 @@ export function showUnassignedPane(items: readonly ActionIn[], viewer: Viewer): 
   return items.some((i) => !!i.unassigned && assignKind(i, viewer) !== null);
 }
 
+/**
+ * Does this Unassigned row show Claim (owner, Nov 18: "go ahead and get rid of the claim button
+ * since the dropdown establishes the same thing")? Only where the row has no "Assign to…":
+ * picking yourself there puts you on it exactly as Claim did, so the two sat side by side doing
+ * one job. A ticket always has the dropdown for anyone who could claim it, so a ticket never
+ * shows Claim. A task or an opportunity has the dropdown only for an admin or a manager; a
+ * ticked office person has no dropdown there, and Claim is still their one way to take it.
+ * A drop on a calendar day still takes it for yourself, as before.
+ */
+export const claimShows = (item: ActionIn, viewer: Viewer): boolean =>
+  !!item.unassigned && canClaim(viewer) && assignKind(item, viewer) === null;
+
+/** A claimer with the dropdown on every row (an admin or a manager ticked Technician). */
+export const PANE_HINT_TAKE = "Drag one onto a day to take it and put it there, or use Assign to.";
+/** A ticked office person: the dropdown on tickets, Claim on tasks and opportunities. */
 export const PANE_HINT_CLAIM =
-  "Drag one onto a day to take it and put it there, or Claim to take it as is.";
+  "Drag one onto a day to take it and put it there. A ticket has Assign to; a task or an opportunity has Claim.";
 export const PANE_HINT_ASSIGN = "Drag one onto a day to assign it for that day, or use Assign to.";
 
 /** The pane's helper line: a claimer's drop claims, anyone else's drop assigns (`dropAssigns`). */
 export const paneHint = (viewer: Viewer): string =>
-  canClaim(viewer) ? PANE_HINT_CLAIM : PANE_HINT_ASSIGN;
+  canClaim(viewer) ? (seesEveryone(viewer) ? PANE_HINT_TAKE : PANE_HINT_CLAIM) : PANE_HINT_ASSIGN;
 
 /**
  * Does dropping this Unassigned row on a day open the assign dialog (Oct 20)? For a viewer who

@@ -311,7 +311,9 @@ function WorkRow({
   const assignNode = item.unassigned && actions ? actions.assign(item) : null;
   // A bid's status, changed in place (owner, Nov 13), beside where "Assign to…" sits.
   const bidNode = actions ? actions.bidStatus(item) : null;
-  const showClaim = !!item.unassigned && !!claim;
+  // Claim only where the row has no "Assign to…" (owner, Nov 18: the dropdown does the same
+  // job; lib/my-work-actions.ts claimShows). A ticket never shows it.
+  const showClaim = !!claim && (actions ? actions.claimShows(item) : !!item.unassigned);
   // A ticket nobody is on that is not Unassigned (Done or Authorized with the technician
   // removed; Nov 2): "No technician", not "(unknown)" — no name lookup failed.
   const noTech = !item.assigneeId && isTicketKind(item.kind);

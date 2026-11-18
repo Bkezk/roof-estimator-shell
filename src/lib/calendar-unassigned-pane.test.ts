@@ -121,8 +121,10 @@ describe("1. showUnassignedPane: whoever may act on nobody's work", () => {
     expect(showUnassignedPane([item({ done: true })], admin)).toBe(false);
   });
   it("paneHint: claimers keep their line; assigners get theirs", () => {
+    // Nov 18: Claim left the rows that have "Assign to…" (claim-button-nov18.test.ts), so the
+    // line no longer offers Claim for everything.
     expect(PANE_HINT_CLAIM).toBe(
-      "Drag one onto a day to take it and put it there, or Claim to take it as is.",
+      "Drag one onto a day to take it and put it there. A ticket has Assign to; a task or an opportunity has Claim.",
     );
     expect(PANE_HINT_ASSIGN).toBe(
       "Drag one onto a day to assign it for that day, or use Assign to.",
