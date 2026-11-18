@@ -71,6 +71,11 @@
  * the app's panels are plain bordered divs, not <Card>).
  */
 :root {
+  /* The blue of the JBK logo's letters, measured from public/jbk-logo.webp (owner, Nov 18: "color
+     them blue, the same blue as in the logo"). White on it reads at 8.6 to 1. The same in both
+     themes; the lighter one is for a press or a hover. */
+  --jbk-blue: #014b96;
+  --jbk-blue-hover: #0a5fb8;
   --radius: 0.625rem;
   --background: oklch(0.968 0.006 247.9);
   --foreground: oklch(0.129 0.042 264.695);
@@ -123,6 +128,9 @@
   --card-foreground: oklch(0.947 0 0);
   --popover: oklch(0.314 0.013 264.4); /* hsl(220 10% 20%) */
   --popover-foreground: oklch(0.947 0 0);
+  /* The logo's blue is the logo's blue on either ground. */
+  --jbk-blue: #014b96;
+  --jbk-blue-hover: #0a5fb8;
   --primary: oklch(0.921 0.009 247.9); /* hsl(210 20% 90%) */
   --primary-foreground: oklch(0.254 0.01 264.4);
   --secondary: oklch(0.352 0.015 264.4); /* hsl(220 10% 24%) */

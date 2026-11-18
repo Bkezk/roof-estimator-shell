@@ -86,7 +86,8 @@ describe("the sections in step order", () => {
       '{...card("signature")}',
       '<Section title="Signature">',
       "<SignatureSection job={job} />",
-      'className="sticky bottom-0 z-10',
+      // (Nov 18: the bar's class has a name, PINNED_BAR; workflow-bar-nov18.test.ts.)
+      "<div className={PINNED_BAR} data-pinned-bar>",
       "<AlertDialogTitle>Before you finish</AlertDialogTitle>",
     ];
     const positions = order.map(at);

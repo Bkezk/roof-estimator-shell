@@ -16,7 +16,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { lockIosFocusZoom } from "@/lib/ios-viewport";
+import { lockIosFocusZoom, watchIosPinned } from "@/lib/ios-viewport";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import { ThemeProvider } from "@/lib/theme-context";
 
@@ -153,6 +153,9 @@ function RootComponent() {
   // again on a route change in case the head re-made its viewport tag.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   useEffect(() => lockIosFocusZoom(), [pathname]);
+  // iPhone / iPad: a bar pinned to the bottom is put back in place after the keyboard closes
+  // (owner, Nov 18: "step 2 stayed in the middle of my screen").
+  useEffect(() => watchIosPinned(), []);
 
   return (
     <QueryClientProvider client={queryClient}>

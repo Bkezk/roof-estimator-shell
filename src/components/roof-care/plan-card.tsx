@@ -224,8 +224,9 @@ export function RoofCareButtons({
   const today = easternYmd();
   const active = (q.data ?? []).find((p) => p.status === "active") ?? null;
   const done = active ? visitsDone(active, today) : null;
-  // The workflow's bar: the two side by side on a phone, each tall enough for a thumb.
-  const size = big ? "h-12 min-w-0 px-2 text-sm font-semibold" : "";
+  // The workflow's bar: the two side by side on a phone, each tall enough for a thumb, in the
+  // logo's blue (owner, Nov 18: "color them blue, the same blue as in the logo").
+  const size = big ? BIG_BUTTON : "";
   return (
     <div
       className={`${big ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"} ${className}`}
@@ -248,7 +249,7 @@ export function RoofCareButtons({
           </span>
           {active && done && (
             <span
-              className={`rounded bg-emerald-600/15 px-1.5 font-medium text-emerald-800 dark:text-emerald-300 ${big ? "text-[10px]" : "ml-1.5 py-0.5 text-[11px]"}`}
+              className={`rounded px-1.5 font-medium ${big ? "bg-white/20 text-[10px] text-white" : "ml-1.5 bg-emerald-600/15 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-300"}`}
               data-care-plan-chip
             >
               {planName(active.plan)} · {done.visits}/2
@@ -276,6 +277,10 @@ export function RoofCareButtons({
     </div>
   );
 }
+
+/** A button of the workflow's bar: blue, white words, a thumb tall. */
+const BIG_BUTTON =
+  "h-11 min-w-0 rounded-lg border-transparent bg-[var(--jbk-blue)] px-2 text-sm font-semibold text-white shadow-none hover:bg-[var(--jbk-blue-hover)] hover:text-white active:bg-[var(--jbk-blue-hover)] disabled:opacity-70";
 
 /** The property's plan in a pop-up: what Care Plan opens when there is one. */
 function PlanDialog({

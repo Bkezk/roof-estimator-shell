@@ -435,12 +435,19 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
  * ticket that is not this person's to close out. Once the rest of the ticket is open the
  * Complete bar carries them.
  */
+/**
+ * The bar pinned to the bottom of the workflow. On a phone it stands 2 rem clear of the bottom
+ * edge (owner, Nov 18, with a picture from his iPhone: "the two buttons at the bottom are kinda
+ * cut off can you adjust them up a smidge"): the page runs under the phone's home bar, the
+ * phone reports no safe area to a page that does not ask for the whole screen, and the 0.75 rem
+ * that was there left the buttons under that bar.
+ */
+export const PINNED_BAR =
+  "sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 [@media(pointer:coarse)]:pb-[max(2rem,env(safe-area-inset-bottom))]";
+
 function PlanBar({ job }: { job: ServiceJobWithTech }) {
   return (
-    <div
-      className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"
-      data-plan-bar
-    >
+    <div className={PINNED_BAR} data-plan-bar data-pinned-bar>
       <RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />
     </div>
   );
@@ -1477,7 +1484,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
           {/* Complete (the rest saves itself): from step 7 only; before that the bar names the
               step to finish and a tap scrolls there. */}
-          <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className={PINNED_BAR} data-pinned-bar>
             <div className="mb-2 flex min-h-4 items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>Everything saves as you go.</span>
               <SavedIndicator state={autosave.state} onRetry={() => void autosave.flush()} />

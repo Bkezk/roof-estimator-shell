@@ -1044,7 +1044,9 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
   });
   it("are pinned at the bottom of the workflow", () => {
     const closeout = flat(read("src/components/service/closeout.tsx"));
-    const bar = closeout.slice(closeout.indexOf('<div className="sticky bottom-0 z-10'));
+    // (Later on Nov 18: the bar's class has a name, PINNED_BAR, which keeps "sticky bottom-0".)
+    expect(closeout).toMatch(/export const PINNED_BAR = "sticky bottom-0 z-10 /);
+    const bar = closeout.slice(closeout.indexOf("<div className={PINNED_BAR} data-pinned-bar>"));
     expect(bar.indexOf("<RoofCareButtons")).toBeGreaterThan(0);
     expect(bar.indexOf("<RoofCareButtons")).toBeLessThan(bar.indexOf("<AlertDialog"));
     expect(bar).toContain(
@@ -1065,7 +1067,7 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     expect(early).toBeLessThan(gate);
     expect(gate - early).toBeLessThan(120);
     const bar = closeout.slice(closeout.indexOf("function PlanBar({ job }"));
-    expect(bar).toContain("sticky bottom-0 z-10");
+    expect(bar).toContain("<div className={PINNED_BAR} data-plan-bar data-pinned-bar>");
     expect(bar).toContain(
       "<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />",
     );
