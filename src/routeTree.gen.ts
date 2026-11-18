@@ -40,6 +40,7 @@ import { Route as AdminNonDlMembraneRouteImport } from './routes/admin.non-dl-me
 import { Route as AdminNonDlTpoRouteImport } from './routes/admin.non-dl-tpo'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
 import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
+import { Route as AdminRoofCareRouteImport } from './routes/admin.roof-care'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -213,6 +214,11 @@ const AdminRemindersRoute = AdminRemindersRouteImport.update({
   path: '/admin/reminders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoofCareRoute = AdminRoofCareRouteImport.update({
+  id: '/admin/roof-care',
+  path: '/admin/roof-care',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminServiceRatesRoute = AdminServiceRatesRouteImport.update({
   id: '/admin/service-rates',
   path: '/admin/service-rates',
@@ -331,6 +337,7 @@ export interface FileRoutesByFullPath {
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/roof-care': typeof AdminRoofCareRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -381,6 +388,7 @@ export interface FileRoutesByTo {
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/roof-care': typeof AdminRoofCareRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -432,6 +440,7 @@ export interface FileRoutesById {
   '/admin/non-dl-tpo': typeof AdminNonDlTpoRoute
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/roof-care': typeof AdminRoofCareRoute
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -484,6 +493,7 @@ export interface FileRouteTypes {
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
+    | '/admin/roof-care'
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
@@ -534,6 +544,7 @@ export interface FileRouteTypes {
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
+    | '/admin/roof-care'
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
@@ -584,6 +595,7 @@ export interface FileRouteTypes {
     | '/admin/non-dl-tpo'
     | '/admin/price-import'
     | '/admin/reminders'
+    | '/admin/roof-care'
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
@@ -635,6 +647,7 @@ export interface RootRouteChildren {
   AdminNonDlTpoRoute: typeof AdminNonDlTpoRoute
   AdminPriceImportRoute: typeof AdminPriceImportRoute
   AdminRemindersRoute: typeof AdminRemindersRoute
+  AdminRoofCareRoute: typeof AdminRoofCareRoute
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -870,6 +883,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRemindersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/roof-care': {
+      id: '/admin/roof-care'
+      path: '/admin/roof-care'
+      fullPath: '/admin/roof-care'
+      preLoaderRoute: typeof AdminRoofCareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/service-rates': {
       id: '/admin/service-rates'
       path: '/admin/service-rates'
@@ -1039,6 +1059,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminNonDlTpoRoute: AdminNonDlTpoRoute,
   AdminPriceImportRoute: AdminPriceImportRoute,
   AdminRemindersRoute: AdminRemindersRoute,
+  AdminRoofCareRoute: AdminRoofCareRoute,
   AdminServiceRatesRoute: AdminServiceRatesRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,

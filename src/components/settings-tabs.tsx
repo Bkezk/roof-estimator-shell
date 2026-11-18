@@ -6,11 +6,11 @@
  * (access.ts pageForPath: admin).
  */
 import { Link } from "@tanstack/react-router";
-import { BellRing, Settings, Users } from "lucide-react";
+import { BellRing, Settings, ShieldCheck, Users } from "lucide-react";
 
 import { SETTINGS_TABS, type SettingsTab } from "@/lib/menu-places";
 
-const ICONS = { users: Users, reminders: BellRing } as const;
+const ICONS = { users: Users, reminders: BellRing, "roof-care": ShieldCheck } as const;
 
 export function SettingsTabs({ active }: { active: SettingsTab }) {
   return (

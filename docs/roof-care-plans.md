@@ -90,6 +90,24 @@ that needs a manager and a reason. The next inspection moves back with it. If th
 would land after the plan year ends, the renewal date moves with it and the Owner page lists the
 plan as running late.
 
+## Built so far
+
+**Step 1, Nov 18: the price engine and its page.** Record:
+`docs/qa/roof-care-pricing-2026-11-18.md`.
+
+- The rule is `src/lib/roof-care-price.ts` (`roofCareQuote`). It holds no numbers.
+- The numbers are one row on the live database, `roof_care_settings`, which only an admin reads
+  and writes. The owner's costing sheet was typed into it. They are changed on Admin, Settings,
+  Roof Care plans.
+- With those numbers the engine gives every figure on the owner's sheet, to the dollar. The sheet
+  prints the drains hours of its 75,000 sq ft row rounded to two places and works with three. The
+  database holds the three-place figure.
+- The drive from the office is `roofCareDrive` in `src/lib/roof-care.functions.ts`. It is for an
+  admin only so far.
+- **For the later steps:** a technician, a salesperson and a visitor with no sign-in cannot read
+  `roof_care_settings`. Giving them a price needs a read made for the purpose, on the server, that
+  hands out the price and never the costs or the profit.
+
 ## Open
 
 1. **The list of services** for the request form. The leave-behind's list is not right and the
@@ -101,7 +119,7 @@ plan as running late.
 
 ## Build order
 
-1. The price engine and the Setup page for plans and numbers.
+1. The price engine and the Setup page for plans and numbers. **Done.**
 2. Plan records, the customer badge, care plan inspections made by the site, push-back, the
    half-and-half invoices.
 3. On-site sign-up with credit.

@@ -348,6 +348,8 @@ export function pageForPath(pathname: string): RoutePage | null {
   if (
     pathname.startsWith("/admin/users") ||
     pathname.startsWith("/admin/reminders") ||
+    // Roof Care plans (Nov 18): what a crew costs and what each plan earns. The owners' alone.
+    pathname.startsWith("/admin/roof-care") ||
     pathname.startsWith("/admin/centerpoint-import")
   )
     return "admin";

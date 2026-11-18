@@ -123,6 +123,8 @@ describe("Admin: Owner and Settings", () => {
     expect(SETTINGS_TABS.map((t) => [t.label, t.to])).toEqual([
       ["Users & access", "/admin/users"],
       ["Reminders", "/admin/reminders"],
+      // Nov 18: the numbers the Roof Care plan prices are worked from.
+      ["Roof Care plans", "/admin/roof-care"],
     ]);
     expect(SETTINGS_HOME).toBe("/admin/users");
     expect(isSettingsPath("/admin/users")).toBe(true);

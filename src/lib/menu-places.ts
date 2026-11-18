@@ -119,6 +119,8 @@ export function setupBlurb(who: { money: boolean; documents: boolean }): string 
 export const SETTINGS_TABS = [
   { key: "users", label: "Users & access", to: "/admin/users" },
   { key: "reminders", label: "Reminders", to: "/admin/reminders" },
+  // Nov 18: the numbers the Roof Care plan prices are worked from (docs/roof-care-plans.md).
+  { key: "roof-care", label: "Roof Care plans", to: "/admin/roof-care" },
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number]["key"];
 
