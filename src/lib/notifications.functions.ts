@@ -202,6 +202,12 @@ export const KIND_LABELS: Readonly<Record<string, string>> = {
   ticket_done: "Ticket done",
   // Every step of every ticket, to the admins and the managers (owner, Nov 17; ticket-watch.ts).
   ticket_watch: "Ticket update",
+  // Owner, Nov 18 (alert-rules.ts): work with nobody on it, and each step of an opportunity or
+  // a bid for the people on those lines.
+  ticket_unassigned: "Nobody on it",
+  opportunity_unassigned: "Nobody on it",
+  opportunity_watch: "Opportunity update",
+  bid_watch: "Bid update",
   ticket_authorized: "Ready to invoice",
   ready_to_invoice: "Ready to invoice",
   mention: "Mention",
@@ -234,8 +240,11 @@ export const KIND_LABEL_ORDER: readonly string[] = [
   "Assigned",
   "Reminder",
   "Untouched",
+  "Nobody on it",
   "Ticket done",
   "Ticket update",
+  "Opportunity update",
+  "Bid update",
   "Ready to invoice",
   "Mention",
   "Task",

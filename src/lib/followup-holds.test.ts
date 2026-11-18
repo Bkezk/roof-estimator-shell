@@ -683,6 +683,9 @@ describe("the reminder pass", () => {
     crm_settings: [
       { id: 1, ticket_every_days: 3, opportunity_every_days: 7, last_dispatch_at: null },
     ],
+    // Nov 18 (alert-rules.ts): who hears is the tickets' "Not started" line, which starts as
+    // every admin and manager.
+    profiles: [{ id: "boss-1", role: "admin", full_name: "Boss One", email: "" }],
     // Its date passed a week before T0 (Nov 13: the date an untouched ticket is past).
     service_jobs: [
       {

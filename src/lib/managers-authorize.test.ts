@@ -615,9 +615,12 @@ describe("4. the words", () => {
     expect(reminders).not.toMatch(
       /authorizer|who authoriz|can authorize|mark (a|the) ticket Authorized/i,
     );
+    // Four since Nov 18: the Needs attention limit twice (its box's name and its line), and the
+    // tickets' "Done, waiting" line twice (its box's name, and "until it is authorized"). Who
+    // authorizes is still chosen on Setup › Service rates; this page only lists who is reminded.
     expect(
       reminders.replace(/attention_authorize_days|authorizeDays/g, "").match(/authoriz/gi) ?? [],
-    ).toHaveLength(2);
+    ).toHaveLength(4);
     expect(read("src/routes/admin.reminders.tsx")).not.toMatch(/authoriz/i);
   });
 });

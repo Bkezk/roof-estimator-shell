@@ -6,6 +6,7 @@
 import { bidHref, bidOpenWords } from "@/lib/bid-kind";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
+import { addWorkingDays, workingDaysBefore, workingDaysBetween } from "@/lib/working-days";
 
 export const BID_STATUSES = ["draft", "submitted", "won", "lost"] as const;
 export type BidStatus = (typeof BID_STATUSES)[number];
@@ -298,7 +299,9 @@ export function bidDueNoticeDue(
   if (asBidStatus(bid.status) !== "draft") return false;
   if (!bid.due_date || !YMD.test(bid.due_date) || bid.notified_due_at) return false;
   const n = Number.isInteger(daysBefore) && daysBefore >= 0 ? daysBefore : 1;
-  return today >= bidDayPlus(bid.due_date, -n);
+  // Working days since Nov 18 (owner: every alert skips weekends): one before a Monday is the
+  // Friday, and a Saturday due date with 0 is noticed on the Friday.
+  return today >= workingDaysBefore(bid.due_date, n);
 }
 
 /**
@@ -353,8 +356,10 @@ export function bidOverdueNoticeDue(
   if (asBidStatus(bid.status) !== "draft") return false;
   if (!bid.due_date || !YMD.test(bid.due_date) || !YMD.test(today)) return false;
   if (!(bid.due_date < today)) return false;
-  if (!bid.notified_overdue_at) return today >= bidDayPlus(bid.due_date, 1);
-  return today >= bidDayPlus(stampDay(bid.notified_overdue_at), everyDays as number);
+  // Working days since Nov 18: first the working day after the due date, then every N working
+  // days after the last one.
+  if (!bid.notified_overdue_at) return today >= addWorkingDays(bid.due_date, 1);
+  return workingDaysBetween(stampDay(bid.notified_overdue_at), today) >= (everyDays as number);
 }
 
 /**

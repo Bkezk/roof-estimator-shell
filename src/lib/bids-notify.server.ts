@@ -51,9 +51,11 @@ import {
   bidReminderSettings,
   type BidReminderSettings,
 } from "@/lib/bid-status";
+import type { AlertKey } from "@/lib/alert-rules";
+import { loadAlertContext, recipientsFor, type AlertContext } from "@/lib/alert-who.server";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
-import { morningReached } from "@/lib/working-days";
+import { addWorkingDays, isWeekend, morningReached } from "@/lib/working-days";
 
 export interface BidNoticeResult {
   /** Bids whose notice was due this pass (the three rules together). */
@@ -226,6 +228,12 @@ async function sendBidNotices(
   stamp: string,
   out: BidNoticeResult,
   counter: "bids_due" | "bids_overdue" | "bids_reminders",
+  /**
+   * Who is told (owner, Nov 18): the people on the rule's line — "Coming up" for the due notice,
+   * "Past due" for the repeat (alert-rules.ts). Left out: whoever started the bid, as always
+   * (the estimator's own "Remind me on" date is theirs alone).
+   */
+  to: (b: BidRow) => string[] = (b) => (b.created_by ? [b.created_by] : []),
 ) {
   out.bids_checked += rows.length;
   if (!rows.length) return;
@@ -237,15 +245,17 @@ async function sendBidNotices(
       out.bids_skipped++;
       continue;
     }
-    // 2. Nobody to tell: the stamp stands, nothing goes out.
-    if (!b.created_by) {
+    // 2. Nobody to tell (no starter and nobody else on the line): the stamp stands, nothing
+    // goes out.
+    const people = to(b);
+    if (!people.length) {
       out.bids_silent++;
       continue;
     }
     // 3. The notice; a failure puts the stamp back and is kept on the row for the next pass.
     const msg = words(b, b.account_id ? (names.get(b.account_id) ?? null) : null);
     try {
-      await notify([b.created_by], msg, admin);
+      await notify(people, msg, admin);
       out.bids_notified++;
       out[counter]++;
     } catch (e) {
@@ -266,6 +276,7 @@ async function dueNotices(
   stamp: string,
   settings: BidReminderSettings,
   out: BidNoticeResult,
+  to: (b: BidRow) => string[],
 ) {
   const daysBefore = settings.bid_due_notice_days;
   // (A null due_date never satisfies lte, so undated drafts are out without a second filter.)
@@ -275,7 +286,8 @@ async function dueNotices(
     .is("deleted_at", null)
     .eq("status", "draft")
     .is("notified_due_at", null)
-    .lte("due_date", bidDayPlus(today, daysBefore))
+    // Working days (Nov 18): a bid due within `daysBefore` working days from today.
+    .lte("due_date", addWorkingDays(today, daysBefore))
     .order("due_date", { ascending: true })
     .limit(300);
   if (error) throw new Error(error.message);
@@ -290,6 +302,7 @@ async function dueNotices(
     stamp,
     out,
     "bids_due",
+    to,
   );
 }
 
@@ -300,6 +313,7 @@ async function overdueNotices(
   stamp: string,
   settings: BidReminderSettings,
   out: BidNoticeResult,
+  to: (b: BidRow) => string[],
 ) {
   const every = settings.bid_overdue_every_days;
   if (every === null) return;
@@ -324,6 +338,7 @@ async function overdueNotices(
     stamp,
     out,
     "bids_overdue",
+    to,
   );
 }
 
@@ -376,9 +391,23 @@ export async function dispatchBidDueNotices(
   // morning now reads nothing and stamps nothing; the 8:00 pass sends what is due.
   if (!morningReached(now)) return out;
   const settings = await readBidReminderSettings(admin);
+  // Who each line tells (owner, Nov 18; alert-rules.ts): whoever started the bid unless the
+  // line says otherwise.
+  const ctx: AlertContext = await loadAlertContext(admin);
+  const line = (key: AlertKey) => (b: BidRow) => recipientsFor(ctx, key, b.created_by);
+  // Nothing about a due date goes out on a Saturday or Sunday (owner, Nov 18: every alert skips
+  // weekends); it goes on Monday. The estimator's own "Remind me on" day is theirs: any day.
+  const weekend = isWeekend(today);
   const passes: [string, () => Promise<void>][] = [
-    ["Bid due", () => dueNotices(admin, today, stamp, settings, out)],
-    ["Bid past due", () => overdueNotices(admin, today, stamp, settings, out)],
+    ...(weekend
+      ? []
+      : ([
+          ["Bid due", () => dueNotices(admin, today, stamp, settings, out, line("bid.coming_up"))],
+          [
+            "Bid past due",
+            () => overdueNotices(admin, today, stamp, settings, out, line("bid.past_due")),
+          ],
+        ] as [string, () => Promise<void>][])),
     ["Bid reminder", () => reminderNotices(admin, today, stamp, out)],
   ];
   for (const [label, pass] of passes) {

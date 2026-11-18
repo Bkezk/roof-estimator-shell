@@ -10,19 +10,34 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import {
+  nobodyAlertDue,
+  nobodyNotice,
+  opportunityUntouchedNotice,
+  reminderKey,
+  reminderWaits,
+  reviewReminderNotice,
+} from "@/lib/alert-rules";
+import {
+  loadAlertContext,
+  notToldToday,
+  personName,
+  recipientsFor,
+  watchersFor,
+  type AlertContext,
+} from "@/lib/alert-who.server";
+import { shortDay } from "@/lib/followup-rules";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
 import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
 import { notificationPath } from "@/lib/notification-link";
 import {
+  dayMorning,
   ticketEscalationDue,
   ticketNextRemindAt,
   ticketReminderNotice,
-  ticketReminderSettings,
-  ticketReminderWaits,
   ticketUntouchedNotice,
-  type TicketReminderSettings,
 } from "@/lib/ticket-reminders";
-import { officeDay } from "@/lib/working-days";
+import { addWorkingDays, morningReached, officeDay, workingDaysBetween } from "@/lib/working-days";
 import { generateVapidKeys, sendWebPush } from "@/lib/webpush";
 
 /**
@@ -366,30 +381,6 @@ const rawRpc = (
   ).rpc(fn, args);
 
 /**
- * Admin › Reminders › Tickets' two "before the date" numbers, as this pass may read them (owner,
- * Nov 13). No row (an office user's pass on the preview: the settings are an admin's and a
- * manager's to read) or columns that are not there yet: the defaults, 3 and 1. The database's
- * trigger sets each next reminder from the saved numbers whoever runs the pass.
- */
-async function readTicketReminderSettings(admin: Client): Promise<TicketReminderSettings> {
-  try {
-    const { data, error } = await admin
-      .from("crm_settings")
-      .select("ticket_before_every_days, ticket_due_notice_days")
-      .eq("id", 1)
-      .limit(1);
-    if (error) throw new Error(error.message);
-    return ticketReminderSettings(data?.[0]);
-  } catch (e) {
-    console.error(
-      "Reminder pass: could not read the ticket reminder settings; using the defaults —",
-      errText(e),
-    );
-    return ticketReminderSettings(undefined);
-  }
-}
-
-/**
  * Claim a due reminder (see dispatchDueReminders): `won` when this pass got it, with `next` the
  * next_remind_at the claim wrote when this code wrote it (the direct update), or null when the
  * database function did (it uses its own clock). Through followup_claim_reminder when the pass
@@ -407,7 +398,7 @@ async function claimReminder(
   f: FollowupRow,
   now: Date,
   viaRpc: boolean,
-  tickets: TicketReminderSettings,
+  ctx: AlertContext,
 ): Promise<{ won: boolean; next: string | null }> {
   if (viaRpc) {
     const r = await admin.rpc("followup_claim_reminder", {
@@ -417,10 +408,17 @@ async function claimReminder(
     if (!r.error) return { won: r.data === true, next: null };
     if (!isMissingRpc(r.error)) throw new Error(r.error.message);
   }
-  const isTicket = f.kind === "ticket";
-  const next = isTicket
-    ? ticketNextRemindAt(f.due_at, officeDay(now), tickets, f.every_days)
-    : new Date(now.getTime() + f.every_days * 86400000).toISOString();
+  // Every kind counts working days (owner, Nov 18): a ticket and an opportunity by the one rule
+  // (the cadence, the notice, the date, then the past-due pace), the review timer every N
+  // working days at 8:00. The numbers are the settings as they are now, not the ones the timer
+  // started with, so a change on the page takes effect at the next reminder.
+  const today = officeDay(now);
+  const next =
+    f.kind === "ticket"
+      ? ticketNextRemindAt(f.due_at, today, ctx.ticket, ctx.every.ticket)
+      : f.kind === "opportunity"
+        ? ticketNextRemindAt(f.due_at, today, ctx.opportunity, ctx.every.opportunity)
+        : dayMorning(addWorkingDays(today, ctx.numbers.ticket_review_every_days));
   const { data: won, error } = await admin
     .from("crm_followups")
     .update({
@@ -555,7 +553,8 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   // database no longer lets move next_remind_at directly (20261002140000_followup_guard.sql):
   // the claim goes through followup_claim_reminder, which makes the same conditional update.
   const claimViaRpc = !hasServiceRole();
-  const tickets = await readTicketReminderSettings(admin);
+  // The day boxes and who each line tells (owner, Nov 18; alert-rules.ts), read once.
+  const ctx = await loadAlertContext(admin);
   const today = officeDay(now);
   const { data: due, error } = await admin
     .from("crm_followups")
@@ -573,13 +572,14 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     skipped: 0,
   };
   for (const f of due ?? []) {
-    // A ticket's reminder is not sent on a Saturday or Sunday, except on the ticket's own date:
-    // it stays due, unclaimed, and goes on Monday's first pass.
-    if (f.kind === "ticket" && ticketReminderWaits(f.due_at, today)) continue;
+    // Nothing is sent on a Saturday or Sunday, except a ticket's or an opportunity's reminder on
+    // its own date (reminderWaits): it stays due, unclaimed, and goes on Monday's first pass.
+    const dueDay = officeDay(f.due_at);
+    if (reminderWaits(f.kind, dueDay, today)) continue;
     // 1. Claim (see above). Lost to another pass: skip. Could not claim: record, skip.
     let claimedNext: string | null = null;
     try {
-      const claim = await claimReminder(admin, f, now, claimViaRpc, tickets);
+      const claim = await claimReminder(admin, f, now, claimViaRpc, ctx);
       if (!claim.won) {
         out.skipped++;
         continue;
@@ -591,17 +591,10 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
       continue;
     }
 
-    // 2. The assignee's reminder. The first one after a hold ends reads "Back from hold" with
-    // the reason (owner, Oct 9: a hold ends loudly); `f` is the row as read, before the claim
-    // stamped last_reminded_at.
-    const dueDate = new Date(f.due_at);
-    const overdueDays = Math.floor((now.getTime() - dueDate.getTime()) / 86400000);
-    const when =
-      overdueDays > 0
-        ? `${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`
-        : overdueDays === 0
-          ? "due today"
-          : `due ${dueDate.toLocaleDateString("en-US")}`;
+    // 2. The reminder, to everyone its line lists (alert-rules.ts reminderKey: Coming up on or
+    // before the date, Past due after it, Done waiting for the review timer). The first one
+    // after a hold ends reads "Back from hold" with the reason (owner, Oct 9: a hold ends
+    // loudly); `f` is the row as read, before the claim stamped last_reminded_at.
     const back =
       f.snoozed_until && f.hold_reason && firstReminderAfterHold(f, now)
         ? backFromHoldNotice({
@@ -610,29 +603,36 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
             hold_reason: f.hold_reason,
           })
         : null;
-    // A ticket's words name the weekday and count working days (ticketReminderNotice): the
-    // cadence before the date, the notice, the date itself, and after it.
+    // The words name the weekday and count working days (ticketReminderNotice): the cadence
+    // before the date, the notice, the date itself, and after it. One rule for a ticket and an
+    // opportunity; the review timer says how long the ticket has waited.
     const words = back
       ? back
       : f.kind === "ticket"
-        ? ticketReminderNotice(f, now, tickets)
-        : {
-            title: `Follow up: ${f.title}`,
-            body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
-          };
+        ? ticketReminderNotice({ ...f, every_days: ctx.every.ticket }, now, ctx.ticket)
+        : f.kind === "opportunity"
+          ? ticketReminderNotice({ ...f, every_days: ctx.every.opportunity }, now, ctx.opportunity)
+          : reviewReminderNotice({
+              title: f.title,
+              since: officeDay(f.created_at),
+              today,
+              remindersSent: f.reminders_sent,
+              every: ctx.numbers.ticket_review_every_days,
+            });
     try {
-      await notify(
-        [f.assignee_id],
-        {
-          kind: "followup",
-          title: words.title,
-          body: words.body,
-          url: f.url,
-          followup_id: f.id,
-        },
-        admin,
-      );
-      out.reminded++;
+      const listed = recipientsFor(ctx, reminderKey(f.kind, dueDay, today), f.assignee_id);
+      const to = await notToldToday(admin, listed, f.url, now);
+      const mine = to.filter((id) => id === f.assignee_id);
+      const others = to.filter((id) => id !== f.assignee_id);
+      const sent = { kind: "followup", title: words.title, url: f.url, followup_id: f.id };
+      if (mine.length) await notify(mine, { ...sent, body: words.body }, admin);
+      // Someone else's work: the reminder says whose.
+      if (others.length) {
+        const whose = personName(ctx, f.assignee_id);
+        const body = whose ? `${words.body} Assigned to ${whose}.` : words.body;
+        await notify(others, { ...sent, body }, admin);
+      }
+      if (to.length) out.reminded++;
     } catch (e) {
       // The send failed after the claim: put the reminder back so the next pass retries it
       // (owner, Oct 12, item 10a), record the failure, count it.
@@ -644,10 +644,18 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
 
   // 3. Untouched work, on its own clock (never stops the reminders above or the stamp below).
   try {
-    await escalateUntouched(admin, now, out);
+    await escalateUntouched(admin, now, out, ctx);
   } catch (e) {
     out.failed++;
     console.error("Reminder pass: the escalation step failed —", errText(e));
+  }
+
+  // 4. Work with nobody on it (owner, Nov 18: "nobody on it should send alerts too").
+  try {
+    await alertUnassigned(admin, now, out, ctx);
+  } catch (e) {
+    out.failed++;
+    console.error("Reminder pass: the nobody-on-it step failed —", errText(e));
   }
 
   // SECURITY DEFINER stamp (it arms the app's ten-minute throttle): the pass may run as an
@@ -665,11 +673,10 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   return out;
 }
 
-const DAY = 86400000;
 type UntouchedItem = Database["public"]["Functions"]["crm_untouched"]["Returns"][number];
-/** Whole days an item has sat since it was assigned (0 when the stamp is missing). */
-const daysSince = (u: UntouchedItem, now: Date) =>
-  u.assigned_at ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / DAY) : 0;
+/** Working days an item has sat since it was assigned (0 when the stamp is missing). */
+const workingDaysSince = (u: UntouchedItem, today: string) =>
+  u.assigned_at ? workingDaysBetween(officeDay(u.assigned_at), today) : 0;
 
 /**
  * The untouched-work escalation (owner, Sep 28; on its own clock since the Oct 2 audit). An item
@@ -701,39 +708,39 @@ const daysSince = (u: UntouchedItem, now: Date) =>
  *
  * Each item is handled on its own: an error on one is recorded and the pass goes on.
  */
-async function escalateUntouched(admin: Client, now: Date, out: DispatchResult): Promise<void> {
-  // What is untouched and who hears. Either lookup failing means no escalations this pass, and
-  // nothing else (the reminders have gone; the stamp follows).
+async function escalateUntouched(
+  admin: Client,
+  now: Date,
+  out: DispatchResult,
+  ctx: AlertContext,
+): Promise<void> {
+  // What is untouched. The lookup failing means no escalations this pass, and nothing else (the
+  // reminders have gone; the stamp follows). Who hears is each type's own "Not started" list
+  // (owner, Nov 18; it was one list for both, escalation_recipients()).
   let untouched: UntouchedItem[];
-  let escalateTo: string[];
   try {
-    const [u, r] = await Promise.all([
-      admin.rpc("crm_untouched"),
-      admin.rpc("escalation_recipients"),
-    ]);
-    const err = u.error ?? r.error;
-    if (err) throw new Error(err.message);
+    const u = await admin.rpc("crm_untouched");
+    if (u.error) throw new Error(u.error.message);
     untouched = u.data ?? [];
-    escalateTo = r.data ?? [];
   } catch (e) {
     console.error("Reminder pass: no escalations this pass —", errText(e));
     return;
   }
+  // Not before 8:00 in the office, like every other reminder (Nov 18: the day's first pass is at
+  // 7, and this step is counted by the day).
+  if (!morningReached(now)) return;
   // A ticket crm_untouched() returns is already past its limit (the database counts the working
-  // days); an opportunity is graded here, from the day it was assigned.
-  const past = untouched.filter((u) => u.kind === "ticket" || daysSince(u, now) >= u.limit_days);
+  // days); an opportunity is graded here, in working days from the day it was assigned.
   const today = officeDay(now);
-  if (!past.length || !escalateTo.length) return;
+  const past = untouched.filter(
+    (u) => u.kind === "ticket" || workingDaysSince(u, today) >= ctx.untouched.opportunity,
+  );
+  if (!past.length) return;
 
   // How often each kind repeats, when each item was last escalated, and its open follow-up (for
   // the link and to record a failure).
   const ids = (kind: string) => past.filter((u) => u.kind === kind).map((u) => u.item_id);
-  const [settings, jobs, opps, fus] = await Promise.all([
-    admin
-      .from("crm_settings")
-      .select("ticket_every_days, opportunity_every_days")
-      .eq("id", 1)
-      .limit(1),
+  const [jobs, opps, fus] = await Promise.all([
     ids("ticket").length
       ? admin
           .from("service_jobs")
@@ -752,17 +759,13 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
         past.map((u) => u.item_id),
       ),
   ]);
-  const readErr = settings.error ?? jobs.error ?? opps.error;
+  const readErr = jobs.error ?? opps.error;
   if (readErr) {
     console.error("Reminder pass: no escalations this pass —", readErr.message);
     return;
   }
-  const s = settings.data?.[0];
-  // The column defaults (20260927100000_crm_followups.sql) if the row is missing.
-  const every = {
-    ticket: Math.max(1, Number(s?.ticket_every_days ?? 3)),
-    opportunity: Math.max(1, Number(s?.opportunity_every_days ?? 7)),
-  };
+  // The repeat is each type's Past due pace.
+  const every = ctx.every;
   const lastAt = new Map<string, string | null>();
   const jobOf = new Map<string, { scheduled_date: string | null; assigned_at: string | null }>();
   for (const j of jobs.data ?? []) {
@@ -779,15 +782,22 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
     if (!lastAt.has(key)) continue;
     const prev = lastAt.get(key) ?? null;
     const everyDays = u.kind === "opportunity" ? every.opportunity : every.ticket;
-    // A ticket: working days since the last escalation, never on a weekend, and only with the
-    // date it is past (none: the database is older than this code, and nothing is sent).
+    // Working days since the last escalation, never on a weekend (both kinds since Nov 18; an
+    // opportunity counted calendar days). A ticket only with the date it is past (none: the
+    // database is older than this code, and nothing is sent).
     const ticketDate = u.kind === "ticket" ? (jobOf.get(u.item_id)?.scheduled_date ?? null) : null;
-    if (u.kind === "ticket") {
-      if (!ticketDate || !ticketEscalationDue(prev, today, everyDays)) continue;
-    } else if (prev && now.getTime() - Date.parse(prev) < everyDays * DAY) continue;
-    const recipients = escalateTo.filter((id) => id !== u.assignee_id);
-    if (!recipients.length) continue;
+    if (u.kind === "ticket" && !ticketDate) continue;
+    if (!ticketEscalationDue(prev, today, everyDays)) continue;
     const f = followupOf.get(key);
+    // The people on this type's Not started line; the person on the work only when the line
+    // names them. Nobody listed: the line is off, and nothing is claimed.
+    const listed = watchersFor(
+      ctx,
+      u.kind === "opportunity" ? "opportunity.not_started" : "ticket.not_started",
+      u.assignee_id,
+    );
+    const recipients = await notToldToday(admin, listed, f?.url ?? u.url, now);
+    if (!recipients.length) continue;
     // On hold: it waits on purpose (lib/followup-holds.ts isHeldAt); not escalated.
     if (isHeldAt(f, now)) continue;
     const record = async (step: string, e: unknown) => {
@@ -818,7 +828,6 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
 
     // 2. The escalation (the message is the Sep 28 one; a ticket's says its date and counts
     // working days, Nov 13).
-    const since = daysSince(u, now);
     const words = ticketDate
       ? ticketUntouchedNotice(
           u,
@@ -826,10 +835,12 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
           jobOf.get(u.item_id)?.assigned_at ?? u.assigned_at,
           today,
         )
-      : {
-          title: `Untouched ${u.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
-          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
-        };
+      : opportunityUntouchedNotice({
+          title: u.title,
+          assigneeName: u.assignee_name,
+          days: workingDaysSince(u, today),
+          limit: ctx.untouched.opportunity,
+        });
     try {
       await notify(
         recipients,
@@ -861,6 +872,154 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
         );
       }
       await record("escalation", e);
+    }
+  }
+}
+
+/**
+ * Work with nobody on it (owner, Nov 18: "nobody on it should send alerts too"). Until then an
+ * unassigned ticket or opportunity only turned red on Work Overview; nobody was told.
+ *
+ * unassigned_marks holds, for each ticket and opportunity with nobody on it, when it was left
+ * that way and when the last alert went (the database keeps it: 20261118120000). An item still
+ * open with nobody on it is alerted once its type's first limit has passed, then again at its
+ * repeat pace, to the people on its "Nobody on it" line (alert-rules.ts nobodyAlertDue), never
+ * on a Saturday or Sunday and never before 8:00 in the office.
+ *
+ * Claimed like every other alert: one conditional update moves alerted_at only where it still
+ * holds what this pass read, so two passes at once alert once; a send that fails puts it back.
+ * Only the scheduled job and the published app can write the marks (the server key), so a pass
+ * without it sends none.
+ */
+async function alertUnassigned(
+  admin: Client,
+  now: Date,
+  out: DispatchResult,
+  ctx: AlertContext,
+): Promise<void> {
+  if (!hasServiceRole() || !morningReached(now)) return;
+  const today = officeDay(now);
+  const { data: marks, error } = await admin
+    .from("unassigned_marks")
+    .select("kind, item_id, since, alerted_at")
+    .limit(1000);
+  if (error) {
+    // Before 20261118120000 is applied there is no such table: nothing to alert.
+    console.error("Reminder pass: no nobody-on-it alerts this pass —", error.message);
+    return;
+  }
+  const due = (marks ?? []).filter((m) =>
+    nobodyAlertDue({
+      since: officeDay(m.since),
+      last: m.alerted_at ? officeDay(m.alerted_at) : null,
+      today,
+      after: m.kind === "opportunity" ? ctx.nobodyAfter.opportunity : ctx.nobodyAfter.ticket,
+      every:
+        m.kind === "opportunity"
+          ? ctx.numbers.opportunity_unassigned_every_days
+          : ctx.numbers.ticket_unassigned_every_days,
+    }),
+  );
+  if (!due.length) return;
+  const idsOf = (kind: string) => due.filter((m) => m.kind === kind).map((m) => m.item_id);
+  // Only what is still open with nobody on it (a mark outlives a deleted or finished item).
+  const [jobs, opps] = await Promise.all([
+    idsOf("ticket").length
+      ? admin
+          .from("service_jobs")
+          .select("id, number, customer_name, description, scheduled_date")
+          .in("id", idsOf("ticket"))
+          .is("technician_id", null)
+          .is("deleted_at", null)
+          .in("stage", ["open", "scheduled"])
+      : Promise.resolve({ data: [], error: null }),
+    idsOf("opportunity").length
+      ? admin
+          .from("crm_opportunities")
+          .select("id, title, expected_close, status")
+          .in("id", idsOf("opportunity"))
+          .is("assignee_id", null)
+          .is("deleted_at", null)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const readErr = jobs.error ?? opps.error;
+  if (readErr) {
+    console.error("Reminder pass: no nobody-on-it alerts this pass —", readErr.message);
+    return;
+  }
+  const items = new Map<string, { title: string; url: string; date: string | null }>();
+  for (const j of jobs.data ?? [])
+    items.set(`ticket:${j.id}`, {
+      title: `Ticket #${j.number} ${j.customer_name}${j.description ? ` — ${j.description}` : ""}`,
+      url: `/service?id=${j.id}`,
+      date: j.scheduled_date,
+    });
+  for (const o of opps.data ?? []) {
+    if (["won", "lost", "no_response"].includes(o.status)) continue;
+    items.set(`opportunity:${o.id}`, {
+      title: o.title,
+      url: `/opportunities?id=${o.id}`,
+      date: o.expected_close,
+    });
+  }
+  for (const m of due) {
+    const item = items.get(`${m.kind}:${m.item_id}`);
+    if (!item) continue;
+    const type = m.kind === "opportunity" ? "opportunity" : "ticket";
+    const listed = recipientsFor(ctx, `${type}.nobody`, null);
+    const to = await notToldToday(admin, listed, item.url, now);
+    if (!to.length) continue;
+    const stamp = now.toISOString();
+    // 1. Claim.
+    try {
+      const claim = admin
+        .from("unassigned_marks")
+        .update({ alerted_at: stamp })
+        .eq("kind", m.kind)
+        .eq("item_id", m.item_id);
+      const { data: won, error: claimErr } = await (
+        m.alerted_at ? claim.eq("alerted_at", m.alerted_at) : claim.is("alerted_at", null)
+      ).select("item_id");
+      if (claimErr) throw new Error(claimErr.message);
+      if (!won?.length) {
+        out.skipped++;
+        continue;
+      }
+    } catch (e) {
+      out.failed++;
+      console.error(`Reminder pass: nobody-on-it claim failed for ${item.title}: ${errText(e)}`);
+      continue;
+    }
+    // 2. The alert.
+    const words = nobodyNotice({
+      type,
+      title: item.title,
+      since: officeDay(m.since),
+      today,
+      dateText: item.date ? shortDay(item.date) : null,
+    });
+    try {
+      await notify(
+        to,
+        { kind: `${type}_unassigned`, title: words.title, body: words.body, url: item.url },
+        admin,
+      );
+      out.escalated++;
+    } catch (e) {
+      out.failed++;
+      console.error(`Reminder pass: nobody-on-it alert failed for ${item.title}: ${errText(e)}`);
+      try {
+        await admin
+          .from("unassigned_marks")
+          .update({ alerted_at: m.alerted_at })
+          .eq("kind", m.kind)
+          .eq("item_id", m.item_id)
+          .eq("alerted_at", stamp);
+      } catch (e2) {
+        console.error(
+          `Reminder pass: ${item.title} could not be put back for a retry — ${errText(e2)}`,
+        );
+      }
     }
   }
 }

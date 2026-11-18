@@ -1316,6 +1316,7 @@ export type Database = {
       }
       crm_settings: {
         Row: {
+          alert_who: Json
           attention_authorize_days: number
           attention_bid_days: number
           bid_due_notice_days: number
@@ -1326,19 +1327,26 @@ export type Database = {
           last_cron_at: string | null
           last_dispatch_at: string | null
           last_dispatch_failed: number
+          opportunity_before_every_days: number | null
           opportunity_close_days: number
+          opportunity_due_notice_days: number | null
           opportunity_every_days: number
           opportunity_first_days: number
+          opportunity_unassigned_days: number
+          opportunity_unassigned_every_days: number | null
           opportunity_untouched_days: number
           ticket_before_every_days: number | null
           ticket_due_notice_days: number | null
           ticket_every_days: number
           ticket_first_days: number
+          ticket_review_every_days: number
+          ticket_unassigned_every_days: number | null
           ticket_untouched_days: number
           unassigned_overdue_days: number
           updated_at: string
         }
         Insert: {
+          alert_who?: Json
           attention_authorize_days?: number
           attention_bid_days?: number
           bid_due_notice_days?: number
@@ -1349,19 +1357,26 @@ export type Database = {
           last_cron_at?: string | null
           last_dispatch_at?: string | null
           last_dispatch_failed?: number
+          opportunity_before_every_days?: number | null
           opportunity_close_days?: number
+          opportunity_due_notice_days?: number | null
           opportunity_every_days?: number
           opportunity_first_days?: number
+          opportunity_unassigned_days?: number
+          opportunity_unassigned_every_days?: number | null
           opportunity_untouched_days?: number
           ticket_before_every_days?: number | null
           ticket_due_notice_days?: number | null
           ticket_every_days?: number
           ticket_first_days?: number
+          ticket_review_every_days?: number
+          ticket_unassigned_every_days?: number | null
           ticket_untouched_days?: number
           unassigned_overdue_days?: number
           updated_at?: string
         }
         Update: {
+          alert_who?: Json
           attention_authorize_days?: number
           attention_bid_days?: number
           bid_due_notice_days?: number
@@ -1372,14 +1387,20 @@ export type Database = {
           last_cron_at?: string | null
           last_dispatch_at?: string | null
           last_dispatch_failed?: number
+          opportunity_before_every_days?: number | null
           opportunity_close_days?: number
+          opportunity_due_notice_days?: number | null
           opportunity_every_days?: number
           opportunity_first_days?: number
+          opportunity_unassigned_days?: number
+          opportunity_unassigned_every_days?: number | null
           opportunity_untouched_days?: number
           ticket_before_every_days?: number | null
           ticket_due_notice_days?: number | null
           ticket_every_days?: number
           ticket_first_days?: number
+          ticket_review_every_days?: number
+          ticket_unassigned_every_days?: number | null
           ticket_untouched_days?: number
           unassigned_overdue_days?: number
           updated_at?: string
@@ -4689,6 +4710,27 @@ export type Database = {
         }
         Relationships: []
       }
+      unassigned_marks: {
+        Row: {
+          alerted_at: string | null
+          item_id: string
+          kind: string
+          since: string
+        }
+        Insert: {
+          alerted_at?: string | null
+          item_id: string
+          kind: string
+          since?: string
+        }
+        Update: {
+          alerted_at?: string | null
+          item_id?: string
+          kind?: string
+          since?: string
+        }
+        Relationships: []
+      }
       underlayment_board_group: {
         Row: {
           board_name: string
@@ -5754,6 +5796,7 @@ export type Database = {
         Returns: number
       }
       trade_bid_number: { Args: { p_bid: string }; Returns: number }
+      unassigned_limits: { Args: never; Returns: Json }
       unassigned_overdue_days: { Args: never; Returns: number }
       undo_opportunity_from_bid: { Args: { p_bid: string }; Returns: Json }
       upsert_buildings: { Args: { rows: Json }; Returns: number }

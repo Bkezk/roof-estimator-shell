@@ -239,18 +239,19 @@ describe("the app's own writes, the page and the schedule", () => {
       "export const dayMorning = (ymd: string): string => reminderMorning(ymd).toISOString();",
     );
   });
-  it("Admin › Reminders says when ticket reminders go out, with the ticket lines", () => {
+  it("Admin › Reminders says when reminders go out, above every card", () => {
+    // Nov 18: one note at the top for every kind of work, where each section had its own "Time
+    // of day" line. Every reminder goes at 8 now, so it is said once.
     const page = flat(read("src/components/reminders-settings.tsx"));
     expect(page).toContain(
-      '<Line label="Time of day">Ticket reminders go out at 8 AM Eastern.</Line>',
+      '<span className="font-medium">{WORKING_DAYS_NOTE}</span> Reminders go out at 8 AM Eastern. “Each step” notices go out at once.',
     );
     const at = (s: string) => page.indexOf(s);
-    expect(at('title="Tickets"')).toBeLessThan(at('<Line label="Time of day">'));
-    expect(at('<Line label="Time of day">')).toBeLessThan(at('title="Bids"'));
-    // "That morning" stays as it was.
-    expect(page).toContain(
-      '<Line label="On the date">That morning, also on a Saturday or Sunday.</Line>',
-    );
+    expect(at("Reminders go out at 8 AM Eastern.")).toBeGreaterThan(-1);
+    expect(at("Reminders go out at 8 AM Eastern.")).toBeLessThan(at('type="ticket"'));
+    expect(page).not.toContain('<Line label="Time of day">');
+    // "That morning" is now in the Coming up line, and the weekend exception in the note.
+    expect(page).toContain("Also on the morning of the date.");
   });
   it("the schedule: twice an hour off the busy minutes, its comment true in both seasons", () => {
     // Nov 13, later (the audit): "*/30" ran about twice a day on GitHub, not 24 times. The top

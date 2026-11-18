@@ -158,6 +158,13 @@ function world(): Tables {
         opportunity_every_days: 7,
       },
     ],
+    // Nov 18 (alert-rules.ts): who hears is the tickets' "Not started" line, which starts as
+    // every admin and manager. The technician is neither, and is the person on the ticket.
+    profiles: [
+      { id: "boss-1", role: "admin", full_name: "Boss One", email: "" },
+      { id: "boss-2", role: "manager", full_name: "Boss Two", email: "" },
+      { id: TECH, role: "user", full_name: "Tech One", email: "" },
+    ],
     service_jobs: [
       {
         id: JOB,
@@ -238,16 +245,17 @@ describe("an untouched ticket escalates on its own clock", () => {
     await simulate(db, 9);
     const boss = daysOf(db, "boss-1", "untouched");
     expect(boss.length).toBeGreaterThan(0);
-    // The date is Monday Oct 5; Wednesday Oct 7 begins in the office 1 day 15 h after T0
-    // (T0 is 9 am Monday there). The Oct 2 audit's point holds: it does not wait for the
-    // assignee's own reminder.
-    expect(boss[0]).toBeGreaterThanOrEqual(1.625);
-    expect(boss[0]).toBeLessThanOrEqual(1.675);
-    // Three working days on is Monday Oct 12 (6 days 15 h after T0): Thursday, Friday, Monday —
-    // not Saturday Oct 10, the third calendar day.
+    // The date is Monday Oct 5; Wednesday Oct 7 is the second working day after it. Since Nov 18
+    // nothing goes out before 8:00 in the office, so it goes at 8 am Wednesday, 1 day 23 h after
+    // T0 (T0 is 9 am Monday there), not as the day begins at midnight. The Oct 2 audit's point
+    // holds: it does not wait for the assignee's own reminder.
+    expect(boss[0]).toBeGreaterThanOrEqual(1.958);
+    expect(boss[0]).toBeLessThanOrEqual(2.0);
+    // Three working days on is Monday Oct 12, at 8 am (6 days 23 h after T0): Thursday, Friday,
+    // Monday — not Saturday Oct 10, the third calendar day.
     expect(boss).toHaveLength(2);
-    expect(boss[1]).toBeGreaterThanOrEqual(6.625);
-    expect(boss[1]).toBeLessThanOrEqual(6.675);
+    expect(boss[1]).toBeGreaterThanOrEqual(6.958);
+    expect(boss[1]).toBeLessThanOrEqual(7.0);
     // Every recipient, never the assignee; the words say the date and count working days.
     expect(daysOf(db, "boss-2", "untouched")).toEqual(boss);
     expect(daysOf(db, TECH, "untouched")).toEqual([]);
@@ -258,9 +266,10 @@ describe("an untouched ticket escalates on its own clock", () => {
     );
     expect(first["url"]).toBe(`/service?id=${JOB}`);
     // Recorded on the ticket (the last one).
-    expect(Date.parse(String(db["service_jobs"]![0]!["escalated_at"]))).toBe(
-      Math.round(T0 + boss[1]! * DAY),
-    );
+    // (boss[1] is rounded to a thousandth of a day, so to the minute.)
+    expect(
+      Math.abs(Date.parse(String(db["service_jobs"]![0]!["escalated_at"])) - (T0 + boss[1]! * DAY)),
+    ).toBeLessThan(90_000);
     // The assignee's own reminders are untouched by this: on the date (the first pass), then
     // every 3 working days at 12:00 UTC — Thursday Oct 8 and Tuesday Oct 13.
     expect(daysOf(db, TECH, "followup")).toEqual([0.021, 2.958, 7.958]);
@@ -364,31 +373,32 @@ describe("one failing escalation does not stop the next", () => {
 });
 
 describe("a failing escalation lookup never stops the reminders", () => {
-  for (const [what, rpc] of [
+  // Nov 18: who hears is read from the people and the settings (alert-who.server.ts), no longer
+  // from escalation_recipients(). The people not being readable is the same kind of failure:
+  // nobody but the assignee can be told, and the assignee's own reminder still goes.
+  for (const [what, opts] of [
     [
-      "escalation_recipients returns an error",
-      (n: string) =>
-        n === "escalation_recipients" ? { data: null, error: { message: "boom" } } : undefined,
-    ],
-    [
-      "escalation_recipients throws",
-      (n: string) => {
-        if (n === "escalation_recipients") throw new Error("connection reset");
-        return undefined;
+      "the people cannot be read",
+      {
+        afterRead: async (table: string) => {
+          if (table === "profiles") throw new Error("connection reset");
+        },
       },
     ],
     [
       "crm_untouched throws",
-      (n: string) => {
-        if (n === "crm_untouched") throw new Error("connection reset");
-        return undefined;
+      {
+        rpc: (n: string) => {
+          if (n === "crm_untouched") throw new Error("connection reset");
+          return undefined;
+        },
       },
     ],
-  ] as const) {
+  ] as [string, FakeOpts][]) {
     it(`${what}: the due reminder still goes, the pass is stamped`, async () => {
       const db = world();
       vi.setSystemTime(T0 + 4.5 * DAY); // reminder due (day 1), item past its limit
-      const client = fakeSupabase(db, { rpc }) as unknown as Client;
+      const client = fakeSupabase(db, opts) as unknown as Client;
       const r = await dispatchDueReminders(client);
       expect(r).toMatchObject({ checked: 1, reminded: 1, escalated: 0 });
       expect(daysOf(db, TECH, "followup")).toEqual([4.5]);

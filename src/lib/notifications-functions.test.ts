@@ -248,7 +248,12 @@ describe("the shared helpers", () => {
     expect(kindLabel(null)).toBe("Other");
     // Nov 17: every ticket step, to the admins and the managers (ticket-watch.ts).
     expect(kindLabel("ticket_watch")).toBe("Ticket update");
-    expect(new Set(Object.values(KIND_LABELS)).size).toBe(16);
+    // Nov 18 (alert-rules.ts): work with nobody on it, and each step of an opportunity or a bid.
+    expect(kindLabel("ticket_unassigned")).toBe("Nobody on it");
+    expect(kindLabel("opportunity_unassigned")).toBe("Nobody on it");
+    expect(kindLabel("opportunity_watch")).toBe("Opportunity update");
+    expect(kindLabel("bid_watch")).toBe("Bid update");
+    expect(new Set(Object.values(KIND_LABELS)).size).toBe(19);
   });
   it("chips: one per label present, in the owner's order, carrying the raw kinds", () => {
     expect(

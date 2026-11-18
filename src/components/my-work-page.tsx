@@ -1243,7 +1243,14 @@ export function MyWorkPage(props: {
 
   const today = localYmd(new Date());
   const items = useMemo(
-    () => (q.data ? flagUnassigned(mergeWork(q.data), today, q.data.unassignedOverdueDays) : []),
+    () =>
+      q.data
+        ? flagUnassigned(
+            mergeWork(q.data),
+            today,
+            q.data.unassignedLimits ?? q.data.unassignedOverdueDays,
+          )
+        : [],
     [q.data, today],
   );
 

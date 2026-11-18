@@ -75,6 +75,8 @@ export interface MyWorkResult {
   unassigned: UnassignedRows | null;
   /** Setup's "needs assignment" timer: unassigned work is flagged overdue after this many days. */
   unassignedOverdueDays: number;
+  /** Each type's own limit (Nov 18); tasks share the tickets'. */
+  unassignedLimits?: { ticket: number; opportunity: number };
   /** Does the caller invoice (`seesInvoices`)? Then the "Authorized — to invoice" column shows. */
   invoicer: boolean;
   /**
@@ -346,6 +348,33 @@ export const listMyWork = createServerFn({ method: "GET" })
     if (bids.error) throw new Error(`Bids: ${bids.error.message}`);
     const unassignedOverdueDays =
       !days.error && typeof days.data === "number" ? days.data : UNASSIGNED_OVERDUE_DAYS_DEFAULT;
+    // Since Nov 18 (alert-rules.ts): each type has its own "Nobody on it" limit, and the clock
+    // starts when the item was left with nobody (unassigned_marks), not when it was entered.
+    // Both reads are best effort: before 20261118120000 is applied they fail, and the one
+    // number and the entered day stand, as before.
+    const markIds = [
+      ...(unTickets.data ?? []).map((t) => (t as { id: string }).id),
+      ...(unOpps.data ?? []).map((o) => o.id),
+    ];
+    const [limitsRes, marksRes] = await Promise.all([
+      showUnassigned ? sb.rpc("unassigned_limits") : Promise.resolve({ data: null, error: null }),
+      markIds.length
+        ? sb.from("unassigned_marks").select("kind, item_id, since").in("item_id", markIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    const rawLimits =
+      !limitsRes.error && limitsRes.data && typeof limitsRes.data === "object"
+        ? (limitsRes.data as Record<string, unknown>)
+        : null;
+    const wholeDays = (v: unknown) =>
+      Number.isInteger(v) && (v as number) >= 0 ? (v as number) : unassignedOverdueDays;
+    const unassignedLimits = {
+      ticket: wholeDays(rawLimits?.["ticket"]),
+      opportunity: wholeDays(rawLimits?.["opportunity"]),
+    };
+    const leftAt = new Map<string, string>();
+    for (const m of marksRes.error ? [] : (marksRes.data ?? []))
+      leftAt.set(`${m.kind}:${m.item_id}`, m.since);
     if (unTickets.error) throw new Error(`Unassigned tickets: ${unTickets.error.message}`);
     if (unOpps.error) throw new Error(`Unassigned opportunities: ${unOpps.error.message}`);
     if (unTasks.error) throw new Error(`Unassigned tasks: ${unTasks.error.message}`);
@@ -457,7 +486,10 @@ export const listMyWork = createServerFn({ method: "GET" })
       authorizerId,
       unassigned: showUnassigned
         ? {
-            tickets: (unTickets.data ?? []) as TicketIn[],
+            tickets: ((unTickets.data ?? []) as TicketIn[]).map((t) => ({
+              ...t,
+              unassigned_at: leftAt.get(`ticket:${t.id}`) ?? null,
+            })),
             opportunities: (unOpps.data ?? []).map((o): OppIn => ({
               id: o.id,
               title: o.title,
@@ -465,11 +497,13 @@ export const listMyWork = createServerFn({ method: "GET" })
               expected_close: o.expected_close,
               account_name: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
               created_at: o.created_at,
+              unassigned_at: leftAt.get(`opportunity:${o.id}`) ?? null,
             })),
             tasks: (unTasks.data ?? []).map(withBuilding),
           }
         : null,
       unassignedOverdueDays,
+      unassignedLimits,
       invoicer,
       // Not an inspection that ends at its sign-off: it never waits for an invoice (Nov 16;
       // ticket-stage.ts awaitsInvoice — the rows carry the ticket's type and its invoice).

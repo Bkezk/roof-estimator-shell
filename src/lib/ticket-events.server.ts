@@ -24,6 +24,7 @@ import { endsAtAuthorized } from "@/lib/ticket-stage";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { exceptActor, wantsOwnNotices } from "@/lib/own-notices.server";
 import { syncFollowup } from "@/lib/followups.server";
+import { tellStep } from "@/lib/work-steps.server";
 import {
   dispatchWatchNotice,
   stageWatchNotice,
@@ -128,26 +129,17 @@ async function tellWatchers(
   actor: { id: string },
 ): Promise<void> {
   if (!notice) return;
-  try {
-    const left = new Set(notice.skip);
-    const watchers = (await authorizerIds(admin)).filter((id) => !left.has(id));
-    const ids = await exceptActor(watchers, actor.id, admin);
-    if (!ids.length) return;
-    await notify(
-      ids,
-      {
-        kind: TICKET_WATCH_KIND,
-        title: notice.title,
-        body: notice.body,
-        url: `/service?id=${row.id}`,
-      },
-      admin,
-    );
-  } catch (e) {
-    console.error(
-      `tellWatchers: ticket #${row.number} — the admins' and managers' notice was not sent: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
+  // Who hears is the tickets' "Each step" line on Admin › Reminders (owner, Nov 18): every admin
+  // and manager until someone changes it. work-steps.server.ts sends, and never fails the save.
+  await tellStep({
+    key: "ticket.steps",
+    kind: TICKET_WATCH_KIND,
+    notice,
+    url: `/service?id=${row.id}`,
+    actorId: actor.id,
+    skip: notice.skip,
+    sb: admin,
+  });
 }
 
 export async function afterTicketStage(

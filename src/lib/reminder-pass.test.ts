@@ -285,6 +285,9 @@ describe("(c) an escalation failure never re-sends the assignee's reminder", () 
     const db: Tables = {
       crm_followups: [followup("f1", "rep-1")],
       crm_settings: [{ id: 1, last_dispatch_at: null, ticket_every_days: 3 }],
+      // Nov 18 (alert-rules.ts): who hears is the tickets' "Not started" line, which starts as
+      // every admin and manager.
+      profiles: [{ id: "boss-1", role: "admin", full_name: "Boss One", email: "" }],
       // Its date passed ten days ago (Nov 13: the date an untouched ticket is past).
       service_jobs: [
         {

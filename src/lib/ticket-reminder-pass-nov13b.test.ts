@@ -354,8 +354,11 @@ describe("the claim", () => {
   });
 });
 
-describe("opportunities are reminded exactly as before", () => {
-  it("the same words, calendar days, weekends included", async () => {
+// Until Nov 18 this pinned "exactly as before": calendar days, a Saturday included. The owner
+// then asked for every alert to skip weekends (alert-rules.ts), so an opportunity now runs on
+// the ticket's rule with its own numbers.
+describe("opportunities are reminded on working days too (owner, Nov 18)", () => {
+  it("one that comes due on a Saturday waits for Monday; the words and the next one count working days", async () => {
     const db: Tables = {
       crm_followups: [
         timer({
@@ -369,19 +372,49 @@ describe("opportunities are reminded exactly as before", () => {
       ],
       crm_settings: [settings()],
     };
-    const now = morning("2026-11-14"); // a Saturday
-    vi.setSystemTime(now);
-    const r = await dispatchDueReminders(use(db));
-    expect(r.reminded).toBe(1);
+    vi.setSystemTime(morning("2026-11-14")); // a Saturday, not its own date
+    expect((await dispatchDueReminders(use(db))).reminded).toBe(0);
+    expect(sent(db)).toEqual([]);
+    // Unclaimed: it is still due, and goes on Monday's pass.
+    expect(f1(db)["reminders_sent"]).toBe(0);
+    vi.setSystemTime(morning("2026-11-16"));
+    expect((await dispatchDueReminders(use(db))).reminded).toBe(1);
     expect(sent(db)[0]).toMatchObject({
+      user_id: TECH,
       title: "Follow up: Dock roof",
-      body: `due ${new Date(at8("2026-12-13")).toLocaleDateString("en-US")}. Reminder 1; it repeats every 7 days until the item is finished or closed.`,
+      body: "due Sunday 12/13/2026. Reminder 1; it repeats every 7 working days until the date.",
     });
-    expect(f1(db)["next_remind_at"]).toBe(new Date(now.getTime() + 7 * 86400000).toISOString());
+    // Seven working days after Monday Nov 16 is Wednesday Nov 25, at 8:00 in the office.
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-11-25"));
+  });
+  it("on its own date it goes even on a Sunday, and after it at the Past due pace", async () => {
+    const db: Tables = {
+      crm_followups: [
+        timer({
+          kind: "opportunity",
+          title: "Dock roof",
+          url: "/opportunities?id=opp-1",
+          due_at: at8("2026-12-13"),
+          next_remind_at: at8("2026-12-13"),
+          every_days: 7,
+          reminders_sent: 3,
+        }),
+      ],
+      crm_settings: [settings({ opportunity_every_days: 4 })],
+    };
+    vi.setSystemTime(morning("2026-12-13")); // Sunday, its own date
+    expect((await dispatchDueReminders(use(db))).reminded).toBe(1);
+    expect(sent(db)[0]!["body"]).toBe(
+      "due today. Reminder 4; after today it repeats every 4 working days until the item is finished or closed.",
+    );
+    // The pace is the setting as it is now (4), not the 7 the timer started with.
+    expect(f1(db)["next_remind_at"]).toBe(at8("2026-12-17"));
   });
 });
 
-describe("untouched work: the ticket's new meaning, the opportunity's old one", () => {
+describe("untouched work: the ticket's meaning, and the opportunity's in working days", () => {
+  /** Someone named on a Not started line, besides the roles (a person's id is a uuid). */
+  const NAMED = "33333333-3333-4333-8333-333333333333";
   const untouchedTicket: Row = {
     kind: "ticket",
     item_id: JOB,
@@ -406,7 +439,16 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
   };
   const world = (): Tables => ({
     crm_followups: [],
-    crm_settings: [settings()],
+    // Who hears (Nov 18): each type's "Not started" line, which starts as the old "Also tell"
+    // list: every admin and manager, and the people named there.
+    crm_settings: [settings({ escalate_to_admins: true, escalate_user_ids: [NAMED] })],
+    profiles: [
+      { id: "boss-1", role: "admin", full_name: "Boss One", email: "" },
+      { id: "boss-2", role: "manager", full_name: "Boss Two", email: "" },
+      { id: NAMED, role: "user", full_name: "Nan Named", email: "" },
+      { id: TECH, role: "user", full_name: "Sam Tech", email: "" },
+      { id: "rep-1", role: "user", full_name: "Pat Rep", email: "" },
+    ],
     service_jobs: [
       {
         id: JOB,
@@ -418,11 +460,7 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
     crm_opportunities: [{ id: "opp-1", escalated_at: null }],
   });
   const lists = (rows: Row[]) => (name: string) =>
-    name === "crm_untouched"
-      ? { data: rows, error: null }
-      : name === "escalation_recipients"
-        ? { data: ["boss-1", "boss-2", TECH], error: null }
-        : undefined;
+    name === "crm_untouched" ? { data: rows, error: null } : undefined;
 
   it("a ticket: the admins and the named people hear, never the assignee, in the new words", async () => {
     const db = world();
@@ -430,7 +468,7 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
     const r = await dispatchDueReminders(use(db, { rpc: lists([untouchedTicket]) }));
     expect(r).toMatchObject({ escalated: 1, failed: 0 });
     const told = sent(db, "untouched");
-    expect(told.map((n) => n["user_id"]).sort()).toEqual(["boss-1", "boss-2"]);
+    expect(told.map((n) => n["user_id"]).sort()).toEqual(["boss-1", "boss-2", NAMED].sort());
     expect(told[0]).toMatchObject({
       title: "Untouched: Ticket #6090 Acme — leak at the dock",
       body: "Assigned to Sam Tech; due Friday 11/6/2026 and not started, 3 working days later. Limit is 2 working days.",
@@ -462,7 +500,7 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
       expect(a.escalated + b.escalated).toBeLessThanOrEqual(1);
     }
     expect(days).toEqual(["2026-11-12", "2026-11-17"]);
-    expect(sent(db, "untouched")).toHaveLength(4); // two escalations × two people
+    expect(sent(db, "untouched")).toHaveLength(6); // two escalations × three people
   });
   it("a ticket first seen on a Saturday waits for Monday", async () => {
     const db = world();
@@ -487,29 +525,42 @@ describe("untouched work: the ticket's new meaning, the opportunity's old one", 
     expect(r.escalated).toBe(0);
     expect(sent(db, "untouched")).toEqual([]);
   });
-  it("an opportunity: the Sep 28 words and calendar days, a Saturday included", async () => {
+  it("an opportunity: working days, never on a weekend, in the new words", async () => {
     const db = world();
-    const now = morning("2026-11-14"); // Saturday, 8 days after it was assigned
-    vi.setSystemTime(now);
-    const client = use(db, { rpc: lists([untouchedOpp, untouchedTicket]) });
-    const r = await dispatchDueReminders(client);
-    expect(r).toMatchObject({ escalated: 1, failed: 0 }); // the opportunity; the ticket waits
+    vi.setSystemTime(morning("2026-11-14")); // Saturday: nothing goes out, for either kind
+    const both = use(db, { rpc: lists([untouchedOpp, untouchedTicket]) });
+    expect((await dispatchDueReminders(both)).escalated).toBe(0);
+    // Monday: 6 working days after Friday Nov 6, when it was assigned. Its limit is 3.
+    vi.setSystemTime(morning("2026-11-16"));
+    const r = await dispatchDueReminders(use(db, { rpc: lists([untouchedOpp]) }));
+    expect(r).toMatchObject({ escalated: 1, failed: 0 });
     const told = sent(db, "untouched");
-    expect(told.map((n) => n["user_id"]).sort()).toEqual(["boss-1", "boss-2", TECH].sort());
+    // The roles and the named person; never the person on it (rep-1).
+    expect(told.map((n) => n["user_id"]).sort()).toEqual(["boss-1", "boss-2", NAMED].sort());
     expect(told[0]).toMatchObject({
       title: "Untouched opportunity: Dock roof",
-      body: "Assigned to Pat Rep 8 days ago; no contact logged and not started. Limit is 3 days.",
+      body: "Assigned to Pat Rep 6 working days ago; no contact logged. Limit is 3 working days.",
       url: "/opportunities?id=opp-1",
     });
-    // Its repeat is opportunity_every_days calendar days: not at 6 days, again at 7.
-    vi.setSystemTime(new Date(now.getTime() + 6 * 86400000));
+    // Its repeat is the Past due pace, 7 working days: not on Tuesday Nov 24 (6), on Wednesday
+    // Nov 25 (7).
+    vi.setSystemTime(morning("2026-11-24"));
     expect((await dispatchDueReminders(use(db, { rpc: lists([untouchedOpp]) }))).escalated).toBe(0);
-    vi.setSystemTime(new Date(now.getTime() + 7 * 86400000 + 60000));
+    vi.setSystemTime(morning("2026-11-25"));
     expect((await dispatchDueReminders(use(db, { rpc: lists([untouchedOpp]) }))).escalated).toBe(1);
+  });
+  it("nothing goes out before 8:00 in the office", async () => {
+    const db = world();
+    vi.setSystemTime(new Date("2026-11-11T12:30:00Z")); // 7:30 am Wednesday
+    const early = await dispatchDueReminders(use(db, { rpc: lists([untouchedTicket]) }));
+    expect(early.escalated).toBe(0);
+    vi.setSystemTime(new Date("2026-11-11T13:05:00Z")); // 8:05 am
+    const later = await dispatchDueReminders(use(db, { rpc: lists([untouchedTicket]) }));
+    expect(later.escalated).toBe(1);
   });
   it("an opportunity still inside its limit is not escalated", async () => {
     const db = world();
-    vi.setSystemTime(new Date("2026-11-08T14:00:00Z")); // 2 days after it was assigned
+    vi.setSystemTime(new Date("2026-11-10T14:00:00Z")); // Tuesday: 2 working days after Fri Nov 6
     const r = await dispatchDueReminders(use(db, { rpc: lists([untouchedOpp]) }));
     expect(r.escalated).toBe(0);
   });

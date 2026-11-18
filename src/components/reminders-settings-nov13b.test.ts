@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { isPastLimit } from "@/lib/contact-log.functions";
+import { WORKING_DAYS_NOTE } from "@/lib/alert-rules";
 import { settingsSchema } from "@/lib/followups.functions";
 import { KIND_CATEGORIES, NOTICE_CATEGORY_HELP, noticeCategory } from "@/lib/notice-categories";
 import { KIND_LABELS, kindLabel } from "@/lib/notifications.functions";
@@ -24,8 +25,16 @@ const service = readFileSync("src/components/service-page.tsx", "utf8").replace(
 
 const saved = {
   opportunity_close_days: 30,
-  opportunity_first_days: 3,
   opportunity_every_days: 7,
+  // Nov 18: the standard lines (alert-rules.ts). The old first-reminder number and the single
+  // "Also tell" list left the save.
+  opportunity_before_every_days: 7 as number | null,
+  opportunity_due_notice_days: null as number | null,
+  opportunity_unassigned_days: 1,
+  opportunity_unassigned_every_days: 3 as number | null,
+  ticket_review_every_days: 3,
+  ticket_unassigned_every_days: 3 as number | null,
+  alert_who: {} as Record<string, string[]>,
   ticket_first_days: 1,
   ticket_every_days: 3,
   ticket_before_every_days: 3 as number | null,
@@ -38,8 +47,6 @@ const saved = {
   // Nov 15: the Owner page's Needs attention limits ride in the same save.
   attention_bid_days: 7,
   attention_authorize_days: 3,
-  escalate_to_admins: true,
-  escalate_user_ids: [],
 };
 
 describe("the save: two more numbers, blank means off", () => {
@@ -81,11 +88,12 @@ describe("the save: two more numbers, blank means off", () => {
 
 describe("Admin › Reminders: the two boxes sit with the ticket numbers", () => {
   it("each is a days-or-blank box like the bids' past-due one, with its range", () => {
+    // Nov 18: each box is named by its card and line.
     expect(flat).toContain(
-      'key: "ticket_before_every_days", label: "Before the date, every N working days (blank = never)", min: 1, max: TICKET_BEFORE_EVERY_DAYS_MAX, never: true, group: "ticket",',
+      'key: "ticket_before_every_days", label: "Tickets, Coming up: every N working days before the date (blank = off)", min: 1, max: TICKET_BEFORE_EVERY_DAYS_MAX, never: true, },',
     );
     expect(flat).toContain(
-      'key: "ticket_due_notice_days", label: "Notice N working days before a ticket’s date (blank = never)", min: 1, max: TICKET_DUE_NOTICE_DAYS_MAX, never: true, group: "ticket",',
+      'key: "ticket_due_notice_days", label: "Tickets, Coming up: a notice N working days before the date (blank = off)", min: 1, max: TICKET_DUE_NOTICE_DAYS_MAX, never: true, },',
     );
     // The same box, the same refusal and the same save as every other number on the page.
     expect(flat).toContain("if (f.never) return ( <DaysOrNever");
@@ -98,6 +106,12 @@ describe("Admin › Reminders: the two boxes sit with the ticket numbers", () =>
   it("a box starts blank when the setting is off, and shows the saved number otherwise", () => {
     // Before anything has loaded nothing stands in the two boxes.
     expect(flat).toContain("ticket_before_every_days: null, ticket_due_notice_days: null,");
+    // Nov 18: the opportunity's two, and the two "then every" boxes, start blank the same way.
+    expect(flat).toContain(
+      "opportunity_before_every_days: null, opportunity_due_notice_days: null,",
+    );
+    expect(flat).toContain("ticket_unassigned_every_days: null,");
+    expect(flat).toContain("opportunity_unassigned_every_days: null,");
     // Null stays null (blank); only a row from before the migration reads as the defaults.
     expect(flat).toContain(
       "ticket_before_every_days: s.ticket_before_every_days === undefined ? 3 : s.ticket_before_every_days,",
@@ -108,46 +122,51 @@ describe("Admin › Reminders: the two boxes sit with the ticket numbers", () =>
     expect(flat).toContain('value={props.value ?? ""}');
   });
   it("the ticket lines say when each reminder goes, in working days", () => {
+    // Nov 18: the same lines on every card (alert-rules.ts). "Before the date", "Notice" and "On
+    // the date" are one "Coming up" line; "After that" is "Past due". Working days are said
+    // once, in the note above the cards, because every kind of work counts them now.
     expect(flat).toContain(
-      '<Line label="Before the date"> Every {field("ticket_before_every_days")} working days from the day the technician is assigned. Leave the box blank to never remind before the date. </Line>',
+      '<Line label={LINE_LABELS.coming_up} who={picker("ticket", "coming_up")}> Every {field("ticket_before_every_days")} days before the date, and a notice{" "} {field("ticket_due_notice_days")} days before it. Also on the morning of the date. </Line>',
     );
     expect(flat).toContain(
-      '<Line label="Notice"> {field("ticket_due_notice_days")} working days before the date (1 = a Monday ticket’s goes out on Friday). Leave the box blank for no notice. </Line>',
+      '<Line label={LINE_LABELS.past_due} who={picker("ticket", "past_due")}> Every {field("ticket_every_days")} days after the date, until it is Done. </Line>',
     );
-    expect(flat).toContain(
-      '<Line label="On the date">That morning, also on a Saturday or Sunday.</Line>',
+    expect(WORKING_DAYS_NOTE).toBe(
+      "Days are working days. Saturdays and Sundays are not counted, and no alert is sent on one, except a reminder on the item's own date.",
     );
-    expect(flat).toContain(
-      '<Line label="After that"> Every {field("ticket_every_days")} working days until the ticket is Done. </Line>',
-    );
-    expect(flat).toContain(
-      "Saturdays and Sundays are not counted, and no ticket reminder goes out on one, except on the ticket’s own date.",
-    );
-    // The order on the page: who, due date, before, notice, on the date, after.
+    expect(flat).toContain('<span className="font-medium">{WORKING_DAYS_NOTE}</span>');
+    // The order on the page: the note, then the ticket card's lines, then the other cards.
     const at = (s: string) => flat.indexOf(s);
     const order = [
-      'title="Tickets"',
-      '<Line label="Before the date">',
-      '<Line label="Notice"> {field("ticket_due_notice_days")}',
-      '<Line label="On the date">',
-      'Every {field("ticket_every_days")} working days',
-      'title="Bids"',
+      'data-note="working-days"',
+      'type="ticket"',
+      'picker("ticket", "coming_up")',
+      'picker("ticket", "past_due")',
+      'picker("ticket", "not_started")',
+      'picker("ticket", "nobody")',
+      'picker("ticket", "review")',
+      'picker("ticket", "steps")',
+      'type="opportunity"',
+      'type="bid"',
     ].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    // Opportunities and bids keep their own words: calendar days.
-    expect(flat).toContain('Every {field("opportunity_every_days")} days until it is won');
-    expect(flat).toContain('{field("bid_due_notice_days")} days before a bid is due');
+    // Opportunities and bids are worded the same way (they counted calendar days before).
+    expect(flat).toContain(
+      'Every {field("opportunity_every_days")} days after it, until it is won, lost or marked No response.',
+    );
+    expect(flat).toContain('A notice {field("bid_due_notice_days")} days before the due date');
   });
   it("untouched says the new meaning for a ticket", () => {
+    // Nov 18: "Untouched work" is each card's "Not started" line; the meaning is unchanged.
     expect(flat).toContain(
-      'label: "Ticket counts as untouched N working days after its date, when nobody has started it"',
+      'key: "ticket_untouched_days", label: "Tickets, Not started: N working days after its date", min: 0, },',
     );
     expect(flat).toContain(
-      'A ticket {field("ticket_untouched_days")} working days after its date, when it is still assigned and nobody has started it; an opportunity after{" "} {field("opportunity_untouched_days")} days with no contact logged.',
+      '{field("ticket_untouched_days")} days after its date with nobody started on it, then at the Past due pace.',
     );
     expect(flat).toContain(
-      "A ticket: its date has passed, it is still assigned and nobody has started it.",
+      '{field("opportunity_untouched_days")} days after it is assigned with no contact logged, then at the Past due pace.',
     );
     expect(page).not.toContain("days with no contact logged; an");
   });
@@ -155,6 +174,14 @@ describe("Admin › Reminders: the two boxes sit with the ticket numbers", () =>
     // Every number box is a fixed 4rem inside a line that wraps.
     expect(page.match(/<span className="inline-block w-16">/g)?.length).toBe(2);
     expect(flat).toContain('<span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">');
+    // Nov 18: a line's name, sentence and who-dropdown stack on a phone and sit in a row only
+    // on a wide screen; the dropdown fills its column and its text is cut, never pushed wide.
+    expect(flat).toContain(
+      'className="grid gap-x-4 gap-y-1.5 py-2.5 text-sm lg:grid-cols-[8.5rem_1fr_17rem]"',
+    );
+    expect(flat).toContain(
+      'className="h-[40px] w-full justify-between gap-2 px-2 font-normal lg:h-9"',
+    );
   });
 });
 

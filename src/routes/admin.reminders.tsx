@@ -20,8 +20,7 @@ function RemindersPage() {
           <BellRing className="h-6 w-6" /> Reminders
         </h1>
         <p className="text-sm text-muted-foreground">
-          How long an opportunity or ticket may sit before it counts as untouched, how often the
-          assignee is reminded, and who hears about untouched work.
+          Who is alerted about service tickets, opportunities and bids, and how often.
         </p>
       </div>
       <RemindersSettings />

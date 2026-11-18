@@ -30,9 +30,23 @@ const ROSTER = [
   { id: "office-1", full_name: "Olive Office", email: "o@x", technician: false },
   { id: "admin-1", full_name: "Ann Admin", email: "a@x", technician: false },
 ];
+/**
+ * The step line's two reads (Nov 18; alert-who.server.ts): no settings row and no people, so the
+ * defaults stand and nobody is on the line.
+ */
+const noRows = () => {
+  const q = {
+    select: () => q,
+    eq: () => q,
+    limit: async () => ({ data: [], error: null }),
+    then: (res: (r: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: [], error: null }).then(res),
+  };
+  return q;
+};
 const client = (result: { data: unknown; error: { message: string } | null }) => {
   const rpc = vi.fn(async () => result);
-  return { sb: { rpc } as unknown as Client, rpc };
+  return { sb: { rpc, from: noRows } as unknown as Client, rpc };
 };
 const row = (over: Record<string, unknown> = {}) => ({
   id: "job-1",

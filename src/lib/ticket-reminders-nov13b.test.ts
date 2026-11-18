@@ -388,13 +388,24 @@ describe("the assignment notice names the first reminder", () => {
       "Due Sunday 12/13/2026; reminders every 1 working day until it is closed.",
     );
   });
-  it("opportunities and the review timer read as they did", () => {
+  // Until Nov 18 these two "read as they did" (calendar days). Every kind counts working days
+  // now (alert-rules.ts): an opportunity reads as a ticket does, and the review timer, which has
+  // no date of its own, gives only its pace.
+  it("an opportunity names the weekday and working days; the review timer gives its pace", () => {
     const base = { title: "Dock roof", reopened: false, actorName: "Roe", due, every: 7 };
     expect(startNotice({ ...base, kind: "opportunity" }).body).toBe(
-      `Roe assigned this to you. Due ${due.toLocaleDateString("en-US")}; reminders every 7 days until it is closed.`,
+      "Roe assigned this to you. Due Sunday 12/13/2026; reminders every 7 working days until it is closed.",
     );
+    expect(
+      startNotice({
+        ...base,
+        kind: "opportunity",
+        firstReminder: new Date(at8("2026-11-24")),
+        now: new Date("2026-11-13T15:00:00Z"),
+      }).body,
+    ).toBe("Roe assigned this to you. Due Sunday 12/13/2026; first reminder Tuesday 11/24/2026.");
     expect(startNotice({ ...base, kind: "invoice", every: 1 }).body).toBe(
-      `Roe assigned this to you. Due ${due.toLocaleDateString("en-US")}; reminders every 1 day until it is closed.`,
+      "Roe assigned this to you. Reminders every 1 working day until it is authorized.",
     );
   });
 });

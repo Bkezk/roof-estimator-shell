@@ -341,10 +341,15 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
     expect(src).toContain('.eq("status", "draft")');
     expect(src).toContain('.is("notified_due_at", null)');
     expect(src).toContain("const daysBefore = settings.bid_due_notice_days;");
-    expect(src).toContain('.lte("due_date", bidDayPlus(today, daysBefore))');
+    // Nov 18: the lead time is working days (owner: every alert skips weekends).
+    expect(src).toContain('.lte("due_date", addWorkingDays(today, daysBefore))');
     expect(src).not.toContain("bidDayPlus(today, 1)");
     expect(src).toContain("bidDueNoticeDue(b, today, daysBefore)");
-    expect(src).toContain("await notify([b.created_by], msg, admin);");
+    // Nov 18: the people on the rule's line (alert-rules.ts); left out, whoever started it.
+    expect(src).toContain(
+      "to: (b: BidRow) => string[] = (b) => (b.created_by ? [b.created_by] : []),",
+    );
+    expect(src).toContain("await notify(people, msg, admin);");
     // B2: the claim before the send, the put-back after a failure, both conditional — on the
     // rule's own stamp column, where it still holds what this pass read (null, or the last stamp).
     const claim = src.indexOf("async function claimBidNotice");
@@ -354,7 +359,7 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
     );
     expect(src.slice(unclaim)).toContain(".eq(col, stamp)");
     expect(src.indexOf("if (!(await claimBidNotice(admin, b.id, col, was, stamp)))")).toBeLessThan(
-      src.indexOf("await notify([b.created_by], msg, admin);"),
+      src.indexOf("await notify(people, msg, admin);"),
     );
     expect(src).toContain("await unclaimBidNotice(admin, b.id, col, was, stamp, errText(e));");
     expect(src).toContain("bids_skipped: number;");

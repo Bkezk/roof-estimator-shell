@@ -52,13 +52,23 @@ const ROSTER = [
 ];
 /** Admins and managers, as ticket_authorizers() lists them. */
 const WATCHERS = ["admin-1", "mgr-1"];
+/**
+ * The people as the step line reads them (Nov 18; alert-who.server.ts): the tickets' "Each step"
+ * line starts as every admin and manager, opened out from their roles.
+ */
+const PEOPLE = ROSTER.map((u) => ({
+  id: u.id,
+  role: u.id === "admin-1" ? "admin" : u.id === "mgr-1" ? "manager" : "user",
+  full_name: u.full_name,
+  email: u.email,
+}));
 
 /** A client whose roster and authorizers answer; `own` are the people with "My own changes" on. */
 function client(own: string[] = []) {
   const rpc = vi.fn(async (fn: string) =>
     fn === "ticket_authorizers" ? { data: WATCHERS, error: null } : { data: ROSTER, error: null },
   );
-  const from = vi.fn(() => {
+  const from = vi.fn((table: string) => {
     let id = "";
     const q = {
       select: () => q,
@@ -67,6 +77,10 @@ function client(own: string[] = []) {
         return q;
       },
       maybeSingle: async () => ({ data: { notify_own: own.includes(id) }, error: null }),
+      // The settings row (none saved: the defaults stand) and the list of people.
+      limit: async () => ({ data: [], error: null }),
+      then: (res: (r: { data: unknown; error: null }) => unknown) =>
+        Promise.resolve({ data: table === "profiles" ? PEOPLE : [], error: null }).then(res),
     };
     return q;
   });
@@ -383,7 +397,7 @@ describe("who is told", () => {
     notify.mockRejectedValueOnce(new Error("mail is down"));
     await expect(afterTicketStage(row(), null, OFFICE, client())).resolves.toBeUndefined();
     expect(errorLog).toHaveBeenCalled();
-    expect(String(errorLog.mock.calls[0]![0])).toContain("ticket #6074");
+    expect(String(errorLog.mock.calls[0]![0])).toContain("Ticket #6074");
   });
 
   it("every ticket path hands the step over: create, save, the board, a claim, a delete", () => {

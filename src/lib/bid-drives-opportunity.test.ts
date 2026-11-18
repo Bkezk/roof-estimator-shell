@@ -809,8 +809,9 @@ describe("the migration, 20261012100000_bid_drives_opportunity.sql", () => {
     expect(bids).toContain(
       'if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id)) await syncOpportunityFromBid(context, bid.id);',
     );
+    // Nov 18: the same branch also sends the bid's "Each step" notice (work-steps.ts).
     expect(bids).toContain(
-      "if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);",
+      "if (asBidStatus(cur.status) !== data.status) { await syncOpportunityFromBid(context, bid.id);",
     );
     const opps = src("src/lib/opportunities.functions.ts");
     expect(opps).toContain(

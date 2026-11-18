@@ -71,6 +71,12 @@ export const KIND_CATEGORIES: Readonly<Record<string, NoticeCategory>> = {
   date_moved: "service",
   // Every step of every ticket, to the admins and the managers (owner, Nov 17; ticket-watch.ts).
   ticket_watch: "service",
+  // Work with nobody on it, and the step lines for opportunities and bids (owner, Nov 18;
+  // alert-rules.ts). A kind each, so the person's own switch for that kind of work covers it.
+  ticket_unassigned: "service",
+  opportunity_unassigned: "opportunities",
+  opportunity_watch: "opportunities",
+  bid_watch: "bids",
 };
 
 /**

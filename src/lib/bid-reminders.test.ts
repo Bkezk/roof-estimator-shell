@@ -168,10 +168,14 @@ describe("the rules (bid-status.ts)", () => {
     expect(bidDueNoticeDue(bid(), "2026-10-12", 0)).toBe(false);
     expect(bidDueNoticeDue(bid(), "2026-10-13", 0)).toBe(true);
     expect(bidDueNoticeDue(bid(), "2026-10-14", 0)).toBe(true); // first seen late: still once
-    // 3: from three days before.
-    expect(bidDueNoticeDue(bid(), "2026-10-09", 3)).toBe(false);
-    expect(bidDueNoticeDue(bid(), "2026-10-10", 3)).toBe(true);
+    // 3: from three WORKING days before (Nov 18: every alert skips weekends). Due Tuesday the
+    // 13th: Monday, Friday, Thursday the 8th. It was three calendar days, Saturday the 10th.
+    expect(bidDueNoticeDue(bid(), "2026-10-07", 3)).toBe(false);
+    expect(bidDueNoticeDue(bid(), "2026-10-08", 3)).toBe(true);
     expect(bidDueNoticeDue(bid(), "2026-10-13", 3)).toBe(true);
+    // One before a Monday is the Friday.
+    expect(bidDueNoticeDue(bid({ due_date: "2026-10-12" }), "2026-10-08")).toBe(false);
+    expect(bidDueNoticeDue(bid({ due_date: "2026-10-12" }), "2026-10-09")).toBe(true);
     // A bad lead time falls back to the day before.
     expect(bidDueNoticeDue(bid(), "2026-10-11", -2)).toBe(false);
     expect(bidDueNoticeDue(bid(), "2026-10-12", 1.5)).toBe(true);
@@ -204,18 +208,20 @@ describe("the rules (bid-status.ts)", () => {
     expect(bidOverdueNoticeDue(bid({ due_date: due }), "2026-10-20", undefined)).toBe(false);
     expect(bidOverdueNoticeDue(bid({ due_date: due }), "2026-10-20", 0)).toBe(false);
     expect(bidOverdueNoticeDue(bid({ due_date: due }), "2026-10-20", 1.5)).toBe(false);
-    // Noticed on Oct 14 (15:00Z = 11:00 Eastern): again Oct 17 with every 3, not before.
+    // Noticed on Wednesday Oct 14 (15:00Z = 11:00 Eastern): again three WORKING days on, Monday
+    // the 19th (Nov 18; it was Saturday the 17th), not before.
     const last = { due_date: due, notified_overdue_at: "2026-10-14T15:00:00Z" };
     expect(bidOverdueNoticeDue(bid(last), "2026-10-15", 3)).toBe(false);
     expect(bidOverdueNoticeDue(bid(last), "2026-10-16", 3)).toBe(false);
-    expect(bidOverdueNoticeDue(bid(last), "2026-10-17", 3)).toBe(true);
-    expect(bidOverdueNoticeDue(bid(last), "2026-10-18", 3)).toBe(true); // a missed day catches up
+    expect(bidOverdueNoticeDue(bid(last), "2026-10-17", 3)).toBe(false);
+    expect(bidOverdueNoticeDue(bid(last), "2026-10-19", 3)).toBe(true);
+    expect(bidOverdueNoticeDue(bid(last), "2026-10-20", 3)).toBe(true); // a missed day catches up
     expect(bidOverdueNoticeDue(bid(last), "2026-10-15", 1)).toBe(true); // every day: tomorrow
     // The stamp's day is the office's: 02:00Z on Oct 15 is still Oct 14 Eastern.
     expect(
       bidOverdueNoticeDue(
         bid({ due_date: due, notified_overdue_at: "2026-10-15T02:00:00Z" }),
-        "2026-10-17",
+        "2026-10-19",
         3,
       ),
     ).toBe(true);
@@ -452,18 +458,20 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
       body: "1 day past due (due Sunday, October 11, 2026) · Bell County Schools. Open the estimator to submit it, or mark it won or lost.",
       url: "/estimate?bid=late",
     });
-    // Oct 13, 14: quiet. Oct 15: again (4 days past due). Oct 16, 17: quiet. Oct 18: again.
+    // Oct 13, 14: quiet. Thursday Oct 15: again (4 days past due). Then three WORKING days on
+    // (Nov 18: every alert skips weekends): Friday, the weekend and Monday are quiet, Tuesday
+    // Oct 20 sends. It was Sunday the 18th.
     expect((await run(client, at("2026-10-13"))).bids_overdue).toBe(0);
     expect((await run(client, at("2026-10-14"))).bids_overdue).toBe(0);
     expect((await run(client, at("2026-10-15"))).bids_overdue).toBe(1);
     expect(overdue()[1]).toMatchObject({ body: expect.stringContaining("4 days past due") });
     expect(row("late")["notified_overdue_at"]).toBe(at("2026-10-15").toISOString());
-    expect((await run(client, at("2026-10-16"))).bids_overdue).toBe(0);
-    expect((await run(client, at("2026-10-17"))).bids_overdue).toBe(0);
-    expect((await run(client, at("2026-10-18"))).bids_overdue).toBe(1);
+    for (const quiet of ["2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19"])
+      expect((await run(client, at(quiet))).bids_overdue).toBe(0);
+    expect((await run(client, at("2026-10-20"))).bids_overdue).toBe(1);
     expect(overdue()).toHaveLength(3);
     // Twice on one day: never (the stamp).
-    expect((await run(client, new Date("2026-10-18T20:00:00Z"))).bids_overdue).toBe(0);
+    expect((await run(client, new Date("2026-10-20T20:00:00Z"))).bids_overdue).toBe(0);
     expect(overdue()).toHaveLength(3);
   });
   it("the past-due repeat's claim is a conditional update on the LAST stamp; a failed send puts that stamp back and keeps the error", async () => {
@@ -709,9 +717,11 @@ describe("the pass (dispatchBidDueNotices, the stand-in client)", () => {
   it("the module: three passes in their own try/catch inside dispatchBidDueNotices, still run from the cron route and the app's pass", () => {
     const src = read("src/lib/bids-notify.server.ts");
     for (const t of [
-      '["Bid due", () => dueNotices(admin, today, stamp, settings, out)]',
-      '["Bid past due", () => overdueNotices(admin, today, stamp, settings, out)]',
+      // Nov 18: each rule sends to the people on its line (alert-rules.ts).
+      '["Bid due", () => dueNotices(admin, today, stamp, settings, out, line("bid.coming_up"))]',
+      '() => overdueNotices(admin, today, stamp, settings, out, line("bid.past_due")),',
       '["Bid reminder", () => reminderNotices(admin, today, stamp, out)]',
+      "const weekend = isWeekend(today);",
       "out.pass_errors.push(`${label}: ${errText(e)}`);",
       "if (every === null) return;",
       '.lte("due_date", bidDayPlus(today, -1))',
@@ -751,30 +761,34 @@ describe("the settings (zod, defaults, Admin › Reminders › Bids)", () => {
     expect(server).toContain("bid_overdue_every_days: number | null;");
     expect(server).toContain("...BID_REMINDER_DEFAULTS,");
   });
-  it("the page: a Bids group after Tickets with the two rows and the help line", () => {
+  it("the page: a Bids card after Service tickets and Opportunities with the two rows and the help line", () => {
+    // Nov 18: one card per kind of work with the same lines on each (alert-rules.ts); the Bids
+    // group became the third card, its "Notice" line is "Coming up", and both count working days.
     const page = read("src/components/reminders-settings.tsx");
-    const tickets = page.indexOf('title="Tickets"');
-    const bids = page.indexOf('title="Bids"');
-    const needs = page.indexOf('title="Needs assignment"');
+    const tickets = page.indexOf('type="ticket"');
+    const opps = page.indexOf('type="opportunity"');
+    const bids = page.indexOf('type="bid"');
     expect(tickets).toBeGreaterThan(-1);
-    expect(bids).toBeGreaterThan(tickets);
-    expect(needs).toBeGreaterThan(bids);
+    expect(opps).toBeGreaterThan(tickets);
+    expect(bids).toBeGreaterThan(opps);
     expect(page).toContain(
-      'help="Sent to whoever started the bid. A submitted, won or lost bid is never reminded."',
+      'help="The date is the bid\'s due date. Only a draft is reminded; a submitted, won or lost bid is not."',
     );
     expect(page).toMatch(
-      /<Line label="Notice">\s+\{field\("bid_due_notice_days"\)\} days before a bid is due \(0 = on the due day\)\./,
+      /<Line label=\{LINE_LABELS\.coming_up\} who=\{picker\("bid", "coming_up"\)\}>\s+A notice \{field\("bid_due_notice_days"\)\} days before the due date \(0 = on the due\s+day\)\./,
     );
     expect(page).toMatch(
-      /<Line label="Past due">\s+Then every \{field\("bid_overdue_every_days"\)\} days while a draft is past due\.\s+Leave\s+the box blank to never remind past due\./,
+      /<Line label=\{LINE_LABELS\.past_due\} who=\{picker\("bid", "past_due"\)\}>\s+Every \{field\("bid_overdue_every_days"\)\} days while a draft is past due\./,
     );
-    expect(page).toContain('label: "Notice N days before a bid is due"');
-    expect(page).toContain('label: "Then every N days while a draft is past due (blank = never)"');
-    expect(page).toMatch(
-      /key: "bid_due_notice_days",\s+label: [^\n]+\n\s+min: 0,\s+max: BID_DUE_NOTICE_DAYS_MAX,\s+group: "bids",/,
+    expect(page).toContain('label: "Bids, Coming up: a notice N working days before the due date"');
+    expect(page).toContain(
+      'label: "Bids, Past due: every N working days while a draft is past due (blank = off)"',
     );
     expect(page).toMatch(
-      /key: "bid_overdue_every_days",\s+label: [^\n]+\n\s+min: 1,\s+max: BID_OVERDUE_EVERY_DAYS_MAX,\s+never: true,\s+group: "bids",/,
+      /key: "bid_due_notice_days",\s+label: [^\n]+\n\s+min: 0,\s+max: BID_DUE_NOTICE_DAYS_MAX,\s+\},/,
+    );
+    expect(page).toMatch(
+      /key: "bid_overdue_every_days",\s+label: [^\n]+\n\s+min: 1,\s+max: BID_OVERDUE_EVERY_DAYS_MAX,\s+never: true,\s+\},/,
     );
   });
   it("blank = never: the box starts blank when null (no 0 stands in), typing sets a number, clearing saves null; the draft starts null and hydrates `?? null`", () => {

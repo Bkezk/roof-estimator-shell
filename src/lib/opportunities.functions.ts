@@ -16,6 +16,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { OPPORTUNITY_WATCH_KIND, opportunityStepNotice } from "@/lib/work-steps";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
@@ -519,7 +520,7 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       row = r;
     }
-    const synced = await syncOppFollowup(row, oldStatus, context, nameOf(p));
+    const synced = await syncOppFollowup(row, oldStatus, context, nameOf(p), !id);
     // @mentions in Notes (owner, Oct 14): the names newly written since the stored text are told;
     // a re-save does not tell anyone twice. sendMentions never throws.
     let mentions: MentionOutcome = NO_MENTIONS;
@@ -565,9 +566,11 @@ async function syncOppFollowup(
   prevStatus: string | null,
   ctx: Ctx,
   actorName: string,
+  /** This save made the opportunity (the step notice then reads "Opened"). */
+  created = false,
 ) {
   const { syncFollowup } = await import("@/lib/followups.server");
-  return syncFollowup(
+  const synced = await syncFollowup(
     {
       kind: "opportunity",
       itemId: row.id,
@@ -584,6 +587,28 @@ async function syncOppFollowup(
     },
     ctx.supabase,
   );
+  // "Each step" (owner, Nov 18; work-steps.ts): opened, a new status, or a change of who has
+  // it, to the people on the opportunities' line on Admin › Reminders. Nobody is on it until
+  // someone picks people there. Never fails the save.
+  const { tellStep } = await import("@/lib/work-steps.server");
+  await tellStep({
+    key: "opportunity.steps",
+    kind: OPPORTUNITY_WATCH_KIND,
+    notice: (nameOf) =>
+      opportunityStepNotice({
+        title: row.title,
+        status: row.status,
+        prevStatus,
+        created,
+        person: synced,
+        who: actorName,
+        assigneeName: nameOf(row.assignee_id),
+      }),
+    url: `/opportunities?id=${row.id}`,
+    actorId: ctx.userId,
+    sb: ctx.supabase,
+  });
+  return synced;
 }
 
 /**
@@ -909,11 +934,12 @@ export const deleteOpportunity = createServerFn({ method: "POST" })
     const p = await me(context);
     if (!canAccess(p, "customers")) throw new Error("Forbidden: Customers access required");
     await assertLiveOpportunity(context.supabase, data.id);
-    const { error } = await context.supabase
+    const { data: gone, error } = await context.supabase
       .from("crm_opportunities")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })
       .eq("id", data.id)
-      .is("deleted_at", null);
+      .is("deleted_at", null)
+      .select("title, status");
     if (error) throw new Error(error.message);
     const { syncFollowup } = await import("@/lib/followups.server");
     await syncFollowup(
@@ -932,6 +958,25 @@ export const deleteOpportunity = createServerFn({ method: "POST" })
       },
       context.supabase,
     );
+    // "Each step" (owner, Nov 18): the people on the opportunities' line hear it was deleted.
+    if (gone?.[0]) {
+      const { tellStep } = await import("@/lib/work-steps.server");
+      await tellStep({
+        key: "opportunity.steps",
+        kind: OPPORTUNITY_WATCH_KIND,
+        notice: opportunityStepNotice({
+          title: gone[0].title,
+          status: gone[0].status,
+          prevStatus: null,
+          deleted: true,
+          who: nameOf(p),
+          assigneeName: null,
+        }),
+        url: `/opportunities?id=${data.id}`,
+        actorId: context.userId,
+        sb: context.supabase,
+      });
+    }
   });
 
 /**

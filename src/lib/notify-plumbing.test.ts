@@ -235,9 +235,15 @@ describe("item 14e — escalation reaches every admin and manager", () => {
     const m = read("supabase/migrations/20261002140000_followup_guard.sql");
     const fn = m.slice(m.indexOf("create or replace function public.escalation_recipients()"));
     expect(fn).toContain("(s.escalate_to_admins and p.role in ('admin', 'manager'))");
+    // Nov 18: the one "Also tell" switch became each type's "Not started" list of people
+    // (alert-rules.ts), which starts as that switch said: every admin and every manager.
+    const rules = read("src/lib/alert-rules.ts");
+    expect(rules).toContain(
+      "...(legacy?.escalate_to_admins === false ? [] : [WHO_ADMINS, WHO_MANAGERS]),",
+    );
     const c = read("src/components/reminders-settings.tsx");
-    expect(c).toContain("Escalate untouched items to every admin and manager");
-    expect(c).not.toMatch(/Escalate untouched items to every admin\n/);
+    expect(c).toContain('{ token: WHO_MANAGERS, label: "Every manager" },');
+    expect(c).not.toContain("Escalate untouched items");
   });
 });
 

@@ -5,6 +5,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { Json } from "@/integrations/supabase/types";
+import { ALERT_NUMBER_MAX, WHO_MAX, parseAlertWho } from "@/lib/alert-rules";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
@@ -567,8 +569,23 @@ export const getCrmSettings = createServerFn({ method: "GET" })
 
 export const settingsSchema = z.object({
   opportunity_close_days: z.number().int().min(1).max(365),
-  opportunity_first_days: z.number().int().min(0).max(365),
+  // (opportunity_first_days left the page on Nov 18: an opportunity's first reminder is the
+  // first step of its "Coming up" pace, as a ticket's is.)
   opportunity_every_days: z.number().int().min(1).max(365),
+  // Owner, Nov 18 (alert-rules.ts): every type has the same lines. Opportunities get the two
+  // "before the date" boxes tickets have; a blank box is off.
+  opportunity_before_every_days: z.number().int().min(1).max(ALERT_NUMBER_MAX).nullable(),
+  opportunity_due_notice_days: z.number().int().min(1).max(ALERT_NUMBER_MAX).nullable(),
+  // A Done ticket waiting to be authorized: every N working days.
+  ticket_review_every_days: z.number().int().min(1).max(ALERT_NUMBER_MAX),
+  // Nobody on it: opportunities have their own first limit (tickets keep
+  // unassigned_overdue_days), and each type its own repeat; a blank repeat means once.
+  opportunity_unassigned_days: z.number().int().min(0).max(ALERT_NUMBER_MAX),
+  ticket_unassigned_every_days: z.number().int().min(1).max(ALERT_NUMBER_MAX).nullable(),
+  opportunity_unassigned_every_days: z.number().int().min(1).max(ALERT_NUMBER_MAX).nullable(),
+  // Who each line tells: roles and people's ids, by "<type>.<line>" (parseAlertWho keeps only
+  // the lines and the entries that exist).
+  alert_who: z.record(z.string().max(40), z.array(z.string().max(60)).max(WHO_MAX)),
   ticket_first_days: z.number().int().min(0).max(365),
   ticket_every_days: z.number().int().min(1).max(365),
   // Owner, Nov 13 (Admin › Reminders › Tickets): before the date, a reminder every N working
@@ -589,8 +606,8 @@ export const settingsSchema = z.object({
   // bid with no follow-up date shows after N days; a Done ticket after N days not authorized.
   attention_bid_days: z.number().int().min(0).max(ATTENTION_DAYS_MAX),
   attention_authorize_days: z.number().int().min(0).max(ATTENTION_DAYS_MAX),
-  escalate_to_admins: z.boolean(),
-  escalate_user_ids: z.array(z.string().uuid()).max(50),
+  // (escalate_to_admins / escalate_user_ids, the old single "Also tell" list, left the page on
+  // Nov 18: the Not started lines of alert_who took its place.)
 });
 export type CrmSettingsInput = z.input<typeof settingsSchema>;
 export const setCrmSettings = createServerFn({ method: "POST" })
@@ -601,7 +618,12 @@ export const setCrmSettings = createServerFn({ method: "POST" })
     if (p.role !== "admin") throw new Error("Forbidden: admin access required");
     const { error } = await context.supabase
       .from("crm_settings")
-      .update({ ...data, updated_at: new Date().toISOString() })
+      .update({
+        ...data,
+        // Only real lines, roles and well-formed ids are kept (alert-rules.ts).
+        alert_who: parseAlertWho(data.alert_who) as unknown as Json,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", 1);
     if (error) throw new Error(error.message);
   });

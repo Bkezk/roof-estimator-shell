@@ -30,6 +30,9 @@ import { DOCUMENTS_BUCKET, documentImageFolder } from "@/lib/documents/server-pu
 import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid, undoOpportunityFromBid } from "@/lib/opportunities.functions";
+import { bidHref } from "@/lib/bid-kind";
+import { BID_WATCH_KIND, bidStepNotice } from "@/lib/work-steps";
+import type { Client as StepClient } from "@/lib/notify.server";
 import { syncInspectionOutcomeAfterBidChange } from "@/lib/service-inspection.functions";
 import { asTradeBidData, calcTradeBid, tradeFigures } from "@/lib/trade-bid";
 
@@ -421,6 +424,13 @@ export const saveBid = createServerFn({ method: "POST" })
       // to be linked to one).
       if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id))
         await syncOpportunityFromBid(context, bid.id);
+      if (statusChanged)
+        await tellBidStep(
+          context,
+          bid,
+          { prevStatus: cur?.status ?? null },
+          payload.updated_by_name,
+        );
       return bid;
     }
     const status = data.status ?? "draft";
@@ -448,8 +458,40 @@ export const saveBid = createServerFn({ method: "POST" })
     // A new bid is linked to its opportunity only after this (linkBid), so there is nothing to
     // sync yet unless the row already names one.
     if (status !== "draft" && bid.opportunity_id) await syncOpportunityFromBid(context, bid.id);
+    await tellBidStep(context, bid, { created: true }, payload.updated_by_name);
     return bid;
   });
+
+/**
+ * "Each step" of a bid (owner, Nov 18; work-steps.ts): started, a new status, deleted, to the
+ * people on the bids' line on Admin › Reminders. Nobody is on it until someone picks people
+ * there. Never fails the save (work-steps.server.ts).
+ */
+async function tellBidStep(
+  context: { supabase: StepClient; userId: string },
+  bid: { id: string; name: string; status: string; kind?: string | null },
+  step: { prevStatus?: string | null; created?: boolean; deleted?: boolean },
+  who: string | null,
+) {
+  const notice = bidStepNotice({
+    name: bid.name,
+    status: bid.status,
+    prevStatus: step.prevStatus ?? null,
+    created: step.created,
+    deleted: step.deleted,
+    who: who ?? "Someone",
+  });
+  if (!notice) return;
+  const { tellStep } = await import("@/lib/work-steps.server");
+  await tellStep({
+    key: "bid.steps",
+    kind: BID_WATCH_KIND,
+    notice,
+    url: bidHref(bid),
+    actorId: context.userId,
+    sb: context.supabase,
+  });
+}
 
 /** saveBid's refusal for a trade bid: the roofing estimator cannot read or price one. */
 export const TRADE_BID_NOT_SAVED_HERE =
@@ -697,10 +739,13 @@ export const setBidStatus = createServerFn({ method: "POST" })
         ...wonOnColumns(cur, { status: data.status, wonOn: data.wonOn }, bidOfficeToday()),
       })
       .eq("id", data.id)
-      .select("id, status, updated_at, updated_by_name, submitted_at, won_on")
+      .select("id, name, kind, status, updated_at, updated_by_name, submitted_at, won_on")
       .single();
     if (error) throw new Error(error.message);
-    if (asBidStatus(cur.status) !== data.status) await syncOpportunityFromBid(context, bid.id);
+    if (asBidStatus(cur.status) !== data.status) {
+      await syncOpportunityFromBid(context, bid.id);
+      await tellBidStep(context, bid, { prevStatus: cur.status }, bid.updated_by_name);
+    }
     const back =
       data.undo && data.status === "draft" ? await undoOpportunityFromBid(context, bid.id) : null;
     // The status the opportunity went back to on an Undo; null when nothing moved.
@@ -818,10 +863,24 @@ export const deleteBid = createServerFn({ method: "POST" })
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", data.id)
       .is("deleted_at", null)
-      .select("id, name, from_job_id");
+      .select("id, name, kind, status, updated_by_name, from_job_id");
     if (error) throw new Error(error.message);
     const gone = rows?.[0];
     if (!gone) throw new Error("Bid not found (it may already have been deleted).");
+    {
+      // "Each step": the people on the bids' line hear it was deleted, by whoever did it.
+      const { data: me } = await context.supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", context.userId)
+        .maybeSingle();
+      await tellBidStep(
+        context,
+        gone,
+        { deleted: true },
+        (me?.full_name ?? "").trim() || me?.email || null,
+      );
+    }
     // The inspection it was started from follows (owner, Nov 10): with no live bid left its
     // "Outcome: Bid" is cleared, so the ticket asks what happens next again.
     if (gone.from_job_id)

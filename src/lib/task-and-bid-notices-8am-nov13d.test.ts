@@ -120,12 +120,11 @@ describe("bid notices wait for 8:00", () => {
 
 describe("Admin › Reminders says so", () => {
   const page = readFileSync("src/components/reminders-settings.tsx", "utf8");
-  it("the Tickets and the Bids sections each carry a Time of day line", () => {
-    expect(page).toContain(
-      '<Line label="Time of day">Ticket reminders go out at 8 AM Eastern.</Line>',
-    );
-    expect(page).toContain(
-      '<Line label="Time of day">Bid reminders go out at 8 AM Eastern.</Line>',
-    );
+  it("one note above the cards gives the time of day for every kind of work", () => {
+    // Nov 18: the Tickets and the Bids sections each had a "Time of day" line; the page is now
+    // one card per kind of work under one note.
+    expect(page).toContain('data-note="working-days"');
+    expect(page.replace(/\s+/g, " ")).toContain("Reminders go out at 8 AM Eastern.");
+    expect(page).not.toContain('<Line label="Time of day">');
   });
 });

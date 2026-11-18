@@ -31,6 +31,8 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { seesEveryone } from "@/lib/access";
 import { isUntitledBid } from "@/lib/bid-name";
 import { bidDeletedMessage, bidSaveIsStale, bidStaleMessage } from "@/lib/bid-stale-save";
+import { bidHref } from "@/lib/bid-kind";
+import { BID_WATCH_KIND, bidStepNotice } from "@/lib/work-steps";
 import { bidCustomerProblem, bidDueDateProblem, bidStatusStamps } from "@/lib/bid-status";
 import { nameAfterCustomer } from "@/lib/bids.functions";
 import {
@@ -409,9 +411,29 @@ export async function saveTradeBidWith(
       created_by: userId,
       ...bidStatusStamps(null, "draft"),
     })
-    .select("id")
+    .select("id, name")
     .single();
   if (error) throw new Error(error.message);
+  // "Each step" (owner, Nov 18; work-steps.ts): the people on the bids' line on Admin ›
+  // Reminders hear a bid was started. Nobody is on it until someone picks people. Never fails
+  // the save.
+  {
+    const { tellStep } = await import("@/lib/work-steps.server");
+    await tellStep({
+      key: "bid.steps",
+      kind: BID_WATCH_KIND,
+      notice: bidStepNotice({
+        name: made.name,
+        status: "draft",
+        prevStatus: null,
+        created: true,
+        who: payload.updated_by_name ?? "Someone",
+      }),
+      url: bidHref({ id: made.id, kind: "trade" }),
+      actorId: userId,
+      sb,
+    });
+  }
   return readTradeBid(sb, made.id);
 }
 

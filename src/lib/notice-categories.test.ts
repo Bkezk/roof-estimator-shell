@@ -164,7 +164,14 @@ describe("noticeCategory: always shown", () => {
 
 describe("the helpers the sender and the inbox reads use", () => {
   it("kindsOfCategory: the kind-only kinds; leads and storms have no link prefix, the others one each", () => {
-    expect(kindsOfCategory("bids")).toEqual(["bid_due", "bid_overdue", "bid_reminder"]);
+    // Nov 18 (alert-rules.ts): work with nobody on it, and the step lines for opportunities and
+    // bids, each under the switch for its own kind of work.
+    expect(kindsOfCategory("bids")).toEqual([
+      "bid_due",
+      "bid_overdue",
+      "bid_reminder",
+      "bid_watch",
+    ]);
     expect(kindsOfCategory("leads")).toEqual(["lead", "bid", "rfp"]);
     expect(kindsOfCategory("storms")).toEqual(["storm"]);
     expect(kindsOfCategory("service")).toEqual([
@@ -174,8 +181,12 @@ describe("the helpers the sender and the inbox reads use", () => {
       "reassigned",
       "date_moved",
       "ticket_watch", // Nov 17: every ticket step, to the admins and the managers
+      "ticket_unassigned", // Nov 18: a ticket with nobody on it
     ]);
-    expect(kindsOfCategory("opportunities")).toEqual([]);
+    expect(kindsOfCategory("opportunities")).toEqual([
+      "opportunity_unassigned",
+      "opportunity_watch",
+    ]);
     expect(urlPrefixOfCategory("leads")).toBeNull();
     expect(urlPrefixOfCategory("storms")).toBeNull();
     expect(urlPrefixOfCategory("opportunities")).toBe("/opportunities");
@@ -225,7 +236,7 @@ describe("the helpers the sender and the inbox reads use", () => {
   it("noticeExclusions: the kind list and the url prefixes of what is off", () => {
     expect(noticeExclusions([])).toEqual({ kinds: [], urlPrefixes: [] });
     expect(noticeExclusions(["opportunities"])).toEqual({
-      kinds: [],
+      kinds: ["opportunity_unassigned", "opportunity_watch"],
       urlPrefixes: ["/opportunities"],
     });
     expect(noticeExclusions(["leads"])).toEqual({
@@ -241,9 +252,11 @@ describe("the helpers the sender and the inbox reads use", () => {
         "reassigned",
         "date_moved",
         "ticket_watch",
+        "ticket_unassigned",
         "bid_due",
         "bid_overdue",
         "bid_reminder",
+        "bid_watch",
       ],
       urlPrefixes: ["/service", "/estimate"],
     });

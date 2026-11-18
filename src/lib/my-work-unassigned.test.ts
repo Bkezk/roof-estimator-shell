@@ -268,8 +268,10 @@ describe("the 'needs assignment' timer (owner, Oct 7: overdue just by nature of 
     );
     const setup = read("../components/reminders-settings.tsx");
     expect(setup).toContain('key: "unassigned_overdue_days"');
-    expect(setup).toContain("Needs assignment");
-    expect(setup).toContain('daysFields("unassigned")');
+    // Nov 18: the "Needs assignment" section became the "Nobody on it" line of each type's card
+    // (alert-rules.ts), with the tickets' limit still this column.
+    expect(setup).toContain('<Line label={LINE_LABELS.nobody} who={picker("ticket", "nobody")}>');
+    expect(setup).toContain('After {field("unassigned_overdue_days")} days with no technician');
     const fn = read("./my-work.functions.ts");
     // Oct 20 (20261020120000): through the SECURITY DEFINER getter — crm_settings itself is an
     // admin's and a manager's to read now.
@@ -278,8 +280,10 @@ describe("the 'needs assignment' timer (owner, Oct 7: overdue just by nature of 
     expect(fn).toContain('"id, title, status, expected_close, account_id, created_at"');
     expect(fn).toContain("unassignedOverdueDays,");
     const page = read("../components/my-work-page.tsx");
-    expect(page).toContain(
-      "flagUnassigned(mergeWork(q.data), today, q.data.unassignedOverdueDays)",
+    // Nov 18: each type has its own limit (unassignedLimits); the one number is the fallback
+    // for an answer from before the database change.
+    expect(page.replace(/\s+/g, " ")).toContain(
+      "flagUnassigned( mergeWork(q.data), today, q.data.unassignedLimits ?? q.data.unassignedOverdueDays, )",
     );
     expect(page).toContain(
       '{item.flag && <span className="font-medium text-destructive">Overdue</span>}',

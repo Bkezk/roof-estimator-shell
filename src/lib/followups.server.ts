@@ -157,10 +157,12 @@ export function startNotice(input: {
   now?: Date | undefined;
 }): { title: string; body: string } {
   const who = input.actorName ?? "The office";
+  // Working days for every kind since Nov 18 (alert-rules.ts): a ticket and an opportunity name
+  // the day and the first reminder; the review timer has no date, only its pace.
   const tail =
-    input.kind === "ticket"
-      ? ticketStartTail(input.due, input.firstReminder, input.every, input.now ?? new Date())
-      : `Due ${input.due.toLocaleDateString("en-US")}; reminders every ${input.every} day${input.every === 1 ? "" : "s"} until it is closed.`;
+    input.kind === "invoice"
+      ? `Reminders every ${input.every} working day${input.every === 1 ? "" : "s"} until it is authorized.`
+      : ticketStartTail(input.due, input.firstReminder, input.every, input.now ?? new Date());
   // A ticket's title already starts "Ticket #6090 …", so its notices do not say "Ticket" again
   // (owner, Nov 13: "update the wording so it doesnt double say ticket"): "Assigned to you:
   // Ticket #6090 …" and "Reopened: Ticket #6090 …". An opportunity's title is its own words, so

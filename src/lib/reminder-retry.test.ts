@@ -201,6 +201,9 @@ describe("(a) a reminder that fails to send is put back for the next pass", () =
     const env = world(
       {
         crm_followups: [],
+        // Nov 18 (alert-rules.ts): who hears is the tickets' "Not started" line, which starts as
+        // every admin and manager.
+        profiles: [{ id: "admin-1", role: "admin", full_name: "Ann Admin", email: "" }],
         // Its date passed five days ago (Nov 13: the date an untouched ticket is past).
         service_jobs: [
           {

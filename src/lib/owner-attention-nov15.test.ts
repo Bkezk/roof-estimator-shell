@@ -712,13 +712,24 @@ describe("the wiring", () => {
     expect(box).toContain("A row leaves by itself when the work is done.");
   });
   it("Setup › Reminders has the two limits, saved as whole days from 0 to 365", () => {
-    expect(setup).toContain('title="Owner’s Needs attention list"');
+    // Nov 18: the section is a plain bordered block under the three cards.
+    expect(setup).toContain(
+      '<h3 className="text-sm font-semibold">Owner’s Needs attention list</h3>',
+    );
     expect(setup).toContain('{field("attention_bid_days")}');
     expect(setup).toContain('{field("attention_authorize_days")}');
     const saved = {
       opportunity_close_days: 30,
-      opportunity_first_days: 3,
       opportunity_every_days: 7,
+      // Nov 18: the standard lines (alert-rules.ts). The old first-reminder number and the single
+      // "Also tell" list left the save.
+      opportunity_before_every_days: 7,
+      opportunity_due_notice_days: null,
+      opportunity_unassigned_days: 1,
+      opportunity_unassigned_every_days: 3,
+      ticket_review_every_days: 3,
+      ticket_unassigned_every_days: 3,
+      alert_who: {},
       ticket_first_days: 1,
       ticket_every_days: 3,
       ticket_before_every_days: 3,
@@ -730,8 +741,6 @@ describe("the wiring", () => {
       bid_overdue_every_days: null,
       attention_bid_days: 7,
       attention_authorize_days: 3,
-      escalate_to_admins: true,
-      escalate_user_ids: [],
     };
     expect(settingsSchema.safeParse(saved).success).toBe(true);
     expect(settingsSchema.safeParse({ ...saved, attention_bid_days: 0 }).success).toBe(true);

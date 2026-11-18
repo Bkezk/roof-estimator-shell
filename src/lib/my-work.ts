@@ -15,6 +15,7 @@ import { seesEveryone } from "@/lib/access";
 import { bidHref } from "@/lib/bid-kind";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { notificationPath } from "@/lib/notification-link";
+import { nobodyFlagged } from "@/lib/alert-rules";
 
 export type WorkKind = "ticket" | "inspection" | "task" | "followup" | "opportunity" | "bid";
 
@@ -284,6 +285,8 @@ export interface TicketIn {
   technician_id: string | null;
   /** When it was entered (sent for unassigned tickets: the "needs assignment" timer). */
   created_at?: string | null;
+  /** When it was left with nobody on it (unassigned_marks, Nov 18); the timer runs from here. */
+  unassigned_at?: string | null;
   /** When it reached its stage (sent for Authorized tickets: "Waiting N days" to invoice). */
   stage_changed_at?: string | null;
   /** When its close-out was finished (sent for Done tickets: "Waiting N days" to authorize). */
@@ -378,8 +381,10 @@ export interface OppIn {
   status: string;
   expected_close: string | null;
   account_name?: string | null;
-  /** When it was entered: the "needs assignment" timer runs from this day. */
+  /** When it was entered: the "needs assignment" timer ran from this day until Nov 18. */
   created_at?: string | null;
+  /** When it was left with nobody on it (unassigned_marks, Nov 18); the timer runs from here. */
+  unassigned_at?: string | null;
 }
 
 /**
@@ -765,9 +770,21 @@ export function opportunityItem(o: OppIn, toYmd: (iso: string) => string = local
     assigneeName: null,
     followup: null,
     unassigned: true,
-    since: o.created_at ? toYmd(o.created_at) : null,
+    since: sinceDay(o, toYmd),
   };
 }
+
+/**
+ * The day an item was left with nobody on it: the database's own stamp (Nov 18), else the day
+ * it was entered (an item the stamp has not reached, and a task).
+ */
+const sinceDay = (
+  row: { unassigned_at?: string | null; created_at?: string | null },
+  toYmd: (iso: string) => string,
+): string | null => {
+  const at = row.unassigned_at ?? row.created_at;
+  return at ? toYmd(at) : null;
+};
 
 /** Setup's default for the "needs assignment" timer (crm_settings.unassigned_overdue_days). */
 export const UNASSIGNED_OVERDUE_DAYS_DEFAULT = 1;
@@ -776,8 +793,10 @@ export const UNASSIGNED_OVERDUE_DAYS_DEFAULT = 1;
  * Is nobody's work flagged overdue (owner, Oct 7: "a timer in setup for when needs assignment
  * should get the overdue flag just by nature of being unassigned")? Yes when it is past its own
  * day (a scheduled date or expected close before today), or when it has waited `days` or more
- * days for a person since it was entered: entered Oct 5 with 1 day allowed → flagged from Oct 6;
- * 0 days → the day it is entered.
+ * WORKING days for a person since it was LEFT WITH NOBODY (Nov 18; alert-rules.ts nobodyFlagged,
+ * the clock the "Nobody on it" alert runs on): it used to count calendar days from the day it
+ * was entered, so a ticket turned red the moment its technician was taken off. 0 days → the day
+ * it happens.
  */
 export function unassignedOverdue(
   item: Pick<WorkItem, "date" | "since" | "unassigned"> & { done?: boolean },
@@ -786,14 +805,39 @@ export function unassignedOverdue(
 ): boolean {
   // Finished work (a Done ticket) is never overdue, whoever is or is not on it (Oct 12).
   if (!item.unassigned || item.done) return false;
-  if (item.date && item.date < today) return true;
-  if (!item.since) return false;
-  return addDays(item.since, Math.max(0, Math.floor(days))) <= today;
+  return nobodyFlagged({
+    since: item.since ?? null,
+    date: item.date ?? null,
+    today,
+    after: Math.max(0, Math.floor(days)),
+  });
 }
 
-/** Every item with its `flag` set: nobody's work past the "needs assignment" timer. */
-export function flagUnassigned(items: WorkItem[], today: string, days?: number): WorkItem[] {
-  return items.map((i) => (i.unassigned ? { ...i, flag: unassignedOverdue(i, today, days) } : i));
+/** Each type's "Nobody on it" limit (Admin › Reminders; the database's unassigned_limits()). */
+export interface UnassignedLimits {
+  ticket: number;
+  opportunity: number;
+}
+
+/**
+ * Every item with its `flag` set: nobody's work past its type's "Nobody on it" limit. An
+ * opportunity has its own; a ticket, an inspection and a task share the tickets'. A plain
+ * number is one limit for all (the older answer).
+ */
+export function flagUnassigned(
+  items: WorkItem[],
+  today: string,
+  days?: number | UnassignedLimits,
+): WorkItem[] {
+  const limit = (i: WorkItem) =>
+    typeof days === "object" && days !== null
+      ? i.kind === "opportunity"
+        ? days.opportunity
+        : days.ticket
+      : days;
+  return items.map((i) =>
+    i.unassigned ? { ...i, flag: unassignedOverdue(i, today, limit(i)) } : i,
+  );
 }
 
 /**
@@ -815,7 +859,7 @@ export function unassignedItems(
     .map((t) => ({
       ...ticketItem(t, {}, null, toYmd),
       unassigned: true,
-      since: t.created_at ? toYmd(t.created_at) : null,
+      since: sinceDay(t, toYmd),
     }));
   const opps = rows.opportunities.map((o) => opportunityItem(o, toYmd));
   const tasks = (rows.tasks ?? [])

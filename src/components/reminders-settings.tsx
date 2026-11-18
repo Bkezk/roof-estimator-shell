@@ -1,45 +1,26 @@
 /**
- * Admin › General › Reminders (docs/service-module-design.md §11): the follow-up timer lengths
- * (crm_settings) and the delivery health of the reminder mail / push, with a "Run reminders
- * now" button (the same lazy dispatcher the app calls on load; it skips a pass when the last one
- * ran under ten minutes ago). Admin only — the server refuses everyone else.
+ * Admin › General › Reminders: one card per kind of work, the same lines on each (owner, Nov 18:
+ * "its still a bit confusing. can you make a standardized version for each type opp, bid,
+ * service ticket etc. where you can select multiple people from a dropdown on who gets alerted
+ * and the frequency in days"; of the drawing with one card per type: "i like idea 1, and yes
+ * skip working days and make a note that shows that, nobody on it should send alerts too. each
+ * step line should be able to be turned on for opps and bids too but defaulted off for now").
  *
- * The sentences state the rules as followups.server.ts runs them (owner, Oct 9: "its unclear
- * what the remind the assignee after x days means … for tickets who is it reminding if
- * unassigned? if assigned is it 1 day after due date then every 3 days?"). Quoted from that
- * module's header and syncFollowup:
- *   "One open row per assigned item; assigning starts it, a closing status ends it, and the
- *    dispatcher (notify.server.ts) reminds the assignee until then."
- *   "ticket = due on its scheduled day (or first_days from now when unscheduled), reminders
- *    every ticket_every_days, closed at Done / Invoiced / Closed or when unassigned.
- *    Opportunity = due at its expected close (default close_days from creation), first reminder
- *    after opportunity_first_days, then every opportunity_every_days, closed at Won / Lost /
- *    No response."
- *   "Ticket: remind on the due day (the scheduled day) unless it is already past, then now.
- *    Opportunity: first reminder after first_days, never later than the due date."
- * An item with no assignee has no follow-up row (syncFollowup closes it "unassigned"), so
- * nobody is reminded; Work Overview lists it under Unassigned and flags it overdue after
- * crm_settings.unassigned_overdue_days (my-work.ts unassignedOverdue). Untouched work
- * (notify.server.ts escalateUntouched): assigned, no contact logged, not started; past
- * ticket_untouched_days / opportunity_untouched_days the escalation people hear, "then again
- * every ticket_every_days / opportunity_every_days", while the assignee's own reminders go on.
+ * The rules are lib/alert-rules.ts: Coming up, Past due, Not started, Nobody on it, Done waiting
+ * (tickets) and Each step, each "how many working days" and "who". It took the place of a
+ * section per rule (Opportunities, Tickets, Bids, Needs assignment, Untouched work), each worded
+ * its own way, with one "Also tell" list for everything.
  *
- * Tickets since Nov 13 (owner: "add the day before notice for tickets, also i think they would
- * want some cadence of reminders as well … every 3 days or so and that can also be edited in
- * settings" … "dont count weekend days" … "ensure the wording and editing is similar to our
- * previous notifications editing and wordings"): two more numbers sit with the ticket ones,
- * boxes that are blank when off like the bids' past-due one — "Before the date" (a reminder
- * every N working days from assignment) and "Notice" (N working days before the date) — and the
- * ticket lines say working days. Untouched, for a ticket, now means its date has passed and
- * nobody has started it (lib/ticket-reminders.ts; crm_untouched(), 20261113120000). Later the
- * same day ("lets do 8AM est instead of 7 am plz"): a "Time of day" line says ticket reminders
- * go out at 8 AM Eastern (working-days.ts reminderMorning; 20261113130000).
+ * Below the cards: the Owner page's Needs attention limits (they send nothing), and the
+ * delivery health of the reminder mail / push with "Run reminders now" (the same dispatcher the
+ * app calls on load; it skips a pass when the last one ran under ten minutes ago). Admin only:
+ * the server refuses everyone else.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Loader2, Play, Save } from "lucide-react";
+import { CalendarClock, ChevronDown, Loader2, Play, Save, Users } from "lucide-react";
 
 import {
   CRON_STALE_LINE,
@@ -51,6 +32,26 @@ import {
   setCrmSettings,
   type CrmSettingsInput,
 } from "@/lib/followups.functions";
+import {
+  ALERT_NUMBER_MAX,
+  LINE_LABELS,
+  TYPE_TITLES,
+  WHO_ADMINS,
+  WHO_ASSIGNEE,
+  WHO_MANAGERS,
+  WORKING_DAYS_NOTE,
+  alertKey,
+  alertNumbers,
+  assigneeLabel,
+  defaultWho,
+  isPersonToken,
+  lineHasAssignee,
+  parseAlertWho,
+  whoSummary,
+  type AlertLine,
+  type AlertType,
+  type AlertWho,
+} from "@/lib/alert-rules";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { blankOrNumber } from "@/lib/number-field-view";
 import { ATTENTION_DEFAULTS } from "@/lib/owner-attention";
@@ -60,9 +61,10 @@ import { SAVE_BAR_ACTIONS, SaveBar } from "@/components/save-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
-import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -82,13 +84,13 @@ const whenTime = (iso: string) =>
     minute: "2-digit",
   });
 
-/** The settings that are a number of days (the escalation ones are not). */
+/** The settings that are a number of days. */
 type NumericKey = {
   [K in keyof CrmSettingsInput]-?: CrmSettingsInput[K] extends number ? K : never;
 }[keyof CrmSettingsInput];
 /**
- * A number of days OR null = never (owner, Oct 13: the past-due repeat on bids). Its box starts
- * blank when null; typing a number sets it; clearing the box saves null again — no 0 stands in.
+ * A number of days OR null = off. Its box starts blank when null; typing a number sets it;
+ * clearing the box saves null again. No 0 stands in.
  */
 type NeverKey = {
   [K in keyof CrmSettingsInput]-?: null extends CrmSettingsInput[K]
@@ -99,124 +101,150 @@ type NeverKey = {
 }[keyof CrmSettingsInput];
 type Field = {
   key: NumericKey | NeverKey;
+  /** The box's own name: its hover text, and what a bad number is called. */
   label: string;
   min: number;
   /** Upper bound (365 when unsaid). */
   max?: number;
-  /** A blank box means never (stored null); a number must still be within min..max. */
+  /** A blank box means off (stored null); a number must still be within min..max. */
   never?: boolean;
-  group: "opportunity" | "ticket" | "bids" | "untouched" | "unassigned" | "attention";
 };
 const FIELDS: Field[] = [
-  {
-    key: "opportunity_close_days",
-    label: "Opportunities should close within N days",
-    min: 1,
-    group: "opportunity",
-  },
-  {
-    key: "opportunity_first_days",
-    label: "First opportunity reminder N days after assignment",
-    min: 0,
-    group: "opportunity",
-  },
-  { key: "opportunity_every_days", label: "Then every N days", min: 1, group: "opportunity" },
+  // Service tickets
   {
     key: "ticket_first_days",
-    label: "Unscheduled ticket due N days after the technician is assigned",
+    label: "Tickets: with no scheduled day, due N days after the technician is assigned",
     min: 0,
-    group: "ticket",
   },
-  // Owner, Nov 13: reminders before the date, on working days. Blank = off, as the bids'
-  // past-due box is.
   {
     key: "ticket_before_every_days",
-    label: "Before the date, every N working days (blank = never)",
+    label: "Tickets, Coming up: every N working days before the date (blank = off)",
     min: 1,
     max: TICKET_BEFORE_EVERY_DAYS_MAX,
     never: true,
-    group: "ticket",
   },
   {
     key: "ticket_due_notice_days",
-    label: "Notice N working days before a ticket’s date (blank = never)",
+    label: "Tickets, Coming up: a notice N working days before the date (blank = off)",
     min: 1,
     max: TICKET_DUE_NOTICE_DAYS_MAX,
     never: true,
-    group: "ticket",
   },
-  {
-    key: "ticket_every_days",
-    label: "After the date, every N working days",
-    min: 1,
-    group: "ticket",
-  },
-  // Owner, Oct 13 ("Where are the bid reminders set? Is it in Reminders like opps and service,
-  // now that bids have due dates?"): bids-notify.server.ts reads these two.
-  {
-    key: "bid_due_notice_days",
-    label: "Notice N days before a bid is due",
-    min: 0,
-    max: BID_DUE_NOTICE_DAYS_MAX,
-    group: "bids",
-  },
-  {
-    key: "bid_overdue_every_days",
-    label: "Then every N days while a draft is past due (blank = never)",
-    min: 1,
-    max: BID_OVERDUE_EVERY_DAYS_MAX,
-    never: true,
-    group: "bids",
-  },
+  { key: "ticket_every_days", label: "Tickets, Past due: every N working days", min: 1 },
   {
     key: "ticket_untouched_days",
-    label: "Ticket counts as untouched N working days after its date, when nobody has started it",
+    label: "Tickets, Not started: N working days after its date",
     min: 0,
-    group: "untouched",
-  },
-  {
-    key: "opportunity_untouched_days",
-    label: "Opportunity counts as untouched after N days",
-    min: 0,
-    group: "untouched",
   },
   {
     key: "unassigned_overdue_days",
-    label: "Unassigned work is flagged overdue after N days without a person",
+    label: "Tickets, Nobody on it: after N working days",
     min: 0,
-    group: "unassigned",
+  },
+  {
+    key: "ticket_unassigned_every_days",
+    label: "Tickets, Nobody on it: then every N working days (blank = once)",
+    min: 1,
+    max: ALERT_NUMBER_MAX,
+    never: true,
+  },
+  {
+    key: "ticket_review_every_days",
+    label: "Tickets, Done waiting: every N working days",
+    min: 1,
+    max: ALERT_NUMBER_MAX,
+  },
+  // Opportunities
+  {
+    key: "opportunity_close_days",
+    label: "Opportunities: with no expected close, due N calendar days after it is entered",
+    min: 1,
+  },
+  {
+    key: "opportunity_before_every_days",
+    label: "Opportunities, Coming up: every N working days before the expected close (blank = off)",
+    min: 1,
+    max: ALERT_NUMBER_MAX,
+    never: true,
+  },
+  {
+    key: "opportunity_due_notice_days",
+    label:
+      "Opportunities, Coming up: a notice N working days before the expected close (blank = off)",
+    min: 1,
+    max: ALERT_NUMBER_MAX,
+    never: true,
+  },
+  {
+    key: "opportunity_every_days",
+    label: "Opportunities, Past due: every N working days",
+    min: 1,
+  },
+  {
+    key: "opportunity_untouched_days",
+    label: "Opportunities, Not started: N working days after it is assigned",
+    min: 0,
+  },
+  {
+    key: "opportunity_unassigned_days",
+    label: "Opportunities, Nobody on it: after N working days",
+    min: 0,
+    max: ALERT_NUMBER_MAX,
+  },
+  {
+    key: "opportunity_unassigned_every_days",
+    label: "Opportunities, Nobody on it: then every N working days (blank = once)",
+    min: 1,
+    max: ALERT_NUMBER_MAX,
+    never: true,
+  },
+  // Bids
+  {
+    key: "bid_due_notice_days",
+    label: "Bids, Coming up: a notice N working days before the due date",
+    min: 0,
+    max: BID_DUE_NOTICE_DAYS_MAX,
+  },
+  {
+    key: "bid_overdue_every_days",
+    label: "Bids, Past due: every N working days while a draft is past due (blank = off)",
+    min: 1,
+    max: BID_OVERDUE_EVERY_DAYS_MAX,
+    never: true,
   },
   // Owner, Nov 15: the Owner page's Needs attention list (lib/owner-attention.ts).
   {
     key: "attention_bid_days",
     label: "A submitted bid with no follow-up date needs attention after N days",
     min: 0,
-    group: "attention",
   },
   {
     key: "attention_authorize_days",
     label: "A Done ticket needs attention after N days without being authorized",
     min: 0,
-    group: "attention",
   },
 ];
 const EMPTY: CrmSettingsInput = {
   opportunity_close_days: 0,
-  opportunity_first_days: 0,
   opportunity_every_days: 0,
+  opportunity_before_every_days: null,
+  opportunity_due_notice_days: null,
+  opportunity_untouched_days: 0,
+  opportunity_unassigned_days: 0,
+  opportunity_unassigned_every_days: null,
   ticket_first_days: 0,
   ticket_every_days: 0,
   ticket_before_every_days: null,
   ticket_due_notice_days: null,
   ticket_untouched_days: 0,
-  opportunity_untouched_days: 0,
+  ticket_review_every_days: 0,
+  ticket_unassigned_every_days: null,
   unassigned_overdue_days: 0,
   bid_due_notice_days: 1,
   bid_overdue_every_days: null,
   attention_bid_days: ATTENTION_DEFAULTS.bidDays,
   attention_authorize_days: ATTENTION_DEFAULTS.authorizeDays,
-  escalate_to_admins: false,
-  escalate_user_ids: [],
+  alert_who: defaultWho(null),
 };
 
 export function RemindersSettings() {
@@ -229,8 +257,8 @@ export function RemindersSettings() {
 
   const settings = useQuery({ queryKey: ["crm-settings"], queryFn: () => getFn() });
   const health = useQuery({ queryKey: ["notification-health"], queryFn: () => healthFn() });
-  // The people untouched items can escalate to: every user (crm_user_options, the same list as
-  // the opportunity assignee box; it was technician_options, the Service roster only).
+  // The people a line can name: every user (crm_user_options, the same list as the opportunity
+  // assignee box).
   const users = useQuery({
     queryKey: ["assignee-options"],
     queryFn: () => usersFn(),
@@ -240,49 +268,47 @@ export function RemindersSettings() {
   const [draft, setDraft] = useState<CrmSettingsInput>(EMPTY);
   useEffect(() => {
     const s = settings.data;
-    if (s)
-      setDraft({
-        opportunity_close_days: s.opportunity_close_days,
-        opportunity_first_days: s.opportunity_first_days,
-        opportunity_every_days: s.opportunity_every_days,
-        ticket_first_days: s.ticket_first_days,
-        ticket_every_days: s.ticket_every_days,
-        // Null is "off" (a blank box). Before 20261113120000 is applied the row has neither:
-        // the defaults, 3 and 1.
-        ticket_before_every_days:
-          s.ticket_before_every_days === undefined ? 3 : s.ticket_before_every_days,
-        ticket_due_notice_days:
-          s.ticket_due_notice_days === undefined ? 1 : s.ticket_due_notice_days,
-        ticket_untouched_days: s.ticket_untouched_days,
-        opportunity_untouched_days: s.opportunity_untouched_days,
-        unassigned_overdue_days: s.unassigned_overdue_days ?? 1,
-        // Before 20261013160000 is applied the row has neither: the day before, never past due.
-        bid_due_notice_days: s.bid_due_notice_days ?? 1,
-        bid_overdue_every_days: s.bid_overdue_every_days ?? null,
-        // Before 20261115120000 is applied the row has neither: 7 and 3.
-        attention_bid_days: s.attention_bid_days ?? ATTENTION_DEFAULTS.bidDays,
-        attention_authorize_days: s.attention_authorize_days ?? ATTENTION_DEFAULTS.authorizeDays,
-        escalate_to_admins: s.escalate_to_admins,
-        escalate_user_ids: s.escalate_user_ids ?? [],
-      });
+    if (!s) return;
+    // The boxes added on Nov 18, read the way the reminder pass reads them (alert-rules.ts): a
+    // column that is not there yet takes what the old page did.
+    const n = alertNumbers(s);
+    setDraft({
+      opportunity_close_days: s.opportunity_close_days,
+      opportunity_every_days: s.opportunity_every_days,
+      opportunity_before_every_days: n.opportunity_before_every_days,
+      opportunity_due_notice_days: n.opportunity_due_notice_days,
+      opportunity_untouched_days: s.opportunity_untouched_days,
+      opportunity_unassigned_days: n.opportunity_unassigned_days,
+      opportunity_unassigned_every_days: n.opportunity_unassigned_every_days,
+      ticket_first_days: s.ticket_first_days,
+      ticket_every_days: s.ticket_every_days,
+      // Null is "off" (a blank box). Before 20261113120000 is applied the row has neither:
+      // the defaults, 3 and 1.
+      ticket_before_every_days:
+        s.ticket_before_every_days === undefined ? 3 : s.ticket_before_every_days,
+      ticket_due_notice_days: s.ticket_due_notice_days === undefined ? 1 : s.ticket_due_notice_days,
+      ticket_untouched_days: s.ticket_untouched_days,
+      ticket_review_every_days: n.ticket_review_every_days,
+      ticket_unassigned_every_days: n.ticket_unassigned_every_days,
+      unassigned_overdue_days: s.unassigned_overdue_days ?? 1,
+      // Before 20261013160000 is applied the row has neither: the day before, never past due.
+      bid_due_notice_days: s.bid_due_notice_days ?? 1,
+      bid_overdue_every_days: s.bid_overdue_every_days ?? null,
+      // Before 20261115120000 is applied the row has neither: 7 and 3.
+      attention_bid_days: s.attention_bid_days ?? ATTENTION_DEFAULTS.bidDays,
+      attention_authorize_days: s.attention_authorize_days ?? ATTENTION_DEFAULTS.authorizeDays,
+      // A line never saved shows who it tells today; a line saved empty is off.
+      alert_who: parseAlertWho(s.alert_who, s),
+    });
   }, [settings.data]);
-  const toggleEscalate = (id: string) =>
-    setDraft((d) => ({
-      ...d,
-      escalate_user_ids: d.escalate_user_ids.includes(id)
-        ? d.escalate_user_ids.filter((x) => x !== id)
-        : [...d.escalate_user_ids, id],
-    }));
-  const userOptions = useMemo(() => {
-    const all = [...(users.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-    // Keep someone already picked listed (and removable) even if they left the roster.
-    for (const id of draft.escalate_user_ids)
-      if (!all.some((u) => u.id === id)) all.push({ id, name: "Former user" });
-    return all;
-  }, [users.data, draft.escalate_user_ids]);
+  const who = draft.alert_who as AlertWho;
+  const people = useMemo(
+    () => [...(users.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [users.data],
+  );
   const invalid = FIELDS.filter((f) => {
     const v = draft[f.key];
-    if (v === null) return !f.never; // blank: fine only where blank means never
+    if (v === null) return !f.never; // blank: fine only where blank means off
     return !Number.isInteger(v) || v < f.min || v > (f.max ?? 365);
   });
 
@@ -310,9 +336,7 @@ export function RemindersSettings() {
     onError: (e) => toast.error(`Could not run the reminders: ${errText(e)}`),
   });
 
-  // Owner, Oct 9 ("optimize and clarify this page a bit, its layout is unusual and spaced out"):
-  // the numbers sit inside short sentences, one compact card, four sections side by side with
-  // their help instead of a two-column grid of boxed sub-cards.
+  // A day box, inline in its sentence.
   const field = (key: Field["key"]) => {
     const f = FIELDS.find((x) => x.key === key)!;
     const v = draft[key];
@@ -336,8 +360,21 @@ export function RemindersSettings() {
       />
     );
   };
-  const daysFields = (group: Field["group"]) =>
-    FIELDS.filter((f) => f.group === group).map((f) => field(f.key));
+  // Who a line tells.
+  const picker = (type: AlertType, line: AlertLine) => {
+    const key = alertKey(type, line);
+    return (
+      <WhoPicker
+        type={type}
+        line={line}
+        value={who[key]}
+        people={people}
+        onChange={(list) =>
+          setDraft((d) => ({ ...d, alert_who: { ...(d.alert_who as AlertWho), [key]: list } }))
+        }
+      />
+    );
+  };
 
   const submit = () => {
     if (invalid.length) {
@@ -352,18 +389,23 @@ export function RemindersSettings() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Follow-up reminders</CardTitle>
-            <CardDescription>
-              A timer starts when a ticket gets a technician or an opportunity gets an assignee;
-              that person is reminded at these lengths until it is closed. Nothing is timed, and
-              nobody is reminded, while an item has no person on it. Each line below says who is
-              reminded, when the item is due, when the first reminder goes and how often after that.
-              Changes apply to timers started from now on; a ticket’s “Before the date” and “Notice”
-              numbers apply from its next reminder.
-            </CardDescription>
-          </div>
+        <CardHeader className="space-y-2">
+          <CardTitle>Reminders and alerts</CardTitle>
+          <CardDescription>
+            One card for each kind of work, with the same lines on each. Every line has its number
+            of days and who is told. A blank box, or nobody picked, turns that line off. Changes
+            take effect from the next reminder.
+          </CardDescription>
+          <p
+            className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm"
+            data-note="working-days"
+          >
+            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              <span className="font-medium">{WORKING_DAYS_NOTE}</span> Reminders go out at 8 AM
+              Eastern. “Each step” notices go out at once.
+            </span>
+          </p>
         </CardHeader>
         <CardContent>
           {settings.error ? (
@@ -377,153 +419,117 @@ export function RemindersSettings() {
           ) : (
             <form
               id="reminder-settings"
-              className="divide-y"
+              className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
                 submit();
               }}
             >
-              <Section
-                title="Opportunities"
-                help="Won, Lost or No response ends the timer; taking the assignee off stops the reminders."
+              {users.error && (
+                <p className="text-xs text-destructive">
+                  Could not load the people to pick from: {errText(users.error)}
+                </p>
+              )}
+
+              <TypeCard
+                type="ticket"
+                help="The date is the scheduled day. Done ends its reminders; so does taking the technician off."
               >
-                <Line label="Who is reminded">
-                  The person assigned to the opportunity. Nobody, until someone is assigned.
-                </Line>
                 <Line label="Due date">
-                  The expected close date. When none is set, {field("opportunity_close_days")} days
-                  after the opportunity is entered.
+                  The scheduled day. With none, {field("ticket_first_days")} days after the
+                  technician is assigned.
                 </Line>
-                <Line label="First reminder">
-                  {field("opportunity_first_days")} days after the person is assigned, or on the due
-                  date if that comes first.
+                <Line label={LINE_LABELS.coming_up} who={picker("ticket", "coming_up")}>
+                  Every {field("ticket_before_every_days")} days before the date, and a notice{" "}
+                  {field("ticket_due_notice_days")} days before it. Also on the morning of the date.
                 </Line>
-                <Line label="After that">
-                  Every {field("opportunity_every_days")} days until it is won, lost or marked No
-                  response.
+                <Line label={LINE_LABELS.past_due} who={picker("ticket", "past_due")}>
+                  Every {field("ticket_every_days")} days after the date, until it is Done.
                 </Line>
-              </Section>
+                <Line label={LINE_LABELS.not_started} who={picker("ticket", "not_started")}>
+                  {field("ticket_untouched_days")} days after its date with nobody started on it,
+                  then at the Past due pace.
+                </Line>
+                <Line label={LINE_LABELS.nobody} who={picker("ticket", "nobody")}>
+                  After {field("unassigned_overdue_days")} days with no technician, then every{" "}
+                  {field("ticket_unassigned_every_days")} days. It also turns red on Work Overview.
+                </Line>
+                <Line label={LINE_LABELS.review} who={picker("ticket", "review")}>
+                  Every {field("ticket_review_every_days")} days until it is authorized.
+                </Line>
+                <Line label={LINE_LABELS.steps} who={picker("ticket", "steps")}>
+                  Once when it is opened, scheduled, reassigned, moved, authorized, invoiced, closed
+                  or deleted.
+                </Line>
+              </TypeCard>
 
-              <Section
-                title="Tickets"
-                help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders. Saturdays and Sundays are not counted, and no ticket reminder goes out on one, except on the ticket’s own date."
+              <TypeCard
+                type="opportunity"
+                help="The date is the expected close. Won, Lost or No response ends its reminders; so does taking the assignee off."
               >
-                <Line label="Who is reminded">
-                  The technician on the ticket. Nobody, until one is assigned.
-                </Line>
                 <Line label="Due date">
-                  The scheduled day. With no scheduled day, {field("ticket_first_days")} days after
-                  the technician is assigned.
+                  The expected close. With none, {field("opportunity_close_days")} calendar days
+                  after it is entered.
                 </Line>
-                <Line label="Before the date">
-                  Every {field("ticket_before_every_days")} working days from the day the technician
-                  is assigned. Leave the box blank to never remind before the date.
+                <Line label={LINE_LABELS.coming_up} who={picker("opportunity", "coming_up")}>
+                  Every {field("opportunity_before_every_days")} days before the expected close, and
+                  a notice {field("opportunity_due_notice_days")} days before it. Also on the
+                  morning of the date.
                 </Line>
-                <Line label="Notice">
-                  {field("ticket_due_notice_days")} working days before the date (1 = a Monday
-                  ticket’s goes out on Friday). Leave the box blank for no notice.
+                <Line label={LINE_LABELS.past_due} who={picker("opportunity", "past_due")}>
+                  Every {field("opportunity_every_days")} days after it, until it is won, lost or
+                  marked No response.
                 </Line>
-                <Line label="On the date">That morning, also on a Saturday or Sunday.</Line>
-                <Line label="After that">
-                  Every {field("ticket_every_days")} working days until the ticket is Done.
+                <Line label={LINE_LABELS.not_started} who={picker("opportunity", "not_started")}>
+                  {field("opportunity_untouched_days")} days after it is assigned with no contact
+                  logged, then at the Past due pace.
                 </Line>
-                {/* Owner, Nov 13: "lets do 8AM est instead of 7 am plz" (reminder_morning). */}
-                <Line label="Time of day">Ticket reminders go out at 8 AM Eastern.</Line>
-              </Section>
+                <Line label={LINE_LABELS.nobody} who={picker("opportunity", "nobody")}>
+                  After {field("opportunity_unassigned_days")} days with nobody assigned, then every{" "}
+                  {field("opportunity_unassigned_every_days")} days. It also turns red on Work
+                  Overview.
+                </Line>
+                <Line label={LINE_LABELS.steps} who={picker("opportunity", "steps")}>
+                  Once when it is opened, assigned, changes status or is deleted.
+                </Line>
+              </TypeCard>
 
-              {/* Owner, Oct 13: "Where are the bid reminders set? Is it in Reminders like opps and
-                  service, now that bids have due dates?" — the "Bid due" notice's lead time (it
-                  was fixed at the day before) and a past-due repeat that is off until a number is
-                  typed (bids-notify.server.ts; rules in bid-status.ts). */}
-              <Section
-                title="Bids"
-                help="Sent to whoever started the bid. A submitted, won or lost bid is never reminded."
+              <TypeCard
+                type="bid"
+                help="The date is the bid's due date. Only a draft is reminded; a submitted, won or lost bid is not."
               >
-                <Line label="Notice">
-                  {field("bid_due_notice_days")} days before a bid is due (0 = on the due day).
+                <Line label={LINE_LABELS.coming_up} who={picker("bid", "coming_up")}>
+                  A notice {field("bid_due_notice_days")} days before the due date (0 = on the due
+                  day).
                 </Line>
-                <Line label="Past due">
-                  Then every {field("bid_overdue_every_days")} days while a draft is past due. Leave
-                  the box blank to never remind past due.
+                <Line label={LINE_LABELS.past_due} who={picker("bid", "past_due")}>
+                  Every {field("bid_overdue_every_days")} days while a draft is past due.
                 </Line>
-                <Line label="Custom reminder">
-                  Whoever sets up a bid can also pick a “Remind me on” day on its Setup; that one
-                  goes out on the day, whatever the bid’s status.
+                <Line label={LINE_LABELS.steps} who={picker("bid", "steps")}>
+                  Once when it is started, changes status or is deleted.
                 </Line>
-                {/* Owner, Nov 13: "yes plz move those to 8 am" (bids-notify.server.ts). */}
-                <Line label="Time of day">Bid reminders go out at 8 AM Eastern.</Line>
-              </Section>
+                <Line label="Own reminder">
+                  Whoever sets up a bid can also pick a “Remind me on” day on its Setup. That one
+                  goes to them alone, on that day, whatever the bid’s status.
+                </Line>
+              </TypeCard>
 
-              <Section
-                title="Needs assignment"
-                help="Nobody is reminded while a ticket or opportunity has no person on it — there is no timer until someone is assigned."
-              >
-                <Line label="Where it shows">Under Unassigned on Work Overview.</Line>
-                <Line label="Flagged overdue">
-                  {daysFields("unassigned")} days after it is entered with nobody assigned (0 = the
-                  same day).
-                </Line>
-              </Section>
-
-              <Section
-                title="Untouched work"
-                help="An opportunity: assigned, with no contact logged. A ticket: its date has passed, it is still assigned and nobody has started it. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until it is started or a contact is logged."
-              >
-                <Line label="Counts as untouched">
-                  A ticket {field("ticket_untouched_days")} working days after its date, when it is
-                  still assigned and nobody has started it; an opportunity after{" "}
-                  {field("opportunity_untouched_days")} days with no contact logged.
-                </Line>
-                <Line label="What happens">
-                  It turns red in the lists. The assignee keeps getting the reminders above.
-                </Line>
-                <Line label="Also tell">
-                  <Switch
-                    checked={draft.escalate_to_admins}
-                    onCheckedChange={(v) => setDraft((d) => ({ ...d, escalate_to_admins: v }))}
-                    aria-label="Escalate untouched items to every admin and manager"
-                  />
-                  <span>Every admin and manager</span>
-                </Line>
-                <Line label="And these people">
-                  {users.error ? (
-                    <span className="text-xs text-destructive">
-                      Could not load the users: {errText(users.error)}
-                    </span>
-                  ) : !users.data ? (
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the users…
-                    </span>
-                  ) : userOptions.length === 0 ? (
-                    <span className="text-xs text-muted-foreground">No users to pick.</span>
-                  ) : (
-                    userOptions.map((u) => {
-                      const on = draft.escalate_user_ids.includes(u.id);
-                      return (
-                        <Button
-                          key={u.id}
-                          type="button"
-                          size="sm"
-                          variant={on ? "default" : "outline"}
-                          className="h-7 rounded-full px-3 text-xs"
-                          aria-pressed={on}
-                          onClick={() => toggleEscalate(u.id)}
-                        >
-                          {u.name}
-                        </Button>
-                      );
-                    })
-                  )}
-                </Line>
-              </Section>
+              <p className="text-xs text-muted-foreground" data-note="tasks">
+                Tasks keep their own notices: when one is given to someone, the morning it is due,
+                and when it is overdue. Each person can turn a kind of notice off for themselves on
+                My account.
+              </p>
 
               {/* Owner, Nov 15: "keep the owner on top of things" — the list at the top of the
                   Owner page (lib/owner-attention.ts). It sends nothing; these two numbers only
                   decide when a row appears there. */}
-              <Section
-                title="Owner’s Needs attention list"
-                help="The list at the top of the Owner page. Nobody is sent anything by it. It also lists work with nobody on it and untouched work, at the limits above, and draft bids past their due date."
-              >
+              <section className="rounded-lg border p-3" data-card="attention">
+                <h3 className="text-sm font-semibold">Owner’s Needs attention list</h3>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  The list at the top of the Owner page. Nobody is sent anything by it. These two
+                  count calendar days. It also lists work with nobody on it and work not started, at
+                  the limits above, and draft bids past their due date.
+                </p>
                 <Line label="Bids sent">
                   A submitted bid with no follow-up date shows after {field("attention_bid_days")}{" "}
                   days. One whose “Remind me on” day has passed shows the next day.
@@ -532,13 +538,12 @@ export function RemindersSettings() {
                   A Done ticket shows after {field("attention_authorize_days")} days without being
                   authorized.
                 </Line>
-              </Section>
+              </section>
               {/* Save stays at the bottom of the window while the page is scrolled (owner,
-                  Nov 17: the same bar as a trade bid's, save-bar.tsx). It took the place of a
-                  Save at the top of the card and another at its foot. */}
+                  Nov 17: the same bar as a trade bid's, save-bar.tsx). */}
               <SaveBar className="mt-4">
                 <div className="min-w-0 flex-1 text-sm text-muted-foreground" data-save-note>
-                  <p>These numbers are saved when you press Save.</p>
+                  <p>The numbers and the people are saved when you press Save.</p>
                 </div>
                 <div className={SAVE_BAR_ACTIONS}>
                   <Button
@@ -778,30 +783,103 @@ export function RemindersSettings() {
   );
 }
 
-/** One setting group: its name and help on the left, its sentences on the right. */
-function Section(props: { title: string; help?: string; children: ReactNode }) {
+/** One kind of work: its name, what its date is, and its lines. */
+function TypeCard(props: { type: AlertType; help: string; children: ReactNode }) {
   return (
-    <div className="grid gap-x-6 gap-y-2 py-4 first:pt-0 sm:grid-cols-[11rem_1fr] lg:grid-cols-[15rem_1fr]">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{props.title}</p>
-        {props.help && <p className="text-xs text-muted-foreground">{props.help}</p>}
+    <section className="rounded-lg border p-3" data-card={props.type}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b pb-2">
+        <h3 className="text-base font-semibold">{TYPE_TITLES[props.type]}</h3>
+        <p className="text-xs text-muted-foreground">{props.help}</p>
       </div>
-      <div className="space-y-2">{props.children}</div>
+      <div className="divide-y">{props.children}</div>
+    </section>
+  );
+}
+
+/**
+ * One alert line: its name, the sentence with its day boxes, and who is told. On a phone the
+ * three stack; on a desk they sit in a row, the same on every card.
+ */
+function Line(props: { label: string; who?: ReactNode; children: ReactNode }) {
+  return (
+    <div
+      className="grid gap-x-4 gap-y-1.5 py-2.5 text-sm lg:grid-cols-[8.5rem_1fr_17rem]"
+      data-line={props.label}
+    >
+      <span className="font-semibold">{props.label}</span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">{props.children}</span>
+      <span>{props.who}</span>
     </div>
   );
 }
 
 /**
- * One rule as "label: what happens", the number boxes inline in the text (owner, Oct 9, after the
- * sentence version: "i still think this wording is a bit unclear" — each line now answers one
- * question: who is reminded, when it is due, when the first reminder goes, then how often).
+ * Who a line tells: a dropdown of tick boxes (owner, Nov 18: "select multiple people from a
+ * dropdown on who gets alerted"). The roles first, then everyone by name. Nobody ticked turns
+ * the line off, and the button says so.
  */
-function Line(props: { label: string; children: ReactNode }) {
+function WhoPicker(props: {
+  type: AlertType;
+  line: AlertLine;
+  value: string[];
+  people: { id: string; name: string }[];
+  onChange: (v: string[]) => void;
+}) {
+  const { type, line, value } = props;
+  const names = new Map(props.people.map((u) => [u.id, u.name]));
+  const toggle = (token: string) =>
+    props.onChange(value.includes(token) ? value.filter((t) => t !== token) : [...value, token]);
+  const roles = [
+    ...(lineHasAssignee(line) ? [{ token: WHO_ASSIGNEE, label: assigneeLabel(type, line) }] : []),
+    { token: WHO_ADMINS, label: "Every admin" },
+    { token: WHO_MANAGERS, label: "Every manager" },
+  ];
+  // Someone picked who has since been removed stays listed, so they can be unticked.
+  const gone = value.filter((t) => isPersonToken(t) && !names.has(t));
+  const row = (token: string, label: string) => (
+    <label
+      key={token}
+      className="flex min-h-[40px] cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"
+    >
+      <Checkbox
+        checked={value.includes(token)}
+        onCheckedChange={() => toggle(token)}
+        data-who-option={token}
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </label>
+  );
   return (
-    <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[10rem_1fr]">
-      <span className="font-medium text-muted-foreground">{props.label}</span>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">{props.children}</span>
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-[40px] w-full justify-between gap-2 px-2 font-normal lg:h-9"
+          aria-label={`Who is told: ${LINE_LABELS[line]}, ${TYPE_TITLES[type]}`}
+          data-who={alertKey(type, line)}
+          data-who-count={value.length}
+        >
+          <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span
+            className={`min-w-0 flex-1 truncate text-left ${value.length ? "" : "text-muted-foreground"}`}
+          >
+            {whoSummary(value, type, line, names)}
+          </span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="max-h-80 w-72 overflow-y-auto p-1.5">
+        <p className="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">
+          Tick everyone who should be told. Nobody ticked turns this line off.
+        </p>
+        {roles.map((r) => row(r.token, r.label))}
+        <div className="my-1 border-t" />
+        {props.people.map((u) => row(u.id, u.name))}
+        {gone.map((t) => row(t, "Someone removed"))}
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -171,7 +171,8 @@ describe("item 1 — a reopen is announced as a reopen, not an assignment", () =
       }),
     ).toEqual({
       title: "Opportunity reopened: X",
-      body: `The office reopened this. Due ${due.toLocaleDateString("en-US")}; reminders every 1 day until it is closed.`,
+      // Working days, and the weekday named, for every kind since Nov 18 (alert-rules.ts).
+      body: "The office reopened this. Due Tuesday 10/20/2026; reminders every 1 working day until it is closed.",
     });
   });
 });
