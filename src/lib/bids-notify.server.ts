@@ -298,7 +298,10 @@ async function dueNotices(
     rows,
     "notified_due_at",
     () => null,
-    (b, who) => bidDueNotice({ id: b.id, name: b.name, due_date: b.due_date! }, who, today),
+    // The bid's kind goes along (Nov 18, the audit): a trade bid's notice opens Trade Bids and
+    // says "Open the bid", not the roofing estimator.
+    (b, who) =>
+      bidDueNotice({ id: b.id, name: b.name, due_date: b.due_date!, kind: b.kind }, who, today),
     stamp,
     out,
     "bids_due",
@@ -334,7 +337,8 @@ async function overdueNotices(
     rows,
     "notified_overdue_at",
     (b) => b.notified_overdue_at ?? null,
-    (b, who) => bidOverdueNotice({ id: b.id, name: b.name, due_date: b.due_date! }, who, today),
+    (b, who) =>
+      bidOverdueNotice({ id: b.id, name: b.name, due_date: b.due_date!, kind: b.kind }, who, today),
     stamp,
     out,
     "bids_overdue",
@@ -360,7 +364,11 @@ async function reminderNotices(admin: Client, today: string, stamp: string, out:
     rows,
     "reminded_at",
     () => null,
-    (b, who) => bidReminderNotice({ id: b.id, name: b.name, reminder_note: b.reminder_note }, who),
+    (b, who) =>
+      bidReminderNotice(
+        { id: b.id, name: b.name, reminder_note: b.reminder_note, kind: b.kind },
+        who,
+      ),
     stamp,
     out,
     "bids_reminders",

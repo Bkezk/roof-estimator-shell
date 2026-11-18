@@ -146,7 +146,9 @@ export function SiteSelect(props: {
       <SelectTrigger
         id={props.id}
         aria-invalid={props.invalid || undefined}
-        className={`${props.invalid ? "border-destructive" : ""} ${props.className ?? ""}`}
+        // A long property line is cut with "…" inside the box; it never widens the page
+        // (Nov 18, the audit).
+        className={`min-w-0 [&>span]:min-w-0 [&>span]:truncate ${props.invalid ? "border-destructive" : ""} ${props.className ?? ""}`}
       >
         <SelectValue
           placeholder={detail.isLoading ? "Loading the properties…" : "Pick the property…"}

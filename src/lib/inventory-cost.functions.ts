@@ -23,7 +23,7 @@ import { categories, pieceDefsForCells, PRICE_IS_MANAGERS } from "@/lib/inventor
 import {
   materialForCell,
   materialsByCell,
-  packCostFor,
+  stockUnitCost,
   serviceLabel,
   type Cell,
 } from "@/lib/service-materials";
@@ -75,7 +75,8 @@ export async function readSetupCost(
   const byCell = materialsByCell(materials);
   return (cell) => {
     const m = materialForCell(byCell, cell);
-    return m && Number.isFinite(m.cost) ? packCostFor(m.cost, pieceFor(cell)) : null;
+    // stockUnitCost: a cell priced by the box is not multiplied by the box's pieces (Nov 18).
+    return m && Number.isFinite(m.cost) ? stockUnitCost(m, pieceFor(cell)) : null;
   };
 }
 

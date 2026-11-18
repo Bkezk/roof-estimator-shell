@@ -29,7 +29,7 @@ import { databaseRpc } from "@/lib/database-rpc";
 import { BID_REMINDER_DEFAULTS } from "@/lib/bid-status";
 import { hasServiceRole, notify, serverClient, type Client } from "@/lib/notify.server";
 import { wantsOwnNotices } from "@/lib/own-notices.server";
-import { officeDay, reminderMorning } from "@/lib/working-days";
+import { officeDay, reminderMorning, undatedDueDay } from "@/lib/working-days";
 import {
   TICKET_REMINDER_DEFAULTS,
   ticketFirstRemindAt,
@@ -279,7 +279,14 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   const due = a.dueDate
     ? // 8:00 in the office that day (Nov 13; it was 12:00 UTC: 7 AM there in winter).
       reminderMorning(a.dueDate)
-    : new Date(now.getTime() + days(a.kind === "opportunity" ? s.opportunity_close_days : first));
+    : // No date of its own: a working day, at 8:00 (Nov 18; working-days.ts undatedDueDay).
+      reminderMorning(
+        undatedDueDay(
+          a.kind,
+          officeDay(now),
+          a.kind === "opportunity" ? s.opportunity_close_days : s.ticket_first_days,
+        ),
+      );
   // Ticket: a date still ahead is reminded before it, on working days (ticketFirstRemindAt);
   // on the due day (the scheduled day) otherwise, unless it is already past, then now. The
   // review timer: as a ticket was. Opportunity: first reminder after first_days, never later

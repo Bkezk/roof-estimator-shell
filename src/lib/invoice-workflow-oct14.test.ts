@@ -210,7 +210,10 @@ describe("the server builds and saves PO lines (source scan)", () => {
     server.indexOf("export function totals("),
   );
   it("buildLinesFromJob reads EVERY purchase order of the ticket and makes a line each (owner, Oct 28: approved or not)", () => {
-    expect(build).toContain("opts: { markup?: number | null; poMarkup?: boolean | null } = {},");
+    // Nov 18: the options gained forInvoiceId (a PO billed on another invoice is left off).
+    expect(build).toMatch(
+      /opts: \{\s*markup\?: number \| null;\s*poMarkup\?: boolean \| null;[\s\S]*?forInvoiceId\?: string \| null;\s*\} = \{\},/,
+    );
     expect(build).toMatch(
       /\.from\("service_job_purchase_orders"\)\s*\.select\("id, po_number, title, price, po_date, vendor_id, vendor_text"\)\s*\.eq\("service_job_id", jobId\)\s*\.order\("po_date"\)/,
     );
@@ -223,12 +226,14 @@ describe("the server builds and saves PO lines (source scan)", () => {
     expect(build).toContain(
       "p.vendor_text ?? (p.vendor_id ? (vendorName.get(p.vendor_id) ?? null) : null),",
     );
-    expect(server).toContain('import { poLineFor } from "@/lib/invoice-po-lines";');
+    expect(server).toMatch(
+      /import \{ billedPoIds, poLineFor, unbilledOrders \} from "@\/lib\/invoice-po-lines";/,
+    );
   });
   it("rebuild passes the draft's po_markup; a new draft passes the default (true)", () => {
     const rebuild = fns.slice(fns.indexOf("export const rebuildInvoiceLines"));
     expect(rebuild).toMatch(
-      /buildLinesFromJob\(sb, inv\.service_job_id, \{\s*markup: inv\.material_markup == null \? null : Number\(inv\.material_markup\),[\s\S]*?poMarkup: inv\.po_markup !== false,\s*\}\)/,
+      /buildLinesFromJob\(sb, inv\.service_job_id, \{\s*markup: inv\.material_markup == null \? null : Number\(inv\.material_markup\),[\s\S]*?poMarkup: inv\.po_markup !== false,[\s\S]*?forInvoiceId: inv\.id,\s*\}\)/,
     );
     const create = fns.slice(
       fns.indexOf("async function createInvoiceFor("),

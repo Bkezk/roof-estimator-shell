@@ -99,6 +99,20 @@ export function workingDaysBefore(ymd: string, n: number): string {
   return day;
 }
 
+/**
+ * The due day of work that has no date of its own, started on `today` (owner, Nov 18, of the
+ * audit: every reminder at 8:00 on a working day). A ticket with no scheduled day and the
+ * "Done, waiting" timer: `days` WORKING days on (0 = today, or Monday from a weekend). An
+ * opportunity with no expected close: its `days` CALENDAR days, moved on to Monday when they end
+ * on a Saturday or a Sunday. It was "now plus N calendar days" at the clock time of the
+ * assignment, so a ticket given out on a Friday afternoon was reminded on Saturday afternoon.
+ * The database's twin is in followup_sync_upsert (20261118150000).
+ */
+export function undatedDueDay(kind: string, today: string, days: number): string {
+  const n = Number.isInteger(days) && days > 0 ? days : 0;
+  return kind === "opportunity" ? addWorkingDays(plusDays(today, n), 0) : addWorkingDays(today, n);
+}
+
 /** The working day before `ymd` (a Monday's is the Friday). */
 export const workingDayBefore = (ymd: string): string => workingDaysBefore(ymd, 1);
 

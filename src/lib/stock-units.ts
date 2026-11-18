@@ -32,6 +32,19 @@ export const stockUnitFor = (screenId: string): string => STOCK_UNIT_BY_SCREEN[s
 /** Catalog columns that say how many pieces one priced pack holds. */
 export const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
 
+/**
+ * Is a catalog price column the price of a whole PACK ("Price/Box", "Price/Package"), not of one
+ * piece ("Price/Part") or of a plain unit ("Price", a colour)? The same reading as
+ * price-import.ts catalogPriceBasis. A pack price is already the cost of one stock unit: it is
+ * never multiplied by the pieces in the pack (the audit, Nov 18).
+ */
+export function priceIsPerPack(priceCol: string | null | undefined): boolean {
+  const m = /\/\s*([a-z]+)\s*$/i.exec(priceCol ?? "");
+  return ["BOX", "BAG", "PACKAGE", "PKG", "PACK", "CASE", "CTN", "CARTON"].includes(
+    (m?.[1] ?? "").toUpperCase(),
+  );
+}
+
 export interface PieceDef {
   /** Singular piece name ("cartridge", "fastener", "gallon", "part"). */
   name: string;

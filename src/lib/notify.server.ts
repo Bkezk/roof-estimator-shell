@@ -556,13 +556,19 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   // The day boxes and who each line tells (owner, Nov 18; alert-rules.ts), read once.
   const ctx = await loadAlertContext(admin);
   const today = officeDay(now);
-  const { data: due, error } = await admin
-    .from("crm_followups")
-    .select("*")
-    .eq("status", "open")
-    .lte("next_remind_at", now.toISOString())
-    .order("next_remind_at")
-    .limit(200);
+  // No reminder goes out before 8:00 in the office (owner, Nov 18, of the audit). Every timer's
+  // next reminder is set for 8:00, but one that waited over a weekend, or came due overnight,
+  // was sent on the day's first run at 7. Before 8:00 the pass reads no reminders and claims
+  // none; the 8:00 run sends them.
+  const { data: due, error } = morningReached(now)
+    ? await admin
+        .from("crm_followups")
+        .select("*")
+        .eq("status", "open")
+        .lte("next_remind_at", now.toISOString())
+        .order("next_remind_at")
+        .limit(200)
+    : { data: [], error: null };
   if (error) throw new Error(error.message);
   const out: DispatchResult = {
     checked: due?.length ?? 0,

@@ -76,7 +76,13 @@ import {
 } from "@/lib/inventory-count.functions";
 import {
   BLANK_LINE,
+  earlierIds,
   fmtDay,
+  laterBanner,
+  laterCount,
+  laterLine,
+  laterOf,
+  withEarlier,
   groupByCategory,
   lineFromProduct,
   lineKey,
@@ -169,6 +175,9 @@ export function InventoryCountTab(props: {
   const [askZero, setAskZero] = useState(false);
   const [askSave, setAskSave] = useState(false);
   const [viewId, setViewId] = useState<string | null>(null);
+  // Entries typed in since the count day that the office says happened on or before it (owner,
+  // Nov 18, of the audit): by entry id. Only a past day's sheet has any to tick.
+  const [before, setBefore] = useState<ReadonlySet<number>>(() => new Set());
   const [browserToday] = useState(() => officeToday());
 
   const locationId =
@@ -192,8 +201,21 @@ export function InventoryCountTab(props: {
   const allLines = useMemo(() => {
     if (!sheet) return [];
     const onSheet = new Set(sheet.lines.map(lineKey));
-    return [...sheet.lines, ...added.filter((l) => !onSheet.has(lineKey(l)))];
-  }, [sheet, added]);
+    // A ticked entry counts as before the count: the line's Expected takes it in (withEarlier),
+    // so the difference shown is the one the save will make.
+    return [...sheet.lines, ...added.filter((l) => !onSheet.has(lineKey(l)))].map((l) =>
+      withEarlier(l, before),
+    );
+  }, [sheet, added, before]);
+  const laterEntries = useMemo(() => laterCount(sheet?.lines ?? []), [sheet]);
+  const onTickBefore = useCallback((id: number, on: boolean) => {
+    setBefore((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   const addedKeys = useMemo(() => new Set(added.map(lineKey)), [added]);
   const onSheetKeys = useMemo(() => new Set(allLines.map(lineKey)), [allLines]);
   const states = useMemo(
@@ -263,6 +285,7 @@ export function InventoryCountTab(props: {
     setTyped({});
     setAdded([]);
     setSearch("");
+    setBefore(new Set());
   };
   const applySwitch = (next: Switch) => {
     if (next.locationId != null) setPicked(next.locationId);
@@ -318,6 +341,10 @@ export function InventoryCountTab(props: {
       opening,
       note: note.trim() || null,
       lines: saveLines(allLines, typed, { opening, dollars }),
+      // The ticked entries of the counted lines; none on today's sheet.
+      ...(before.size
+        ? { before_ids: earlierIds(allLines, typed, { opening, dollars }, before) }
+        : {}),
     });
   };
 
@@ -466,6 +493,14 @@ export function InventoryCountTab(props: {
             )}
             {sheet && (
               <>
+                {laterBanner(laterEntries, sheet.counted_on) && (
+                  <p
+                    className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+                    data-count-later-banner
+                  >
+                    {laterBanner(laterEntries, sheet.counted_on)}
+                  </p>
+                )}
                 <p className="font-medium" data-count-summary>
                   {summary.counted} of {many(summary.lines, "line", "lines")} counted ·{" "}
                   {many(summary.differ, "differs", "differ")}
@@ -555,6 +590,9 @@ export function InventoryCountTab(props: {
                             disabled={save.isPending}
                             onType={onType}
                             onRemove={onRemove}
+                            before={before}
+                            countedOn={sheet.counted_on}
+                            onTickBefore={onTickBefore}
                           />
                         ))}
                       </TableBody>
@@ -700,6 +738,10 @@ export function InventoryCountTab(props: {
 interface RowHandlers {
   onType: (key: string, patch: Partial<TypedLine>) => void;
   onRemove: (key: string) => void;
+  /** The ticked "happened on or before the count day" entries, and the tick itself. */
+  before: ReadonlySet<number>;
+  countedOn: string;
+  onTickBefore: (id: number, on: boolean) => void;
 }
 
 /** A category's heading and its lines. */
@@ -738,6 +780,9 @@ function CategoryRows(
             disabled={props.disabled}
             onType={props.onType}
             onRemove={props.onRemove}
+            before={props.before}
+            countedOn={props.countedOn}
+            onTickBefore={props.onTickBefore}
           />
         );
       })}
@@ -775,6 +820,35 @@ const SheetRow = memo(function SheetRow(
           <span className="block font-mono text-xs font-normal text-muted-foreground">
             #{line.item_nos.join(", #")}
           </span>
+        )}
+        {/* Typed in since the count day (owner, Nov 18): each one is ticked if it happened on or
+            before that day, so the count does not take it off twice. */}
+        {laterOf(line).length > 0 && (
+          <div
+            className="mt-1.5 space-y-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs font-normal text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+            data-count-later={key}
+          >
+            <p className="font-semibold">Typed in since {fmtDay(props.countedOn)}</p>
+            {laterOf(line).map((e) => (
+              <label key={e.id} className="flex cursor-pointer items-start gap-2">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={props.before.has(e.id)}
+                  disabled={props.disabled}
+                  onCheckedChange={(v) => props.onTickBefore(e.id, v === true)}
+                  data-count-later-tick={e.id}
+                />
+                <span>
+                  {laterLine(e, line.unit)}
+                  <span className="block text-amber-900/80 dark:text-amber-100/80">
+                    {props.before.has(e.id)
+                      ? `Counted as on or before ${fmtDay(props.countedOn)}: it is in Expected.`
+                      : `Tick if it happened on or before ${fmtDay(props.countedOn)}.`}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
         )}
         {props.added && (
           <span className="mt-0.5 flex items-center gap-1 text-xs font-normal text-muted-foreground">

@@ -20,7 +20,7 @@
  * Pure: no React, no database, no clock.
  */
 import { cents, countDifference, parsePrice } from "@/lib/inventory-cost";
-import type { CountSheetLine } from "@/lib/inventory-count.functions";
+import type { CountSheetLine, LaterEntry } from "@/lib/inventory-count.functions";
 import { packUnitLabel, plural, type PieceDef } from "@/lib/stock-units";
 
 /** A product that can be stocked, for "Add an item" (the Inventory page's own product list). */
@@ -37,6 +37,71 @@ export interface CountProduct {
 
 /** One line of the sheet, as the server sends it (an added item is given the same shape). */
 export type SheetLine = CountSheetLine;
+
+// ── Entries typed in since the count day (owner, Nov 18, of the audit) ─────────────────────────
+// A count dated to an earlier day is compared with what inventory held at the end of that day.
+// Something typed in since then that really happened on or before the day (a use logged late)
+// was corrected for twice: once by the count, which saw the shelf without it, and once by the
+// late entry. The sheet now lists such entries under their line; ticking one says "this was
+// before the count", and the save moves it into the count day.
+
+export type { LaterEntry };
+
+/** The entries typed in since the count day for a line (none on today's sheet). */
+export const laterOf = (l: { later?: LaterEntry[] | undefined }): LaterEntry[] => l.later ?? [];
+
+/**
+ * The line as the count sees it once the ticked entries count as before the count day: what
+ * inventory expected, with those entries taken in. 10 expected and a late "2 used" ticked is 8
+ * expected, so a count of 8 is no difference.
+ */
+export function withEarlier<T extends { expected: number; later?: LaterEntry[] | undefined }>(
+  line: T,
+  before: ReadonlySet<number>,
+): T {
+  const moved = laterOf(line)
+    .filter((e) => before.has(e.id))
+    .reduce((n, e) => n + e.qty, 0);
+  return moved === 0 ? line : { ...line, expected: r3(line.expected + moved) };
+}
+
+/** What the save sends as `before_ids`: the ticked entries of the lines that are counted. */
+export function earlierIds(
+  lines: readonly (StateLine & { later?: LaterEntry[] | undefined })[],
+  typed: Readonly<Record<string, TypedLine>>,
+  opts: SheetOptions,
+  before: ReadonlySet<number>,
+): number[] {
+  const out: number[] = [];
+  for (const l of lines) {
+    if (lineState(l, typed[lineKey(l)], opts).counted == null) continue;
+    for (const e of laterOf(l)) if (before.has(e.id)) out.push(e.id);
+  }
+  return out;
+}
+
+/** How many entries were typed in since the count day, over the whole sheet. */
+export const laterCount = (lines: readonly { later?: LaterEntry[] | undefined }[]): number =>
+  lines.reduce((n, l) => n + laterOf(l).length, 0);
+
+/** The line above a past day's sheet that has such entries; null when it has none. */
+export function laterBanner(n: number, day: string): string | null {
+  if (n <= 0) return null;
+  const d = fmtDay(day);
+  return `${n === 1 ? "1 entry was" : `${n} entries were`} typed in after ${d} for items on this sheet. ${n === 1 ? "It is" : "They are"} shown under ${n === 1 ? "its" : "their"} item. Tick ${n === 1 ? "it if it" : "each one that"} happened on or before ${d}, so the count does not take it off twice. Leave it unticked if it happened after.`;
+}
+
+/** One such entry in words: "Jan 2 · Tyler M · 2 each Used on job · #6071 …". */
+export function laterLine(e: LaterEntry, unit: string): string {
+  const when = new Date(e.at).toLocaleDateString("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+  });
+  const n = Math.abs(r3(e.qty));
+  const amount = `${e.qty < 0 ? "−" : "+"}${n} ${packUnitLabel(n, unit)}`;
+  return [when, e.who, `${amount} · ${e.what}`, e.job].filter(Boolean).join(" · ");
+}
 
 /** What is typed against one line: the boxes' TEXT, so a blank box stays blank and never 0. */
 export interface TypedLine {

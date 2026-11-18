@@ -40,6 +40,7 @@ import {
   calcTradeBid,
   emptySetup,
   tradeBidDataSchema,
+  tradeBidSaveBlocked,
   tradeFigures,
   tradeSetupSchema,
   type TradeBidData,
@@ -380,6 +381,10 @@ export async function saveTradeBidWith(
       hadDueDate: !!cur.due_date,
     });
     if (dueProblem) throw new Error(dueProblem);
+    // A Submitted or Won bid is not saved with a line missing its number (Nov 18, the audit):
+    // the line prices at $0, so the price the customer was given would drop without a word.
+    const blocked = tradeBidSaveBlocked(cur.status, result.problems);
+    if (blocked) throw new Error(blocked);
     const { error } = await sb.from("bids").update(payload).eq("id", data.id);
     if (error) throw new Error(error.message);
     return readTradeBid(sb, data.id);

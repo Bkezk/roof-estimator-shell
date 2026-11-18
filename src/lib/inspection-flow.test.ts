@@ -93,6 +93,7 @@ import {
   setJobPhotoItems,
 } from "@/lib/service-field.functions";
 import {
+  clearInspectionOutcome,
   createRepairFromInspection,
   getTicketInspection,
   saveTicketInspection,
@@ -729,18 +730,24 @@ describe("4b. saveTicketInspection carries the switch; the outcome; Warranty", (
     expect(typeof tables.service_jobs[0]!["inspection_outcome_at"]).toBe("string");
     expect(inspFn).toContain('service_type: z.enum(["repair", "warranty", "other"]),');
   });
-  it("setInspectionOutcome 'none' / 'bid': the office or a manager on a Done inspection; a technician is refused", async () => {
+  // Nov 18 (the audit, owner: "fix please"): "No action needed" takes the inspection off the
+  // Owner page's list for good, so it is a manager's or an admin's. It was any office user's.
+  it("setInspectionOutcome 'none': a manager on a Done inspection; an office user and a technician are refused", async () => {
     const tables = envWith(job({ stage: "done", inspection: savedJson() }));
+    await expect(
+      call(setInspectionOutcome, { id: JOB, outcome: "none" }, tables, OFFICE),
+    ).rejects.toThrow("Only a manager or an admin marks an inspection “No action needed”");
+    expect(tables.service_jobs[0]!["inspection_outcome"] ?? null).toBeNull();
     const rec = await call<{ outcome: string; at: string; by: string | null }>(
       setInspectionOutcome,
       { id: JOB, outcome: "none" },
       tables,
-      OFFICE,
+      MANAGER,
     );
-    expect(rec).toMatchObject({ outcome: "none", by: "Olive Office" });
+    expect(rec).toMatchObject({ outcome: "none", by: "Mo Manager" });
     expect(tables.service_jobs[0]).toMatchObject({
       inspection_outcome: "none",
-      inspection_outcome_by: OFFICE,
+      inspection_outcome_by: MANAGER,
     });
     expect(tables.service_job_events[0]).toMatchObject({
       kind: "note",
@@ -759,6 +766,103 @@ describe("4b. saveTicketInspection carries the switch; the outcome; Warranty", (
         call(setInspectionOutcome, { id: JOB, outcome: "repair_ticket" }, tables, MANAGER),
       ),
     ).rejects.toThrow();
+  });
+  // ── The audit of Nov 18 (owner: "fix please") ──────────────────────────────────────────────
+  it("a repair ticket made from an inspection sends “Opened” to the admins and managers, as a ticket made by hand does", async () => {
+    const ADMIN = "55555555-5555-4555-8555-555555555555";
+    const tables = {
+      ...envWith(job({ stage: "done", inspection: savedJson(), number: 6012 })),
+      profiles: [
+        ...profiles,
+        {
+          id: ADMIN,
+          role: "admin",
+          access: [],
+          technician: false,
+          full_name: "Ann Admin",
+          email: "ann@example.test",
+        },
+      ],
+    };
+    notify.mockClear();
+    const made = await call<{ id: string; number: number; existing: boolean }>(
+      createRepairFromInspection,
+      { id: JOB, service_type: "repair", scheduled_date: "2026-11-23" },
+      tables,
+      MANAGER,
+    );
+    expect(made.existing).toBe(false);
+    const opened = notify.mock.calls.filter(([, m]) => m.title.startsWith("Opened: Ticket #"));
+    expect(opened).toHaveLength(1);
+    // The admin is told; the manager who made it is not (their own change).
+    expect(opened[0]![0]).toEqual([ADMIN]);
+    expect(opened[0]![1].body).toContain("Mo Manager opened it.");
+    // A second press opens nothing and tells nobody again.
+    notify.mockClear();
+    const again = await call<{ existing: boolean }>(
+      createRepairFromInspection,
+      { id: JOB, service_type: "repair", scheduled_date: "2026-11-23" },
+      tables,
+      MANAGER,
+    );
+    expect(again.existing).toBe(true);
+    expect(notify).not.toHaveBeenCalled();
+    // A notice that cannot be sent never undoes the ticket: it is caught and logged.
+    expect(inspFn).toMatch(
+      /try \{\s*const \{ afterTicketStage \} = await import\("@\/lib\/ticket-events\.server"\);\s*await afterTicketStage\(row, null, \{ id: context\.userId, name: nameOf\(p\) \}, sb\);\s*\} catch \(e\) \{\s*console\.error\(/,
+    );
+  });
+  it("“No action needed” can be taken back by a manager or an admin, once, with a line on the timeline", async () => {
+    const tables = envWith(
+      job({
+        stage: "done",
+        inspection: savedJson(),
+        inspection_outcome: "none",
+        inspection_outcome_at: "2026-11-18T15:00:00Z",
+        inspection_outcome_by: MANAGER,
+      }),
+    );
+    await expect(call(clearInspectionOutcome, { id: JOB }, tables, OFFICE)).rejects.toThrow(
+      "Only a manager or an admin marks an inspection “No action needed”",
+    );
+    await expect(call(clearInspectionOutcome, { id: JOB }, tables, TECH)).rejects.toThrow(
+      "Only a manager or an admin",
+    );
+    expect(tables.service_jobs[0]!["inspection_outcome"]).toBe("none");
+    expect(await call(clearInspectionOutcome, { id: JOB }, tables, MANAGER)).toEqual({
+      cleared: true,
+    });
+    expect(tables.service_jobs[0]).toMatchObject({
+      inspection_outcome: null,
+      inspection_outcome_at: null,
+      inspection_outcome_by: null,
+    });
+    expect(tables.service_job_events.at(-1)).toMatchObject({
+      kind: "note",
+      note: "Inspection outcome: “No action needed” was taken back",
+      by_name: "Mo Manager",
+    });
+    // Nothing to take back the second time, or when a bid or a repair ticket came of it.
+    await expect(call(clearInspectionOutcome, { id: JOB }, tables, MANAGER)).rejects.toThrow(
+      "Nothing to take back",
+    );
+    const bid = envWith(job({ stage: "done", inspection_outcome: "bid" }));
+    await expect(call(clearInspectionOutcome, { id: JOB }, bid, MANAGER)).rejects.toThrow(
+      "Nothing to take back",
+    );
+    expect(bid.service_jobs[0]!["inspection_outcome"]).toBe("bid");
+  });
+  it("the panel: the button is a manager's, with “Take back” beside the recorded answer; a reopened inspection asks again", () => {
+    const panel = read("src/components/service/inspection-section.tsx");
+    expect(panel).toContain('data-action="take-back-no-action"');
+    expect(panel).toContain('data-note="no-action-managers"');
+    expect(panel).toContain("“No action needed” is a manager’s to choose.");
+    const sql = read("supabase/migrations/20261118170000_no_action_needed_cleared_on_reopen.sql");
+    expect(sql).toContain("create trigger service_jobs_reopen_clears_no_action");
+    expect(sql).toContain("before update of stage on public.service_jobs");
+    expect(sql.replace(/\s+/g, " ")).toContain(
+      "old.stage in ('done', 'authorized', 'invoiced', 'closed') and new.stage in ('open', 'scheduled')",
+    );
   });
   it("getTicketInspection returns the outcome with who and when", async () => {
     const tables = envWith(

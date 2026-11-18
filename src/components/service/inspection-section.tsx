@@ -44,6 +44,7 @@ import {
   answerInspectionOpportunity,
   createRepairFromInspection,
   getSourceInspection,
+  clearInspectionOutcome,
   setInspectionOutcome,
   type OpportunityQuestion,
   type OutcomeRecord,
@@ -544,6 +545,7 @@ function OfficeActions({
   const navigate = useNavigate();
   const createFn = useServerFn(createRepairFromInspection);
   const outcomeFn = useServerFn(setInspectionOutcome);
+  const clearFn = useServerFn(clearInspectionOutcome);
   // Those the opportunity's own rule lets read it get "Open" on the toast that names it.
   const canOpenOpportunity = can("customers") || can("estimate");
   const [type, setType] = useState<RepairType>("repair");
@@ -595,6 +597,20 @@ function OfficeActions({
     },
     onError: (e) => toast.error(`Could not record the outcome: ${errText(e)}`),
   });
+  // Taking "No action needed" back (owner, Nov 18, of the audit): a manager's, as pressing it is.
+  const takeBack = useMutation({
+    mutationFn: () => clearFn({ data: { id: job.id } }),
+    onSuccess: () => {
+      qc.setQueryData<TicketInspection>(inspectionKey(job.id), (old) =>
+        old ? { ...old, outcome: null } : old,
+      );
+      void qc.invalidateQueries({ queryKey: inspectionKey(job.id) });
+      void qc.invalidateQueries({ queryKey: fieldKeys.job(job.id) });
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(job.id) });
+      toast.success("Taken back: nothing is chosen for this inspection now");
+    },
+    onError: (e) => toast.error(`Could not take it back: ${errText(e)}`),
+  });
   const ins = data.inspection;
   const bidPrefill = ins
     ? bidPrefillFromInspection(
@@ -640,6 +656,21 @@ function OfficeActions({
             by: outcome.by,
             when: outcome.at ? whenShort(outcome.at) : null,
           })}
+          {/* A mis-press is taken back here (owner, Nov 18): a manager's or an admin's. */}
+          {outcome.outcome === "none" && manager && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={takeBack.isPending}
+              onClick={() => takeBack.mutate()}
+              data-action="take-back-no-action"
+            >
+              {takeBack.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+              Take back
+            </Button>
+          )}
         </p>
       )}
       {!complete ? (
@@ -748,21 +779,32 @@ function OfficeActions({
             {/* Black (owner, Nov 3): the one that closes the matter without another ticket. When
                 the technician recommended something (owner, Nov 13) that choice is the black one
                 and this stands beside it, outlined: still one press away. */}
-            <Button
-              type="button"
-              variant={pre.line ? "outline" : "default"}
-              className="h-10"
-              disabled={dirty || record.isPending || outcome?.outcome === "none"}
-              onClick={() => record.mutate("none")}
-              data-action="no-action-needed"
-            >
-              {record.isPending && record.variables === "none" ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-              )}
-              No action needed
-            </Button>
+            {/* A manager's or an admin's (owner, Nov 18, of the audit): it takes the inspection
+                off the Owner page's list. The office sees why the button is not theirs. */}
+            {manager ? (
+              <Button
+                type="button"
+                variant={pre.line ? "outline" : "default"}
+                className="h-10"
+                disabled={dirty || record.isPending || outcome?.outcome === "none"}
+                onClick={() => record.mutate("none")}
+                data-action="no-action-needed"
+              >
+                {record.isPending && record.variables === "none" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                No action needed
+              </Button>
+            ) : (
+              <p
+                className="self-center text-xs text-muted-foreground"
+                data-note="no-action-managers"
+              >
+                “No action needed” is a manager’s to choose.
+              </p>
+            )}
           </div>
         </>
       )}

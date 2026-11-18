@@ -301,6 +301,47 @@ export function asTradeBidData(x: unknown): TradeBidData | null {
   return r.success ? r.data : null;
 }
 
+/**
+ * The lines of a saved trade bid that are missing a number, as the bid screen lists them
+ * ("Primer: type the cost"); none for a roofing bid or a complete one. A line that is missing a
+ * number prices at $0, so the bid's saved price is short by it (the audit, Nov 18).
+ */
+export function tradeBidProblems(data: unknown): string[] {
+  const d = asTradeBidData(data);
+  return d ? calcTradeBid(d.setup, d.quantities).problems : [];
+}
+
+/**
+ * Why a trade bid cannot go further yet (owner, Nov 18, of the audit: a bid with a line missing
+ * its cost could be saved, sent, won and invoiced at the lower price, and only the bid screen
+ * warned). `what` says what was not done ("Not marked Won"). Null when nothing is missing.
+ */
+export function tradeBidNotReady(what: string, problems: readonly string[]): string | null {
+  if (!problems.length) return null;
+  const n = problems.length;
+  const shown = problems.slice(0, 3).join("; ") + (n > 3 ? "; and more" : "");
+  const lines =
+    n === 1
+      ? "a line on this bid is missing a number"
+      : `${n} lines on this bid are missing a number`;
+  return `${what}: ${lines} (${shown}), so its price is not complete. Open the bid, fill ${n === 1 ? "it" : "them"} in and save.`;
+}
+
+/**
+ * Why a save is refused: the bid is already Submitted or Won and a line is missing a number, so
+ * the save would lower the price the customer was given. A draft saves as it is (work in
+ * progress; the screen lists what is missing). Null when the save goes through.
+ */
+export function tradeBidSaveBlocked(
+  status: string | null | undefined,
+  problems: readonly string[],
+): string | null {
+  if (!problems.length || (status !== "submitted" && status !== "won")) return null;
+  const n = problems.length;
+  const shown = problems.slice(0, 3).join("; ") + (n > 3 ? "; and more" : "");
+  return `Not saved: this bid is ${status === "won" ? "Won" : "Submitted"} and ${n === 1 ? "a line is" : `${n} lines are`} missing a number (${shown}), so its price would not be complete. Fill ${n === 1 ? "it" : "them"} in, then save.`;
+}
+
 /** Is this `bids.data` a trade bid's? (A roofing bid's has no `kind`.) */
 export const isTradeData = (x: unknown): boolean =>
   !!x && typeof x === "object" && (x as { kind?: unknown }).kind === "trade";

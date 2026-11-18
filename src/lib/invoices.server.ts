@@ -37,7 +37,7 @@ import {
   unitText,
   type CatalogData,
 } from "@/lib/invoice-materials";
-import { poLineFor } from "@/lib/invoice-po-lines";
+import { billedPoIds, poLineFor, unbilledOrders } from "@/lib/invoice-po-lines";
 import {
   chosenPhotoIds,
   invoicePhotoCaption,
@@ -75,7 +75,7 @@ import {
   SERVICE_STOCK_SCREEN,
   materialForCell,
   materialsByCell,
-  packCostFor,
+  stockUnitCost,
   servicePiece,
 } from "@/lib/service-materials";
 import { loadServiceMaterials } from "@/lib/service-materials.server";
@@ -170,6 +170,31 @@ export async function cellPiece(
 }
 
 /**
+ * The purchase orders that the ticket's OTHER live invoices already carry as lines (not the
+ * draft being built or rebuilt, and not a voided invoice, which bills nothing).
+ */
+async function posBilledElsewhere(
+  sb: Client,
+  jobId: string,
+  forInvoiceId: string | null | undefined,
+): Promise<Set<string>> {
+  const { data: others, error } = await sb
+    .from("invoices")
+    .select("id")
+    .eq("service_job_id", jobId)
+    .neq("status", "void");
+  if (error) throw new Error(`The ticket's other invoices: ${error.message}`);
+  const ids = (others ?? []).map((i) => i.id).filter((id) => id !== forInvoiceId);
+  if (!ids.length) return new Set();
+  const { data: lines, error: lErr } = await sb
+    .from("invoice_lines")
+    .select("source")
+    .in("invoice_id", ids);
+  if (lErr) throw new Error(`The ticket's other invoices' lines: ${lErr.message}`);
+  return billedPoIds(lines ?? []);
+}
+
+/**
  * Build the lines a ticket's time entries, materials and purchase orders produce today.
  * `markup` is the invoice's own material markup (owner, Oct 6: per invoice); without it, Setup ›
  * Material pricing's. `poMarkup` (owner, Oct 14; invoices.po_markup) prices the PO lines at
@@ -178,7 +203,15 @@ export async function cellPiece(
 export async function buildLinesFromJob(
   sb: Client,
   jobId: string,
-  opts: { markup?: number | null; poMarkup?: boolean | null } = {},
+  opts: {
+    markup?: number | null;
+    poMarkup?: boolean | null;
+    /**
+     * The draft the lines are for, when it exists already (Rebuild): its own PO lines do not
+     * count as "billed elsewhere". A new draft passes nothing.
+     */
+    forInvoiceId?: string | null;
+  } = {},
 ): Promise<LineInsert[]> {
   const { data: job, error } = await sb
     .from("service_jobs")
@@ -300,7 +333,9 @@ export async function buildLinesFromJob(
     // bills in that unit.
     const piece = servicePiece(material) ?? catalogPiece ?? pieceFromCountedNotes(c.notes);
     // The service price is per piece / unit as CenterPoint lists it; the ledger is in packs.
-    const cost = material ? packCostFor(material.cost, piece) : (catalogCost ?? 0);
+    // (stockUnitCost: a material priced by the box is not multiplied by the box's pieces; the
+    // audit, Nov 18.)
+    const cost = material ? stockUnitCost(material, piece) : (catalogCost ?? 0);
     const named = material ? { ...c, row_label: material.name, price_col: "" } : c;
     lines.push({
       sort: sort++,
@@ -315,7 +350,9 @@ export async function buildLinesFromJob(
   // Purchase orders (owner, Oct 14: "the mark up … toggled to applied to the PO or not"): one
   // material line each at the PO's price plus the markup, or at the price when the invoice's
   // switch is off. The supplier is named as typed on the PO, else by its linked vendor.
-  const orders = pos ?? [];
+  // A PO already on another live invoice of this ticket is not billed again (owner, Nov 18, of
+  // the audit; invoice-po-lines.ts unbilledOrders).
+  const orders = unbilledOrders(pos ?? [], await posBilledElsewhere(sb, jobId, opts.forInvoiceId));
   const vendorIds = [
     ...new Set(
       orders.filter((p) => !p.vendor_text && p.vendor_id).map((p) => p.vendor_id as string),

@@ -2,7 +2,9 @@
  * The Owner page's "Needs attention" list (owner, Nov 15: "one issue we run into on the roofing
  * business is things not getting started or followed up on" … "i more so meant like keep the
  * owner on top of things"). One list at the top of the Owner page, found by rules: nobody adds
- * a row and nobody on the staff can dismiss one. A row leaves when the work is done.
+ * a row and nobody on the staff can dismiss one. A row leaves when the work is done. The one
+ * exception is an inspection a manager or an admin marks "No action needed" (Nov 16): its row
+ * leaves, and comes back when that is taken back or the inspection is reopened (Nov 18).
  *
  * The owner approved three groups and these rows ("Those are right"), with tickets waiting on
  * an invoice left out ("Yes noise") and no morning brief ("No morning brief please"):

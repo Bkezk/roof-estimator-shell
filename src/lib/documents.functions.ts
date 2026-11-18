@@ -28,6 +28,7 @@ import { easternYmd } from "@/lib/field-day";
 import { parseInspection, withItemKeys } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
 import { parsePhotoMarkup, type PhotoMark, type Rotation } from "@/lib/photo-annotations";
+import { tradeBidNotReady, tradeBidProblems } from "@/lib/trade-bid";
 import { toBase64 } from "@/lib/webpush";
 
 import { missingDefaultTemplates } from "./documents/defaults";
@@ -641,6 +642,10 @@ async function loadSource(
       .maybeSingle();
     if (error) throw err(error, "Could not read the bid");
     if (!row) throw new Error("Bid not found");
+    // A trade bid with a line missing a number prints a price that is short by it (Nov 18, the
+    // audit): no document until the bid is complete.
+    const notReady = tradeBidNotReady("No document was made", tradeBidProblems(row.data));
+    if (notReady) throw new Error(notReady);
     bid = bidFromSavedState(row.data, row);
     accountId = row.account_id;
     siteId = row.site_id;

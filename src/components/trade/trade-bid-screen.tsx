@@ -785,7 +785,9 @@ function BidForm(props: { bid: TradeBid | null; start: Draft }) {
           <CardTitle className="text-base">The job</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          {/* One column that cannot grow past the card on a phone (Nov 18, the audit: a long
+              property line made the whole page 692 wide on a 390 screen). */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="trade-bid-name">Job name</Label>
               <Input

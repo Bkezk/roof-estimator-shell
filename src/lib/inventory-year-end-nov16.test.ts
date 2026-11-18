@@ -14,6 +14,7 @@
  *                 so $197.50                                   on hand 22   $2,172.50
  *         Mar 2   4 moved from the shop to the truck (no cost change): shop 18, truck 4
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-start", async () => ({
@@ -28,6 +29,16 @@ import {
   setEntryPrice,
 } from "@/lib/inventory-cost.functions";
 import {
+  earlierIds,
+  laterBanner,
+  laterCount,
+  laterLine,
+  laterOf,
+  lineKey,
+  withEarlier,
+} from "@/lib/inventory-count-sheet";
+import {
+  COUNT_BEFORE_NEEDS_PAST_DAY,
   COUNT_FUTURE,
   COUNT_NEEDS_ESTIMATE,
   countInstant,
@@ -521,7 +532,10 @@ describe("the count sheet (getCountSheet)", () => {
       true,
       NOW,
     );
-    expect(before.lines).toEqual([]);
+    // Nov 18 (the audit): the truck held none that night, and what was typed in since is shown
+    // on the line so the office can say whether it happened on or before the count day.
+    expect(before.lines.map((l) => [l.item, l.expected])).toEqual([["Box of plates", 0]]);
+    expect(before.lines[0]!.later).toHaveLength(1);
   });
 
   it("no dollars for anyone but an admin or a manager", async () => {
@@ -867,5 +881,180 @@ describe("the count report's shape (pure)", () => {
         "Difference",
       ],
     ]);
+  });
+});
+
+// ── Nov 18 (the audit; owner: "fix please") ──────────────────────────────────────────────────
+// A count dated to an earlier day was compared with what inventory held that night. Something
+// typed in since that really happened before the count (a use logged late) was then taken off
+// twice: by the count, which saw the shelf without it, and by the late entry. The past day's
+// sheet now lists what was typed in since, and a ticked entry is moved into the count day.
+describe("a count dated to an earlier day: the entries typed in since", () => {
+  const admin = { role: "admin", access: [], technician: false };
+  const past = { location_id: "shop", counted_on: "2026-12-31", opening: false };
+
+  it("the past day's sheet lists them under their item, oldest first; today's sheet has none", async () => {
+    const sheet = await readCountSheet(world().db, past, true, NOW);
+    expect(sheet.lines).toHaveLength(1);
+    expect(sheet.lines[0]!.expected).toBe(15);
+    expect(laterOf(sheet.lines[0]!)).toEqual([
+      { id: 4, at: "2027-02-01T15:00:00.000Z", qty: 5, what: "Received", who: "Mo", job: null },
+      {
+        id: 5,
+        at: "2027-03-01T15:00:00.000Z",
+        qty: 2,
+        what: "Put in inventory",
+        who: "Tess",
+        job: "#6015 Acme",
+      },
+      { id: 6, at: "2027-03-02T15:00:00.000Z", qty: -4, what: "Moved out", who: "Mo", job: null },
+    ]);
+    expect(laterCount(sheet.lines)).toBe(3);
+    const today = await readCountSheet(world().db, { location_id: "shop" }, true, NOW);
+    expect(laterCount(today.lines)).toBe(0);
+  });
+  it("a count's own correction is never offered as a late entry", async () => {
+    const env = world({
+      inventory_movements: [...STORY, move(8, "2027-01-05", -1, "adjustment", { count_id: COUNT })],
+    });
+    const sheet = await readCountSheet(env.db, past, true, NOW);
+    expect(laterOf(sheet.lines[0]!).map((e) => e.id)).toEqual([4, 5, 6]);
+  });
+  it("a ticked entry counts as before the count: Expected takes it in, so the difference is the true one", () => {
+    const line = {
+      ...PLATES,
+      expected: 10,
+      later: [
+        {
+          id: 21,
+          at: "2027-01-03T15:00:00.000Z",
+          qty: -2,
+          what: "Used on job",
+          who: "T",
+          job: null,
+        },
+        { id: 22, at: "2027-01-04T15:00:00.000Z", qty: 5, what: "Received", who: "M", job: null },
+      ],
+    };
+    // Nothing ticked: as the sheet came.
+    expect(withEarlier(line, new Set())).toBe(line);
+    // The late "2 used" was before the count: 8 expected, so a count of 8 is no difference
+    // (it was a difference of -2 on top of the late entry's own -2).
+    expect(withEarlier(line, new Set([21])).expected).toBe(8);
+    expect(withEarlier(line, new Set([21, 22])).expected).toBe(13);
+    // An id of another line changes nothing.
+    expect(withEarlier(line, new Set([99]))).toBe(line);
+    // No float dust.
+    expect(
+      withEarlier({ expected: 0.1, later: [{ ...line.later[0]!, qty: 0.2 }] }, new Set([21])),
+    ).toMatchObject({ expected: 0.3 });
+  });
+  it("only the ticked entries of the lines that are counted are sent", () => {
+    const a = { ...PLATES, unit: "each", expected: 10, later: [{ id: 21 }, { id: 22 }] };
+    const b = { ...TAPE, unit: "each", expected: 3, later: [{ id: 31 }] };
+    const lines = [a, b] as unknown as Parameters<typeof earlierIds>[0];
+    const opts = { opening: false, dollars: false };
+    const typed = { [lineKey(PLATES)]: { packs: "8", pieces: "", cost: "" } };
+    // Seam tape was left blank (not counted): its ticked entry is not moved.
+    expect(earlierIds(lines, typed, opts, new Set([21, 31]))).toEqual([21]);
+    expect(earlierIds(lines, typed, opts, new Set())).toEqual([]);
+    expect(earlierIds(lines, {}, opts, new Set([21, 22, 31]))).toEqual([]);
+  });
+  it("the words above the sheet and on each entry", () => {
+    expect(laterBanner(0, "2026-12-31")).toBeNull();
+    expect(laterBanner(1, "2026-12-31")).toBe(
+      "1 entry was typed in after Dec 31, 2026 for items on this sheet. It is shown under its item. Tick it if it happened on or before Dec 31, 2026, so the count does not take it off twice. Leave it unticked if it happened after.",
+    );
+    expect(laterBanner(3, "2026-12-31")).toBe(
+      "3 entries were typed in after Dec 31, 2026 for items on this sheet. They are shown under their item. Tick each one that happened on or before Dec 31, 2026, so the count does not take it off twice. Leave it unticked if it happened after.",
+    );
+    expect(
+      laterLine(
+        {
+          id: 1,
+          at: "2027-01-03T15:00:00.000Z",
+          qty: -2,
+          what: "Used on job",
+          who: "Tess",
+          job: "#6015 Acme",
+        },
+        "each",
+      ),
+    ).toBe("Jan 3 · Tess · −2 each · Used on job · #6015 Acme");
+    expect(
+      laterLine(
+        { id: 2, at: "2027-02-01T15:00:00.000Z", qty: 5, what: "Received", who: null, job: null },
+        "box",
+      ),
+    ).toBe("Feb 1 · +5 boxes · Received");
+  });
+  it("the save hands the ticked entries to the database, each once; none on today's count", async () => {
+    const env = world({}, { rpcs: { inventory_save_count: () => COUNT } });
+    await saveCountWith(
+      env.db,
+      { ...past, lines: [{ ...PLATES, counted: 13 }], before_ids: [6, 6, 5] },
+      admin,
+      NOW,
+    );
+    expect(env.rpcCalls[0]!.args).toMatchObject({
+      p_counted_on: "2026-12-31",
+      p_before: [6, 5],
+    });
+    // Nothing ticked: the call is the one it always was (no p_before at all).
+    const plain = world({}, { rpcs: { inventory_save_count: () => COUNT } });
+    await saveCountWith(plain.db, { ...past, lines: [{ ...PLATES, counted: 15 }] }, admin, NOW);
+    expect(Object.keys(plain.rpcCalls[0]!.args)).not.toContain("p_before");
+    // Today's count takes everything typed so far already.
+    const today = world({}, { rpcs: { inventory_save_count: () => COUNT } });
+    await expect(
+      saveCountWith(
+        today.db,
+        {
+          location_id: "shop",
+          counted_on: "2027-06-01",
+          opening: false,
+          lines: [{ ...PLATES, counted: 18 }],
+          before_ids: [6],
+        },
+        admin,
+        NOW,
+      ),
+    ).rejects.toThrow(COUNT_BEFORE_NEEDS_PAST_DAY);
+    expect(today.rpcCalls).toEqual([]);
+  });
+  it("the database moves a ticked entry into the count day, and only an entry it should", () => {
+    const sql = readFileSync(
+      "supabase/migrations/20261118190000_count_takes_entries_typed_since.sql",
+      "utf8",
+    );
+    const flat = sql.replace(/\s+/g, " ");
+    // The ledger has no update rule for people: the move is the database's own, and only
+    // while a count is being saved.
+    expect(flat).toContain("create or replace function public.inventory_move_into_count(");
+    expect(flat).toContain("current_setting('jbk.count_save', true)");
+    expect(flat).toContain("raise exception 'Only saving a count moves an entry'");
+    expect(flat).toContain(
+      "revoke all on function public.inventory_move_into_count(bigint[], timestamptz, date) from public, anon;",
+    );
+    // Each entry is checked: this place, typed after the count day, not a count's own line.
+    expect(flat).toContain("p_before bigint[] default null");
+    expect(flat).toMatch(/m\.location_id (=|is distinct from) p_location/);
+    expect(flat).toMatch(/m\.created_at (>|<=) v_at/);
+    expect(flat).toContain("count_id is null");
+    // The old five-argument form goes, so one name has one meaning.
+    expect(flat).toContain(
+      "drop function if exists public.inventory_save_count(text, date, boolean, text, jsonb)",
+    );
+    // The entry keeps a note of when it was really typed.
+    expect(flat).toContain("Typed in ");
+  });
+  it("the screen: the banner, each entry with its tick box, and the ticked ids in the save", () => {
+    const tab = readFileSync("src/components/inventory-count-tab.tsx", "utf8");
+    expect(tab).toContain("data-count-later-banner");
+    expect(tab).toContain("data-count-later-tick={e.id}");
+    expect(tab).toContain("withEarlier(l, before)");
+    expect(tab).toContain("before_ids: earlierIds(allLines, typed, { opening, dollars }, before)");
+    // Clearing the sheet clears the ticks.
+    expect(tab).toMatch(/const clearSheet = \(\) => \{[\s\S]*?setBefore\(new Set\(\)\);\s*\};/);
   });
 });

@@ -496,7 +496,7 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
           created_by: context.userId,
           updated_by_name: nameOf(p),
         })
-        .select("id, number")
+        .select("*")
         .single();
       if (iErr) {
         // Two requests at once: the second trips service_jobs_from_job_live_idx (migration
@@ -517,9 +517,25 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       });
       // The outcome (owner, Oct 12): a repair ticket came of this inspection.
       await recordOutcome(sb, job.id, "repair_ticket", context.userId, nameOf(p));
+      // "Opened", to the people on the tickets' Each step line, as for a ticket made by hand
+      // (owner, Nov 18, of the audit: a repair ticket made here told nobody until someone
+      // scheduled it). Never fails the creation: the ticket is already made.
+      try {
+        const { afterTicketStage } = await import("@/lib/ticket-events.server");
+        await afterTicketStage(row, null, { id: context.userId, name: nameOf(p) }, sb);
+      } catch (e) {
+        console.error(
+          `createRepairFromInspection: the Opened notice for ticket #${row.number} was not sent: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
       // The repair ticket took the inspection's opportunity as it was written (the database,
       // 20261113100000), and a repair ticket wins it (owner, Nov 13).
-      return { ...row, existing: false, ...(await movedByTicket(context, row.id)) };
+      return {
+        id: row.id,
+        number: row.number,
+        existing: false,
+        ...(await movedByTicket(context, row.id)),
+      };
     },
   );
 
@@ -551,6 +567,11 @@ async function recordOutcome(
  * access who is not technician-only, the people the After the inspection panel shows to). A
  * repair ticket records itself (createRepairFromInspection). The choice can be changed: the
  * latest press wins, and the timeline keeps each.
+ *
+ * "No action needed" is a manager's or an admin's (owner, Nov 18, of the audit): it takes the
+ * inspection off the Owner page's Needs attention list, and any office user could press it on
+ * an inspection that found problems. It can be taken back (clearInspectionOutcome), and the
+ * database clears it when the inspection is reopened (20261118170000).
  */
 export const setInspectionOutcome = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -561,6 +582,7 @@ export const setInspectionOutcome = createServerFn({ method: "POST" })
     const p = await me(context);
     if (!dispatchesTickets(p))
       throw new Error("Only the office or a manager records the inspection's outcome");
+    if (data.outcome === "none" && !managesTickets(p)) throw new Error(NO_ACTION_MANAGERS_ONLY);
     const sb = context.supabase;
     const { data: job, error } = await sb
       .from("service_jobs")
@@ -586,6 +608,60 @@ export const setInspectionOutcome = createServerFn({ method: "POST" })
       meta: { inspection_outcome: data.outcome } as Json,
     });
     return { outcome: data.outcome, at, by: name };
+  });
+
+/** The refusal when someone who is not a manager or an admin presses "No action needed". */
+export const NO_ACTION_MANAGERS_ONLY =
+  "Only a manager or an admin marks an inspection “No action needed”. It takes the inspection off the Owner page's list.";
+
+/**
+ * "No action needed" taken back (owner, Nov 18, of the audit: it had no undo, so a mis-press
+ * could only be reversed by making a repair ticket or a bid). A manager or an admin; only while
+ * the outcome is "No action needed" (a repair ticket or a bid is undone by deleting it). The
+ * ticket is as if nothing had been chosen: its row is back on the Owner page's list when the
+ * inspection found problems. An opportunity that was closed after the choice stays as it is.
+ */
+export const clearInspectionOutcome = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ cleared: true }> => {
+    const p = await me(context);
+    if (!managesTickets(p)) throw new Error(NO_ACTION_MANAGERS_ONLY);
+    const sb = context.supabase;
+    const { data: job, error } = await sb
+      .from("service_jobs")
+      .select("id, service_type, inspection_outcome")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!job) throw new Error("Ticket not found");
+    if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+    if (job.inspection_outcome !== "none")
+      throw new Error("Nothing to take back: “No action needed” is not what was chosen");
+    const name = nameOf(p);
+    const { data: done, error: uErr } = await sb
+      .from("service_jobs")
+      .update({
+        inspection_outcome: null,
+        inspection_outcome_at: null,
+        inspection_outcome_by: null,
+        updated_by_name: name,
+      })
+      .eq("id", job.id)
+      // Only while it still says so: two people at once take it back once.
+      .eq("inspection_outcome", "none")
+      .select("id");
+    if (uErr) throw new Error(uErr.message);
+    if (!done?.length) throw new Error("Not taken back: the outcome changed a moment ago");
+    await sb.from("service_job_events").insert({
+      service_job_id: job.id,
+      kind: "note",
+      note: "Inspection outcome: “No action needed” was taken back",
+      by_user: context.userId,
+      by_name: name,
+      meta: { inspection_outcome: null } as Json,
+    });
+    return { cleared: true };
   });
 
 /**

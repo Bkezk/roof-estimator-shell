@@ -9,7 +9,7 @@
  * leftovers and repair purchases; any other material is stocked under screen "service" with its
  * name as the row. Pure, so the server, the pickers and the tests share it.
  */
-import type { PieceDef } from "@/lib/stock-units";
+import { priceIsPerPack, type PieceDef } from "@/lib/stock-units";
 
 /** The stock screen of a material with no bid-catalog twin. */
 export const SERVICE_STOCK_SCREEN = "service";
@@ -102,6 +102,26 @@ export function serviceLabel(
  */
 export function packCostFor(cost: number, piece: PieceDef | null): number {
   return piece && piece.perPack > 0 ? cost * piece.perPack : cost;
+}
+
+/**
+ * What ONE STOCK UNIT of a material's cell costs, from the material's own cost.
+ *
+ * A material's cost is normally per piece (as CenterPoint lists it), so a pack costs that times
+ * the pieces in it (packCostFor). One case is different (owner, Nov 18, of the audit: "fix
+ * please"): a material linked to an Estimate Pricing row with no "units per stock unit" takes
+ * that cell's price as its cost, and when the cell is priced by the pack ("Price/Box") that
+ * price is already the box's. It was multiplied by the box's pieces all the same: a $300 box of
+ * 1,000 was valued, and billed, at $300,000 a box. A cell priced by the piece ("Price/Part",
+ * with "Parts/Bag") is still multiplied, which is right.
+ */
+export function stockUnitCost(
+  m: ServiceMaterialLink & { cost: number },
+  piece: PieceDef | null,
+): number {
+  const ownUnit = servicePiece(m);
+  if (m.stock_screen_id && !ownUnit && priceIsPerPack(m.stock_price_col)) return m.cost;
+  return packCostFor(m.cost, piece);
 }
 
 /** The price a unit bills at: cost × (1 + markup), to the cent. */

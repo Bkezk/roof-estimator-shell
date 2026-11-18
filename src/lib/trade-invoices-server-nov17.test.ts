@@ -638,6 +638,23 @@ describe("createBidInvoice: a draft invoice straight from a won trade bid", () =
     expect(invoices(env)).toHaveLength(2);
   });
 
+  // Nov 18 (the audit; owner: "fix please"): a line missing its cost prices at $0, so the bid's
+  // price is short. No invoice is made at that price and nothing is written.
+  it("a won bid with a line missing a number is not invoiced until the line is filled in", async () => {
+    const data = {
+      ...(paintingBid()["data"] as Row),
+      setup: { ...emptySetup(), fixed: [{ id: "lift", name: "Lift rental", cost: null }] },
+    };
+    const env = world({ bids: [paintingBid({ data })] });
+    await expect(run(createBidInvoice, { bid_id: BID }, env, ADMIN)).rejects.toThrow(
+      "No invoice was made: a line on this bid is missing a number (Lift rental: type the cost), so its price is not complete. Open the bid, fill it in and save.",
+    );
+    expect(env.writes).toEqual([]);
+    // The bid has its own job number (it is the bid's, given once); no invoice number is taken.
+    expect(env.rpcCalls.map((c) => c.fn)).toEqual(["trade_bid_number"]);
+    expect(invoices(env)).toEqual([]);
+  });
+
   it("a draft bid, a roofing bid and a deleted bid are refused by the database, in its words", async () => {
     const draft = world({ bids: [paintingBid({ status: "draft" })] });
     await expect(run(createBidInvoice, { bid_id: BID }, draft, ADMIN)).rejects.toThrow(

@@ -34,7 +34,13 @@ import { bidHref } from "@/lib/bid-kind";
 import { BID_WATCH_KIND, bidStepNotice } from "@/lib/work-steps";
 import type { Client as StepClient } from "@/lib/notify.server";
 import { syncInspectionOutcomeAfterBidChange } from "@/lib/service-inspection.functions";
-import { asTradeBidData, calcTradeBid, tradeFigures } from "@/lib/trade-bid";
+import {
+  asTradeBidData,
+  calcTradeBid,
+  tradeBidNotReady,
+  tradeBidProblems,
+  tradeFigures,
+} from "@/lib/trade-bid";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -722,12 +728,27 @@ export const setBidStatus = createServerFn({ method: "POST" })
         .maybeSingle(),
       context.supabase
         .from("bids")
-        .select("status, submitted_at, won_on, status_changed_at")
+        .select("kind, status, submitted_at, won_on, status_changed_at")
         .eq("id", data.id)
         .maybeSingle(),
     ]);
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Bid not found (it may have been deleted).");
+    // A trade bid with a line missing a number is not sent or won at its short price (owner,
+    // Nov 18, of the audit; trade-bid.ts tradeBidNotReady). Only the bid screen warned before.
+    if ((data.status === "submitted" || data.status === "won") && cur.kind === "trade") {
+      const { data: body, error: bErr } = await context.supabase
+        .from("bids")
+        .select("data")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (bErr) throw new Error(bErr.message);
+      const notReady = tradeBidNotReady(
+        data.status === "won" ? "Not marked Won" : "Not marked Submitted",
+        tradeBidProblems(body?.data),
+      );
+      if (notReady) throw new Error(notReady);
+    }
     const { data: bid, error } = await context.supabase
       .from("bids")
       .update({

@@ -41,6 +41,7 @@ import {
   cellUnitsForCells,
   nameStockCells,
   PRICE_IS_MANAGERS,
+  REASON_LABELS,
 } from "@/lib/inventory.functions";
 import { toCsv } from "@/lib/review-export";
 import { materialsByCell, serviceLabel, type Cell } from "@/lib/service-materials";
@@ -85,6 +86,25 @@ export function countInstant(day: string, today: string): string | null {
   return new Date(Date.parse(endOfDay(day)) - 1000).toISOString();
 }
 
+/**
+ * An entry typed in AFTER the day a count is dated to, for an item on its sheet (owner, Nov 18,
+ * of the audit). The office says of each whether it happened on or before that day: one that
+ * did is moved into the day when the count is saved, so the count does not correct for it a
+ * second time.
+ */
+export interface LaterEntry {
+  id: number;
+  /** When it was typed in (ISO). */
+  at: string;
+  /** In the stock unit, signed: -2 is two taken. */
+  qty: number;
+  /** "Used on job", "Received" … as History names it. */
+  what: string;
+  who: string | null;
+  /** The ticket or bid it was for, when it names one. */
+  job: string | null;
+}
+
 export interface CountSheetLine extends Cell {
   item: string;
   colour: string;
@@ -97,6 +117,8 @@ export interface CountSheetLine extends Cell {
   /** The item's average cost per unit that day (admins and managers); null otherwise or when unknown. */
   avg: number | null;
   estimated: boolean;
+  /** Entries typed in since the count day for this item here; only on a past day's sheet. */
+  later?: LaterEntry[];
 }
 
 export interface CountSheet {
@@ -108,6 +130,54 @@ export interface CountSheet {
   lines: CountSheetLine[];
   /** The reader sees dollars (an admin or a manager). */
   dollars: boolean;
+}
+
+type LaterCell = { screen_id: string; row_label: string; price_col: string; unit: string };
+
+/**
+ * The entries typed in at a place at or after `until` (the moment after the count day ends),
+ * oldest first, by item. A count's own correcting entries are left out: they are another
+ * count's, not something that happened on a day.
+ */
+async function readLater(
+  sb: Client,
+  locationId: string,
+  until: string,
+): Promise<Map<string, (LaterEntry & LaterCell)[]>> {
+  const { data, error } = await looseClient(sb)
+    .from("inventory_movements")
+    .select(
+      "id, screen_id, row_label, price_col, qty, unit, reason, created_at, created_by_name, service_job_name, bid_name",
+    )
+    .eq("location_id", locationId)
+    .gte("created_at", until)
+    .is("count_id", null)
+    .order("created_at")
+    .order("id")
+    .limit(1000);
+  if (error) throw new Error(error.message);
+  const out = new Map<string, (LaterEntry & LaterCell)[]>();
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const cell = {
+      screen_id: String(r["screen_id"]),
+      row_label: String(r["row_label"]),
+      price_col: String(r["price_col"]),
+    };
+    const reason = String(r["reason"] ?? "");
+    const entry = {
+      ...cell,
+      unit: String(r["unit"] ?? ""),
+      id: Number(r["id"]),
+      at: new Date(String(r["created_at"])).toISOString(),
+      qty: Number(r["qty"]),
+      what: (REASON_LABELS as Record<string, string>)[reason] ?? reason,
+      who: (r["created_by_name"] as string | null) ?? null,
+      job: ((r["service_job_name"] ?? r["bid_name"]) as string | null) ?? null,
+    };
+    const k = cellKeyOf(cell);
+    out.set(k, [...(out.get(k) ?? []), entry]);
+  }
+  return out;
 }
 
 /** The count sheet of one place for one day: every item ever held there, with what is expected. */
@@ -133,6 +203,26 @@ export async function readCountSheet(
         })),
       };
   const here = stockAsOf(ctx.movements, until).filter((c) => c.location_id === place.id);
+  // A past day's sheet also shows what was typed in since for this place (Nov 18). An item
+  // whose first entry here came after that day is on the sheet too, at 0 expected, so a late
+  // delivery of something new is not counted on top of itself.
+  const later = at == null ? new Map<string, LaterEntry[]>() : await readLater(sb, place.id, until);
+  if (later.size) {
+    const known = new Set(here.map((c) => cellKeyOf(c)));
+    for (const [k, list] of later) {
+      const first = list[0] as LaterEntry & LaterCell;
+      if (known.has(k)) continue;
+      here.push({
+        location_id: place.id,
+        screen_id: first.screen_id,
+        row_label: first.row_label,
+        price_col: first.price_col,
+        on_hand: 0,
+        last_at: first.at,
+        unit: first.unit,
+      });
+    }
+  }
   const rows = await nameStockCells(sb, here);
   const costs = "prices" in ctx ? replayLedger({ ...ctx, until }).items : null;
   const lines: CountSheetLine[] = rows
@@ -151,6 +241,18 @@ export async function readCountSheet(
         expected: r.on_hand,
         avg: cost?.avg ?? null,
         estimated: cost?.estimated ?? false,
+        ...(later.has(cellKeyOf(r))
+          ? {
+              later: later.get(cellKeyOf(r))!.map(({ id, at: typedAt, qty, what, who, job }) => ({
+                id,
+                at: typedAt,
+                qty,
+                what,
+                who,
+                job,
+              })),
+            }
+          : {}),
       };
     })
     .sort(
@@ -202,7 +304,16 @@ export const saveCountSchema = z.object({
     )
     .min(1, "Type at least one count")
     .max(2000),
+  /**
+   * Entries typed in since the count day that happened on or before it (owner, Nov 18): moved
+   * into that day by the save, so the count does not correct for them twice. Only on a count
+   * dated to an earlier day.
+   */
+  before_ids: z.array(z.number().int().positive()).max(1000).optional(),
 });
+
+export const COUNT_BEFORE_NEEDS_PAST_DAY =
+  "Only a count dated to an earlier day can take entries typed in since";
 
 export interface SavedCount {
   id: string;
@@ -222,6 +333,9 @@ export async function saveCountWith(
   if (!seesEveryone(who) && data.lines.some((l) => l.unit_cost != null))
     throw new Error(PRICE_IS_MANAGERS);
   if (data.counted_on > easternYmd(now)) throw new Error(COUNT_FUTURE);
+  const before = [...new Set(data.before_ids ?? [])];
+  if (before.length && data.counted_on === easternYmd(now))
+    throw new Error(COUNT_BEFORE_NEEDS_PAST_DAY);
   const seen = new Set<string>();
   for (const l of data.lines) {
     const k = cellKeyOf(l);
@@ -270,6 +384,8 @@ export async function saveCountWith(
     p_opening: data.opening,
     p_note: data.note ?? null,
     p_lines: lines,
+    // Sent only when there is one, so a count with none is saved the same way as before.
+    ...(before.length ? { p_before: before } : {}),
   });
   if (error) throw new Error(error.message);
   if (typeof id !== "string") throw new Error("The count was not saved");

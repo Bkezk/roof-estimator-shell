@@ -73,6 +73,33 @@ export interface PoLineInsert {
 }
 
 /**
+ * The purchase orders already billed on OTHER invoices: the ids named by those invoices' "po:"
+ * lines. `lines` are the lines of the ticket's other live invoices (draft, final or paid; a
+ * void one bills nothing).
+ */
+export function billedPoIds(lines: readonly { source: string | null }[]): Set<string> {
+  const out = new Set<string>();
+  for (const l of lines) {
+    const id = poIdOfLine(l);
+    if (id) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * The purchase orders a NEW draft takes as lines: the ticket's, less those another live invoice
+ * of the ticket already carries (owner, Nov 18, of the audit: "fix please"). A second invoice
+ * made from a ticket took every PO again, so a $500 order already billed was billed, and
+ * counted as cost, a second time unless someone took the line off by hand.
+ */
+export function unbilledOrders<T extends { id: string }>(
+  orders: readonly T[],
+  billed: ReadonlySet<string>,
+): T[] {
+  return orders.filter((o) => !billed.has(o.id));
+}
+
+/**
  * One invoice line for a PO at `markup` (0.75 = 75 %). `poMarkup` false bills it at
  * cost. Quantity 1 "ea"; the PO's price is the line's cost, so Cost and Margin stay truthful.
  */

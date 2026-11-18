@@ -86,7 +86,7 @@ import {
   bidOverdueNotice,
   bidReminderNotice,
 } from "@/lib/bid-status";
-import { duplicateBid, listBids, listDeletedBids } from "@/lib/bids.functions";
+import { duplicateBid, listBids, listDeletedBids, setBidStatus } from "@/lib/bids.functions";
 import {
   defaultTemplates,
   missingDefaultTemplates,
@@ -110,7 +110,14 @@ import {
 import { listMarginReport } from "@/lib/margin-report.functions";
 import { bidItem } from "@/lib/my-work";
 import { ATTENTION_DEFAULTS, attentionList, type AttBid } from "@/lib/owner-attention";
-import { emptySetup, type TradeBidData, type TradeSetup } from "@/lib/trade-bid";
+import {
+  emptySetup,
+  tradeBidNotReady,
+  tradeBidProblems,
+  tradeBidSaveBlocked,
+  type TradeBidData,
+  type TradeSetup,
+} from "@/lib/trade-bid";
 import { parseTradeBidsSearch, tradeBidHref, tradeBidsView } from "@/lib/trade-bids-search";
 import {
   deleteTradeType,
@@ -2056,5 +2063,140 @@ describe("the menu: Trade Bids is its own row, under Estimate Pricing and above 
     expect(items).toContain('url: "/admin/price-import"');
     expect(items).not.toContain('"/trade-bids"');
     expect(items).not.toContain('title: "Trade Bids"');
+  });
+});
+
+// ── Nov 18 (the audit; owner: "fix please") ──────────────────────────────────────────────────
+// A trade bid with a line missing its cost priced that line at $0. Only the bid screen said so:
+// the bid could be marked Submitted or Won, invoiced and put on a proposal at the short price.
+describe("a trade bid with a line missing a number goes no further", () => {
+  /** The painting bid with the Primer's cost left blank. */
+  const short = (): TradeBidData => {
+    const setup = painting();
+    setup.materials[1] = { ...setup.materials[1]!, cost: null };
+    return tradeData({ setup });
+  };
+  const PRIMER = "Primer: type the cost";
+
+  it("the missing lines of a saved bid, as the bid screen lists them", () => {
+    expect(tradeBidProblems(tradeData())).toEqual([]);
+    expect(tradeBidProblems(short())).toEqual([PRIMER]);
+    // Not a trade bid's data (a roofing bid, nothing at all): nothing to say.
+    expect(tradeBidProblems({ customer: { name: "Acme" } })).toEqual([]);
+    expect(tradeBidProblems(null)).toEqual([]);
+  });
+  it("the refusal says what was not done, which line, and what to do", () => {
+    expect(tradeBidNotReady("Not marked Won", [])).toBeNull();
+    expect(tradeBidNotReady("Not marked Won", [PRIMER])).toBe(
+      "Not marked Won: a line on this bid is missing a number (Primer: type the cost), so its price is not complete. Open the bid, fill it in and save.",
+    );
+    expect(tradeBidNotReady("No invoice was made", ["A: x", "B: y", "C: z", "D: w"])).toBe(
+      "No invoice was made: 4 lines on this bid are missing a number (A: x; B: y; C: z; and more), so its price is not complete. Open the bid, fill them in and save.",
+    );
+  });
+  it("it is not marked Submitted or Won from the list; Lost and Draft still go through", async () => {
+    const rpcs = { sync_opportunity_from_bid: () => ({ action: "none" }) };
+    const env = fakeSupabase(
+      {
+        profiles: [{ id: EST, role: "user", full_name: "Sam Ortiz" }],
+        bids: [tradeBidRow({ data: short() })],
+        crm_settings: [{ id: 1 }],
+      },
+      { rpcs },
+    );
+    await expect(call(setBidStatus, { id: TBID, status: "won" }, env)).rejects.toThrow(
+      "Not marked Won: a line on this bid is missing a number (Primer: type the cost)",
+    );
+    await expect(call(setBidStatus, { id: TBID, status: "submitted" }, env)).rejects.toThrow(
+      "Not marked Submitted: a line on this bid is missing a number",
+    );
+    expect(bidsOf(env)[0]!["status"]).toBe("draft");
+    expect(env.writes).toEqual([]);
+    await call(setBidStatus, { id: TBID, status: "lost", lostReason: "Price" }, env);
+    expect(bidsOf(env)[0]!["status"]).toBe("lost");
+    // The complete bid is marked Won as before.
+    const whole = fakeSupabase(
+      {
+        profiles: [{ id: EST, role: "user", full_name: "Sam Ortiz" }],
+        bids: [tradeBidRow()],
+        crm_settings: [{ id: 1 }],
+      },
+      { rpcs },
+    );
+    await call(setBidStatus, { id: TBID, status: "won" }, whole);
+    expect(bidsOf(whole)[0]!["status"]).toBe("won");
+  });
+  it("a roofing bid is never asked: its numbers are the estimator's", async () => {
+    const env = fakeSupabase(
+      {
+        profiles: [{ id: EST, role: "user", full_name: "Sam Ortiz" }],
+        bids: [roofBidRow(RBID)],
+        crm_settings: [{ id: 1 }],
+      },
+      { rpcs: { sync_opportunity_from_bid: () => ({ action: "none" }) } },
+    );
+    await call(setBidStatus, { id: RBID, status: "won" }, env);
+    expect(bidsOf(env)[0]!["status"]).toBe("won");
+  });
+  it("a draft saves with the line missing; a Submitted or Won bid does not", async () => {
+    const again = {
+      id: TBID,
+      name: "Acme Hardware repaint",
+      data: short(),
+      expectUpdatedAt: SAVED,
+    };
+    const draft = world({ bids: [tradeBidRow()] });
+    await expect(call<TradeBid>(saveTradeBid, again, draft)).resolves.toBeTruthy();
+    for (const [status, word] of [
+      ["submitted", "Submitted"],
+      ["won", "Won"],
+    ] as const) {
+      const env = world({ bids: [tradeBidRow({ status })] });
+      await expect(call(saveTradeBid, again, env)).rejects.toThrow(
+        `Not saved: this bid is ${word} and a line is missing a number (Primer: type the cost), so its price would not be complete. Fill it in, then save.`,
+      );
+      expect(env.writes).toEqual([]);
+      expect(bidsOf(env)[0]!["grand_total"]).toBe(3067.12);
+    }
+    expect(tradeBidSaveBlocked("draft", [PRIMER])).toBeNull();
+    expect(tradeBidSaveBlocked("lost", [PRIMER])).toBeNull();
+    expect(tradeBidSaveBlocked("won", [])).toBeNull();
+    expect(tradeBidSaveBlocked("won", ["A: x", "B: y"])).toBe(
+      "Not saved: this bid is Won and 2 lines are missing a number (A: x; B: y), so its price would not be complete. Fill them in, then save.",
+    );
+  });
+  it("no invoice and no proposal either (in the source: both ask before anything is made)", () => {
+    expect(flat("src/lib/bid-invoices.functions.ts")).toContain(
+      'const notReady = tradeBidNotReady("No invoice was made", tradeBidProblems(bid.data)); if (notReady) throw new Error(notReady);',
+    );
+    expect(flat("src/lib/documents.functions.ts")).toContain(
+      'const notReady = tradeBidNotReady("No document was made", tradeBidProblems(row.data)); if (notReady) throw new Error(notReady);',
+    );
+  });
+});
+
+describe("a won bid with an invoice stays Won (the database, 20261118160000)", () => {
+  const sql = flatSql("supabase/migrations/20261118160000_won_bid_with_invoice_stays_won.sql");
+  it("leaving Won is refused while an invoice that is not void names the bid", () => {
+    expect(sql).toContain("create or replace function public.bids_invoiced_guard()");
+    expect(sql).toContain("old.status = 'won' and new.status is distinct from 'won'");
+    expect(sql).toContain("Void the invoice before changing the bid from Won.");
+    expect(sql).toMatch(/status <> 'void'|status is distinct from 'void'|status not in \('void'\)/);
+  });
+  it("the guard runs on a status change as well as on a delete", () => {
+    expect(sql).toMatch(
+      /create trigger bids_invoiced_guard before delete or update of deleted_at, status on public\.bids/,
+    );
+  });
+});
+
+describe("the trade bid page on a phone (the audit: 692 wide on a 390 screen)", () => {
+  it("the job grid is one column that cannot outgrow the card, and a long property line is cut", () => {
+    expect(read("src/components/trade/trade-bid-screen.tsx")).toContain(
+      '<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">',
+    );
+    expect(read("src/components/crm/site-select.tsx")).toContain(
+      "min-w-0 [&>span]:min-w-0 [&>span]:truncate",
+    );
   });
 });

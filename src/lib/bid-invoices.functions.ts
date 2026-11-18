@@ -33,7 +33,7 @@ import { isTradeBid } from "@/lib/bid-kind";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { invoiceLabel } from "@/lib/invoice-numbering";
 import { bidJobLabelOf, nameOf, numberTaken, office } from "@/lib/invoices.functions";
-import { asTradeBidData } from "@/lib/trade-bid";
+import { asTradeBidData, tradeBidNotReady, tradeBidProblems } from "@/lib/trade-bid";
 import { accountBillTo } from "@/lib/vendors";
 
 const bidInput = (d: unknown) => z.object({ bid_id: z.string().uuid() }).parse(d);
@@ -82,6 +82,9 @@ export const createBidInvoice = createServerFn({ method: "POST" })
     if (bid.status !== "won") throw new Error(BID_INVOICE_NEEDS_WON);
 
     const trade = asTradeBidData(bid.data);
+    // Never an invoice at a price that is short by a line with no number (Nov 18, the audit).
+    const notReady = tradeBidNotReady("No invoice was made", tradeBidProblems(bid.data));
+    if (notReady) throw new Error(notReady);
     const price = Number(bid.grand_total ?? 0);
     const [{ data: account, error: aErr }, { data: site, error: sErr }] = await Promise.all([
       bid.account_id

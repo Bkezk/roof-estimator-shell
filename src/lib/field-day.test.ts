@@ -76,6 +76,8 @@ function fakeDb(tables: Record<string, Row[]>) {
       insert: (p: Row | Row[]) => ((op = "insert"), (payload = p), q),
       update: (p: Row) => ((op = "update"), (payload = p), q),
       eq: (c: string, v: unknown) => (preds.push((r) => r[c] === v), q),
+      // Nov 18: the builder asks for the ticket's other invoices (not void, not this one).
+      neq: (c: string, v: unknown) => (preds.push((r) => r[c] !== v), q),
       in: (c: string, v: unknown[]) => (preds.push((r) => v.includes(r[c])), q),
       is: (c: string, v: unknown) => (preds.push((r) => (r[c] ?? null) === v), q),
       order: () => q,

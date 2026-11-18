@@ -170,7 +170,8 @@ describe("the wiring", () => {
   it("prices a ticket's materials from the service list, the catalog only as a fallback", () => {
     const inv = read("src/lib/invoices.server.ts");
     expect(inv).toContain("materialsByCell(await loadServiceMaterials(sb))");
-    expect(inv).toContain("packCostFor(material.cost, piece)");
+    // Nov 18: through stockUnitCost, so a material priced by the box is not multiplied again.
+    expect(inv).toContain("stockUnitCost(material, piece)");
     expect(inv).toContain("material ? null : cellCost(sb, c)");
   });
   it("stocks a service-only material in its own unit", () => {

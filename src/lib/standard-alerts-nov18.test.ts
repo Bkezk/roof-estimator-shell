@@ -58,7 +58,7 @@ import {
   bidStepNotice,
   opportunityStepNotice,
 } from "@/lib/work-steps";
-import { reminderMorning } from "@/lib/working-days";
+import { reminderMorning, undatedDueDay } from "@/lib/working-days";
 
 type Row = Record<string, unknown>;
 type Result = { data: unknown; error: { message: string } | null };
@@ -1572,5 +1572,112 @@ describe("the page, the save, the bell and the database", () => {
     expect(types).toContain("unassigned_marks: {");
     expect(types).toContain("unassigned_limits: { Args: never; Returns: Json }");
     expect(types).toContain("alert_who: Json");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The audit of Nov 18 (owner: "can you fix those?"): every reminder at 8:00 on a working day.
+
+describe("every reminder goes at 8:00 in the office (the audit, Nov 18)", () => {
+  it("a reminder that came due overnight waits for 8:00; the 7 o'clock pass reads none", async () => {
+    // Due at 2:15 am Eastern on Wed Nov 18 (an old timer with an odd clock time).
+    const db: Tables = {
+      crm_followups: [timer({ next_remind_at: "2026-11-18T07:15:00.000Z" })],
+      crm_settings: [settings()],
+      profiles: people(),
+    };
+    const client = connect(db);
+    vi.setSystemTime(new Date("2026-11-18T12:32:00Z")); // 7:32 am
+    expect(await dispatchDueReminders(client)).toMatchObject({ checked: 0, reminded: 0 });
+    expect(inbox(db, "followup")).toEqual([]);
+    expect(db["crm_followups"]![0]).toMatchObject({ reminders_sent: 1 });
+    vi.setSystemTime(new Date("2026-11-18T13:02:00Z")); // 8:02 am
+    expect(await dispatchDueReminders(client)).toMatchObject({ checked: 1, reminded: 1 });
+    expect(toldTo(db, "followup")).toEqual([TECH]);
+  });
+  it("work with no date of its own: its first reminder is a working day, at 8:00", () => {
+    // Friday Nov 20: one working day on is Monday, never Saturday.
+    expect(undatedDueDay("ticket", "2026-11-20", 1)).toBe("2026-11-23");
+    expect(undatedDueDay("ticket", "2026-11-18", 3)).toBe("2026-11-23");
+    // 0 = the same day; from a weekend, Monday.
+    expect(undatedDueDay("ticket", "2026-11-18", 0)).toBe("2026-11-18");
+    expect(undatedDueDay("ticket", "2026-11-21", 0)).toBe("2026-11-23");
+    expect(undatedDueDay("invoice", "2026-11-20", 3)).toBe("2026-11-25");
+    // An opportunity's close is counted in calendar days, then moved off a weekend.
+    expect(undatedDueDay("opportunity", "2026-11-18", 3)).toBe("2026-11-23"); // Sat → Mon
+    expect(undatedDueDay("opportunity", "2026-11-18", 30)).toBe("2026-12-18"); // a Friday
+    expect(undatedDueDay("opportunity", "2026-11-18", 0)).toBe("2026-11-18");
+    // A bad number is 0 days, not a crash.
+    expect(undatedDueDay("ticket", "2026-11-18", -2)).toBe("2026-11-18");
+    expect(undatedDueDay("ticket", "2026-11-18", 1.5)).toBe("2026-11-18");
+  });
+  it("the save and the database use it: no more “now plus N days” at the time of day it was assigned", () => {
+    const fu = read("src/lib/followups.server.ts");
+    expect(fu).toContain("reminderMorning(");
+    expect(fu).toContain("undatedDueDay(");
+    expect(fu).not.toMatch(/now\.getTime\(\) \+ [^;]*86_?400_?000/);
+    const pass = flat(read("src/lib/notify.server.ts"));
+    expect(pass).toContain("const { data: due, error } = morningReached(now) ? await admin");
+    const sql = read("supabase/migrations/20261118150000_reminders_at_8_on_working_days.sql");
+    expect(flat(sql)).toContain(
+      "when p_kind = 'opportunity' then public.reminder_morning(public.add_working_days(v_today + v_close, 0))",
+    );
+    expect(flat(sql)).toContain(
+      "else public.reminder_morning(public.add_working_days(v_today, v_first))",
+    );
+    // The timers already open are moved to 8:00 on a working day, once; a dated item's reminder
+    // on its own date is left where it is (a Saturday inspection is still reminded that Saturday).
+    expect(flat(sql)).toContain(
+      "f.next_remind_at <> public.reminder_morning(public.office_day(f.next_remind_at))",
+    );
+    expect(sql).not.toMatch(/now\(\) \+ make_interval\(days => v_(first|close)\)/);
+  });
+});
+
+describe("a trade bid's notices open Trade Bids (the audit, Nov 18)", () => {
+  const EST = "est-1";
+  const tradeBid = (over: Row = {}): Row => ({
+    id: "t1",
+    name: "Sheet metal for the gym",
+    kind: "trade",
+    status: "draft",
+    due_date: "2026-11-23",
+    notified_due_at: null,
+    notified_overdue_at: null,
+    reminder_on: null,
+    reminder_note: null,
+    reminded_at: null,
+    created_by: EST,
+    account_id: null,
+    deleted_at: null,
+    ...over,
+  });
+  const world = (bids: Row[]): Tables => ({
+    bids,
+    crm_settings: [{ id: 1, bid_due_notice_days: 1, bid_overdue_every_days: 1 }],
+    profiles: [...people(), { id: EST, role: "user", full_name: "Eve Estimator", email: "" }],
+    crm_accounts: [],
+  });
+  it("due soon: the link and the words are the trade bid's, not the estimator's", async () => {
+    const db = world([tradeBid()]);
+    await dispatchBidDueNotices(connect(db), morning("2026-11-20"));
+    const n = inbox(db, "bid_due")[0]!;
+    expect(n["url"]).toBe("/trade-bids?bid=t1");
+    expect(String(n["body"])).toContain("Open the bid to finish and submit it.");
+    expect(String(n["body"])).not.toContain("estimator");
+  });
+  it("past due and the estimator's own reminder too; a roofing bid still opens the estimator", async () => {
+    const db = world([
+      tradeBid({ id: "t2", due_date: "2026-11-17", notified_due_at: "2026-11-16T13:00:00Z" }),
+      tradeBid({ id: "t3", due_date: null, reminder_on: "2026-11-18", reminder_note: "Call" }),
+      tradeBid({ id: "r1", kind: "roof", due_date: "2026-11-19" }),
+    ]);
+    await dispatchBidDueNotices(connect(db), morning("2026-11-18"));
+    const url = (kind: string) => inbox(db, kind).map((n) => n["url"]);
+    expect(url("bid_overdue")).toEqual(["/trade-bids?bid=t2"]);
+    expect(url("bid_reminder")).toEqual(["/trade-bids?bid=t3"]);
+    expect(url("bid_due")).toEqual(["/estimate?bid=r1"]);
+    for (const n of [...inbox(db, "bid_overdue"), ...inbox(db, "bid_reminder")])
+      expect(String(n["body"])).not.toContain("estimator");
   });
 });
