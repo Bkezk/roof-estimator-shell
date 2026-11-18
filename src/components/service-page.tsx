@@ -152,6 +152,7 @@ import { SiteSelect } from "@/components/crm/site-select";
 import { PropertySiteSelect } from "@/components/crm/property-site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
+import { RoofCareCard } from "@/components/roof-care/plan-card";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import type { ServiceSearch, StageFilter, TicketFrom, TypeValue } from "@/lib/service-search";
@@ -2046,6 +2047,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             }
             onContact={(v) => set("contact_id", v)}
           />
+          {/* Owner, Nov 18: the property's Roof Care plan, and this ticket's inspection when it
+              is one of the plan's. */}
+          {job?.site_id && (
+            <RoofCareCard siteId={job.site_id} visitId={job.roof_care_visit_id} short />
+          )}
           {/* What happened here before (owner, Oct 21): one line, a tap opens the fold below. */}
           {job?.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
         </>
@@ -2401,6 +2407,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </p>
         )}
         <WarrantyBadges siteId={job.site_id} />
+        {/* Owner, Nov 18: the property's Roof Care plan, this ticket's inspection when it is one,
+            and the sign-up for whoever is on the roof. */}
+        <RoofCareCard siteId={job.site_id} visitId={job.roof_care_visit_id} short />
         {job.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
       </div>
       <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 [&>dt]:text-muted-foreground [&>dd]:min-w-0">

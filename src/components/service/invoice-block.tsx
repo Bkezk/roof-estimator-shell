@@ -33,7 +33,12 @@ import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, ShieldCheck, Trash2 } 
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets, seesInvoices } from "@/lib/access";
-import { INSPECTION_BILL_LABEL, INVOICE_STAGES, endsAtAuthorized } from "@/lib/ticket-stage";
+import {
+  CARE_PLAN_BILL_LABEL,
+  INSPECTION_BILL_LABEL,
+  INVOICE_STAGES,
+  endsAtAuthorized,
+} from "@/lib/ticket-stage";
 import { setServiceStage } from "@/lib/service.functions";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
@@ -98,6 +103,9 @@ function BillInspectionCard({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const makeFn = useServerFn(getOrCreateInvoice);
+  // A Roof Care plan inspection (owner, Nov 18) is billed as a matter of course: its button is
+  // for everyone who makes invoices, not a manager alone.
+  const carePlan = !!job.roof_care_visit_id;
   const make = useMutation({
     mutationFn: () => makeFn({ data: { job_id: job.id } }),
     onSuccess: (r) => {
@@ -121,19 +129,26 @@ function BillInspectionCard({ job }: { job: ServiceJobWithTech }) {
       <h2 className="flex items-center gap-2 font-semibold">
         <ShieldCheck className="h-4 w-4" /> Inspection authorized
       </h2>
-      <p className="text-sm text-muted-foreground">
-        This inspection is complete and nothing is invoiced.
-        {managesTickets(profile) &&
-          " If this one is being charged for, make its invoice here; a fee can be added to it as a line."}
-      </p>
-      {managesTickets(profile) && (
+      {carePlan ? (
+        <p className="text-sm text-muted-foreground" data-care-plan-billing>
+          This is a Roof Care plan inspection. Its invoice bills this visit’s share of the plan.
+          Make it here. A storm inspection is included in the plan and is not invoiced.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This inspection is complete and nothing is invoiced.
+          {managesTickets(profile) &&
+            " If this one is being charged for, make its invoice here; a fee can be added to it as a line."}
+        </p>
+      )}
+      {(carePlan || managesTickets(profile)) && (
         <Button variant="outline" disabled={make.isPending} onClick={() => make.mutate()}>
           {make.isPending ? (
             <Loader2 className="mr-1 h-4 w-4 animate-spin" />
           ) : (
             <Receipt className="mr-1 h-4 w-4" />
           )}
-          {INSPECTION_BILL_LABEL}
+          {carePlan ? CARE_PLAN_BILL_LABEL : INSPECTION_BILL_LABEL}
         </Button>
       )}
     </section>

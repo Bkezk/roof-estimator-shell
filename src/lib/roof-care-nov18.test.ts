@@ -375,11 +375,13 @@ describe("the drive from the office", () => {
   });
   it("uses the routing the close-out uses, and gives no price for an address it cannot place", () => {
     const fn = read("src/lib/roof-care.functions.ts");
-    expect(fn).toContain("geocodeAddress(sb, addressLine(data), data.state ?? null)");
+    // Later on Nov 18 the address gained three fallbacks (roof-care-locate-nov18.test.ts); the
+    // building on our own map is still asked first.
+    expect(fn).toContain("const building = await geocodeAddress(sb, line, a.state ?? null);");
     expect(fn).toContain("const routed = await routedDrive(from, to).catch(() => null);");
     expect(fn).toContain("if (!to) return null;");
     const page = read("src/components/roof-care-settings.tsx");
-    expect(page).toContain("That address could not be found on the map, so no price is given.");
+    expect(page).toContain("{NOT_PLACED_LINE}");
     // A changed address has no drive until it is worked out again.
     expect(page).toContain("setDrive(null);");
   });

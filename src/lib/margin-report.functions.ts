@@ -73,6 +73,14 @@ import {
   type MarginSource,
   marginBucket,
 } from "@/lib/margin-report";
+import {
+  filterByLine,
+  lineMonthSeries,
+  lineTotals,
+  MARGIN_LINE_FILTERS,
+  type MarginLineFilter,
+  type RoofCareInForce,
+} from "@/lib/margin-lines";
 import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
 
 type Sb = SupabaseClient<Database>;
@@ -89,6 +97,8 @@ const INPUT = z
     compare: RANGE.optional(),
     /** Include: service invoices, won bids, or both (the default). */
     source: z.enum(MARGIN_SOURCES).optional(),
+    /** Business: everything (the default), or one line of business alone (Nov 18). */
+    line: z.enum(MARGIN_LINE_FILTERS).optional(),
   })
   .refine((d) => d.from <= d.to, { message: "From must be on or before To" });
 export type MarginReportInput = z.infer<typeof INPUT>;
@@ -154,7 +164,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
     readInChunks(ticketIds, (chunk) =>
       sb
         .from("service_jobs")
-        .select("id, technician_id, account_id, customer_name")
+        .select("id, technician_id, account_id, customer_name, roof_care_visit_id")
         .in("id", chunk),
     ),
     byIds(invoiceIds, (chunk, after) =>
@@ -287,6 +297,8 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       technician: technicianId ? (techName.get(technicianId) ?? null) : null,
       technicianId,
       ticket: !!ticket,
+      // The invoice of a Roof Care plan inspection is its own line of business (Nov 18).
+      ...(ticket?.roof_care_visit_id ? { carePlan: true } : {}),
       ...costs,
       purchaseOrders: myPos.length
         ? poCostCarried(i.id, refsByTicket.get(i.ticket) ?? [], myPos, myLines)
@@ -419,6 +431,17 @@ const periodOf = (
   groupBy: MarginGroupBy,
 ): MarginPeriod => ({ from, to, invoices, ...aggregateMarginRows(invoices, groupBy) });
 
+/** The Roof Care plans in force today: how many, and what they bill a year. */
+async function roofCareInForce(sb: Sb): Promise<RoofCareInForce> {
+  const { data, error } = await sb.from("roof_care_plans").select("price").eq("status", "active");
+  if (error) throw new Error(`Roof Care plans: ${error.message}`);
+  const rows = data ?? [];
+  return {
+    plans: rows.length,
+    yearly: Math.round(rows.reduce((n, r) => n + Number(r.price), 0) * 100) / 100,
+  };
+}
+
 export const listMarginReport = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => INPUT.parse(d))
@@ -434,20 +457,36 @@ export const listMarginReport = createServerFn({ method: "GET" })
     if (!me || !isAdmin(me)) throw new Error("Forbidden: admin only");
 
     const source: MarginSource = data.source ?? "both";
-    const [current, earlier] = await Promise.all([
+    const line: MarginLineFilter = data.line ?? "all";
+    const [current, earlier, roofCare] = await Promise.all([
       readPeriod(sb, data.from, data.to, source),
       data.compare ? readPeriod(sb, data.compare.from, data.compare.to, source) : null,
+      roofCareInForce(sb),
     ]);
 
+    // The table, the tiles and the older charts show the selected line alone; the three lines
+    // side by side are worked from every row of the period, whatever is selected.
     return {
-      ...periodOf(data.from, data.to, current.rows, data.groupBy),
+      ...periodOf(data.from, data.to, filterByLine(current.rows, line), data.groupBy),
       groupBy: data.groupBy,
       source,
       bidsWithoutFigures: current.bidsWithoutFigures,
       generatedAt: new Date().toISOString(),
       ...(earlier && data.compare
-        ? { comparison: periodOf(data.compare.from, data.compare.to, earlier.rows, data.groupBy) }
+        ? {
+            comparison: periodOf(
+              data.compare.from,
+              data.compare.to,
+              filterByLine(earlier.rows, line),
+              data.groupBy,
+            ),
+            earlierByLine: lineTotals(earlier.rows),
+          }
         : {}),
+      line,
+      byLine: lineTotals(current.rows),
+      lineMonths: lineMonthSeries(current.rows, data.from, data.to),
+      roofCare,
     };
   });
 

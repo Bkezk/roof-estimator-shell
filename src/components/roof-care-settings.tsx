@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-store";
+import { NOT_PLACED_LINE, placedRoughly, roughPlaceLine } from "@/lib/roof-care-locate";
 
 import {
   draftFrom,
@@ -506,8 +507,12 @@ function TryABuilding({ settings }: { settings: RoofCareSettings }) {
         </Button>
         {drive === "none" && (
           <p className="text-destructive" data-try-line="not-found">
-            That address could not be found on the map, so no price is given. Check the street, city
-            and state.
+            {NOT_PLACED_LINE}
+          </p>
+        )}
+        {drive && drive !== "none" && placedRoughly(drive.placed_by) && (
+          <p className="text-amber-700 dark:text-amber-400" data-try-line="rough">
+            {roughPlaceLine(drive.place)}
           </p>
         )}
         {usable && (

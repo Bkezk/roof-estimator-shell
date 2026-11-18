@@ -1413,7 +1413,9 @@ describe("the component, pinned to its source", () => {
     expect(src).toMatch(/useState<MarginSource>\("both"\)/);
     expect(src).toContain("MARGIN_SOURCES.map(");
     expect(src).toContain("MARGIN_SOURCE_LABELS[");
-    expect(src).toMatch(/queryKey: \["margin-report", from, to, groupBy, source,/);
+    // Nov 18: the key gained the Business picker's line (margin-lines-nov18.test.ts) and now
+    // runs over several lines.
+    expect(src).toMatch(/queryKey: \[\s*"margin-report",\s*from,\s*to,\s*groupBy,\s*source,/);
     expect(src.indexOf('id="margin-group"')).toBeLessThan(src.indexOf('id="margin-source"'));
     const flat = src.replace(/\s+/g, " ");
     // Nov 16: the two kinds of sales tax are told apart (margin-tax-nov16.test.ts).

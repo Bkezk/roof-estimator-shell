@@ -52,6 +52,7 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
   AWAITS_INVOICE_OR,
+  CARE_PLAN_BILL_LABEL,
   INSPECTION_STAGE_MESSAGE,
   isInspectionType,
   NOT_FINISHED_INSPECTION_OR,
@@ -891,6 +892,22 @@ export const setServiceStage = createServerFn({ method: "POST" })
       undefined,
       { reopened },
     );
+    // A Roof Care plan inspection is invoiced when it is authorized (owner, Nov 18): the draft
+    // is made here. The ticket is authorized either way; a failure is said out loud, and the
+    // ticket's own button makes the invoice.
+    if (row.roof_care_visit_id && data.stage === "authorized" && prev.stage !== "authorized") {
+      try {
+        const { ensureCarePlanInvoice } = await import("@/lib/invoices.functions");
+        await ensureCarePlanInvoice(context.supabase, row.id, {
+          id: context.userId,
+          name: nameOf(p),
+        });
+      } catch (e) {
+        throw new Error(
+          `The ticket is authorized, but the invoice for this care plan inspection was not made (${e instanceof Error ? e.message : String(e)}). Open the ticket and press ${CARE_PLAN_BILL_LABEL}.`,
+        );
+      }
+    }
   });
 
 /**
@@ -1297,3 +1314,61 @@ export const getCrewRateDefaults = createServerFn({ method: "GET" })
       if (r.default_bill_rate != null) profiles[r.id] = Number(r.default_bill_rate);
     return { table, profiles };
   });
+
+// ── Roof Care plan inspections (owner, Nov 18; lib/roof-care-plan.functions.ts) ─────────────
+
+/**
+ * The inspection tickets the database made for a Roof Care plan (roof_care_make_tickets) are
+ * announced like any ticket made by hand: the Opened notice, the technician's notice when it is
+ * theirs, the follow-up timer. Best effort for each: the tickets exist either way.
+ */
+export async function announceCarePlanTickets(
+  sb: SupabaseClient<Database>,
+  jobIds: readonly string[],
+  actor: { id: string; name: string | null },
+): Promise<void> {
+  for (const id of jobIds) {
+    const { data: row, error } = await sb
+      .from("service_jobs")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (error || !row) continue;
+    try {
+      await syncTicketFollowup(row, actor, sb, null);
+    } catch (e) {
+      console.error("Could not announce a care plan ticket", e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+/**
+ * A pushed-back care plan inspection takes its ticket's day with it: saved, written on the
+ * timeline and told to the technician, as a date moved on the Board is.
+ */
+export async function moveCarePlanTicketDate(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  toYmd: string,
+  actor: { id: string; name: string | null },
+): Promise<void> {
+  const { data: cur, error } = await sb
+    .from("service_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!cur || cur.deleted_at || cur.scheduled_date === toYmd) return;
+  const { data: saved, error: uErr } = await sb
+    .from("service_jobs")
+    .update({ scheduled_date: toYmd, updated_by_name: actor.name })
+    .eq("id", jobId)
+    .select("*")
+    .single();
+  if (uErr) throw new Error(uErr.message);
+  await logTicketDateMove(sb, jobId, cur.scheduled_date, toYmd, actor);
+  await syncTicketFollowup(saved, actor, sb, cur.stage, {
+    technician_id: cur.technician_id,
+    scheduled_date: cur.scheduled_date,
+  });
+}

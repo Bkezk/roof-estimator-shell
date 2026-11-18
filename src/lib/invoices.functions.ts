@@ -426,6 +426,33 @@ async function liveInvoices(sb: SupabaseClient<Database>, jobId: string) {
 }
 
 /**
+ * The draft invoice of a Roof Care plan inspection, made when the ticket is authorized (owner,
+ * Nov 18: "billed half at first visit half at second visit and invoiced"), so nobody has to
+ * remember to start it: with an invoice the ticket sits in the waiting-for-invoice lists like
+ * any other. Nothing is made for a ticket that is not a plan's, one that already has a live
+ * invoice, or a visit that bills nothing (a storm inspection). Answers whether it made one.
+ */
+export async function ensureCarePlanInvoice(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  actor: { id: string; name: string | null },
+): Promise<boolean> {
+  const { data: job, error } = await sb
+    .from("service_jobs")
+    .select("id, roof_care_visit_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!job?.roof_care_visit_id) return false;
+  const { carePlanVisit } = await import("@/lib/invoices.server");
+  const visit = await carePlanVisit(sb, job.roof_care_visit_id);
+  if (!visit || !(visit.amount > 0)) return false;
+  if ((await liveInvoices(sb, jobId)).length) return false;
+  await createInvoiceFor(sb, jobId, { id: actor.id, name: actor.name ?? "", manages: true }, true);
+  return true;
+}
+
+/**
  * After an invoice is deleted or voided the ticket must not keep pointing at it (audit, Nov 16,
  * fix 5). A person with Customers and Invoices but no Service access cannot write the ticket:
  * the update above then changes no row and reports no error, and an inspection stayed "billed"
@@ -588,7 +615,9 @@ async function createInvoiceFor(
   // has one, it is billed like any ticket. "Has one" is read from the invoices themselves, not
   // from the ticket's pointer (audit, Nov 16, fix 4): a pointer left on a deleted invoice let
   // anyone through. The database says the same (trigger invoices_inspection_rule).
-  if (isInspectionType(job.service_type) && !actor.manages) {
+  // A Roof Care plan inspection is billed as a matter of course (owner, Nov 18: half the plan
+  // at each visit), so anyone who makes invoices starts its first one.
+  if (isInspectionType(job.service_type) && !job.roof_care_visit_id && !actor.manages) {
     const live = await liveInvoices(sb, job.id);
     if (!live.length) throw new Error(INSPECTION_BILL_MANAGER);
   }

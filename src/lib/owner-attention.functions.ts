@@ -31,8 +31,11 @@ import {
   type AttTicket,
   type AttUntouched,
   type AttentionList,
+  type AttCareVisit,
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
+import { planName, runsLate, VISIT_LABEL, visitState } from "@/lib/roof-care-plan";
+import { plansOfSites } from "@/lib/roof-care-plan.functions";
 import { visibleToOwner } from "@/lib/owner-view";
 import { PAGE, afterId, readAll } from "@/lib/read-all";
 import { OPEN_OPP_STATUSES, parseTodayInput, viewerToday } from "@/lib/work-counts";
@@ -235,5 +238,48 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       repairFrom: fromIds(repairs),
       bidFrom: fromIds(bidsFrom),
       names,
+      careVisits: await careVisitsNotDone(sb, today),
     });
   });
+
+/**
+ * The inspections still to do of the Roof Care plans in force (owner, Nov 18): the rule lists
+ * the ones past their last day and the ones a push-back carried past the plan year.
+ */
+async function careVisitsNotDone(sb: Sb, today: string): Promise<AttCareVisit[]> {
+  const { data: active, error } = await sb
+    .from("roof_care_plans")
+    .select("site_id")
+    .eq("status", "active");
+  if (error) throw new Error(`Roof Care plans: ${error.message}`);
+  const siteIds = [...new Set((active ?? []).map((p) => p.site_id))];
+  if (!siteIds.length) return [];
+  const plans = (await plansOfSites(sb, siteIds)).filter((p) => p.status === "active");
+  const [sites, accounts] = await Promise.all([
+    readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
+    readInChunks([...new Set(plans.map((p) => p.account_id))], (chunk) =>
+      sb.from("crm_accounts").select("id, name").in("id", chunk),
+    ),
+  ]);
+  const siteName = new Map(sites.map((x) => [x.id, (x.name ?? "").trim()]));
+  const accountName = new Map(accounts.map((x) => [x.id, (x.name ?? "").trim()]));
+  const out: AttCareVisit[] = [];
+  for (const p of plans) {
+    const where = [siteName.get(p.site_id), accountName.get(p.account_id)].filter(Boolean);
+    const title = `${planName(p.plan)} · ${where[0] ?? "Property"}${where[1] ? ` (${where[1]})` : ""}`;
+    const last = [...p.visits].filter((v) => v.kind !== "storm").pop();
+    for (const v of p.visits) {
+      if (visitState(v, today) === "done") continue;
+      out.push({
+        visit_id: v.id,
+        site_id: p.site_id,
+        title,
+        label: VISIT_LABEL[v.kind],
+        due_by: v.due_by,
+        amount: v.amount,
+        pastPlanYear: runsLate(p) && v.id === last?.id,
+      });
+    }
+  }
+  return out;
+}

@@ -103,3 +103,10 @@ Nothing was saved from the page. No temporary rows were made. The test login is 
   a browser.
 - The roof size is typed by hand on this page. Looking it up from the building's outline comes
   with the public form.
+
+## Changed later the same day
+
+The owner asked: "if it cant find the location on a map can you just provide the address and look
+it up from there?" An address the map cannot find is now looked up by its street anywhere in the
+country, then by its zip code, then by its town. A price from the zip code or the town says it is
+an estimate. Record: `docs/qa/roof-care-plans-2026-11-18.md`.

@@ -1264,6 +1264,12 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   value={draft.lead_source}
                   onChange={(v) => set("lead_source", v)}
                 />
+                {/* Owner, Nov 18: who brought the work in. The credit is the name. */}
+                {opp?.referred_by && (
+                  <p className="text-xs text-muted-foreground" data-opp-referred-by>
+                    Brought in by {opp.referred_by}
+                  </p>
+                )}
               </div>
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="opp-value">Est. value ($)</Label>

@@ -78,7 +78,8 @@ export type AttentionKind =
   | "bid_sent"
   | "inspection_no_next"
   | "to_authorize"
-  | "invoice_unpaid";
+  | "invoice_unpaid"
+  | "care_plan_late";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -194,6 +195,24 @@ export interface AttFollowup {
   assignee_id?: string | null;
 }
 
+/**
+ * A Roof Care plan inspection that is not done (owner, Nov 18; docs/roof-care-plans.md). Listed
+ * once it is past its last day, and when a push-back carried the plan past its year.
+ */
+export interface AttCareVisit {
+  visit_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** "Inspection 1" / "Inspection 2" / "Storm inspection". */
+  label: string;
+  due_by: string;
+  /** What the visit bills. */
+  amount: number;
+  /** The plan year ran on to this inspection: the renewal moved with it. */
+  pastPlanYear: boolean;
+}
+
 export interface AttentionIn {
   /** The viewer's day, YYYY-MM-DD. */
   today: string;
@@ -218,6 +237,8 @@ export interface AttentionIn {
   bidFrom: readonly string[];
   /** Profile id → name. */
   names: Readonly<Record<string, string>>;
+  /** Roof Care plan inspections not yet done, of plans in force (Nov 18). */
+  careVisits?: readonly AttCareVisit[];
 }
 
 export interface AttentionRow {
@@ -647,6 +668,32 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: toneOf(age, 15),
       amount: balance,
       href: `/service/invoices?id=${v.id}`,
+    });
+  }
+
+  // A Roof Care plan inspection past its last day, or pushed past the plan year (Nov 18).
+  for (const v of i.careVisits ?? []) {
+    const lateBy = YMD.test(v.due_by) ? Math.max(0, daysBetween(v.due_by, today)) : 0;
+    if (lateBy <= 0 && !v.pastPlanYear) continue;
+    const dueWords = `${v.label} was due by ${shortDay(v.due_by)} and is not done.`;
+    rows.push({
+      key: `care_plan_late:${v.visit_id}`,
+      group: "office",
+      kind: "care_plan_late",
+      tag: "Roof Care",
+      title: v.title,
+      why:
+        lateBy > 0
+          ? v.pastPlanYear
+            ? `${dueWords} It was pushed past the plan year, so the renewal moved.`
+            : dueWords
+          : `${v.label} was pushed past the plan year, so the renewal moved. It is due by ${shortDay(v.due_by)}.`,
+      ...office,
+      age: lateBy,
+      ageText: lateBy > 0 ? late(lateBy) : "Running late",
+      tone: lateBy > 14 ? "red" : "amber",
+      amount: v.amount > 0 ? v.amount : null,
+      href: `/properties/${v.site_id}`,
     });
   }
 

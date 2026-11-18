@@ -63,6 +63,8 @@ export const INSPECTION_STAGE_MESSAGE =
 /** The button on an authorized inspection, and who it is for (Nov 16). */
 export const INSPECTION_BILL_LABEL = "Invoice this inspection";
 export const INSPECTION_BILL_MANAGER = "Only a manager can bill an inspection";
+/** The same button on a Roof Care plan inspection, which is billed as a matter of course. */
+export const CARE_PLAN_BILL_LABEL = "Invoice this care plan inspection";
 export const isInspectionType = (serviceType: string | null | undefined): boolean =>
   serviceType === "inspection";
 /** Does the ticket end at its sign-off? An inspection, unless it has been billed. */

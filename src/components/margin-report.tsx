@@ -43,6 +43,13 @@ import { ChevronDown, ChevronRight, FileDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { MarginCharts } from "@/components/margin-charts";
+import { MarginLineCharts } from "@/components/margin-line-charts";
+import {
+  MARGIN_LINE_FILTER_LABELS,
+  MARGIN_LINE_FILTERS,
+  MARGIN_LINE_LABELS,
+  type MarginLineFilter,
+} from "@/lib/margin-lines";
 import { STATUS_LABELS, downloadBlob, money } from "@/components/service/invoice-utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -290,6 +297,8 @@ export function MarginReport() {
   const [groupBy, setGroupBy] = useState<MarginGroupBy>("month");
   // Include (owner, Oct 21): service invoices, won bids, or both.
   const [source, setSource] = useState<MarginSource>("both");
+  // Business (owner, Nov 18): everything, or regular business, trade bids or Roof Care alone.
+  const [line, setLine] = useState<MarginLineFilter>("all");
   const [compareMode, setCompareMode] = useState<CompareMode>("off");
   // The comparison's own From / To: blank until a preset fills them or Custom is typed into.
   const [compareFrom, setCompareFrom] = useState("");
@@ -316,8 +325,18 @@ export function MarginReport() {
   };
 
   const q = useQuery({
-    queryKey: ["margin-report", from, to, groupBy, source, compare?.from ?? "", compare?.to ?? ""],
-    queryFn: () => fn({ data: { from, to, groupBy, source, ...(compare ? { compare } : {}) } }),
+    queryKey: [
+      "margin-report",
+      from,
+      to,
+      groupBy,
+      source,
+      line,
+      compare?.from ?? "",
+      compare?.to ?? "",
+    ],
+    queryFn: () =>
+      fn({ data: { from, to, groupBy, source, line, ...(compare ? { compare } : {}) } }),
     enabled: !!session && valid,
     refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
@@ -405,6 +424,21 @@ export function MarginReport() {
               {MARGIN_SOURCES.map((s) => (
                 <SelectItem key={s} value={s}>
                   {MARGIN_SOURCE_LABELS[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="margin-line">Business</Label>
+          <Select value={line} onValueChange={(v) => setLine(v as MarginLineFilter)}>
+            <SelectTrigger id="margin-line" className="w-[13rem]" aria-label="Business">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MARGIN_LINE_FILTERS.map((l) => (
+                <SelectItem key={l} value={l}>
+                  {MARGIN_LINE_FILTER_LABELS[l]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -505,13 +539,22 @@ export function MarginReport() {
           ))}
         </p>
       )}
+      {/* The three lines side by side: always all of them, whatever Business shows below. */}
+      {d && <MarginLineCharts d={d} />}
+      {d && d.line && d.line !== "all" && (
+        <p className="text-sm font-medium" data-margin-line-note>
+          Showing {MARGIN_LINE_FILTER_LABELS[d.line].toLowerCase()} below.
+        </p>
+      )}
       {d && d.rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          {d.source === "service"
-            ? "No finalized invoices in this range."
-            : d.source === "bids"
-              ? "No won bids in this range."
-              : "No finalized invoices or won bids in this range."}
+          {d.line && d.line !== "all"
+            ? `Nothing in this range for ${MARGIN_LINE_LABELS[d.line].toLowerCase()}.`
+            : d.source === "service"
+              ? "No finalized invoices in this range."
+              : d.source === "bids"
+                ? "No won bids in this range."
+                : "No finalized invoices or won bids in this range."}
         </p>
       )}
       {d && d.rows.length > 0 && (

@@ -79,6 +79,7 @@ import {
   servicePiece,
 } from "@/lib/service-materials";
 import { loadServiceMaterials } from "@/lib/service-materials.server";
+import { carePlanInvoiceLines, type CarePlanVisitRef } from "@/lib/roof-care-invoice";
 import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
@@ -349,7 +350,32 @@ export async function buildLinesFromJob(
         sort++,
       ),
     );
+  // A Roof Care plan inspection bills its share of the plan (owner, Nov 18: "billed half at
+  // first visit half at second visit and invoiced"), and the visit's own time and materials are
+  // covered by it: listed at no charge, with their cost kept.
+  if (job.roof_care_visit_id) {
+    const visit = await carePlanVisit(sb, job.roof_care_visit_id);
+    if (visit) return carePlanInvoiceLines(lines, visit);
+  }
   return lines;
+}
+
+/** The visit a care plan ticket was made for, with its plan; null when it cannot be read. */
+export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePlanVisitRef | null> {
+  const { data: v, error } = await sb
+    .from("roof_care_visits")
+    .select("id, kind, amount, plan_id")
+    .eq("id", visitId)
+    .maybeSingle();
+  if (error) throw new Error(`The Roof Care plan of this ticket: ${error.message}`);
+  if (!v) return null;
+  const { data: p, error: pErr } = await sb
+    .from("roof_care_plans")
+    .select("plan")
+    .eq("id", v.plan_id)
+    .maybeSingle();
+  if (pErr) throw new Error(`The Roof Care plan of this ticket: ${pErr.message}`);
+  return { id: v.id, kind: v.kind, amount: Number(v.amount), plan: p?.plan ?? null };
 }
 
 /** Totals from lines and the tax rule. */

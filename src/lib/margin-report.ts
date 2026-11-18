@@ -244,6 +244,8 @@ export interface MarginInvoiceIn {
   kind: MarginRowKind;
   /** A bid's own kind, "roof" or "trade" (Nov 16): where its row opens (bid-kind.ts). */
   bidKind?: string | null | undefined;
+  /** The invoice of a Roof Care plan inspection (Nov 18; margin-lines.ts). */
+  carePlan?: boolean | undefined;
   /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel), or the bid's name. */
   number: string;
   /** YYYY-MM-DD (invoiceDay; bidWonDay for a bid). */
@@ -344,6 +346,8 @@ export interface MarginInvoiceRow {
   kind: MarginRowKind;
   /** A bid's own kind, "roof" or "trade": a trade bid opens on Trade Bids. */
   bidKind?: string | null | undefined;
+  /** The invoice of a Roof Care plan inspection (Nov 18; margin-lines.ts). */
+  carePlan?: boolean | undefined;
   number: string;
   day: string;
   status: MarginRowStatus;
@@ -382,6 +386,7 @@ export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
     id: inv.id,
     kind: inv.kind,
     ...(inv.bidKind === "trade" ? { bidKind: "trade" } : {}),
+    ...(inv.carePlan ? { carePlan: true } : {}),
     number: inv.number,
     day: inv.day,
     status: inv.status,
@@ -448,6 +453,18 @@ export interface MarginReportResult extends MarginPeriod {
   generatedAt: string;
   /** The comparison period, when one was asked for (the same groupBy and source). */
   comparison?: MarginPeriod;
+  /**
+   * By line of business (owner, Nov 18; margin-lines.ts). `line` is the Business select; the
+   * period's rows above are that line's alone. `byLine` and `lineMonths` are always all three
+   * lines, whatever is selected, so the lines can be compared while one is shown.
+   */
+  line?: import("@/lib/margin-lines").MarginLineFilter;
+  byLine?: import("@/lib/margin-lines").MarginLineTotals[];
+  lineMonths?: import("@/lib/margin-lines").LineMonthPoint[];
+  /** The comparison period's three lines, when one was asked for. */
+  earlierByLine?: import("@/lib/margin-lines").MarginLineTotals[];
+  /** The Roof Care plans in force today. */
+  roofCare?: import("@/lib/margin-lines").RoofCareInForce;
 }
 
 export const emptyMarginTotals = (): MarginTotals => ({

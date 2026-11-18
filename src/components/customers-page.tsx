@@ -118,6 +118,7 @@ import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { AccountPicker, QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties, warrantyKey } from "@/components/crm/site-warranties";
+import { RoofCareCard } from "@/components/roof-care/plan-card";
 import { PropertySites, propertySitesKey, SiteCoverPhoto } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
@@ -1899,6 +1900,8 @@ function SitesSection({
                 )}
                 {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
                 <SiteWarranties siteId={s.id} />
+                {/* Owner, Nov 18: the property's Roof Care plan and how many inspections are done. */}
+                <RoofCareCard siteId={s.id} className="mt-2" />
                 {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
                 <PropertySites propertyId={s.id} />
                 {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}

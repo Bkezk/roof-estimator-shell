@@ -6,18 +6,22 @@
  *    admin's alone (the database says the same: roof_care_settings is admin-only), because they
  *    are what a crew member costs and what each plan earns.
  *  - roofCareDrive: the round trip from the office to an address, with the routing the close-out
- *    already uses (the stored map data, then the state's address server, then a road router,
- *    else an estimate from the straight-line distance). Null when the address cannot be placed:
- *    the page then says so and gives no price, never a price at a guessed distance.
+ *    already uses (a road router, else an estimate from the straight-line distance). The address
+ *    is placed by placeAddress: the building on our own map, then the street address anywhere in
+ *    the country, then the centre of its zip code, then of its town (roof-care-locate.ts; owner,
+ *    Nov 18). Null when none of the four finds it: the page then says so and gives no price,
+ *    never a price at a guessed distance.
  *
  * Read and written with the caller's own sign-in.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
-import type { Json } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { isAdmin } from "@/lib/access";
+import { censusGeocoderUrl, CENSUS_TIMEOUT_MS, parseCensusResponse } from "@/lib/address-census";
 import { routedDrive } from "@/lib/drive-route";
 import { readProfile } from "@/lib/profile-cache.server";
 import {
@@ -26,6 +30,17 @@ import {
   type Drive,
   type RoofCareSettings,
 } from "@/lib/roof-care-price";
+import {
+  parseTownPlace,
+  parseZipPlace,
+  PLACE_TIMEOUT_MS,
+  state2,
+  townLookupUrl,
+  zip5,
+  zipLookupUrl,
+  type Placed,
+  type PlacedBy,
+} from "@/lib/roof-care-locate";
 import { geocodeAddress, geocodeAddressCached } from "@/lib/service-aerial.functions";
 import { estimateTravelBetween, travelFromRoute, travelOrigin } from "@/lib/travel-estimate";
 
@@ -101,6 +116,10 @@ export interface RoofCareDrive extends Drive {
   source: "routed" | "estimated";
   /** One way, as the close-out says it: "42 mi · about 55 min each way (routed)". */
   note: string;
+  /** How the address was placed. "zip" and "town" are not the building: the price is an estimate. */
+  placed_by: PlacedBy;
+  /** What the drive is to when it is not the building: "London, KY 40741". */
+  place: string | null;
 }
 
 const addressInput = z.object({
@@ -114,6 +133,51 @@ const addressInput = z.object({
 export function addressLine(a: z.infer<typeof addressInput>): string {
   const tail = [a.city, [a.state, a.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   return [a.address, tail].filter(Boolean).join(", ");
+}
+
+export type AddressInput = z.infer<typeof addressInput>;
+
+/** A lookup's answer as JSON, or null: a slow, failing or odd answer is a miss, never a throw. */
+async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
+  try {
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where an address is, most exact first: the building on our map, the street address anywhere in
+ * the country, the centre of its zip code, the centre of its town. Null when none finds it.
+ * `fetcher` is the lookups' door, so the tests answer for them.
+ */
+export async function placeAddress(
+  sb: SupabaseClient<Database>,
+  a: AddressInput,
+  fetcher: (url: string, timeoutMs: number) => Promise<unknown> = fetchJson,
+): Promise<Placed | null> {
+  const line = addressLine(a);
+  const building = await geocodeAddress(sb, line, a.state ?? null);
+  if (building) return { ...building, by: "building", place: null };
+  const street = parseCensusResponse(await fetcher(censusGeocoderUrl(line), CENSUS_TIMEOUT_MS));
+  if (street) return { lat: street.lat, lng: street.lng, by: "street", place: null };
+  const zip = zip5(a.zip);
+  if (zip) {
+    const z5 = parseZipPlace(await fetcher(zipLookupUrl(zip), PLACE_TIMEOUT_MS));
+    if (z5) return z5;
+  }
+  const st = state2(a.state);
+  const city = (a.city ?? "").trim();
+  if (st && city) {
+    const town = parseTownPlace(await fetcher(townLookupUrl(st, city), PLACE_TIMEOUT_MS));
+    if (town) return town;
+  }
+  return null;
 }
 
 /** A one-way estimate as a round trip: twice the minutes and twice the miles. */
@@ -130,26 +194,48 @@ export const roofCareDrive = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<RoofCareDrive | null> => {
     await admin(context);
     const sb = context.supabase;
-    const { data: office, error } = await sb
-      .from("company_settings_public")
-      .select("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip")
-      .eq("id", 1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    const origin = office ? travelOrigin(office) : null;
-    if (!origin)
-      throw new Error(
-        "The office has no street address to drive from. Add it under Estimate Pricing, General.",
-      );
-    const [from, to] = await Promise.all([
-      geocodeAddressCached(sb, origin.line, origin.state),
-      geocodeAddress(sb, addressLine(data), data.state ?? null),
-    ]);
-    if (!from) throw new Error("The office's address could not be found on the map.");
-    if (!to) return null;
-    const routed = await routedDrive(from, to).catch(() => null);
-    const one = (routed && travelFromRoute(routed)) ?? estimateTravelBetween(from, to);
-    // The same spot as the office: nothing to drive.
-    if (!one) return { hours: 0, miles: 0, source: "estimated", note: "At the office" };
-    return { ...roundTrip(one), source: one.source, note: one.note };
+    return driveTo(sb, await officeOrigin(sb), data);
   });
+
+/** Where the trucks leave from. Throws in plain words when the office has no street address. */
+export async function officeOrigin(
+  sb: SupabaseClient<Database>,
+): Promise<{ line: string; state: string | null }> {
+  const { data: office, error } = await sb
+    .from("company_settings_public")
+    .select("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const origin = office ? travelOrigin(office) : null;
+  if (!origin)
+    throw new Error(
+      "The office has no street address to drive from. Add it under Estimate Pricing, General.",
+    );
+  return origin;
+}
+
+/** The round trip from the office at `origin` to an address; null when it cannot be placed. */
+export async function driveTo(
+  sb: SupabaseClient<Database>,
+  origin: { line: string; state: string | null },
+  a: AddressInput,
+  fetcher?: (url: string, timeoutMs: number) => Promise<unknown>,
+  /** A point already known for the address (the property's own, on its record): used as it is. */
+  known?: { lat: number; lng: number } | null,
+): Promise<RoofCareDrive | null> {
+  const [from, to] = await Promise.all([
+    geocodeAddressCached(sb, origin.line, origin.state),
+    known
+      ? Promise.resolve<Placed>({ ...known, by: "building", place: null })
+      : placeAddress(sb, a, fetcher),
+  ]);
+  if (!from) throw new Error("The office's address could not be found on the map.");
+  if (!to) return null;
+  const where = { placed_by: to.by, place: to.place };
+  const routed = await routedDrive(from, to).catch(() => null);
+  const one = (routed && travelFromRoute(routed)) ?? estimateTravelBetween(from, to);
+  // The same spot as the office: nothing to drive.
+  if (!one) return { hours: 0, miles: 0, source: "estimated", note: "At the office", ...where };
+  return { ...roundTrip(one), source: one.source, note: one.note, ...where };
+}

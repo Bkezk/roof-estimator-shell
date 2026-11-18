@@ -1189,6 +1189,7 @@ export type Database = {
           id: string
           lead_source: string | null
           notes: string | null
+          referred_by: string | null
           site_id: string | null
           status: string
           title: string
@@ -1211,6 +1212,7 @@ export type Database = {
           id?: string
           lead_source?: string | null
           notes?: string | null
+          referred_by?: string | null
           site_id?: string | null
           status?: string
           title: string
@@ -1233,6 +1235,7 @@ export type Database = {
           id?: string
           lead_source?: string | null
           notes?: string | null
+          referred_by?: string | null
           site_id?: string | null
           status?: string
           title?: string
@@ -3398,6 +3401,93 @@ export type Database = {
           },
         ]
       }
+      roof_care_plans: {
+        Row: {
+          account_id: string
+          agreed_by: string
+          created_at: string
+          created_by: string | null
+          drive_hours: number
+          drive_miles: number
+          ended_by_name: string | null
+          ended_on: string | null
+          ended_reason: string | null
+          first_visit: string
+          id: string
+          list_price: number
+          notes: string
+          plan: string
+          price: number
+          price_estimated: boolean
+          referred_by: string | null
+          renews_on: string
+          roof_sqft: number
+          signed_on: string
+          site_id: string
+          sold_by: string | null
+          sold_by_name: string
+          status: string
+          travel_price: number
+          updated_at: string
+        }
+        Insert: {
+          account_id: string
+          agreed_by: string
+          created_at?: string
+          created_by?: string | null
+          drive_hours: number
+          drive_miles: number
+          ended_by_name?: string | null
+          ended_on?: string | null
+          ended_reason?: string | null
+          first_visit: string
+          id?: string
+          list_price: number
+          notes?: string
+          plan: string
+          price: number
+          price_estimated?: boolean
+          referred_by?: string | null
+          renews_on: string
+          roof_sqft: number
+          signed_on: string
+          site_id: string
+          sold_by?: string | null
+          sold_by_name?: string
+          status?: string
+          travel_price?: number
+          updated_at?: string
+        }
+        Update: {
+          account_id?: string
+          agreed_by?: string
+          created_at?: string
+          created_by?: string | null
+          drive_hours?: number
+          drive_miles?: number
+          ended_by_name?: string | null
+          ended_on?: string | null
+          ended_reason?: string | null
+          first_visit?: string
+          id?: string
+          list_price?: number
+          notes?: string
+          plan?: string
+          price?: number
+          price_estimated?: boolean
+          referred_by?: string | null
+          renews_on?: string
+          roof_sqft?: number
+          signed_on?: string
+          site_id?: string
+          sold_by?: string | null
+          sold_by_name?: string
+          status?: string
+          travel_price?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       roof_care_settings: {
         Row: {
           data: Json
@@ -3419,6 +3509,48 @@ export type Database = {
           updated_at?: string
           updated_by?: string | null
           updated_by_name?: string | null
+        }
+        Relationships: []
+      }
+      roof_care_visits: {
+        Row: {
+          amount: number
+          created_at: string
+          due_by: string
+          due_from: string
+          first_due_by: string
+          id: string
+          kind: string
+          plan_id: string
+          push_reason: string | null
+          pushed_at: string | null
+          pushed_by_name: string | null
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          due_by: string
+          due_from: string
+          first_due_by: string
+          id?: string
+          kind: string
+          plan_id: string
+          push_reason?: string | null
+          pushed_at?: string | null
+          pushed_by_name?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          due_by?: string
+          due_from?: string
+          first_due_by?: string
+          id?: string
+          kind?: string
+          plan_id?: string
+          push_reason?: string | null
+          pushed_at?: string | null
+          pushed_by_name?: string | null
         }
         Relationships: []
       }
@@ -3918,6 +4050,7 @@ export type Database = {
           on_site_at: string | null
           po_number: string | null
           recommend_new_roof: boolean
+          roof_care_visit_id: string | null
           scheduled_date: string | null
           service_type: string
           signature_path: string | null
@@ -3976,6 +4109,7 @@ export type Database = {
           on_site_at?: string | null
           po_number?: string | null
           recommend_new_roof?: boolean
+          roof_care_visit_id?: string | null
           scheduled_date?: string | null
           service_type?: string
           signature_path?: string | null
@@ -4034,6 +4168,7 @@ export type Database = {
           on_site_at?: string | null
           po_number?: string | null
           recommend_new_roof?: boolean
+          roof_care_visit_id?: string | null
           scheduled_date?: string | null
           service_type?: string
           signature_path?: string | null
@@ -5671,6 +5806,10 @@ export type Database = {
         Args: { p_id: string; p_name: string }
         Returns: number
       }
+      request_additional_service: {
+        Args: { p_details: string; p_services: string; p_site: string }
+        Returns: string
+      }
       reset_address_checks: { Args: { p_county: string }; Returns: number }
       restore_assert_system: { Args: never; Returns: undefined }
       restore_catalog: { Args: never; Returns: Json }
@@ -5683,6 +5822,35 @@ export type Database = {
         Returns: Json
       }
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
+      roof_care_add_storm: { Args: { p_plan: string }; Returns: string }
+      roof_care_end: {
+        Args: { p_plan: string; p_reason: string }
+        Returns: undefined
+      }
+      roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
+      roof_care_price: {
+        Args: { p_hours?: number; p_miles?: number; p_sqft: number }
+        Returns: Json
+      }
+      roof_care_push_back: {
+        Args: { p_days: number; p_reason: string; p_visit: string }
+        Returns: Json
+      }
+      roof_care_sign_up: {
+        Args: {
+          p_agreed_by: string
+          p_days: number
+          p_estimated: boolean
+          p_first: string
+          p_hours: number
+          p_miles: number
+          p_notes: string
+          p_plan: string
+          p_site: string
+          p_sqft: number
+        }
+        Returns: string
+      }
       save_checklist_items: { Args: { p_items: Json }; Returns: undefined }
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] }

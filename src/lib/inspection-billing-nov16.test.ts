@@ -162,7 +162,9 @@ describe("the server", () => {
     // Nov 16 audit fix 4: "has an invoice" is read from the invoices, not from the ticket's
     // pointer (inspection-billing-rules-nov16b.test.ts runs it).
     expect(inv).toContain(
-      "if (isInspectionType(job.service_type) && !actor.manages) { const live = await liveInvoices(sb, job.id); if (!live.length) throw new Error(INSPECTION_BILL_MANAGER); }",
+      // Nov 18: a Roof Care plan inspection is billed as a matter of course, so it is exempt
+      // (roof-care-plan-nov18.test.ts). Every other inspection is a manager's, as here.
+      "if (isInspectionType(job.service_type) && !job.roof_care_visit_id && !actor.manages) { const live = await liveInvoices(sb, job.id); if (!live.length) throw new Error(INSPECTION_BILL_MANAGER); }",
     );
     // After the stage check (a Done inspection is still reviewed first), before anything is made.
     const make = inv.slice(inv.indexOf("async function createInvoiceFor("));
@@ -192,8 +194,10 @@ describe("the ticket", () => {
       block.indexOf("function BillInspectionCard("),
       block.indexOf("function AuthorizeCard("),
     );
-    expect(card).toContain("{managesTickets(profile) && ( <Button");
-    expect(card).toContain("{INSPECTION_BILL_LABEL}");
+    // Nov 18: the same card serves a Roof Care plan inspection, whose button is for everyone who
+    // makes invoices. On any other inspection it is a manager's, as before.
+    expect(card).toContain("{(carePlan || managesTickets(profile)) && ( <Button");
+    expect(card).toContain("{carePlan ? CARE_PLAN_BILL_LABEL : INSPECTION_BILL_LABEL}");
     expect(card).toContain("mutationFn: () => makeFn({ data: { job_id: job.id } })");
     expect(card).toContain(
       'void navigate({ to: "/service/invoices", search: { id: r.invoice.id } });',
