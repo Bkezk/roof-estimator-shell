@@ -196,3 +196,15 @@ export function createReminderHint(input: {
     return "Created at this status, it starts no follow-up reminders.";
   return "Creating it starts the assignee's follow-up reminders.";
 }
+
+/**
+ * "Referred by" as it is saved (owner, Nov 18: "add a form on an opp shows who referred the
+ * customer"): left out = kept as it is (undefined), so a caller that knows nothing of the box
+ * never wipes the credit; blank clears it (null); otherwise the name, trimmed.
+ */
+export const REFERRED_BY_MAX = 120;
+export function cleanReferredBy(v: string | null | undefined): string | null | undefined {
+  if (v === undefined) return undefined;
+  const name = (v ?? "").trim();
+  return name === "" ? null : name;
+}

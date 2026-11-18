@@ -153,6 +153,10 @@ plan as running late.
 - A technician-only login works a ticket in the workflow and nowhere else. The ticket page is
   the office's.
 
+**The audit, Nov 18.** What was proven: `docs/qa/roof-care-audit-2026-11-18.md`. What it found
+and is still open: `office_reference_notes`, key `roof-care-audit-2026-11-18`. Read that before
+changing prices, invoices or the inspection dates.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".

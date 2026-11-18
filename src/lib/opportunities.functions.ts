@@ -25,7 +25,13 @@ import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canAccess, canClaim, seesEveryone } from
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { CONTACT_METHODS, LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
-import { assigneeProblem, OPP_CUSTOMER_REQUIRED, opportunityProblem } from "@/lib/opportunity-form";
+import {
+  assigneeProblem,
+  cleanReferredBy,
+  OPP_CUSTOMER_REQUIRED,
+  opportunityProblem,
+  REFERRED_BY_MAX,
+} from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { addDays } from "@/lib/my-work";
@@ -349,6 +355,16 @@ const oppSchema = z.object({
     .optional(),
   status: z.enum(OPP_STATUSES).optional(),
   lead_source: optText(120),
+  // Who referred the customer, or who took the request on site (owner, Nov 18: "add a form on an
+  // opp shows who referred the customer"). Left out = kept, so a form opened before the box
+  // existed, or a caller that knows nothing of it, never wipes the credit. "" clears it.
+  referred_by: z
+    .string()
+    .trim()
+    .max(REFERRED_BY_MAX)
+    .nullable()
+    .optional()
+    .transform(cleanReferredBy),
   est_value: z.number().finite().nonnegative().nullable().optional(),
   bid_id: z.string().uuid().nullable().optional(),
   // Left out = kept (owner, Nov 4: the form has no Notes box any more — what the next person
@@ -477,6 +493,7 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       ...(id && fields.expected_close === undefined ? {} : { expected_close: expected }),
       ...(fields.status ? { status: fields.status } : {}),
       lead_source: fields.lead_source ?? null,
+      ...(fields.referred_by === undefined ? {} : { referred_by: fields.referred_by }),
       est_value: fields.est_value ?? null,
       // Left out = kept: the bid link is written by /estimate (linkBid), and a form opened
       // before it was linked must not clear it.

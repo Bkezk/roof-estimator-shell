@@ -916,9 +916,9 @@ describe("another service asked for on site", () => {
     );
     expect(sql).toContain("'open', 'On-site request', nullif(v_name, ''),");
     expect(sql).toContain("and (not public.is_technician() or public.tech_sees_site(p_site))))");
-    expect(read("src/components/opportunities-page.tsx")).toContain(
-      "Brought in by {opp.referred_by}",
-    );
+    // (Later on Nov 18: the name is in a box the office can type in, "Referred by";
+    // opportunity-referred-by-nov18.test.ts.)
+    expect(read("src/components/opportunities-page.tsx")).toContain("data-opp-referred-by");
     expect(read("src/components/roof-care/plan-card.tsx")).toContain(
       'data-action="additional-services"',
     );

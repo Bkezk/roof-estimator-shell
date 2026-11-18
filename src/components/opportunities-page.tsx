@@ -367,6 +367,7 @@ function OppList({
         o.site_name,
         o.assignee_name,
         o.lead_source,
+        o.referred_by,
         o.description,
       ]
         .filter(Boolean)
@@ -591,6 +592,7 @@ function OppListRow({
     o.expected_close ? `Expected close ${day(o.expected_close)}` : "No close date",
     o.est_value != null ? money(o.est_value) : null,
     o.lead_source,
+    o.referred_by ? `${REFERRED_BY_LABEL} ${o.referred_by}` : null,
   ].filter(Boolean);
   // Owner, Sep 28: the whole card opens the opportunity, as on Bids (no Open button).
   const open = () => void navigate({ to: "/opportunities", search: { id: o.id } });
@@ -723,10 +725,15 @@ interface Draft {
   /** A new opportunity's status (the header select; Open to start). */
   status: OppStatus;
   lead_source: string;
+  /** Who referred the customer, or took the request on site; "" = nobody named. */
+  referred_by: string;
   /** 0 = blank (no estimate). */
   est_value: number;
   description: string;
 }
+
+/** The box's name, and the word on the list's line ("Referred by Tyler Mitchell"). */
+const REFERRED_BY_LABEL = "Referred by";
 
 const draftFrom = (o: OpportunityWithNames | null): Draft =>
   o
@@ -743,6 +750,7 @@ const draftFrom = (o: OpportunityWithNames | null): Draft =>
         expected_close: o.expected_close ?? "",
         status: asStatus(o.status),
         lead_source: o.lead_source ?? "",
+        referred_by: o.referred_by ?? "",
         est_value: o.est_value ?? 0,
         description: o.description ?? "",
       }
@@ -754,6 +762,7 @@ const draftFrom = (o: OpportunityWithNames | null): Draft =>
         expected_close: "",
         status: "open",
         lead_source: "",
+        referred_by: "",
         est_value: 0,
         description: "",
       };
@@ -915,6 +924,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         assignee_id: draft.assignee_id || null,
         expected_close: draft.expected_close || null,
         lead_source: draft.lead_source,
+        referred_by: draft.referred_by,
         est_value: draft.est_value > 0 ? draft.est_value : null,
         description: draft.description,
         // No notes (the box is gone; left out, the server keeps what was saved) and no bid_id:
@@ -1264,12 +1274,20 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   value={draft.lead_source}
                   onChange={(v) => set("lead_source", v)}
                 />
-                {/* Owner, Nov 18: who brought the work in. The credit is the name. */}
-                {opp?.referred_by && (
-                  <p className="text-xs text-muted-foreground" data-opp-referred-by>
-                    Brought in by {opp.referred_by}
-                  </p>
-                )}
+              </div>
+              {/* Owner, Nov 18: "add a form on an opp shows who referred the customer". The
+                  credit is the name: a request taken on site fills it with the person who took
+                  it, and the office types or corrects it here. */}
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="opp-referred-by">{REFERRED_BY_LABEL}</Label>
+                <Input
+                  id="opp-referred-by"
+                  value={draft.referred_by}
+                  maxLength={120}
+                  placeholder="Who sent them, or who took the request"
+                  onChange={(e) => set("referred_by", e.target.value)}
+                  data-opp-referred-by
+                />
               </div>
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="opp-value">Est. value ($)</Label>
