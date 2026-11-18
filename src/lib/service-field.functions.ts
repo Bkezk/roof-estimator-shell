@@ -253,7 +253,7 @@ async function tryLogEvent(ctx: Ctx, jobId: string, ev: AppEvent, byName: string
  * decides which rows a technician reads.
  */
 export const TODAY_JOB_SELECT =
-  "id, number, customer_name, description, service_type, stage, field_status, en_route_at, on_site_at, completed_at, scheduled_date, arrival_window, technician_id, helper_count, crew_confirmed_at, site_id, site_name, site_address, contact_id, account_id, from_job_id, signature_path, signed_at, signed_by, closing_notes, checked_in_with, checked_out_with, recommend_new_roof, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by, labor_rate_kind, created_at, updated_at, updated_by_name" as const;
+  "id, number, customer_name, description, service_type, stage, field_status, en_route_at, on_site_at, completed_at, scheduled_date, arrival_window, technician_id, helper_count, crew_confirmed_at, site_id, site_name, site_address, contact_id, account_id, from_job_id, signature_path, signed_at, signed_by, closing_notes, checked_in_with, checked_out_with, recommend_new_roof, inspection, inspection_outcome, inspection_outcome_at, inspection_outcome_by, labor_rate_kind, notes, notes_tech_visible, created_at, updated_at, updated_by_name" as const;
 type SplitColumns<S extends string> = S extends `${infer H}, ${infer T}` ? H | SplitColumns<T> : S;
 export type TodayJobColumn = SplitColumns<typeof TODAY_JOB_SELECT>;
 /** The ticket row as My tickets reads it (TODAY_JOB_SELECT). */

@@ -461,7 +461,9 @@ describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets
     // Oct 28: My tickets reads a named column list; the columns it leaves out are null in the
     // seed (job-cache.ts UNREAD_COLUMNS) until the loader's own read lands.
     expect(seeded.invoice_id).toBeNull();
-    expect(seeded.notes).toBeNull();
+    // (Nov 18: My tickets reads the Special instructions now, so `notes` comes with the row
+    // and is no longer one of the columns seeded as null.)
+    expect(seeded.job_number).toBeNull();
     expect(seeded.deleted_at).toBeNull();
     expect(seedJobFromToday(j, { full_name: "  ", email: "t@x.com" }).technician_name).toBe(
       "t@x.com",

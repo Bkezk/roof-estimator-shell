@@ -66,6 +66,7 @@ import { RATE_TONES } from "@/lib/stage-colors";
 import { usePictures } from "@/components/service/picture-queue";
 import { UploadBadge, WaitingForSignalLine } from "@/components/service/picture-queue-ui";
 import { HistoryLink } from "@/components/service/site-history";
+import { SpecialInstructionsBox } from "@/components/service/special-instructions";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
 import { WarrantyBadgeList } from "@/components/crm/site-warranties";
 import {
@@ -521,6 +522,10 @@ function JobCard({
       {j.site_id && <HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />}
 
       {j.description && <p className="text-base">{j.description}</p>}
+
+      {/* What this visit needs to know (owner, Nov 18): on the card itself, so it is read
+          whether or not the property has any history to open. */}
+      <SpecialInstructionsBox where="card" text={j.notes} />
 
       {/* M5 (owner, Oct 5): the roof warranty while in force. */}
       {j.warranty_badges?.length > 0 && <WarrantyBadgeList badges={j.warranty_badges} />}

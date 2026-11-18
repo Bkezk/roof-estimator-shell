@@ -31,6 +31,7 @@ vi.mock("@/lib/service-crew.server", () => ({
 import { getBoardPeek } from "@/lib/board-peek.functions";
 import { FIELD_DETAILS_NOTE_PLAIN } from "@/lib/field-ticket-page";
 import { ticketInstructions } from "@/lib/service-history.functions";
+import { TODAY_JOB_SELECT } from "@/lib/service-field.functions";
 import { getServiceJob, saveServiceJob } from "@/lib/service.functions";
 import {
   choosesInstructionsVisible,
@@ -407,6 +408,37 @@ describe("the database (20261118200000_special_instructions_office_only.sql)", (
   });
 });
 
+// Owner, Nov 18: "think of a solution for when there is no history but still special
+// instructions" (then: "go on 1"). The instructions are on the My tickets card and at the top of
+// the close-out, so they do not depend on the property having a history to open.
+describe("the instructions where a technician works, history or not", () => {
+  const today = read("src/components/service/today-page.tsx");
+  const closeout = read("src/components/service/closeout.tsx");
+  const box = read("src/components/service/special-instructions.tsx");
+  it("My tickets reads them with the day, and the card shows them", () => {
+    const cols = TODAY_JOB_SELECT.split(", ");
+    expect(cols).toContain("notes");
+    expect(cols).toContain("notes_tech_visible");
+    expect(today).toContain('<SpecialInstructionsBox where="card" text={j.notes} />');
+    // Not inside the history link, which a first ticket at a property does not have.
+    expect(today.indexOf('where="card"')).toBeGreaterThan(today.indexOf("<HistoryLink"));
+  });
+  it("the close-out opens with them; the office is told when technicians do not see them", () => {
+    expect(closeout.replace(/\s+/g, " ")).toContain(
+      '<SpecialInstructionsBox where="closeout" text={job.notes} officeOnly={job.notes_tech_visible === false} />',
+    );
+  });
+  it("one box for all three places: nothing without text, the words as typed", () => {
+    expect(box).toContain("if (!body) return null;");
+    expect(box).toContain("whitespace-pre-line");
+    expect(box).toContain("data-special-instructions={where}");
+    expect(box).toContain("{INSTRUCTIONS_OFFICE_ONLY}");
+    // A technician is never handed the office's own instructions, so the card needs no rule
+    // of its own: the row My tickets reads has none of that text.
+    expect(read("src/lib/ticket-instructions.ts")).toContain("service_jobs.notes is then empty");
+  });
+});
+
 describe("the screens", () => {
   const page = read("src/components/service-page.tsx");
   const history = read("src/components/service/site-history.tsx");
@@ -436,7 +468,8 @@ describe("the screens", () => {
   });
   it("History at this property: this ticket's instructions sit above the timeline, in the fold and the pop-up", () => {
     expect(INSTRUCTIONS_HISTORY_TITLE).toBe("Special instructions for this ticket");
-    expect(history).toContain('data-history="instructions"');
+    expect(history).toContain('where="history"');
+    expect(history).toContain("title={INSTRUCTIONS_HISTORY_TITLE}");
     // One timeline serves the fold and the pop-up, and the box is its first thing.
     expect(history.replace(/\s+/g, " ")).toContain(
       "<InstructionsBox jobId={jobId} enabled={enabled} /> {timeline}",

@@ -89,7 +89,8 @@ import {
   siteHistorySummary,
   ticketInstructions,
 } from "@/lib/service-history.functions";
-import { INSTRUCTIONS_HISTORY_TITLE, INSTRUCTIONS_OFFICE_ONLY } from "@/lib/ticket-instructions";
+import { INSTRUCTIONS_HISTORY_TITLE } from "@/lib/ticket-instructions";
+import { SpecialInstructionsBox } from "@/components/service/special-instructions";
 import {
   STAGE_LABELS,
   TYPE_LABELS,
@@ -175,23 +176,14 @@ function InstructionsBox({ jobId, enabled }: { jobId: string; enabled: boolean }
         Could not load this ticket’s special instructions: {errText(q.error)}
       </p>
     );
-  if (!q.data?.text) return null;
   return (
-    <section
-      className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
-      aria-label={INSTRUCTIONS_HISTORY_TITLE}
-      data-history="instructions"
-    >
-      <h3 className="text-xs font-semibold uppercase tracking-wide">
-        {INSTRUCTIONS_HISTORY_TITLE}
-      </h3>
-      <p className="mt-1 whitespace-pre-line break-words text-sm">{q.data.text}</p>
-      {q.data.officeOnly && (
-        <p className="mt-1 text-xs opacity-80" data-history="instructions-office-only">
-          {INSTRUCTIONS_OFFICE_ONLY}
-        </p>
-      )}
-    </section>
+    <SpecialInstructionsBox
+      where="history"
+      className="mb-4"
+      title={INSTRUCTIONS_HISTORY_TITLE}
+      text={q.data?.text}
+      officeOnly={q.data?.officeOnly === true}
+    />
   );
 }
 

@@ -11,3 +11,4 @@
 
 - Keep SQL-nullable and overloaded RPC contract corrections in `src/lib/database-rpc.ts`; generated database types remain untouched and calls retain the original client and authorization.
 - Database changes are applied by hand: a file under `supabase/migrations/` does not change the live database until its statements are run through the Lovable database tool and checked. If a change cannot be run, list it in `docs/PENDING-DATABASE.md` so the next session applies it.
+- Roof Care plans, the public QR forms and referral credit are being built in steps: read `docs/roof-care-plans.md` first. Its prices and costing numbers are kept out of the repository, in the admin-only table `office_reference_notes` on the live database.

@@ -139,6 +139,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
 import { HistoryLink } from "@/components/service/site-history";
+import { SpecialInstructionsBox } from "@/components/service/special-instructions";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
@@ -375,6 +376,13 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
         {/* What happened here before (owner, Oct 21): a tap opens the ticket's History fold. */}
         {job.site_id && <HistoryLink jobId={job.id} whenNone="say" />}
         {job.description && <p className="text-sm">{job.description}</p>}
+        {/* Read before the work is closed out (owner, Nov 18); the office is told when
+            technicians do not see them. */}
+        <SpecialInstructionsBox
+          where="closeout"
+          text={job.notes}
+          officeOnly={job.notes_tech_visible === false}
+        />
         {FINISHED.includes(job.stage) && (
           <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />

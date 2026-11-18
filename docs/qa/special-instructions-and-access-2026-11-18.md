@@ -139,5 +139,21 @@ Ticket and trade numbering are untouched. The test login is an admin again.
 
 - The proposal's address was proved by its checks, not by making a document in a browser.
 - Nothing was tried on a real phone.
-- When a property has no earlier tickets, My tickets shows no history link, so there is no pop-up
-  to open there. The instructions are still on the ticket itself.
+
+## Added the same day: the instructions where a technician works
+
+A property with no earlier tickets has no history to open, so its instructions had no box on My
+tickets. The owner's words: "think of a solution for when there is no history but still special
+instructions", then "go on 1".
+
+- The **My tickets card** shows the ticket's Special instructions in a box under the description.
+- The **close-out** opens with the same box. There the office is told when technicians do not see
+  them.
+- The history pop-up keeps its box. All three are one component.
+- A technician is never handed instructions the office keeps to itself, so none of the three can
+  show them.
+
+Proof: 3 more checks in `ticket-instructions-nov18.test.ts`. Full run: 596 files, 8,555 checks
+pass. In a browser at phone size, on a temporary ticket with no property and so no history, with
+every save blocked: the box is on the My tickets card and at the top of the close-out, with the
+words as typed. The temporary ticket was removed.
