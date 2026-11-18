@@ -285,14 +285,19 @@ describe("the timeline", () => {
       src.indexOf("function HistoryRow({"),
       src.indexOf("function HistoryPhotos({"),
     );
-    for (const part of ["found", "inspection-notes", "repairs", "closing-notes", "shared-notes"])
+    for (const part of ["found", "inspection-notes", "repairs", "closing-notes"])
       expect(row).toContain(`data-history="${part}"`);
+    // Nov 18: the ticked entries are drawn by SharedNotesList (ticket-shared-notes.tsx), which
+    // this ticket's own entries use too. The words and the marks are as they were.
+    expect(row).toContain('<SharedNotesList notes={ticket.shared_notes} where="shared-notes" />');
+    const list = read("src/components/service/ticket-shared-notes.tsx");
+    expect(list).toContain("data-history={where}");
     expect(row).toContain("Found on the inspection");
     expect(row).toContain("What was wrong: ");
     expect(row).toContain("What was done: ");
     expect(row).toContain("Closing notes: ");
-    expect(row).toContain("{historyNoteLabel(n.method)}");
-    expect(row).toContain("· {whenShort(n.at)}");
+    expect(list).toContain("{historyNoteLabel(n.method)}");
+    expect(list).toContain("· {whenShort(n.at)}");
     // Not the photos (they are behind the tap), and never the Special instructions.
     expect(row).not.toContain("<PhotoGrid");
     expect(src).not.toContain("special_instructions");
@@ -371,7 +376,11 @@ describe("the History here line opens the history on its own", () => {
 
   it("the pop-up holds the timeline and Close, and nothing else of the ticket", () => {
     expect(link).toContain("data-history-dialog={jobId}");
-    expect(link).toContain("<HistoryTimeline jobId={jobId} locationId={locationId} enabled />");
+    // Nov 18: the pop-up also asks for THIS ticket's ticked Activity entries (withActivity;
+    // ticket-shared-notes.test.tsx). The whole Activity block, with its buttons, stays out.
+    expect(link).toContain(
+      "<HistoryTimeline jobId={jobId} locationId={locationId} enabled withActivity />",
+    );
     expect(link).toContain("data-history-dialog-close");
     expect(link).toContain("{historyFoldTitle(count)}");
     for (const gone of [

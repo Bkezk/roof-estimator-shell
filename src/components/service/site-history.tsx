@@ -22,6 +22,8 @@
  *    Special instructions are not shown.
  *    Above the timeline (owner, Nov 18): THIS ticket's Special instructions, in a box of their
  *    own (InstructionsBox), for whoever may read them (lib/ticket-instructions.ts).
+ *    Under them, in the pop-up (owner, Nov 18): THIS ticket's own ticked Activity entries
+ *    (ticket-shared-notes.tsx). The earlier tickets' entries were here; this ticket's were not.
  *  * LastTimeLine — under an inspection checklist item: "Last time: Jun 12 — Issue: cracked
  *    sealant" with the photo taken for that item on the earlier ticket (photos carry item_key,
  *    the checklist item's id, which is the same across tickets).
@@ -34,20 +36,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import {
-  Camera,
-  ChevronRight,
-  History,
-  Loader2,
-  Mail,
-  MapPin,
-  MapPinned,
-  MessageSquare,
-  MessageSquarePlus,
-  PenLine,
-  Phone,
-  PhoneCall,
-} from "lucide-react";
+import { Camera, ChevronRight, History, Loader2, MapPinned, PenLine } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
@@ -69,7 +58,6 @@ import {
   HISTORY_NO_PHOTOS,
   dayText,
   flaggedHistoryItems,
-  historyNoteLabel,
   historyPhotosHint,
   historyFoldSummary,
   historyFoldTitle,
@@ -91,6 +79,7 @@ import {
 } from "@/lib/service-history.functions";
 import { INSTRUCTIONS_HISTORY_TITLE } from "@/lib/ticket-instructions";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
+import { SharedNotesList, TicketSharedNotes } from "@/components/service/ticket-shared-notes";
 import {
   STAGE_LABELS,
   TYPE_LABELS,
@@ -99,13 +88,7 @@ import {
 } from "@/lib/service.functions";
 import { Box } from "@/components/service/field-shared";
 import { PhotoLightbox, RotatedPhoto } from "@/components/service/photo-markup";
-import {
-  errText,
-  fieldKeys,
-  useSignedUrl,
-  useStableLink,
-  whenShort,
-} from "@/components/service/field-utils";
+import { errText, fieldKeys, useSignedUrl, useStableLink } from "@/components/service/field-utils";
 
 /** The fold's element id: the strip scrolls to it, and so does ?open=history. */
 export const HISTORY_FOLD_ID = "history-at-property";
@@ -313,7 +296,7 @@ function HistoryDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <HistoryTimeline jobId={jobId} locationId={locationId} enabled />
+          <HistoryTimeline jobId={jobId} locationId={locationId} enabled withActivity />
         </div>
         <DialogFooter className="flex-row items-center justify-end border-t px-4 py-3">
           <Button
@@ -341,10 +324,16 @@ function HistoryTimeline({
   jobId,
   locationId,
   enabled,
+  withActivity = false,
 }: {
   jobId: string;
   locationId: string | null;
   enabled: boolean;
+  /**
+   * The pop-up only (owner, Nov 18): THIS ticket's ticked Activity entries, under its Special
+   * instructions. The ticket page's fold leaves them out: the whole Activity is on that page.
+   */
+  withActivity?: boolean;
 }) {
   const { profile } = useAuth();
   // A technician-only user cannot read another technician's ticket: no Open link, nothing said.
@@ -406,6 +395,9 @@ function HistoryTimeline({
   return (
     <>
       <InstructionsBox jobId={jobId} enabled={enabled} />
+      {withActivity && (
+        <TicketSharedNotes jobId={jobId} where="history" enabled={enabled} className="mb-4" />
+      )}
       {timeline}
     </>
   );
@@ -451,15 +443,6 @@ export function HistoryFold({
 
 /** A small heading inside a timeline entry: "FOUND ON THE INSPECTION". */
 const HEAD = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
-
-/** The icon of a shared Activity entry, as the ticket's own Activity draws it. */
-const NOTE_ICONS: Record<string, typeof Phone> = {
-  called: Phone,
-  texted: MessageSquare,
-  emailed: Mail,
-  visited: MapPin,
-  comment: MessageSquarePlus,
-};
 
 /** "Nov 10 · Inspection · #6069 · Done · Ted Tech · North wing": an earlier ticket's line. */
 function TicketLine({ ticket, sameSpot }: { ticket: SiteHistoryTicket; sameSpot: boolean }) {
@@ -597,25 +580,7 @@ function HistoryRow({
         )}
         {/* The Activity entries ticked "Viewable to technicians", as the Activity draws them. */}
         {ticket.shared_notes.length > 0 && (
-          <ol className="space-y-1 text-xs" data-history="shared-notes">
-            {ticket.shared_notes.map((n) => {
-              const Icon = NOTE_ICONS[n.method] ?? PhoneCall;
-              return (
-                <li key={n.id} className="flex gap-1.5">
-                  <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <div className="min-w-0">
-                    <span className="font-medium">{historyNoteLabel(n.method)}</span>
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {whenShort(n.at)}
-                      {n.by_name ? ` · ${n.by_name}` : ""}
-                    </span>
-                    {n.note ? <span className="whitespace-pre-line"> — {n.note}</span> : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
+          <SharedNotesList notes={ticket.shared_notes} where="shared-notes" />
         )}
       </div>
       {open && (

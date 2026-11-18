@@ -471,9 +471,13 @@ describe("the screens", () => {
     expect(history).toContain('where="history"');
     expect(history).toContain("title={INSTRUCTIONS_HISTORY_TITLE}");
     // One timeline serves the fold and the pop-up, and the box is its first thing.
-    expect(history.replace(/\s+/g, " ")).toContain(
-      "<InstructionsBox jobId={jobId} enabled={enabled} /> {timeline}",
-    );
+    // (Later on Nov 18: in the pop-up, this ticket's ticked Activity entries come between the
+    // box and the timeline; ticket-shared-notes.test.tsx.)
+    const body = history.replace(/\s+/g, " ");
+    const boxAt = body.indexOf("<InstructionsBox jobId={jobId} enabled={enabled} />");
+    expect(boxAt).toBeGreaterThan(-1);
+    expect(boxAt).toBeLessThan(body.indexOf("{timeline} </>"));
+    expect(body.slice(boxAt, body.indexOf("{timeline} </>"))).not.toContain("<HistoryRow");
     expect(history.match(/<HistoryTimeline /g)).toHaveLength(2);
     // A save of the ticket refreshes the box.
     expect(page).toContain("qc.invalidateQueries({ queryKey: fieldKeys.instructions(row.id) })");

@@ -52,6 +52,11 @@ can no longer be opened. What it showed and where a technician reads it now:
 | The day, the assigned technician and the crew as a list      | The card shows the day. The workflow asks the crew |
 | The ticket's Activity and its timeline                       | Not shown to a technician any more                 |
 
+Later on Nov 18 the entries of the ticket that are ticked "Viewable to technicians" were put back,
+at the top of the workflow and of the History pop-up:
+`docs/qa/this-ticket-activity-2026-11-18.md`. The stage steps and the buttons that add an entry
+are still the office's.
+
 ### 3. The ten terms
 
 The sign-up shows the ten terms the owner approved, in a list, with a tick: "The customer has

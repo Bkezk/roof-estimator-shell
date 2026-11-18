@@ -61,6 +61,9 @@ describe("the ticket page on arrival at the history", () => {
     // address that still carries ?open=history is honoured by the page, as above.
     const strip = read("src/components/service/site-history.tsx");
     expect(strip).not.toContain("search={{ id: jobId, open: HISTORY_OPEN_PARAM }}");
-    expect(strip).toContain("<HistoryTimeline jobId={jobId} locationId={locationId} enabled />");
+    // Nov 18: the pop-up also shows this ticket's own ticked Activity entries (withActivity).
+    expect(strip).toContain(
+      "<HistoryTimeline jobId={jobId} locationId={locationId} enabled withActivity />",
+    );
   });
 });

@@ -19,7 +19,7 @@ import { canAccess, isFieldOnly, type AccessLike } from "@/lib/access";
 
 export const TECH_VISIBLE_LABEL = "Viewable to technicians";
 export const TECH_VISIBLE_HELP =
-  "Shows in this ticket's pop-up under History at this property, for technicians on later tickets here.";
+  "Shows to the technician working this ticket, and under History at this property for technicians on later tickets here.";
 
 /** The entries a tick can sit on: the ones a person makes. Not "note" (the site's own lines) or "service". */
 export const TECH_VISIBLE_METHODS = [
@@ -57,4 +57,30 @@ export function techVisibleOnSave(input: {
   if (isFieldOnly(input.profile)) return true;
   // Only someone who works tickets chooses; anyone else's entry stays on its own ticket.
   return choosesTechVisible(input.profile) && input.ticked === true;
+}
+
+/**
+ * This ticket's own ticked entries, where a technician works it (owner, Nov 18: "but the activity
+ * list and timeline are on the history when you click it no?"). They were not: the history lists
+ * EARLIER tickets, and since a technician works a ticket in the workflow only, the ticket's own
+ * Activity was on no screen of theirs. A note the office ticked for technicians on the ticket
+ * being worked (a gate code, who to ask for) was read by nobody until the ticket was history.
+ * Now the ticked entries of this ticket show at the top of the workflow and at the top of the
+ * history's pop-up, by the same tick as an earlier ticket's.
+ */
+export const THIS_TICKET_ACTIVITY_TITLE = "Activity on this ticket";
+/** The office's line under them, on the screens it shares with technicians. */
+export const THIS_TICKET_ACTIVITY_OFFICE =
+  "Technicians see the entries ticked “Viewable to technicians”. These are the ticked ones.";
+
+/**
+ * The entries of a ticket a technician is shown: ticked, made by a person, newest first. The
+ * same rule the history reads an earlier ticket's by (site_history: tech_visible).
+ */
+export function techVisibleEntries<
+  T extends { method: string; tech_visible?: boolean | null; at: string },
+>(rows: readonly T[] | null | undefined): T[] {
+  return (rows ?? [])
+    .filter((r) => r.tech_visible === true && canBeTechVisible(r.method))
+    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }

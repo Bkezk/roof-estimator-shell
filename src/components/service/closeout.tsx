@@ -139,6 +139,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
 import { HistoryLink } from "@/components/service/site-history";
+import { TicketSharedNotes } from "@/components/service/ticket-shared-notes";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
 import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { CrewBox } from "@/components/service/crew-box";
@@ -388,6 +389,9 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
           text={job.notes}
           officeOnly={job.notes_tech_visible === false}
         />
+        {/* This ticket's Activity entries ticked "Viewable to technicians" (owner, Nov 18): the
+            workflow is the technician's only screen of the ticket, so they are read here. */}
+        <TicketSharedNotes jobId={job.id} where="closeout" />
         {FINISHED.includes(job.stage) && (
           <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
