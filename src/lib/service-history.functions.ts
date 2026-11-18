@@ -18,6 +18,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { isFieldOnly } from "@/lib/access";
+import { readProfile } from "@/lib/profile-cache.server";
+import { withInstructions } from "@/lib/ticket-instructions";
 import {
   siteHistorySchema,
   siteHistorySummarySchema,
@@ -112,4 +115,36 @@ export const siteHistorySummary = createServerFn({ method: "GET" })
     const r = await rawRpc(context.supabase, "site_history_summary", { p_job_id: data.id });
     if (r.error) throw new Error(r.error.message);
     return siteHistorySummarySchema.parse(r.data);
+  });
+
+/** This ticket's Special instructions, for the box above the timeline (owner, Nov 18). */
+export interface TicketInstructions {
+  /** The instructions the reader may see; null when there are none (or none for them). */
+  text: string | null;
+  /** True for the office while the box is unticked: technicians do not see the text. */
+  officeOnly: boolean;
+}
+
+/**
+ * The Special instructions of the ticket whose history is open: read with the caller's own
+ * sign-in, so a technician reads them on a ticket that is theirs, and never the ones the
+ * office keeps to itself (those are not on the ticket's row; ticket-instructions.ts).
+ */
+export const ticketInstructions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator(idInput)
+  .handler(async ({ data, context }): Promise<TicketInstructions> => {
+    const sb = context.supabase;
+    const p = await readProfile(sb, context.userId);
+    const { data: row, error } = await sb
+      .from("service_jobs")
+      .select("id, notes, notes_tech_visible")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    // A ticket the caller may not read has no instructions for them; the history says the rest.
+    if (!row) return { text: null, officeOnly: false };
+    const { notes } = await withInstructions(sb, p, row);
+    const text = (notes ?? "").trim() || null;
+    return { text, officeOnly: !!text && !row.notes_tech_visible && !isFieldOnly(p) };
   });

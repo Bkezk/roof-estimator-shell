@@ -20,6 +20,8 @@
  *    PhotoLightbox) read-only, with arrows / a swipe between them. "Open the ticket" only for
  *    someone who can read it — a technician-only user sees no link. The earlier ticket's
  *    Special instructions are not shown.
+ *    Above the timeline (owner, Nov 18): THIS ticket's Special instructions, in a box of their
+ *    own (InstructionsBox), for whoever may read them (lib/ticket-instructions.ts).
  *  * LastTimeLine — under an inspection checklist item: "Last time: Jun 12 — Issue: cracked
  *    sealant" with the photo taken for that item on the earlier ticket (photos carry item_key,
  *    the checklist item's id, which is the same across tickets).
@@ -85,7 +87,9 @@ import {
   HISTORY_FIRST_TICKETS,
   siteHistory,
   siteHistorySummary,
+  ticketInstructions,
 } from "@/lib/service-history.functions";
+import { INSTRUCTIONS_HISTORY_TITLE, INSTRUCTIONS_OFFICE_ONLY } from "@/lib/ticket-instructions";
 import {
   STAGE_LABELS,
   TYPE_LABELS,
@@ -143,6 +147,52 @@ function useHistory(jobId: string, enabled: boolean, all = false) {
     staleTime: 45 * 60_000,
     gcTime: LINKS_FRESH_MS,
   });
+}
+
+/** This ticket's Special instructions, for the box above the timeline (owner, Nov 18). */
+function useInstructions(jobId: string, enabled: boolean) {
+  const { session } = useAuth();
+  const fn = useServerFn(ticketInstructions);
+  return useQuery({
+    queryKey: fieldKeys.instructions(jobId),
+    queryFn: () => fn({ data: { id: jobId } }),
+    enabled: !!session && enabled,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Above the timeline (owner, Nov 18: "can we have the special instructions be at the top of the
+ * timeline when techs are looking at history at this property"): what THIS visit needs to know,
+ * read first. Nothing when the ticket has none, or none the reader may see. The office is told
+ * when technicians do not see them.
+ */
+function InstructionsBox({ jobId, enabled }: { jobId: string; enabled: boolean }) {
+  const q = useInstructions(jobId, enabled);
+  if (q.error)
+    return (
+      <p className="mb-3 text-sm text-destructive" data-history="instructions-error">
+        Could not load this ticket’s special instructions: {errText(q.error)}
+      </p>
+    );
+  if (!q.data?.text) return null;
+  return (
+    <section
+      className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+      aria-label={INSTRUCTIONS_HISTORY_TITLE}
+      data-history="instructions"
+    >
+      <h3 className="text-xs font-semibold uppercase tracking-wide">
+        {INSTRUCTIONS_HISTORY_TITLE}
+      </h3>
+      <p className="mt-1 whitespace-pre-line break-words text-sm">{q.data.text}</p>
+      {q.data.officeOnly && (
+        <p className="mt-1 text-xs opacity-80" data-history="instructions-office-only">
+          {INSTRUCTIONS_OFFICE_ONLY}
+        </p>
+      )}
+    </section>
+  );
 }
 
 // ── The strip ──────────────────────────────────────────────────────────────────────────────
@@ -322,7 +372,7 @@ function HistoryTimeline({
   const refresh = () => {
     if (q.data && Date.now() - q.dataUpdatedAt > LINKS_FRESH_MS) void q.refetch();
   };
-  return q.error ? (
+  const timeline = q.error ? (
     <p className="text-sm text-destructive">Could not load the history here: {errText(q.error)}</p>
   ) : q.isLoading || !q.data ? (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -359,6 +409,12 @@ function HistoryTimeline({
           Show all {summary.data?.count} earlier tickets
         </Button>
       )}
+    </>
+  );
+  return (
+    <>
+      <InstructionsBox jobId={jobId} enabled={enabled} />
+      {timeline}
     </>
   );
 }

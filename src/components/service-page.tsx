@@ -108,6 +108,7 @@ import {
 } from "@/lib/ticket-stage";
 import {
   FIELD_DETAILS_NOTE,
+  FIELD_DETAILS_NOTE_PLAIN,
   fieldNotesInput,
   isFieldTicketPage,
   TICKET_NOTES_LABEL,
@@ -211,7 +212,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  choosesInstructionsVisible,
+  INSTRUCTIONS_OFFICE_ONLY,
+  INSTRUCTIONS_TECH_LABEL,
+} from "@/lib/ticket-instructions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
@@ -1286,6 +1293,8 @@ interface Draft {
   centerpoint_ticket: string;
   centerpoint_invoice: string;
   notes: string;
+  /** "Viewable to technicians" beside Special instructions (Nov 18); ticked on a new ticket. */
+  notes_tech_visible: boolean;
 }
 
 /**
@@ -1318,6 +1327,7 @@ const draftFrom = (job: ServiceJobWithTech | null): Draft =>
         centerpoint_ticket: job.centerpoint_ticket ?? "",
         centerpoint_invoice: job.centerpoint_invoice ?? "",
         notes: job.notes ?? "",
+        notes_tech_visible: job.notes_tech_visible !== false,
       }
     : {
         customer: null,
@@ -1335,6 +1345,7 @@ const draftFrom = (job: ServiceJobWithTech | null): Draft =>
         centerpoint_ticket: "",
         centerpoint_invoice: "",
         notes: "",
+        notes_tech_visible: true,
       };
 /** A new ticket's starting values beyond the defaults, with a line saying where they came from. */
 interface Seed {
@@ -1463,6 +1474,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // known too (lib/field-ticket-page.ts), so the office's controls never flash first. An office
   // person ticked Technician sees no change (owner, Oct 8: the office keeps full visibility).
   const fieldPage = isFieldTicketPage(profile, job);
+  // The box beside Special instructions is the office's (Nov 18). A technician-only login on a
+  // ticket whose instructions the office keeps to itself is shown no instructions box.
+  const officeChoosesInstructions = choosesInstructionsVisible(profile);
+  const instructionsHidden =
+    !officeChoosesInstructions && !!job && job.notes_tech_visible === false;
   // Owner, Oct 8: an office person ticked Technician takes an unassigned ticket for themselves.
   const claimFn = useServerFn(claimServiceJob);
   const claimMut = useMutation({
@@ -1714,6 +1730,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             // server keeps the stage, moving an Open ticket that now has a technician and a day to
             // Scheduled itself.
             notes: draft.notes,
+            // The office's box beside Special instructions (ticket-instructions.ts).
+            ...(officeChoosesInstructions ? { notes_tech_visible: draft.notes_tech_visible } : {}),
             centerpoint_ticket: draft.centerpoint_ticket,
             centerpoint_invoice: draft.centerpoint_invoice,
             // Written on create only (an opportunity's "Start a ticket").
@@ -1733,6 +1751,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       }
       if (job) {
         qc.setQueryData(["service-job", row.id], row);
+        // The box above the history's timeline shows the instructions just saved.
+        void qc.invalidateQueries({ queryKey: fieldKeys.instructions(row.id) });
         // A save can move the stage (Open → Scheduled): its date on the strip.
         void qc.invalidateQueries({ queryKey: fieldKeys.events(row.id) });
         setSavedKey(draftKey(draft));
@@ -2415,15 +2435,35 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                 : "—"}
         </dd>
       </dl>
-      <p className="text-xs text-muted-foreground">{FIELD_DETAILS_NOTE}</p>
+      <p className="text-xs text-muted-foreground">
+        {instructionsHidden ? FIELD_DETAILS_NOTE_PLAIN : FIELD_DETAILS_NOTE}
+      </p>
     </section>
   );
   // Two rows to start, growing as they are typed (owner, Oct 1). "Special instructions" since
   // Nov 17 (owner: "changes notes on service tickets to special instructions as we already have
   // the activity log"): what happened goes in Activity; this box is what the visit needs to know.
-  const notesField = (
+  // Nov 18 (owner: "add a viewable to technicians check box next to special instructions for the
+  // office"): the office ticks who reads them. Unticked, a technician-only login is shown no
+  // box at all (the database gives them none of the text; ticket-instructions.ts).
+  const notesField = instructionsHidden ? null : (
     <div className="space-y-1">
-      <Label htmlFor="ticket-notes">{TICKET_NOTES_LABEL}</Label>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <Label htmlFor="ticket-notes">{TICKET_NOTES_LABEL}</Label>
+        {officeChoosesInstructions && (
+          <label
+            className="flex min-h-8 cursor-pointer items-center gap-2 text-sm"
+            data-instructions-visible
+          >
+            <Checkbox
+              checked={draft.notes_tech_visible}
+              disabled={ro}
+              onCheckedChange={(v) => set("notes_tech_visible", v === true)}
+            />
+            {INSTRUCTIONS_TECH_LABEL}
+          </label>
+        )}
+      </div>
       <AutoTextarea
         id="ticket-notes"
         rows={2}
@@ -2431,6 +2471,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         disabled={ro}
         onChange={(e) => set("notes", e.target.value)}
       />
+      {officeChoosesInstructions && !draft.notes_tech_visible && (
+        <p className="text-xs text-muted-foreground" data-instructions-office-only>
+          {INSTRUCTIONS_OFFICE_ONLY}
+        </p>
+      )}
     </div>
   );
 

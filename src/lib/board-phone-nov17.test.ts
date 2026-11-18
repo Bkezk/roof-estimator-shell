@@ -448,7 +448,9 @@ describe("the details pop-up", () => {
   it("reads the special instructions and who to call with the viewer's own sign-in", () => {
     expect(peekFn).toContain(".middleware([requireSupabaseAuth])");
     expect(peekFn).toContain('canAccess(p, "service") || canAccess(p, "customers")');
-    expect(peekFn).toContain('.select("notes, contact_id, account_id")');
+    // Nov 18: with the box beside Special instructions, so the office's pop-up reads the ones
+    // kept from technicians too (ticket-instructions.ts).
+    expect(peekFn).toContain('.select("id, notes, notes_tech_visible, contact_id, account_id")');
     expect(peekFn).toContain("context.supabase");
     // No money, and no service-role client.
     expect(peekFn).not.toMatch(/rate|price|cost|amount|total/i);

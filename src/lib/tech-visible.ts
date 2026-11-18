@@ -15,7 +15,7 @@
  * Pure: the words and the rules. The database says the same (contact_log_set_tech_visible,
  * 20261117190000_history_popup_tech_visible.sql).
  */
-import { isFieldOnly, type AccessLike } from "@/lib/access";
+import { canAccess, isFieldOnly, type AccessLike } from "@/lib/access";
 
 export const TECH_VISIBLE_LABEL = "Viewable to technicians";
 export const TECH_VISIBLE_HELP =
@@ -33,9 +33,14 @@ export const TECH_VISIBLE_METHODS = [
 export const canBeTechVisible = (method: string): boolean =>
   (TECH_VISIBLE_METHODS as readonly string[]).includes(method);
 
-/** Who is shown the checkbox: the office (anyone who is not a technician-only login). */
+/**
+ * Who is shown the checkbox: the office that works tickets (Service access, a manager or an
+ * admin; not a technician-only login). Someone who only reads tickets through Customers access
+ * is not asked (Nov 18: the database refused their tick on an entry already made, and now
+ * refuses it on a new one too; 20261118210000).
+ */
 export const choosesTechVisible = (p: AccessLike | null | undefined): boolean =>
-  !!p && !isFieldOnly(p);
+  !!p && !isFieldOnly(p) && canAccess(p, "service");
 
 /**
  * What a new entry is saved with: a technician-only writer's ticket entry is always viewable to
@@ -49,5 +54,7 @@ export function techVisibleOnSave(input: {
   ticked: boolean | null | undefined;
 }): boolean {
   if (input.kind !== "ticket" || !canBeTechVisible(input.method)) return false;
-  return isFieldOnly(input.profile) ? true : input.ticked === true;
+  if (isFieldOnly(input.profile)) return true;
+  // Only someone who works tickets chooses; anyone else's entry stays on its own ticket.
+  return choosesTechVisible(input.profile) && input.ticked === true;
 }

@@ -39,6 +39,9 @@ export const TICKET_NOTES_LABEL = "Special instructions";
 /** Under the read-only details, in the technician's words. */
 export const FIELD_DETAILS_NOTE =
   "The office sets these. Special instructions are below; the close-out marks the ticket Done.";
+/** The same line on a ticket with no instructions box for technicians (Nov 18). */
+export const FIELD_DETAILS_NOTE_PLAIN =
+  "The office sets these. The close-out marks the ticket Done.";
 
 const asType = (s: string): ServiceType =>
   (SERVICE_TYPES as readonly string[]).includes(s) ? (s as ServiceType) : "other";

@@ -158,7 +158,9 @@ describe("the ticket page (components/service-page.tsx)", () => {
     expect(block).not.toContain("<Input");
     expect(block).not.toContain("<Select");
     expect(block).toContain("<HistoryStrip jobId={job.id} onOpen={openHistory} />");
-    expect(block).toContain("{FIELD_DETAILS_NOTE}");
+    // Nov 18: the line leaves out "Special instructions are below" where the office keeps
+    // them to itself and no such box is shown.
+    expect(block).toContain("{instructionsHidden ? FIELD_DETAILS_NOTE_PLAIN : FIELD_DETAILS_NOTE}");
     for (const label of ["Description", "Type", "Day", "Technician", "Crew"])
       expect(block).toContain(`<dt>${label}</dt>`);
     // Notes stay an editable box, saved through the notes-only input.

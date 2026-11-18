@@ -14,6 +14,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import { canAccess } from "@/lib/access";
 import { readProfile } from "@/lib/profile-cache.server";
+import { withInstructions } from "@/lib/ticket-instructions";
 
 export interface BoardPeek {
   /** The ticket's Special instructions. */
@@ -33,11 +34,14 @@ export const getBoardPeek = createServerFn({ method: "GET" })
       throw new Error("Forbidden: Service access required");
     const { data: row, error } = await sb
       .from("service_jobs")
-      .select("notes, contact_id, account_id")
+      .select("id, notes, notes_tech_visible, contact_id, account_id")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Ticket not found");
+    // Instructions kept from technicians (Nov 18): the office's pop-up still reads them; a
+    // technician-only login is given none by the database.
+    const { notes } = await withInstructions(sb, p, row);
     const [contact, account] = await Promise.all([
       row.contact_id
         ? sb
@@ -52,7 +56,7 @@ export const getBoardPeek = createServerFn({ method: "GET" })
     ]);
     const c = contact.data;
     return {
-      notes: (row.notes ?? "").trim() || null,
+      notes: (notes ?? "").trim() || null,
       contact_name: c?.name ?? null,
       contact_phone: c?.mobile || c?.office_phone || null,
       account_phone: account.data?.phone ?? null,

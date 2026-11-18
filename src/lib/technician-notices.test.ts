@@ -191,8 +191,9 @@ describe("every path reaches it once", () => {
       svc.indexOf("async function saveCrew"),
     );
     // Nov 16 audit fix 1: the same read carries the type and the invoice, for the Type lock.
+    // Nov 18: and the box beside Special instructions (ticket-instructions.ts).
     expect(save).toContain(
-      '.select("technician_id, stage, scheduled_date, service_type, invoice_id")',
+      '"technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible"',
     );
     expect(save).toContain(
       "await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);",

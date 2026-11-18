@@ -12,6 +12,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { withInstructions } from "@/lib/ticket-instructions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
@@ -1435,7 +1436,7 @@ export const getTicketBundle = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<TicketBundle> => {
-    await me(context);
+    const p = await me(context);
     const sb = context.supabase;
     // Started now, awaited at the end: they run beside the ticket's own reads, not after them.
     const extras = Promise.all([
@@ -1473,7 +1474,10 @@ export const getTicketBundle = createServerFn({ method: "GET" })
     for (const r of [repairs, photos, time, events]) if (r.error) throw new Error(r.error.message);
     const names = new Map<string, string>();
     for (const t of techs.data ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    const job = jobRes.data;
+    // This is the read the ticket page opens on. Instructions the office keeps to itself are
+    // not on the ticket's own row (Nov 18): the office's read puts them back, so its box is
+    // never blank over text it would then save away. A technician-only login is given none.
+    const job = await withInstructions(sb, p, jobRes.data);
     const rows = photos.data ?? [];
     const [links, urls, inspection, [crew, materials, pos, contacts, clock]] = await Promise.all([
       photoLinks(

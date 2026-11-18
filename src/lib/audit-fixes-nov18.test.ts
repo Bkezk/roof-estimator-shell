@@ -19,6 +19,7 @@ import { billedPoIds, poIdOfLine, unbilledOrders } from "@/lib/invoice-po-lines"
 import { buildLinesFromJob } from "@/lib/invoices.server";
 import { packCostFor, stockUnitCost, type ServiceMaterialLink } from "@/lib/service-materials";
 import { priceIsPerPack, type PieceDef } from "@/lib/stock-units";
+import { choosesTechVisible, techVisibleOnSave } from "@/lib/tech-visible";
 import { fakeSupabase } from "@/test/fake-supabase";
 
 type Row = Record<string, unknown>;
@@ -206,5 +207,110 @@ describe("12. an Activity entry not ticked “Viewable to technicians”", () =>
   it("nothing else about the table changes: one policy, no data touched", () => {
     expect(sql.match(/create policy/g)).toHaveLength(1);
     expect(sql).not.toMatch(/\b(update|delete from|insert into|alter table)\b/);
+  });
+});
+
+// ── The database's own rules (owner, Nov 18: "Close all four") ───────────────────────────────
+// Each of these matched what the site does; none was enforced by the database itself.
+
+describe("the database's rules match the site's (20261118210000)", () => {
+  const sql = flatSql("supabase/migrations/20261118210000_access_rules_tightened.sql");
+
+  it("an inventory entry from someone without Estimate access: made now, by them, with its reason's sign", () => {
+    expect(sql).toContain(
+      "create policy inventory_movements_insert on public.inventory_movements for insert to authenticated",
+    );
+    // An estimator's entries and a saved count are as they were.
+    expect(sql).toContain("with check ( (select public.has_access('estimate')) or (");
+    expect(sql).toContain(
+      "reason in ('leftover', 'received', 'consumed', 'transfer_out', 'transfer_in') or (reason = 'released' and service_job_id is not null)",
+    );
+    expect(sql).toContain("and created_by = (select auth.uid())");
+    expect(sql).toContain("and count_id is null");
+    expect(sql).toContain(
+      "and created_at between now() - interval '5 minutes' and now() + interval '5 minutes'",
+    );
+    expect(sql).toContain(
+      "and case when reason in ('consumed', 'transfer_out') then qty < 0 else qty > 0 end",
+    );
+  });
+  it("the site's own entries fit the rule: its signs, its name, no date of its own", () => {
+    const fn = read("src/lib/inventory.functions.ts");
+    // Used and damaged subtract; everything else a technician records adds.
+    expect(fn).toContain(
+      'if (data.reason === "damaged" || data.reason === "consumed") qty = -qty;',
+    );
+    expect(fn).toContain("qty: -moved,");
+    expect(fn).toContain("qty: moved,");
+    expect(fn.match(/created_by: context\.userId,/g)!.length).toBeGreaterThanOrEqual(2);
+    // No entry the site makes for a person carries a created_at of its own.
+    expect(fn).not.toMatch(/\.insert\(\{[^}]*created_at:/);
+  });
+  it("a bid's job number is the numbering function's alone", () => {
+    expect(sql).toContain(
+      "create trigger bids_trade_number_guard before insert or update of trade_number on public.bids",
+    );
+    expect(sql).toContain("raise exception 'A bid''s job number cannot be changed'");
+    expect(sql).toContain(
+      "raise exception 'A bid is given its job number when it is first invoiced'",
+    );
+    // The function sets the flag only around its own write; a restore (nobody signed in) passes.
+    expect(sql).toContain(
+      "perform set_config('jbk.trade_number', 'on', true); update public.bids set trade_number = nextval('public.trade_bid_number_seq') where id = p_bid returning trade_number into v_bid.trade_number; perform set_config('jbk.trade_number', '', true);",
+    );
+    expect(sql).toContain(
+      "if coalesce(current_setting('jbk.trade_number', true), '') = 'on' or auth.uid() is null then return new;",
+    );
+    // The site never writes the number itself.
+    for (const f of ["bids.functions.ts", "trade-bids.functions.ts", "bid-invoices.functions.ts"])
+      expect(read(`src/lib/${f}`)).not.toMatch(/trade_number:\s*[^,}\n]*[,}\n]/);
+  });
+  it("the “nobody is on it” marks are the office's to read", () => {
+    expect(sql).toContain(
+      "create policy unassigned_marks_read on public.unassigned_marks for select to authenticated using ( (select public.is_admin()) or (select public.is_manager()) or ( ((select public.has_access('service')) or (select public.has_access('customers'))) and not (select public.is_technician()) ) );",
+    );
+  });
+  it("“Viewable to technicians” on a new entry: a ticket, an entry a person makes, someone who works tickets", () => {
+    expect(sql).toContain(
+      "and ( not tech_visible or ( kind = 'ticket' and method not in ('note', 'service') and ((select public.is_admin()) or (select public.is_manager()) or (select public.has_access('service'))) ) )",
+    );
+    // Who may add an entry at all is as it was.
+    expect(sql).toContain("by_user = (select auth.uid())");
+    // The site asks the same people (lib/tech-visible.ts).
+    const officeWithService = { role: "user", access: ["service", "customers"], technician: false };
+    const customersOnly = { role: "user", access: ["customers"], technician: false };
+    const technician = { role: "user", access: ["service"], technician: true };
+    expect(choosesTechVisible(officeWithService)).toBe(true);
+    expect(choosesTechVisible({ role: "manager", access: [], technician: false })).toBe(true);
+    expect(choosesTechVisible(customersOnly)).toBe(false);
+    expect(choosesTechVisible(technician)).toBe(false);
+    const on = (profile: typeof technician, ticked: boolean) =>
+      techVisibleOnSave({ profile, kind: "ticket", method: "called", ticked });
+    expect(on(officeWithService, true)).toBe(true);
+    expect(on(officeWithService, false)).toBe(false);
+    // Someone who only reads tickets through Customers: their entry stays on its own ticket.
+    expect(on(customersOnly, true)).toBe(false);
+    // What a technician writes is for technicians, ticked or not.
+    expect(on(technician, false)).toBe(true);
+    // Never on the site's own lines, the close-out's summary, or an opportunity.
+    expect(
+      techVisibleOnSave({
+        profile: officeWithService,
+        kind: "ticket",
+        method: "note",
+        ticked: true,
+      }),
+    ).toBe(false);
+    expect(
+      techVisibleOnSave({ profile: technician, kind: "ticket", method: "service", ticked: true }),
+    ).toBe(false);
+    expect(
+      techVisibleOnSave({
+        profile: officeWithService,
+        kind: "opportunity",
+        method: "called",
+        ticked: true,
+      }),
+    ).toBe(false);
   });
 });

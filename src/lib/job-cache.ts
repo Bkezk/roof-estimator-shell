@@ -71,6 +71,8 @@ const UNREAD_COLUMNS: Omit<ServiceJobRow, TodayJobColumn> = {
   invoice_id: null,
   job_number: null,
   notes: null,
+  // The box beside Special instructions (Nov 18): ticked until the loader's own read says not.
+  notes_tech_visible: true,
   site_city: null,
   site_state: null,
   nothing_used_at: null,

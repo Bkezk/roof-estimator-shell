@@ -33,9 +33,16 @@ import {
   canAccess,
   canClaim,
   dispatchesTickets,
+  isFieldOnly,
   isOffice,
   managesTickets,
 } from "@/lib/access";
+import {
+  instructionsPatch,
+  instructionsWrite,
+  saveOfficeInstructions,
+  withInstructions,
+} from "@/lib/ticket-instructions";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import type { SyncResult } from "@/lib/followups.server";
@@ -362,7 +369,7 @@ export const getServiceJob = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
-    await serviceAccess(context);
+    const p = await serviceAccess(context);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .select("*")
@@ -370,7 +377,9 @@ export const getServiceJob = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Ticket not found");
-    return withTechName(context.supabase, row);
+    // Instructions the office keeps to itself are not on the ticket's own row (Nov 18): the
+    // office's read puts them back; a technician-only login is given none by the database.
+    return withTechName(context.supabase, await withInstructions(context.supabase, p, row));
   });
 
 /** Optional text: missing, null or blank all become null (the DB column's "not set"). */
@@ -434,6 +443,11 @@ const jobSchema = z.object({
   // Invoiced ticket back to Done. setServiceStage (the header's picker) is the one way to set
   // it; a `stage` key sent here is dropped by the schema.
   notes: optText(10000),
+  /**
+   * "Viewable to technicians" beside Special instructions (owner, Nov 18). Left out: as it is
+   * (a new ticket: ticked). Only the office's is read; a technician's save never changes it.
+   */
+  notes_tech_visible: z.boolean().optional(),
   centerpoint_ticket: optText(40),
   centerpoint_invoice: optText(40),
   /**
@@ -539,6 +553,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     // answers "who is on this job" on the close-out (setJobCrew) instead; anyone else's save
     // leaves the crew, the technician and the labor rate as they are.
     const crew = manager ? fields.crew : undefined;
+    const by = { id: context.userId, name: nameOf(p) };
     const patch = {
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
@@ -563,7 +578,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         ? { scheduled_date: fields.scheduled_date ?? null }
         : {}),
       ...(fields.arrival_window !== undefined ? { arrival_window: fields.arrival_window } : {}),
-      notes: fields.notes ?? null,
+      // The Special instructions are written below, by their box (ticket-instructions.ts).
       centerpoint_ticket: fields.centerpoint_ticket ?? null,
       centerpoint_invoice: fields.centerpoint_invoice ?? null,
       updated_by_name: nameOf(p),
@@ -571,7 +586,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (id) {
       const { data: cur, error: cErr } = await sb
         .from("service_jobs")
-        .select("technician_id, stage, scheduled_date, service_type, invoice_id")
+        .select(
+          "technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible",
+        )
         .eq("id", id)
         .maybeSingle();
       // (technician_id and scheduled_date also feed the technician's reassigned / date-moved
@@ -611,13 +628,29 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         const problem = stageProblem(p, "scheduled", cur.stage);
         if (problem) throw new Error(problem);
       }
-      const { data: row, error } = await sb
+      // The instructions, by their box: kept from technicians, they go to the office's own
+      // table first and only then leave the ticket's row; shown again, the other way round.
+      const instructions = instructionsWrite({
+        fieldOnly: isFieldOnly(p),
+        text: fields.notes,
+        ticked: fields.notes_tech_visible,
+        currentVisible: cur.notes_tech_visible,
+      });
+      const hadCopy = cur.notes_tech_visible === false;
+      await saveOfficeInstructions(sb, id, instructions, "before", by, hadCopy);
+      const { data: written, error } = await sb
         .from("service_jobs")
-        .update(scheduledNow ? { ...patch, stage: "scheduled" } : patch)
+        .update({
+          ...patch,
+          ...instructionsPatch(instructions),
+          ...(scheduledNow ? { stage: "scheduled" } : {}),
+        })
         .eq("id", id)
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      await saveOfficeInstructions(sb, id, instructions, "after", by, hadCopy);
+      const row = await withInstructions(sb, p, written);
       await logTicketDateMove(sb, row.id, cur?.scheduled_date, row.scheduled_date, {
         id: context.userId,
         name: nameOf(p),
@@ -642,10 +675,17 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       if (oErr) throw new Error(oErr.message);
       if (!o) throw new Error("Opportunity not found");
     }
-    const { data: row, error } = await sb
+    const instructions = instructionsWrite({
+      fieldOnly: isFieldOnly(p),
+      text: fields.notes,
+      ticked: fields.notes_tech_visible,
+      currentVisible: null,
+    });
+    const { data: made, error } = await sb
       .from("service_jobs")
       .insert({
         ...patch,
+        ...instructionsPatch(instructions),
         stage,
         created_by: context.userId,
         ...(from_opportunity_id ? { from_opportunity_id } : {}),
@@ -653,6 +693,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // A new ticket whose instructions are the office's alone: kept once the ticket exists.
+    await saveOfficeInstructions(sb, made.id, instructions, "before", by, false);
+    const row = await withInstructions(sb, p, made);
     const saved = await saveCrew(sb, row, crew);
     await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, null);
     const out = await withTechName(sb, saved);

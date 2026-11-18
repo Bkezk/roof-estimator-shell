@@ -60,6 +60,8 @@ export const fieldKeys = {
   /** History at this property (owner, Oct 21): the fold's rows, and the strip's numbers. */
   history: (id: string) => ["site-history", id] as const,
   historySummary: (id: string) => ["site-history-summary", id] as const,
+  /** This ticket's Special instructions, above the history's timeline (owner, Nov 18). */
+  instructions: (id: string) => ["ticket-instructions", id] as const,
   /** My running clock (owner, Oct 15; myClock): the Today banner, the cards, the close-out line. */
   clock: ["service-my-clock"] as const,
   /** The clock running on a ticket, whoever's (clockOnJob): the office ticket page. */

@@ -649,8 +649,9 @@ export const poLine = (
  * The estimator's Setup customer block (SavedBidState.customer: name, contact, projectAddress,
  * estimatorName), used when the bid is not linked to a customer record (owner, Oct 26: "its also
  * not filling in the customers info" — the bids tried had no customer link; the typed-in block
- * is what the office has). projectAddress is free text: line 1 the street, a later "City, ST
- * 12345" line the rest. The property takes the bid's name. Null parts when nothing is typed.
+ * is what the office has). projectAddress is free text: line 1 the street. The city, state and
+ * zip are the job site's own boxes when any is typed (Nov 18), else a "City, ST 12345" line.
+ * The property takes the bid's name. Null parts when nothing is typed.
  */
 export function customerFromSavedState(
   data: unknown,
@@ -670,16 +671,22 @@ export function customerFromSavedState(
     .map((l) => l.trim())
     .filter(Boolean);
   const address = lines[0] ?? "";
-  let city = "";
-  let state = "";
-  let zip = "";
-  for (const l of lines.slice(1)) {
-    const m = /^(.*?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/.exec(l);
-    if (m) {
-      city = m[1]!.trim();
-      state = m[2]!.toUpperCase();
-      zip = m[3]!;
-      break;
+  // The job site's own City, State and Zip boxes come first (owner, Nov 18, of the audit: a
+  // trade bid with no property picked printed the street and no city, state or zip; the boxes
+  // were typed and never read. The invoice already printed them). With none of the three typed:
+  // the one-line "City, ST 12345" box, then such a line under the street.
+  let city = t(c["jobCity"]);
+  let state = t(c["jobState"]);
+  let zip = t(c["jobZip"]);
+  if (!city && !state && !zip) {
+    for (const l of [t(c["jobCityStZip"]), ...lines.slice(1)]) {
+      const m = /^(.*?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/.exec(l);
+      if (m) {
+        city = m[1]!.trim();
+        state = m[2]!.toUpperCase();
+        zip = m[3]!;
+        break;
+      }
     }
   }
   const company =

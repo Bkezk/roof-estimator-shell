@@ -339,6 +339,61 @@ describe("customerFromSavedState: the Setup customer block when the bid is not l
     });
     expect(out.estimatorName).toBe("Braden Keck");
   });
+  // Nov 18 (the audit; owner chose "print the typed address"): a trade bid with no property
+  // picked printed the street and no city, state or zip. The three boxes were typed and never
+  // read; the invoice already printed them.
+  it("the job site's own City, State and Zip boxes are printed when no property is picked", () => {
+    const out = customerFromSavedState(
+      {
+        kind: "trade",
+        customer: {
+          name: "Acme Hardware",
+          contact: "",
+          projectAddress: "12 Mill Street",
+          jobCity: " London ",
+          jobState: "KY",
+          jobZip: "40741",
+        },
+      },
+      "Acme Hardware repaint",
+    );
+    expect(out.property).toEqual({
+      name: "Acme Hardware repaint",
+      address: "12 Mill Street",
+      city: "London",
+      county: "",
+      state: "KY",
+      zip: "40741",
+      areaSqFt: null,
+    });
+    expect(out.company).toMatchObject({ city: "London", state: "KY", zip: "40741" });
+  });
+  it("the boxes win over a line under the street; one box typed is enough; the one-line box is read too", () => {
+    const both = customerFromSavedState(
+      {
+        customer: {
+          name: "A",
+          projectAddress: "1 Main St\nCorbin, KY 40701",
+          jobCity: "London",
+          jobState: "",
+          jobZip: "",
+        },
+      },
+      "Bid",
+    );
+    expect(both.property).toMatchObject({ city: "London", state: "", zip: "" });
+    const oneLine = customerFromSavedState(
+      { customer: { name: "A", projectAddress: "1 Main St", jobCityStZip: "Corbin, ky 40701" } },
+      "Bid",
+    );
+    expect(oneLine.property).toMatchObject({ city: "Corbin", state: "KY", zip: "40701" });
+    // Nothing typed anywhere: blank, never undefined.
+    const none = customerFromSavedState(
+      { customer: { name: "A", projectAddress: "1 Main St" } },
+      "Bid",
+    );
+    expect(none.property).toMatchObject({ city: "", state: "", zip: "" });
+  });
   it("the Summit case: a name alone (trailing space) still fills Company; blanks stay blank, never undefined", () => {
     const out = customerFromSavedState(
       { customer: { name: "Summit ", contact: "", projectAddress: "" } },

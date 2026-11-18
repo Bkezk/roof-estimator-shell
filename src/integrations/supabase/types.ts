@@ -3524,6 +3524,38 @@ export type Database = {
           },
         ]
       }
+      service_job_office_notes: {
+        Row: {
+          notes: string
+          service_job_id: string
+          updated_at: string
+          updated_by: string | null
+          updated_by_name: string | null
+        }
+        Insert: {
+          notes: string
+          service_job_id: string
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Update: {
+          notes?: string
+          service_job_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_job_office_notes_service_job_id_fkey"
+            columns: ["service_job_id"]
+            isOneToOne: true
+            referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_job_photo_items: {
         Row: {
           created_at: string
@@ -3856,6 +3888,7 @@ export type Database = {
           location_name: string | null
           notes: string | null
           notes_skipped_at: string | null
+          notes_tech_visible: boolean
           nothing_used_at: string | null
           number: number
           on_site_at: string | null
@@ -3913,6 +3946,7 @@ export type Database = {
           location_name?: string | null
           notes?: string | null
           notes_skipped_at?: string | null
+          notes_tech_visible?: boolean
           nothing_used_at?: string | null
           number?: number
           on_site_at?: string | null
@@ -3970,6 +4004,7 @@ export type Database = {
           location_name?: string | null
           notes?: string | null
           notes_skipped_at?: string | null
+          notes_tech_visible?: boolean
           nothing_used_at?: string | null
           number?: number
           on_site_at?: string | null

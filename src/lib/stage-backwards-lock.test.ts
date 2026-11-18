@@ -113,7 +113,10 @@ describe("the server", () => {
     expect(techStageLocked(office, "closed")).toBe(false);
     expect(techStageLocked(managerTech, "closed")).toBe(false);
     // Before the save itself (nothing is written first).
-    expect(fn.indexOf("TECH_LOCKED_MESSAGE")).toBeLessThan(fn.indexOf(".update(scheduledNow"));
+    // (Nov 18: the save's first write is now the instructions' own; the lock is before both.)
+    expect(fn.indexOf("TECH_LOCKED_MESSAGE")).toBeLessThan(fn.indexOf("saveOfficeInstructions("));
+    expect(fn.indexOf("TECH_LOCKED_MESSAGE")).toBeLessThan(fn.indexOf(".update({"));
+    expect(fn.indexOf(".update({")).toBeGreaterThan(-1);
   });
 });
 
