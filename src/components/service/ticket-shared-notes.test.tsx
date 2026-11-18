@@ -161,7 +161,8 @@ describe("where the box is", () => {
   const box = read("src/components/service/ticket-shared-notes.tsx");
 
   it("at the top of the workflow, under the Special instructions", () => {
-    const at = closeout.indexOf('<TicketSharedNotes jobId={job.id} where="closeout" />');
+    // (Later on Nov 18: as one row that opens the list, `compact`; closeout-top-nov18.test.tsx.)
+    const at = closeout.indexOf('<TicketSharedNotes jobId={job.id} where="closeout" compact />');
     expect(at).toBeGreaterThan(closeout.indexOf('<SpecialInstructionsBox where="closeout"'));
     expect(at).toBeLessThan(closeout.indexOf("<CloseoutForm key={job.id} job={job} />"));
   });

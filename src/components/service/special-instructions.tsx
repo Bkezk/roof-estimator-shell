@@ -8,6 +8,7 @@
  * "office only" line is for the office, on the screens it shares with technicians.
  */
 import { INSTRUCTIONS_OFFICE_ONLY } from "@/lib/ticket-instructions";
+import { ClampedText, type ClampLines } from "@/components/service/clamped-text";
 import { TICKET_NOTES_LABEL } from "@/lib/field-ticket-page";
 
 export function SpecialInstructionsBox({
@@ -16,6 +17,7 @@ export function SpecialInstructionsBox({
   title = TICKET_NOTES_LABEL,
   className = "",
   where,
+  clampLines,
 }: {
   text: string | null | undefined;
   /** The office is told when technicians do not see these. */
@@ -24,6 +26,11 @@ export function SpecialInstructionsBox({
   className?: string;
   /** Which screen it is on, for the tests and the browser checks. */
   where: "history" | "card" | "closeout";
+  /**
+   * Stop at this many lines, with "Show all" for the rest (owner, Nov 18: the top of the
+   * workflow was busy). Left out: the whole text, as on the card and in the history.
+   */
+  clampLines?: ClampLines;
 }) {
   const body = (text ?? "").trim();
   if (!body) return null;
@@ -34,7 +41,16 @@ export function SpecialInstructionsBox({
       data-special-instructions={where}
     >
       <h3 className="text-xs font-semibold uppercase tracking-wide">{title}</h3>
-      <p className="mt-1 whitespace-pre-line break-words text-sm">{body}</p>
+      {clampLines ? (
+        <ClampedText
+          name="instructions"
+          lines={clampLines}
+          text={body}
+          className="mt-1 whitespace-pre-line break-words text-sm"
+        />
+      ) : (
+        <p className="mt-1 whitespace-pre-line break-words text-sm">{body}</p>
+      )}
       {officeOnly && (
         <p className="mt-1 text-xs opacity-80" data-special-instructions-office-only>
           {INSTRUCTIONS_OFFICE_ONLY}

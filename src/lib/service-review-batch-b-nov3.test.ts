@@ -164,10 +164,12 @@ describe("25. undo your own material entry while the ticket is still yours", () 
 describe("33. finger-sized targets on the close-out", () => {
   it("step dots, the list chevron, Edit / Done, repair chips and the pending thumb's links", () => {
     expect(closeout).toContain(
-      "flex h-[44px] w-[44px] items-center justify-center rounded-full text-sm font-semibold",
+      // (Nov 18: `max-w-full`, so seven dots share a narrow phone's row; still 44 px tall.)
+      "flex h-[44px] w-[44px] max-w-full items-center justify-center rounded-full text-sm font-semibold",
     );
     expect(closeout).toContain(
-      "flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground",
+      // (Nov 18: `order-2` puts the chevron beside the words on a phone.)
+      "order-2 flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground",
     );
     expect(closeout).toContain(
       'className="h-[44px] max-w-full justify-start rounded-full px-4 text-sm"',

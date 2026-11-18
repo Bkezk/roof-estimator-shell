@@ -8,20 +8,34 @@
  *    workflow only, so without this box the ticket's own entries were on no screen of theirs.
  *    Nothing is drawn when the ticket has none. The read is the Activity's own (listContactLog,
  *    the same cache), limited by the database to what the reader may see.
+ *    `compact` (owner, Nov 18: the top of the workflow was busy): one row, "Activity · 3 ·
+ *    Braden: gate code is 4471", that opens the list under itself.
  */
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Mail, MapPin, MessageSquare, MessageSquarePlus, Phone, PhoneCall } from "lucide-react";
+import {
+  Mail,
+  MapPin,
+  MessageSquare,
+  MessageSquarePlus,
+  MessagesSquare,
+  Phone,
+  PhoneCall,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listContactLog } from "@/lib/contact-log.functions";
 import { historyNoteLabel } from "@/lib/service-history";
 import {
+  activityPeek,
   choosesTechVisible,
   techVisibleEntries,
   THIS_TICKET_ACTIVITY_OFFICE,
+  THIS_TICKET_ACTIVITY_ROW,
   THIS_TICKET_ACTIVITY_TITLE,
 } from "@/lib/tech-visible";
+import { PeekRow } from "@/components/service/clamped-text";
 import { errText, FIELD_SEEDED_MS, whenShort } from "@/components/service/field-utils";
 
 /** The icon of a shared Activity entry, as the ticket's own Activity draws it. */
@@ -80,15 +94,19 @@ export function TicketSharedNotes({
   jobId,
   where,
   enabled = true,
+  compact = false,
   className = "",
 }: {
   jobId: string;
   /** Which screen it is on, for the tests and the browser checks. */
   where: "history" | "closeout";
   enabled?: boolean;
+  /** One row that opens the list under itself, instead of the list in a box. */
+  compact?: boolean;
   className?: string;
 }) {
   const { session, profile } = useAuth();
+  const [open, setOpen] = useState(false);
   const fn = useServerFn(listContactLog);
   const q = useQuery({
     // The Activity's own key (ticket-activity.tsx): a new entry refreshes both.
@@ -105,25 +123,58 @@ export function TicketSharedNotes({
     );
   const notes = techVisibleEntries(q.data);
   if (!notes.length) return null;
+  // A long list scrolls inside its own box. A short one is never given a scroll bar: a single
+  // entry showed one, from a fraction of a pixel at the larger text size.
+  const list = (
+    <SharedNotesList
+      notes={notes}
+      where="this-ticket-notes"
+      className={notes.length > LONG_LIST ? "max-h-56 overflow-y-auto" : ""}
+    />
+  );
+  const office = choosesTechVisible(profile) && (
+    <p className="mt-1 text-xs text-muted-foreground" data-this-ticket-activity-office>
+      {THIS_TICKET_ACTIVITY_OFFICE}
+    </p>
+  );
+  if (compact)
+    return (
+      <section
+        className={className}
+        aria-label={THIS_TICKET_ACTIVITY_TITLE}
+        data-this-ticket-activity={where}
+      >
+        <PeekRow
+          name="activity"
+          icon={MessagesSquare}
+          label={THIS_TICKET_ACTIVITY_ROW}
+          detail={activityPeek(notes, historyNoteLabel)}
+          title={open ? "Close this ticket’s activity" : "See this ticket’s activity"}
+          expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        />
+        {open && (
+          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2">
+            {list}
+            {office}
+          </div>
+        )}
+      </section>
+    );
   return (
     <section
       className={`rounded-md border bg-muted/30 px-3 py-2 ${className}`}
       aria-label={THIS_TICKET_ACTIVITY_TITLE}
       data-this-ticket-activity={where}
     >
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {THIS_TICKET_ACTIVITY_TITLE}
       </h3>
-      <SharedNotesList
-        notes={notes}
-        where="this-ticket-notes"
-        className="mt-1 max-h-56 overflow-y-auto"
-      />
-      {choosesTechVisible(profile) && (
-        <p className="mt-1 text-xs text-muted-foreground" data-this-ticket-activity-office>
-          {THIS_TICKET_ACTIVITY_OFFICE}
-        </p>
-      )}
+      {list}
+      {office}
     </section>
   );
 }
+
+/** More entries than this and the list scrolls inside its own box. */
+const LONG_LIST = 6;

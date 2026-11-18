@@ -366,7 +366,9 @@ describe("the History here line opens the history on its own", () => {
   );
 
   it("is a button, not a link to the ticket page", () => {
-    expect(link).toContain('<button\n        type="button"');
+    // (Nov 18: the workflow draws it as a short row, PeekRow, which is a button too.)
+    expect(link).toContain('<button\n          type="button"');
+    expect(link).toContain("<PeekRow");
     expect(link).toContain('aria-haspopup="dialog"');
     expect(link).toContain("onClick={() => setOpen(true)}");
     expect(link).not.toContain("<Link");
@@ -406,7 +408,8 @@ describe("the History here line opens the history on its own", () => {
       '<HistoryLink jobId={j.id} whenNone="hide" summary={j.history} />',
     );
     expect(read("src/components/service/closeout.tsx")).toContain(
-      '<HistoryLink jobId={job.id} whenNone="say" />',
+      // (Nov 18: as one short row there, `compact`; closeout-top-nov18.test.tsx.)
+      '<HistoryLink jobId={job.id} whenNone="say" compact />',
     );
   });
 });

@@ -224,7 +224,9 @@ describe("no box in a box: the step is the card", () => {
 describe("the compact strip", () => {
   it("one line: the headline, seven dots (tick / number / lock), a chevron for the full list", () => {
     expect(strip).toMatch(
-      /<p className="min-w-0 flex-1 truncate text-sm font-semibold">\s*\{stepHeadline\(open, serviceType\)\}\s*<\/p>/,
+      // (Nov 18: on a phone the words and the chevron take the line above the dots, `order-1`;
+      // closeout-top-nov18.test.tsx. One line from a small tablet up, as before.)
+      /<p className="order-1 min-w-0 flex-1 truncate text-sm font-semibold">\s*\{stepHeadline\(open, serviceType\)\}\s*<\/p>/,
     );
     expect(strip).toContain('aria-label="Jump to a step"');
     expect(strip).toContain('aria-disabled={status === "locked" || undefined}');

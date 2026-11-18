@@ -198,6 +198,23 @@ export function historyStrip(s: SiteHistorySummary, today: Date = new Date()): s
   return `History here: ${plural(s.count, "earlier ticket", "earlier tickets")}${last ? `, ${last}` : ""}.${photos}`;
 }
 
+/**
+ * The strip cut short, for the one row at the top of the workflow (owner, Nov 18: "this is a bit
+ * busy"): "2 earlier tickets · last Nov 25 · 1 photo". What the last ticket was about is in the
+ * pop-up the row opens.
+ */
+export function historyShort(s: SiteHistorySummary, today: Date = new Date()): string {
+  if (s.count <= 0) return FIRST_TICKET;
+  const when = s.last ? historyWhen(s.last) : null;
+  return [
+    plural(s.count, "earlier ticket", "earlier tickets"),
+    when ? `last ${dayText(when, today)}` : "",
+    s.photo_count > 0 ? plural(s.photo_count, "photo", "photos") : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /** The fold's title: "History at this property (3)" once the count is known. */
 export function historyFoldTitle(count: number | null): string {
   return count === null ? "History at this property" : `History at this property (${count})`;

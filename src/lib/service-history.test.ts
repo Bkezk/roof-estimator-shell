@@ -456,7 +456,8 @@ describe("on the screens", () => {
     expect(comp).toContain('if (whenNone === "hide") return null;');
     // The close-out, where the technician works the ticket, carries the same line.
     expect(read("src/components/service/closeout.tsx")).toContain(
-      '<HistoryLink jobId={job.id} whenNone="say" />',
+      // (Nov 18: as one short row there, `compact`; closeout-top-nov18.test.tsx.)
+      '<HistoryLink jobId={job.id} whenNone="say" compact />',
     );
   });
   it("no Open link for a technician-only user — the row carries everything, nothing is said", () => {

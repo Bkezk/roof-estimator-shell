@@ -84,3 +84,22 @@ export function techVisibleEntries<
     .filter((r) => r.tech_visible === true && canBeTechVisible(r.method))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
+
+/** The row's name at the top of the workflow, where the box is folded to one line. */
+export const THIS_TICKET_ACTIVITY_ROW = "Activity";
+
+/**
+ * The folded row's words (owner, Nov 18: the top of the workflow was busy): how many entries and
+ * the newest one, "3 · Braden: gate code is 4471". The writer's first name, then the first line
+ * of what was written, or what was done ("Called") when nothing was written.
+ */
+export function activityPeek(
+  notes: readonly { method: string; note: string | null; by_name: string | null }[],
+  labelOf: (method: string) => string,
+): string {
+  const newest = notes[0];
+  if (!newest) return "";
+  const who = (newest.by_name ?? "").trim().split(/\s+/)[0] ?? "";
+  const what = (newest.note ?? "").trim().split("\n")[0]?.trim() || labelOf(newest.method);
+  return `${notes.length} · ${[who, what].filter(Boolean).join(": ")}`;
+}

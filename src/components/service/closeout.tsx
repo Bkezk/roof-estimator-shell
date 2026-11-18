@@ -138,6 +138,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
+import { ClampedText } from "@/components/service/clamped-text";
 import { HistoryLink } from "@/components/service/site-history";
 import { TicketSharedNotes } from "@/components/service/ticket-shared-notes";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
@@ -379,19 +380,28 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
             {[job.site_name, job.site_address].filter(Boolean).join(", ")}
           </p>
         )}
-        {/* What happened here before (owner, Oct 21): a tap opens the ticket's History fold. */}
-        {job.site_id && <HistoryLink jobId={job.id} whenNone="say" />}
-        {job.description && <p className="text-sm">{job.description}</p>}
+        {/* The top is kept short (owner, Nov 18: "this is a bit busy any way to make it
+            cleaner? especially if there is a lot of special instructions or activities?"): the
+            description at two lines, the instructions at three, each with Show all; then the
+            history and this ticket's activity as one row each. */}
+        {job.description && (
+          <ClampedText name="description" lines={2} text={job.description} className="text-sm" />
+        )}
         {/* Read before the work is closed out (owner, Nov 18); the office is told when
             technicians do not see them. */}
         <SpecialInstructionsBox
           where="closeout"
           text={job.notes}
           officeOnly={job.notes_tech_visible === false}
+          clampLines={3}
         />
-        {/* This ticket's Activity entries ticked "Viewable to technicians" (owner, Nov 18): the
-            workflow is the technician's only screen of the ticket, so they are read here. */}
-        <TicketSharedNotes jobId={job.id} where="closeout" />
+        <div className="space-y-1.5 pt-0.5" data-closeout-rows>
+          {/* What happened here before (owner, Oct 21): a tap opens the history's pop-up. */}
+          {job.site_id && <HistoryLink jobId={job.id} whenNone="say" compact />}
+          {/* This ticket's Activity entries ticked "Viewable to technicians" (owner, Nov 18):
+              the workflow is the technician's only screen of the ticket, so they are read here. */}
+          <TicketSharedNotes jobId={job.id} where="closeout" compact />
+        </div>
         {FINISHED.includes(job.stage) && (
           <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
@@ -453,13 +463,19 @@ function StepStrip({
   const [listOpen, setListOpen] = useState(false);
   return (
     <nav aria-label="Close-out steps" className="rounded-xl border bg-card px-3 py-2">
+      {/* On a phone the seven dots fill the row by themselves, so the words and the chevron
+          take the line above them (Nov 18: the words were squeezed to one letter, "S", and the
+          chevron dropped to a line of its own). From a small tablet up it is one line. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <p className="order-1 min-w-0 flex-1 truncate text-sm font-semibold">
           {stepHeadline(open, serviceType)}
         </p>
-        <ol className="flex items-center gap-1" aria-label="Jump to a step">
+        <ol
+          className="order-3 flex w-full items-center sm:order-2 sm:w-auto sm:gap-1"
+          aria-label="Jump to a step"
+        >
           {statuses.map(({ step, status }) => (
-            <li key={step.id}>
+            <li key={step.id} className="flex min-w-0 flex-1 justify-center sm:flex-none">
               <button
                 type="button"
                 aria-current={status === "current" ? "step" : undefined}
@@ -468,7 +484,7 @@ function StepStrip({
                   status === "locked" ? ` — locked: ${step.unlocks}` : ""
                 }`}
                 title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}
-                className={`flex h-[44px] w-[44px] items-center justify-center rounded-full text-sm font-semibold ${
+                className={`flex h-[44px] w-[44px] max-w-full items-center justify-center rounded-full text-sm font-semibold ${
                   status === "current"
                     ? "bg-primary text-primary-foreground"
                     : status === "done"
@@ -492,7 +508,7 @@ function StepStrip({
           type="button"
           aria-expanded={listOpen}
           aria-label={listOpen ? "Hide the step list" : "Show all steps"}
-          className="flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+          className="order-2 flex h-[44px] w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 sm:order-3"
           onClick={() => setListOpen((v) => !v)}
         >
           {listOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

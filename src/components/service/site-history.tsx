@@ -61,6 +61,7 @@ import {
   historyPhotosHint,
   historyFoldSummary,
   historyFoldTitle,
+  historyShort,
   historyStrip,
   historyWhen,
   isSameSpot,
@@ -78,6 +79,7 @@ import {
   ticketInstructions,
 } from "@/lib/service-history.functions";
 import { INSTRUCTIONS_HISTORY_TITLE } from "@/lib/ticket-instructions";
+import { PeekRow } from "@/components/service/clamped-text";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
 import { SharedNotesList, TicketSharedNotes } from "@/components/service/ticket-shared-notes";
 import {
@@ -223,9 +225,15 @@ export function HistoryLink({
   whenNone,
   summary,
   locationId,
+  compact = false,
 }: {
   jobId: string;
   whenNone: "hide" | "say";
+  /**
+   * The workflow's top (owner, Nov 18: "this is a bit busy"): one short bordered row, "History
+   * · 2 earlier tickets · last Nov 25", with the rest in the pop-up it opens.
+   */
+  compact?: boolean;
   /** The numbers when the page already has them (My tickets reads them with the day, Nov 3). */
   summary?: SiteHistorySummary | null | undefined;
   /** The ticket's named spot, when the page knows it: the same spot's tickets come first. */
@@ -248,17 +256,30 @@ export function HistoryLink({
   }
   return (
     <>
-      <button
-        type="button"
-        className="-mx-1 flex min-h-10 w-full items-center gap-1.5 rounded-md px-1 text-left text-sm hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title="See the history at this property"
-        aria-haspopup="dialog"
-        data-line="history-strip"
-        onClick={() => setOpen(true)}
-      >
-        <History className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
-        <span>{historyStrip(data)}</span>
-      </button>
+      {compact ? (
+        <PeekRow
+          name="history"
+          icon={History}
+          iconClassName="text-rose-600 dark:text-rose-400"
+          label="History"
+          detail={historyShort(data)}
+          title="See the history at this property"
+          popup
+          onClick={() => setOpen(true)}
+        />
+      ) : (
+        <button
+          type="button"
+          className="-mx-1 flex min-h-10 w-full items-center gap-1.5 rounded-md px-1 text-left text-sm hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="See the history at this property"
+          aria-haspopup="dialog"
+          data-line="history-strip"
+          onClick={() => setOpen(true)}
+        >
+          <History className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
+          <span>{historyStrip(data)}</span>
+        </button>
+      )}
       {open && (
         <HistoryDialog
           jobId={jobId}

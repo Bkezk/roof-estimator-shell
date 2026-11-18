@@ -425,7 +425,8 @@ describe("the instructions where a technician works, history or not", () => {
   });
   it("the close-out opens with them; the office is told when technicians do not see them", () => {
     expect(closeout.replace(/\s+/g, " ")).toContain(
-      '<SpecialInstructionsBox where="closeout" text={job.notes} officeOnly={job.notes_tech_visible === false} />',
+      // (Later on Nov 18: stopped at three lines there, with Show all; closeout-top-nov18.test.tsx.)
+      '<SpecialInstructionsBox where="closeout" text={job.notes} officeOnly={job.notes_tech_visible === false} clampLines={3} />',
     );
   });
   it("one box for all three places: nothing without text, the words as typed", () => {
