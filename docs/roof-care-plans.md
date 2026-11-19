@@ -185,6 +185,58 @@ Record: `docs/qa/roof-care-followups-2026-11-19.md`.
 - **Push back.** The office's 30 days count from each inspection's own first date. Reasons are
   kept, each with its day and who gave it.
 
+## Paying up front: looked into on Nov 19, not built
+
+The owner: "i think we are going to do payment up front rather than at time of service via
+something like stripe so we dont have to fight apathy." He asked what that changes. Nothing below
+is built. It waits on his answers.
+
+**What was checked.** Every piece that knows the plan is billed in two halves, in the code and on
+the live database:
+
+- The price function hands back the two halves, and sign-up saves one on each inspection
+  (`roof_care_visits.amount`).
+- An inspection ticket makes its own draft invoice at Authorized, with that half as its one
+  charged line (`ensureCarePlanInvoice`, `carePlanInvoiceLines`).
+- The sign-up screen, the plan card, the Needs authorization card, the "Not invoiced" flag, the
+  Needs attention row and terms 2, 4 and 9 all say or assume "billed at each inspection".
+- The margin report counts Roof Care as the invoices of care plan inspection tickets.
+- An invoice must belong to a ticket or a trade bid (`invoices_one_parent`). There is no invoice
+  for a plan itself.
+- A plan is `active` or `ended`. There is no "signed, not paid yet".
+- Inspection tickets are made for every active plan, 14 days before the inspection is due, and at
+  once for "do it today".
+- Nothing renews a plan. Ending a plan refunds nothing and has no rule for it.
+- The public invoice link shows the PDF. It has no way to pay.
+- On the live database there were no plans, and no final or paid invoice.
+
+**What paying up front would change.**
+
+1. Sign-up makes the plan "awaiting payment" and one invoice for the whole year, belonging to the
+   plan. No inspection tickets yet.
+2. The customer pays through a Stripe page (a link or a QR code on the spot), or the office marks
+   a check as received. Stripe tells the site, and the plan becomes active.
+3. From there the inspections are made as they are today. Each bills nothing; its invoice, or the
+   ticket itself, only carries what the visit cost.
+4. The halves, the automatic half invoice, "Not invoiced" and its Needs attention row go. In
+   their place: "signed, not paid" on the plan and on Needs attention.
+5. The Owner page counts the plan's invoice as Roof Care's income.
+6. Renewal has to be built: a yearly charge by Stripe, or a renewal invoice with a pay link.
+7. The terms change (a new version): paid in full at sign-up, what happens if the roof's size
+   turns out different, and what is refunded when a plan ends.
+8. The minor repairs allowance, storm inspections, push back, the windows and the price itself
+   stay as they are.
+
+**For the owner to decide** (asked Nov 19): card, bank transfer or both; whether a check is still
+taken; whether the plan year and the inspections start at sign-up or at payment; whether
+"do the first inspection today" waits for payment; the refund rule; one-off yearly payment or a
+card kept on file that renews by itself; and the roof size, since "it's invoiced at time of
+service" no longer corrects it.
+
+**Setting it up.** A Stripe account in the company's name. Its keys go in Lovable Cloud › Secrets
+by the owner's hand, never in the repository or the chat. Stripe's test mode first: with a live
+key a payment made from the preview is a real one.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".
