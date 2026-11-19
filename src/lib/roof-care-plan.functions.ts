@@ -26,13 +26,17 @@ import { chunkIds } from "@/lib/chunk-ids";
 import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
 import {
+  asPayMethod,
   asPlanKey,
   asPlanStatus,
   carePlanLineSource,
   FIRST_VISIT_CHOICES,
   mapRoofSize,
+  PAY_METHOD_NEEDED,
+  PAY_METHODS,
   priceChangedLine,
   readPriceAnswer,
+  readRefundWorked,
   ROOF_CARE_TERMS_VERSION,
   shownPrice,
   TERMS_NOT_AGREED,
@@ -43,6 +47,7 @@ import {
   type PlanInvoiceRef,
   type PlanVisit,
   type PriceEstimate,
+  type RefundWorked,
   type RoofCarePlan,
   type ShownPrice,
   type VisitKind,
@@ -50,6 +55,7 @@ import {
 } from "@/lib/roof-care-plan";
 import { NOT_PLACED_LINE, placedRoughly } from "@/lib/roof-care-locate";
 import { PLAN_KEYS } from "@/lib/roof-care-price";
+import { isTravelWaiverLine, travelLineSource } from "@/lib/roof-care-travel";
 import { driveTo, officeOrigin, type RoofCareDrive } from "@/lib/roof-care.functions";
 import { aerialForAddress } from "@/lib/service-aerial.functions";
 
@@ -209,7 +215,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name" as const;
 const TICKET_SELECT =
@@ -225,7 +231,11 @@ const ORDER: Record<VisitKind, number> = { visit1: 0, visit2: 1, storm: 2 };
 async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly string[]) {
   const billed = new Set<string>();
   const uses = new Map<string, AllowanceUse[]>();
-  const sources = [...visitIds.map(carePlanLineSource), ...planIds.map(allowanceLineSource)];
+  const sources = [
+    ...visitIds.map(carePlanLineSource),
+    ...planIds.map(allowanceLineSource),
+    ...planIds.map(travelLineSource),
+  ];
   const lines: { source: string | null; total: number; invoice_id: string }[] = [];
   for (const chunk of chunkIds(sources)) {
     const { data, error } = await sb
@@ -244,9 +254,16 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
     if (error) throw new Error(`The plans' invoices: ${error.message}`);
     for (const i of data ?? []) if (i.status !== "void") live.set(i.id, i.display_number ?? "");
   }
+  // The invoices that hold one of each plan's leak calls with no travel charge.
+  const calls = new Map<string, Set<string>>();
   for (const l of lines) {
     const number = live.get(l.invoice_id);
     if (number === undefined || !l.source) continue;
+    if (isTravelWaiverLine(l)) {
+      const id = l.source.slice(travelLineSource("").length);
+      calls.set(id, (calls.get(id) ?? new Set()).add(l.invoice_id));
+      continue;
+    }
     const planId = allowancePlanOf(l);
     if (!planId) {
       billed.add(l.source.slice(carePlanLineSource("").length));
@@ -280,7 +297,7 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
       });
     }
   }
-  return { billed, uses, own };
+  return { billed, uses, own, calls };
 }
 
 /**
@@ -373,6 +390,14 @@ export async function plansOfSites(
       first_days: p.first_days,
       starts_on: p.starts_on,
       invoice: money ? (money.own.get(p.id) ?? null) : null,
+      pay_method: asPayMethod(p.pay_method),
+      pay_note: p.pay_note,
+      free_travel_calls: Number(p.free_travel_calls) || 0,
+      free_travel_used: money ? (money.calls.get(p.id)?.size ?? 0) : null,
+      refund:
+        money && p.refund_due != null
+          ? { due: Number(p.refund_due) || 0, sent_on: p.refund_sent_on, ref: p.refund_ref }
+          : null,
       signed_on: p.signed_on,
       renews_on: p.renews_on,
       roof_sqft: Number(p.roof_sqft),
@@ -411,6 +436,10 @@ const signUpInput = z.object({
   sqft: sqftInput,
   first: z.enum(FIRST_VISIT_CHOICES),
   days: z.number().int().min(1).max(365).nullable().optional(),
+  // How they pay for the year (owner, Nov 19: "by check or card either one during sign up"),
+  // and a note with it: the number of a check handed over.
+  pay_method: z.enum(PAY_METHODS, { errorMap: () => ({ message: PAY_METHOD_NEEDED }) }),
+  pay_note: z.string().trim().max(120).optional(),
   agreed_by: z
     .string()
     .trim()
@@ -475,6 +504,8 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_agreed_by: data.agreed_by,
       p_notes: data.notes ?? "",
       p_terms: ROOF_CARE_TERMS_VERSION,
+      p_pay_method: data.pay_method,
+      p_pay_note: data.pay_note ?? "",
     });
     if (error) throw new Error(error.message);
     // Its invoice for the year, at once when the person signing may make invoices. A technician
@@ -564,14 +595,57 @@ export const endRoofCarePlan = createServerFn({ method: "POST" })
       .object({
         plan_id: z.string().uuid(),
         reason: z.string().trim().min(1, "Type why the plan is ending").max(500),
+        refund: z.number().finite().min(0).max(10_000_000).nullable().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ok: true; refund: number }> => {
+    await signedIn(context);
+    // Ended with its refund (Nov 19): the database works the sum and keeps the amount the
+    // manager confirmed. Left out, the worked amount is taken.
+    const { data: worked, error } = await context.supabase.rpc("roof_care_end_refund", {
+      p_plan: data.plan_id,
+      p_reason: data.reason,
+      ...(data.refund == null ? {} : { p_refund: data.refund }),
+    });
+    if (error) throw new Error(error.message);
+    const confirmed = Number((worked as { confirmed?: unknown } | null)?.confirmed);
+    return { ok: true, refund: Number.isFinite(confirmed) ? confirmed : 0 };
+  });
+
+/** What ending the plan today would refund, for the End plan box. The office's alone. */
+export const roofCareRefund = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<RefundWorked> => {
+    await signedIn(context);
+    const { data: worked, error } = await context.supabase.rpc("roof_care_refund", {
+      p_plan: data.plan_id,
+    });
+    if (error) throw new Error(error.message);
+    const w = readRefundWorked(worked);
+    if (!w) throw new Error("The refund could not be worked out");
+    return w;
+  });
+
+/** The refund was sent to the customer. */
+export const markRoofCareRefundSent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        ref: z.string().trim().max(80).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     await signedIn(context);
-    const { error } = await context.supabase.rpc("roof_care_end", {
+    const { error } = await context.supabase.rpc("roof_care_refund_sent", {
       p_plan: data.plan_id,
-      p_reason: data.reason,
+      p_on: data.on,
+      p_ref: data.ref ?? "",
     });
     if (error) throw new Error(error.message);
     return { ok: true };

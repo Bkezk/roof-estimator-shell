@@ -573,7 +573,8 @@ describe("the database's side", () => {
     const types = flat("src/integrations/supabase/types.ts");
     expect(types).toContain("roof_care_sign_up_await_payment: { Args: {");
     expect(types).toContain(
-      "paid_on: string | null pay_first: boolean plan: string plan_number: number | null",
+      // (Later on Nov 19: how they pay sits between them.)
+      "paid_on: string | null pay_first: boolean pay_method: string | null pay_note: string | null plan: string plan_number: number | null",
     );
     expect(types).toContain("property: Json roof_care_plan_id: string | null");
   });

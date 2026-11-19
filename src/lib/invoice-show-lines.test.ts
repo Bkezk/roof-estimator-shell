@@ -121,7 +121,8 @@ describe("the editor, the PDF, the save and the database", () => {
       "const listLine = ({ line: l, priced }: (typeof rows.listed)[number]) => {",
     );
     expect(srv).toContain(
-      "for (const row of rows.listed) if (!isAllowanceLine(row.line)) listLine(row);",
+      // (Nov 19, later: the leak call line is the plan's too, so the test is isPlanLine.)
+      "for (const row of rows.listed) if (!isPlanLine(row.line)) listLine(row);",
     );
     expect(srv).toContain("if (rows.rollup) {");
   });

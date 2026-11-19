@@ -210,32 +210,43 @@ The owner, the same evening: "they can pay up front by check". Record:
 - **Needs attention** lists a plan signed and not paid, with what the office does next.
 - **The Owner page** counts the plan's invoice as Roof Care.
 - **The terms** are a new set (2026-11-19): paid in full first, the year runs from the payment,
-  and the refund rule. They wait for the owner's yes before a customer signs.
+  and the refund rule.
 - A plan signed by a page published before this (`roof_care_sign_up`) still works the old way:
   in force at once, half billed at each inspection. Remove that function once the site is
   published and nobody has an old page open.
 
-**Not built yet, in this order:**
+**Built later on Nov 19**, at the owner's "go with the first 3 not built yet and ill work on
+stripe later". Record: `docs/qa/roof-care-refund-and-leak-calls-2026-11-19.md`.
 
-1. **The refund when a plan ends early.** The rule is decided: the share for inspections not
-   done, less the minor repairs already covered, never below zero. Today a manager ends a paid
-   plan and nothing works the refund out.
-2. **Renewal.** A renewal invoice before the year ends, with the three rules for a year that
-   closes with an inspection still owed (see "More answers the same day").
-3. **Roof Guard's two leak calls with no travel charged** (see below).
-4. **Stripe**: a pay link or QR code, automatic renewal and its discount.
+- **How they pay is said at the sign-up**: "the payment needs to be by check or card either one
+  during sign up". The sign-up asks Check or Card, with a box for a check's number. The plan
+  keeps it, and it shows on the waiting plan and in Needs attention. A card cannot be charged
+  from the site until Stripe: the office takes it and marks the invoice paid.
+- **The refund when a plan ends early.** The End plan box shows the sum, worked by the database:
+  the share of what was paid for the inspections not done, less the minor repairs the plan
+  already covered, never below nothing. The manager confirms it or types another amount, never
+  more than was paid. It stays on the property and in Needs attention until it is marked sent.
+- **Roof Guard's leak calls.** In the owner's words: "two leak calls with the credit subtracting
+  until it reaches 0 and on those two leak calls travel is not charged? then after that it is",
+  and "travel does come out of the later ones if theyve had 2 calls but havent used all their
+  repair allotment". The flyer gives this to Roof Guard only, and the owner said so again: "roof
+  care shouldnt get it". A plan keeps its calls a year from the price setup at sign-up. A repair
+  invoice at the property carries one line that takes its travel off while a call is left; the
+  office presses "Charge the travel: not a leak call" when it was not one. The minor repairs
+  credit then covers what the invoice still charges. The price setup now counts two leak calls
+  with no labor (typed at the owner's word).
+- **The terms of 2026-11-19 are agreed**: "go with the agreement terms update".
+- **The discount for renewing by itself is said in dollars**, not a percent: "go on the dollar
+  amount savings that is better". It is worked as 5% of the plan price with the drive left out.
+  It comes with Stripe.
 
-**Roof Guard's leak calls (owner, Nov 19).** "Two leak calls with the credit subtracting until it
-reaches 0 and on those two leak calls travel is not charged? then after that it is?" and "travel
-does come out of the later ones if theyve had 2 calls but havent used all their repair allotment".
-So: the credit covers whatever a repair invoice charges, labor, materials and travel. On Roof
-Guard's first two leak calls of the plan year travel is not charged at all, so it uses no credit.
-The flyer gives this to Roof Guard only. A ticket has no "leak call" mark yet, and the price
-setup still counts one leak call with labor.
+**Not built yet:**
 
-**The discount for renewing by itself.** The owner asked which way is honest. Proposed: say the
-dollars, not a percent ("Renew automatically and save so many dollars a year"), worked as 5% of the plan
-price with the drive left out. Not yet answered.
+1. **Renewal.** A renewal invoice before the year ends, with the three rules for a year that
+   closes with an inspection still owed (see "More answers the same day"). The owner said go.
+2. **Stripe**: a pay link or QR code at the sign-up, automatic renewal and its discount. The
+   owner: "ill work on stripe later".
+3. The Owner page does not take a refund off Roof Care's income.
 
 ## Paying up front: what was looked into first
 
@@ -353,7 +364,8 @@ key a payment made from the preview is a real one.
 ## The terms: agreed
 
 The owner, Nov 18: "i like all 10 you came up with". Terms 2, 3 and 9 were rewritten on Nov 19
-for paying the year first (version 2026-11-19) and wait for his yes. They are `ROOF_CARE_TERMS` in
+for paying the year first (version 2026-11-19), and he agreed them the same day. They are
+`ROOF_CARE_TERMS` in
 `src/lib/roof-care-plan.ts`, dated by `ROOF_CARE_TERMS_VERSION`. The sign-up shows them with a
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.

@@ -75,8 +75,16 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
-import { allowanceMoney, isAllowanceLine, type InvoiceAllowance } from "@/lib/roof-care-allowance";
+import { allowanceMoney, type InvoiceAllowance } from "@/lib/roof-care-allowance";
 import { getInvoiceAllowance, setInvoiceAllowance } from "@/lib/roof-care-allowance.functions";
+import {
+  isPlanLine,
+  TRAVEL_CHARGE_IT,
+  TRAVEL_USE_CALL,
+  travelBoxWords,
+  type InvoiceTravel,
+} from "@/lib/roof-care-travel";
+import { getInvoiceTravel, setInvoiceTravel } from "@/lib/roof-care-travel.functions";
 import { planName } from "@/lib/roof-care-plan";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import type { InvoiceBidRef } from "@/lib/bid-invoices";
@@ -1012,13 +1020,14 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       ctx.applied(r, { quiet: true });
       // The Roof Care plan's line is the server's (Nov 19): it follows the invoice by itself, so
       // what came back replaces what is on the screen when the two differ.
-      const own = r.lines.filter(isAllowanceLine).map(lineFrom);
+      // (The leak call's travel line is the plan's too.)
+      const own = r.lines.filter(isPlanLine).map(lineFrom);
       setLines((ls) => {
-        const mine = ls.filter(isAllowanceLine);
+        const mine = ls.filter(isPlanLine);
         const same =
           mine.length === own.length &&
           mine.every((l, i) => l.key === own[i]!.key && l.rate === own[i]!.rate);
-        return same ? ls : [...ls.filter((l) => !isAllowanceLine(l)), ...own];
+        return same ? ls : [...ls.filter((l) => !isPlanLine(l)), ...own];
       });
     },
     { what: `Invoice #${no}`, delay: 900, signal: false },
@@ -1113,6 +1122,26 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     enabled: !!job,
     placeholderData: (prev) => prev,
   });
+  // Roof Guard's leak calls with no travel charge (owner, Nov 19): where this invoice stands.
+  const travelFn = useServerFn(getInvoiceTravel);
+  const setTravelFn = useServerFn(setInvoiceTravel);
+  const travelQ = useQuery({
+    queryKey: ["invoice-travel", inv.id, inv.updated_at],
+    queryFn: () => travelFn({ data: { id: inv.id } }),
+    enabled: !!job,
+    placeholderData: (prev) => prev,
+  });
+  const answerTravel = (use: boolean) =>
+    run("allowance", "Could not save the answer", async () => {
+      await autosave.flush();
+      const r = await setTravelFn({ data: { id: inv.id, use } });
+      takeServer({ invoice: r.invoice, lines: r.lines });
+      toast.success(
+        use
+          ? "The plan's leak call is used: the travel is not charged"
+          : "Marked: the travel on this invoice is charged",
+      );
+    });
   const answerAllowance = (choice: AllowanceAnswer, amount: number | null) =>
     run("allowance", "Could not save the answer", async () => {
       // What is still waiting goes first, so the amount is worked from the lines as they are.
@@ -1355,6 +1384,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         </div>
       </div>
 
+      {job && travelQ.data && (
+        <LeakCallBox t={travelQ.data} busy={!!busy} onAnswer={(use) => void answerTravel(use)} />
+      )}
       {job && allowanceQ.data && (
         <AllowanceBox
           a={allowanceQ.data}
@@ -1397,7 +1429,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               )}
               <div className="space-y-2 lg:space-y-0">
                 {lines.map((l, i) =>
-                  isAllowanceLine(l) ? (
+                  isPlanLine(l) ? (
                     // The plan's allowance line: changed in the Roof Care plan box, not typed
                     // over here (Nov 19).
                     <div
@@ -2047,6 +2079,60 @@ function usePoCost(
 
 /** What the office presses in the plan box: use the plan, or not. */
 type AllowanceAnswer = "applied" | "declined";
+
+/**
+ * Roof Guard's leak calls on a repair invoice (owner, Nov 19: "on those two leak calls travel is
+ * not charged? then after that it is"). The travel is taken off by itself while the plan has a
+ * call left; the office charges it when the visit was not a leak call.
+ */
+function LeakCallBox({
+  t,
+  busy,
+  onAnswer,
+}: {
+  t: InvoiceTravel;
+  busy: boolean;
+  onAnswer: (use: boolean) => void;
+}) {
+  const used = t.waived > 0;
+  const canUse = !used && t.travel > 0 && t.usedElsewhere < t.calls;
+  return (
+    <section
+      className="space-y-2 rounded-lg border p-4 text-sm"
+      aria-label="Roof Care plan leak calls"
+      data-leak-call-box={used ? "used" : (t.choice ?? "none")}
+    >
+      <h2 className="flex items-center gap-2 font-semibold">
+        <ShieldCheck className="h-4 w-4" /> Roof Care plan: leak calls
+      </h2>
+      <p data-leak-call-answer>{travelBoxWords(t)}</p>
+      {used && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onAnswer(false)}
+          data-action="leak-call-charge"
+        >
+          {TRAVEL_CHARGE_IT}
+        </Button>
+      )}
+      {canUse && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onAnswer(true)}
+          data-action="leak-call-use"
+        >
+          {TRAVEL_USE_CALL}
+        </Button>
+      )}
+    </section>
+  );
+}
 
 /**
  * The Roof Care plan box on a repair invoice (owner, Nov 19: "I like the tick idea"; "think

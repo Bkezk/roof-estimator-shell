@@ -26,6 +26,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { tradeJobLabel, type InvoiceBidRef } from "@/lib/bid-invoices";
 import { planName, planNumberLabel } from "@/lib/roof-care-plan";
+import { isPlanLine } from "@/lib/roof-care-travel";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
@@ -746,8 +747,9 @@ async function withPlanAllowance(
 ): Promise<InvoiceWithLines> {
   const made = await withLines(sb, inv);
   if (!ofTicket(inv)) return made;
-  const { syncAllowance } = await import("@/lib/roof-care-allowance.functions");
-  if (!(await syncAllowance(sb, inv, made.lines))) return made;
+  // The leak call's travel first, then the minor repairs credit over what is still charged.
+  const { syncPlanLines } = await import("@/lib/roof-care-travel.functions");
+  if (!(await syncPlanLines(sb, inv, made.lines))) return made;
   const { data: again, error } = await sb.from("invoices").select("*").eq("id", inv.id).single();
   if (error) throw new Error(error.message);
   return withLines(sb, again);
@@ -1076,13 +1078,14 @@ export const saveInvoice = createServerFn({ method: "POST" })
       const kept = new Set<number>();
       // The Roof Care plan's allowance line is the plan box's (Nov 19): the editor's save never
       // types over it, adds one or drops it, whatever it sent.
-      for (const l of oldLines ?? []) if (isAllowanceLine(l)) kept.add(l.id);
+      // (The leak call's travel line is the plan's too, and is kept the same way.)
+      for (const l of oldLines ?? []) if (isPlanLine(l)) kept.add(l.id);
       const fresh: LineWrite[] = [];
       const edits: { id: number; row: LineWrite }[] = [];
       data.lines.forEach((l, i) => {
         const prev = l.id != null ? old.get(l.id) : undefined;
-        if (isAllowanceLine(l) || (prev && isAllowanceLine(prev))) {
-          if (prev && isAllowanceLine(prev) && prev.sort !== i)
+        if (isPlanLine(l) || (prev && isPlanLine(prev))) {
+          if (prev && isPlanLine(prev) && prev.sort !== i)
             edits.push({ id: prev.id, row: { sort: i } as LineWrite });
           return;
         }
@@ -1123,16 +1126,16 @@ export const saveInvoice = createServerFn({ method: "POST" })
     // invoice by itself, a typed amount never takes more than the invoice now bills, and an
     // invoice switched to a vendor takes nothing. Whom it is billed to is as this save leaves it.
     if (ofTicket(inv)) {
-      const { syncAllowance } = await import("@/lib/roof-care-allowance.functions");
+      const { syncPlanLines } = await import("@/lib/roof-care-travel.functions");
       const billedTo =
         data.bill_to_vendor_id === undefined
           ? (inv.bill_to_vendor_id ?? null)
           : data.bill_to_vendor_id;
-      if (await syncAllowance(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {
+      if (await syncPlanLines(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {
         lines = await readLines();
         const { data: again } = await sb
           .from("invoices")
-          .select("care_allowance_choice, care_allowance_plan_id")
+          .select("care_allowance_choice, care_allowance_plan_id, care_travel_choice")
           .eq("id", inv.id)
           .maybeSingle();
         if (again) Object.assign(inv, again);

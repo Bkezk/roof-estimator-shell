@@ -414,6 +414,7 @@ const invoiceRow = (over: Partial<InvoiceRow>): InvoiceRow => ({
   bill_to_vendor_id: null,
   care_allowance_choice: null,
   care_allowance_plan_id: null,
+  care_travel_choice: null,
   cost_total: 0,
   created_at: "2026-11-17T15:00:00.000Z",
   created_by: null,

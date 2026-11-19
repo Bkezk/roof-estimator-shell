@@ -31,12 +31,20 @@ import {
   type AttTicket,
   type AttUntouched,
   type AttentionList,
+  type AttCareRefund,
   type AttCareUnbilled,
   type AttCareUnpaid,
   type AttCareVisit,
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
-import { planName, runsLate, VISIT_LABEL, visitState, visitUnbilled } from "@/lib/roof-care-plan";
+import {
+  payWords,
+  planName,
+  runsLate,
+  VISIT_LABEL,
+  visitState,
+  visitUnbilled,
+} from "@/lib/roof-care-plan";
 import { plansOfSites } from "@/lib/roof-care-plan.functions";
 import { visibleToOwner } from "@/lib/owner-view";
 import { PAGE, afterId, readAll } from "@/lib/read-all";
@@ -244,6 +252,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careVisits: care.notDone,
       careUnbilled: care.unbilled,
       careUnpaid: care.unpaid,
+      careRefunds: care.refunds,
     });
   });
 
@@ -256,22 +265,38 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
 async function careVisitsOfPlans(
   sb: Sb,
   today: string,
-): Promise<{ notDone: AttCareVisit[]; unbilled: AttCareUnbilled[]; unpaid: AttCareUnpaid[] }> {
+): Promise<{
+  notDone: AttCareVisit[];
+  unbilled: AttCareUnbilled[];
+  unpaid: AttCareUnpaid[];
+  refunds: AttCareRefund[];
+}> {
   const { data: active, error } = await sb
     .from("roof_care_plans")
     .select("site_id")
     .in("status", ["active", "awaiting_payment"]);
   if (error) throw new Error(`Roof Care plans: ${error.message}`);
-  const siteIds = [...new Set((active ?? []).map((p) => p.site_id))];
-  if (!siteIds.length) return { notDone: [], unbilled: [], unpaid: [] };
+  // Ended early with a refund not yet sent (Nov 19).
+  const { data: owed, error: oErr } = await sb
+    .from("roof_care_plans")
+    .select("id, plan, site_id, account_id, ended_on, refund_due")
+    .eq("status", "ended")
+    .gt("refund_due", 0)
+    .is("refund_sent_on", null);
+  if (oErr) throw new Error(`Roof Care plans: ${oErr.message}`);
+  const siteIds = [
+    ...new Set([...(active ?? []).map((p) => p.site_id), ...(owed ?? []).map((p) => p.site_id)]),
+  ];
+  if (!siteIds.length) return { notDone: [], unbilled: [], unpaid: [], refunds: [] };
   const live = (await plansOfSites(sb, siteIds, { money: true })).filter(
     (p) => p.status !== "ended",
   );
   const plans = live.filter((p) => p.status === "active");
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
-    readInChunks([...new Set(live.map((p) => p.account_id))], (chunk) =>
-      sb.from("crm_accounts").select("id, name").in("id", chunk),
+    readInChunks(
+      [...new Set([...live.map((p) => p.account_id), ...(owed ?? []).map((p) => p.account_id)])],
+      (chunk) => sb.from("crm_accounts").select("id, name").in("id", chunk),
     ),
   ]);
   const siteName = new Map(sites.map((x) => [x.id, (x.name ?? "").trim()]));
@@ -299,7 +324,15 @@ async function careVisitsOfPlans(
             paid_amount: p.invoice.paid_amount,
           }
         : null,
+      pay: payWords(p.pay_method, p.pay_note),
     }));
+  const refunds: AttCareRefund[] = (owed ?? []).map((p) => ({
+    plan_id: p.id,
+    site_id: p.site_id,
+    title: titleOf(p),
+    ended_on: p.ended_on,
+    amount: Number(p.refund_due) || 0,
+  }));
   for (const p of plans) {
     const title = titleOf(p);
     const last = [...p.visits].filter((v) => v.kind !== "storm").pop();
@@ -328,5 +361,5 @@ async function careVisitsOfPlans(
       });
     }
   }
-  return { notDone, unbilled, unpaid };
+  return { notDone, unbilled, unpaid, refunds };
 }

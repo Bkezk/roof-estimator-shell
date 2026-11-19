@@ -2126,6 +2126,7 @@ export type Database = {
           bill_to_vendor_id: string | null
           care_allowance_choice: string | null
           care_allowance_plan_id: string | null
+          care_travel_choice: string | null
           cost_total: number
           created_at: string
           created_by: string | null
@@ -2172,6 +2173,7 @@ export type Database = {
           bill_to_vendor_id?: string | null
           care_allowance_choice?: string | null
           care_allowance_plan_id?: string | null
+          care_travel_choice?: string | null
           cost_total?: number
           created_at?: string
           created_by?: string | null
@@ -2218,6 +2220,7 @@ export type Database = {
           bill_to_vendor_id?: string | null
           care_allowance_choice?: string | null
           care_allowance_plan_id?: string | null
+          care_travel_choice?: string | null
           cost_total?: number
           created_at?: string
           created_by?: string | null
@@ -3432,16 +3435,23 @@ export type Database = {
           ended_reason: string | null
           first_days: number | null
           first_visit: string
+          free_travel_calls: number
           id: string
           list_price: number
           notes: string
           paid_on: string | null
           pay_first: boolean
+          pay_method: string | null
+          pay_note: string | null
           plan: string
           plan_number: number | null
           price: number
           price_estimated: boolean
           referred_by: string | null
+          refund_due: number | null
+          refund_ref: string | null
+          refund_sent_on: string | null
+          refund_worked: Json | null
           renews_on: string
           repair_allowance: number
           roof_sqft: number
@@ -3467,16 +3477,23 @@ export type Database = {
           ended_reason?: string | null
           first_days?: number | null
           first_visit: string
+          free_travel_calls?: number
           id?: string
           list_price: number
           notes?: string
           paid_on?: string | null
           pay_first?: boolean
+          pay_method?: string | null
+          pay_note?: string | null
           plan: string
           plan_number?: number | null
           price: number
           price_estimated?: boolean
           referred_by?: string | null
+          refund_due?: number | null
+          refund_ref?: string | null
+          refund_sent_on?: string | null
+          refund_worked?: Json | null
           renews_on: string
           repair_allowance?: number
           roof_sqft: number
@@ -3502,16 +3519,23 @@ export type Database = {
           ended_reason?: string | null
           first_days?: number | null
           first_visit?: string
+          free_travel_calls?: number
           id?: string
           list_price?: number
           notes?: string
           paid_on?: string | null
           pay_first?: boolean
+          pay_method?: string | null
+          pay_note?: string | null
           plan?: string
           plan_number?: number | null
           price?: number
           price_estimated?: boolean
           referred_by?: string | null
+          refund_due?: number | null
+          refund_ref?: string | null
+          refund_sent_on?: string | null
+          refund_worked?: Json | null
           renews_on?: string
           repair_allowance?: number
           roof_sqft?: number
@@ -5866,6 +5890,10 @@ export type Database = {
         Args: { p_plan: string; p_reason: string }
         Returns: undefined
       }
+      roof_care_end_refund: {
+        Args: { p_plan: string; p_reason: string; p_refund?: number }
+        Returns: Json
+      }
       roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
       roof_care_price: {
         Args: { p_hours?: number; p_miles?: number; p_sqft: number }
@@ -5874,6 +5902,11 @@ export type Database = {
       roof_care_push_back: {
         Args: { p_days: number; p_reason: string; p_visit: string }
         Returns: Json
+      }
+      roof_care_refund: { Args: { p_plan: string }; Returns: Json }
+      roof_care_refund_sent: {
+        Args: { p_on: string; p_plan: string; p_ref: string }
+        Returns: undefined
       }
       roof_care_sign_up: {
         Args: {
@@ -5900,6 +5933,8 @@ export type Database = {
           p_hours: number
           p_miles: number
           p_notes: string
+          p_pay_method?: string
+          p_pay_note?: string
           p_plan: string
           p_site: string
           p_sqft: number

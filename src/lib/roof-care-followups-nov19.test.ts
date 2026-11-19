@@ -1016,11 +1016,14 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
   });
   it("the editor's save cannot type over the line, and a rebuild carries it", () => {
     const fn = flat(read("src/lib/invoices.functions.ts"));
-    expect(fn).toContain("if (isAllowanceLine(l) || (prev && isAllowanceLine(prev))) {");
+    // (Later on Nov 19: the leak call's travel line is the plan's too, so these read isPlanLine.
+    // roof-care-leak-calls-nov19.test.ts.)
+    expect(fn).toContain("if (isPlanLine(l) || (prev && isPlanLine(prev))) {");
     // The editor never drops the line either: it is kept whatever was sent.
-    expect(fn).toContain("for (const l of oldLines ?? []) if (isAllowanceLine(l)) kept.add(l.id);");
+    expect(fn).toContain("for (const l of oldLines ?? []) if (isPlanLine(l)) kept.add(l.id);");
     expect(fn).toContain(
-      "if (await syncAllowance(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {",
+      // (Later on Nov 19: the leak call's travel first, then the credit, in syncPlanLines.)
+      "if (await syncPlanLines(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {",
     );
     expect(fn).toContain(
       "? allowanceAfterChange(allowanceTaken(allowanceOld), billableBefore(lines))",
@@ -1031,7 +1034,7 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     // A new draft and a rebuilt one both take the plan into account.
     expect(fn).toContain("return withPlanAllowance(sb, inv); }");
     expect(fn).toContain("return withPlanAllowance(sb, updated);");
-    expect(fn).toContain("if (!(await syncAllowance(sb, inv, made.lines))) return made;");
+    expect(fn).toContain("if (!(await syncPlanLines(sb, inv, made.lines))) return made;");
   });
   it("the invoice has the box and the read-only line; the property page has the status", () => {
     const editor = flat(read("src/components/service/invoice-editor.tsx"));
@@ -1040,10 +1043,10 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     // Ticked by itself, and said so, with the way out.
     expect(editor).toContain('{a.choice === "auto" && (');
     expect(editor).toContain("If this is not a minor repair, press Does not use the plan.");
-    expect(editor).toContain("const own = r.lines.filter(isAllowanceLine).map(lineFrom);");
+    expect(editor).toContain("const own = r.lines.filter(isPlanLine).map(lineFrom);");
     expect(editor).toContain('data-action="allowance-apply"');
     expect(editor).toContain('data-action="allowance-decline"');
-    expect(editor).toContain("isAllowanceLine(l) ? (");
+    expect(editor).toContain("isPlanLine(l) ? (");
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
     expect(card).toContain("{!short && active.repair_allowance > 0 && (");
     expect(card).toContain("{active.allowance_used === null ? (");
@@ -1063,7 +1066,7 @@ describe("10. the database lets the three answers through, and no other", () => 
 describe("10. on the customer's copy", () => {
   it("what the plan takes off is listed under the work, not above it", () => {
     const server = flat(read("src/lib/invoices.server.ts"));
-    const listed = server.indexOf("if (!isAllowanceLine(row.line)) listLine(row);");
+    const listed = server.indexOf("if (!isPlanLine(row.line)) listLine(row);");
     const rollup = server.indexOf("doc.text(rows.rollup.label, cols.desc, 9);");
     const taken = server.indexOf("if (isAllowanceLine(row.line)) listLine(row);");
     expect(listed).toBeGreaterThan(0);

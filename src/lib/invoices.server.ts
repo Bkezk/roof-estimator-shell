@@ -81,6 +81,7 @@ import {
 import { loadServiceMaterials } from "@/lib/service-materials.server";
 import { carePlanInvoiceLines, type CarePlanVisitRef } from "@/lib/roof-care-invoice";
 import { isAllowanceLine } from "@/lib/roof-care-allowance";
+import { isPlanLine, isTravelWaiverLine } from "@/lib/roof-care-travel";
 import { carePlanLineSource } from "@/lib/roof-care-plan";
 import { toBase64 } from "@/lib/webpush";
 
@@ -748,13 +749,15 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   };
   // What a Roof Care plan takes off reads after the work it is taken from (Nov 19), so it goes
   // under the one Services and materials row, not above it.
-  for (const row of rows.listed) if (!isAllowanceLine(row.line)) listLine(row);
+  for (const row of rows.listed) if (!isPlanLine(row.line)) listLine(row);
   if (rows.rollup) {
     doc.ensure(14);
     doc.text(rows.rollup.label, cols.desc, 9);
     doc.textRight(money(rows.rollup.total), cols.total, 9);
     doc.y -= 12;
   }
+  // The leak call's travel, then the minor repairs credit.
+  for (const row of rows.listed) if (isTravelWaiverLine(row.line)) listLine(row);
   for (const row of rows.listed) if (isAllowanceLine(row.line)) listLine(row);
   doc.line();
   doc.y -= 14;

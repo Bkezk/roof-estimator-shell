@@ -82,7 +82,8 @@ export type AttentionKind =
   | "invoice_unpaid"
   | "care_plan_late"
   | "care_plan_unbilled"
-  | "care_plan_unpaid";
+  | "care_plan_unpaid"
+  | "care_plan_refund";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -236,6 +237,21 @@ export interface AttCareUnpaid {
   price: number;
   /** The plan's invoice; null when none has been made yet. */
   invoice: { id: string; number: string; status: string; paid_amount: number } | null;
+  /** "Paying by check (#1042)."; "" when the sign-up did not say. */
+  pay?: string;
+}
+
+/**
+ * A Roof Care plan ended early with a refund a manager confirmed, not yet marked sent (owner,
+ * Nov 19).
+ */
+export interface AttCareRefund {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  ended_on: string | null;
+  amount: number;
 }
 
 export interface AttCareUnbilled {
@@ -282,6 +298,8 @@ export interface AttentionIn {
   careUnbilled?: readonly AttCareUnbilled[];
   /** Roof Care plans signed and not yet paid (Nov 19). */
   careUnpaid?: readonly AttCareUnpaid[];
+  /** Roof Care plans ended early whose refund is not yet sent (Nov 19). */
+  careRefunds?: readonly AttCareRefund[];
 }
 
 export interface AttentionRow {
@@ -778,13 +796,34 @@ export function attentionList(i: AttentionIn): AttentionList {
       kind: "care_plan_unpaid",
       tag: "Roof Care",
       title: v.title,
-      why: `${signed} ${next}`,
+      why: [signed, v.pay, next].filter(Boolean).join(" "),
       ...office,
       age,
       ageText: days(age),
       tone: age > 14 ? "red" : "amber",
       amount: v.price > 0 ? v.price : null,
       href: v.invoice ? `/service/invoices?id=${v.invoice.id}` : `/properties/${v.site_id}`,
+    });
+  }
+
+  // A refund owed on a Roof Care plan that was ended early (Nov 19), until it is marked sent.
+  for (const v of i.careRefunds ?? []) {
+    if (!(v.amount > 0)) continue;
+    const age =
+      v.ended_on && YMD.test(v.ended_on) ? Math.max(0, daysBetween(v.ended_on, today)) : 0;
+    rows.push({
+      key: `care_plan_refund:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_refund",
+      tag: "Roof Care",
+      title: v.title,
+      why: `The plan was ended${v.ended_on ? ` ${shortDay(v.ended_on)}` : ""} and a refund is owed. Send it, then mark it sent on the property.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: v.amount,
+      href: `/properties/${v.site_id}`,
     });
   }
 

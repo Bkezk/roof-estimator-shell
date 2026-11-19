@@ -80,6 +80,29 @@ export interface PlanInvoiceRef {
   paid_amount: number;
 }
 
+/** How the customer pays for the plan year (owner, Nov 19: "by check or card either one"). */
+export const PAY_METHODS = ["check", "card"] as const;
+export type PayMethod = (typeof PAY_METHODS)[number];
+export const asPayMethod = (v: unknown): PayMethod | null =>
+  v === "check" || v === "card" ? v : null;
+export const PAY_METHOD_WORDS: Record<PayMethod, string> = { check: "Check", card: "Card" };
+export const PAY_METHOD_NEEDED = "Pick how they are paying: by check or by card";
+/** "Paying by check (#1042)." */
+export function payWords(method: PayMethod | null, note: string | null): string {
+  if (!method) return "";
+  const n = (note ?? "").trim();
+  return `Paying by ${PAY_METHOD_WORDS[method].toLowerCase()}${n ? ` (${n})` : ""}.`;
+}
+export const PAY_CARD_NOTE =
+  "A card cannot be charged from here yet. The office takes the card and marks the invoice paid.";
+
+/** The refund of a plan that was ended early. */
+export interface PlanRefund {
+  due: number;
+  sent_on: string | null;
+  ref: string | null;
+}
+
 export type PlanStatus = "awaiting_payment" | "active" | "ended";
 export const asPlanStatus = (v: unknown): PlanStatus =>
   v === "ended" ? "ended" : v === "awaiting_payment" ? "awaiting_payment" : "active";
@@ -108,6 +131,19 @@ export interface RoofCarePlan {
    * there is none yet.
    */
   invoice: PlanInvoiceRef | null;
+  /** How the customer said they pay, at the sign-up; null for a plan signed before that was asked. */
+  pay_method: PayMethod | null;
+  /** A note with it: a check's number. */
+  pay_note: string | null;
+  /** Repair calls a year with no travel charge (Roof Guard's leak calls); 0 for a plan with none. */
+  free_travel_calls: number;
+  /** How many invoices hold one; null for a reader who does not see invoices. */
+  free_travel_used: number | null;
+  /**
+   * The refund confirmed when the plan was ended early; null when there is none, and for a
+   * reader who does not see invoices.
+   */
+  refund: PlanRefund | null;
   signed_on: string;
   renews_on: string;
   roof_sqft: number;
@@ -330,6 +366,64 @@ export function firstVisitWords(first: FirstVisit, days: number | null): string 
 /** Under the dates on the sign-up: they move with the payment. */
 export const DATES_FROM_PAYMENT =
   "These dates are for a payment received today. They are counted from the day it is received.";
+
+// ── The refund when a plan ends early (owner, Nov 19) ───────────────────────────────────────
+//
+// "a share for inspections not done, if we did one half is refunded", and "i like the repairs
+// coming off a refund rule". The database works it (roof_care_refund_worked): the share of what
+// was paid for the inspections not done, less the minor repairs the plan already covered, never
+// below nothing. A manager confirms the amount when ending the plan. These are the words.
+
+export interface RefundWorked {
+  paid: number;
+  inspections_done: number;
+  share: number;
+  repairs: number;
+  refund: number;
+}
+
+/** The database's answer, or null when it is not one. */
+export function readRefundWorked(x: unknown): RefundWorked | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const n = (k: string) => {
+    const v = Number(o[k]);
+    return Number.isFinite(v) ? v : null;
+  };
+  const paid = n("paid");
+  const done = n("inspections_done");
+  const share = n("share");
+  const repairs = n("repairs");
+  const refund = n("refund");
+  if (paid == null || done == null || share == null || repairs == null || refund == null)
+    return null;
+  return { paid, inspections_done: done, share, repairs, refund };
+}
+
+const cents = (n: number) =>
+  "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** The sum, a line at a time, as the End plan box shows it. */
+export function refundLines(w: RefundWorked): string[] {
+  if (!(w.paid > 0)) return ["Nothing was paid for this plan year, so there is nothing to refund."];
+  const out = [
+    `Paid for the year: ${cents(w.paid)}`,
+    `Inspections done: ${w.inspections_done} of 2`,
+    `Share for the inspections not done: ${cents(w.share)}`,
+  ];
+  if (w.repairs > 0) out.push(`Minor repairs the plan already covered: ${cents(w.repairs)} off`);
+  out.push(`Refund: ${cents(w.refund)}`);
+  return out;
+}
+
+/** "Refund owed: $650.00." / "Refund of $650.00 sent Nov 20, 2026 (check 2001)." */
+export function refundStatusWords(r: PlanRefund): string {
+  if (!(r.due > 0)) return "";
+  if (!r.sent_on) return `Refund owed: ${cents(r.due)}.`;
+  return `Refund of ${cents(r.due)} sent ${longDay(r.sent_on)}${r.ref ? ` (${r.ref})` : ""}.`;
+}
+export const REFUND_MARK_SENT = "Mark the refund sent";
+export const REFUND_BAD_AMOUNT = "Type the refund, 0 or more, and no more than was paid";
 
 // ── Push back ───────────────────────────────────────────────────────────────────────────────
 

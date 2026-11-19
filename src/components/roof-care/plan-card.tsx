@@ -51,6 +51,10 @@ import {
   MAP_ROOF_USE,
   mapRoofSizeLine,
   nextWindow,
+  PAY_CARD_NOTE,
+  PAY_METHOD_WORDS,
+  PAY_METHODS,
+  payWords,
   planBadge,
   PLAN_MAKE_INVOICE,
   PLAN_NO_INVOICE,
@@ -58,6 +62,10 @@ import {
   planName,
   planNumberLabel,
   pushPreview,
+  REFUND_BAD_AMOUNT,
+  REFUND_MARK_SENT,
+  refundLines,
+  refundStatusWords,
   PRICE_ESTIMATE_JUST_NOW,
   PRICE_ESTIMATE_ROUGH,
   isPriceChanged,
@@ -72,6 +80,7 @@ import {
   visitUnbilled,
   windowWords,
   type FirstVisit,
+  type PayMethod,
   type PlanVisit,
   type RoofCarePlan,
 } from "@/lib/roof-care-plan";
@@ -79,15 +88,18 @@ import {
   addRoofCareStorm,
   endRoofCarePlan,
   listRoofCarePlans,
+  markRoofCareRefundSent,
   pushBackRoofCareVisit,
   requestAdditionalService,
   roofCareMapSize,
   roofCareOffer,
+  roofCareRefund,
   signUpRoofCare,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
 import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
 import { money0, type PlanKey } from "@/lib/roof-care-price";
+import { TRAVEL_INCLUDED_WORDS, travelStatusWords } from "@/lib/roof-care-travel";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const STALE_MS = 60_000;
@@ -400,6 +412,9 @@ export function RoofCareCard({
       data-roof-care={active ? active.plan : waiting ? "awaiting" : "none"}
     >
       {plan && <RoofCareBadge plan={plan} today={today} />}
+      {plan.status === "ended" && plan.refund && plan.refund.due > 0 && (
+        <RefundOwed siteId={siteId} plan={plan} />
+      )}
       {waiting && (
         <AwaitingPayment
           siteId={siteId}
@@ -426,6 +441,14 @@ export function RoofCareCard({
             Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
+          {/* Roof Guard's leak calls with no travel charge (owner, Nov 19). */}
+          {!short && active.free_travel_calls > 0 && (
+            <p className="text-xs" data-roof-care-leak-calls>
+              {active.free_travel_used === null
+                ? TRAVEL_INCLUDED_WORDS
+                : travelStatusWords(active.free_travel_calls, active.free_travel_used)}
+            </p>
+          )}
           {/* The minor repairs the plan includes each year (owner, Nov 19: "have that under
               the plan status"): what is used and what is left, for those who see invoices. */}
           {!short && active.repair_allowance > 0 && (
@@ -537,6 +560,58 @@ export function RoofCareCard({
   );
 }
 
+// ── The refund of a plan ended early (owner, Nov 19) ────────────────────────────────────────
+
+/** The refund a manager confirmed, until it is marked sent. Only for those who see invoices. */
+function RefundOwed({ siteId, plan }: { siteId: string; plan: RoofCarePlan }) {
+  const refresh = useRefresh(siteId);
+  const [ref, setRef] = useState("");
+  const sentFn = useServerFn(markRoofCareRefundSent);
+  const sent = useMutation({
+    mutationFn: () => sentFn({ data: { plan_id: plan.id, on: easternYmd(), ref: ref.trim() } }),
+    onSuccess: () => {
+      refresh();
+      toast.success("Refund marked sent");
+    },
+    onError: (e) => toast.error(`Could not mark the refund sent: ${errText(e)}`),
+  });
+  const r = plan.refund!;
+  return (
+    <div className="space-y-1 text-xs" data-roof-care-refund={r.sent_on ? "sent" : "owed"}>
+      <p
+        className={
+          r.sent_on ? "text-muted-foreground" : "font-medium text-amber-800 dark:text-amber-300"
+        }
+      >
+        {refundStatusWords(r)}
+      </p>
+      {!r.sent_on && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            aria-label="Check number or note for the refund"
+            placeholder="Check number or note"
+            className="h-7 w-48 text-xs"
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={sent.isPending}
+            onClick={() => sent.mutate()}
+            data-action="roof-care-refund-sent"
+          >
+            {sent.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+            {REFUND_MARK_SENT}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Signed, waiting for its payment (owner, Nov 19) ─────────────────────────────────────────
 
 /**
@@ -584,6 +659,12 @@ function AwaitingPayment({
         Signed {longDay(plan.signed_on)} by {plan.agreed_by}
         {plan.sold_by_name ? `, signed up by ${plan.sold_by_name}` : ""}. {AWAITING_PAYMENT_NOTE}
       </p>
+      {plan.pay_method && (
+        <p className="font-medium" data-awaiting-pay={plan.pay_method}>
+          {payWords(plan.pay_method, plan.pay_note)}
+          {plan.pay_method === "card" ? ` ${PAY_CARD_NOTE}` : ""}
+        </p>
+      )}
       {!short && (
         <p className="text-muted-foreground" data-awaiting-first>
           {firstVisitWords(plan.first_visit, plan.first_days)}
@@ -667,6 +748,9 @@ function SignUpDialog({
   const [agreedBy, setAgreedBy] = useState("");
   const [notes, setNotes] = useState("");
   const [agreed, setAgreed] = useState(false);
+  // How they pay for the year (owner, Nov 19: "by check or card either one during sign up").
+  const [payMethod, setPayMethod] = useState<PayMethod | null>(null);
+  const [payNote, setPayNote] = useState("");
   const offerFn = useServerFn(roofCareOffer);
   const signFn = useServerFn(signUpRoofCare);
   // What the map shows at the address, offered beside the box. The box itself stays blank.
@@ -694,6 +778,7 @@ function SignUpDialog({
     !!plan &&
     !!first &&
     !!dates &&
+    !!payMethod &&
     agreedBy.trim().length > 0 &&
     agreed &&
     plans.length > 0 &&
@@ -707,6 +792,8 @@ function SignUpDialog({
           sqft: size!,
           first: first!,
           days: first === "days" ? dayCount : null,
+          pay_method: payMethod!,
+          pay_note: payMethod === "check" ? payNote.trim() : "",
           agreed_by: agreedBy.trim(),
           notes: notes.trim(),
           terms_agreed: true as const,
@@ -890,6 +977,35 @@ function SignUpDialog({
                   </p>
                 )}
               </fieldset>
+              <fieldset className="space-y-1.5" data-sign-pay>
+                <legend className="font-medium">How they are paying for the year</legend>
+                {PAY_METHODS.map((m) => (
+                  <label key={m} className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="radio"
+                      name="rc-pay"
+                      checked={payMethod === m}
+                      onChange={() => setPayMethod(m)}
+                      data-pay={m}
+                    />
+                    <span>{PAY_METHOD_WORDS[m]}</span>
+                    {m === "check" && payMethod === "check" && (
+                      <Input
+                        aria-label="Check number, if they hand it over now"
+                        placeholder="Check number, if handed over now"
+                        className="h-8 w-56"
+                        value={payNote}
+                        onChange={(e) => setPayNote(e.target.value)}
+                      />
+                    )}
+                  </label>
+                ))}
+                {payMethod === "card" && (
+                  <p className="text-xs text-muted-foreground" data-sign-line="card-note">
+                    {PAY_CARD_NOTE}
+                  </p>
+                )}
+              </fieldset>
               <div className="space-y-1">
                 <Label htmlFor="rc-agreed">Who agreed to the plan (the customer’s name)</Label>
                 <Input
@@ -1058,16 +1174,34 @@ function EndDialog({
 }) {
   const refresh = useRefresh(siteId);
   const [reason, setReason] = useState("");
+  // The refund (owner, Nov 19): the share for inspections not done, less the minor repairs the
+  // plan already covered. The database works it; the manager confirms it, or types another.
+  const [refundText, setRefundText] = useState("");
+  const refundFn = useServerFn(roofCareRefund);
+  const worked = useQuery({
+    queryKey: ["roof-care-refund", plan.id],
+    queryFn: () => refundFn({ data: { plan_id: plan.id } }),
+    enabled: plan.pay_first,
+    retry: false,
+    staleTime: 0,
+  });
+  const typed = refundText.trim() === "" ? null : Number(refundText.replace(/[$,\s]/g, ""));
+  const badRefund =
+    typed !== null &&
+    !(Number.isFinite(typed) && typed >= 0 && (!worked.data || typed <= worked.data.paid));
   const endFn = useServerFn(endRoofCarePlan);
   const end = useMutation({
-    mutationFn: () => endFn({ data: { plan_id: plan.id, reason: reason.trim() } }),
-    onSuccess: () => {
+    mutationFn: () => endFn({ data: { plan_id: plan.id, reason: reason.trim(), refund: typed } }),
+    onSuccess: (r) => {
       refresh();
       // Its inspection tickets nobody had started are taken off the board (Nov 19).
       toast.success(
         plan.status === "awaiting_payment"
           ? "Plan ended. Its unpaid invoice was removed."
-          : "Plan ended. Its inspection tickets not yet started were taken off the board.",
+          : r.refund > 0
+            ? `Plan ended. A refund of ${money0(r.refund)} is owed: send it, then mark it sent on the property.`
+            : "Plan ended. Its inspection tickets not yet started were taken off the board.",
+        { duration: 20_000 },
       );
       onClose();
     },
@@ -1093,6 +1227,41 @@ function EndDialog({
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
+        {plan.pay_first && (
+          <div className="space-y-1 rounded-md border p-3 text-sm" data-roof-care-end-refund>
+            <p className="font-medium">The refund</p>
+            {worked.isPending && <p className="text-muted-foreground">Working out the refund…</p>}
+            {worked.error && (
+              <p className="text-destructive">
+                Could not work out the refund: {errText(worked.error)}
+              </p>
+            )}
+            {worked.data && (
+              <>
+                <ul className="text-muted-foreground" data-refund-lines>
+                  {refundLines(worked.data).map((l) => (
+                    <li key={l}>{l}</li>
+                  ))}
+                </ul>
+                {worked.data.paid > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <Label htmlFor="rc-end-refund">
+                      Refund to confirm (leave blank for the amount above)
+                    </Label>
+                    <Input
+                      id="rc-end-refund"
+                      inputMode="decimal"
+                      className="h-9 w-40"
+                      value={refundText}
+                      onChange={(e) => setRefundText(e.target.value)}
+                    />
+                    {badRefund && <p className="text-xs text-destructive">{REFUND_BAD_AMOUNT}</p>}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
@@ -1100,7 +1269,7 @@ function EndDialog({
           <Button
             type="button"
             variant="destructive"
-            disabled={!reason.trim() || end.isPending}
+            disabled={!reason.trim() || badRefund || end.isPending}
             onClick={() => end.mutate()}
             data-action="roof-care-end-confirm"
           >

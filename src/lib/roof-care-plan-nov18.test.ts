@@ -554,6 +554,8 @@ describe("signing a customer up", () => {
     sqft: 20000,
     first: "now",
     days: null,
+    // (Nov 19: the sign-up asks how they pay, by check or by card.)
+    pay_method: "check",
     agreed_by: " Pat Smith ",
     notes: "",
     terms_agreed: true,
@@ -630,6 +632,8 @@ describe("signing a customer up", () => {
         p_agreed_by: "Pat Smith",
         p_notes: "",
         p_terms: ROOF_CARE_TERMS_VERSION,
+        p_pay_method: "check",
+        p_pay_note: "",
       },
     ]);
     expect(made.plan).toBe("guard");
