@@ -107,8 +107,9 @@ describe("a plan that is signed and not yet paid", () => {
 
 describe("the terms the customer agrees to", () => {
   it("say the year is paid first, when it starts, and what is refunded", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19");
-    expect(ROOF_CARE_TERMS).toHaveLength(10);
+    // Nov 19, later: version 2026-11-19.2, eleven terms (roof-care-credit-nov19.test.ts).
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.2");
+    expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
     );
@@ -117,8 +118,10 @@ describe("the terms the customer agrees to", () => {
     );
     // The owner: "a share for inspections not done, if we did one half is refunded", and "i like
     // the repairs coming off a refund rule, we may need to note that on the agreement".
+    // Nov 19, later, the owner's "ensure it makes it into the service agreement": the leak call
+    // travel and the storm inspection are named too.
     expect(ROOF_CARE_TERMS[8]).toBe(
-      "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered.",
+      "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done.",
     );
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/two halves|half of the yearly/);
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);

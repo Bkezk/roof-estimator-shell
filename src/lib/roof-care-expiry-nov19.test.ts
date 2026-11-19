@@ -287,7 +287,10 @@ describe("Needs attention", () => {
 
   it("only while the property has no plan in force or waiting", () => {
     const fn = flat("src/lib/owner-attention.functions.ts");
-    expect(fn).toContain("(p) => isExpired(p) && !live.some((x) => x.site_id === p.site_id)");
+    // Nov 19, later: nor one a manager closed out.
+    expect(fn).toContain(
+      "(p) => isExpired(p) && !p.closed_out && !live.some((x) => x.site_id === p.site_id)",
+    );
     expect(fn).toContain('.gte("ended_on", plusDays(today, -EXPIRED_LISTED_DAYS));');
   });
 });

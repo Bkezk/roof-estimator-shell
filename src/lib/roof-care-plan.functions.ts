@@ -221,7 +221,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on" as const;
 const TICKET_SELECT =
@@ -407,6 +407,9 @@ export async function plansOfSites(
         money && p.refund_due != null
           ? { due: Number(p.refund_due) || 0, sent_on: p.refund_sent_on, ref: p.refund_ref }
           : null,
+      closed_out: p.closed_out_on
+        ? { on: p.closed_out_on, reason: (p.closed_out_reason ?? "").trim() }
+        : null,
       renewed_from: p.renewed_from,
       renewal_choice: asRenewalChoice(p.renewal_choice),
       renewal_credit: Number(p.renewal_credit) || 0,
@@ -672,6 +675,31 @@ export const markRoofCareRefundSent = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+/**
+ * Close out an expired plan that will not be renewed (owner, Nov 19: "do we ever have the
+ * ability to dismiss that? say its owed and been 6 months and they just dont seem interested").
+ * A manager's. `dropped`: how many inspections still owed were dropped with it.
+ */
+export const closeOutRoofCarePlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        reason: z.string().trim().min(1, "Type why it is closed out").max(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ok: true; dropped: number }> => {
+    await signedIn(context);
+    const { data: n, error } = await context.supabase.rpc("roof_care_close_out", {
+      p_plan: data.plan_id,
+      p_reason: data.reason,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, dropped: Number(n) || 0 };
   });
 
 // ── Renewal (owner, Nov 19) ─────────────────────────────────────────────────────────────────

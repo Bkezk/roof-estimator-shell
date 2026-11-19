@@ -3426,6 +3426,9 @@ export type Database = {
         Row: {
           account_id: string
           agreed_by: string
+          closed_out_by_name: string | null
+          closed_out_on: string | null
+          closed_out_reason: string | null
           created_at: string
           created_by: string | null
           drive_hours: number
@@ -3473,6 +3476,9 @@ export type Database = {
         Insert: {
           account_id: string
           agreed_by: string
+          closed_out_by_name?: string | null
+          closed_out_on?: string | null
+          closed_out_reason?: string | null
           created_at?: string
           created_by?: string | null
           drive_hours: number
@@ -3520,6 +3526,9 @@ export type Database = {
         Update: {
           account_id?: string
           agreed_by?: string
+          closed_out_by_name?: string | null
+          closed_out_on?: string | null
+          closed_out_reason?: string | null
           created_at?: string
           created_by?: string | null
           drive_hours?: number
@@ -5910,6 +5919,10 @@ export type Database = {
       }
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
       roof_care_add_storm: { Args: { p_plan: string }; Returns: string }
+      roof_care_close_out: {
+        Args: { p_plan: string; p_reason: string }
+        Returns: number
+      }
       roof_care_end: {
         Args: { p_plan: string; p_reason: string }
         Returns: undefined

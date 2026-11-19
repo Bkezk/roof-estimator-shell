@@ -308,13 +308,30 @@ stripe later". Record: `docs/qa/roof-care-refund-and-leak-calls-2026-11-19.md`.
 - **A refund comes off Roof Care's income.** The income report has a row for each refund, on the
   day the plan was ended, with its amount below nothing. It is Roof Care's line of business.
 
-**For the owner to decide:**
+**Three rules agreed and built Nov 19, night.** Record:
+`docs/qa/roof-care-credit-2026-11-19.md`. The owner had asked for the numbers on every case and
+then said: "we need some rules so the worst case on roof guard … doesnt happen".
 
-1. **What is taken off a renewal for an inspection we did not do.** Half off is built. The
-   numbers say it should be less on one plan. See the private notes.
-2. **What a refund takes off besides the minor repairs.** The same notes.
-3. **An expired plan that is not renewed, with an inspection we never did.** Today the
-   inspection stays owed and its ticket stays on the board. Nothing is refunded by itself.
+- **The price of one inspection comes off a renewal, not half the plan** ("go for 1"). One
+  inspection is half of what Roof Watch costs for that roof and drive: Roof Watch is two
+  inspections and nothing else. It is the same amount whatever the plan. For Roof Watch itself
+  nothing changes. Only on Roof Watch can a renewal still come to no charge, a manager's.
+- **A refund also takes off the leak call travel that was not charged, and a storm inspection
+  counts as an inspection done** ("2. go for this. Just ensure it makes it into the service
+  agreement").
+- **The agreement says both.** Terms version 2026-11-19.2, eleven terms. Term 9 names the leak
+  call travel and the storm inspection. Term 10 is new: the plan ends after its twelve months
+  unless renewed, the price of one inspection comes off the renewal for one we could not get
+  to, and one we were not given access for can be done in the first 60 days of the new year.
+- **An expired plan that is not renewed keeps its owed inspection** ("3. yes"), and nothing is
+  refunded by itself.
+- **Closing out.** He asked: "do we ever have the ability to dismiss that? say its owed and been
+  6 months and they just dont seem interested in wanting it, how do we get it off the reminders
+  list?" A manager now closes out an expired plan with a reason: what was still owed is dropped,
+  its tickets come off the board, and the plan leaves the Needs attention list. It can still be
+  renewed later. Without that the plan leaves the list by itself after 60 days, but an owed
+  inspection's ticket stays on the board.
+- **Upgrades paying the difference:** "as long as its profitable … is fine". With Stripe.
 
 **Not built yet, all with Stripe:**
 

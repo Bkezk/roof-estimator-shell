@@ -325,7 +325,10 @@ async function careVisitsOfPlans(
   const all = await plansOfSites(sb, siteIds, { money: true });
   const live = all.filter((p) => p.status !== "ended");
   // An expired plan is the office's to chase unless the property has a plan in force or waiting.
-  const ranOut = all.filter((p) => isExpired(p) && !live.some((x) => x.site_id === p.site_id));
+  // One a manager closed out is done with.
+  const ranOut = all.filter(
+    (p) => isExpired(p) && !p.closed_out && !live.some((x) => x.site_id === p.site_id),
+  );
   const plans = live.filter((p) => p.status === "active");
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),

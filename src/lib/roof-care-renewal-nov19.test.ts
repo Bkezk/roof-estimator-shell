@@ -216,9 +216,11 @@ describe("the office's call on an inspection still owed", () => {
     expect(owedWords(2)).toBe("Both inspections are still owed");
   });
 
-  it("half off: says what comes off and what the customer pays", () => {
+  // Nov 19, later: what comes off is the price of one inspection, and the words say so. (It was
+  // half the plan's own price, and said only the amount.)
+  it("we did not get there: says what comes off and what the customer pays", () => {
     expect(renewalChoiceWords("half_off", OFFER)).toBe(
-      "We did not get there. Take $920.00 off the renewal: the customer pays $920.00. The inspection is dropped.",
+      "We did not get there. Take $920.00 off the renewal, the price of one inspection: the customer pays $920.00. The inspection is dropped.",
     );
   });
 
@@ -242,7 +244,7 @@ describe("the office's call on an inspection still owed", () => {
 
   it("says why it leans the way it does (owner: half off unless a reason says the customer asked)", () => {
     expect(renewalDefaultWords({ default_choice: "half_off", default_reason: "late" })).toBe(
-      "It is late and no push-back says the customer asked, so half off is picked.",
+      "It is late and no push-back says the customer asked, so taking its price off is picked.",
     );
     expect(renewalDefaultWords({ default_choice: "full", default_reason: "customer" })).toBe(
       "A push-back of it was marked as the customer asking, so charging in full is picked.",
@@ -357,7 +359,9 @@ describe("the renewal's invoice", () => {
   it("carries a second line that takes the credit off", () => {
     expect(renewalCreditLine(NEW, 920, 1)).toMatchObject({
       sort: 2,
-      description: "One inspection of last plan year was not done: half off this renewal",
+      // Nov 19, later: it said "half off this renewal".
+      description:
+        "One inspection of last plan year was not done: its price is taken off this renewal",
       qty: 1,
       rate: -920,
       total: -920,
@@ -367,7 +371,9 @@ describe("the renewal's invoice", () => {
       show_on_invoice: true,
     });
     expect(renewalCreditSource(NEW)).toBe(`roof-care-renewal:${NEW}`);
-    expect(renewalCreditWords(2)).toBe("Both inspections of last plan year were not done");
+    expect(renewalCreditWords(2)).toBe(
+      "Both inspections of last plan year were not done: their price is taken off this renewal",
+    );
   });
 
   it("has no such line when nothing is taken off", () => {

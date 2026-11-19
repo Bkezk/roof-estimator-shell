@@ -1207,15 +1207,17 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
 });
 
 describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () => {
-  it("are ten, dated, and none of them names a price", () => {
-    expect(ROOF_CARE_TERMS).toHaveLength(10);
+  // Nov 19, later: eleven. Term 10 is new (the plan ends after its year, and what happens with
+  // an inspection not done), and term 9 names the leak call travel and the storm inspection.
+  it("are eleven, dated, and none of them names a price", () => {
+    expect(ROOF_CARE_TERMS).toHaveLength(11);
     // (Nov 19: terms 2, 3 and 9 changed with paying for the year first, so the version did.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19");
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.2");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
     );
-    expect(ROOF_CARE_TERMS[9]).toBe(
+    expect(ROOF_CARE_TERMS[10]).toBe(
       "The plan is not a warranty and does not cover replacing the roof.",
     );
   });

@@ -149,6 +149,8 @@ export interface RoofCarePlan {
    * reader who does not see invoices.
    */
   refund: PlanRefund | null;
+  /** An expired plan a manager closed out: when, and why. Null otherwise. */
+  closed_out: { on: string; reason: string } | null;
   /** The plan year this one renews; null for a plan signed up new. */
   renewed_from: string | null;
   /** What was decided about an inspection still owed when the renewal was made. */
@@ -348,6 +350,14 @@ export function expiredWords(p: Pick<RoofCarePlan, "ended_on" | "renews_on">): s
   return `Expired ${longDay(p.ended_on || p.renews_on)}. What the plan included has stopped. It can be renewed: the new plan year starts the day the renewal is paid.`;
 }
 
+/** "Closed out Jun 3, 2028: not interested." */
+export function closedOutWords(c: { on: string; reason: string }): string {
+  return `Closed out ${longDay(c.on)}: ${c.reason.replace(/[.\s]+$/, "")}. What was still owed was dropped.`;
+}
+export const CLOSE_OUT_LABEL = "Close it out";
+export const CLOSE_OUT_NOTE =
+  "For a plan that will not be renewed. Any inspection still owed is dropped, its ticket comes off the board, and the plan leaves the Needs attention list. It can still be renewed later.";
+
 /** An expired plan is listed in Needs attention for this long. */
 export const EXPIRED_LISTED_DAYS = 60;
 
@@ -414,8 +424,12 @@ export const DATES_FROM_PAYMENT =
 export interface RefundWorked {
   paid: number;
   inspections_done: number;
+  /** How many of those are storm inspections: one counts as an inspection done (Nov 19). */
+  storm_counted: number;
   share: number;
   repairs: number;
+  /** The travel of the plan's leak calls that was not charged (Nov 19). */
+  travel: number;
   refund: number;
 }
 
@@ -434,7 +448,16 @@ export function readRefundWorked(x: unknown): RefundWorked | null {
   const refund = n("refund");
   if (paid == null || done == null || share == null || repairs == null || refund == null)
     return null;
-  return { paid, inspections_done: done, share, repairs, refund };
+  // The two added Nov 19 read as nothing from an answer made before them.
+  return {
+    paid,
+    inspections_done: done,
+    storm_counted: n("storm_counted") ?? 0,
+    share,
+    repairs,
+    travel: n("travel") ?? 0,
+    refund,
+  };
 }
 
 const cents = (n: number) =>
@@ -445,10 +468,11 @@ export function refundLines(w: RefundWorked): string[] {
   if (!(w.paid > 0)) return ["Nothing was paid for this plan year, so there is nothing to refund."];
   const out = [
     `Paid for the year: ${cents(w.paid)}`,
-    `Inspections done: ${w.inspections_done} of 2`,
+    `Inspections done: ${w.inspections_done} of 2${w.storm_counted > 0 ? " (a storm inspection counts as one)" : ""}`,
     `Share for the inspections not done: ${cents(w.share)}`,
   ];
   if (w.repairs > 0) out.push(`Minor repairs the plan already covered: ${cents(w.repairs)} off`);
+  if (w.travel > 0) out.push(`Leak call travel that was not charged: ${cents(w.travel)} off`);
   out.push(`Refund: ${cents(w.refund)}`);
   return out;
 }
@@ -526,7 +550,10 @@ export interface RenewalOffer {
   default_choice: RenewalChoice | null;
   /** Why: the customer asked, nothing is late yet, or it is late and ours. */
   default_reason: RenewalReason | null;
-  /** What "half off" takes off: half the price for each inspection owed. */
+  /**
+   * What "we did not get there" takes off: the price of one inspection for each one owed (Nov
+   * 19: half the Roof Watch price for that roof and drive; it was half the plan's own price).
+   */
   credit_if_half_off: number;
   /** The last day an inspection charged in full stays owed, for a payment made today. */
   carried_until: string;
@@ -603,7 +630,7 @@ export function renewalChoiceWords(
   if (choice === "half_off") {
     const left = Math.max(0, Math.round((offer.price - offer.credit_if_half_off) * 100) / 100);
     return left > 0
-      ? `We did not get there. Take ${cents(offer.credit_if_half_off)} off the renewal: the customer pays ${cents(left)}. The inspection is dropped.`
+      ? `We did not get there. Take ${cents(offer.credit_if_half_off)} off the renewal, the price of ${one ? "one inspection" : "two inspections"}: the customer pays ${cents(left)}. ${one ? "The inspection is" : "The inspections are"} dropped.`
       : "We did not get there. The renewal is at no charge, and a manager makes it. The inspections are dropped.";
   }
   return `The customer kept us off the roof. Charge the renewal in full. ${one ? "The inspection stays" : "The inspections stay"} owed until ${longDay(offer.carried_until)}, then ${one ? "it is" : "they are"} lost.`;
@@ -622,7 +649,7 @@ export function renewalDefaultWords(
     return "A push-back of it was marked as the customer asking, so charging in full is picked.";
   if (offer.default_reason === "not_late")
     return "It is not late yet, so charging in full is picked: it can still be done on time.";
-  return "It is late and no push-back says the customer asked, so half off is picked.";
+  return "It is late and no push-back says the customer asked, so taking its price off is picked.";
 }
 
 /** "Price for the year: $2,100" and, when it moved, what this year was. */
@@ -651,8 +678,8 @@ export const RENEWAL_NOTE =
 export const renewalCreditSource = (planId: string): string => `roof-care-renewal:${planId}`;
 export function renewalCreditWords(owed: number): string {
   return owed >= 2
-    ? "Both inspections of last plan year were not done"
-    : "One inspection of last plan year was not done: half off this renewal";
+    ? "Both inspections of last plan year were not done: their price is taken off this renewal"
+    : "One inspection of last plan year was not done: its price is taken off this renewal";
 }
 
 /** "Lost Mar 11, 2028": a carried inspection whose 60 days ran out. */
@@ -796,7 +823,11 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // carries the owner's refund rule: "a share for inspections not done, if we did one half is
 // refunded", and "i like the repairs coming off a refund rule, we may need to note that on the
 // agreement".
-export const ROOF_CARE_TERMS_VERSION = "2026-11-19";
+// Nov 19, later (version 2026-11-19.2), at the owner's "go" and "ensure it makes it into the
+// service agreement": term 9 also names the leak call travel and the storm inspection, and term
+// 10 is new: the plan ends after its twelve months, the price of one inspection comes off the
+// renewal for one we did not get to, and one we were kept from can be done in the first 60 days.
+export const ROOF_CARE_TERMS_VERSION = "2026-11-19.2";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
@@ -806,7 +837,8 @@ export const ROOF_CARE_TERMS: readonly string[] = [
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",
   "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
   "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
-  "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered.",
+  "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done.",
+  "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
   "The plan is not a warranty and does not cover replacing the roof.",
 ];
 export const TERMS_NOT_AGREED = "The customer has to agree to the plan's terms";

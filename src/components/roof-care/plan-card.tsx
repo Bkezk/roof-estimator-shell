@@ -45,6 +45,9 @@ import {
   AWAITING_PAYMENT_WORDS,
   CARE_PLAN_LABEL,
   CARRIED_NO_PUSH,
+  CLOSE_OUT_LABEL,
+  CLOSE_OUT_NOTE,
+  closedOutWords,
   CUSTOMER_ASKED_LABEL,
   CUSTOMER_ASKED_NOTE,
   DATES_FROM_PAYMENT,
@@ -104,6 +107,7 @@ import {
 } from "@/lib/roof-care-plan";
 import {
   addRoofCareStorm,
+  closeOutRoofCarePlan,
   endRoofCarePlan,
   listRoofCarePlans,
   markRoofCareRefundSent,
@@ -420,6 +424,7 @@ export function RoofCareCard({
   // The renewal (Nov 19): the Renew box, and ending a renewal that is waiting.
   const [renewing, setRenewing] = useState(false);
   const [endingRenewal, setEndingRenewal] = useState(false);
+  const [closingOut, setClosingOut] = useState(false);
   const refresh = useRefresh(siteId ?? "");
   const stormFn = useServerFn(addRoofCareStorm);
   const storm = useMutation({
@@ -470,6 +475,11 @@ export function RoofCareCard({
       {expired && (
         <div className="space-y-1 text-xs" data-roof-care-expired>
           <p className="font-medium text-amber-800 dark:text-amber-300">{expiredWords(expired)}</p>
+          {expired.closed_out && (
+            <p className="text-muted-foreground" data-roof-care-closed-out>
+              {closedOutWords(expired.closed_out)}
+            </p>
+          )}
           {/* What was not done is still owed. */}
           {!short &&
             expired.visits.some(
@@ -493,16 +503,31 @@ export function RoofCareCard({
               </ul>
             )}
           {!short && office && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => setRenewing(true)}
-              data-action="roof-care-renew"
-            >
-              {RENEW_LABEL}
-            </Button>
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => setRenewing(true)}
+                data-action="roof-care-renew"
+              >
+                {RENEW_LABEL}
+              </Button>
+              {/* It will not be renewed (owner, Nov 19): a manager takes it off the lists. */}
+              {manager && !expired.closed_out && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => setClosingOut(true)}
+                  data-action="roof-care-close-out"
+                >
+                  {CLOSE_OUT_LABEL}
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -704,6 +729,9 @@ export function RoofCareCard({
           plan={(active ?? expired)!}
           onClose={() => setRenewing(false)}
         />
+      )}
+      {closingOut && expired && (
+        <CloseOutDialog siteId={siteId} plan={expired} onClose={() => setClosingOut(false)} />
       )}
       {endingRenewal && renewal && (
         <EndDialog siteId={siteId} plan={renewal} renewal onClose={() => setEndingRenewal(false)} />
@@ -1639,6 +1667,69 @@ function EndDialog({
           >
             {end.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
             {renewal ? "Cancel the renewal" : "End plan"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Close out an expired plan (owner, Nov 19) ───────────────────────────────────────────────
+
+function CloseOutDialog({
+  siteId,
+  plan,
+  onClose,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const [reason, setReason] = useState("");
+  const closeFn = useServerFn(closeOutRoofCarePlan);
+  const close = useMutation({
+    mutationFn: () => closeFn({ data: { plan_id: plan.id, reason: reason.trim() } }),
+    onSuccess: (r) => {
+      refresh();
+      toast.success(
+        r.dropped > 0
+          ? `Closed out. ${r.dropped === 1 ? "1 inspection that was still owed was" : `${r.dropped} inspections that were still owed were`} dropped.`
+          : "Closed out.",
+        { duration: 15_000 },
+      );
+      onClose();
+    },
+    onError: (e) => toast.error(`Could not close it out: ${errText(e)}`),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md" data-roof-care-close-out-dialog>
+        <DialogHeader>
+          <DialogTitle>Close out the {planName(plan.plan)} plan</DialogTitle>
+          <DialogDescription>{CLOSE_OUT_NOTE}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1 text-sm">
+          <Label htmlFor="rc-close-reason">Why it is closed out</Label>
+          <Textarea
+            id="rc-close-reason"
+            rows={2}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!reason.trim() || close.isPending}
+            onClick={() => close.mutate()}
+            data-action="roof-care-close-out-confirm"
+          >
+            {close.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            {CLOSE_OUT_LABEL}
           </Button>
         </DialogFooter>
       </DialogContent>

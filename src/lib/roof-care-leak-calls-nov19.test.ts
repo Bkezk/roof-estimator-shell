@@ -327,7 +327,16 @@ describe("the refund when a plan ends early", () => {
   it("reads the database's sum, and nothing that is not one", () => {
     expect(
       readRefundWorked({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 }),
-    ).toEqual({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 });
+      // Nov 19, later: the two added parts read as nothing from an answer made before them.
+    ).toEqual({
+      paid: 1840,
+      inspections_done: 1,
+      storm_counted: 0,
+      share: 920,
+      repairs: 400,
+      travel: 0,
+      refund: 520,
+    });
     expect(readRefundWorked({ paid: 1840 })).toBeNull();
     expect(readRefundWorked(null)).toBeNull();
     expect(readRefundWorked("520")).toBeNull();
@@ -335,7 +344,15 @@ describe("the refund when a plan ends early", () => {
 
   it("is shown a line at a time", () => {
     expect(
-      refundLines({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 }),
+      refundLines({
+        paid: 1840,
+        inspections_done: 1,
+        storm_counted: 0,
+        share: 920,
+        repairs: 400,
+        travel: 0,
+        refund: 520,
+      }),
     ).toEqual([
       "Paid for the year: $1,840.00",
       "Inspections done: 1 of 2",
@@ -347,7 +364,15 @@ describe("the refund when a plan ends early", () => {
 
   it("leaves the repairs line out when the plan covered none", () => {
     expect(
-      refundLines({ paid: 1100, inspections_done: 0, share: 1100, repairs: 0, refund: 1100 }),
+      refundLines({
+        paid: 1100,
+        inspections_done: 0,
+        storm_counted: 0,
+        share: 1100,
+        repairs: 0,
+        travel: 0,
+        refund: 1100,
+      }),
     ).toEqual([
       "Paid for the year: $1,100.00",
       "Inspections done: 0 of 2",
@@ -357,9 +382,17 @@ describe("the refund when a plan ends early", () => {
   });
 
   it("says so when nothing was paid", () => {
-    expect(refundLines({ paid: 0, inspections_done: 0, share: 0, repairs: 0, refund: 0 })).toEqual([
-      "Nothing was paid for this plan year, so there is nothing to refund.",
-    ]);
+    expect(
+      refundLines({
+        paid: 0,
+        inspections_done: 0,
+        storm_counted: 0,
+        share: 0,
+        repairs: 0,
+        travel: 0,
+        refund: 0,
+      }),
+    ).toEqual(["Nothing was paid for this plan year, so there is nothing to refund."]);
   });
 
   it("stays on the property until it is marked sent", () => {
