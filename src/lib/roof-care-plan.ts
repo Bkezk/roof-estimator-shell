@@ -455,5 +455,44 @@ export function shownPrice(a: PriceAnswer): ShownPrice {
   };
 }
 
+// The roof size box of the sign-up starts blank, as every number box does. When our map has a
+// building outline at the property's address, the sign-up says its size beside the box and
+// offers it (owner, Nov 19: "should we go ahead and lookup … the customers properties to make it
+// easier to price the plans?"). It is the outline's area, so it is said as "about", to the
+// hundred, and it is one building: a property with more roofs than one is added up by a person.
+
+/** What the map shows at a property's address. `sure` is false when it was found by its name. */
+export interface MapRoofSize {
+  sqft: number;
+  sure: boolean;
+}
+
+/** An outline smaller than this is a shed or a canopy, not the roof a plan is for. */
+export const MAP_ROOF_MIN_SQFT = 500;
+
+/**
+ * The address finder's answer as a roof size to offer, or null: nothing found, a point with no
+ * outline, or an outline too small to be the building.
+ */
+export function mapRoofSize(
+  found: { areaSqFt: number | null } | null | undefined,
+  note: string | null | undefined,
+): MapRoofSize | null {
+  const area = found?.areaSqFt;
+  if (area == null || !Number.isFinite(area) || area < MAP_ROOF_MIN_SQFT) return null;
+  return { sqft: Math.round(area / 100) * 100, sure: !/^found by name/i.test((note ?? "").trim()) };
+}
+
+export const MAP_ROOF_USE = "Use this size";
+export const MAP_ROOF_MORE = "If the property has more than one roof, add them together.";
+
+/** "The map shows a building of about 22,400 sq ft at this address." */
+export function mapRoofSizeLine(m: MapRoofSize): string {
+  const size = m.sqft.toLocaleString("en-US");
+  return m.sure
+    ? `The map shows a building of about ${size} sq ft at this address.`
+    : `The map shows a building of about ${size} sq ft that matches this property's name. Check it is the right building.`;
+}
+
 /** Why a shown price is an estimate, when it is. */
 export type PriceEstimate = "rough" | "just-now" | null;

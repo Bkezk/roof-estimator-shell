@@ -7,6 +7,8 @@
  *    (roof_care_price) and hands back no cost, so anyone who may sign a customer up can ask.
  *  - signUpRoofCare: the sign-up. The drive is worked out again here, never taken from the
  *    form, and the database works the price out again from it.
+ *  - roofCareMapSize: the size of the building our map shows at a property's address, offered
+ *    beside the sign-up's roof size box. Read only: it saves nothing.
  *  - listRoofCarePlans: the plans of some properties with their inspections and tickets.
  *  - pushBackRoofCareVisit, addRoofCareStorm, endRoofCarePlan.
  *
@@ -27,6 +29,7 @@ import {
   asPlanKey,
   carePlanLineSource,
   FIRST_VISIT_CHOICES,
+  mapRoofSize,
   priceChangedLine,
   readPriceAnswer,
   ROOF_CARE_TERMS_VERSION,
@@ -34,6 +37,7 @@ import {
   TERMS_NOT_AGREED,
   VISIT_KINDS,
   type AllowanceUse,
+  type MapRoofSize,
   type PlanVisit,
   type PriceEstimate,
   type RoofCarePlan,
@@ -44,6 +48,7 @@ import {
 import { NOT_PLACED_LINE, placedRoughly } from "@/lib/roof-care-locate";
 import { PLAN_KEYS } from "@/lib/roof-care-price";
 import { driveTo, officeOrigin, type RoofCareDrive } from "@/lib/roof-care.functions";
+import { aerialForAddress } from "@/lib/service-aerial.functions";
 
 type Sb = SupabaseClient<Database>;
 type Ctx = { supabase: Sb; userId: string };
@@ -148,6 +153,51 @@ export const roofCareOffer = createServerFn({ method: "GET" })
           ? "just-now"
           : null;
     return { site: { id: site.id, name: site.name }, placed: !!drive, estimate, price };
+  });
+
+/** How long the sign-up waits for the map before it goes on without a size to offer. */
+export const MAP_SIZE_WAIT_MS = 10_000;
+
+/**
+ * The building our map shows at a property's address, as a roof size to offer. Null when the
+ * map has no outline there, the state's map server is slow or down, or the address cannot be
+ * read: the sign-up then simply has nothing to offer, and the size is typed as before.
+ */
+export async function siteMapSize(
+  sb: Sb,
+  site: Site,
+  find: typeof aerialForAddress = aerialForAddress,
+  waitMs: number = MAP_SIZE_WAIT_MS,
+): Promise<MapRoofSize | null> {
+  const street = (site.address1 ?? "").trim();
+  if (!street) return null;
+  const tail = [site.city, [site.state, site.zip].filter(Boolean).join(" ")]
+    .filter(Boolean)
+    .join(", ");
+  const line = [street, tail].filter(Boolean).join(", ");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const a = await Promise.race([
+      find(sb, line, { stateHint: site.state, propertyName: site.name }),
+      new Promise<null>((done) => {
+        timer = setTimeout(() => done(null), waitMs);
+      }),
+    ]);
+    return a ? mapRoofSize(a.found, a.note) : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export const roofCareMapSize = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ site_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<MapRoofSize | null> => {
+    await signedIn(context);
+    const sb = context.supabase;
+    return siteMapSize(sb, await siteOf(sb, data.site_id));
   });
 
 const PLAN_SELECT =

@@ -43,6 +43,9 @@ import {
   ADDITIONAL_SERVICES_LABEL,
   CARE_PLAN_LABEL,
   dueWords,
+  MAP_ROOF_MORE,
+  MAP_ROOF_USE,
+  mapRoofSizeLine,
   nextWindow,
   planBadge,
   planDates,
@@ -71,6 +74,7 @@ import {
   listRoofCarePlans,
   pushBackRoofCareVisit,
   requestAdditionalService,
+  roofCareMapSize,
   roofCareOffer,
   signUpRoofCare,
   type RoofCareOffer,
@@ -525,6 +529,14 @@ function SignUpDialog({
   const [agreed, setAgreed] = useState(false);
   const offerFn = useServerFn(roofCareOffer);
   const signFn = useServerFn(signUpRoofCare);
+  // What the map shows at the address, offered beside the box. The box itself stays blank.
+  const mapFn = useServerFn(roofCareMapSize);
+  const mapSize = useQuery({
+    queryKey: ["roof-care-map-size", siteId],
+    queryFn: () => mapFn({ data: { site_id: siteId } }),
+    staleTime: 60 * 60_000,
+    retry: false,
+  });
   const size = wholeNumber(sqft);
   const price = useMutation({
     mutationFn: (n: number) => offerFn({ data: { site_id: siteId, sqft: n } }),
@@ -611,6 +623,20 @@ function SignUpDialog({
               Get the price
             </Button>
           </div>
+          {mapSize.data && (
+            <p className="text-muted-foreground" data-sign-line="map-size">
+              {mapRoofSizeLine(mapSize.data)} {MAP_ROOF_MORE}{" "}
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 align-baseline"
+                onClick={() => setSqft(String(mapSize.data!.sqft))}
+                data-action="use-map-size"
+              >
+                {MAP_ROOF_USE}
+              </Button>
+            </p>
+          )}
           {price.error && (
             <p className="text-destructive" data-sign-line="error">
               {errText(price.error)}

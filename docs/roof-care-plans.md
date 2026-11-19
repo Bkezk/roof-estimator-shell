@@ -246,10 +246,25 @@ the live database:
 - The roof size only has to be relatively close. He asked whether the map can give it.
 - He has no Stripe account yet.
 
+**More answers the same day.**
+
+- **Repairs come off a refund.** "I like the repairs coming off a refund rule, we may need to
+  note that on the agreement." What the plan already covered in minor repairs is taken off the
+  refund, never below zero. It goes in the new terms.
+- **A year that closes with one inspection done.** Two parts are decided. Sixty days before the
+  renewal, Needs attention lists a plan with an inspection still owed. If it is still owed at
+  renewal because we did not get there, the renewal is charged with half taken off. Not decided:
+  what happens when the customer kept us off the roof.
+- **Roof Guard, in his words:** "3 free inspections (one is by request after storms) … of minor
+  repairs and no trip charge on two leak calls." The flyer says the same. The price setup counts
+  the leak calls another way; the numbers are in the private notes and wait on his answer.
+
 **Still open.** Whether a card is taken at all (its fee is a share of the price; a bank transfer
-is a small flat fee). The size of the discount and whether it holds for every plan and roof
-size. What is refunded when the plan's minor repairs were already used. Whether a year that
-closes with one inspection done credits half to the next year or holds the renewal back.
+is a small flat fee). The size of the discount, and whether it comes off the whole price or only
+the list price (the drive is charged at cost). A year that closes with one inspection done
+because the customer kept us off the roof. Whether the minor repairs a plan includes cover labor
+("do we include labor in the credits? i think thats the question"): today the plan's line takes
+off whatever the invoice bills, labor and travel with it.
 
 **The roof size from the map (checked Nov 19).** The building outlines already in the database
 (`buildings`, Kentucky and Tennessee only) carry a roof size. Of the 34 properties that have a
@@ -257,6 +272,12 @@ point on the map, 33 have an outline at that point. But a property often has sev
 close by, and the nearest outline is not always the one meant, so it cannot be picked by itself:
 the person signing up would pick the building, or buildings, on the map. No bid is linked to an
 outline, so the outlines could not be held against a roof the company has measured.
+
+**The map's size on the sign-up (built Nov 19).** The owner: "go with looking up the
+properties". The sign-up now asks our map for the building at the property's address and says
+its size beside the roof size box, with a "Use this size" button. The box still starts blank.
+Nothing is saved by it. A trial of fifty properties, and what is not done yet (saving a map
+point and a size on every property), is in `docs/qa/roof-care-map-size-2026-11-19.md`.
 
 **Setting it up.** A Stripe account in the company's name. Its keys go in Lovable Cloud › Secrets
 by the owner's hand, never in the repository or the chat. Stripe's test mode first: with a live
