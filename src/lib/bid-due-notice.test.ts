@@ -377,7 +377,10 @@ describe("where it runs", () => {
     expect(src).toContain("sendsFailed += b.bids_errors;");
     expect(src).toContain('console.error("Cron reminders: the bid due notice pass failed", e);');
     // Nov 19: the Roof Care "plan expired" pass reports beside them.
-    expect(src).toMatch(/followups,\s*tasks,\s*bids,\s*plans,\s*cron_stamped: cronStamped,/);
+    // (Nov 19, later: and the pass that emails a Roof Care customer their agreement and receipt.)
+    expect(src).toMatch(
+      /followups,\s*tasks,\s*bids,\s*plans,\s*plan_emails: planEmails,\s*cron_stamped: cronStamped,/,
+    );
   });
   it("the app's own pass: after the task notices, the same admin client, under the same server-key guard", () => {
     const src = read("src/lib/followups.functions.ts");

@@ -44,6 +44,14 @@ import {
   type ParsedAddress,
 } from "@/lib/aerial-address";
 import {
+  parseTownPlace,
+  parseZipPlace,
+  state2,
+  townLookupUrl,
+  zip5,
+  zipLookupUrl,
+} from "@/lib/roof-care-locate";
+import {
   CENSUS_DOWN_NOTE,
   CENSUS_FOUND_NOTE,
   CENSUS_NO_MATCH_NOTE,
@@ -150,6 +158,13 @@ export interface TicketAerial {
    * "Pick the building" opens, with the note naming the numbers found.
    */
   near?: { lat: number; lng: number } | null;
+  /**
+   * `near` is only the middle of the address's zip code or town (owner, Nov 19): nothing closer
+   * was found, so the map opens over the town and not on all of Kentucky and Tennessee.
+   */
+  nearRough?: boolean;
+  /** What that rough point is, in words: "Corbin, KY 40701". */
+  nearPlace?: string | null;
 }
 
 const toFound = (
@@ -372,6 +387,48 @@ export async function aerialForAddress(
   return miss(NO_MATCH_NOTE);
 }
 
+/**
+ * The middle of an address's zip code, else of its town: where "Pick the building" opens when
+ * the address is on no map of ours (owner, Nov 19: "have the map try its best to get close to
+ * the location … instead of just showing tn and Ky in its entirety"). `place` names it
+ * ("Corbin, KY 40701"). Null when neither is known or the lookup does not answer in time. Never
+ * throws: the map then opens on the state, as before.
+ */
+export async function roughNear(
+  a: { city?: string | null; state?: string | null; zip?: string | null },
+  fetcher: (url: string) => Promise<unknown> = quickJson,
+): Promise<{ lat: number; lng: number; place: string | null } | null> {
+  const ask = async (url: string): Promise<unknown> => {
+    try {
+      return await fetcher(url);
+    } catch {
+      return null;
+    }
+  };
+  const zip = zip5(a.zip);
+  if (zip) {
+    const z = parseZipPlace(await ask(zipLookupUrl(zip)));
+    if (z) return { lat: z.lat, lng: z.lng, place: z.place };
+  }
+  const st = state2(a.state);
+  const city = (a.city ?? "").trim();
+  if (st && city) {
+    const t = parseTownPlace(await ask(townLookupUrl(st, city)));
+    if (t) return { lat: t.lat, lng: t.lng, place: t.place };
+  }
+  return null;
+}
+
+/** A technician is waiting on this read: each lookup gets three seconds, not the usual six. */
+export const ROUGH_TIMEOUT_MS = 3_000;
+const quickJson = async (url: string): Promise<unknown> => {
+  const res = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(ROUGH_TIMEOUT_MS),
+  });
+  return res.ok ? res.json() : null;
+};
+
 /** The ticket's saved aerial, or where its address is on our map. */
 export const getTicketAerial = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -382,6 +439,8 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     const job = await readJob(context, data.id);
     let address = job.site_address ?? "";
     let siteState: string | null = null;
+    let siteCity: string | null = null;
+    let siteZip: string | null = null;
     let propertyName: string | null = job.site_name ?? null;
     if (job.site_id) {
       const { data: s } = await sb
@@ -391,6 +450,8 @@ export const getTicketAerial = createServerFn({ method: "GET" })
         .maybeSingle();
       if (s) {
         siteState = s.state;
+        siteCity = s.city;
+        siteZip = s.zip;
         if (!address.trim()) address = siteAddressLine(s);
         if (s.name?.trim()) propertyName = s.name;
       }
@@ -461,7 +522,24 @@ export const getTicketAerial = createServerFn({ method: "GET" })
         note,
       };
     }
-    return { address, addressState, saved: null, found: null, note, near };
+    if (near) return { address, addressState, saved: null, found: null, note, near };
+    // Nothing on our maps: the middle of its zip code or town, so the picker opens close by.
+    const rough = await roughNear({
+      // The address that was looked for first (a ticket can carry its own), then the property's
+      // boxes. (`||`: a property saved with an empty box holds "", which is not a town.)
+      city: parsed?.city || siteCity?.trim() || null,
+      state: parsed?.state || siteState?.trim() || null,
+      zip: parsed?.zip || siteZip?.trim() || null,
+    });
+    return {
+      address,
+      addressState,
+      saved: null,
+      found: null,
+      note,
+      near: rough ? { lat: rough.lat, lng: rough.lng } : null,
+      ...(rough ? { nearRough: true, nearPlace: rough.place } : {}),
+    };
   });
 
 const fetchJson = async (url: string): Promise<unknown> => {

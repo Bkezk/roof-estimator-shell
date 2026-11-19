@@ -27,6 +27,12 @@ import { chunkIds } from "@/lib/chunk-ids";
 import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
 import {
+  EMAIL_BAD,
+  looksLikeEmail,
+  readBenefits,
+  type BenefitNumbers,
+} from "@/lib/roof-care-benefits";
+import {
   asPayMethod,
   asPlanKey,
   asPlanStatus,
@@ -221,7 +227,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on" as const;
 const TICKET_SELECT =
@@ -308,6 +314,27 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
 }
 
 /**
+ * What each plan includes, in numbers (roof_care_benefits() in the database): the minor repairs
+ * each year, the leak calls with no trip charge, the storm inspections. Null when they cannot
+ * be read: the descriptions then say it without the numbers.
+ */
+export async function readPlanBenefits(sb: Sb): Promise<BenefitNumbers | null> {
+  try {
+    const { data, error } = await sb.rpc("roof_care_benefits");
+    return error ? null : readBenefits(data);
+  } catch {
+    return null;
+  }
+}
+
+export const roofCareBenefits = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<BenefitNumbers | null> => {
+    await signedIn(context);
+    return readPlanBenefits(context.supabase);
+  });
+
+/**
  * The plans of `siteIds`, newest first, each with its inspections and their tickets. `money`:
  * also what is billed and what the allowance has taken, for a reader who sees invoices.
  */
@@ -381,6 +408,8 @@ export async function plansOfSites(
     });
     byPlan.set(v.plan_id, list);
   }
+  // The storm inspections a plan includes are not kept on the plan: the settings say.
+  const benefits = plans.some((p) => p.plan === "guard") ? await readPlanBenefits(sb) : null;
   const out: RoofCarePlan[] = [];
   for (const p of plans) {
     const plan = asPlanKey(p.plan);
@@ -431,6 +460,14 @@ export async function plansOfSites(
       visits: (byPlan.get(p.id) ?? []).sort(
         (a, b) => ORDER[a.kind] - ORDER[b.kind] || a.due_from.localeCompare(b.due_from),
       ),
+      storm_included: benefits?.[plan].storm ?? 0,
+      email: {
+        to: p.customer_email ?? null,
+        agreement_sent_at: p.agreement_sent_at ?? null,
+        agreement_error: p.agreement_error ?? null,
+        receipt_sent_at: p.receipt_sent_at ?? null,
+        receipt_error: p.receipt_error ?? null,
+      },
     });
   }
   return out;
@@ -461,6 +498,13 @@ const signUpInput = z.object({
     .min(1, "Type the name of the person who agreed to the plan")
     .max(120),
   notes: z.string().trim().max(2000).optional(),
+  // Where the agreement and the receipt are emailed (owner, Nov 19); blank when they gave none.
+  email: z
+    .string()
+    .trim()
+    .max(254)
+    .refine((v) => v === "" || looksLikeEmail(v), EMAIL_BAD)
+    .optional(),
   // The customer agreed to the plan's terms (owner, Nov 18): the form's tick, and no plan
   // without it. The database refuses it too.
   terms_agreed: z.literal(true, { errorMap: () => ({ message: TERMS_NOT_AGREED }) }),
@@ -530,6 +574,16 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_pay_note: data.pay_note ?? "",
     });
     if (error) throw new Error(error.message);
+    // Where the agreement and the receipt go. A failure here does not undo the sign-up: the
+    // plan then says it has no email address, and the office adds it.
+    const email = (data.email ?? "").trim();
+    if (email) {
+      try {
+        await sb.rpc("roof_care_set_email", { p_plan: planId, p_email: email });
+      } catch {
+        // Said on the plan.
+      }
+    }
     // Its invoice for the year, at once when the person signing may make invoices. A technician
     // may not: the plan then waits for the office, which makes it from the plan. A failure here
     // does not undo the sign-up; the plan says it has no invoice yet.
@@ -542,10 +596,50 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
         // Said on the plan: "No invoice has been made for this plan yet."
       }
     }
+    // The agreement, to the customer, now: they are standing there. What cannot go now (email
+    // not set up, no service key on this server) goes with the scheduled run.
+    if (email) await sendPlanEmailsNow(sb, planId);
     const made = (await plansOfSites(sb, [site.id], { money })).find((x) => x.id === planId);
     if (!made)
       throw new Error("The plan was saved, but it could not be read back. Reload the page.");
     return made;
+  });
+
+/** The agreement and the receipt of one plan, sent at once when they can be. Never throws. */
+async function sendPlanEmailsNow(sb: Sb, planId: string): Promise<void> {
+  try {
+    const { dispatchPlanEmails } = await import("@/lib/roof-care-email.server");
+    await dispatchPlanEmails(sb, { planId });
+  } catch (e) {
+    console.error("Roof Care plan email: plan", planId, "—", e instanceof Error ? e.message : e);
+  }
+}
+
+/** Give or correct the email on a plan. A changed address gets the agreement (and receipt) again. */
+export const setRoofCareEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        email: z
+          .string()
+          .trim()
+          .max(254)
+          .refine((v) => v === "" || looksLikeEmail(v), EMAIL_BAD),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await signedIn(context);
+    const sb = context.supabase;
+    const { error } = await sb.rpc("roof_care_set_email", {
+      p_plan: data.plan_id,
+      p_email: data.email,
+    });
+    if (error) throw new Error(error.message);
+    if (data.email) await sendPlanEmailsNow(sb, data.plan_id);
+    return { ok: true };
   });
 
 export interface PushBackResult {
@@ -758,6 +852,20 @@ export const renewRoofCarePlan = createServerFn({ method: "POST" })
         p_shown_price: data.shown_price,
       });
       if (error) throw new Error(error.message);
+      // The renewal's agreement and receipt go where last year's went.
+      try {
+        const { data: old } = await sb
+          .from("roof_care_plans")
+          .select("customer_email")
+          .eq("id", data.plan_id)
+          .maybeSingle();
+        if (old?.customer_email) {
+          await sb.rpc("roof_care_set_email", { p_plan: planId, p_email: old.customer_email });
+          await sendPlanEmailsNow(sb, planId);
+        }
+      } catch {
+        // The office adds the address on the plan.
+      }
       const { data: made } = await sb
         .from("roof_care_plans")
         .select("status")

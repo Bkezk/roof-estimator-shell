@@ -260,17 +260,20 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     expect(form).toContain("const shownOpen = shownOpenStep(open, onStep, job.service_type);");
     expect(form).toContain("const statuses = stepStatuses(stepState, shownOpen);");
     expect(form).toContain("const status = (id: StepId) => stepStatus(id, stepState, shownOpen);");
-    expect(form).toContain(
-      "<StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />",
+    // (Nov 19: the strip also takes the card on the screen and the pick.)
+    expect(form).toMatch(
+      /<StepStrip\s+statuses=\{statuses\}\s+open=\{shownOpen\}\s+serviceType=\{job\.service_type\}/,
     );
     expect(form).not.toMatch(/localStorage[^\n]*onStep/);
-    // The step just left folds: the per-step Edit state still resets when the shown step moves.
-    expect(form).toContain("useEffect(() => setEditing({}), [shownOpen]);");
+    // Nov 19: one card on the screen. A picked done step goes back to the step being worked
+    // whenever that step moves (the per-step Edit state before it reset the same way).
+    expect(form).toContain("useEffect(() => setPicked(null), [shownOpen]);");
   });
   it("Next step: the card is current before the scroll measures it (flushSync), then scrolls into view; the bar's Finish step N takes the same road", () => {
     expect(src).toContain('import { flushSync } from "react-dom";');
     expect(form).toMatch(
-      /const goTo = \(id: StepId\) => \{\s*flushSync\(\(\) => setOnStep\(id\)\);\s*jumpTo\(id\);\s*\};/,
+      // (Nov 19: going to a step also drops a picked done step, in the same flush.)
+      /const goTo = \(id: StepId\) => \{\s*flushSync\(\(\) => \{\s*setOnStep\(id\);\s*setPicked\(null\);\s*\}\);\s*jumpTo\(id\);\s*\};/,
     );
     expect(form).toMatch(
       /const goNext = \(id: StepId\) => \{\s*const next = nextStep\(id, job\.service_type\);\s*if \(next\) goTo\(next\);\s*\};/,
@@ -320,9 +323,15 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     expect(form).toMatch(/markNotesSkipped\(true\);\s*goNext\("notes"\);/);
     expect(form).not.toContain("useState(() => readNothingUsed(job.id))");
   });
-  it("Edit on a folded done step expands it in place and does not move onStep", () => {
-    expect(form).toContain("onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),");
-    expect(form).not.toMatch(/onToggle:[^\n]*setOnStep/);
+  it("looking at a done step does not move onStep (Edit on a folded step until Nov 19; a picked card since)", () => {
+    const pick = form.slice(
+      form.indexOf("const pick = (id: StepId)"),
+      form.indexOf("const card = "),
+    );
+    expect(pick).toContain("setPicked(");
+    expect(pick).not.toContain("setOnStep");
+    expect(form).toMatch(/onBack: \(\) => \{\s*flushSync\(\(\) => setPicked\(null\)\);/);
+    expect(form).not.toMatch(/onBack:[^\n]*setOnStep/);
   });
   it("the Work step's text saves a moment after typing stops (the Next button reads the saved row), still flushed on blur", () => {
     // The rule reads resolution_text on the saved repair row; the box used to save only when left,

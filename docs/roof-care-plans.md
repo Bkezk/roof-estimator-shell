@@ -437,6 +437,33 @@ size at once and looks up a property that has none. The counts are in
 by the owner's hand, never in the repository or the chat. Stripe's test mode first: with a live
 key a payment made from the preview is a real one.
 
+## The sign-up the customer reads, and the emails (Nov 19, late)
+
+The owner: "the care plan menu … will likely be customer facing so we need it to be visually
+appealing, explain the plans, and the verbiage should be as if a customer is reading it", "if
+they click care plan it pops up the plan they are currently on and its benefits", and "the
+terms need to be emailed to the customer at signup as well as a receipt ideally".
+
+- The sign-up is written to the customer, in five numbered parts, with a card for each plan:
+  its one line, its price, what it includes (`src/lib/roof-care-benefits.ts`).
+- The numbers in a plan's description come from the plan settings through
+  `roof_care_benefits()`, never from the code.
+- Care Plan on a property that has a plan opens that plan: what it includes, and "Used this
+  plan year" (inspections, minor repairs, leak calls with no trip charge, storm inspection).
+- The plan keeps the customer's email (`customer_email`). The agreement goes at sign-up and the
+  receipt when the payment is received (`src/lib/roof-care-email.ts`,
+  `src/lib/roof-care-email.server.ts`, and the scheduled run). Email is not set up on the site
+  yet: it needs `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL`.
+- Card still means the office takes the card. With Stripe, signing with Card goes to Stripe's
+  checkout.
+- Record: `docs/qa/roof-care-customer-facing-2026-11-19.md`.
+
+Not built, waiting on the owner's word:
+
+- A tick on a care plan inspection that the drains, scuppers and gutters were cleaned, and a
+  mark that the yearly budget forecast was sent. Today the site does not record either.
+- Technicians seeing how much of the minor repairs is used. Today they see what is included.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".

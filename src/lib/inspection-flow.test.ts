@@ -1038,13 +1038,17 @@ describe("6a. the close-out renders the inspection flow with the same mechanics"
     expect(cards).not.toContain("TicketExtras");
     expect(read("src/components/service/aerial-markup.tsx")).toContain("plain={plain}");
     // The strip and the cards take the type: "Step n of 4".
-    expect(form).toContain(
-      "<StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />",
+    // (Nov 19: the strip also takes the card on the screen and the pick.)
+    expect(form).toMatch(
+      /<StepStrip\s+statuses=\{statuses\}\s+open=\{shownOpen\}\s+serviceType=\{job\.service_type\}/,
     );
     expect(form).toContain("serviceType: job.service_type,");
     expect(closeout).toContain("{stepHeadline(open, serviceType)}");
     expect(closeout).toContain("const nextLabel = nextStepLabel(id, serviceType);");
-    expect(closeout).toContain("{lockedLine(open, serviceType)}");
+    // Nov 19: one card on the screen, so the locked line left the list (the step's number and
+    // the step list say what unlocks it, by the type's own steps).
+    expect(closeout).not.toContain("lockedLine(");
+    expect(closeout).toContain("{step.unlocks}");
     expect(closeout).toContain(
       "aria-label={`Step ${step.n} of ${statuses.length}: ${step.title}${",
     );

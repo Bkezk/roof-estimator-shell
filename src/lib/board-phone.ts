@@ -154,6 +154,74 @@ export function dayShort(ymd: string): string {
   return `${WEEKDAYS[new Date(y, m - 1, d).getDay()]!.slice(0, 3)}, ${MONTHS[m - 1]} ${d}`;
 }
 
+// ---- The technician dock -----------------------------------------------------------------------
+// Owner, Nov 19: "assigning service to the tech via the tech board on mobile isnt great think of
+// ways to improve it to drag and drop assigning better". On a phone about four technicians fit
+// between the day buttons and the tray, so a ticket bound for anyone further down had to be held
+// at the edge of the list until the page scrolled to them. Now the technicians come to the
+// finger: while a ticket is held, every technician is a small target in a block that sits right
+// above the tray, all on the screen at once. A target there is a technician's day like any row
+// (the same key, cellKey), so a drop on it is the same single write with the same rules.
+
+/**
+ * Which lifted ticket gets the dock: one from the Unassigned tray (no technician, or no day
+ * yet). The tray is under the dock, so the dock never opens under the finger. A ticket lifted
+ * from a technician's row is somewhere in the list, which is where the dock opens: a finger let
+ * go without moving would then land on whoever's name came up under it. That ticket keeps the
+ * rows, as before.
+ */
+export const dockFor = (
+  job: Pick<MoveJob, "technician_id" | "scheduled_date"> | null | undefined,
+): boolean => !!job && (!job.technician_id || !job.scheduled_date);
+
+/** A dock target's height, and the gap between two. A thumb's 44 pixels and a little more. */
+export const DOCK_ROW_PX = 48;
+export const DOCK_GAP_PX = 6;
+/** The dock's own line of words and padding. */
+export const DOCK_HEAD_PX = 44;
+
+/** The room the dock has: from the day buttons down to the tray (never less than nothing). */
+export function dockRoom(trayTop: number, listTop: number): number {
+  return Math.max(0, Math.round(trayTop - listTop));
+}
+
+/**
+ * How far the page scrolls when a ticket lifts, to make room for the dock. Until the page is
+ * scrolled its own heading sits above the day buttons, and on a short phone that leaves less
+ * room than the technicians need. Scrolling brings the day buttons to the top of the screen
+ * (where they stay) and frees that room. Only as far as is needed (`need` − `room`), as the day
+ * buttons can still rise (`slack`), and as the page can still scroll (`left`).
+ */
+export function dockScroll(need: number, room: number, slack: number, left: number): number {
+  return Math.max(0, Math.round(Math.min(need - room, slack, left)));
+}
+
+/** How tall the dock is with `count` technicians in `columns`. */
+export function dockHeight(count: number, columns: number): number {
+  const rows = Math.ceil(count / Math.max(1, columns));
+  return DOCK_HEAD_PX + rows * DOCK_ROW_PX + Math.max(0, rows - 1) * DOCK_GAP_PX;
+}
+
+/**
+ * Two technicians across, so a name reads whole; three when two would not fit the room (a long
+ * crew list, or a short phone). Every technician is on the screen either way.
+ */
+export function dockColumns(count: number, room: number): 2 | 3 {
+  return dockHeight(count, 2) <= room ? 2 : 3;
+}
+
+/** The dock's line: "Drop on a technician · Thu, Nov 19". */
+export const dockTitle = (ymd: string): string => `Drop on a technician · ${dayShort(ymd)}`;
+
+/**
+ * What a dock target says under the name: who has the ticket now (a drop there changes nothing
+ * unless the day differs), else how many tickets that technician has that day.
+ */
+export function dockNote(count: number, hasIt: boolean): string {
+  if (hasIt) return "has it now";
+  return count === 0 ? "free" : `${count} ${count === 1 ? "ticket" : "tickets"}`;
+}
+
 // ---- Words -------------------------------------------------------------------------------------
 export const PHONE_BOARD_HINT =
   "Hold a ticket, then drag it onto a technician. Tap a ticket for its details.";

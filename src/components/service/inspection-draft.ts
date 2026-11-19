@@ -259,7 +259,12 @@ export function useInspectionDraft(
 
   return {
     data: q.data,
-    loading: opts.enabled && q.isLoading,
+    // Still loading until the read has STARTED the draft (the effect above), not only until it
+    // answered. Between the two there is one drawing where the answer is here but `hasRecord` is
+    // not set yet, and the workflow picked its opening step in that drawing: an inspection whose
+    // checklist was already saved reopened on step 1 (found Nov 19, with one card on the screen:
+    // the step the work had reached was then two presses of Next away).
+    loading: opts.enabled && (q.isLoading || (q.data !== undefined && draft === null)),
     error: q.error,
     items: draft?.items ?? [],
     recommendRepairs: draft?.recommend_repairs ?? false,

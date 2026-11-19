@@ -8,8 +8,8 @@
  * lvSummary grid (Category | Item | Qty. | Cost/Quote | Hours | Labor Cost; hours at 3 dp —
  * display rounding only). Dialog grids mirror the legacy CustomList columns: Description |
  * Footage/Calc (auto) | Extra (or a single Quantity = auto + extra) | Unit Cost | Total Cost |
- * HoursPerUnit | Hours | Labor Rate | Labor Cost, with the blank last row that adds a custom
- * item and the "Use Estimate Labor" reset.
+ * HoursPerUnit | Hours | Labor Rate | Labor Cost, with the box that adds a custom item (legacy's
+ * blank last row; first in the list since Nov 19) and the "Use Estimate Labor" reset.
  */
 
 import { useState } from "react";
@@ -518,6 +518,29 @@ function GroupGrid(props: {
           </TableRow>
         </TableHeader>
         <TableBody>
+          {/* The box that adds a custom item, FIRST in the list (owner, Nov 19: "the form to add
+              items is at the bottom of the list, can we make it at the top"). Only where it
+              shows moved: an added item still joins the end of the list, as it is saved. */}
+          <TableRow data-nondl-add-row>
+            <TableCell colSpan={split ? 10 : 9}>
+              <Input
+                className="h-7 max-w-[320px] px-1"
+                placeholder={`Add a custom ${NON_DL_CATEGORY_LABEL[group].toLowerCase()} item…`}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => addCustom(false)}
+                onKeyDown={(e) => {
+                  // Enter or Tab (owner, Oct 27: "hitting tab should take you directly into the
+                  // quantity form") adds the item and lands in its Quantity box. Tab on an empty
+                  // box keeps its usual meaning (and Shift+Tab always does).
+                  if (customBoxAdds(e.key, e.shiftKey, draft)) {
+                    e.preventDefault();
+                    addCustom(true);
+                  }
+                }}
+              />
+            </TableCell>
+          </TableRow>
           {refRows.map((row) => {
             const st = rowState[row.description];
             const line = lines.find((l) => !l.isCustom && l.item === row.description);
@@ -675,27 +698,6 @@ function GroupGrid(props: {
               </TableRow>
             );
           })}
-          {/* Legacy blank last row: typing a description adds a custom item. */}
-          <TableRow>
-            <TableCell colSpan={split ? 10 : 9}>
-              <Input
-                className="h-7 max-w-[320px] px-1"
-                placeholder={`Add a custom ${NON_DL_CATEGORY_LABEL[group].toLowerCase()} item…`}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={() => addCustom(false)}
-                onKeyDown={(e) => {
-                  // Enter or Tab (owner, Oct 27: "hitting tab should take you directly into the
-                  // quantity form") adds the item and lands in its Quantity box. Tab on an empty
-                  // box keeps its usual meaning (and Shift+Tab always does).
-                  if (customBoxAdds(e.key, e.shiftKey, draft)) {
-                    e.preventDefault();
-                    addCustom(true);
-                  }
-                }}
-              />
-            </TableCell>
-          </TableRow>
         </TableBody>
       </Table>
     </div>

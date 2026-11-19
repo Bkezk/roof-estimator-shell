@@ -98,6 +98,20 @@ async function run(request: Request): Promise<Response> {
     plans = { error: errText(e) };
   }
 
+  // A Roof Care customer's agreement and receipt (roof-care-email.server.ts; owner, Nov 19):
+  // whatever was not sent where it was made. Held, and said so, while email is not set up.
+  let planEmails: Record<string, number | string | null> | { error: string };
+  try {
+    const { dispatchPlanEmails } = await import("@/lib/roof-care-email.server");
+    const e = await dispatchPlanEmails(supabaseAdmin);
+    sendsFailed += e.email_errors;
+    planEmails = { ...e };
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the Roof Care plan email pass failed", e);
+    planEmails = { error: errText(e) };
+  }
+
   // The scheduled run's own stamp (last_cron_at), after the passes, whatever they did: it says
   // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
   // applied yet; logged, never a failure of the run.
@@ -121,6 +135,7 @@ async function run(request: Request): Promise<Response> {
       tasks,
       bids,
       plans,
+      plan_emails: planEmails,
       cron_stamped: cronStamped,
       at: new Date().toISOString(),
     },

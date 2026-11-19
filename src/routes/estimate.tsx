@@ -127,6 +127,9 @@ import {
   unacknowledged,
   type SanityWarning,
 } from "@/lib/bid-sanity";
+import { BidNoticeList } from "@/components/bid-notice-list";
+import { readDismissedNotices, splitNotices } from "@/lib/bid-dismissed-notices";
+import { bidChangedSince, LOCK_BACK_UNSAVED, lockReturnAction } from "@/lib/bid-lock-return";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
@@ -650,10 +653,22 @@ function EstimatePage() {
     bidId: bidParam,
     enabled: authed && !!profile,
     holderName: lockHolderName,
+    // The lock came back to this tab (lib/bid-lock-return.ts; owner, Nov 19). Unsaved changes
+    // here are kept and said: until now the page was read again from the saved bid without a
+    // word, and whatever was not saved went with it. With nothing unsaved the saved bid is read
+    // again, and the page is replaced only when the bid really changed meanwhile.
     onAcquired: (firstTime) => {
-      if (firstTime) return;
-      hydratedFor.current = null;
-      void qc.invalidateQueries({ queryKey: ["bid", bidParam] });
+      const action = lockReturnAction(firstTime, dirtyRef.current);
+      if (action === "nothing") return;
+      if (action === "keep") {
+        toast.warning(LOCK_BACK_UNSAVED, { duration: 30_000 });
+        return;
+      }
+      void refetchBid().then((r) => {
+        if (!r.data || !bidChangedSince(loadedUpdatedAt.current, r.data.updated_at)) return;
+        hydratedFor.current = null;
+        setLockBackStamp((n) => n + 1);
+      });
     },
   });
   const readOnly = bidLock.readOnly;
@@ -669,6 +684,9 @@ function EstimatePage() {
   const [perDiemFromChart, setPerDiemFromChart] = useState(true);
   // Unusual numbers waved through on this bid (owner, Oct 7); the save asks about the rest.
   const [sanityAcknowledged, setSanityAcknowledged] = useState<string[]>([]);
+  // The yellow notices dismissed on this bid, one at a time (owner, Nov 19;
+  // lib/bid-dismissed-notices.ts). Kept on the bid and saved with its next Save.
+  const [dismissedNotices, setDismissedNotices] = useState<string[]>([]);
   const [sanityPrompt, setSanityPrompt] = useState<{
     warnings: SanityWarning[];
     after?: (() => void) | undefined;
@@ -1116,6 +1134,9 @@ function EstimatePage() {
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const hydratedFor = useRef<string | null>(null);
+  // Bumped when the lock came back and the saved bid had changed: the load effect below runs
+  // again on the row already in hand.
+  const [lockBackStamp, setLockBackStamp] = useState(0);
   const {
     data: loadedBid,
     error: loadBidError,
@@ -1214,6 +1235,7 @@ function EstimatePage() {
     setPerDiem(d.perDiem ?? 0);
     setPerDiemFromChart(d.perDiemFromChart ?? true);
     setSanityAcknowledged(Array.isArray(d.sanityAcknowledged) ? d.sanityAcknowledged : []);
+    setDismissedNotices(readDismissedNotices(d.dismissedNotices));
     setExtraShipping(d.extraShipping ?? 0);
     setPerDiemInMarkup(d.perDiemInMarkup ?? true);
     setCommissionInMarkup(d.commissionInMarkup ?? false);
@@ -1319,7 +1341,7 @@ function EstimatePage() {
     hydratedFor.current = loadedBid.id;
     setRenderedBidId(loadedBid.id);
     setHydrationStamp((n) => n + 1);
-  }, [loadedBid]);
+  }, [loadedBid, lockBackStamp]);
 
   // Bid Combiner (legacy BidAdvantage.BidCombiner, docs §22.41): ?combine=<id>,<id>,… loads the
   // source bids and merges them into THIS (new, unsaved) bid on top of the fresh defaults.
@@ -2093,6 +2115,7 @@ function EstimatePage() {
     ...(combineInfo ? { combineInfo } : {}),
     ...(takeoffInfo ? { takeoffInfo } : {}),
     ...(importInfo ? { importInfo } : {}),
+    ...(dismissedNotices.length ? { dismissedNotices } : {}),
     // LAST on purpose (Nov 10): "Save anyway" sends the list a render before `saved` carries it,
     // and the save's baseline adds it the same way (bid-sanity.ts savedWithAcknowledged), so the
     // two read alike and the bid is not left "Unsaved changes" by its own save.
@@ -2467,6 +2490,8 @@ function EstimatePage() {
   // The adhesives this bid uses with no price (lib/adhesive-price-gaps.ts): a red line on the
   // Bid total card (owner, Oct 30).
   const adhesiveGaps = adhesivePriceGaps(result?.adhesiveWholeUnits, admin?.adhesivePrices);
+  // The "Check inputs" notices not dismissed on this bid: the yellow triangles count these.
+  const openInputWarnings = result ? splitNotices(result.warnings, dismissedNotices).open : [];
 
   // Legacy Underlayment screen readouts (frmUnderlayment.UpdateGraphic) for the selected sections:
   // Σ UnderlaymentBaseHours / UnderlaymentAdjustedBaseHours / UnderlaymentQuoteHours, and the
@@ -3245,12 +3270,12 @@ function EstimatePage() {
             <p className="text-xs text-muted-foreground">
               Sections drawn in Takeoff keep their measured outline; re-measure there to change
               their size.{" "}
-              <a
-                href={`/takeoff?id=${encodeURIComponent(takeoffInfo.takeoffId)}`}
-                className="underline"
-              >
+              {/* A link of this site, not a plain address (Nov 19): a plain one loaded the page
+                  anew, so a bid with unsaved changes got the browser's own "Leave site?" and
+                  never the question that offers to save. */}
+              <Link to="/takeoff" search={{ id: takeoffInfo.takeoffId }} className="underline">
                 Open the takeoff
-              </a>
+              </Link>
             </p>
           </div>
         )}
@@ -3285,14 +3310,14 @@ function EstimatePage() {
               <p className="text-xs text-muted-foreground">Every row has been placed.</p>
             )}
             {importInfo.warnings.length > 0 && (
-              <>
-                <p className="text-xs text-amber-700 dark:text-amber-400">Check:</p>
-                <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">
-                  {importInfo.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </>
+              <BidNoticeList
+                title="Check:"
+                tone="plain"
+                notices={importInfo.warnings}
+                dismissed={dismissedNotices}
+                onDismissed={setDismissedNotices}
+                readOnly={readOnly}
+              />
             )}
           </div>
         )}
@@ -7265,10 +7290,10 @@ function EstimatePage() {
               {!bidTotalOpen && result && (
                 <p className="flex items-center gap-1.5 text-lg font-semibold tabular-nums">
                   {money(result.r.money.grandTotal)}
-                  {result.warnings.length > 0 && (
+                  {openInputWarnings.length > 0 && (
                     <AlertTriangle
                       className="h-4 w-4 text-amber-500"
-                      aria-label={`${result.warnings.length} input warning(s)`}
+                      aria-label={`${openInputWarnings.length} input warning(s)`}
                     />
                   )}
                 </p>
@@ -7319,17 +7344,16 @@ function EstimatePage() {
                 above.
               </div>
             )}
+            {/* Each yellow notice has its own dismiss (owner, Nov 19); "Show N dismissed" brings
+                them back. */}
             {result?.warnings.length ? (
-              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-                <div className="mb-1 flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="h-3 w-3" /> Check inputs
-                </div>
-                <ul className="list-inside list-disc space-y-0.5">
-                  {result.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </div>
+              <BidNoticeList
+                title="Check inputs"
+                notices={result.warnings}
+                dismissed={dismissedNotices}
+                onDismissed={setDismissedNotices}
+                readOnly={readOnly}
+              />
             ) : null}
             {result && (
               <Table>
@@ -7523,7 +7547,9 @@ function EstimatePage() {
         <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t bg-background/95 px-4 py-2 backdrop-blur lg:hidden">
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             Bid total
-            {result.warnings.length > 0 && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+            {openInputWarnings.length > 0 && (
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            )}
           </span>
           <span className="font-semibold tabular-nums">{money(result.r.money.grandTotal)}</span>
           <Button

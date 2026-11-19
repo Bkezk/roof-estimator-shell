@@ -8,11 +8,11 @@
  * the roof). The rules are the database's; the forms say what will happen before it is pressed
  * (lib/roof-care-plan.ts).
  */
-import { useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CalendarClock, CloudLightning, Loader2, Plus, ShieldCheck } from "lucide-react";
+import { CalendarClock, Check, CloudLightning, Loader2, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -33,11 +33,30 @@ import { isFieldOnly, managesTickets, seesInvoices } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { easternYmd } from "@/lib/field-day";
 import { longDay } from "@/lib/followup-rules";
+import { allowanceMoney } from "@/lib/roof-care-allowance";
 import {
-  ALLOWANCE_INCLUDED_WORDS,
-  allowanceMoney,
-  allowanceStatusWords,
-} from "@/lib/roof-care-allowance";
+  AGREE_WORDS,
+  benefitsOfPlan,
+  benefitsUsed,
+  everythingIncluded,
+  EMAIL_BAD,
+  EMAIL_LABEL,
+  EMAIL_NONE_NOTE,
+  looksLikeEmail,
+  PAY_CARD_NOTE_CUSTOMER,
+  PAY_CHECK_NOTE_CUSTOMER,
+  PAY_QUESTION,
+  PLAN_FOOTNOTES,
+  PLAN_PITCH,
+  PLAN_RECOMMENDED,
+  planIncludes,
+  PRICE_AFTER_SIZE,
+  PRICE_PAID_FIRST,
+  RECOMMENDED_WORDS,
+  SIGN_UP_BUTTON,
+  SIGN_UP_LEAD,
+  SIGN_UP_TITLE,
+} from "@/lib/roof-care-benefits";
 import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
 import {
   ADDITIONAL_SERVICES_LABEL,
@@ -69,6 +88,7 @@ import {
   PLAN_MAKE_INVOICE,
   PLAN_NO_INVOICE,
   planDates,
+  planEmailLines,
   planName,
   planNumberLabel,
   pushPreview,
@@ -115,15 +135,16 @@ import {
   renewRoofCarePlan,
   requestAdditionalService,
   roofCareMapSize,
+  roofCareBenefits,
   roofCareOffer,
   roofCareRefund,
   roofCareRenewalOffer,
+  setRoofCareEmail,
   signUpRoofCare,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
 import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
-import { money0, type PlanKey } from "@/lib/roof-care-price";
-import { TRAVEL_INCLUDED_WORDS, travelStatusWords } from "@/lib/roof-care-travel";
+import { money0, PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const STALE_MS = 60_000;
@@ -143,6 +164,18 @@ function usePlans(siteId: string | null | undefined) {
     queryFn: () => listFn({ data: { site_ids: [siteId!] } }),
     enabled: !!session && !!siteId,
     staleTime: STALE_MS,
+  });
+}
+
+/** What each plan includes, in numbers. Null while it loads and when it cannot be read. */
+function useBenefits() {
+  const { session } = useAuth();
+  const fn = useServerFn(roofCareBenefits);
+  return useQuery({
+    queryKey: ["roof-care-benefits"],
+    queryFn: () => fn(),
+    enabled: !!session,
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -393,9 +426,11 @@ function PlanDialog({
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto" data-care-plan-dialog>
         <DialogHeader>
           <DialogTitle>{CARE_PLAN_LABEL}</DialogTitle>
-          <DialogDescription>This property’s Roof Care plan and its inspections.</DialogDescription>
+          <DialogDescription>
+            The plan this property is on, what it includes, and what has been used this plan year.
+          </DialogDescription>
         </DialogHeader>
-        <RoofCareCard siteId={siteId} visitId={visitId} />
+        <RoofCareCard siteId={siteId} visitId={visitId} includesOpen />
       </DialogContent>
     </Dialog>
   );
@@ -410,11 +445,14 @@ export function RoofCareCard({
   siteId,
   visitId,
   short = false,
+  includesOpen = false,
   className = "",
 }: {
   siteId: string | null | undefined;
   visitId?: string | null;
   short?: boolean;
+  /** The Care Plan pop-up: what the plan includes is open, not folded. */
+  includesOpen?: boolean;
   className?: string;
 }) {
   const { profile } = useAuth();
@@ -538,6 +576,7 @@ export function RoofCareCard({
           office={office}
           manager={manager}
           short={short}
+          includesOpen={includesOpen}
           {...(waitingRenews ? { renewalOf: waitingRenews } : {})}
           onEnd={() => setEnding(true)}
         />
@@ -564,53 +603,38 @@ export function RoofCareCard({
             Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
-          {/* Roof Guard's leak calls with no travel charge (owner, Nov 19). */}
-          {!short && active.free_travel_calls > 0 && (
-            <p className="text-xs" data-roof-care-leak-calls>
-              {active.free_travel_used === null
-                ? TRAVEL_INCLUDED_WORDS
-                : travelStatusWords(active.free_travel_calls, active.free_travel_used)}
-            </p>
+          {/* What the plan includes and what it has given so far (owner, Nov 19). */}
+          {!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}
+          {!short && office && active.pay_first && active.email && (
+            <PlanEmailLine siteId={siteId} plan={active} paid />
           )}
-          {/* The minor repairs the plan includes each year (owner, Nov 19: "have that under
-              the plan status"): what is used and what is left, for those who see invoices. */}
-          {!short && active.repair_allowance > 0 && (
+          {/* Which invoices used the minor repairs, for those who see invoices. The tally
+              above says how much is used and left. */}
+          {!short && active.repair_allowance > 0 && active.allowance_used !== null && (
             <div className="space-y-0.5 text-xs" data-roof-care-allowance>
-              {active.allowance_used === null ? (
-                <p className="text-muted-foreground">{ALLOWANCE_INCLUDED_WORDS}</p>
-              ) : (
-                <>
-                  <p className="font-medium" data-allowance-status>
-                    {allowanceStatusWords({
-                      repair_allowance: active.repair_allowance,
-                      allowance_used: active.allowance_used,
-                    })}
-                  </p>
-                  {active.allowance_uses.length > 0 && (
-                    <p className="text-muted-foreground" data-allowance-uses>
-                      Used on{" "}
-                      {active.allowance_uses.map((u, n) => (
-                        <span key={u.invoice_id}>
-                          {n > 0 && ", "}
-                          <Link
-                            to="/service/invoices"
-                            search={{ id: u.invoice_id }}
-                            className="underline underline-offset-2"
-                          >
-                            invoice #{u.number}
-                          </Link>{" "}
-                          ({allowanceMoney(u.amount)})
-                        </span>
-                      ))}
-                      .
-                    </p>
-                  )}
-                  <p className="text-muted-foreground">
-                    A repair invoice at this property uses the plan by itself while any is left.
-                    Untick it on the invoice when the repair is not a minor one.
-                  </p>
-                </>
+              {active.allowance_uses.length > 0 && (
+                <p className="text-muted-foreground" data-allowance-uses>
+                  Minor repairs used on{" "}
+                  {active.allowance_uses.map((u, n) => (
+                    <span key={u.invoice_id}>
+                      {n > 0 && ", "}
+                      <Link
+                        to="/service/invoices"
+                        search={{ id: u.invoice_id }}
+                        className="underline underline-offset-2"
+                      >
+                        invoice #{u.number}
+                      </Link>{" "}
+                      ({allowanceMoney(u.amount)})
+                    </span>
+                  ))}
+                  .
+                </p>
               )}
+              <p className="text-muted-foreground">
+                A repair invoice at this property uses the plan by itself while any is left. Untick
+                it on the invoice when the repair is not a minor one.
+              </p>
             </div>
           )}
           {runsLate(active) && (
@@ -740,6 +764,134 @@ export function RoofCareCard({
   );
 }
 
+// ── What the plan includes, and what it has given (owner, Nov 19) ───────────────────────────
+
+/** Every line the plan includes, with the plan's own numbers. Folded unless `open`. */
+function PlanIncludes({ plan, open }: { plan: RoofCarePlan; open: boolean }) {
+  const lines = everythingIncluded(plan.plan, benefitsOfPlan(plan, plan.storm_included ?? 0));
+  return (
+    <details
+      className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+      open={open}
+      data-roof-care-includes={plan.plan}
+    >
+      <summary className="cursor-pointer font-medium">What {planName(plan.plan)} includes</summary>
+      <ul className="mt-1.5 space-y-1">
+        {lines.map((line) => (
+          <li key={line} className="flex gap-1.5">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <span>{line}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/**
+ * The plan in force: what it includes, and the plan year's tally (the inspections, the minor
+ * repairs, the leak calls with no trip charge, the storm inspection).
+ */
+function PlanBenefits({ plan, today, open }: { plan: RoofCarePlan; today: string; open: boolean }) {
+  const rows = benefitsUsed(plan, today, plan.storm_included ?? 0);
+  return (
+    <div className="space-y-1.5" data-roof-care-benefits>
+      <PlanIncludes plan={plan} open={open} />
+      <div className="rounded-md border px-2.5 py-1.5 text-xs">
+        <p className="font-medium">Used this plan year</p>
+        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+          {rows.map((r) => (
+            <Fragment key={r.key}>
+              <dt className="text-muted-foreground">{r.label}</dt>
+              <dd className="font-medium" data-benefit={r.key}>
+                {r.words}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+/** Where the agreement and the receipt went, and the box that gives or corrects the address. */
+function PlanEmailLine({
+  siteId,
+  plan,
+  paid,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  paid: boolean;
+}) {
+  const refresh = useRefresh(siteId);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(plan.email?.to ?? "");
+  const fn = useServerFn(setRoofCareEmail);
+  const save = useMutation({
+    mutationFn: () => fn({ data: { plan_id: plan.id, email: value.trim() } }),
+    onSuccess: () => {
+      refresh();
+      setEditing(false);
+      toast.success("Email saved");
+    },
+    onError: (e) => toast.error(`Could not save the email: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const e = plan.email;
+  if (!e) return null;
+  const bad = value.trim() !== "" && !looksLikeEmail(value.trim());
+  return (
+    <div className="space-y-1 text-xs" data-roof-care-email={e.to ? "has" : "none"}>
+      {planEmailLines(e, { paid, day: longDay }).map((l) => (
+        <p key={l} className="text-muted-foreground">
+          {l}
+        </p>
+      ))}
+      {editing ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Input
+            type="email"
+            aria-label="The customer’s email"
+            className="h-8 w-64"
+            value={value}
+            onChange={(ev) => setValue(ev.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={bad || save.isPending}
+            onClick={() => save.mutate()}
+            data-action="roof-care-email-save"
+          >
+            Save
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setEditing(false)}
+          >
+            Cancel
+          </Button>
+          {bad && <span className="text-destructive">{EMAIL_BAD}</span>}
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto p-0 text-xs"
+          onClick={() => setEditing(true)}
+          data-action="roof-care-email-edit"
+        >
+          {e.to ? "Change the email" : "Add an email"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ── The refund of a plan ended early (owner, Nov 19) ────────────────────────────────────────
 
 /** The refund a manager confirmed, until it is marked sent. Only for those who see invoices. */
@@ -805,6 +957,7 @@ function AwaitingPayment({
   office,
   manager,
   short,
+  includesOpen = false,
   renewalOf,
   onEnd,
 }: {
@@ -813,6 +966,8 @@ function AwaitingPayment({
   office: boolean;
   manager: boolean;
   short: boolean;
+  /** The Care Plan pop-up: what the plan includes is open. */
+  includesOpen?: boolean;
   /** The plan year this one renews, when it is a renewal shown under it. */
   renewalOf?: RoofCarePlan;
   onEnd: () => void;
@@ -870,6 +1025,8 @@ function AwaitingPayment({
           {firstVisitWords(plan.first_visit, plan.first_days)}
         </p>
       )}
+      {!short && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}
+      {!short && office && plan.email && <PlanEmailLine siteId={siteId} plan={plan} paid={false} />}
       {money &&
         (inv ? (
           <p data-awaiting-invoice={inv.status}>
@@ -1085,11 +1242,27 @@ function RenewDialog({
 // ── Sign up ─────────────────────────────────────────────────────────────────────────────────
 
 // Counted from the day the payment is received (Nov 19): no inspection before the plan is paid.
+// In the customer's words (Nov 19): they read this screen.
 const FIRST_WORDS: Record<FirstVisit, string> = {
-  now: "As soon as the payment is received",
-  days: "This many days after the payment",
-  window: "In the next window after the payment",
+  now: "As soon as your payment is received",
+  days: "A set number of days after your payment",
+  window: "In the next inspection window",
 };
+
+/** A numbered part of the sign-up. */
+function SignStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2.5" data-sign-step={n}>
+      <h3 className="flex items-center gap-2 text-base font-semibold">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--jbk-blue)] text-xs font-bold text-white">
+          {n}
+        </span>
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 function SignUpDialog({
   siteId,
@@ -1111,6 +1284,9 @@ function SignUpDialog({
   const [agreedBy, setAgreedBy] = useState("");
   const [notes, setNotes] = useState("");
   const [agreed, setAgreed] = useState(false);
+  // Where the agreement and the receipt are emailed (owner, Nov 19).
+  const [email, setEmail] = useState("");
+  const benefits = useBenefits().data ?? null;
   // How they pay for the year (owner, Nov 19: "by check or card either one during sign up").
   const [payMethod, setPayMethod] = useState<PayMethod | null>(null);
   const [payNote, setPayNote] = useState("");
@@ -1137,6 +1313,7 @@ function SignUpDialog({
   const answer = offer?.price ?? null;
   const plans = answer?.ready && !answer.custom_quote ? answer.plans : [];
   const stale = pricedFor !== size;
+  const emailBad = email.trim() !== "" && !looksLikeEmail(email.trim());
   const ready =
     !!plan &&
     !!first &&
@@ -1144,6 +1321,7 @@ function SignUpDialog({
     !!payMethod &&
     agreedBy.trim().length > 0 &&
     agreed &&
+    !emailBad &&
     plans.length > 0 &&
     !stale;
   const sign = useMutation({
@@ -1159,6 +1337,7 @@ function SignUpDialog({
           pay_note: payMethod === "check" ? payNote.trim() : "",
           agreed_by: agreedBy.trim(),
           notes: notes.trim(),
+          email: email.trim(),
           terms_agreed: true as const,
           // The price on the screen: the plan is saved at it or not at all (Nov 19).
           shown_price: plans.find((o) => o.plan === plan)!.price,
@@ -1186,243 +1365,334 @@ function SignUpDialog({
     },
   });
   const w = nextWindow(today);
+  const offerOf = (k: PlanKey) => plans.find((o) => o.plan === k) ?? null;
+  // The screen is read by the customer (owner, Nov 19): what each plan is, in their words, and
+  // the price for their roof. The steps run top to bottom; nothing here names a cost of ours.
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto" data-roof-care-sign-up>
-        <DialogHeader>
-          <DialogTitle>Sign up for a Roof Care plan</DialogTitle>
-          <DialogDescription>
-            Two inspections a year with a photo report after each. The price is for this property.
-            The plan is paid for the year first, and starts the day the payment is received.
-          </DialogDescription>
+      <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto" data-roof-care-sign-up>
+        <DialogHeader className="mt-4 rounded-xl bg-[var(--jbk-blue)] px-4 py-4 text-left text-white sm:px-6">
+          <DialogTitle className="text-2xl font-bold tracking-tight">{SIGN_UP_TITLE}</DialogTitle>
+          <DialogDescription className="text-sm text-white/90">{SIGN_UP_LEAD}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 text-sm">
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="rc-sqft">Roof size (sq ft)</Label>
-              <Input
-                id="rc-sqft"
-                inputMode="numeric"
-                className="h-9 w-40"
-                value={sqft}
-                onChange={(e) => setSqft(e.target.value)}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={size == null || size <= 0 || price.isPending}
-              onClick={() => size != null && price.mutate(size)}
-              data-action="roof-care-price"
-            >
-              {price.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Get the price
-            </Button>
-          </div>
-          {mapSize.data && (
-            <p className="text-muted-foreground" data-sign-line="map-size">
-              {mapRoofSizeLine(mapSize.data)} {MAP_ROOF_MORE}{" "}
-              <Button
-                type="button"
-                variant="link"
-                className="h-auto p-0 align-baseline"
-                onClick={() => setSqft(String(mapSize.data!.sqft))}
-                data-action="use-map-size"
-              >
-                {MAP_ROOF_USE}
-              </Button>
-            </p>
-          )}
-          {price.error && (
-            <p className="text-destructive" data-sign-line="error">
-              {errText(price.error)}
-            </p>
-          )}
-          {offer && !offer.placed && (
-            <p className="text-destructive" data-sign-line="not-placed">
-              {NOT_PLACED_LINE}
-            </p>
-          )}
-          {/* The price is one number here (owner, Nov 19): nothing of the drive or what it adds. */}
-          {offer?.estimate === "just-now" && (
-            <p className="text-amber-700 dark:text-amber-400" data-sign-line="estimate-just-now">
-              {PRICE_ESTIMATE_JUST_NOW}
-            </p>
-          )}
-          {offer?.estimate === "rough" && (
-            <p className="text-amber-700 dark:text-amber-400" data-sign-line="rough">
-              {PRICE_ESTIMATE_ROUGH}
-            </p>
-          )}
-          {answer && !answer.ready && (
-            <p className="text-destructive" data-sign-line="not-ready">
-              The Roof Care plan prices are not set up yet. Ask an admin.
-            </p>
-          )}
-          {answer?.ready && answer.custom_quote && (
-            <p className="text-destructive" data-sign-line="custom">
-              A roof over {answer.over_sqft.toLocaleString("en-US")} sq ft gets a custom quote. Call
-              the office.
-            </p>
-          )}
-          {plans.length > 0 && (
-            <div className={`grid gap-2 sm:grid-cols-3 ${stale ? "opacity-50" : ""}`}>
-              {plans.map((o) => (
-                <button
-                  key={o.plan}
-                  type="button"
-                  disabled={stale}
-                  onClick={() => setPlan(o.plan)}
-                  aria-pressed={plan === o.plan}
-                  data-plan-offer={o.plan}
-                  className={`rounded-lg border p-3 text-left ${plan === o.plan ? "border-primary ring-2 ring-primary/40" : "hover:bg-muted/50"}`}
-                >
-                  <span className="block font-semibold">{o.name}</span>
-                  <span className="block text-lg font-semibold" data-plan-price>
-                    {money0(o.price)}
-                    <span className="text-xs font-normal text-muted-foreground"> a year</span>
-                  </span>
-                  <span className="block text-xs text-muted-foreground">
-                    Paid in full before the plan starts
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {stale && plans.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              The roof size changed. Press Get the price again.
-            </p>
-          )}
-          {plans.length > 0 && (
-            <>
-              <fieldset className="space-y-1.5">
-                <legend className="font-medium">The first inspection</legend>
-                {(["now", "days", "window"] as const).map((c) => (
-                  <label key={c} className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="radio"
-                      name="rc-first"
-                      checked={first === c}
-                      onChange={() => setFirst(c)}
-                      data-first={c}
-                    />
-                    <span>{FIRST_WORDS[c]}</span>
-                    {c === "days" && (
-                      <>
-                        <Input
-                          aria-label="Days after the payment for the first inspection"
-                          inputMode="numeric"
-                          className="h-8 w-20"
-                          value={days}
-                          onChange={(e) => {
-                            setDays(e.target.value);
-                            setFirst("days");
-                          }}
-                        />
-                        <span>days</span>
-                      </>
-                    )}
-                    {c === "window" && (
-                      <span className="text-muted-foreground">({windowWords(w)})</span>
-                    )}
-                  </label>
-                ))}
-                {first === "days" && !dates && (
-                  <p className="text-xs text-destructive">Type the days, 1 to 365.</p>
-                )}
-                {dates && (
-                  <p className="text-xs text-muted-foreground" data-sign-line="dates">
-                    Inspection 1: {dueWords({ due_from: dates.first.from, due_by: dates.first.to })}
-                    . Inspection 2:{" "}
-                    {dueWords({ due_from: dates.second.from, due_by: dates.second.to })}. The plan
-                    renews {longDay(dates.renews)}. {DATES_FROM_PAYMENT}
-                  </p>
-                )}
-              </fieldset>
-              <fieldset className="space-y-1.5" data-sign-pay>
-                <legend className="font-medium">How they are paying for the year</legend>
-                {PAY_METHODS.map((m) => (
-                  <label key={m} className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="radio"
-                      name="rc-pay"
-                      checked={payMethod === m}
-                      onChange={() => setPayMethod(m)}
-                      data-pay={m}
-                    />
-                    <span>{PAY_METHOD_WORDS[m]}</span>
-                    {m === "check" && payMethod === "check" && (
-                      <Input
-                        aria-label="Check number, if they hand it over now"
-                        placeholder="Check number, if handed over now"
-                        className="h-8 w-56"
-                        value={payNote}
-                        onChange={(e) => setPayNote(e.target.value)}
-                      />
-                    )}
-                  </label>
-                ))}
-                {payMethod === "card" && (
-                  <p className="text-xs text-muted-foreground" data-sign-line="card-note">
-                    {PAY_CARD_NOTE}
-                  </p>
-                )}
-              </fieldset>
+        <div className="space-y-6 text-sm">
+          <SignStep n={1} title="Your roof">
+            <div className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
-                <Label htmlFor="rc-agreed">Who agreed to the plan (the customer’s name)</Label>
+                <Label htmlFor="rc-sqft">Roof size (sq ft)</Label>
                 <Input
-                  id="rc-agreed"
-                  className="h-9"
-                  value={agreedBy}
-                  onChange={(e) => setAgreedBy(e.target.value)}
+                  id="rc-sqft"
+                  inputMode="numeric"
+                  className="h-10 w-40"
+                  value={sqft}
+                  onChange={(e) => setSqft(e.target.value)}
                 />
               </div>
-              <div className="space-y-1.5" data-roof-care-terms>
-                <p className="font-medium">What the customer agrees to</p>
-                <ol className="max-h-48 list-decimal space-y-1 overflow-y-auto rounded-md border bg-muted/30 py-2 pl-8 pr-3 text-xs">
-                  {ROOF_CARE_TERMS.map((t) => (
-                    <li key={t}>{t}</li>
+              <Button
+                type="button"
+                className="h-10 bg-[var(--jbk-blue)] text-white hover:bg-[var(--jbk-blue-hover)]"
+                disabled={size == null || size <= 0 || price.isPending}
+                onClick={() => size != null && price.mutate(size)}
+                data-action="roof-care-price"
+              >
+                {price.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                Show my price
+              </Button>
+            </div>
+            {mapSize.data && (
+              <p className="text-muted-foreground" data-sign-line="map-size">
+                {mapRoofSizeLine(mapSize.data)} {MAP_ROOF_MORE}{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 align-baseline"
+                  onClick={() => setSqft(String(mapSize.data!.sqft))}
+                  data-action="use-map-size"
+                >
+                  {MAP_ROOF_USE}
+                </Button>
+              </p>
+            )}
+            {price.error && (
+              <p className="text-destructive" data-sign-line="error">
+                {errText(price.error)}
+              </p>
+            )}
+            {offer && !offer.placed && (
+              <p className="text-destructive" data-sign-line="not-placed">
+                {NOT_PLACED_LINE}
+              </p>
+            )}
+            {/* The price is one number here (owner, Nov 19): nothing of the drive or what it adds. */}
+            {offer?.estimate === "just-now" && (
+              <p className="text-amber-700 dark:text-amber-400" data-sign-line="estimate-just-now">
+                {PRICE_ESTIMATE_JUST_NOW}
+              </p>
+            )}
+            {offer?.estimate === "rough" && (
+              <p className="text-amber-700 dark:text-amber-400" data-sign-line="rough">
+                {PRICE_ESTIMATE_ROUGH}
+              </p>
+            )}
+            {answer && !answer.ready && (
+              <p className="text-destructive" data-sign-line="not-ready">
+                The Roof Care plan prices are not set up yet. Ask an admin.
+              </p>
+            )}
+            {answer?.ready && answer.custom_quote && (
+              <p className="text-destructive" data-sign-line="custom">
+                A roof over {answer.over_sqft.toLocaleString("en-US")} sq ft gets a custom quote.
+                Call the office.
+              </p>
+            )}
+          </SignStep>
+
+          <SignStep n={2} title="Pick your plan">
+            {/* The three plans are explained before there is a price; one is picked once
+                there is. */}
+            <div
+              className={`grid gap-4 pt-2 sm:grid-cols-3 ${stale && plans.length > 0 ? "opacity-60" : ""}`}
+              data-plan-cards
+            >
+              {PLAN_KEYS.map((k) => {
+                const o = offerOf(k);
+                const picked = plan === k && !!o;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    disabled={!o || stale}
+                    onClick={() => setPlan(k)}
+                    aria-pressed={picked}
+                    data-plan-offer={o ? k : undefined}
+                    data-plan-card={k}
+                    className={`relative flex h-full flex-col rounded-xl border-2 p-4 text-left transition ${picked ? "border-[var(--jbk-blue)] bg-[var(--jbk-blue)]/5 shadow-md" : "border-border bg-card enabled:hover:border-[var(--jbk-blue)]/50"}`}
+                  >
+                    {k === PLAN_RECOMMENDED && (
+                      <span
+                        className="absolute -top-3 left-4 whitespace-nowrap rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+                        data-plan-recommended
+                      >
+                        {RECOMMENDED_WORDS}
+                      </span>
+                    )}
+                    <span className="text-lg font-bold">{PLAN_NAMES[k]}</span>
+                    <span className="mt-0.5 text-sm text-muted-foreground">{PLAN_PITCH[k]}</span>
+                    {o ? (
+                      <span className="mt-3 block" data-plan-price>
+                        <span className="text-3xl font-bold tracking-tight">{money0(o.price)}</span>
+                        <span className="text-sm text-muted-foreground"> a year</span>
+                      </span>
+                    ) : (
+                      <span className="mt-3 block text-sm italic text-muted-foreground">
+                        {PRICE_AFTER_SIZE}
+                      </span>
+                    )}
+                    <ul className="mt-3 flex-1 space-y-1.5 text-sm" data-plan-includes={k}>
+                      {planIncludes(k, benefits?.[k] ?? null).map((line) => (
+                        <li key={line} className="flex gap-2">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {o && (
+                      <span
+                        className={`mt-4 rounded-lg px-3 py-2 text-center text-sm font-semibold ${picked ? "bg-[var(--jbk-blue)] text-white" : "border border-[var(--jbk-blue)] text-[var(--jbk-blue)] dark:border-white/60 dark:text-white"}`}
+                      >
+                        {picked ? "Selected" : `Choose ${PLAN_NAMES[k]}`}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="space-y-0.5 text-xs text-muted-foreground" data-plan-footnotes>
+              <p>{PRICE_PAID_FIRST}.</p>
+              {PLAN_FOOTNOTES.map((f) => (
+                <p key={f}>{f}</p>
+              ))}
+            </div>
+            {stale && plans.length > 0 && (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                The roof size changed. Press Show my price again.
+              </p>
+            )}
+          </SignStep>
+
+          {plans.length > 0 && (
+            <>
+              <SignStep n={3} title="Your first inspection">
+                <fieldset className="space-y-2">
+                  <legend className="sr-only">Your first inspection</legend>
+                  {(["now", "days", "window"] as const).map((c) => (
+                    <label key={c} className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="radio"
+                        name="rc-first"
+                        checked={first === c}
+                        onChange={() => setFirst(c)}
+                        data-first={c}
+                      />
+                      <span>{FIRST_WORDS[c]}</span>
+                      {c === "days" && (
+                        <>
+                          <Input
+                            aria-label="Days after your payment for the first inspection"
+                            inputMode="numeric"
+                            className="h-8 w-20"
+                            value={days}
+                            onChange={(e) => {
+                              setDays(e.target.value);
+                              setFirst("days");
+                            }}
+                          />
+                          <span>days</span>
+                        </>
+                      )}
+                      {c === "window" && (
+                        <span className="text-muted-foreground">({windowWords(w)})</span>
+                      )}
+                    </label>
                   ))}
-                </ol>
-                <label className="flex cursor-pointer items-start gap-2">
-                  <Checkbox
-                    checked={agreed}
-                    onCheckedChange={(v) => setAgreed(v === true)}
-                    className="mt-0.5"
-                    data-terms-agreed
-                  />
-                  <span>The customer has read these terms and agrees to them.</span>
-                </label>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="rc-notes">Notes (optional)</Label>
+                  {first === "days" && !dates && (
+                    <p className="text-xs text-destructive">Type the days, 1 to 365.</p>
+                  )}
+                  {dates && (
+                    <p className="text-xs text-muted-foreground" data-sign-line="dates">
+                      Inspection 1:{" "}
+                      {dueWords({ due_from: dates.first.from, due_by: dates.first.to })}. Inspection
+                      2: {dueWords({ due_from: dates.second.from, due_by: dates.second.to })}. The
+                      plan renews {longDay(dates.renews)}. {DATES_FROM_PAYMENT}
+                    </p>
+                  )}
+                </fieldset>
+              </SignStep>
+
+              <SignStep n={4} title={PAY_QUESTION}>
+                <fieldset className="space-y-2" data-sign-pay>
+                  <legend className="sr-only">{PAY_QUESTION}</legend>
+                  {PAY_METHODS.map((m) => (
+                    <label key={m} className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="radio"
+                        name="rc-pay"
+                        checked={payMethod === m}
+                        onChange={() => setPayMethod(m)}
+                        data-pay={m}
+                      />
+                      <span>{PAY_METHOD_WORDS[m]}</span>
+                      {m === "check" && payMethod === "check" && (
+                        <Input
+                          aria-label="Check number, if you have it now"
+                          placeholder="Check number, if you have it now"
+                          className="h-8 w-60"
+                          value={payNote}
+                          onChange={(e) => setPayNote(e.target.value)}
+                        />
+                      )}
+                    </label>
+                  ))}
+                  {/* Card (owner, Nov 19): once Stripe is set up, signing sends the customer to
+                      its checkout. Until then the office takes the card. */}
+                  {payMethod === "card" && (
+                    <p className="text-xs text-muted-foreground" data-sign-line="card-note">
+                      {PAY_CARD_NOTE_CUSTOMER}
+                    </p>
+                  )}
+                  {payMethod === "check" && (
+                    <p className="text-xs text-muted-foreground" data-sign-line="check-note">
+                      {PAY_CHECK_NOTE_CUSTOMER}
+                    </p>
+                  )}
+                </fieldset>
+              </SignStep>
+
+              <SignStep n={5} title="Your agreement">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="rc-agreed">Your name</Label>
+                    <Input
+                      id="rc-agreed"
+                      className="h-10"
+                      autoComplete="off"
+                      value={agreedBy}
+                      onChange={(e) => setAgreedBy(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="rc-email">{EMAIL_LABEL}</Label>
+                    <Input
+                      id="rc-email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="off"
+                      className="h-10"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      data-sign-email
+                    />
+                    {emailBad ? (
+                      <p className="text-xs text-destructive">{EMAIL_BAD}</p>
+                    ) : (
+                      email.trim() === "" && (
+                        <p className="text-xs text-muted-foreground">{EMAIL_NONE_NOTE}</p>
+                      )
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2" data-roof-care-terms>
+                  <p className="font-medium">The terms of your plan</p>
+                  <ol className="max-h-56 list-decimal space-y-1.5 overflow-y-auto rounded-lg border bg-muted/30 py-2.5 pl-8 pr-3 text-xs">
+                    {ROOF_CARE_TERMS.map((t) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ol>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border-2 border-[var(--jbk-blue)]/40 p-3 font-medium">
+                    <Checkbox
+                      checked={agreed}
+                      onCheckedChange={(v) => setAgreed(v === true)}
+                      className="mt-0.5"
+                      data-terms-agreed
+                    />
+                    <span>{AGREE_WORDS}</span>
+                  </label>
+                </div>
+              </SignStep>
+
+              {/* The office's own part: not for the customer. */}
+              <div className="space-y-1.5 rounded-lg border border-dashed p-3" data-sign-staff>
+                <Label htmlFor="rc-notes" className="text-xs text-muted-foreground">
+                  JBK notes (optional)
+                </Label>
                 <Textarea
                   id="rc-notes"
                   rows={2}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                 />
+                <p className="text-xs text-muted-foreground" data-sign-line="credit">
+                  Signed up with {(profile?.full_name ?? "").trim() || profile?.email}. Their name
+                  goes on the plan.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground" data-sign-line="credit">
-                Signed up by {(profile?.full_name ?? "").trim() || profile?.email}. Your name goes
-                on the plan.
-              </p>
             </>
           )}
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
+            Not now
           </Button>
           <Button
             type="button"
+            size="lg"
+            className="bg-[var(--jbk-blue)] text-white hover:bg-[var(--jbk-blue-hover)]"
             disabled={!ready || sign.isPending}
             onClick={() => sign.mutate()}
             data-action="roof-care-confirm"
           >
             {sign.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            Sign the plan
+            {SIGN_UP_BUTTON}
           </Button>
         </DialogFooter>
       </DialogContent>

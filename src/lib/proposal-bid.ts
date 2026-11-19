@@ -155,6 +155,11 @@ export interface SavedBidState {
   perDiemFromChart?: boolean;
   /** Unusual-number warnings the estimator waved through, by rule and value (bid-sanity.ts). */
   sanityAcknowledged?: string[];
+  /**
+   * The yellow notices dismissed on this bid, by their own words (owner, Nov 19;
+   * bid-dismissed-notices.ts): a notice whose numbers change is a new notice and shows again.
+   */
+  dismissedNotices?: string[];
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
   /** Per-bid setup / inspection time adjustments % (legacy per-item overrides). */

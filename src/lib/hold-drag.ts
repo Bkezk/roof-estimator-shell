@@ -78,6 +78,15 @@ export const release = (s: HoldState): { drop: boolean; tap: boolean } => ({
 });
 
 /**
+ * Was the lifted ticket carried anywhere? A ticket that lifts and is let go where it lifted (the
+ * finger never left the slop) is put back: it drops on nothing. The page can change under a
+ * still finger at the lift (the open tray folds away, the technician dock opens), so what is
+ * under it then is not something the finger chose (Nov 19).
+ */
+export const carried = (liftX: number, liftY: number, x: number, y: number): boolean =>
+  Math.hypot(x - liftX, y - liftY) > SLOP_PX;
+
+/**
  * How far the page scrolls this frame with the finger at `y`, between the list's `top` and
  * `bottom` edges on the screen: up (negative) in the top band, down in the bottom band, faster
  * the deeper in, nothing in between or outside the list (over the day buttons or the tray, which

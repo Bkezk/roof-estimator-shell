@@ -1053,9 +1053,16 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     expect(editor).toContain('data-action="allowance-decline"');
     expect(editor).toContain("isPlanLine(l) ? (");
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain("{!short && active.repair_allowance > 0 && (");
-    expect(card).toContain("{active.allowance_used === null ? (");
-    expect(card).toContain("allowanceStatusWords({");
+    // (Nov 19, later: what is used and left is one tally with the plan's other benefits,
+    // "Used this plan year" (roof-care-benefits.ts benefitsUsed; its own tests are in
+    // roof-care-customer-facing-nov19.test.ts). The invoices that used it stay listed here.)
+    expect(card).toContain(
+      "{!short && active.repair_allowance > 0 && active.allowance_used !== null && (",
+    );
+    expect(card).toContain(
+      "{!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}",
+    );
+    expect(card).not.toContain("allowanceStatusWords({");
   });
 });
 

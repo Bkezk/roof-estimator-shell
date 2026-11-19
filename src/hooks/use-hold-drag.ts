@@ -10,7 +10,9 @@
  *     mid-drag (the board switched day) still receives its finger's events, and nothing else does;
  *   - iPhones only let a move be cancelled when a cancelling listener existed before the finger
  *     went down, so one is kept on the window while the board is on the page;
- *   - the lift comes after HOLD_MS with the finger still, so a swipe on a ticket still scrolls.
+ *   - the lift comes after HOLD_MS with the finger still, so a swipe on a ticket still scrolls;
+ *   - a ticket let go where it lifted is put back: the page may have changed under the finger
+ *     at the lift, and what is under it then is not something the finger chose.
  */
 import {
   useCallback,
@@ -23,6 +25,7 @@ import {
 import {
   DWELL_MS,
   HOLD_MS,
+  carried,
   edgeScrollAfterWait,
   lift,
   move,
@@ -76,6 +79,8 @@ export function useHoldDrag(opts: HoldDragOptions) {
       let frame = 0;
       let inBandSince: number | null = null;
       let done = false;
+      // Where the finger was when the ticket lifted (lib/hold-drag.ts carried).
+      let liftAt: { x: number; y: number } | null = null;
 
       const ghost = () => o.current.ghost.current;
       const place = () => {
@@ -112,6 +117,7 @@ export function useHoldDrag(opts: HoldDragOptions) {
       const timer = setTimeout(() => {
         state = lift(state);
         if (state.phase !== "dragging") return;
+        liftAt = { x: state.x, y: state.y };
         try {
           navigator.vibrate?.(12);
         } catch {
@@ -157,7 +163,8 @@ export function useHoldDrag(opts: HoldDragOptions) {
         const { drop } = release(state);
         // A drop is not also a tap: no click follows a cancelled touchend.
         if (drop && ev.cancelable) ev.preventDefault();
-        finish(drop);
+        // Let go where it lifted: the ticket goes back, whatever opened under the finger.
+        finish(drop && !!liftAt && carried(liftAt.x, liftAt.y, state.x, state.y));
       };
       const onCancel = () => finish(false);
 

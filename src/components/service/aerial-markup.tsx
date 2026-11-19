@@ -123,6 +123,7 @@ import {
   type AreaDrawAction,
   type Pt,
 } from "@/lib/aerial-area";
+import { pickRoughLine } from "@/components/prospect-map-focus";
 import { isTypingTarget } from "@/components/takeoff/shapes";
 import { TargetMarker } from "@/components/takeoff/overlay";
 import { Button } from "@/components/ui/button";
@@ -428,6 +429,7 @@ function AerialEditor({
         <DialogHeader>
           <DialogTitle>Pick the building</DialogTitle>
           <DialogDescription>
+            {!view && data.nearRough ? `${pickRoughLine(data.nearPlace)} ` : ""}
             Zoom in until the building outlines show, then tap inside the roof.
           </DialogDescription>
         </DialogHeader>
@@ -448,6 +450,10 @@ function AerialEditor({
               }}
               // Nothing found but the street is on the map (owner, Oct 26): open there.
               focus={view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? null)}
+              // Only the town or zip code is known (Nov 19): open over the town, with no pin.
+              focusRough={!view && !!data.nearRough}
+              // On the roof the phone knows where the building is: a "where am I" button.
+              locateMe
               fitTo={view || data.near ? undefined : data.addressState}
               className="h-[60vh] w-full rounded-md border"
             />

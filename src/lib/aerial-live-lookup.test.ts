@@ -335,6 +335,8 @@ describe("getTicketAerial falls back to the live state layers (owner, Oct 9)", (
     expect(r.note).toBe(
       "The address matches 2 places in our map data; pick the building on the map.",
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The state servers are not asked. (Nov 19: with nothing to open on, the zip code and the
+    // town are looked up so "Pick the building" opens close by; aerial-rough-near-nov19.test.ts.)
+    expect(urls.filter((u) => !u.includes("api.zippopotam.us"))).toEqual([]);
   });
 });

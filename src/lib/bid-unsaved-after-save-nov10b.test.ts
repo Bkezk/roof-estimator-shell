@@ -50,9 +50,10 @@ describe("1. Save anyway does not leave the bid unsaved", () => {
   });
 
   it("the estimator keeps the list last in `saved`, sends it, and baselines with it", () => {
-    // Last key of the `saved` object literal.
+    // Last key of the `saved` object literal. Nov 19: the notices dismissed on the bid
+    // (dismissedNotices) are kept just before it; the list waved through is still the last key.
     expect(route).toMatch(
-      /\.\.\.\(importInfo \? \{ importInfo \} : \{\}\), (?:\/\/[^;]*? )?\.\.\.\(sanityAcknowledged\.length \? \{ sanityAcknowledged \} : \{\}\), \}; \/\/ Unsaved-changes tracking/,
+      /\.\.\.\(importInfo \? \{ importInfo \} : \{\}\), \.\.\.\(dismissedNotices\.length \? \{ dismissedNotices \} : \{\}\), (?:\/\/[^;]*? )?\.\.\.\(sanityAcknowledged\.length \? \{ sanityAcknowledged \} : \{\}\), \}; \/\/ Unsaved-changes tracking/,
     );
     expect(route).not.toContain(
       "perDiemFromChart, ...(sanityAcknowledged.length ? { sanityAcknowledged } : {}),",

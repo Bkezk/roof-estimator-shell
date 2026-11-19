@@ -82,7 +82,6 @@ import {
   MapPin,
   MapPinCheck,
   Package,
-  Pencil,
   PenLine,
   Plus,
   RefreshCw,
@@ -185,7 +184,6 @@ import {
   finishStepLabel,
   firstOpenStep,
   isInspection,
-  lockedLine,
   nextStep,
   nextStepLabel,
   nothingUsedKey,
@@ -202,6 +200,7 @@ import {
   type StepState,
   type StepStatus,
 } from "@/lib/closeout-steps";
+import { backToStep, cardInPage, pickStep, shownCardStep } from "./one-card";
 import { isFlagged, issueCountText, unattachedTicketPhotos } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { pressLine, runningLabel } from "@/lib/tech-clock";
@@ -480,15 +479,28 @@ function jumpTo(id: StepId) {
  * unlocks it). The chevron opens the full list (one line per step, the locked ones with their
  * unlock line) for anyone who wants it; closed by default, nothing remembered. Not sticky.
  */
-function StepStrip({
+export function StepStrip({
   statuses,
   open,
   serviceType,
+  shown,
+  onPick,
+  summary,
 }: {
   statuses: { step: CloseoutStep; status: StepStatus }[];
   open: StepId | null;
   /** The ticket's type: the inspection flow has six steps, the repair flow seven. */
   serviceType: string;
+  /** The one step whose card is on the screen (owner, Nov 19). */
+  shown: StepId | null;
+  /** Show a step's card. Never called for a locked step. */
+  onPick: (id: StepId) => void;
+  /**
+   * A done step in one line ("2 repairs, 2 Before photos"). It was the folded card's line; with
+   * one card on the screen it is in the step list, so what each done step holds is still a tap
+   * away without opening it.
+   */
+  summary: (id: StepId) => string;
 }) {
   const [listOpen, setListOpen] = useState(false);
   return (
@@ -514,14 +526,21 @@ function StepStrip({
                   status === "locked" ? ` — locked: ${step.unlocks}` : ""
                 }`}
                 title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}
+                data-step-dot={step.id}
+                data-step-shown={shown === step.id || undefined}
                 className={`flex h-[44px] w-[44px] max-w-full items-center justify-center rounded-full text-sm font-semibold ${
+                  // The step on the screen, when it is not the one being worked: a ring.
+                  shown === step.id && status !== "current"
+                    ? "ring-2 ring-primary ring-offset-2 ring-offset-card "
+                    : ""
+                }${
                   status === "current"
                     ? "bg-primary text-primary-foreground"
                     : status === "done"
                       ? "bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-emerald-950"
                       : "cursor-default bg-muted text-muted-foreground/70"
                 }`}
-                onClick={() => status !== "locked" && jumpTo(step.id)}
+                onClick={() => status !== "locked" && onPick(step.id)}
               >
                 {status === "done" ? (
                   <Check className="h-4 w-4" aria-hidden />
@@ -559,7 +578,10 @@ function StepStrip({
                       ? "hover:bg-muted/40"
                       : "text-muted-foreground/70"
                 }`}
-                onClick={() => jumpTo(step.id)}
+                onClick={() => {
+                  onPick(step.id);
+                  setListOpen(false);
+                }}
               >
                 {status === "done" ? (
                   <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -577,6 +599,14 @@ function StepStrip({
                   {status === "locked" && (
                     <span className="block truncate text-xs font-normal">{step.unlocks}</span>
                   )}
+                  {status === "done" && summary(step.id) && (
+                    <span
+                      className="block truncate text-xs font-normal text-muted-foreground"
+                      data-step-summary={step.id}
+                    >
+                      {summary(step.id)}
+                    </span>
+                  )}
                 </span>
               </button>
             </li>
@@ -592,26 +622,26 @@ function StepStrip({
  * cramped even on subsequent steps"): one bordered card per step. Its header row is the step
  * number (a tick once done), the section's icon and the title — "2 · Before" — with the aside on
  * the right ("0 of 1 done", "3 items"); the body renders plain inside. The current step has a
- * primary border and a left accent bar, not a ring. A locked step is one muted line saying which
- * step to finish first. A done step that is not current folds to its header and a one-line
- * summary (closeout-steps.ts stepSummary) with Edit ("can we have each step minimize after
- * completion"); `expanded` / `onToggle` are the form's per-step state, and a step that becomes
- * current again is never folded. The current card ends in the "Next step: <title>" button
+ * primary border and a left accent bar, not a ring. Only ONE card is on the screen (owner,
+ * Nov 19: "let's only show the card we are currently on rather than all steps minimized in the
+ * list"): the step being worked, or a done step picked from the numbers above, which shows whole
+ * with a "Back to step N" button. A locked step is never on the screen; its number and the step
+ * list say what unlocks it. Until Nov 19 every step was in the list at once: locked ones as one
+ * muted line, done ones folded to a summary with Edit. The current card ends in the "Next step: <title>" button
  * (owner, Oct 9: "a go to next step button at the bottom" instead of auto-advancing): enabled
  * when `missing` is null (the step's rule holds), else disabled over the `missing` line that says
  * what to do; `onNext` is the form's move. Signature has no next step (the Complete bar follows
  * it), so it gets no button.
  */
-function StepCard({
+export function StepCard({
   id,
+  shown,
   status,
   open,
   serviceType,
   icon: Icon,
   aside,
-  summary,
-  expanded,
-  onToggle,
+  onBack,
   missing,
   onNext,
   footer,
@@ -619,15 +649,20 @@ function StepCard({
   children,
 }: {
   id: StepId;
+  /**
+   * Only one step's card is on the screen (owner, Nov 19: "only show the card we are currently
+   * on rather than all steps minimized in the list"). The others draw nothing; the numbers and
+   * the step list above are how to reach them.
+   */
+  shown: boolean;
   status: StepStatus;
   open: StepId | null;
   /** The ticket's type (closeout-steps.ts closeoutSteps): which list numbers and orders the steps. */
   serviceType: string;
   icon: typeof Wrench;
   aside?: React.ReactNode;
-  summary: string;
-  expanded: boolean;
-  onToggle: () => void;
+  /** "Back to step N" on a done step that was picked from the numbers. */
+  onBack: () => void;
   /** What this step still needs (closeout-steps.ts stepMissing); null once its rule holds. */
   missing: string | null;
   onNext: () => void;
@@ -639,25 +674,19 @@ function StepCard({
 }) {
   const step = stepOf(id, serviceType);
   const nextLabel = nextStepLabel(id, serviceType);
-  if (status === "locked")
-    return (
-      <p
-        id={stepAnchor(id)}
-        className="flex items-center gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"
-      >
-        <Lock className="h-4 w-4 shrink-0" />
-        <span>
-          <span className="font-medium">
-            {step.n} · {step.title}
-          </span>{" "}
-          · {lockedLine(open, serviceType)}
-        </span>
-      </p>
-    );
-  const folded = status === "done" && !expanded;
+  // Off the screen a step draws nothing, with one exception: the step being worked stays in the
+  // page, hidden, while a done step is looked at. Hours half typed or a row left open on it are
+  // still there on the way back (taking it out of the page would drop them without a word).
+  if (!cardInPage(shown, status)) return null;
+  // A done step on the screen was picked from the numbers: it shows whole, and its button goes
+  // back to the step being worked. With every step done there is nowhere to go back to.
+  const back = backToStep(id, status, open);
+  const backTo = back === null ? null : stepOf(back, serviceType);
   return (
     <section
       id={stepAnchor(id)}
+      hidden={!shown}
+      data-step-card={id}
       aria-label={`Step ${step.n} · ${step.title}`}
       className={`scroll-mt-3 rounded-xl border bg-card ${
         status === "current" ? "border-l-4 border-primary" : ""
@@ -685,33 +714,21 @@ function StepCard({
         </h2>
         <div className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
           {aside}
-          {status === "done" && (
+          {backTo && (
             <Button
               type="button"
-              variant={folded ? "outline" : "ghost"}
+              variant="outline"
               size="sm"
               className="h-[44px]"
-              aria-expanded={!folded}
-              onClick={onToggle}
+              onClick={onBack}
+              data-action="step-back"
             >
-              {folded ? (
-                <>
-                  <Pencil className="mr-1 h-4 w-4" /> Edit
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="mr-1 h-4 w-4" /> Done
-                </>
-              )}
+              Back to step {backTo.n} <ArrowRight className="ml-1 h-4 w-4" aria-hidden />
             </Button>
           )}
         </div>
       </div>
-      {folded ? (
-        <p className="px-4 pb-3 text-sm text-muted-foreground">{summary}</p>
-      ) : (
-        <div className="space-y-3 px-4 pb-4">{children}</div>
-      )}
+      <div className="space-y-3 px-4 pb-4">{children}</div>
       {status === "current" && nextLabel !== null && (
         <div className="space-y-1.5 border-t px-4 py-3">
           <div className="flex gap-2" data-line="step-buttons">
@@ -1046,7 +1063,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     closingNotes: draft.closing_notes,
     notesSkipped,
     signaturePath: job.signature_path,
-    // The folded steps' summaries (stepSummary): helper_count follows the named crew
+    // The done steps' summaries in the step list (stepSummary): helper_count follows the named crew
     // (service-crew.ts helperCountFor), the items are the ledger's distinct cells, net.
     crewOthers: job.helper_count,
     materialItems: countMaterialItems(materialsQ.data ?? []),
@@ -1080,10 +1097,13 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     started.current = true;
     setOnStep(open);
   }, [ready, open]);
-  // Go to a step: the card is current (expanded) before the scroll measures it, so the heading
-  // lands at the top with the step just left already folded.
+  // Go to a step: the card is current and on the screen before the scroll measures it, so the
+  // heading lands at the top.
   const goTo = (id: StepId) => {
-    flushSync(() => setOnStep(id));
+    flushSync(() => {
+      setOnStep(id);
+      setPicked(null);
+    });
     jumpTo(id);
   };
   const goNext = (id: StepId) => {
@@ -1093,21 +1113,29 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const shownOpen = shownOpenStep(open, onStep, job.service_type);
   const statuses = stepStatuses(stepState, shownOpen);
   const status = (id: StepId) => stepStatus(id, stepState, shownOpen);
-  // Owner, Oct 9: a done step folds to its summary unless Edit was pressed on it. Component
-  // state, nothing remembered; cleared whenever the shown open step moves, so a step just
-  // finished folds once the tech presses Next step, and a step that reopened (its Before photo
-  // deleted) is current — never folded. Edit on a folded step expands it in place; it does not
-  // move onStep.
-  const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});
-  useEffect(() => setEditing({}), [shownOpen]);
+  // One card on the screen (owner, Nov 19): the step being worked, unless a done step was
+  // picked from the numbers. With every step done it is the last one. Component state, nothing
+  // remembered; it goes back to the step being worked whenever that step moves.
+  const [picked, setPicked] = useState<StepId | null>(null);
+  useEffect(() => setPicked(null), [shownOpen]);
+  const lastStep = statuses[statuses.length - 1]?.step.id ?? null;
+  const shownCard = shownCardStep(picked, status, shownOpen, lastStep);
+  const pick = (id: StepId) => {
+    if (status(id) === "locked") return;
+    flushSync(() => setPicked(pickStep(id, status, shownOpen, picked)));
+    jumpTo(id);
+  };
   const card = (id: StepId) => ({
     id,
+    shown: id === shownCard,
     status: status(id),
     open: shownOpen,
     serviceType: job.service_type,
-    summary: stepSummary(id, stepState),
-    expanded: editing[id] === true,
-    onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),
+    // A done step that was picked: its button goes back to the step being worked.
+    onBack: () => {
+      flushSync(() => setPicked(null));
+      if (shownOpen) jumpTo(shownOpen);
+    },
     missing: stepMissing(id, stepState),
     onNext: () => goNext(id),
   });
@@ -1167,7 +1195,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           </Button>
         </div>
       )}
-      <StepStrip statuses={statuses} open={shownOpen} serviceType={job.service_type} />
+      <StepStrip
+        statuses={statuses}
+        open={shownOpen}
+        serviceType={job.service_type}
+        shown={shownCard}
+        onPick={pick}
+        summary={(id) => stepSummary(id, stepState)}
+      />
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
           answered. The card's own line says so; no second paragraph under it. Not on an

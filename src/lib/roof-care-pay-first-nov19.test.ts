@@ -327,20 +327,22 @@ describe("the sign-up", () => {
   });
 
   it("says the year is paid first, and shows no halves", () => {
-    expect(card).toContain(
-      "The plan is paid for the year first, and starts the day the payment is received.",
-    );
-    expect(card).toContain("Paid in full before the plan starts");
+    // (Nov 19, later: the sign-up is read by the customer, so it says it in their words:
+    // "Paid once for the year, before the plan starts", and under how they pay, "Your plan
+    // starts the day it is received". roof-care-customer-facing-nov19.test.ts.)
+    expect(card).toContain("<p>{PRICE_PAID_FIRST}.</p>");
+    expect(card).toContain("{PAY_CHECK_NOTE_CUSTOMER}");
     expect(card).not.toContain("at the first inspection, {money0(o.visit2)} at the second");
     expect(card).toContain("{DATES_FROM_PAYMENT}");
-    expect(card).toContain("Sign the plan </Button>");
+    expect(card).toContain("{SIGN_UP_BUTTON} </Button>");
     expect(card).not.toContain("Start the plan </Button>");
   });
 
   it("offers the first inspection counted from the payment", () => {
-    expect(card).toContain('now: "As soon as the payment is received",');
-    expect(card).toContain('days: "This many days after the payment",');
-    expect(card).toContain('window: "In the next window after the payment",');
+    // (Nov 19, later: in the customer's words.)
+    expect(card).toContain('now: "As soon as your payment is received",');
+    expect(card).toContain('days: "A set number of days after your payment",');
+    expect(card).toContain('window: "In the next inspection window",');
     expect(card).not.toContain("Do the first inspection today");
   });
 });

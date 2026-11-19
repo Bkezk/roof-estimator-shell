@@ -166,9 +166,11 @@ describe("no box in a box: the step is the card", () => {
     expect(card).toContain("{aside}");
     // Current: a left accent bar and a primary border, not a ring-offset frame.
     expect(card).toMatch(/status === "current" \? "border-l-4 border-primary" : ""/);
-    // Locked: still one muted line naming the step to finish.
-    expect(card).toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
-    expect(card).toContain("{lockedLine(open, serviceType)}");
+    // Nov 19 (owner: "only show the card we are currently on"): a locked step is no longer a
+    // muted line in the list; it is not on the screen, and its number and the step list say
+    // what unlocks it (service-one-card-nov19.test.ts).
+    expect(card).not.toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
+    expect(card).not.toContain("lockedLine(");
   });
   it("the sections pass only a title; the icons and asides sit on the step cards", () => {
     for (const t of ["Time", "Notes", "Signature"])
@@ -233,7 +235,8 @@ describe("the compact strip", () => {
     expect(strip).toContain(
       'title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}',
     );
-    expect(strip).toContain('onClick={() => status !== "locked" && jumpTo(step.id)}');
+    // Nov 19: a tap on a number shows that step's card (onPick), where it scrolled to it.
+    expect(strip).toContain('onClick={() => status !== "locked" && onPick(step.id)}');
     expect(strip).toMatch(
       /status === "done" \? \(\s*<Check className="h-4 w-4" aria-hidden \/>\s*\) : status === "locked" \? \(\s*<Lock className="h-3\.5 w-3\.5" aria-hidden \/>\s*\) : \(\s*step\.n\s*\)/,
     );
@@ -248,34 +251,33 @@ describe("the compact strip", () => {
     expect(strip).not.toContain("sticky");
     expect(form).toMatch(
       // (Owner, Oct 15: the clock's line sits above the strip while the clock runs on this ticket.)
-      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
+      // (Nov 19: the strip also takes the card on the screen and the pick; service-one-card-nov19.test.ts.)
+      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip\s+statuses=\{statuses\}\s+open=\{shownOpen\}\s+serviceType=\{job\.service_type\}/,
     );
   });
 });
 
+// Oct 9 – Nov 19 a done step folded to its header, a one-line summary and Edit. On Nov 19 the
+// owner asked for one card on the screen ("only show the card we are currently on rather than
+// all steps minimized in the list"), so a done step is off the screen until its number is
+// tapped, and then shows whole (service-one-card-nov19.test.ts).
 describe("done steps minimize", () => {
-  it("a done step that is not current folds to its header, the summary and Edit; Edit unfolds it", () => {
-    expect(card).toContain('const folded = status === "done" && !expanded;');
-    expect(card).toMatch(
-      /\{folded \? \(\s*<p className="px-4 pb-3 text-sm text-muted-foreground">\{summary\}<\/p>\s*\) : \(\s*<div className="space-y-3 px-4 pb-4">\{children\}<\/div>/,
-    );
-    expect(card).toMatch(/\{status === "done" && \(\s*<Button/);
-    expect(card).toContain("aria-expanded={!folded}");
-    expect(card).toContain("onClick={onToggle}");
-    expect(card).toMatch(/<Pencil className="mr-1 h-4 w-4" \/> Edit/);
-    expect(card).toMatch(/<ChevronUp className="mr-1 h-4 w-4" \/> Done/);
+  it("a done step is off the screen; picked from the numbers it shows whole with Back to step N (it folded with Edit until Nov 19)", () => {
+    expect(card).not.toContain("folded");
+    expect(card).toContain("if (!cardInPage(shown, status)) return null;");
+    expect(card).toContain('<div className="space-y-3 px-4 pb-4">{children}</div>');
+    expect(card).toContain("onClick={onBack}");
+    expect(card).not.toContain("<Pencil");
+    expect(card).not.toContain("aria-expanded");
   });
-  it("the form holds the per-step state, nothing remembered; it clears when the open step moves", () => {
-    expect(form).toContain(
-      "const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});",
-    );
-    // Owner, Oct 9 (later): the SHOWN open step — the one the tech is inside does not fold.
-    expect(form).toContain("useEffect(() => setEditing({}), [shownOpen]);");
-    expect(form).not.toContain("useEffect(() => setEditing({}), [open]);");
-    expect(form).toContain("summary: stepSummary(id, stepState),");
-    expect(form).toContain("expanded: editing[id] === true,");
-    expect(form).toContain("onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),");
-    expect(form).not.toMatch(/localStorage[^\n]*editing/);
+  it("the form holds the picked step, nothing remembered; it clears when the open step moves", () => {
+    expect(form).toContain("const [picked, setPicked] = useState<StepId | null>(null);");
+    // The SHOWN open step, as the Edit state before it (owner, Oct 9, later).
+    expect(form).toContain("useEffect(() => setPicked(null), [shownOpen]);");
+    expect(form).not.toContain("setEditing");
+    // The summary is the step list's line for a done step now.
+    expect(form).toContain("summary={(id) => stepSummary(id, stepState)}");
+    expect(form).not.toMatch(/localStorage[^\n]*picked/);
     // The state the summaries need.
     expect(form).toContain("crewOthers: job.helper_count,");
     expect(form).toContain("materialItems: countMaterialItems(materialsQ.data ?? []),");

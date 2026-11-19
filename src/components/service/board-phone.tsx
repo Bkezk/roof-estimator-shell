@@ -11,13 +11,16 @@
  *     moment and the board switches to that day), back onto the tray to unassign it, or onto
  *     "A week earlier" / "A week later", which show under the day buttons while a ticket is held
  *     (hooks/use-hold-drag.ts). A swipe still scrolls.
+ *   - While a ticket from the tray is held, every technician is also a small target in a block
+ *     right above the tray (owner, Nov 19: assigning on a phone "isnt great"): nobody is a
+ *     scroll away, and the finger moves an inch or two, not up the page.
  *   - A tap opens the ticket's details over the board, with Open ticket, Move (pick a technician
  *     and a day without dragging), Call and Directions. Closing it leaves the board where it was.
  *
  * Every move is the same single write the desk grid makes (assignServiceJob, through the board's
  * own mutation in board-page.tsx), so the same rules, the same history and the same notices apply.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
@@ -58,6 +61,13 @@ import {
   dayNumber,
   dayShort,
   dayTitle,
+  dockColumns,
+  dockFor,
+  dockHeight,
+  dockNote,
+  dockRoom,
+  dockScroll,
+  dockTitle,
   isDayKey,
   mapsUrl,
   movableOnBoard,
@@ -170,13 +180,16 @@ export function PhoneBoard(p: PhoneBoardProps) {
   const strip = useRef<HTMLDivElement>(null);
   const tray = useRef<HTMLElement>(null);
   const weeks = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
   const dragging = !!p.dragId;
   const dragged = p.dragId ? p.jobs.find((j) => j.id === p.dragId) : undefined;
 
   const bind = useHoldDrag({
     ghost,
     topEdge: () => (weeks.current ?? strip.current)?.getBoundingClientRect().bottom ?? 0,
-    bottomEdge: () => tray.current?.getBoundingClientRect().top ?? window.innerHeight,
+    // The dock is a target, not part of the list: the page does not scroll under a finger on it.
+    bottomEdge: () =>
+      (dock.current ?? tray.current)?.getBoundingClientRect().top ?? window.innerHeight,
     onLift: (id) => {
       // The open tray folds out of the way of the technicians, and stays folded after the drop
       // so the result is on the screen.
@@ -211,6 +224,39 @@ export function PhoneBoard(p: PhoneBoardProps) {
   // a technician and a day) is given two targets under the day buttons for as long as it is held.
   const weekTargets = p.dispatch && !!dragged?.technician_id && !!dragged.scheduled_date;
   const overClass = "ring-2 ring-inset ring-primary bg-primary/10";
+  // The technician dock (lib/board-phone.ts): shown while a dispatcher holds a ticket from the
+  // Unassigned tray. It hangs
+  // on the tray's top edge by itself (it is drawn inside the tray); only the room above the tray
+  // is measured, before the screen is drawn, to choose two or three technicians across.
+  const showDock = p.dispatch && p.techRows.length > 0 && dockFor(dragged);
+  const [dockSpace, setDockSpace] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!showDock) {
+      setDockSpace(null);
+      return;
+    }
+    const measure = () => {
+      const trayTop = tray.current?.getBoundingClientRect().top ?? window.innerHeight;
+      const listTop = (weeks.current ?? strip.current)?.getBoundingClientRect().bottom ?? 0;
+      return dockRoom(trayTop, listTop);
+    };
+    let room = measure();
+    // Not enough room for two technicians across: the page's own heading is still above the day
+    // buttons. Scroll it away (the day buttons then sit at the top of the screen, the tray stays
+    // at the bottom) and measure again.
+    const bar = strip.current;
+    if (bar) {
+      const slack = bar.getBoundingClientRect().top - (parseFloat(getComputedStyle(bar).top) || 0);
+      const left = document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
+      const by = dockScroll(dockHeight(p.techRows.length, 2), room, slack, left);
+      if (by > 0) {
+        window.scrollBy(0, by);
+        room = measure();
+      }
+    }
+    setDockSpace(room);
+    // Measured when the ticket lifts, and again if the tray or the week targets change height.
+  }, [showDock, trayOpen, weekTargets, p.techRows.length]);
 
   const row = (r: Row, shaded: boolean) => {
     const key = cellKey(r.id, day);
@@ -379,6 +425,49 @@ export function PhoneBoard(p: PhoneBoardProps) {
           p.over === RAIL_KEY ? `${overClass} bg-card` : "bg-card"
         }`}
       >
+        {/* The technician dock: every technician within an inch or two of the finger. It hangs
+              on the tray's top edge. Its own key is empty, so a finger let go between two
+              technicians drops on nothing (not on the tray under it, which would unassign). */}
+        {showDock && dockSpace !== null && (
+          <div
+            ref={dock}
+            data-board-dock
+            data-drop=""
+            aria-label={dockTitle(day)}
+            style={{ maxHeight: dockSpace }}
+            className="absolute inset-x-0 bottom-full mb-0 overflow-hidden border-t bg-card px-4 pb-2 pt-1 shadow-[0_-8px_20px_rgba(0,0,0,0.3)] sm:px-6"
+          >
+            <p className="flex h-[30px] items-center text-xs font-semibold">{dockTitle(day)}</p>
+            <div
+              className={`grid gap-[6px] ${
+                dockColumns(p.techRows.length, dockSpace) === 3 ? "grid-cols-3" : "grid-cols-2"
+              }`}
+            >
+              {p.techRows.map((r) => {
+                const key = cellKey(r.id, day);
+                const hasIt = dragged?.technician_id === r.id && dragged.scheduled_date === day;
+                return (
+                  <div
+                    key={r.id}
+                    data-drop={key}
+                    data-dock-tech={r.id}
+                    className={`flex h-[48px] items-center gap-2 rounded-md border px-2 transition-colors ${
+                      p.over === key ? overClass : hasIt ? "bg-muted/60" : "bg-background"
+                    }`}
+                  >
+                    <UserRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-sm font-semibold">{r.name}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {dockNote(p.cellJobs(r.id, day).length, hasIt)}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <button
           type="button"
           className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm font-semibold"

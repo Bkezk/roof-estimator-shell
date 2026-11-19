@@ -136,6 +136,15 @@ vi.mock("@/lib/roof-care-notify.server", () => ({
     plans_errors: 0,
   }),
 }));
+// Nov 19, later: and the pass that emails a Roof Care customer their agreement and receipt.
+vi.mock("@/lib/roof-care-email.server", () => ({
+  dispatchPlanEmails: async () => ({
+    agreements_sent: 0,
+    receipts_sent: 0,
+    email_errors: 0,
+    held: null,
+  }),
+}));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
 }));

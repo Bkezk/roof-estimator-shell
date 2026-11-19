@@ -1242,8 +1242,12 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
     expect(card).toContain("{ROOF_CARE_TERMS.map((t) => ( <li key={t}>{t}</li> ))}");
     expect(card).toContain("const [agreed, setAgreed] = useState(false);");
-    expect(card).toContain("agreedBy.trim().length > 0 && agreed && plans.length > 0 && !stale;");
-    expect(card).toContain("The customer has read these terms and agrees to them.");
+    // (Nov 19, later: an email address that is typed has to be one, and the tick is in the
+    // customer's own words, "I have read these terms and agree to them.")
+    expect(card).toContain(
+      "agreedBy.trim().length > 0 && agreed && !emailBad && plans.length > 0 && !stale;",
+    );
+    expect(card).toContain("<span>{AGREE_WORDS}</span>");
   });
   it("the plan keeps which terms were agreed, and the database refuses a sign-up without them", () => {
     const sql = flat(read("supabase/migrations/20261118260000_roof_care_terms.sql"));

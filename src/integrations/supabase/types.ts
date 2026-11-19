@@ -3426,11 +3426,14 @@ export type Database = {
         Row: {
           account_id: string
           agreed_by: string
+          agreement_error: string | null
+          agreement_sent_at: string | null
           closed_out_by_name: string | null
           closed_out_on: string | null
           closed_out_reason: string | null
           created_at: string
           created_by: string | null
+          customer_email: string | null
           drive_hours: number
           drive_miles: number
           ended_by_name: string | null
@@ -3451,6 +3454,8 @@ export type Database = {
           plan_number: number | null
           price: number
           price_estimated: boolean
+          receipt_error: string | null
+          receipt_sent_at: string | null
           referred_by: string | null
           refund_due: number | null
           refund_ref: string | null
@@ -3476,11 +3481,14 @@ export type Database = {
         Insert: {
           account_id: string
           agreed_by: string
+          agreement_error?: string | null
+          agreement_sent_at?: string | null
           closed_out_by_name?: string | null
           closed_out_on?: string | null
           closed_out_reason?: string | null
           created_at?: string
           created_by?: string | null
+          customer_email?: string | null
           drive_hours: number
           drive_miles: number
           ended_by_name?: string | null
@@ -3501,6 +3509,8 @@ export type Database = {
           plan_number?: number | null
           price: number
           price_estimated?: boolean
+          receipt_error?: string | null
+          receipt_sent_at?: string | null
           referred_by?: string | null
           refund_due?: number | null
           refund_ref?: string | null
@@ -3526,11 +3536,14 @@ export type Database = {
         Update: {
           account_id?: string
           agreed_by?: string
+          agreement_error?: string | null
+          agreement_sent_at?: string | null
           closed_out_by_name?: string | null
           closed_out_on?: string | null
           closed_out_reason?: string | null
           created_at?: string
           created_by?: string | null
+          customer_email?: string | null
           drive_hours?: number
           drive_miles?: number
           ended_by_name?: string | null
@@ -3551,6 +3564,8 @@ export type Database = {
           plan_number?: number | null
           price?: number
           price_estimated?: boolean
+          receipt_error?: string | null
+          receipt_sent_at?: string | null
           referred_by?: string | null
           refund_due?: number | null
           refund_ref?: string | null
@@ -5919,6 +5934,7 @@ export type Database = {
       }
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
       roof_care_add_storm: { Args: { p_plan: string }; Returns: string }
+      roof_care_benefits: { Args: never; Returns: Json }
       roof_care_close_out: {
         Args: { p_plan: string; p_reason: string }
         Returns: number
@@ -5961,6 +5977,10 @@ export type Database = {
         Returns: string
       }
       roof_care_renewal_offer: { Args: { p_plan: string }; Returns: Json }
+      roof_care_set_email: {
+        Args: { p_email: string; p_plan: string }
+        Returns: undefined
+      }
       roof_care_sign_up: {
         Args: {
           p_agreed_by: string

@@ -9,9 +9,11 @@
  */
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { FOCUS_ZOOM, focusMove } from "@/components/prospect-map-focus";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import {
   AttributionControl,
+  GeolocateControl,
   GeoJSONSource,
   LngLatBounds,
   Map as MlMap,
@@ -86,6 +88,18 @@ interface Props {
   onViewCenter?: ((center: { lng: number; lat: number } | null) => void) | undefined;
   /** Fly to this point (zoom 18) and drop a pin on it — a lead's site, not a stored building. */
   focus?: { lat: number; lng: number } | null | undefined;
+  /**
+   * The point is only the middle of a town or zip code (owner, Nov 19: "have the map try its
+   * best to get close"): open over the town, not on a roof, and drop no pin, since the pin
+   * would point at a building that is not the one.
+   */
+  focusRough?: boolean | undefined;
+  /**
+   * A "where am I" button under the zoom buttons (Nov 19): a technician picking the building is
+   * usually standing on it, and the phone knows where that is when the address is on no map.
+   * Nothing is asked of the phone until the button is tapped.
+   */
+  locateMe?: boolean | undefined;
   /** Fit the view to this area when it changes (the state filter): "KY", "TN" or both (null). */
   fitTo?: "KY" | "TN" | null | undefined;
   selectedId: string | null;
@@ -311,6 +325,8 @@ const IMAGERY_CREDIT = `Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch
 export default function ProspectMap({
   buildings,
   focus,
+  focusRough,
+  locateMe,
   fitTo,
   stormAreas,
   showStormAreas = true,
@@ -336,6 +352,8 @@ export default function ProspectMap({
   select.current = onSelect;
   const tapEmpty = useRef(onTapEmpty);
   tapEmpty.current = onTapEmpty;
+  // Read once, when the map is made (as the callbacks below are).
+  const locate = useRef(locateMe);
   const viewCenter = useRef(onViewCenter);
   viewCenter.current = onViewCenter;
   const attribution = useRef<AttributionControl | null>(null);
@@ -474,6 +492,14 @@ export default function ProspectMap({
       }, 400);
     });
     m.addControl(new NavigationControl({ visualizePitch: false }), "top-right");
+    if (locate.current)
+      m.addControl(
+        new GeolocateControl({
+          positionOptions: { enableHighAccuracy: true },
+          fitBoundsOptions: { maxZoom: FOCUS_ZOOM },
+        }),
+        "top-right",
+      );
     m.addControl(new ScaleControl({ unit: "imperial" }));
     // City labels as HTML markers (no font glyphs needed): the eight largest in view, fading
     // with zoom, hidden when the toggle is off.
@@ -793,15 +819,16 @@ export default function ProspectMap({
     const apply = () => {
       focusPin.current?.remove();
       focusPin.current = null;
-      if (!focus) return;
-      focusPin.current = new Marker({ color: "#f59e0b" })
-        .setLngLat([focus.lng, focus.lat])
-        .addTo(m);
-      m.easeTo({ center: [focus.lng, focus.lat], zoom: 18, duration: 800 });
+      // A rough point (the middle of a town or zip code) gets no pin (prospect-map-focus.ts).
+      const move = focusMove(focus, focusRough);
+      if (!move) return;
+      if (move.pin)
+        focusPin.current = new Marker({ color: "#f59e0b" }).setLngLat(move.center).addTo(m);
+      m.easeTo({ center: move.center, zoom: move.zoom, duration: 800 });
     };
     if (ready.current) apply();
     else m.once("load", apply);
-  }, [focus]);
+  }, [focus, focusRough]);
 
   return <div ref={el} className={className ?? "h-[420px] w-full rounded-md border"} />;
 }

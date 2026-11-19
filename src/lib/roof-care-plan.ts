@@ -173,6 +173,45 @@ export interface RoofCarePlan {
   ended_on: string | null;
   ended_reason: string | null;
   visits: PlanVisit[];
+  /** Storm inspections a year the plan includes (the plan settings); absent on an older read. */
+  storm_included?: number;
+  /** The customer's email, and what has been sent to it (Nov 19). Absent on an older read. */
+  email?: PlanEmail;
+}
+
+/** Where the agreement and the receipt go, and whether they went. */
+export interface PlanEmail {
+  to: string | null;
+  agreement_sent_at: string | null;
+  agreement_error: string | null;
+  receipt_sent_at: string | null;
+  receipt_error: string | null;
+}
+
+/** "Agreement emailed to a@b.com Nov 19." and the like: one line each, for the office. */
+export function planEmailLines(
+  e: PlanEmail,
+  o: { paid: boolean; day: (iso: string) => string },
+): string[] {
+  if (!e.to) return ["No email address: the agreement and the receipt were not emailed."];
+  const why = (err: string | null) =>
+    !err
+      ? "It goes out within the half hour."
+      : /not set up|not set/i.test(err)
+        ? "Email is not set up on the site yet."
+        : `It could not be sent: ${err}`;
+  const out = [
+    e.agreement_sent_at
+      ? `Agreement emailed to ${e.to} ${o.day(e.agreement_sent_at.slice(0, 10))}.`
+      : `The agreement has not been emailed to ${e.to} yet. ${why(e.agreement_error)}`,
+  ];
+  if (o.paid)
+    out.push(
+      e.receipt_sent_at
+        ? `Receipt emailed ${o.day(e.receipt_sent_at.slice(0, 10))}.`
+        : `The receipt has not been emailed yet. ${why(e.receipt_error)}`,
+    );
+  return out;
 }
 
 // ── The two windows ─────────────────────────────────────────────────────────────────────────

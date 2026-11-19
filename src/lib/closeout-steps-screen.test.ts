@@ -24,7 +24,8 @@ describe("the step strip", () => {
     // The SHOWN open step (owner, Oct 9, later: the step the tech is inside stays open).
     expect(form).toMatch(
       // (Owner, Oct 15: the clock's line sits above the strip while the clock runs on this ticket.)
-      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip statuses=\{statuses\} open=\{shownOpen\} serviceType=\{job\.service_type\} \/>/,
+      // (Nov 19: the strip also takes the card on the screen and the pick; service-one-card-nov19.test.ts.)
+      /<div className="space-y-5">\s*\{\/\* The clock on this ticket \(owner, Oct 15\)[\s\S]*?<StepStrip\s+statuses=\{statuses\}\s+open=\{shownOpen\}\s+serviceType=\{job\.service_type\}/,
     );
     const strip = src.slice(
       src.indexOf("function StepStrip({"),
@@ -112,20 +113,22 @@ describe("the sections in step order", () => {
       expect(form.match(new RegExp(`\\{\\.\\.\\.card\\("${id}"\\)\\}`, "g"))).toHaveLength(1);
     expect(form.match(/<StepCard/g)).toHaveLength(9);
   });
-  it("a locked step is one muted line naming the step to finish; open ones are the card, the current one with the accent bar", () => {
+  it("a locked step is not on the screen (one muted line until Nov 19); open ones are the card, the current one with the accent bar", () => {
     const slot = src.slice(
       src.indexOf("function StepCard({"),
       src.indexOf("function CloseoutForm("),
     );
-    expect(slot).toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
-    expect(slot).toContain("{lockedLine(open, serviceType)}");
-    expect(slot).toContain('<Lock className="h-4 w-4 shrink-0" />');
+    // Nov 19 (owner: "only show the card we are currently on"): the locked line left the list.
+    // What unlocks a step is on its number and in the step list (the strip, above).
+    expect(slot).not.toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
+    expect(slot).not.toContain("lockedLine(");
+    expect(slot).toContain("if (!cardInPage(shown, status)) return null;");
     expect(slot).toContain("{children}");
     // Owner, Oct 9 (later): the ring-offset frame around a Section card read as a box in a box;
     // the step is the card now, with a left accent bar while current.
     expect(slot).not.toContain("ring-offset-4");
     expect(slot).toMatch(/status === "current" \? "border-l-4 border-primary" : ""/);
-    expect(slot).toMatch(/\{step\.n\} · \{step\.title\}/);
+    expect(slot).toContain("aria-label={`Step ${step.n} · ${step.title}`}");
     expect(slot).toContain("id={stepAnchor(id)}");
   });
   it("the repairs section knows its step: the picker, Remove and quantity in Before; What was wrong, What you did in The work", () => {
