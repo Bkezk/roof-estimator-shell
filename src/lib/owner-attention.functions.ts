@@ -31,10 +31,11 @@ import {
   type AttTicket,
   type AttUntouched,
   type AttentionList,
+  type AttCareUnbilled,
   type AttCareVisit,
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
-import { planName, runsLate, VISIT_LABEL, visitState } from "@/lib/roof-care-plan";
+import { planName, runsLate, VISIT_LABEL, visitState, visitUnbilled } from "@/lib/roof-care-plan";
 import { plansOfSites } from "@/lib/roof-care-plan.functions";
 import { visibleToOwner } from "@/lib/owner-view";
 import { PAGE, afterId, readAll } from "@/lib/read-all";
@@ -225,6 +226,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
     ))
       names[p.id] = (p.full_name ?? "").trim() || (p.email ?? "").trim();
 
+    const care = await careVisitsOfPlans(sb, today);
     return attentionList({
       today,
       now: now.toISOString(),
@@ -238,23 +240,31 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       repairFrom: fromIds(repairs),
       bidFrom: fromIds(bidsFrom),
       names,
-      careVisits: await careVisitsNotDone(sb, today),
+      careVisits: care.notDone,
+      careUnbilled: care.unbilled,
     });
   });
 
 /**
- * The inspections still to do of the Roof Care plans in force (owner, Nov 18): the rule lists
- * the ones past their last day and the ones a push-back carried past the plan year.
+ * The inspections of the Roof Care plans in force that the list has a rule for (owner, Nov 18
+ * and 19): the ones still to do (the rule lists those past their last day, and those a
+ * push-back carried past the plan year), and the ones done with their share of the plan on no
+ * invoice.
  */
-async function careVisitsNotDone(sb: Sb, today: string): Promise<AttCareVisit[]> {
+async function careVisitsOfPlans(
+  sb: Sb,
+  today: string,
+): Promise<{ notDone: AttCareVisit[]; unbilled: AttCareUnbilled[] }> {
   const { data: active, error } = await sb
     .from("roof_care_plans")
     .select("site_id")
     .eq("status", "active");
   if (error) throw new Error(`Roof Care plans: ${error.message}`);
   const siteIds = [...new Set((active ?? []).map((p) => p.site_id))];
-  if (!siteIds.length) return [];
-  const plans = (await plansOfSites(sb, siteIds)).filter((p) => p.status === "active");
+  if (!siteIds.length) return { notDone: [], unbilled: [] };
+  const plans = (await plansOfSites(sb, siteIds, { money: true })).filter(
+    (p) => p.status === "active",
+  );
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
     readInChunks([...new Set(plans.map((p) => p.account_id))], (chunk) =>
@@ -263,14 +273,27 @@ async function careVisitsNotDone(sb: Sb, today: string): Promise<AttCareVisit[]>
   ]);
   const siteName = new Map(sites.map((x) => [x.id, (x.name ?? "").trim()]));
   const accountName = new Map(accounts.map((x) => [x.id, (x.name ?? "").trim()]));
-  const out: AttCareVisit[] = [];
+  const notDone: AttCareVisit[] = [];
+  const unbilled: AttCareUnbilled[] = [];
   for (const p of plans) {
     const where = [siteName.get(p.site_id), accountName.get(p.account_id)].filter(Boolean);
     const title = `${planName(p.plan)} · ${where[0] ?? "Property"}${where[1] ? ` (${where[1]})` : ""}`;
     const last = [...p.visits].filter((v) => v.kind !== "storm").pop();
     for (const v of p.visits) {
-      if (visitState(v, today) === "done") continue;
-      out.push({
+      if (visitState(v, today) === "done") {
+        if (visitUnbilled(v) && v.ticket)
+          unbilled.push({
+            visit_id: v.id,
+            job_id: v.ticket.id,
+            number: v.ticket.number,
+            title,
+            label: VISIT_LABEL[v.kind],
+            amount: v.amount,
+            since: v.ticket.completed_at,
+          });
+        continue;
+      }
+      notDone.push({
         visit_id: v.id,
         site_id: p.site_id,
         title,
@@ -281,5 +304,5 @@ async function careVisitsNotDone(sb: Sb, today: string): Promise<AttCareVisit[]>
       });
     }
   }
-  return out;
+  return { notDone, unbilled };
 }

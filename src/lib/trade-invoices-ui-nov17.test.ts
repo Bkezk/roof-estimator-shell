@@ -412,6 +412,8 @@ const invoiceRow = (over: Partial<InvoiceRow>): InvoiceRow => ({
   service_job_id: null,
   bill_to: { name: "Corner House Owner", address1: "12 Corner St", city: "Springfield" },
   bill_to_vendor_id: null,
+  care_allowance_choice: null,
+  care_allowance_plan_id: null,
   cost_total: 0,
   created_at: "2026-11-17T15:00:00.000Z",
   created_by: null,

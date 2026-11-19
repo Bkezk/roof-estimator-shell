@@ -58,6 +58,7 @@ import { isFlagged, visibleChecklist, type InspectionGrade } from "@/lib/inspect
 import { ON_RECEIPT_LATE_DAYS, invoiceDue } from "@/lib/invoice-list";
 import { addDays, isHeldOn } from "@/lib/my-work";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
+import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
 import { isFinishedStage } from "@/lib/ticket-stages";
 import { bidOverdueDays, isOpenOppStatus } from "@/lib/work-counts";
 import { officeDay, workingDaysBetween } from "@/lib/working-days";
@@ -79,7 +80,8 @@ export type AttentionKind =
   | "inspection_no_next"
   | "to_authorize"
   | "invoice_unpaid"
-  | "care_plan_late";
+  | "care_plan_late"
+  | "care_plan_unbilled";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -213,6 +215,25 @@ export interface AttCareVisit {
   pastPlanYear: boolean;
 }
 
+/**
+ * A Roof Care plan inspection that is done and signed off, with its share of the plan on no
+ * invoice (owner, Nov 19: "Go with 6"). The draft is made when the ticket is authorized; this
+ * is the one somebody then deleted or voided.
+ */
+export interface AttCareUnbilled {
+  visit_id: string;
+  job_id: string;
+  number: number;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** "Inspection 1" / "Inspection 2". */
+  label: string;
+  /** What the visit bills. */
+  amount: number;
+  /** When the inspection was finished (ISO), to age the row; null when unknown. */
+  since: string | null;
+}
+
 export interface AttentionIn {
   /** The viewer's day, YYYY-MM-DD. */
   today: string;
@@ -239,6 +260,8 @@ export interface AttentionIn {
   names: Readonly<Record<string, string>>;
   /** Roof Care plan inspections not yet done, of plans in force (Nov 18). */
   careVisits?: readonly AttCareVisit[];
+  /** Roof Care plan inspections done and on no invoice (Nov 19). */
+  careUnbilled?: readonly AttCareUnbilled[];
 }
 
 export interface AttentionRow {
@@ -694,6 +717,26 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: lateBy > 14 ? "red" : "amber",
       amount: v.amount > 0 ? v.amount : null,
       href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan inspection done and signed off, with its half of the plan on no invoice
+  // (Nov 19): the draft made at Authorized is gone. Shown from the first day.
+  for (const v of i.careUnbilled ?? []) {
+    const age = since(v.since, today) ?? 0;
+    rows.push({
+      key: `care_plan_unbilled:${v.visit_id}`,
+      group: "office",
+      kind: "care_plan_unbilled",
+      tag: "Roof Care",
+      title: v.title,
+      why: `${v.label} is done and its share of the plan is on no invoice. Open ticket #${v.number} and press ${CARE_PLAN_BILL_LABEL}.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: v.amount > 0 ? v.amount : null,
+      href: `/service?id=${v.job_id}`,
     });
   }
 

@@ -18,6 +18,8 @@ export type FirstVisit = (typeof FIRST_VISIT_CHOICES)[number];
 export const PUSH_LIMIT_DAYS = 30;
 /** The second inspection is at least this long after the first. */
 export const SECOND_VISIT_GAP_DAYS = 120;
+/** The second inspection's window is never shorter than this (owner, Nov 19). */
+export const SECOND_WINDOW_MIN_DAYS = 14;
 /** A ticket is made this many days before its inspection is due. */
 export const TICKET_LEAD_DAYS = 14;
 
@@ -55,6 +57,18 @@ export interface PlanVisit {
   push_reason: string | null;
   pushed_by_name: string | null;
   ticket: VisitTicket | null;
+  /**
+   * Its share of the plan is on a live invoice (Nov 19). Null for a reader who does not see
+   * invoices: nothing is said to them either way.
+   */
+  billed: boolean | null;
+}
+
+/** An invoice that took from the plan's minor repairs allowance. */
+export interface AllowanceUse {
+  invoice_id: string;
+  number: string;
+  amount: number;
 }
 
 export interface RoofCarePlan {
@@ -67,9 +81,12 @@ export interface RoofCarePlan {
   renews_on: string;
   roof_sqft: number;
   price: number;
-  list_price: number;
-  travel_price: number;
   price_estimated: boolean;
+  /** The minor repairs the plan includes each year; 0 for a plan with none. */
+  repair_allowance: number;
+  /** What invoices have taken from it; null for a reader who does not see invoices. */
+  allowance_used: number | null;
+  allowance_uses: AllowanceUse[];
   agreed_by: string;
   sold_by_name: string;
   notes: string;
@@ -140,14 +157,24 @@ export function planDates(
     v1 = { from: d, to: d };
   } else v1 = nextWindow(today);
   const earliest = plusDays(v1.from, SECOND_VISIT_GAP_DAYS);
-  const w = windowsFrom(earliest)[0]!;
+  // At least two weeks of the window left, else the next one (owner, Nov 19: a sign-up in
+  // mid January used to leave May 15 alone for the second inspection).
+  const w = windowsFrom(earliest)
+    .map((x) => ({ from: x.from > earliest ? x.from : earliest, to: x.to }))
+    .find((x) => daysBetween(x.from, x.to) >= SECOND_WINDOW_MIN_DAYS - 1)!;
   const year = `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
   // Feb 29 has no day a year on; the database lands on Feb 28.
   let renews = /^\d{4}-02-29$/.test(year) ? `${year.slice(0, 4)}-02-28` : year;
-  const from = w.from > earliest ? w.from : earliest;
+  const from = w.from;
   let to = w.to;
-  if (from <= renews) to = to < renews ? to : renews;
-  else renews = to;
+  // Inside the plan year when it fits, and never under two weeks. The renewal follows an
+  // inspection that ends after it.
+  if (from <= renews) {
+    const floor = plusDays(from, SECOND_WINDOW_MIN_DAYS - 1);
+    const cap = renews > floor ? renews : floor;
+    to = to < cap ? to : cap;
+  }
+  if (to > renews) renews = to;
   return { first: v1, second: { from, to }, renews };
 }
 
@@ -155,6 +182,20 @@ export function planDates(
 
 /** Stages at which the inspection has been done on the roof. */
 const DONE_STAGES = ["done", "authorized", "invoiced", "closed"];
+/** Stages at which its invoice should exist: it is made when the ticket is authorized. */
+const BILLED_BY_STAGES = ["authorized", "invoiced", "closed"];
+
+/**
+ * Done and signed off, with its share of the plan on no invoice (owner, Nov 19: "Go with 6"):
+ * the draft made at Authorized was deleted or voided, and nothing else said so. Only for a
+ * reader who sees invoices, and only for an inspection that bills something.
+ */
+export function visitUnbilled(v: PlanVisit): boolean {
+  return (
+    v.billed === false && v.amount > 0 && !!v.ticket && BILLED_BY_STAGES.includes(v.ticket.stage)
+  );
+}
+export const VISIT_UNBILLED_WORDS = "Not invoiced";
 
 export type VisitState = "done" | "late" | "ticket" | "waiting";
 
@@ -368,6 +409,51 @@ export function priceChangedLine(shown: number, now: number): string {
 }
 export const isPriceChanged = (message: string): boolean => message.includes(PRICE_CHANGED);
 
-/** Under the drive, when the road router did not answer and the straight line was used. */
-export const DRIVE_ESTIMATED_LINE =
-  "The road route could not be read just now, so this drive is worked from the straight-line distance. The price is an estimate. Press Show prices again in a minute for the routed drive.";
+/**
+ * Under the prices, when the road router did not answer and the straight line was used. It
+ * says the price is an estimate and nothing of why (owner, Nov 19: "they shouldn't know they're
+ * paying more for distance neither the customer or tech").
+ */
+export const PRICE_ESTIMATE_JUST_NOW =
+  "This price is an estimate just now. Press Get the price again in a minute for the exact one.";
+/** The same, when the address is placed by its town or zip and not the building. */
+export const PRICE_ESTIMATE_ROUGH =
+  "The street address is not on the map. This price is an estimate until the office confirms the address.";
+
+// ── What the sign-up screen is told (owner, Nov 19) ─────────────────────────────────────────
+//
+// The customer reads the sign-up screen with whoever holds it. The price is one number: not the
+// list price and what the distance adds, not the hours or the miles. So none of that is sent to
+// the browser at all. The database still saves both parts on the plan for the Owner page.
+
+export interface ShownOffer {
+  plan: PlanKey;
+  name: string;
+  price: number;
+  visit1: number;
+  visit2: number;
+}
+export type ShownPrice =
+  | { ready: false }
+  | { ready: true; custom_quote: true; over_sqft: number; plans: [] }
+  | { ready: true; custom_quote: false; plans: ShownOffer[] };
+
+/** The price answer with everything about the distance left out. */
+export function shownPrice(a: PriceAnswer): ShownPrice {
+  if (!a.ready) return { ready: false };
+  if (a.custom_quote) return { ready: true, custom_quote: true, over_sqft: a.over_sqft, plans: [] };
+  return {
+    ready: true,
+    custom_quote: false,
+    plans: a.plans.map((o) => ({
+      plan: o.plan,
+      name: o.name,
+      price: o.price,
+      visit1: o.visit1,
+      visit2: o.visit2,
+    })),
+  };
+}
+
+/** Why a shown price is an estimate, when it is. */
+export type PriceEstimate = "rough" | "just-now" | null;

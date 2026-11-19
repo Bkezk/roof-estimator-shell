@@ -127,7 +127,14 @@ describe("the editor, the PDF, the save and the database", () => {
   });
   it("page 1 prints a No price line's quantity but no rate or amount", () => {
     const srv = read("src/lib/invoices.server.ts");
-    expect(srv).toContain("for (const { line: l, priced } of rows.listed) {");
+    // (Nov 19: the loop became listLine, so a Roof Care plan's line can be listed under the one
+    // Services and materials row; roof-care-followups-nov19.test.ts.)
+    expect(srv).toContain(
+      "const listLine = ({ line: l, priced }: (typeof rows.listed)[number]) => {",
+    );
+    expect(srv).toContain(
+      "for (const row of rows.listed) if (!isAllowanceLine(row.line)) listLine(row);",
+    );
     expect(srv).toContain("if (priced) {");
   });
   it("the save takes hide_price; Rebuild writes it once the column exists", () => {

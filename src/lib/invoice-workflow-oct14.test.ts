@@ -210,7 +210,10 @@ describe("the server builds and saves PO lines (source scan)", () => {
     server.indexOf("export function totals("),
   );
   it("buildLinesFromJob reads EVERY purchase order of the ticket and makes a line each (owner, Oct 28: approved or not)", () => {
-    expect(build).toContain("opts: { markup?: number | null; poMarkup?: boolean | null } = {},");
+    // (Nov 19: the options also name the draft being rebuilt, for a care plan's own line.)
+    expect(build.replace(/\s+/g, " ")).toContain(
+      "opts: { markup?: number | null; poMarkup?: boolean | null;",
+    );
     expect(build).toMatch(
       /\.from\("service_job_purchase_orders"\)\s*\.select\("id, po_number, title, price, po_date, vendor_id, vendor_text"\)\s*\.eq\("service_job_id", jobId\)\s*\.order\("po_date"\)/,
     );
@@ -228,7 +231,8 @@ describe("the server builds and saves PO lines (source scan)", () => {
   it("rebuild passes the draft's po_markup; a new draft passes the default (true)", () => {
     const rebuild = fns.slice(fns.indexOf("export const rebuildInvoiceLines"));
     expect(rebuild).toMatch(
-      /buildLinesFromJob\(sb, inv\.service_job_id, \{\s*markup: inv\.material_markup == null \? null : Number\(inv\.material_markup\),[\s\S]*?poMarkup: inv\.po_markup !== false,\s*\}\)/,
+      // (Nov 19: and the draft's own id, for a care plan inspection's line.)
+      /buildLinesFromJob\(sb, inv\.service_job_id, \{\s*markup: inv\.material_markup == null \? null : Number\(inv\.material_markup\),[\s\S]*?poMarkup: inv\.po_markup !== false,[\s\S]*?invoiceId: inv\.id,\s*\}\)/,
     );
     const create = fns.slice(
       fns.indexOf("async function createInvoiceFor("),

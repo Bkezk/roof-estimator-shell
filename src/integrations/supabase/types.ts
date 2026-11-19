@@ -2115,6 +2115,8 @@ export type Database = {
           bid_id: string | null
           bill_to: Json
           bill_to_vendor_id: string | null
+          care_allowance_choice: string | null
+          care_allowance_plan_id: string | null
           cost_total: number
           created_at: string
           created_by: string | null
@@ -2158,6 +2160,8 @@ export type Database = {
           bid_id?: string | null
           bill_to?: Json
           bill_to_vendor_id?: string | null
+          care_allowance_choice?: string | null
+          care_allowance_plan_id?: string | null
           cost_total?: number
           created_at?: string
           created_by?: string | null
@@ -2201,6 +2205,8 @@ export type Database = {
           bid_id?: string | null
           bill_to?: Json
           bill_to_vendor_id?: string | null
+          care_allowance_choice?: string | null
+          care_allowance_plan_id?: string | null
           cost_total?: number
           created_at?: string
           created_by?: string | null
@@ -3421,6 +3427,7 @@ export type Database = {
           price_estimated: boolean
           referred_by: string | null
           renews_on: string
+          repair_allowance: number
           roof_sqft: number
           signed_on: string
           site_id: string
@@ -3450,6 +3457,7 @@ export type Database = {
           price_estimated?: boolean
           referred_by?: string | null
           renews_on: string
+          repair_allowance?: number
           roof_sqft: number
           signed_on: string
           site_id: string
@@ -3479,6 +3487,7 @@ export type Database = {
           price_estimated?: boolean
           referred_by?: string | null
           renews_on?: string
+          repair_allowance?: number
           roof_sqft?: number
           signed_on?: string
           site_id?: string

@@ -145,7 +145,12 @@ describe("10. a second invoice brings everything, purchase orders included (owne
       server.indexOf("export function totals("),
     );
     expect(build).toContain("const orders = pos ?? [];");
-    expect(build).not.toContain('.from("invoices")');
+    // (Nov 19: a Roof Care plan inspection asks one thing of the ticket's other invoices, whether
+    // its own share of the plan is already on one. That is after the lines are built and has no
+    // say over a purchase order; roof-care-followups-nov19.test.ts.)
+    const lines = build.slice(0, build.indexOf("if (job.roof_care_visit_id) {"));
+    expect(lines).toContain("const orders = pos ?? [];");
+    expect(lines).not.toContain('.from("invoices")');
     expect(build).not.toContain("forInvoiceId");
   });
 });

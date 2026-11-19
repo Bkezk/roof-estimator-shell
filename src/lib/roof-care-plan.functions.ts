@@ -19,18 +19,25 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { seesInvoices } from "@/lib/access";
+import { chunkIds } from "@/lib/chunk-ids";
 import { readProfile } from "@/lib/profile-cache.server";
+import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
 import {
   asPlanKey,
+  carePlanLineSource,
   FIRST_VISIT_CHOICES,
   priceChangedLine,
   readPriceAnswer,
   ROOF_CARE_TERMS_VERSION,
+  shownPrice,
   TERMS_NOT_AGREED,
   VISIT_KINDS,
+  type AllowanceUse,
   type PlanVisit,
-  type PriceAnswer,
+  type PriceEstimate,
   type RoofCarePlan,
+  type ShownPrice,
   type VisitKind,
   type VisitTicket,
 } from "@/lib/roof-care-plan";
@@ -96,12 +103,19 @@ export async function siteDrive(
   );
 }
 
+/**
+ * What the sign-up screen is told. The drive, the list price and what the distance adds stay on
+ * the server (owner, Nov 19: "they shouldn't know they're paying more for distance neither the
+ * customer or tech"): the screen gets the price of each plan and nothing of how it was made.
+ */
 export interface RoofCareOffer {
   site: { id: string; name: string | null };
-  /** Null when neither the address nor its town is on the map: no price then. */
-  drive: RoofCareDrive | null;
-  /** Null until a roof size is given and the drive is known. */
-  price: PriceAnswer | null;
+  /** False when neither the address nor its town is on the map: no price then. */
+  placed: boolean;
+  /** Why the price is an estimate: placed by its town, or the road route was not read just now. */
+  estimate: PriceEstimate;
+  /** Null until a roof size is given and the property is placed. */
+  price: ShownPrice | null;
 }
 
 const sqftInput = z.number().positive().max(5_000_000);
@@ -116,7 +130,7 @@ export const roofCareOffer = createServerFn({ method: "GET" })
     const sb = context.supabase;
     const site = await siteOf(sb, data.site_id);
     const drive = await siteDrive(sb, site);
-    let price: PriceAnswer | null = null;
+    let price: ShownPrice | null = null;
     if (drive && data.sqft != null) {
       const { data: answer, error } = await sb.rpc("roof_care_price", {
         p_sqft: data.sqft,
@@ -124,13 +138,20 @@ export const roofCareOffer = createServerFn({ method: "GET" })
         p_miles: drive.miles,
       });
       if (error) throw new Error(error.message);
-      price = readPriceAnswer(answer);
+      price = shownPrice(readPriceAnswer(answer));
     }
-    return { site: { id: site.id, name: site.name }, drive, price };
+    const estimate: PriceEstimate = !drive
+      ? null
+      : placedRoughly(drive.placed_by)
+        ? "rough"
+        : drive.source === "estimated"
+          ? "just-now"
+          : null;
+    return { site: { id: site.id, name: site.name }, placed: !!drive, estimate, price };
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, signed_on, renews_on, roof_sqft, price, list_price, travel_price, price_estimated, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name" as const;
 const TICKET_SELECT =
@@ -138,8 +159,60 @@ const TICKET_SELECT =
 
 const ORDER: Record<VisitKind, number> = { visit1: 0, visit2: 1, storm: 2 };
 
-/** The plans of `siteIds`, newest first, each with its inspections and their tickets. */
-export async function plansOfSites(sb: Sb, siteIds: readonly string[]): Promise<RoofCarePlan[]> {
+/**
+ * What the plans' own lines on invoices say (Nov 19): which inspections have their share of the
+ * plan on a live invoice, and what each plan's minor repairs allowance has taken. A void invoice
+ * counts for nothing. Read with the caller's sign-in, so only for someone who sees invoices.
+ */
+async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly string[]) {
+  const billed = new Set<string>();
+  const uses = new Map<string, AllowanceUse[]>();
+  const sources = [...visitIds.map(carePlanLineSource), ...planIds.map(allowanceLineSource)];
+  const lines: { source: string | null; total: number; invoice_id: string }[] = [];
+  for (const chunk of chunkIds(sources)) {
+    const { data, error } = await sb
+      .from("invoice_lines")
+      .select("source, total, invoice_id")
+      .in("source", chunk);
+    if (error) throw new Error(`The plans' invoices: ${error.message}`);
+    lines.push(...(data ?? []));
+  }
+  const live = new Map<string, string>();
+  for (const chunk of chunkIds([...new Set(lines.map((l) => l.invoice_id))])) {
+    const { data, error } = await sb
+      .from("invoices")
+      .select("id, status, display_number")
+      .in("id", chunk);
+    if (error) throw new Error(`The plans' invoices: ${error.message}`);
+    for (const i of data ?? []) if (i.status !== "void") live.set(i.id, i.display_number ?? "");
+  }
+  for (const l of lines) {
+    const number = live.get(l.invoice_id);
+    if (number === undefined || !l.source) continue;
+    const planId = allowancePlanOf(l);
+    if (!planId) {
+      billed.add(l.source.slice(carePlanLineSource("").length));
+      continue;
+    }
+    const list = uses.get(planId) ?? [];
+    const amount = -Number(l.total) || 0;
+    const same = list.find((u) => u.invoice_id === l.invoice_id);
+    if (same) same.amount = Math.round((same.amount + amount) * 100) / 100;
+    else list.push({ invoice_id: l.invoice_id, number, amount });
+    uses.set(planId, list);
+  }
+  return { billed, uses };
+}
+
+/**
+ * The plans of `siteIds`, newest first, each with its inspections and their tickets. `money`:
+ * also what is billed and what the allowance has taken, for a reader who sees invoices.
+ */
+export async function plansOfSites(
+  sb: Sb,
+  siteIds: readonly string[],
+  opts: { money?: boolean } = {},
+): Promise<RoofCarePlan[]> {
   if (!siteIds.length) return [];
   const { data: plans, error } = await sb
     .from("roof_care_plans")
@@ -177,6 +250,13 @@ export async function plansOfSites(sb: Sb, siteIds: readonly string[]): Promise<
       invoice_id: j.invoice_id,
     });
   }
+  const money = opts.money
+    ? await planMoney(
+        sb,
+        visitIds,
+        plans.map((p) => p.id),
+      )
+    : null;
   const byPlan = new Map<string, PlanVisit[]>();
   for (const v of visits ?? []) {
     const kind = (VISIT_KINDS as readonly string[]).includes(v.kind) ? (v.kind as VisitKind) : null;
@@ -192,6 +272,7 @@ export async function plansOfSites(sb: Sb, siteIds: readonly string[]): Promise<
       push_reason: v.push_reason,
       pushed_by_name: v.pushed_by_name,
       ticket: ticketOf.get(v.id) ?? null,
+      billed: money ? money.billed.has(v.id) : null,
     });
     byPlan.set(v.plan_id, list);
   }
@@ -209,9 +290,12 @@ export async function plansOfSites(sb: Sb, siteIds: readonly string[]): Promise<
       renews_on: p.renews_on,
       roof_sqft: Number(p.roof_sqft),
       price: Number(p.price),
-      list_price: Number(p.list_price),
-      travel_price: Number(p.travel_price),
       price_estimated: !!p.price_estimated,
+      repair_allowance: Number(p.repair_allowance) || 0,
+      allowance_used: money
+        ? Math.round((money.uses.get(p.id) ?? []).reduce((n, u) => n + u.amount, 0) * 100) / 100
+        : null,
+      allowance_uses: money ? (money.uses.get(p.id) ?? []) : [],
       agreed_by: p.agreed_by,
       sold_by_name: p.sold_by_name,
       notes: p.notes,
@@ -229,8 +313,9 @@ export const listRoofCarePlans = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ site_ids: z.array(z.string().uuid()).max(300) }).parse(d))
   .handler(async ({ data, context }): Promise<RoofCarePlan[]> => {
-    await signedIn(context);
-    return plansOfSites(context.supabase, data.site_ids);
+    const p = await signedIn(context);
+    // What is billed and what the allowance has taken: for those who see invoices.
+    return plansOfSites(context.supabase, data.site_ids, { money: seesInvoices(p) });
   });
 
 const signUpInput = z.object({

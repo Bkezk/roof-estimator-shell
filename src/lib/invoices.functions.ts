@@ -47,6 +47,14 @@ import {
   type RebuildLine,
 } from "@/lib/invoice-rebuild";
 import { stampSent } from "@/lib/invoice-sent";
+import {
+  ALLOWANCE_UNANSWERED,
+  allowanceAfterChange,
+  allowanceTaken,
+  allowanceUnanswered,
+  billableBefore,
+  isAllowanceLine,
+} from "@/lib/roof-care-allowance";
 import { mergeSendTo } from "@/lib/invoice-send-to";
 import {
   canShareInvoice,
@@ -270,6 +278,14 @@ async function finalizeDraft(
   // The ticket's stage as loaded with the bundle (loadBundle reads it fresh for this call).
   const stageProblem = finalizeStageProblem(ofTicket(b.invoice) ? b.job?.stage : null);
   if (stageProblem) throw new Error(stageProblem);
+  // A repair at a property whose Roof Care plan has minor repairs left (owner, Nov 19): the
+  // office answers on the invoice whether it uses the plan, before it is final. Asked here, ahead
+  // of the PDF, so nothing is stored for an invoice that is refused; the database refuses it too.
+  if (ofTicket(b.invoice)) {
+    const { invoiceAllowanceOf } = await import("@/lib/roof-care-allowance.functions");
+    const allowance = await invoiceAllowanceOf(sb, b.invoice, b.lines);
+    if (allowanceUnanswered(allowance)) throw new Error(ALLOWANCE_UNANSWERED(allowance.left));
+  }
   const { renderInvoicePdf } = await import("@/lib/invoices.server");
   const pdf = await renderInvoicePdf(sb, b);
   const path = pdfPath(b.invoice);
@@ -804,6 +820,8 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       markup: inv.material_markup == null ? null : Number(inv.material_markup),
       // The PO lines follow this draft's Mark up switch (owner, Oct 14).
       poMarkup: inv.po_markup !== false,
+      // A care plan inspection's own line stays on the invoice that has it (Nov 19).
+      invoiceId: inv.id,
     });
     const { data: oldLines, error: oErr } = await sb
       .from("invoice_lines")
@@ -841,6 +859,35 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
         };
       },
     );
+    // The Roof Care plan's allowance line is not the ticket's, so the builder does not make it
+    // (Nov 19): it is carried over, held to what the rebuilt invoice bills. With nothing left to
+    // cover it goes, and the question is open again.
+    const allowanceOld = (oldLines ?? []).filter(isAllowanceLine);
+    const allowanceKept = allowanceOld.length
+      ? allowanceAfterChange(allowanceTaken(allowanceOld), billableBefore(lines))
+      : 0;
+    if (allowanceKept > 0) {
+      const from = allowanceOld[0]!;
+      lines.push({
+        sort: lines.reduce((m, l) => Math.max(m, l.sort), -1) + 1,
+        kind: from.kind,
+        description: from.description,
+        qty: 1,
+        unit: from.unit,
+        rate: -allowanceKept,
+        total: -allowanceKept,
+        cost_rate: 0,
+        cost_total: 0,
+        on_date: null,
+        source: from.source,
+        taxable: false,
+        invoice_id: inv.id,
+        ...(hasFlag ? { rate_overridden: true } : {}),
+        ...(hasShow ? { show_on_invoice: true } : {}),
+        ...(hasHide ? { hide_price: false } : {}),
+      });
+    }
+    const allowanceGone = allowanceOld.length > 0 && !(allowanceKept > 0);
     // The lines are thrown away and made again (new ids): the log shows each removed and added.
     const { error: dErr } = await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
     if (dErr) throw new Error(dErr.message);
@@ -851,7 +898,11 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     const t = totals(lines, Number(inv.tax_rate));
     const { data: updated, error: uErr } = await sb
       .from("invoices")
-      .update({ ...t, updated_by_name: nameOf(p) })
+      .update({
+        ...t,
+        updated_by_name: nameOf(p),
+        ...(allowanceGone ? { care_allowance_choice: null, care_allowance_plan_id: null } : {}),
+      })
       .eq("id", inv.id)
       .select("*")
       .single();
@@ -962,6 +1013,15 @@ export const saveInvoice = createServerFn({ method: "POST" })
       const edits: { id: number; row: LineWrite }[] = [];
       data.lines.forEach((l, i) => {
         const prev = l.id != null ? old.get(l.id) : undefined;
+        // The Roof Care plan's allowance line is the plan box's (Nov 19): it is kept as stored,
+        // whatever the editor sent for it, and one is never added from here.
+        if (isAllowanceLine(l) || (prev && isAllowanceLine(prev))) {
+          if (prev && isAllowanceLine(prev) && !kept.has(prev.id)) {
+            kept.add(prev.id);
+            if (prev.sort !== i) edits.push({ id: prev.id, row: { sort: i } as LineWrite });
+          }
+          return;
+        }
         // A price typed by hand is remembered as the editor says (rate_overridden), so Rebuild
         // from ticket keeps it (owner, Oct 5; Oct 6: the flag, not a ratio test). Only once the
         // column exists (20261005170000): before that the row has no such key (savedLineRow).
@@ -992,9 +1052,16 @@ export const saveInvoice = createServerFn({ method: "POST" })
         if (lErr) throw new Error(lErr.message);
       }
     }
-    const { data: lines } = await sb.from("invoice_lines").select("*").eq("invoice_id", inv.id);
+    const readLines = async () =>
+      (await sb.from("invoice_lines").select("*").eq("invoice_id", inv.id)).data ?? [];
+    let lines = await readLines();
+    // The plan's allowance line never takes more than the invoice now bills (Nov 19).
+    if (lines.some(isAllowanceLine) || inv.care_allowance_choice === "applied") {
+      const { keepAllowanceInStep } = await import("@/lib/roof-care-allowance.functions");
+      if (await keepAllowanceInStep(sb, inv, lines)) lines = await readLines();
+    }
     const taxRate = data.tax_rate ?? Number(inv.tax_rate);
-    const t = totals(lines ?? [], taxRate);
+    const t = totals(lines, taxRate);
     const patch: Database["public"]["Tables"]["invoices"]["Update"] = {
       ...t,
       tax_rate: taxRate,

@@ -80,6 +80,8 @@ import {
 } from "@/lib/service-materials";
 import { loadServiceMaterials } from "@/lib/service-materials.server";
 import { carePlanInvoiceLines, type CarePlanVisitRef } from "@/lib/roof-care-invoice";
+import { isAllowanceLine } from "@/lib/roof-care-allowance";
+import { carePlanLineSource } from "@/lib/roof-care-plan";
 import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
@@ -179,7 +181,12 @@ export async function cellPiece(
 export async function buildLinesFromJob(
   sb: Client,
   jobId: string,
-  opts: { markup?: number | null; poMarkup?: boolean | null } = {},
+  opts: {
+    markup?: number | null;
+    poMarkup?: boolean | null;
+    /** The draft being built again; null or absent for a new invoice (the plan's line, Nov 19). */
+    invoiceId?: string | null;
+  } = {},
 ): Promise<LineInsert[]> {
   const { data: job, error } = await sb
     .from("service_jobs")
@@ -353,11 +360,43 @@ export async function buildLinesFromJob(
   // A Roof Care plan inspection bills its share of the plan (owner, Nov 18: "billed half at
   // first visit half at second visit and invoiced"), and the visit's own time and materials are
   // covered by it: listed at no charge, with their cost kept.
+  // Once (owner, Nov 19: "Go with 1"): "Another invoice" on the same ticket used to open with
+  // the plan's half on it again. When a live invoice of this ticket carries the plan's line, a
+  // further one is built as any ticket's is, from its time and materials at their own prices.
   if (job.roof_care_visit_id) {
     const visit = await carePlanVisit(sb, job.roof_care_visit_id);
-    if (visit) return carePlanInvoiceLines(lines, visit);
+    if (visit && !(await planLineElsewhere(sb, jobId, visit.id, opts.invoiceId ?? null)))
+      return carePlanInvoiceLines(lines, visit);
   }
   return lines;
+}
+
+/**
+ * Is the plan's own line for this inspection on a live invoice of the ticket other than
+ * `invoiceId` (the one being built again; null for a new one)? A void invoice does not count.
+ */
+export async function planLineElsewhere(
+  sb: Client,
+  jobId: string,
+  visitId: string,
+  invoiceId: string | null,
+): Promise<boolean> {
+  const { data: invs, error } = await sb
+    .from("invoices")
+    .select("id, status")
+    .eq("service_job_id", jobId)
+    .neq("status", "void");
+  if (error) throw new Error(`This ticket's invoices: ${error.message}`);
+  const others = (invs ?? []).map((i) => i.id).filter((id) => id !== invoiceId);
+  if (!others.length) return false;
+  const { data: found, error: lErr } = await sb
+    .from("invoice_lines")
+    .select("id")
+    .in("invoice_id", others)
+    .eq("source", carePlanLineSource(visitId))
+    .limit(1);
+  if (lErr) throw new Error(`This ticket's invoices: ${lErr.message}`);
+  return (found ?? []).length > 0;
 }
 
 /** The visit a care plan ticket was made for, with its plan; null when it cannot be read. */
@@ -690,7 +729,7 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   // Only the lines shown are listed, a No price line with its quantity only; the hidden and
   // No price amounts are one row (owner, Oct 8), so the totals below are the same either way.
   const rows = pdfLineRows(b.lines);
-  for (const { line: l, priced } of rows.listed) {
+  const listLine = ({ line: l, priced }: (typeof rows.listed)[number]) => {
     doc.ensure(14);
     const desc = doc.wrap(l.description + (l.on_date ? `  (${fmtDate(l.on_date)})` : ""), 280, 9);
     doc.text(desc[0] ?? "", cols.desc, 9);
@@ -705,13 +744,17 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       doc.text(extra, cols.desc, 9);
       doc.y -= 12;
     }
-  }
+  };
+  // What a Roof Care plan takes off reads after the work it is taken from (Nov 19), so it goes
+  // under the one Services and materials row, not above it.
+  for (const row of rows.listed) if (!isAllowanceLine(row.line)) listLine(row);
   if (rows.rollup) {
     doc.ensure(14);
     doc.text(rows.rollup.label, cols.desc, 9);
     doc.textRight(money(rows.rollup.total), cols.total, 9);
     doc.y -= 12;
   }
+  for (const row of rows.listed) if (isAllowanceLine(row.line)) listLine(row);
   doc.line();
   doc.y -= 14;
   const tot: [string, string, boolean][] = [

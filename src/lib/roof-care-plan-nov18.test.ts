@@ -102,6 +102,7 @@ const visit = (over: Partial<PlanVisit> = {}): PlanVisit => ({
   push_reason: null,
   pushed_by_name: null,
   ticket: null,
+  billed: null,
   ...over,
 });
 const ticket = (stage: string) => ({
@@ -393,7 +394,9 @@ describe("the price for a property", () => {
     expect(env.rpcCalls).toEqual([
       { fn: "roof_care_price", args: { p_sqft: 20000, p_hours: 3.5, p_miles: 180 } },
     ]);
-    expect(o.drive?.miles).toBe(180);
+    // (Nov 19: the drive stays on the server. The screen is told the property was placed.)
+    expect(o.placed).toBe(true);
+    expect(o.estimate).toBeNull();
     expect(o.price).toEqual({ ready: false });
     // The address went to the map as the property has it.
     expect(drive.mock.calls[0]![2]).toEqual({
@@ -431,7 +434,12 @@ describe("the price for a property", () => {
     drive.mockResolvedValue(null);
     const env = world();
     const o = await call<RoofCareOffer>(roofCareOffer, env, { site_id: SITE, sqft: 20000 });
-    expect(o).toEqual({ site: { id: SITE, name: "Plant 2" }, drive: null, price: null });
+    expect(o).toEqual({
+      site: { id: SITE, name: "Plant 2" },
+      placed: false,
+      estimate: null,
+      price: null,
+    });
     expect(env.rpcCalls).toEqual([]);
   });
   it("a property with no address and no point says so", async () => {
@@ -590,8 +598,9 @@ describe("signing a customer up", () => {
     await call(signUpRoofCare, env, form);
     expect(seen[0]!["p_estimated"]).toBe(true);
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain('{offer?.drive?.source === "estimated" && (');
-    expect(card).toContain("{DRIVE_ESTIMATED_LINE}");
+    // (Nov 19: the form says the price is an estimate, and nothing of the drive.)
+    expect(card).toContain('{offer?.estimate === "just-now" && (');
+    expect(card).toContain("{PRICE_ESTIMATE_JUST_NOW}");
   });
 
   it("the database is given the server's own drive, and the price is its to work out", async () => {

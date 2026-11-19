@@ -66,6 +66,7 @@ import {
   Send,
   Trash2,
   X,
+  ShieldCheck,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -74,6 +75,14 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
+import {
+  allowanceMoney,
+  isAllowanceLine,
+  type AllowanceChoice,
+  type InvoiceAllowance,
+} from "@/lib/roof-care-allowance";
+import { getInvoiceAllowance, setInvoiceAllowance } from "@/lib/roof-care-allowance.functions";
+import { planName } from "@/lib/roof-care-plan";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import type { InvoiceBidRef } from "@/lib/bid-invoices";
 import { createBidInvoice, listBidInvoices } from "@/lib/bid-invoices.functions";
@@ -865,7 +874,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   // Lines whose computed rate the office chose to override (the pencil; owner, Oct 14).
   const [rateEdit, setRateEdit] = useState<ReadonlySet<string>>(() => new Set());
 
-  const [busy, setBusy] = useState<null | "rebuild" | "final" | "delete">(null);
+  const [busy, setBusy] = useState<null | "rebuild" | "final" | "delete" | "allowance">(null);
   const [confirm, setConfirm] = useState<null | "rebuild" | "final" | "delete">(null);
 
   const account = useAccount(job ? job.account_id : bid.account_id);
@@ -1054,6 +1063,28 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       takeServer(r);
       toast.success(
         `Rebuilt from the ticket: ${r.lines.length} line${r.lines.length === 1 ? "" : "s"}`,
+      );
+    });
+  // The property's Roof Care plan and this invoice (owner, Nov 19): where the minor repairs
+  // allowance stands, read again after each save because it follows what the invoice bills.
+  const allowanceFn = useServerFn(getInvoiceAllowance);
+  const setAllowanceFn = useServerFn(setInvoiceAllowance);
+  const allowanceQ = useQuery({
+    queryKey: ["invoice-allowance", inv.id, inv.updated_at],
+    queryFn: () => allowanceFn({ data: { id: inv.id } }),
+    enabled: !!job,
+    placeholderData: (prev) => prev,
+  });
+  const answerAllowance = (choice: AllowanceChoice, amount: number | null) =>
+    run("allowance", "Could not save the answer", async () => {
+      // What is still waiting goes first, so the amount is worked from the lines as they are.
+      await autosave.flush();
+      const r = await setAllowanceFn({ data: { id: inv.id, choice, amount } });
+      takeServer({ invoice: r.invoice, lines: r.lines });
+      toast.success(
+        choice === "applied"
+          ? `${allowanceMoney(r.allowance?.applied ?? 0)} taken off under the Roof Care plan`
+          : "Marked: this invoice does not use the Roof Care plan",
       );
     });
   const finalise = () =>
@@ -1286,6 +1317,14 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         </div>
       </div>
 
+      {job && allowanceQ.data && (
+        <AllowanceBox
+          a={allowanceQ.data}
+          busy={!!busy}
+          onAnswer={(choice, amount) => void answerAllowance(choice, amount)}
+        />
+      )}
+
       {/* The lines, with the totals in a summary box on the right */}
       {/* The totals sit beside the lines only when the content is wide enough for both (a
           container query, not the window: the sidebar takes its share). Nov 9 audit: at 1280 to
@@ -1319,176 +1358,200 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 </p>
               )}
               <div className="space-y-2 lg:space-y-0">
-                {lines.map((l, i) => (
-                  <div
-                    key={l.key}
-                    className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
-                  >
-                    <div className="order-first lg:order-none">
-                      <CellLabel>Kind</CellLabel>
-                      {l.source ? (
-                        <div className="flex h-9 items-center">
-                          <KindBadge kind={l.kind} />
-                        </div>
-                      ) : (
-                        <Select
-                          value={l.kind}
-                          onValueChange={(v) => setLine(l.key, { kind: asKind(v) })}
-                        >
-                          <SelectTrigger className="h-9 w-full" aria-label={`Line ${i + 1} kind`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {LINE_KINDS.map((k) => (
-                              <SelectItem key={k} value={k}>
-                                {KIND_LABELS[k]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                    <div className="col-span-2 lg:col-span-1">
-                      <CellLabel>Description</CellLabel>
-                      <Input
-                        value={l.description}
-                        maxLength={300}
-                        autoFocus={l.key === newKey}
-                        aria-label={`Line ${i + 1} description`}
-                        className={
-                          showProblems && !l.description.trim() ? "border-destructive" : ""
-                        }
-                        onChange={(e) => setLine(l.key, { description: e.target.value })}
-                      />
-                      {l.on_date && (
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {shortDay(l.on_date)}
+                {lines.map((l, i) =>
+                  isAllowanceLine(l) ? (
+                    // The plan's allowance line: changed in the Roof Care plan box, not typed
+                    // over here (Nov 19).
+                    <div
+                      key={l.key}
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-emerald-600/40 bg-emerald-600/5 p-3 text-sm lg:my-1"
+                      data-allowance-line
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+                        <span className="min-w-0">
+                          <span className="block font-medium">{l.description}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            Listed on the invoice with its amount. Change it in the Roof Care plan
+                            box above.
+                          </span>
                         </span>
-                      )}
-                    </div>
-                    <div>
-                      <CellLabel>Qty</CellLabel>
-                      <OptionalNumber
-                        value={l.qty}
-                        step="0.25"
-                        label={`Line ${i + 1} quantity`}
-                        invalid={showProblems && l.qty === null}
-                        onChange={(v) => setLine(l.key, { qty: v })}
-                      />
-                    </div>
-                    <div>
-                      <CellLabel>Unit</CellLabel>
-                      <Input
-                        value={l.unit}
-                        maxLength={20}
-                        aria-label={`Line ${i + 1} unit`}
-                        onChange={(e) => setLine(l.key, { unit: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <CellLabel>Rate</CellLabel>
-                      {/* A ticket material's rate follows the markup (owner, Oct 14): shown with
-                      its rule and a pencil; the box comes back to type a price of your own. */}
-                      {rateIsComputed(l) && !rateEdit.has(l.key) ? (
-                        <div className="flex h-9 items-center justify-end gap-1">
-                          <span className="text-right leading-tight">
-                            <span className="block text-sm tabular-nums">{rateText(l.rate)}</span>
-                            <span className="block text-[10px] text-muted-foreground">
-                              {computedRateHint(l, head.markup_pct, head.po_markup)}
-                            </span>
-                          </span>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 shrink-0 text-muted-foreground"
-                            aria-label={`Override the rate for line ${i + 1}`}
-                            title="Type a rate of your own"
-                            onClick={() => setRateEdit((s) => new Set(s).add(l.key))}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <OptionalNumber
-                          value={l.rate}
-                          min={-1_000_000}
-                          step="0.01"
-                          label={`Line ${i + 1} rate`}
-                          invalid={showProblems && l.rate === null}
-                          onChange={(v) => setLine(l.key, { rate: v })}
-                        />
-                      )}
-                    </div>
-                    {internal && (
-                      <div>
-                        <CellLabel>Cost</CellLabel>
-                        <OptionalNumber
-                          value={l.cost_rate}
-                          step="0.01"
-                          label={`Line ${i + 1} cost`}
-                          onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
-                        />
-                        {/* Owner, Oct 14 ("it says cost 0.091, I'm confused"): a material from the
-                        ledger is costed per piece — the box price over the pieces in it. */}
-                        {rateIsComputed(l) && (
-                          <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
-                            per {l.unit.trim() || "ea"}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
-                      <Checkbox
-                        checked={l.taxable}
-                        aria-label={`Line ${i + 1} taxable`}
-                        onCheckedChange={(c) => setLine(l.key, { taxable: c === true })}
-                      />
-                      <span className="lg:hidden">Taxable</span>
-                    </label>
-                    {/* On the customer's PDF (owner, Oct 8): Hidden (in the one Services and
-                    materials amount), No price (listed with its quantity), With price. */}
-                    <div>
-                      <CellLabel>On the invoice</CellLabel>
-                      <Select
-                        value={showChoice(l)}
-                        onValueChange={(v) => setLine(l.key, showFlags(v as ShowChoice))}
-                      >
-                        <SelectTrigger
-                          className="h-9 w-full"
-                          aria-label={`Line ${i + 1} on the invoice`}
-                          title="Hidden: in the one Services and materials amount. No price: listed with its quantity. With price: listed with rate and amount."
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hidden">Hidden</SelectItem>
-                          <SelectItem value="no_price">No price</SelectItem>
-                          <SelectItem value="priced">With price</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 lg:block lg:h-9 lg:pt-2 lg:text-right">
-                      <span className="text-xs text-muted-foreground lg:hidden">Total</span>
-                      <span className="tabular-nums">
+                      </span>
+                      <span className="tabular-nums font-medium">
                         {money(r2((l.qty ?? 0) * (l.rate ?? 0)))}
                       </span>
                     </div>
-                    <div className="order-first flex justify-end lg:order-none">
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-9 w-9 text-destructive hover:text-destructive"
-                        aria-label={`Remove line ${i + 1}`}
-                        title="Remove this line"
-                        onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                  ) : (
+                    <div
+                      key={l.key}
+                      className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
+                    >
+                      <div className="order-first lg:order-none">
+                        <CellLabel>Kind</CellLabel>
+                        {l.source ? (
+                          <div className="flex h-9 items-center">
+                            <KindBadge kind={l.kind} />
+                          </div>
+                        ) : (
+                          <Select
+                            value={l.kind}
+                            onValueChange={(v) => setLine(l.key, { kind: asKind(v) })}
+                          >
+                            <SelectTrigger className="h-9 w-full" aria-label={`Line ${i + 1} kind`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {LINE_KINDS.map((k) => (
+                                <SelectItem key={k} value={k}>
+                                  {KIND_LABELS[k]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                      <div className="col-span-2 lg:col-span-1">
+                        <CellLabel>Description</CellLabel>
+                        <Input
+                          value={l.description}
+                          maxLength={300}
+                          autoFocus={l.key === newKey}
+                          aria-label={`Line ${i + 1} description`}
+                          className={
+                            showProblems && !l.description.trim() ? "border-destructive" : ""
+                          }
+                          onChange={(e) => setLine(l.key, { description: e.target.value })}
+                        />
+                        {l.on_date && (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {shortDay(l.on_date)}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <CellLabel>Qty</CellLabel>
+                        <OptionalNumber
+                          value={l.qty}
+                          step="0.25"
+                          label={`Line ${i + 1} quantity`}
+                          invalid={showProblems && l.qty === null}
+                          onChange={(v) => setLine(l.key, { qty: v })}
+                        />
+                      </div>
+                      <div>
+                        <CellLabel>Unit</CellLabel>
+                        <Input
+                          value={l.unit}
+                          maxLength={20}
+                          aria-label={`Line ${i + 1} unit`}
+                          onChange={(e) => setLine(l.key, { unit: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <CellLabel>Rate</CellLabel>
+                        {/* A ticket material's rate follows the markup (owner, Oct 14): shown with
+                      its rule and a pencil; the box comes back to type a price of your own. */}
+                        {rateIsComputed(l) && !rateEdit.has(l.key) ? (
+                          <div className="flex h-9 items-center justify-end gap-1">
+                            <span className="text-right leading-tight">
+                              <span className="block text-sm tabular-nums">{rateText(l.rate)}</span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                {computedRateHint(l, head.markup_pct, head.po_markup)}
+                              </span>
+                            </span>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 shrink-0 text-muted-foreground"
+                              aria-label={`Override the rate for line ${i + 1}`}
+                              title="Type a rate of your own"
+                              onClick={() => setRateEdit((s) => new Set(s).add(l.key))}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <OptionalNumber
+                            value={l.rate}
+                            min={-1_000_000}
+                            step="0.01"
+                            label={`Line ${i + 1} rate`}
+                            invalid={showProblems && l.rate === null}
+                            onChange={(v) => setLine(l.key, { rate: v })}
+                          />
+                        )}
+                      </div>
+                      {internal && (
+                        <div>
+                          <CellLabel>Cost</CellLabel>
+                          <OptionalNumber
+                            value={l.cost_rate}
+                            step="0.01"
+                            label={`Line ${i + 1} cost`}
+                            onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
+                          />
+                          {/* Owner, Oct 14 ("it says cost 0.091, I'm confused"): a material from the
+                        ledger is costed per piece — the box price over the pieces in it. */}
+                          {rateIsComputed(l) && (
+                            <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
+                              per {l.unit.trim() || "ea"}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
+                        <Checkbox
+                          checked={l.taxable}
+                          aria-label={`Line ${i + 1} taxable`}
+                          onCheckedChange={(c) => setLine(l.key, { taxable: c === true })}
+                        />
+                        <span className="lg:hidden">Taxable</span>
+                      </label>
+                      {/* On the customer's PDF (owner, Oct 8): Hidden (in the one Services and
+                    materials amount), No price (listed with its quantity), With price. */}
+                      <div>
+                        <CellLabel>On the invoice</CellLabel>
+                        <Select
+                          value={showChoice(l)}
+                          onValueChange={(v) => setLine(l.key, showFlags(v as ShowChoice))}
+                        >
+                          <SelectTrigger
+                            className="h-9 w-full"
+                            aria-label={`Line ${i + 1} on the invoice`}
+                            title="Hidden: in the one Services and materials amount. No price: listed with its quantity. With price: listed with rate and amount."
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="hidden">Hidden</SelectItem>
+                            <SelectItem value="no_price">No price</SelectItem>
+                            <SelectItem value="priced">With price</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 lg:block lg:h-9 lg:pt-2 lg:text-right">
+                        <span className="text-xs text-muted-foreground lg:hidden">Total</span>
+                        <span className="tabular-nums">
+                          {money(r2((l.qty ?? 0) * (l.rate ?? 0)))}
+                        </span>
+                      </div>
+                      <div className="order-first flex justify-end lg:order-none">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-9 w-9 text-destructive hover:text-destructive"
+                          aria-label={`Remove line ${i + 1}`}
+                          title="Remove this line"
+                          onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             </div>
             <Button
@@ -1940,6 +2003,115 @@ function usePoCost(
     onInvoice: onInvoice.length,
     error: null,
   };
+}
+
+/**
+ * The Roof Care plan box on a repair invoice (owner, Nov 19: "I like the tick idea"; "think
+ * about how we can ensure this is followed"). It says what is left of the plan's yearly minor
+ * repairs and asks the one question. Finalise waits for the answer.
+ */
+function AllowanceBox({
+  a,
+  busy,
+  onAnswer,
+}: {
+  a: InvoiceAllowance;
+  busy: boolean;
+  onAnswer: (choice: AllowanceChoice, amount: number | null) => void;
+}) {
+  // Blank: all that can be taken (number boxes start blank).
+  const [text, setText] = useState("");
+  const typed = text.trim() === "" ? null : Number(text);
+  const bad = typed !== null && !(Number.isFinite(typed) && typed > 0);
+  const waiting = a.choice === null && a.cap > 0;
+  const canTake = a.cap > 0;
+  const apply = () => {
+    if (bad) {
+      toast.error("Type the amount to take off, or leave it blank for all of it");
+      return;
+    }
+    onAnswer("applied", typed === null ? null : Math.min(typed, a.cap));
+  };
+  return (
+    <section
+      className={`space-y-2 rounded-lg border p-4 text-sm ${waiting ? "border-amber-500 bg-amber-500/5" : ""}`}
+      aria-label="Roof Care plan"
+      data-allowance-box={a.choice ?? (canTake ? "waiting" : "nothing")}
+    >
+      <h2 className="flex items-center gap-2 font-semibold">
+        <ShieldCheck className="h-4 w-4" /> Roof Care plan
+      </h2>
+      <p>
+        This property has a {planName(a.plan)} plan. {allowanceMoney(a.left)} of its{" "}
+        {allowanceMoney(a.allowance)} of minor repairs is left this plan year
+        {a.applied > 0 ? ", before this invoice" : ""}.
+      </p>
+      {a.choice === "applied" && (
+        <p className="font-medium" data-allowance-answer>
+          {allowanceMoney(a.applied)} is taken off this invoice under the plan.{" "}
+          {allowanceMoney(Math.max(0, a.left - a.applied))} is left after it.
+        </p>
+      )}
+      {a.choice === "declined" && (
+        <p className="font-medium" data-allowance-answer>
+          Marked: this invoice does not use the plan.
+        </p>
+      )}
+      {waiting && (
+        <p className="font-medium text-amber-800 dark:text-amber-300" data-allowance-answer>
+          Does this invoice use the plan? Finalise waits for the answer.
+        </p>
+      )}
+      {!canTake && a.choice !== "applied" && (
+        <p className="text-muted-foreground">
+          {a.left > 0
+            ? "The invoice bills nothing yet, so there is nothing for the plan to cover."
+            : "The minor repairs are used up for this plan year."}
+        </p>
+      )}
+      {canTake && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="allowance-amount" className="text-xs">
+              Amount to take off (blank for all of it: {allowanceMoney(a.cap)})
+            </Label>
+            <Input
+              id="allowance-amount"
+              inputMode="decimal"
+              className={`h-9 w-44 ${bad ? "border-destructive" : ""}`}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </div>
+          <Button type="button" disabled={busy} onClick={apply} data-action="allowance-apply">
+            {a.choice === "applied" ? "Change the amount" : "Use the plan"}
+          </Button>
+          {a.choice !== "declined" && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onAnswer("declined", null)}
+              data-action="allowance-decline"
+            >
+              Does not use the plan
+            </Button>
+          )}
+        </div>
+      )}
+      {!canTake && a.choice === "applied" && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onAnswer("declined", null)}
+          data-action="allowance-decline"
+        >
+          Does not use the plan
+        </Button>
+      )}
+    </section>
+  );
 }
 
 function Totals({

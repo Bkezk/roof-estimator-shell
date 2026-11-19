@@ -33,7 +33,12 @@ import { isFieldOnly, managesTickets } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { easternYmd } from "@/lib/field-day";
 import { longDay } from "@/lib/followup-rules";
-import { NOT_PLACED_LINE, placedRoughly, roughPlaceLine } from "@/lib/roof-care-locate";
+import {
+  ALLOWANCE_INCLUDED_WORDS,
+  allowanceMoney,
+  allowanceStatusWords,
+} from "@/lib/roof-care-allowance";
+import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
 import {
   ADDITIONAL_SERVICES_LABEL,
   CARE_PLAN_LABEL,
@@ -43,15 +48,18 @@ import {
   planDates,
   planName,
   pushPreview,
-  DRIVE_ESTIMATED_LINE,
+  PRICE_ESTIMATE_JUST_NOW,
+  PRICE_ESTIMATE_ROUGH,
   isPriceChanged,
   ROOF_CARE_TERMS,
   roofCarePlansKey,
   runsLate,
   VISIT_LABEL,
+  VISIT_UNBILLED_WORDS,
   visitsDone,
   visitsDoneWords,
   visitState,
+  visitUnbilled,
   windowWords,
   type FirstVisit,
   type PlanVisit,
@@ -178,6 +186,12 @@ function VisitRow({
       )}
       {showMoney && visit.amount > 0 && (
         <span className="text-muted-foreground">bills {money0(visit.amount)}</span>
+      )}
+      {/* Done and signed off, with its share of the plan on no invoice (Nov 19). */}
+      {showMoney && visitUnbilled(visit) && (
+        <Badge variant="destructive" data-visit-unbilled>
+          {VISIT_UNBILLED_WORDS}
+        </Badge>
       )}
       {visit.due_by !== visit.first_due_by && (
         <span className="text-muted-foreground">
@@ -370,6 +384,47 @@ export function RoofCareCard({
             {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
+          {/* The minor repairs the plan includes each year (owner, Nov 19: "have that under
+              the plan status"): what is used and what is left, for those who see invoices. */}
+          {!short && active.repair_allowance > 0 && (
+            <div className="space-y-0.5 text-xs" data-roof-care-allowance>
+              {active.allowance_used === null ? (
+                <p className="text-muted-foreground">{ALLOWANCE_INCLUDED_WORDS}</p>
+              ) : (
+                <>
+                  <p className="font-medium" data-allowance-status>
+                    {allowanceStatusWords({
+                      repair_allowance: active.repair_allowance,
+                      allowance_used: active.allowance_used,
+                    })}
+                  </p>
+                  {active.allowance_uses.length > 0 && (
+                    <p className="text-muted-foreground" data-allowance-uses>
+                      Used on{" "}
+                      {active.allowance_uses.map((u, n) => (
+                        <span key={u.invoice_id}>
+                          {n > 0 && ", "}
+                          <Link
+                            to="/service/invoices"
+                            search={{ id: u.invoice_id }}
+                            className="underline underline-offset-2"
+                          >
+                            invoice #{u.number}
+                          </Link>{" "}
+                          ({allowanceMoney(u.amount)})
+                        </span>
+                      ))}
+                      .
+                    </p>
+                  )}
+                  <p className="text-muted-foreground">
+                    A repair invoice at this property asks whether it uses the plan before it can be
+                    finalised.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           {runsLate(active) && (
             <p className="text-xs text-amber-700 dark:text-amber-400" data-roof-care-late>
               Running late: an inspection was pushed past the plan year, so the renewal moved.
@@ -530,8 +585,7 @@ function SignUpDialog({
         <DialogHeader>
           <DialogTitle>Sign up for a Roof Care plan</DialogTitle>
           <DialogDescription>
-            Two inspections a year with a photo report after each. The price follows the roof’s size
-            and the drive from the office.
+            Two inspections a year with a photo report after each. The price is for this property.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
@@ -562,24 +616,20 @@ function SignUpDialog({
               {errText(price.error)}
             </p>
           )}
-          {offer && !offer.drive && (
+          {offer && !offer.placed && (
             <p className="text-destructive" data-sign-line="not-placed">
               {NOT_PLACED_LINE}
             </p>
           )}
-          {offer?.drive && (
-            <p className="text-muted-foreground" data-sign-line="drive">
-              Round trip from the office: {offer.drive.hours} h, {offer.drive.miles} miles.
+          {/* The price is one number here (owner, Nov 19): nothing of the drive or what it adds. */}
+          {offer?.estimate === "just-now" && (
+            <p className="text-amber-700 dark:text-amber-400" data-sign-line="estimate-just-now">
+              {PRICE_ESTIMATE_JUST_NOW}
             </p>
           )}
-          {offer?.drive?.source === "estimated" && (
-            <p className="text-amber-700 dark:text-amber-400" data-sign-line="drive-estimated">
-              {DRIVE_ESTIMATED_LINE}
-            </p>
-          )}
-          {offer?.drive && placedRoughly(offer.drive.placed_by) && (
+          {offer?.estimate === "rough" && (
             <p className="text-amber-700 dark:text-amber-400" data-sign-line="rough">
-              {roughPlaceLine(offer.drive.place)}
+              {PRICE_ESTIMATE_ROUGH}
             </p>
           )}
           {answer && !answer.ready && (
@@ -613,11 +663,6 @@ function SignUpDialog({
                   <span className="block text-xs text-muted-foreground">
                     {money0(o.visit1)} at the first inspection, {money0(o.visit2)} at the second
                   </span>
-                  {o.travel > 0 && (
-                    <span className="block text-xs text-muted-foreground">
-                      {money0(o.list)} plus {money0(o.travel)} for the drive
-                    </span>
-                  )}
                 </button>
               ))}
             </div>

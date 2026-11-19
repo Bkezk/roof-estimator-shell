@@ -162,6 +162,27 @@ inspection, the saved price is the shown price, ending a plan takes its untouche
 the board, the drive's share adds up, and a care plan invoice saves its lines. The automatic
 invoice was tried live.
 
+## Decided on Nov 19
+
+Record: `docs/qa/roof-care-followups-2026-11-19.md`.
+
+- **The price is one number.** "They shouldn't know they're paying more for distance neither the
+  customer or tech." The sign-up shows each plan's price and its two halves. The drive, the list
+  price and what the distance adds stay on the server. The Setup page still shows them to admins.
+- **The minor repairs a plan includes each year** are kept on the plan and shown under its status
+  on the property page. A repair invoice at that property asks whether it uses the plan, and is
+  not finalised until that is answered. The owner chose the tick over taking it off by itself.
+- **No skips.** Two inspections are owed a year. A care plan ticket that is deleted is made
+  again by the morning check, and that stands.
+- **The roof size on a plan is not changed after sign-up.** "That's fine since it's invoiced at
+  time of service": the office changes the plan's line on the invoice when it needs to.
+- **An inspection's share of the plan goes on one invoice.** A second invoice on the ticket is
+  for work beyond the plan and is built from the ticket's time and materials.
+- **The second inspection's window is at least two weeks.** Under two weeks left of a window,
+  the next window is used.
+- **Push back.** The office's 30 days count from each inspection's own first date. Reasons are
+  kept, each with its day and who gave it.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".
