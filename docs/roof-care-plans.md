@@ -227,11 +227,29 @@ the live database:
 8. The minor repairs allowance, storm inspections, push back, the windows and the price itself
    stay as they are.
 
-**For the owner to decide** (asked Nov 19): card, bank transfer or both; whether a check is still
-taken; whether the plan year and the inspections start at sign-up or at payment; whether
-"do the first inspection today" waits for payment; the refund rule; one-off yearly payment or a
-card kept on file that renews by itself; and the roof size, since "it's invoiced at time of
-service" no longer corrects it.
+**The owner's answers (Nov 19).**
+
+- A check is still taken, marked received by the office.
+- The plan year starts at payment, not at sign-up.
+- "Do the first inspection today" waits for payment too.
+- Ending a plan refunds a share for the inspections not done: one done, half back.
+- Renewing by itself is offered as a choice at sign-up, with a discount for choosing it. He
+  named 5% and asked whether the numbers still work. The worked answer, with the office's own
+  costs, is in the private notes, not here.
+- The roof size only has to be relatively close. He asked whether the map can give it.
+- He has no Stripe account yet.
+
+**Still open.** Whether a card is taken at all (its fee is a share of the price; a bank transfer
+is a small flat fee). The size of the discount and whether it holds for every plan and roof
+size. What is refunded when the plan's minor repairs were already used. Whether a year that
+closes with one inspection done credits half to the next year or holds the renewal back.
+
+**The roof size from the map (checked Nov 19).** The building outlines already in the database
+(`buildings`, Kentucky and Tennessee only) carry a roof size. Of the 34 properties that have a
+point on the map, 33 have an outline at that point. But a property often has several buildings
+close by, and the nearest outline is not always the one meant, so it cannot be picked by itself:
+the person signing up would pick the building, or buildings, on the map. No bid is linked to an
+outline, so the outlines could not be held against a roof the company has measured.
 
 **Setting it up.** A Stripe account in the company's name. Its keys go in Lovable Cloud › Secrets
 by the owner's hand, never in the repository or the chat. Stripe's test mode first: with a live
