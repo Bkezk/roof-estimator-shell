@@ -447,7 +447,7 @@ export const PINNED_BAR =
 function PlanBar({ job }: { job: ServiceJobWithTech }) {
   return (
     <div className={PINNED_BAR} data-plan-bar data-pinned-bar>
-      <RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />
+      <RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} jobId={job.id} big />
     </div>
   );
 }
@@ -1549,6 +1549,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             <RoofCareButtons
               siteId={job.site_id}
               visitId={job.roof_care_visit_id}
+              jobId={job.id}
               big
               className="mt-2"
             />

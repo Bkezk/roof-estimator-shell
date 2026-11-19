@@ -1146,7 +1146,9 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     expect(bar.indexOf("<RoofCareButtons")).toBeGreaterThan(0);
     expect(bar.indexOf("<RoofCareButtons")).toBeLessThan(bar.indexOf("<AlertDialog"));
     expect(bar).toContain(
-      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big className="mt-2" />',
+      // (Nov 19, night: each ticket hands the button the ticket, so the press is kept.
+      // care-plan-offers-nov19.test.ts.)
+      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} jobId={job.id} big className="mt-2" />',
     );
   });
   it("are there from the workflow's first screen, before Who is here is answered", () => {
@@ -1165,7 +1167,7 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     const bar = closeout.slice(closeout.indexOf("function PlanBar({ job }"));
     expect(bar).toContain("<div className={PINNED_BAR} data-plan-bar data-pinned-bar>");
     expect(bar).toContain(
-      "<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} big />",
+      "<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} jobId={job.id} big />",
     );
   });
   it("stay on a ticket that is not this person's to close out", () => {
@@ -1182,7 +1184,7 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     const page = read("src/components/service-page.tsx");
     const f = flat(page);
     expect(f).toContain(
-      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} className="justify-end" />',
+      '<RoofCareButtons siteId={job.site_id} visitId={job.roof_care_visit_id} jobId={job.id} className="justify-end" />',
     );
     expect(page.indexOf("<RoofCareButtons")).toBeGreaterThan(page.indexOf("Open ticket"));
     expect(page.indexOf("<RoofCareButtons")).toBeGreaterThan(

@@ -33,6 +33,8 @@ import { isFieldOnly, managesTickets, seesInvoices } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { easternYmd } from "@/lib/field-day";
 import { longDay } from "@/lib/followup-rules";
+import { offeredWords, offersKey } from "@/lib/care-plan-offers";
+import { carePlanOffered, markCarePlanOffered } from "@/lib/care-plan-offers.functions";
 import { allowanceMoney } from "@/lib/roof-care-allowance";
 import {
   AGREE_WORDS,
@@ -328,17 +330,40 @@ function VisitRow({
 export function RoofCareButtons({
   siteId,
   visitId,
+  jobId,
   big = false,
   className = "",
 }: {
   siteId: string | null | undefined;
   visitId?: string | null;
+  /**
+   * On a ticket: the ticket. Pressing Care Plan there is kept, so the owner can see the plan is
+   * being offered (Nov 19: "track the care plan button click on the ticket").
+   */
+  jobId?: string | null;
   big?: boolean;
   className?: string;
 }) {
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
   const q = usePlans(siteId);
+  const qc = useQueryClient();
   const [open, setOpen] = useState<"plan" | "service" | null>(null);
+  const markFn = useServerFn(markCarePlanOffered);
+  const mark = useMutation({
+    mutationFn: (id: string) => markFn({ data: { job_id: id } }),
+    // The press is a record, not the person's task: a failure is tried again, never shown.
+    retry: 2,
+    onSuccess: (_r, id) => void qc.invalidateQueries({ queryKey: offersKey(id) }),
+  });
+  // Who has pressed it on this ticket: the office's line under the buttons.
+  const offeredFn = useServerFn(carePlanOffered);
+  const showsOffered = !!jobId && !big && !!profile && !isFieldOnly(profile);
+  const offered = useQuery({
+    queryKey: offersKey(jobId ?? ""),
+    queryFn: () => offeredFn({ data: { job_id: jobId! } }),
+    enabled: !!session && showsOffered,
+    staleTime: STALE_MS,
+  });
   if (!siteId || !profile) return null;
   const today = easternYmd();
   const active = (q.data ?? []).find((p) => p.status === "active") ?? null;
@@ -361,7 +386,10 @@ export function RoofCareButtons({
         // Until the plans are read the button cannot know which of the two it opens.
         disabled={!q.data && !q.error}
         title={q.error ? `Could not load the Roof Care plan: ${errText(q.error)}` : undefined}
-        onClick={() => setOpen("plan")}
+        onClick={() => {
+          setOpen("plan");
+          if (jobId) mark.mutate(jobId);
+        }}
         data-action="care-plan"
       >
         <span className={big ? "flex min-w-0 flex-col items-center leading-tight" : "contents"}>
@@ -403,6 +431,15 @@ export function RoofCareButtons({
           <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} />
         ))}
       {open === "service" && <ServiceRequestDialog siteId={siteId} onClose={() => setOpen(null)} />}
+      {/* Was the plan offered on this ticket? Only where there is one to offer. */}
+      {showsOffered && q.data && !active && !waiting && offered.data && (
+        <p
+          className={`basis-full text-right text-xs ${offered.data.length ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}`}
+          data-care-plan-offered={offered.data.length}
+        >
+          {offeredWords(offered.data)}
+        </p>
+      )}
     </div>
   );
 }

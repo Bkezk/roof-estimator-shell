@@ -458,6 +458,12 @@ terms need to be emailed to the customer at signup as well as a receipt ideally"
   checkout.
 - Record: `docs/qa/roof-care-customer-facing-2026-11-19.md`.
 
+Was the plan offered (owner, Nov 19, night: "track the care plan button click on the ticket to
+ensure it's being offered"): pressing Care Plan on a ticket is kept in `roof_care_offers`, the
+office sees who opened it on the ticket, and the Owner page's Business tab counts it for each
+technician against the tickets they finished (`src/lib/care-plan-offers.ts`). Record:
+`docs/qa/roof-care-offered-2026-11-19.md`.
+
 Not built, waiting on the owner's word:
 
 - A tick on a care plan inspection that the drains, scuppers and gutters were cleaned, and a

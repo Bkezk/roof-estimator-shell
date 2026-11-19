@@ -19,6 +19,8 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth-store";
 import { localYmd } from "@/lib/tasks";
+import { OFFER_DAYS, OFFER_REPORT_KEY, OFFER_REPORT_NOTE, offerLine } from "@/lib/care-plan-offers";
+import { listCarePlanOffers } from "@/lib/care-plan-offers.functions";
 import { BUSINESS_HREFS, USD, money, type BusinessNumbers } from "@/lib/owner-business";
 import { listOwnerBusiness } from "@/lib/owner-business.functions";
 import { visibleToOwner } from "@/lib/owner-view";
@@ -86,6 +88,69 @@ function Tile({
       <p className="mt-1 min-h-8 text-2xl font-semibold tabular-nums">{value}</p>
       <p className="min-h-4 text-xs text-muted-foreground">{sub}</p>
     </Go>
+  );
+}
+
+/**
+ * Was the Roof Care plan offered? (owner, Nov 19): for each technician, on how many of the
+ * tickets they finished Care Plan was opened. The ones who open it least come first.
+ */
+function CarePlanOffered() {
+  const { session, profile } = useAuth();
+  const fn = useServerFn(listCarePlanOffers);
+  const q = useQuery({
+    queryKey: OFFER_REPORT_KEY,
+    queryFn: () => fn({ data: { today: localYmd(new Date()) } }),
+    enabled: !!session && visibleToOwner(profile),
+    refetchOnMount: "always",
+    staleTime: 60_000,
+  });
+  const d = q.data;
+  return (
+    <section className="rounded-lg border p-3" data-business-care-offers>
+      <h2 className="text-sm font-semibold">Care Plan offered, last {OFFER_DAYS} days</h2>
+      {q.error && (
+        <p className="mt-2 text-sm text-destructive">Could not load it: {errText(q.error)}</p>
+      )}
+      {d && d.rows.length === 0 && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          No ticket was finished at a property without a plan.
+        </p>
+      )}
+      {d && d.rows.length > 0 && (
+        <>
+          <p className="mt-2 text-sm font-medium" data-care-offers-total>
+            {offerLine(d.total)}
+          </p>
+          <ul className="mt-2 space-y-1.5 text-sm">
+            {d.rows.map((r) => (
+              <li key={r.id ?? "none"} data-care-offers-row={r.id ?? "none"}>
+                <span className="font-medium">{r.name}:</span>{" "}
+                <span className={r.shown < r.finished ? "text-amber-700 dark:text-amber-400" : ""}>
+                  {offerLine(r)}
+                </span>
+                {r.missed.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {" "}
+                    Not opened on{" "}
+                    {r.missed.slice(0, 8).map((m, n) => (
+                      <span key={m.id}>
+                        {n > 0 && ", "}
+                        <Go href={`/service?id=${m.id}`} className="underline underline-offset-2">
+                          #{m.number ?? "?"}
+                        </Go>
+                      </span>
+                    ))}
+                    {r.missed.length > 8 ? `, and ${r.missed.length - 8} more` : ""}.
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">{OFFER_REPORT_NOTE}</p>
+    </section>
   );
 }
 
@@ -160,6 +225,7 @@ export function OwnerBusiness() {
       {/* Owner, Nov 16: tickets past their day and the untouched tickets and opportunities left
           this strip (the Needs attention list on the People tab has them). The holds stay:
           that list only says how many of ITS rows are held. */}
+      <CarePlanOffered />
       <section className="rounded-lg border p-3" data-business-holds>
         <h2 className="text-sm font-semibold">On hold</h2>
         <p className="mt-2 text-sm">

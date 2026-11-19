@@ -3422,6 +3422,51 @@ export type Database = {
           },
         ]
       }
+      roof_care_offers: {
+        Row: {
+          at: string
+          by_name: string
+          by_user: string | null
+          had_plan: boolean
+          id: number
+          job_id: string
+          site_id: string | null
+        }
+        Insert: {
+          at?: string
+          by_name?: string
+          by_user?: string | null
+          had_plan?: boolean
+          id?: never
+          job_id: string
+          site_id?: string | null
+        }
+        Update: {
+          at?: string
+          by_name?: string
+          by_user?: string | null
+          had_plan?: boolean
+          id?: never
+          job_id?: string
+          site_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_offers_by_user_fkey"
+            columns: ["by_user"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_offers_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       roof_care_plans: {
         Row: {
           account_id: string
@@ -5948,6 +5993,7 @@ export type Database = {
         Returns: Json
       }
       roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
+      roof_care_mark_offered: { Args: { p_job: string }; Returns: undefined }
       roof_care_price: {
         Args: { p_hours?: number; p_miles?: number; p_sqft: number }
         Returns: Json

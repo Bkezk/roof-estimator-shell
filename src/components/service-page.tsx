@@ -2718,6 +2718,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               <RoofCareButtons
                 siteId={job.site_id}
                 visitId={job.roof_care_visit_id}
+                jobId={job.id}
                 className="justify-end"
               />
             </div>
