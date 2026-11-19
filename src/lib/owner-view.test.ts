@@ -71,18 +71,43 @@ describe("visibleToOwner: admins only", () => {
 });
 
 describe("roleLabel", () => {
-  it("Admin / Manager / Sales-PM / Technician / User", () => {
+  it("Admin / Manager / Office / Technician / User", () => {
     expect(roleLabel({ role: "admin", technician: true })).toBe("Admin");
     expect(roleLabel({ role: "manager", technician: true })).toBe("Manager");
-    // Sales-PM = a plain user with the Invoices tick (access.ts isSalesPm; owner, Oct 8 — Estimate
-    // alone no longer makes one).
-    expect(roleLabel({ role: "user", technician: false, access: ["invoices"] })).toBe("Sales-PM");
-    expect(roleLabel({ role: "user", technician: false, access: ["estimate"] })).toBe("User");
-    expect(roleLabel({ role: "user", technician: true, access: ["estimate"] })).toBe("Technician");
+    // Office = a user who holds a page of the office's (Nov 19; it was "Sales-PM" for the
+    // Invoices tick alone, and "User" for the others).
+    expect(roleLabel({ role: "user", technician: false, access: ["invoices"] })).toBe("Office");
+    expect(roleLabel({ role: "user", technician: false, access: ["estimate"] })).toBe("Office");
+    expect(roleLabel({ role: "user", technician: false, access: ["customers"] })).toBe("Office");
     expect(roleLabel({ role: "user", technician: true })).toBe("Technician");
     expect(roleLabel({ role: "user", technician: false })).toBe("User");
-    expect(roleLabel({ role: "user", technician: false, access: ["customers"] })).toBe("User");
     expect(roleLabel({ role: null })).toBe("User");
+  });
+
+  // The owner, Nov 19: "the role has brian and mark as techicians when theyre office". Both are
+  // ticked Technician, so they can be put on a ticket, and hold the office's pages. The tick
+  // alone used to make them "Technician".
+  it("office staff ticked Technician are Office, not Technician", () => {
+    const office = [
+      "estimate",
+      "pricing",
+      "customers",
+      "service",
+      "invoices",
+      "prospect",
+      "takeoff",
+    ];
+    expect(roleLabel({ role: "user", technician: true, access: office })).toBe("Office");
+    expect(roleLabel({ role: "user", technician: true, access: ["estimate"] })).toBe("Office");
+  });
+
+  it("a technician is someone ticked Technician with Service and Inventory at most", () => {
+    expect(roleLabel({ role: "user", technician: true, access: ["service"] })).toBe("Technician");
+    expect(roleLabel({ role: "user", technician: true, access: ["service", "inventory"] })).toBe(
+      "Technician",
+    );
+    // Not ticked, with the same pages: nobody's technician.
+    expect(roleLabel({ role: "user", technician: false, access: ["service"] })).toBe("User");
   });
 });
 

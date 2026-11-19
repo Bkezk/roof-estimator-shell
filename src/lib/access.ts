@@ -221,6 +221,14 @@ export const isFieldOnly = (p: AccessLike | null | undefined): boolean =>
   (p.access ?? []).every((a) => FIELD_PAGES.includes(a));
 
 /**
+ * Holds a page of the office's: anything beyond Service and Inventory. Someone ticked
+ * Technician who also holds one is office staff who can be put on a ticket, not a technician
+ * (owner, Nov 19: "the role has brian and mark as techicians when theyre office").
+ */
+export const holdsOfficePage = (p: AccessLike | null | undefined): boolean =>
+  !!p && (p.access ?? []).some((a) => !FIELD_PAGES.includes(a));
+
+/**
  * Who can take unassigned work for themselves (owner, Oct 8: "they should be able to go in and
  * claim it if need be"): anyone ticked Technician who is not technician-only (an office person,
  * a manager or an owner on the board) with Service access — the people who see the unassigned

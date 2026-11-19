@@ -94,7 +94,7 @@ describe("the auditor's reproduction: an overdue opportunity with its open follo
     const row: OwnerRow = {
       id: BOB,
       name: "Bob",
-      role: "Sales-PM",
+      role: "Office",
       ...personNumbers(r.b, r.o),
       doneThisWeek: 0,
       lastActivity: null,

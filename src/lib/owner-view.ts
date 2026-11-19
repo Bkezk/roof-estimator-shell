@@ -35,7 +35,7 @@
  *                   entries and audit-log entries; red when older than 3 working days (never
  *                   for admins).
  */
-import { isAdmin, isSalesPm, type AccessLike } from "@/lib/access";
+import { holdsOfficePage, isAdmin, type AccessLike } from "@/lib/access";
 import { taskMapHref } from "@/lib/my-work-actions";
 import {
   KIND_LABELS,
@@ -63,12 +63,17 @@ export const visibleToOwner = (p: AccessLike | null | undefined): boolean => isA
 
 // ---- role ----------------------------------------------------------------------------------
 
-export type RoleLabel = "Admin" | "Manager" | "Technician" | "Sales-PM" | "User";
+export type RoleLabel = "Admin" | "Manager" | "Office" | "Technician" | "User";
 
 /**
- * A person's role as one word: Admin, Manager, Sales-PM (the owner's sales / project managers:
- * a plain user, not a technician, with Estimate access — access.ts isSalesPm), Technician (a
- * user ticked Technician), otherwise User.
+ * A person's role as one word: Admin, Manager, Office (a user who holds a page of the
+ * office's: Estimate, Customers, Invoices and the like), Technician (a user ticked Technician
+ * who holds none: the database's own rule, is_technician), otherwise User.
+ *
+ * Nov 19: it said "Technician" for anyone ticked Technician. The tick only means the person can
+ * be put on a ticket, and the office staff are ticked too, so the Owner view called them
+ * technicians (the owner: "the role has brian and mark as techicians when theyre office").
+ * "Sales-PM" went with it: those people are the office.
  */
 export function roleLabel(p: {
   role: string | null | undefined;
@@ -77,8 +82,8 @@ export function roleLabel(p: {
 }): RoleLabel {
   if (p.role === "admin") return "Admin";
   if (p.role === "manager") return "Manager";
+  if (holdsOfficePage(p)) return "Office";
   if (p.technician) return "Technician";
-  if (isSalesPm(p)) return "Sales-PM";
   return "User";
 }
 
