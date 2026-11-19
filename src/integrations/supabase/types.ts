@@ -2148,6 +2148,7 @@ export type Database = {
           po_markup: boolean
           po_number: string | null
           property: Json
+          roof_care_plan_id: string | null
           sage_exported_at: string | null
           sent_at: string | null
           sent_by_name: string | null
@@ -2193,6 +2194,7 @@ export type Database = {
           po_markup?: boolean
           po_number?: string | null
           property?: Json
+          roof_care_plan_id?: string | null
           sage_exported_at?: string | null
           sent_at?: string | null
           sent_by_name?: string | null
@@ -2238,6 +2240,7 @@ export type Database = {
           po_markup?: boolean
           po_number?: string | null
           property?: Json
+          roof_care_plan_id?: string | null
           sage_exported_at?: string | null
           sent_at?: string | null
           sent_by_name?: string | null
@@ -3427,11 +3430,15 @@ export type Database = {
           ended_by_name: string | null
           ended_on: string | null
           ended_reason: string | null
+          first_days: number | null
           first_visit: string
           id: string
           list_price: number
           notes: string
+          paid_on: string | null
+          pay_first: boolean
           plan: string
+          plan_number: number | null
           price: number
           price_estimated: boolean
           referred_by: string | null
@@ -3442,6 +3449,7 @@ export type Database = {
           site_id: string
           sold_by: string | null
           sold_by_name: string
+          starts_on: string | null
           status: string
           terms_version: string | null
           travel_price: number
@@ -3457,11 +3465,15 @@ export type Database = {
           ended_by_name?: string | null
           ended_on?: string | null
           ended_reason?: string | null
+          first_days?: number | null
           first_visit: string
           id?: string
           list_price: number
           notes?: string
+          paid_on?: string | null
+          pay_first?: boolean
           plan: string
+          plan_number?: number | null
           price: number
           price_estimated?: boolean
           referred_by?: string | null
@@ -3472,6 +3484,7 @@ export type Database = {
           site_id: string
           sold_by?: string | null
           sold_by_name?: string
+          starts_on?: string | null
           status?: string
           terms_version?: string | null
           travel_price?: number
@@ -3487,11 +3500,15 @@ export type Database = {
           ended_by_name?: string | null
           ended_on?: string | null
           ended_reason?: string | null
+          first_days?: number | null
           first_visit?: string
           id?: string
           list_price?: number
           notes?: string
+          paid_on?: string | null
+          pay_first?: boolean
           plan?: string
+          plan_number?: number | null
           price?: number
           price_estimated?: boolean
           referred_by?: string | null
@@ -3502,6 +3519,7 @@ export type Database = {
           site_id?: string
           sold_by?: string | null
           sold_by_name?: string
+          starts_on?: string | null
           status?: string
           terms_version?: string | null
           travel_price?: number
@@ -5858,6 +5876,22 @@ export type Database = {
         Returns: Json
       }
       roof_care_sign_up: {
+        Args: {
+          p_agreed_by: string
+          p_days: number
+          p_estimated: boolean
+          p_first: string
+          p_hours: number
+          p_miles: number
+          p_notes: string
+          p_plan: string
+          p_site: string
+          p_sqft: number
+          p_terms: string
+        }
+        Returns: string
+      }
+      roof_care_sign_up_await_payment: {
         Args: {
           p_agreed_by: string
           p_days: number

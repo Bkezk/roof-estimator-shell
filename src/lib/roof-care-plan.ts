@@ -71,12 +71,43 @@ export interface AllowanceUse {
   amount: number;
 }
 
+/** The plan's own invoice for the year, for a reader who sees invoices. */
+export interface PlanInvoiceRef {
+  id: string;
+  number: string;
+  status: string;
+  total: number;
+  paid_amount: number;
+}
+
+export type PlanStatus = "awaiting_payment" | "active" | "ended";
+export const asPlanStatus = (v: unknown): PlanStatus =>
+  v === "ended" ? "ended" : v === "awaiting_payment" ? "awaiting_payment" : "active";
+
 export interface RoofCarePlan {
   id: string;
   account_id: string;
   site_id: string;
   plan: PlanKey;
-  status: "active" | "ended";
+  /** Signed and waiting for its payment, in force, or over. */
+  status: PlanStatus;
+  /**
+   * Paid for the year before it starts (owner, Nov 19). False for a plan signed before that:
+   * billed half at each inspection.
+   */
+  pay_first: boolean;
+  /** "RC-1001" is plan 1001; null for a plan signed before plans were numbered. */
+  plan_number: number | null;
+  /** What was chosen for the first inspection, counted from the payment. */
+  first_visit: FirstVisit;
+  first_days: number | null;
+  /** The first day of the plan year: the day the payment was received. */
+  starts_on: string | null;
+  /**
+   * The plan's invoice for the year: null for a reader who does not see invoices, and when
+   * there is none yet.
+   */
+  invoice: PlanInvoiceRef | null;
   signed_on: string;
   renews_on: string;
   roof_sqft: number;
@@ -238,16 +269,67 @@ export function visitsDoneWords(plan: Pick<RoofCarePlan, "visits">, today: strin
   return `${base}, and ${d.storm === 1 ? "a storm inspection" : `${d.storm} storm inspections`}`;
 }
 
-/** The plan year ran on because an inspection was pushed past it. */
-export function runsLate(p: Pick<RoofCarePlan, "signed_on" | "renews_on">): boolean {
-  const year = `${Number(p.signed_on.slice(0, 4)) + 1}${p.signed_on.slice(4)}`;
+/**
+ * The plan year ran on because an inspection was pushed past it. The year starts at the payment
+ * for a plan paid first, and at the sign-up for an older one.
+ */
+export function runsLate(
+  p: Pick<RoofCarePlan, "signed_on" | "renews_on"> & { starts_on?: string | null },
+): boolean {
+  const from = p.starts_on || p.signed_on;
+  const year = `${Number(from.slice(0, 4)) + 1}${from.slice(4)}`;
   return p.renews_on > year;
 }
 
-/** The badge on a property: "Roof Guard", and "ended" for a plan that is over. */
+/**
+ * The badge on a property: "Roof Guard", "awaiting payment" for one signed and not yet paid,
+ * and "ended" for a plan that is over.
+ */
 export function planBadge(p: Pick<RoofCarePlan, "plan" | "status">): string {
-  return p.status === "ended" ? `${planName(p.plan)} (ended)` : planName(p.plan);
+  if (p.status === "ended") return `${planName(p.plan)} (ended)`;
+  if (p.status === "awaiting_payment") return `${planName(p.plan)} (awaiting payment)`;
+  return planName(p.plan);
 }
+
+// ── Paid for the year before it starts (owner, Nov 19) ──────────────────────────────────────
+//
+// "i think we are going to do payment up front rather than at time of service … so we dont have
+// to fight apathy", and "they can pay up front by check". A plan is signed, then waits for its
+// payment. One invoice for the year belongs to the plan. The day it is marked paid in full the
+// plan year starts and the inspections are dated. The database does all of it
+// (20261119600000_roof_care_pay_first.sql); these are the words.
+
+export const PLAN_NUMBER_PREFIX = "RC-";
+/** "RC-1001": the plan's number, and its invoice's. */
+export const planNumberLabel = (n: number): string => `${PLAN_NUMBER_PREFIX}${n}`;
+export const isPlanInvoiceNumber = (display: string | null | undefined): boolean =>
+  !!display && display.startsWith(PLAN_NUMBER_PREFIX);
+
+export const AWAITING_PAYMENT_WORDS = "Awaiting payment";
+export const AWAITING_PAYMENT_NOTE =
+  "The plan starts the day its payment is received. No inspection is made before that.";
+export const PLAN_NO_INVOICE = "No invoice has been made for this plan yet.";
+export const PLAN_MAKE_INVOICE = "Make the invoice";
+export const PLAN_INVOICE_EXISTS = "This plan already has an invoice.";
+export const PLAN_INVOICE_NOT_AWAITING =
+  "Only a plan that is waiting for its payment gets an invoice made for it.";
+
+/** "Roof Care plan, one year: two inspections with photo reports". The invoice's one line. */
+export function planInvoiceLineWords(plan: unknown): string {
+  return `${planName(plan)} plan, one year: two inspections with a photo report after each`;
+}
+
+/** When the first inspection is, counted from the payment: for the plan that is waiting. */
+export function firstVisitWords(first: FirstVisit, days: number | null): string {
+  if (first === "now") return "First inspection: as soon as the payment is received.";
+  if (first === "days")
+    return `First inspection: ${days ?? 0} ${days === 1 ? "day" : "days"} after the payment is received.`;
+  return "First inspection: in the next inspection window after the payment is received.";
+}
+
+/** Under the dates on the sign-up: they move with the payment. */
+export const DATES_FROM_PAYMENT =
+  "These dates are for a payment received today. They are counted from the day it is received.";
 
 // ── Push back ───────────────────────────────────────────────────────────────────────────────
 
@@ -355,11 +437,15 @@ export function readPriceAnswer(x: unknown): PriceAnswer {
 /** The `source` of the plan's own line on a visit's invoice, so a rebuild knows it. */
 export const carePlanLineSource = (visitId: string): string => `roof-care:${visitId}`;
 
-/** "Roof Guard plan: inspection 1 of 2 (half of the yearly price)". */
-export function carePlanLineWords(plan: unknown, kind: VisitKind): string {
+/**
+ * "Roof Guard plan: inspection 1 of 2 (half of the yearly price)", and for a plan paid for the
+ * year before it started, "(included in the plan)".
+ */
+export function carePlanLineWords(plan: unknown, kind: VisitKind, paidFirst = false): string {
   const name = planName(plan);
   if (kind === "storm") return `${name} plan: storm inspection (included in the plan)`;
-  return `${name} plan: inspection ${kind === "visit1" ? 1 : 2} of 2 (half of the yearly price)`;
+  const which = `${name} plan: inspection ${kind === "visit1" ? 1 : 2} of 2`;
+  return paidFirst ? `${which} (included in the plan)` : `${which} (half of the yearly price)`;
 }
 
 /** The note on the ticket's own lines of a visit's invoice: they are covered by the plan. */
@@ -372,17 +458,21 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
  * The plan keeps which set was agreed (`terms_version`), so a later change to the wording does
  * not rewrite what an earlier customer said yes to. Change a line: change the version too.
  */
-export const ROOF_CARE_TERMS_VERSION = "2026-11-18";
+// Nov 19 (version 2026-11-19), with paying for the year first: terms 2, 3 and 9 changed. Term 9
+// carries the owner's refund rule: "a share for inspections not done, if we did one half is
+// refunded", and "i like the repairs coming off a refund rule, we may need to note that on the
+// agreement".
+export const ROOF_CARE_TERMS_VERSION = "2026-11-19";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
-  "The yearly price is billed in two halves, one after each of the two inspections.",
-  "The plan runs for twelve months from the day it is signed.",
+  "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+  "The plan runs for twelve months from the day we receive your payment.",
   "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
   "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",
   "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
   "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
-  "Either of us can end the plan in writing. Work already done is billed. Nothing is refunded for a visit already made.",
+  "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered.",
   "The plan is not a warranty and does not cover replacing the roof.",
 ];
 export const TERMS_NOT_AGREED = "The customer has to agree to the plan's terms";

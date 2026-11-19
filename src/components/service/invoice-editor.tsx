@@ -254,10 +254,13 @@ const bidRefOf = (data: InvoiceWithLines, bidId: string): InvoiceBidRef =>
   data.bid ?? {
     id: bidId,
     name: "",
-    trade_name: "",
+    // A Roof Care plan year's invoice (Nov 19) is told apart by `plan`; with no answer from
+    // getInvoice the property is not known, so the header names the plan and links nowhere.
+    trade_name: data.invoice.roof_care_plan_id ? "Roof Care plan" : "",
     job_label: invoiceLabel(data.invoice).replace(/\.\d+$/, ""),
     account_id: null,
     readable: false,
+    ...(data.invoice.roof_care_plan_id ? { plan: { site_id: "" } } : {}),
   };
 
 /** Null while the ticket is still being read. A trade bid's invoice waits for nothing more. */
@@ -265,7 +268,9 @@ function ownerOf(
   data: InvoiceWithLines,
   ticket: ServiceJobWithTech | null | undefined,
 ): Owner | null {
-  const bidId = data.invoice.bid_id;
+  // Neither has a ticket: a won trade bid's invoice, or a Roof Care plan year's (Nov 19), which
+  // rides in the same place with `plan` set on it.
+  const bidId = data.invoice.bid_id ?? data.invoice.roof_care_plan_id;
   if (bidId) return { job: null, bid: bidRefOf(data, bidId) };
   return ticket ? { job: ticket, bid: null } : null;
 }
@@ -357,6 +362,9 @@ export function InvoiceEditorPage({
     void qc.invalidateQueries({ queryKey: ["bid-invoices", bid], refetchType });
     void qc.invalidateQueries({ queryKey: ["trade-bid", bid], refetchType });
     void qc.invalidateQueries({ queryKey: ["audit"], refetchType });
+    // A Roof Care plan year's invoice (Nov 19): paid, it starts the plan, so the property's plan
+    // is read again wherever it shows.
+    void qc.invalidateQueries({ queryKey: ["roof-care-plans"], refetchType });
   };
   const openInvoice = (invoiceId: string, replace = false) =>
     void navigate({ to: "/service/invoices", search: { id: invoiceId }, replace });
@@ -430,7 +438,9 @@ export function InvoiceEditorPage({
   // A save's answer does not say which bid (only getInvoice does): the one in hand is kept, so
   // the header keeps its link.
   const keepBid = (r: InvoiceWithLines): InvoiceWithLines =>
-    r.bid === undefined && data.bid && r.invoice.bid_id === data.bid.id
+    r.bid === undefined &&
+    data.bid &&
+    (r.invoice.bid_id ?? r.invoice.roof_care_plan_id) === data.bid.id
       ? { ...r, bid: data.bid }
       : r;
   // A trade bid's invoice voided, or its draft deleted (Nov 17): back to the bid, whose Invoices
@@ -438,7 +448,12 @@ export function InvoiceEditorPage({
   const bidVoided = (b: InvoiceBidRef, voidedId: string) => {
     qc.removeQueries({ queryKey: invoicePageKey(voidedId) });
     refreshBid(b.id);
-    if (b.readable) void navigate({ ...bidLink({ id: b.id, kind: "trade" }), replace: true });
+    // A plan's invoice (Nov 19): back to the property, where the plan says it has no invoice.
+    if (b.plan)
+      void (b.plan.site_id
+        ? navigate({ to: "/properties/$id", params: { id: b.plan.site_id }, replace: true })
+        : navigate({ to: "/service/invoices", search: listSearch, replace: true }));
+    else if (b.readable) void navigate({ ...bidLink({ id: b.id, kind: "trade" }), replace: true });
     else void navigate({ to: "/service/invoices", search: listSearch, replace: true });
   };
 
@@ -528,6 +543,21 @@ export function InvoiceEditorPage({
                 Ticket #{job.number}
                 {job.customer_name ? ` · ${job.customer_name}` : ""}
               </>
+            ) : bid.plan ? (
+              bid.plan.site_id ? (
+                <Link
+                  to="/properties/$id"
+                  params={{ id: bid.plan.site_id }}
+                  title="Open the property"
+                  className="underline underline-offset-4 hover:text-foreground"
+                  data-invoice-plan
+                >
+                  {bid.trade_name} {bid.job_label}
+                  {bid.name ? ` · ${bid.name}` : ""}
+                </Link>
+              ) : (
+                `${bid.trade_name} ${bid.job_label}`
+              )
             ) : bid.readable ? (
               <Link
                 {...bidLink({ id: bid.id, kind: "trade" })}
@@ -547,26 +577,29 @@ export function InvoiceEditorPage({
               last changed by {inv.updated_by_name}
             </span>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="sm:ml-auto"
-            disabled={making}
-            title={
-              job
-                ? `Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`
-                : `Make another invoice for trade bid ${bid.job_label}: it bills what the bid has left to bill`
-            }
-            onClick={() => (job ? another.mutate(job.id) : anotherBid.mutate(bid.id))}
-          >
-            {making ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="mr-1 h-4 w-4" />
-            )}
-            Another invoice
-          </Button>
+          {/* A Roof Care plan year is billed once (Nov 19): no "Another invoice" on its invoice. */}
+          {!(bid && bid.plan) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="sm:ml-auto"
+              disabled={making}
+              title={
+                job
+                  ? `Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`
+                  : `Make another invoice for trade bid ${bid.job_label}: it bills what the bid has left to bill`
+              }
+              onClick={() => (job ? another.mutate(job.id) : anotherBid.mutate(bid.id))}
+            >
+              {making ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="mr-1 h-4 w-4" />
+              )}
+              Another invoice
+            </Button>
+          )}
         </div>
         {siblings.length > 1 && (
           <div
@@ -1665,7 +1698,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 : confirm === "delete"
                   ? job
                     ? deleteDraftNote(job.number, no)
-                    : `The draft and its lines are removed. The next invoice made for this bid takes number ${no}.`
+                    : bid.plan
+                      ? "The draft and its line are removed. The plan then has no invoice: make it again from the plan on the property's page."
+                      : `The draft and its lines are removed. The next invoice made for this bid takes number ${no}.`
                   : `The invoice is frozen at ${money(t.total)} and its PDF stored${job ? "; the ticket moves to Invoiced" : ""}. To change it afterwards, void it.`}
               {confirm === "final" && dirty ? " Your unsaved changes are saved first." : ""}
             </AlertDialogDescription>

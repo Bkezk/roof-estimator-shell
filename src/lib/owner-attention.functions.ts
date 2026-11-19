@@ -32,6 +32,7 @@ import {
   type AttUntouched,
   type AttentionList,
   type AttCareUnbilled,
+  type AttCareUnpaid,
   type AttCareVisit,
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
@@ -242,6 +243,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       names,
       careVisits: care.notDone,
       careUnbilled: care.unbilled,
+      careUnpaid: care.unpaid,
     });
   });
 
@@ -254,20 +256,21 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
 async function careVisitsOfPlans(
   sb: Sb,
   today: string,
-): Promise<{ notDone: AttCareVisit[]; unbilled: AttCareUnbilled[] }> {
+): Promise<{ notDone: AttCareVisit[]; unbilled: AttCareUnbilled[]; unpaid: AttCareUnpaid[] }> {
   const { data: active, error } = await sb
     .from("roof_care_plans")
     .select("site_id")
-    .eq("status", "active");
+    .in("status", ["active", "awaiting_payment"]);
   if (error) throw new Error(`Roof Care plans: ${error.message}`);
   const siteIds = [...new Set((active ?? []).map((p) => p.site_id))];
-  if (!siteIds.length) return { notDone: [], unbilled: [] };
-  const plans = (await plansOfSites(sb, siteIds, { money: true })).filter(
-    (p) => p.status === "active",
+  if (!siteIds.length) return { notDone: [], unbilled: [], unpaid: [] };
+  const live = (await plansOfSites(sb, siteIds, { money: true })).filter(
+    (p) => p.status !== "ended",
   );
+  const plans = live.filter((p) => p.status === "active");
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
-    readInChunks([...new Set(plans.map((p) => p.account_id))], (chunk) =>
+    readInChunks([...new Set(live.map((p) => p.account_id))], (chunk) =>
       sb.from("crm_accounts").select("id, name").in("id", chunk),
     ),
   ]);
@@ -275,9 +278,30 @@ async function careVisitsOfPlans(
   const accountName = new Map(accounts.map((x) => [x.id, (x.name ?? "").trim()]));
   const notDone: AttCareVisit[] = [];
   const unbilled: AttCareUnbilled[] = [];
-  for (const p of plans) {
+  const titleOf = (p: { plan: unknown; site_id: string; account_id: string }) => {
     const where = [siteName.get(p.site_id), accountName.get(p.account_id)].filter(Boolean);
-    const title = `${planName(p.plan)} · ${where[0] ?? "Property"}${where[1] ? ` (${where[1]})` : ""}`;
+    return `${planName(p.plan)} · ${where[0] ?? "Property"}${where[1] ? ` (${where[1]})` : ""}`;
+  };
+  // Signed and waiting for its payment (Nov 19).
+  const unpaid: AttCareUnpaid[] = live
+    .filter((p) => p.status === "awaiting_payment")
+    .map((p) => ({
+      plan_id: p.id,
+      site_id: p.site_id,
+      title: titleOf(p),
+      signed_on: p.signed_on,
+      price: p.price,
+      invoice: p.invoice
+        ? {
+            id: p.invoice.id,
+            number: p.invoice.number,
+            status: p.invoice.status,
+            paid_amount: p.invoice.paid_amount,
+          }
+        : null,
+    }));
+  for (const p of plans) {
+    const title = titleOf(p);
     const last = [...p.visits].filter((v) => v.kind !== "storm").pop();
     for (const v of p.visits) {
       if (visitState(v, today) === "done") {
@@ -304,5 +328,5 @@ async function careVisitsOfPlans(
       });
     }
   }
-  return { notDone, unbilled };
+  return { notDone, unbilled, unpaid };
 }

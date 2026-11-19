@@ -530,7 +530,9 @@ describe("signing a customer up", () => {
       },
       // Nov 19: the sign-up asks the database for the price first, to hold it against the one
       // the form showed (made-up numbers; the real ones are not in the repository).
-      { roof_care_sign_up: rpc, roof_care_price: () => priced.answer },
+      // (Later on Nov 19: the sign-up leaves the plan waiting for its payment, through
+      // roof_care_sign_up_await_payment. roof-care-pay-first-nov19.test.ts.)
+      { roof_care_sign_up_await_payment: rpc, roof_care_price: () => priced.answer },
     );
   const priced = {
     answer: {
@@ -638,12 +640,13 @@ describe("signing a customer up", () => {
     // No table is written from here: the function is the only door.
     expect(env.writes).toEqual([]);
   });
-  it("the ticket the database made is announced like any new ticket", async () => {
+  it("no ticket is announced at the sign-up: none is made until the plan is paid (Nov 19)", async () => {
+    // Before the plan was paid for first, the sign-up made the first inspection's ticket and
+    // announced it. Now the tickets are made, and announced, when the plan's invoice is marked
+    // paid (roof-care-pay-first-nov19.test.ts).
     const env = signed(() => PLAN);
     await call(signUpRoofCare, env, form);
-    expect(announced).toHaveBeenCalledTimes(1);
-    expect(announced.mock.calls[0]![1]).toEqual([JOB]);
-    expect(announced.mock.calls[0]![2]).toEqual({ id: ADMIN, name: "Ann Admin" });
+    expect(announced).not.toHaveBeenCalled();
   });
   it("a drive to the town marks the price as an estimate", async () => {
     drive.mockResolvedValue({ ...ROUTED, placed_by: "zip", place: "London, KY 40741" });
@@ -1114,7 +1117,9 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
   it("Care Plan opens the plan when the property has one, and the sign-up when it has none", () => {
     const f = flat(card);
     expect(f).toContain(
-      '{open === "plan" && (active ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
+      // (Nov 19: a plan signed and waiting for its payment opens the plan too, never a second
+      // sign-up.)
+      '{open === "plan" && (active || waiting ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
     );
     // The button says which plan and how many inspections are done.
     expect(f).toContain("{planName(active.plan)} · {done.visits}/2");
@@ -1192,10 +1197,11 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
 describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () => {
   it("are ten, dated, and none of them names a price", () => {
     expect(ROOF_CARE_TERMS).toHaveLength(10);
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-18");
+    // (Nov 19: terms 2, 3 and 9 changed with paying for the year first, so the version did.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
-      "The yearly price is billed in two halves, one after each of the two inspections.",
+      "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
     );
     expect(ROOF_CARE_TERMS[9]).toBe(
       "The plan is not a warranty and does not cover replacing the roof.",

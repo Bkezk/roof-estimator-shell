@@ -410,7 +410,7 @@ export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePl
   if (!v) return null;
   const { data: p, error: pErr } = await sb
     .from("roof_care_plans")
-    .select("plan, status")
+    .select("plan, status, pay_first")
     .eq("id", v.plan_id)
     .maybeSingle();
   if (pErr) throw new Error(`The Roof Care plan of this ticket: ${pErr.message}`);
@@ -420,6 +420,7 @@ export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePl
     amount: Number(v.amount),
     plan: p?.plan ?? null,
     ended: p?.status === "ended",
+    paid_first: !!p?.pay_first,
   };
 }
 

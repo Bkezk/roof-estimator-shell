@@ -1652,12 +1652,16 @@ describe("in the source: every ticket step sits behind the has-a-ticket check", 
 
   it("rebuild refuses before it reads a ticket; save and send read the ticket only when there is one", () => {
     const rebuild = body("export const rebuildInvoiceLines", "const lineSchema");
-    expect(
-      rebuild.indexOf("if (!ofTicket(inv)) throw new Error(INVOICE_NO_TICKET_TO_REBUILD);"),
-    ).toBeGreaterThan(0);
-    expect(
-      rebuild.indexOf("if (!ofTicket(inv)) throw new Error(INVOICE_NO_TICKET_TO_REBUILD);"),
-    ).toBeLessThan(rebuild.indexOf("buildLinesFromJob(sb, inv.service_job_id, {"));
+    // (Nov 19: the refusal has two wordings now, a trade bid's and a Roof Care plan year's.)
+    const refusal = rebuild
+      .replace(/\s+/g, " ")
+      .indexOf(
+        "if (!ofTicket(inv)) throw new Error( inv.roof_care_plan_id ? INVOICE_PLAN_NOT_REBUILT : INVOICE_NO_TICKET_TO_REBUILD, );",
+      );
+    expect(refusal).toBeGreaterThan(0);
+    expect(rebuild.indexOf("if (!ofTicket(inv))")).toBeLessThan(
+      rebuild.indexOf("buildLinesFromJob(sb, inv.service_job_id, {"),
+    );
     const save = body("export const saveInvoice", "/** The PDF as base64");
     expect(save).toContain("} else if (ofTicket(inv)) {");
     expect(save.indexOf("} else if (ofTicket(inv)) {")).toBeLessThan(

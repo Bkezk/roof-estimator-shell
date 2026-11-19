@@ -192,11 +192,56 @@ Record: `docs/qa/roof-care-followups-2026-11-19.md`.
   means no floor. The plan still keeps the roof's own size, and the cost shown to admins is the
   real roof's. Record: `docs/qa/roof-care-floor-2026-11-19.md`.
 
-## Paying up front: looked into on Nov 19, not built
+## Paying up front: step 1 built on Nov 19
+
+The owner, the same evening: "they can pay up front by check". Record:
+`docs/qa/roof-care-pay-first-2026-11-19.md`.
+
+- **A signed plan waits for its payment.** Status `awaiting_payment`. No inspection and no
+  ticket is made for it.
+- **One invoice for the year belongs to the plan** (`invoices.roof_care_plan_id`), numbered after
+  it: plan 1001 is invoice RC-1001. It is a draft with one line. Someone who makes invoices gets
+  it made at the sign-up; after a technician's sign-up the office makes it from the plan.
+- **The day that invoice is marked paid in full, the plan starts.** The database does it
+  (`invoices_plan_paid`, `roof_care_start`): the plan year runs from the payment, the two
+  inspections are dated from the day it is recorded, their tickets are made and announced.
+- **An inspection of such a plan bills nothing.** Its invoice is still made at Authorized, at no
+  charge, so the Owner page knows what the visit cost.
+- **Needs attention** lists a plan signed and not paid, with what the office does next.
+- **The Owner page** counts the plan's invoice as Roof Care.
+- **The terms** are a new set (2026-11-19): paid in full first, the year runs from the payment,
+  and the refund rule. They wait for the owner's yes before a customer signs.
+- A plan signed by a page published before this (`roof_care_sign_up`) still works the old way:
+  in force at once, half billed at each inspection. Remove that function once the site is
+  published and nobody has an old page open.
+
+**Not built yet, in this order:**
+
+1. **The refund when a plan ends early.** The rule is decided: the share for inspections not
+   done, less the minor repairs already covered, never below zero. Today a manager ends a paid
+   plan and nothing works the refund out.
+2. **Renewal.** A renewal invoice before the year ends, with the three rules for a year that
+   closes with an inspection still owed (see "More answers the same day").
+3. **Roof Guard's two leak calls with no travel charged** (see below).
+4. **Stripe**: a pay link or QR code, automatic renewal and its discount.
+
+**Roof Guard's leak calls (owner, Nov 19).** "Two leak calls with the credit subtracting until it
+reaches 0 and on those two leak calls travel is not charged? then after that it is?" and "travel
+does come out of the later ones if theyve had 2 calls but havent used all their repair allotment".
+So: the credit covers whatever a repair invoice charges, labor, materials and travel. On Roof
+Guard's first two leak calls of the plan year travel is not charged at all, so it uses no credit.
+The flyer gives this to Roof Guard only. A ticket has no "leak call" mark yet, and the price
+setup still counts one leak call with labor.
+
+**The discount for renewing by itself.** The owner asked which way is honest. Proposed: say the
+dollars, not a percent ("Renew automatically and save so many dollars a year"), worked as 5% of the plan
+price with the drive left out. Not yet answered.
+
+## Paying up front: what was looked into first
 
 The owner: "i think we are going to do payment up front rather than at time of service via
-something like stripe so we dont have to fight apathy." He asked what that changes. Nothing below
-is built. It waits on his answers.
+something like stripe so we dont have to fight apathy." He asked what that changes. This is what
+was found before anything was built.
 
 **What was checked.** Every piece that knows the plan is billed in two halves, in the code and on
 the live database:
@@ -297,16 +342,18 @@ key a payment made from the preview is a real one.
 2. **The printable sheets** with the QR codes and no prices.
 3. **The office's list of sign-ups waiting to be matched** to a customer.
 4. **Renewal.** A plan is one plan year. Nothing yet starts the next year or re-prices it. The
-   first plan cannot reach its renewal before Nov 18, 2027.
+   first plan cannot reach its renewal before Nov 18, 2027. See "Not built yet" under paying up
+   front.
 5. ~~The terms on the sign-up.~~ Done, Nov 18.
 6. **The tick boxes of services** on the request, once the owner has settled the list.
-7. **The roof's size from the building's outline**, where the site has it. It is typed for now.
+7. ~~The roof's size from the building's outline.~~ Done, Nov 19: offered on the sign-up.
 8. **An "Opened" notice** for a ticket the morning check makes. Today it shows as unassigned work
    and the "Nobody is on it" reminder covers it.
 
 ## The terms: agreed
 
-The owner, Nov 18: "i like all 10 you came up with". They are `ROOF_CARE_TERMS` in
+The owner, Nov 18: "i like all 10 you came up with". Terms 2, 3 and 9 were rewritten on Nov 19
+for paying the year first (version 2026-11-19) and wait for his yes. They are `ROOF_CARE_TERMS` in
 `src/lib/roof-care-plan.ts`, dated by `ROOF_CARE_TERMS_VERSION`. The sign-up shows them with a
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.

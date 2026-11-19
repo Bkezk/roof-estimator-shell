@@ -101,6 +101,13 @@ export interface InvoiceBidRef {
   account_id: string | null;
   /** May this person open the bid (Estimate access)? The page links to it only then. */
   readable: boolean;
+  /**
+   * Set when the invoice belongs to a Roof Care plan year, not a trade bid (Nov 19;
+   * invoices.roof_care_plan_id). Then `id` is the plan's, `job_label` is "RC-1001", `trade_name`
+   * is "Roof Guard plan" and `name` is the property's. The page links to the property and
+   * offers none of the bid's own buttons.
+   */
+  plan?: { site_id: string };
 }
 
 /** createBidInvoice's refusals, in plain words. */

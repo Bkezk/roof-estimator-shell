@@ -435,6 +435,8 @@ const invoiceRow = (over: Partial<InvoiceRow>): InvoiceRow => ({
   po_markup: true,
   po_number: null,
   property: {},
+  // (Nov 19: a Roof Care plan year's invoice; none here.)
+  roof_care_plan_id: null,
   sage_exported_at: null,
   sent_at: null,
   sent_by_name: null,
@@ -649,8 +651,10 @@ describe("pins on the invoice page's source", () => {
       "type Owner = { job: ServiceJobWithTech; bid: null } | { job: null; bid: InvoiceBidRef };",
     );
     // A bid's invoice has its owner at once; a ticket's only when the ticket is read.
+    // (Nov 19: a Roof Care plan year's invoice has no ticket either, and rides in the bid's
+    // place with `plan` set on it. roof-care-pay-first-nov19.test.ts.)
     expect(EDITOR).toMatch(
-      /const bidId = data\.invoice\.bid_id;\s*if \(bidId\) return \{ job: null, bid: bidRefOf\(data, bidId\) \};\s*return ticket \? \{ job: ticket, bid: null \} : null;/,
+      /const bidId = data\.invoice\.bid_id \?\? data\.invoice\.roof_care_plan_id;\s*if \(bidId\) return \{ job: null, bid: bidRefOf\(data, bidId\) \};\s*return ticket \? \{ job: ticket, bid: null \} : null;/,
     );
     expect(PAGE).toContain("const owner = data ? ownerOf(data, jobQ.data) : null;");
     expect(PAGE).toMatch(/if \(!data \|\| !owner\)\s*return \(/);
@@ -736,7 +740,8 @@ describe("pins on the invoice page's source", () => {
     expect(EDITOR.match(/useAccount\(job \? job\.account_id : bid\.account_id\)/g)).toHaveLength(2);
     expect(EDITOR).toContain("accountId={job ? job.account_id : bid.account_id}");
     expect(DRAFT).toMatch(
-      /\? job\s*\? deleteDraftNote\(job\.number, no\)\s*: `The draft and its lines are removed\. The next invoice made for this bid takes number \$\{no\}\.`/,
+      // (Nov 19: a plan year's invoice says its own words between the two.)
+      /\? job\s*\? deleteDraftNote\(job\.number, no\)\s*: bid\.plan\s*\? "[^"]*"\s*: `The draft and its lines are removed\. The next invoice made for this bid takes number \$\{no\}\.`/,
     );
     // Nothing reads the ticket without first knowing there is one.
     expect(EDITOR).not.toMatch(/const \{ job \} = ctx;/);

@@ -24,17 +24,23 @@ export interface CarePlanVisitRef {
   plan: string | null;
   /** The plan has been ended (Nov 19): nothing is billed for it without a person pressing. */
   ended?: boolean;
+  /**
+   * The plan was paid for the year before it started (Nov 19): the inspection bills nothing,
+   * and its invoice is still made, for what the visit cost.
+   */
+  paid_first?: boolean;
 }
 
 /**
  * Whether the invoice is made by itself when the inspection is authorized (owner, Nov 19):
- * a visit with its half to bill, or a storm inspection, whose invoice is for nothing but carries
- * what the trip cost so the Owner page counts it. Never for a plan that has been ended: the
+ * a visit with its half to bill, or one that bills nothing (a storm inspection, or an inspection
+ * of a plan paid for the year first), whose invoice carries what the trip cost so the Owner page
+ * counts it. Never for a plan that has been ended: the
  * office presses the button if the work was done and is owed.
  */
 export function billsItself(visit: CarePlanVisitRef | null): boolean {
   if (!visit || visit.ended) return false;
-  return visit.amount > 0 || visit.kind === "storm";
+  return visit.amount > 0 || visit.kind === "storm" || !!visit.paid_first;
 }
 
 const asKind = (k: string): VisitKind =>
@@ -46,7 +52,7 @@ export function carePlanOwnLine(visit: CarePlanVisitRef) {
   return {
     sort: 0,
     kind: "other",
-    description: carePlanLineWords(visit.plan, asKind(visit.kind)),
+    description: carePlanLineWords(visit.plan, asKind(visit.kind), !!visit.paid_first),
     qty: 1,
     unit: "ea",
     rate: amount,

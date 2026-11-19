@@ -27,6 +27,7 @@ import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
 import {
   asPlanKey,
+  asPlanStatus,
   carePlanLineSource,
   FIRST_VISIT_CHOICES,
   mapRoofSize,
@@ -37,7 +38,9 @@ import {
   TERMS_NOT_AGREED,
   VISIT_KINDS,
   type AllowanceUse,
+  type FirstVisit,
   type MapRoofSize,
+  type PlanInvoiceRef,
   type PlanVisit,
   type PriceEstimate,
   type RoofCarePlan,
@@ -206,7 +209,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name" as const;
 const TICKET_SELECT =
@@ -256,7 +259,28 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
     else list.push({ invoice_id: l.invoice_id, number, amount });
     uses.set(planId, list);
   }
-  return { billed, uses };
+  // Each plan's own invoice for the year (Nov 19): the newest that is not void.
+  const own = new Map<string, PlanInvoiceRef>();
+  for (const chunk of chunkIds([...planIds])) {
+    const { data, error } = await sb
+      .from("invoices")
+      .select("id, roof_care_plan_id, display_number, status, total, paid_amount, created_at")
+      .in("roof_care_plan_id", chunk)
+      .neq("status", "void")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(`The plans' invoices: ${error.message}`);
+    for (const i of data ?? []) {
+      if (!i.roof_care_plan_id || own.has(i.roof_care_plan_id)) continue;
+      own.set(i.roof_care_plan_id, {
+        id: i.id,
+        number: i.display_number ?? "",
+        status: i.status,
+        total: Number(i.total) || 0,
+        paid_amount: Number(i.paid_amount) || 0,
+      });
+    }
+  }
+  return { billed, uses, own };
 }
 
 /**
@@ -340,7 +364,15 @@ export async function plansOfSites(
       account_id: p.account_id,
       site_id: p.site_id,
       plan,
-      status: p.status === "ended" ? "ended" : "active",
+      status: asPlanStatus(p.status),
+      pay_first: !!p.pay_first,
+      plan_number: p.plan_number,
+      first_visit: (FIRST_VISIT_CHOICES as readonly string[]).includes(p.first_visit)
+        ? (p.first_visit as FirstVisit)
+        : "window",
+      first_days: p.first_days,
+      starts_on: p.starts_on,
+      invoice: money ? (money.own.get(p.id) ?? null) : null,
       signed_on: p.signed_on,
       renews_on: p.renews_on,
       roof_sqft: Number(p.roof_sqft),
@@ -393,8 +425,8 @@ const signUpInput = z.object({
   shown_price: z.number().finite().positive(),
 });
 
-/** The tickets a plan's inspections have, to announce the ones just made. */
-async function ticketIdsOfPlan(sb: Sb, planId: string): Promise<string[]> {
+/** The tickets a plan's inspections have, to announce the ones made when it is paid. */
+export async function ticketIdsOfPlan(sb: Sb, planId: string): Promise<string[]> {
   const { data: visits } = await sb.from("roof_care_visits").select("id").eq("plan_id", planId);
   const ids = (visits ?? []).map((v) => v.id);
   if (!ids.length) return [];
@@ -427,7 +459,9 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     const now = answer.ready ? answer.plans.find((o) => o.plan === data.plan) : undefined;
     if (now && now.price !== Math.round(data.shown_price))
       throw new Error(priceChangedLine(data.shown_price, now.price));
-    const { data: planId, error } = await sb.rpc("roof_care_sign_up", {
+    // Signed, and waiting for its payment (Nov 19): no inspection is made until the plan's
+    // invoice is paid. The older roof_care_sign_up is left for a page published before this.
+    const { data: planId, error } = await sb.rpc("roof_care_sign_up_await_payment", {
       p_site: site.id,
       p_plan: data.plan,
       p_sqft: data.sqft,
@@ -443,12 +477,19 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_terms: ROOF_CARE_TERMS_VERSION,
     });
     if (error) throw new Error(error.message);
-    const { announceCarePlanTickets } = await import("@/lib/service.functions");
-    await announceCarePlanTickets(sb, await ticketIdsOfPlan(sb, planId), {
-      id: context.userId,
-      name: nameOf(p),
-    });
-    const made = (await plansOfSites(sb, [site.id])).find((x) => x.id === planId);
+    // Its invoice for the year, at once when the person signing may make invoices. A technician
+    // may not: the plan then waits for the office, which makes it from the plan. A failure here
+    // does not undo the sign-up; the plan says it has no invoice yet.
+    const money = seesInvoices(p);
+    if (money) {
+      try {
+        const { makePlanInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
+        await makePlanInvoice(sb, planId, { id: context.userId, name: nameOf(p) });
+      } catch {
+        // Said on the plan: "No invoice has been made for this plan yet."
+      }
+    }
+    const made = (await plansOfSites(sb, [site.id], { money })).find((x) => x.id === planId);
     if (!made)
       throw new Error("The plan was saved, but it could not be read back. Reload the page.");
     return made;

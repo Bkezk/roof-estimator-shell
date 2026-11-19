@@ -140,7 +140,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
         sb
           .from("invoices")
           .select(
-            "id, number, display_number, status, sent_at, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id, bid_id",
+            "id, number, display_number, status, sent_at, invoice_date, finalized_at, created_at, subtotal, bill_to, bill_to_vendor_id, service_job_id, bid_id, roof_care_plan_id",
           )
           .in("status", [...COUNTED_INVOICE_STATUSES])
           .gte("invoice_date", from)
@@ -152,8 +152,10 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
     ),
   );
   // A trade bid's invoices are not counted: the won bid is, from its own figures (readWonBids).
-  // Every invoice left is a ticket's (the check invoices_one_parent); `ticket` is its id, ""
-  // for a row with none, which then finds no ticket and no purchase orders below.
+  // Every invoice left is a ticket's, or a Roof Care plan year's (Nov 19: paid for before the
+  // plan starts; the check invoices_one_parent). `ticket` is the ticket's id, "" for a row with
+  // none, which then finds no ticket and no purchase orders below. A plan year's invoice is Roof
+  // Care's income; what the year costs is on its inspections' own invoices, which bill nothing.
   const invoices = read
     .filter((i) => !i.bid_id)
     .map((i) => ({ ...i, ticket: i.service_job_id ?? "" }));
@@ -298,7 +300,7 @@ async function readInvoices(sb: Sb, from: string, to: string): Promise<MarginInv
       technicianId,
       ticket: !!ticket,
       // The invoice of a Roof Care plan inspection is its own line of business (Nov 18).
-      ...(ticket?.roof_care_visit_id ? { carePlan: true } : {}),
+      ...(ticket?.roof_care_visit_id || i.roof_care_plan_id ? { carePlan: true } : {}),
       ...costs,
       purchaseOrders: myPos.length
         ? poCostCarried(i.id, refsByTicket.get(i.ticket) ?? [], myPos, myLines)

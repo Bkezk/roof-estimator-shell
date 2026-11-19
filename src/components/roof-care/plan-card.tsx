@@ -10,7 +10,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CalendarClock, CloudLightning, Loader2, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -29,7 +29,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { isFieldOnly, managesTickets } from "@/lib/access";
+import { isFieldOnly, managesTickets, seesInvoices } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { easternYmd } from "@/lib/field-day";
 import { longDay } from "@/lib/followup-rules";
@@ -41,15 +41,22 @@ import {
 import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
 import {
   ADDITIONAL_SERVICES_LABEL,
+  AWAITING_PAYMENT_NOTE,
+  AWAITING_PAYMENT_WORDS,
   CARE_PLAN_LABEL,
+  DATES_FROM_PAYMENT,
   dueWords,
+  firstVisitWords,
   MAP_ROOF_MORE,
   MAP_ROOF_USE,
   mapRoofSizeLine,
   nextWindow,
   planBadge,
+  PLAN_MAKE_INVOICE,
+  PLAN_NO_INVOICE,
   planDates,
   planName,
+  planNumberLabel,
   pushPreview,
   PRICE_ESTIMATE_JUST_NOW,
   PRICE_ESTIMATE_ROUGH,
@@ -79,6 +86,7 @@ import {
   signUpRoofCare,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
+import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
 import { money0, type PlanKey } from "@/lib/roof-care-price";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -102,9 +110,12 @@ function usePlans(siteId: string | null | undefined) {
   });
 }
 
-/** The plan in force, else the one that ended last. */
+/** The plan in force, else the one waiting for its payment, else the one that ended last. */
 const currentPlan = (plans: readonly RoofCarePlan[]): RoofCarePlan | null =>
-  plans.find((p) => p.status === "active") ?? plans[0] ?? null;
+  plans.find((p) => p.status === "active") ??
+  plans.find((p) => p.status === "awaiting_payment") ??
+  plans[0] ??
+  null;
 
 function useRefresh(siteId: string) {
   const qc = useQueryClient();
@@ -123,7 +134,7 @@ export function RoofCareBadge({ plan, today }: { plan: RoofCarePlan; today: stri
     <span className="flex flex-wrap items-center gap-1.5" data-roof-care-badge={plan.plan}>
       <Badge
         variant="outline"
-        className={`gap-1 font-medium ${plan.status === "active" ? "border-emerald-600/50 text-emerald-800 dark:text-emerald-300" : "text-muted-foreground"}`}
+        className={`gap-1 font-medium ${plan.status === "active" ? "border-emerald-600/50 text-emerald-800 dark:text-emerald-300" : plan.status === "awaiting_payment" ? "border-amber-600/50 text-amber-800 dark:text-amber-300" : "text-muted-foreground"}`}
       >
         <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> {planBadge(plan)}
       </Badge>
@@ -243,6 +254,8 @@ export function RoofCareButtons({
   if (!siteId || !profile) return null;
   const today = easternYmd();
   const active = (q.data ?? []).find((p) => p.status === "active") ?? null;
+  // Signed and waiting for its payment (Nov 19): Care Plan opens it, never a second sign-up.
+  const waiting = (q.data ?? []).find((p) => p.status === "awaiting_payment") ?? null;
   const done = active ? visitsDone(active, today) : null;
   // The workflow's bar: the two side by side on a phone, each tall enough for a thumb, in the
   // logo's blue (owner, Nov 18: "color them blue, the same blue as in the logo").
@@ -250,7 +263,7 @@ export function RoofCareButtons({
   return (
     <div
       className={`${big ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"} ${className}`}
-      data-roof-care-buttons={active ? active.plan : "none"}
+      data-roof-care-buttons={active ? active.plan : waiting ? "awaiting" : "none"}
     >
       <Button
         type="button"
@@ -275,6 +288,14 @@ export function RoofCareButtons({
               {planName(active.plan)} · {done.visits}/2
             </span>
           )}
+          {!active && waiting && (
+            <span
+              className={`rounded px-1.5 font-medium ${big ? "bg-white/20 text-[10px] text-white" : "ml-1.5 bg-amber-500/15 py-0.5 text-[11px] text-amber-800 dark:text-amber-300"}`}
+              data-care-plan-chip="awaiting"
+            >
+              {AWAITING_PAYMENT_WORDS}
+            </span>
+          )}
         </span>
       </Button>
       <Button
@@ -288,7 +309,7 @@ export function RoofCareButtons({
         <Plus className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {ADDITIONAL_SERVICES_LABEL}
       </Button>
       {open === "plan" &&
-        (active ? (
+        (active || waiting ? (
           <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
         ) : (
           <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} />
@@ -369,12 +390,26 @@ export function RoofCareCard({
   // starts (RoofCareButtons).
   if (!plan) return null;
   const active = plan?.status === "active" ? plan : null;
+  const waiting = plan?.status === "awaiting_payment" ? plan : null;
   const office = !isFieldOnly(profile);
   const manager = managesTickets(profile);
   const mine = active && visitId ? (active.visits.find((v) => v.id === visitId) ?? null) : null;
   return (
-    <div className={`space-y-1.5 ${className}`} data-roof-care={active ? active.plan : "none"}>
+    <div
+      className={`space-y-1.5 ${className}`}
+      data-roof-care={active ? active.plan : waiting ? "awaiting" : "none"}
+    >
       {plan && <RoofCareBadge plan={plan} today={today} />}
+      {waiting && (
+        <AwaitingPayment
+          siteId={siteId}
+          plan={waiting}
+          office={office}
+          manager={manager}
+          short={short}
+          onEnd={() => setEnding(true)}
+        />
+      )}
       {mine && (
         <p className="text-xs font-medium" data-roof-care-this-ticket>
           This ticket is the plan’s {VISIT_LABEL[mine.kind].toLowerCase()}. {dueWords(mine)}.
@@ -384,8 +419,11 @@ export function RoofCareCard({
         <>
           <p className="text-xs text-muted-foreground">
             Signed {longDay(active.signed_on)} by {active.agreed_by}
-            {active.sold_by_name ? `, signed up by ${active.sold_by_name}` : ""}. Renews{" "}
-            {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
+            {active.sold_by_name ? `, signed up by ${active.sold_by_name}` : ""}.
+            {active.pay_first && active.starts_on
+              ? ` Paid, and started ${longDay(active.starts_on)}.`
+              : ""}{" "}
+            Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
           {/* The minor repairs the plan includes each year (owner, Nov 19: "have that under
@@ -492,8 +530,109 @@ export function RoofCareCard({
           onClose={() => setPush(null)}
         />
       )}
-      {ending && active && (
-        <EndDialog siteId={siteId} plan={active} onClose={() => setEnding(false)} />
+      {ending && (active ?? waiting) && (
+        <EndDialog siteId={siteId} plan={(active ?? waiting)!} onClose={() => setEnding(false)} />
+      )}
+    </div>
+  );
+}
+
+// ── Signed, waiting for its payment (owner, Nov 19) ─────────────────────────────────────────
+
+/**
+ * A plan that is signed and not yet paid: who signed, what was chosen for the first inspection,
+ * and for those who see invoices the plan's invoice, or the button that makes it. The plan
+ * starts by itself the day that invoice is marked paid in full.
+ */
+function AwaitingPayment({
+  siteId,
+  plan,
+  office,
+  manager,
+  short,
+  onEnd,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  office: boolean;
+  manager: boolean;
+  short: boolean;
+  onEnd: () => void;
+}) {
+  const { profile } = useAuth();
+  const refresh = useRefresh(siteId);
+  const navigate = useNavigate();
+  const makeFn = useServerFn(createRoofCarePlanInvoice);
+  const make = useMutation({
+    mutationFn: () => makeFn({ data: { plan_id: plan.id } }),
+    onSuccess: (r) => {
+      refresh();
+      void navigate({ to: "/service/invoices", search: { id: r.id } });
+    },
+    onError: (e) => toast.error(`Could not make the invoice: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const money = seesInvoices(profile);
+  const inv = plan.invoice;
+  return (
+    <div className="space-y-1 text-xs" data-roof-care-awaiting>
+      <p className="font-medium text-amber-800 dark:text-amber-300">
+        {AWAITING_PAYMENT_WORDS}
+        {plan.plan_number != null ? ` · ${planNumberLabel(plan.plan_number)}` : ""}
+        {office && ` · ${money0(plan.price)} for the year`}
+      </p>
+      <p className="text-muted-foreground">
+        Signed {longDay(plan.signed_on)} by {plan.agreed_by}
+        {plan.sold_by_name ? `, signed up by ${plan.sold_by_name}` : ""}. {AWAITING_PAYMENT_NOTE}
+      </p>
+      {!short && (
+        <p className="text-muted-foreground" data-awaiting-first>
+          {firstVisitWords(plan.first_visit, plan.first_days)}
+        </p>
+      )}
+      {money &&
+        (inv ? (
+          <p data-awaiting-invoice={inv.status}>
+            <Link
+              to="/service/invoices"
+              search={{ id: inv.id }}
+              className="font-medium underline underline-offset-2"
+            >
+              Invoice #{inv.number}
+            </Link>{" "}
+            {inv.status === "draft"
+              ? "is a draft. Finalise it and send it to the customer."
+              : inv.paid_amount > 0
+                ? `has ${money0(inv.paid_amount)} paid of ${money0(inv.total)}. The plan starts when it is paid in full.`
+                : "is waiting to be paid. Mark it paid when the payment arrives."}
+          </p>
+        ) : (
+          <p className="flex flex-wrap items-center gap-2" data-awaiting-invoice="none">
+            <span>{PLAN_NO_INVOICE}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={make.isPending}
+              onClick={() => make.mutate()}
+              data-action="roof-care-make-invoice"
+            >
+              {make.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              {PLAN_MAKE_INVOICE}
+            </Button>
+          </p>
+        ))}
+      {!short && manager && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs text-muted-foreground"
+          onClick={onEnd}
+          data-action="roof-care-end"
+        >
+          End plan
+        </Button>
       )}
     </div>
   );
@@ -501,10 +640,11 @@ export function RoofCareCard({
 
 // ── Sign up ─────────────────────────────────────────────────────────────────────────────────
 
+// Counted from the day the payment is received (Nov 19): no inspection before the plan is paid.
 const FIRST_WORDS: Record<FirstVisit, string> = {
-  now: "Do the first inspection today",
-  days: "Push the first inspection back",
-  window: "Wait for the next window",
+  now: "As soon as the payment is received",
+  days: "This many days after the payment",
+  window: "In the next window after the payment",
 };
 
 function SignUpDialog({
@@ -576,7 +716,12 @@ function SignUpDialog({
       }),
     onSuccess: (made) => {
       refresh();
-      toast.success(`${planName(made.plan)} plan started`);
+      toast.success(
+        made.invoice
+          ? `${planName(made.plan)} plan signed. Invoice #${made.invoice.number} is a draft: finalise it and send it. The plan starts when it is paid.`
+          : `${planName(made.plan)} plan signed. The office sends the invoice. The plan starts when it is paid.`,
+        { duration: 20_000 },
+      );
       onClose();
     },
     onError: (e) => {
@@ -598,6 +743,7 @@ function SignUpDialog({
           <DialogTitle>Sign up for a Roof Care plan</DialogTitle>
           <DialogDescription>
             Two inspections a year with a photo report after each. The price is for this property.
+            The plan is paid for the year first, and starts the day the payment is received.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
@@ -687,7 +833,7 @@ function SignUpDialog({
                     <span className="text-xs font-normal text-muted-foreground"> a year</span>
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    {money0(o.visit1)} at the first inspection, {money0(o.visit2)} at the second
+                    Paid in full before the plan starts
                   </span>
                 </button>
               ))}
@@ -715,7 +861,7 @@ function SignUpDialog({
                     {c === "days" && (
                       <>
                         <Input
-                          aria-label="Days to push the first inspection back"
+                          aria-label="Days after the payment for the first inspection"
                           inputMode="numeric"
                           className="h-8 w-20"
                           value={days}
@@ -740,7 +886,7 @@ function SignUpDialog({
                     Inspection 1: {dueWords({ due_from: dates.first.from, due_by: dates.first.to })}
                     . Inspection 2:{" "}
                     {dueWords({ due_from: dates.second.from, due_by: dates.second.to })}. The plan
-                    renews {longDay(dates.renews)}.
+                    renews {longDay(dates.renews)}. {DATES_FROM_PAYMENT}
                   </p>
                 )}
               </fieldset>
@@ -797,7 +943,7 @@ function SignUpDialog({
             data-action="roof-care-confirm"
           >
             {sign.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            Start the plan
+            Sign the plan
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -918,7 +1064,11 @@ function EndDialog({
     onSuccess: () => {
       refresh();
       // Its inspection tickets nobody had started are taken off the board (Nov 19).
-      toast.success("Plan ended. Its inspection tickets not yet started were taken off the board.");
+      toast.success(
+        plan.status === "awaiting_payment"
+          ? "Plan ended. Its unpaid invoice was removed."
+          : "Plan ended. Its inspection tickets not yet started were taken off the board.",
+      );
       onClose();
     },
     onError: (e) => toast.error(`Could not end the plan: ${errText(e)}`),
@@ -929,7 +1079,9 @@ function EndDialog({
         <DialogHeader>
           <DialogTitle>End the {planName(plan.plan)} plan</DialogTitle>
           <DialogDescription>
-            No more inspections are made for it. Tickets already made stay as they are.
+            {plan.status === "awaiting_payment"
+              ? "The plan was never paid, so it never started. Its unpaid invoice is removed with it."
+              : "No more inspections are made for it. Tickets already made stay as they are."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1 text-sm">

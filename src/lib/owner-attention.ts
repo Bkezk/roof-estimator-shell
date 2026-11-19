@@ -81,7 +81,8 @@ export type AttentionKind =
   | "to_authorize"
   | "invoice_unpaid"
   | "care_plan_late"
-  | "care_plan_unbilled";
+  | "care_plan_unbilled"
+  | "care_plan_unpaid";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -220,6 +221,23 @@ export interface AttCareVisit {
  * invoice (owner, Nov 19: "Go with 6"). The draft is made when the ticket is authorized; this
  * is the one somebody then deleted or voided.
  */
+/**
+ * A Roof Care plan that is signed and not yet paid (owner, Nov 19: the plan is paid for the year
+ * before it starts). Nothing happens for the customer until the office sends the invoice and
+ * the payment is marked, so it is listed from the first day.
+ */
+export interface AttCareUnpaid {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  signed_on: string;
+  /** The yearly price. */
+  price: number;
+  /** The plan's invoice; null when none has been made yet. */
+  invoice: { id: string; number: string; status: string; paid_amount: number } | null;
+}
+
 export interface AttCareUnbilled {
   visit_id: string;
   job_id: string;
@@ -262,6 +280,8 @@ export interface AttentionIn {
   careVisits?: readonly AttCareVisit[];
   /** Roof Care plan inspections done and on no invoice (Nov 19). */
   careUnbilled?: readonly AttCareUnbilled[];
+  /** Roof Care plans signed and not yet paid (Nov 19). */
+  careUnpaid?: readonly AttCareUnpaid[];
 }
 
 export interface AttentionRow {
@@ -737,6 +757,34 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: age > 14 ? "red" : "amber",
       amount: v.amount > 0 ? v.amount : null,
       href: `/service?id=${v.job_id}`,
+    });
+  }
+
+  // A Roof Care plan signed and waiting for its payment (Nov 19). It says what the office does
+  // next: make the invoice, send the draft, or mark the payment.
+  for (const v of i.careUnpaid ?? []) {
+    const age = YMD.test(v.signed_on) ? Math.max(0, daysBetween(v.signed_on, today)) : 0;
+    const signed = `Signed ${shortDay(v.signed_on)} and not paid, so the plan has not started.`;
+    const next = !v.invoice
+      ? "No invoice has been made. Open the property and press Make the invoice."
+      : v.invoice.status === "draft"
+        ? `Invoice #${v.invoice.number} is a draft. Finalise it and send it.`
+        : v.invoice.paid_amount > 0
+          ? `Invoice #${v.invoice.number} is part paid. The plan starts when it is paid in full.`
+          : `Invoice #${v.invoice.number} is waiting to be paid. Mark it paid when the payment arrives.`;
+    rows.push({
+      key: `care_plan_unpaid:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_unpaid",
+      tag: "Roof Care",
+      title: v.title,
+      why: `${signed} ${next}`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: v.price > 0 ? v.price : null,
+      href: v.invoice ? `/service/invoices?id=${v.invoice.id}` : `/properties/${v.site_id}`,
     });
   }
 

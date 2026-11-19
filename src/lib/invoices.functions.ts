@@ -25,6 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { tradeJobLabel, type InvoiceBidRef } from "@/lib/bid-invoices";
+import { planName, planNumberLabel } from "@/lib/roof-care-plan";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
@@ -131,6 +132,9 @@ export function ofTicket<T extends { service_job_id: string | null }>(
 /** Rebuild from ticket on an invoice that has no ticket. */
 export const INVOICE_NO_TICKET_TO_REBUILD =
   "This invoice was made from a trade bid. It has no ticket to rebuild from.";
+/** The same on a Roof Care plan year's invoice (Nov 19). */
+export const INVOICE_PLAN_NOT_REBUILT =
+  "This is a Roof Care plan's invoice for the year. It has no ticket to rebuild from.";
 
 /**
  * The trade job's label read off one of its invoice numbers: "T-1001.2" is job "T-1001". For
@@ -779,6 +783,7 @@ async function invoiceBidRef(
   sb: SupabaseClient<Database>,
   inv: InvoiceRow,
 ): Promise<InvoiceBidRef | null> {
+  if (inv.roof_care_plan_id) return invoicePlanRef(sb, inv, inv.roof_care_plan_id);
   if (!inv.bid_id) return null;
   const { data, error } = await sb
     .from("bids")
@@ -815,6 +820,44 @@ async function invoiceBidRef(
 }
 
 /**
+ * The Roof Care plan a plan year's invoice belongs to (Nov 19), in the shape the page already
+ * reads for a trade bid: the label is the plan's number, the name is the property's, and `plan`
+ * says it is a plan and where its property is. A reader who cannot read the plan still opens
+ * the invoice; the label is then read off the invoice's own number.
+ */
+async function invoicePlanRef(
+  sb: SupabaseClient<Database>,
+  inv: InvoiceRow,
+  planId: string,
+): Promise<InvoiceBidRef> {
+  const { data: plan, error } = await sb
+    .from("roof_care_plans")
+    .select("id, plan, plan_number, account_id, site_id")
+    .eq("id", planId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const property = ((inv.property ?? {}) as { name?: string }).name ?? "";
+  if (!plan)
+    return {
+      id: planId,
+      name: property,
+      trade_name: "Roof Care plan",
+      job_label: invoiceLabel(inv),
+      account_id: null,
+      readable: false,
+    };
+  return {
+    id: plan.id,
+    name: property,
+    trade_name: `${planName(plan.plan)} plan`,
+    job_label: plan.plan_number != null ? planNumberLabel(plan.plan_number) : invoiceLabel(inv),
+    account_id: plan.account_id,
+    readable: true,
+    plan: { site_id: plan.site_id },
+  };
+}
+
+/**
  * Rebuild a draft's lines from the ticket (after its time or material was corrected). Lines
  * added by hand on the invoice and prices changed by hand are kept (invoice-rebuild.ts). An
  * invoice made from a trade bid has no ticket to rebuild from: refused in plain words.
@@ -832,7 +875,10 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
-    if (!ofTicket(inv)) throw new Error(INVOICE_NO_TICKET_TO_REBUILD);
+    if (!ofTicket(inv))
+      throw new Error(
+        inv.roof_care_plan_id ? INVOICE_PLAN_NOT_REBUILT : INVOICE_NO_TICKET_TO_REBUILD,
+      );
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
     const built = await buildLinesFromJob(sb, inv.service_job_id, {
@@ -1136,7 +1182,9 @@ export const saveInvoice = createServerFn({ method: "POST" })
         // told who that is, so the Bill To stays as stored, the vendor and its snapshot
         // together (the column set above is taken back), rather than a customer column over a
         // vendor's address.
-        const customer = await bidCustomer(sb, inv.bid_id);
+        const customer = inv.roof_care_plan_id
+          ? await planCustomer(sb, inv.roof_care_plan_id)
+          : await bidCustomer(sb, inv.bid_id);
         if (customer) {
           const { data: account, error: aErr } = customer.account_id
             ? await sb.from("crm_accounts").select("*").eq("id", customer.account_id).maybeSingle()
@@ -1181,6 +1229,20 @@ async function bidCustomer(
   return bid
     ? { account_id: bid.account_id ?? null, customer_name: bid.customer_name ?? null }
     : null;
+}
+
+/** Whom a Roof Care plan year's invoice is for: the plan's customer account (Nov 19). */
+async function planCustomer(
+  sb: SupabaseClient<Database>,
+  planId: string,
+): Promise<{ account_id: string | null; customer_name: string | null } | null> {
+  const { data, error } = await sb
+    .from("roof_care_plans")
+    .select("account_id")
+    .eq("id", planId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? { account_id: data.account_id, customer_name: null } : null;
 }
 
 /** The PDF as base64 (for preview / download in the browser). */
@@ -1429,6 +1491,23 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
+    // A Roof Care plan year's invoice paid in full (Nov 19): the database has just started the
+    // plan and made the tickets that are due (invoices_plan_paid). They are announced as a
+    // ticket made by hand is. Best effort: the plan is started either way.
+    if (inv.roof_care_plan_id && inv.status === "paid" && cur.status !== "paid") {
+      try {
+        const [{ ticketIdsOfPlan }, { announceCarePlanTickets }] = await Promise.all([
+          import("@/lib/roof-care-plan.functions"),
+          import("@/lib/service.functions"),
+        ]);
+        await announceCarePlanTickets(sb, await ticketIdsOfPlan(sb, inv.roof_care_plan_id), {
+          id: context.userId,
+          name: nameOf(p),
+        });
+      } catch (e) {
+        console.error("Could not announce the plan's tickets", e instanceof Error ? e.message : e);
+      }
+    }
     // The ticket keeps its stage (owner, Oct 5: a manager closes it by hand).
     return { ...(await withLines(sb, inv)), ticket_closed: false };
   });
@@ -1651,10 +1730,16 @@ export const exportSageCsv = createServerFn({ method: "POST" })
  * copy's service_job_id: the CSV never prints it and nothing is written back.
  */
 const SAGE_BID_KEY = "bid:";
+/** A Roof Care plan year's invoice (Nov 19) is looked up by its plan, under "plan:<id>". */
+const SAGE_PLAN_KEY = "plan:";
 type SageKeyed = InvoiceRow & { service_job_id: string };
 const sageKeyed = (i: InvoiceRow): SageKeyed => ({
   ...i,
-  service_job_id: i.service_job_id ?? `${SAGE_BID_KEY}${i.bid_id ?? ""}`,
+  service_job_id:
+    i.service_job_id ??
+    (i.roof_care_plan_id
+      ? `${SAGE_PLAN_KEY}${i.roof_care_plan_id}`
+      : `${SAGE_BID_KEY}${i.bid_id ?? ""}`),
 });
 
 /** The current Sage numbers for the invoices whose snapshot has none (the vendor's, or the ticket's customer's; for a trade bid's invoice, the bid's customer's). */
@@ -1666,7 +1751,17 @@ async function sageLookups(sb: Ctx["supabase"], invs: readonly SageKeyed[]): Pro
     ...new Set(blank.map((i) => i.bill_to_vendor_id).filter((v): v is string => !!v)),
   ];
   const toCustomer = blank.filter((i) => !i.bill_to_vendor_id);
-  const jobIds = [...new Set(toCustomer.filter((i) => !i.bid_id).map((i) => i.service_job_id))];
+  const jobIds = [
+    ...new Set(
+      toCustomer.filter((i) => !i.bid_id && !i.roof_care_plan_id).map((i) => i.service_job_id),
+    ),
+  ];
+  const planIds = [
+    ...new Set(toCustomer.map((i) => i.roof_care_plan_id).filter((x): x is string => !!x)),
+  ];
+  const plans = planIds.length
+    ? await sb.from("roof_care_plans").select("id, account_id").in("id", planIds)
+    : { data: [] as { id: string; account_id: string | null }[] };
   // The bids' accounts, read with the caller's client: someone who may not read bids (no
   // Estimate access) gets none, and the number then stays blank and is listed as missing.
   const bidIds = [...new Set(toCustomer.map((i) => i.bid_id).filter((b): b is string => !!b))];
@@ -1687,7 +1782,7 @@ async function sageLookups(sb: Ctx["supabase"], invs: readonly SageKeyed[]): Pro
   ]);
   const accountIds = [
     ...new Set(
-      [...(jobs.data ?? []), ...(bids.data ?? [])]
+      [...(jobs.data ?? []), ...(bids.data ?? []), ...(plans.data ?? [])]
         .map((j) => j.account_id)
         .filter((a): a is string => !!a),
     ),
@@ -1710,6 +1805,13 @@ async function sageLookups(sb: Ctx["supabase"], invs: readonly SageKeyed[]): Pro
       ...(bids.data ?? []).map(
         (b) =>
           [`${SAGE_BID_KEY}${b.id}`, b.account_id ? byAccount.get(b.account_id) : null] as const,
+      ),
+      ...(plans.data ?? []).map(
+        (pl) =>
+          [
+            `${SAGE_PLAN_KEY}${pl.id}`,
+            pl.account_id ? byAccount.get(pl.account_id) : null,
+          ] as const,
       ),
     ]),
   };
