@@ -296,8 +296,9 @@ describe("7. the second inspection's window is never under two weeks", () => {
     const d = planDates("2027-10-15", "window", null)!;
     expect(d.first).toEqual({ from: "2028-03-15", to: "2028-05-15" });
     expect(d.second).toEqual({ from: "2028-10-15", to: "2028-10-28" });
-    // The renewal follows an inspection that ends after it.
-    expect(d.renews).toBe("2028-10-28");
+    // Nov 19, later: the plan year is twelve months and no longer. The renewal no longer
+    // follows an inspection that ends after it (it had moved to 2028-10-28).
+    expect(d.renews).toBe("2028-10-15");
   });
   it("two weeks left is enough, thirteen days is not", () => {
     // 120 days after Jan 2, 2027 is May 2: 14 days to May 15.

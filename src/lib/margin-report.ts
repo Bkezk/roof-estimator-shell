@@ -246,6 +246,11 @@ export interface MarginInvoiceIn {
   bidKind?: string | null | undefined;
   /** The invoice of a Roof Care plan inspection (Nov 18; margin-lines.ts). */
   carePlan?: boolean | undefined;
+  /**
+   * A refund of a Roof Care plan ended early (Nov 19): the property it opens. Its revenue is
+   * less than nothing, so it comes off Roof Care's income.
+   */
+  refundSite?: string | undefined;
   /** The invoice's label ("6012.2"; invoice-numbering.ts invoiceLabel), or the bid's name. */
   number: string;
   /** YYYY-MM-DD (invoiceDay; bidWonDay for a bid). */
@@ -348,6 +353,8 @@ export interface MarginInvoiceRow {
   bidKind?: string | null | undefined;
   /** The invoice of a Roof Care plan inspection (Nov 18; margin-lines.ts). */
   carePlan?: boolean | undefined;
+  /** A Roof Care refund (Nov 19): the property it opens, in place of an invoice. */
+  refundSite?: string | undefined;
   number: string;
   day: string;
   status: MarginRowStatus;
@@ -387,6 +394,7 @@ export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
     kind: inv.kind,
     ...(inv.bidKind === "trade" ? { bidKind: "trade" } : {}),
     ...(inv.carePlan ? { carePlan: true } : {}),
+    ...(inv.refundSite ? { refundSite: inv.refundSite } : {}),
     number: inv.number,
     day: inv.day,
     status: inv.status,
@@ -402,7 +410,8 @@ export function toMarginInvoiceRow(inv: MarginInvoiceIn): MarginInvoiceRow {
     purchaseOrders,
     cost,
     margin,
-    marginPct: marginPctOf(margin, revenue),
+    // A refund has no margin percent: money given back over itself would read 100%.
+    marginPct: inv.refundSite ? null : marginPctOf(margin, revenue),
   };
 }
 

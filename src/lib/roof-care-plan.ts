@@ -242,17 +242,17 @@ export function planDates(
     .find((x) => daysBetween(x.from, x.to) >= SECOND_WINDOW_MIN_DAYS - 1)!;
   const year = `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
   // Feb 29 has no day a year on; the database lands on Feb 28.
-  let renews = /^\d{4}-02-29$/.test(year) ? `${year.slice(0, 4)}-02-28` : year;
+  const renews = /^\d{4}-02-29$/.test(year) ? `${year.slice(0, 4)}-02-28` : year;
   const from = w.from;
   let to = w.to;
-  // Inside the plan year when it fits, and never under two weeks. The renewal follows an
-  // inspection that ends after it.
+  // Inside the plan year when it fits, and never under two weeks. The plan year is twelve
+  // months and no longer (owner, Nov 19: "one year of coverage … and the benefits dont roll
+  // over"): an inspection that ends after it does not move the renewal, it is owed at renewal.
   if (from <= renews) {
     const floor = plusDays(from, SECOND_WINDOW_MIN_DAYS - 1);
     const cap = renews > floor ? renews : floor;
     to = to < cap ? to : cap;
   }
-  if (to > renews) renews = to;
   return { first: v1, second: { from, to }, renews };
 }
 
@@ -332,11 +332,33 @@ export function runsLate(
   return p.renews_on > year;
 }
 
+// ── A plan whose year is over (owner, Nov 19) ───────────────────────────────────────────────
+//
+// "the agreement is for one year of coverage …, and the benefits dont roll over". The morning
+// run ends a plan on its renewal date as "Expired" (roof_care_expire). What it included stops.
+// An inspection not done is still owed, and the plan can still be renewed.
+
+/** What the database writes as the reason. */
+export const EXPIRED_REASON = "Expired";
+export const isExpired = (p: { status: string; ended_reason?: string | null }): boolean =>
+  p.status === "ended" && p.ended_reason === EXPIRED_REASON;
+
+/** "Expired Dec 19, 2026. The minor repairs and leak calls it included have stopped." */
+export function expiredWords(p: Pick<RoofCarePlan, "ended_on" | "renews_on">): string {
+  return `Expired ${longDay(p.ended_on || p.renews_on)}. What the plan included has stopped. It can be renewed: the new plan year starts the day the renewal is paid.`;
+}
+
+/** An expired plan is listed in Needs attention for this long. */
+export const EXPIRED_LISTED_DAYS = 60;
+
 /**
  * The badge on a property: "Roof Guard", "awaiting payment" for one signed and not yet paid,
  * and "ended" for a plan that is over.
  */
-export function planBadge(p: Pick<RoofCarePlan, "plan" | "status">): string {
+export function planBadge(
+  p: Pick<RoofCarePlan, "plan" | "status"> & { ended_reason?: string | null },
+): string {
+  if (isExpired(p)) return `${planName(p.plan)} (expired)`;
   if (p.status === "ended") return `${planName(p.plan)} (ended)`;
   if (p.status === "awaiting_payment") return `${planName(p.plan)} (awaiting payment)`;
   return planName(p.plan);
@@ -483,7 +505,12 @@ export interface OwedInspection {
   due_by: string;
   push_reason: string | null;
   customer_asked: boolean;
+  /** Its last day has gone by. One still inside its window is not late: it is still to do. */
+  late: boolean;
 }
+
+/** Why the Renew box leans the way it does. */
+export type RenewalReason = "customer" | "not_late" | "late";
 
 /** What renewing a plan today would be: the database's answer (roof_care_renewal_offer). */
 export interface RenewalOffer {
@@ -497,6 +524,8 @@ export interface RenewalOffer {
   owed: OwedInspection[];
   /** Which way the rule leans; null with nothing owed. */
   default_choice: RenewalChoice | null;
+  /** Why: the customer asked, nothing is late yet, or it is late and ours. */
+  default_reason: RenewalReason | null;
   /** What "half off" takes off: half the price for each inspection owed. */
   credit_if_half_off: number;
   /** The last day an inspection charged in full stays owed, for a payment made today. */
@@ -536,6 +565,7 @@ export function readRenewalOffer(x: unknown): RenewalOffer | null {
       due_by: r["due_by"],
       push_reason: typeof r["push_reason"] === "string" ? r["push_reason"] : null,
       customer_asked: r["customer_asked"] === true,
+      late: r["late"] === true,
     });
   }
   return {
@@ -546,6 +576,11 @@ export function readRenewalOffer(x: unknown): RenewalOffer | null {
     price_was,
     owed,
     default_choice: owed.length ? asRenewalChoice(o["default_choice"]) : null,
+    default_reason: owed.length
+      ? o["default_reason"] === "customer" || o["default_reason"] === "not_late"
+        ? o["default_reason"]
+        : "late"
+      : null,
     credit_if_half_off: credit,
     carried_until,
     pay_method: asPayMethod(o["pay_method"]),
@@ -574,13 +609,20 @@ export function renewalChoiceWords(
   return `The customer kept us off the roof. Charge the renewal in full. ${one ? "The inspection stays" : "The inspections stay"} owed until ${longDay(offer.carried_until)}, then ${one ? "it is" : "they are"} lost.`;
 }
 
-/** Why the Renew box leans the way it does. */
-export function renewalDefaultWords(offer: Pick<RenewalOffer, "default_choice">): string {
-  if (offer.default_choice === "full")
+/**
+ * Why the Renew box leans the way it does. A renewal is made up to 60 days ahead, when the
+ * year's second inspection is often still inside its own window: that one is still to do, and
+ * nothing comes off for it.
+ */
+export function renewalDefaultWords(
+  offer: Pick<RenewalOffer, "default_choice" | "default_reason">,
+): string {
+  if (!offer.default_choice) return "";
+  if (offer.default_reason === "customer")
     return "A push-back of it was marked as the customer asking, so charging in full is picked.";
-  if (offer.default_choice === "half_off")
-    return "No push-back says the customer asked, so half off is picked.";
-  return "";
+  if (offer.default_reason === "not_late")
+    return "It is not late yet, so charging in full is picked: it can still be done on time.";
+  return "It is late and no push-back says the customer asked, so half off is picked.";
 }
 
 /** "Price for the year: $2,100" and, when it moved, what this year was. */

@@ -376,7 +376,8 @@ describe("where it runs", () => {
     expect(src).toContain("const b = await dispatchBidDueNotices(supabaseAdmin);");
     expect(src).toContain("sendsFailed += b.bids_errors;");
     expect(src).toContain('console.error("Cron reminders: the bid due notice pass failed", e);');
-    expect(src).toMatch(/followups,\s*tasks,\s*bids,\s*cron_stamped: cronStamped,/);
+    // Nov 19: the Roof Care "plan expired" pass reports beside them.
+    expect(src).toMatch(/followups,\s*tasks,\s*bids,\s*plans,\s*cron_stamped: cronStamped,/);
   });
   it("the app's own pass: after the task notices, the same admin client, under the same server-key guard", () => {
     const src = read("src/lib/followups.functions.ts");

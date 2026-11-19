@@ -105,8 +105,11 @@ const OFFER: RenewalOffer = {
   open: true,
   price: 1840,
   price_was: 1840,
-  owed: [{ kind: "visit2", due_by: "2027-12-20", push_reason: null, customer_asked: false }],
+  owed: [
+    { kind: "visit2", due_by: "2027-12-20", push_reason: null, customer_asked: false, late: true },
+  ],
   default_choice: "half_off",
+  default_reason: "late",
   credit_if_half_off: 920,
   carried_until: "2028-03-10",
   pay_method: "check",
@@ -152,10 +155,12 @@ describe("the database's answer for the Renew box", () => {
         due_by: "2027-12-20",
         push_reason: "Nov 2: The customer asked (Ann)",
         customer_asked: true,
+        late: true,
       },
     ],
     owed_count: 1,
     default_choice: "full",
+    default_reason: "customer",
     credit_if_half_off: 920,
     carried_until: "2028-03-10",
     pay_method: "card",
@@ -175,9 +180,11 @@ describe("the database's answer for the Renew box", () => {
           due_by: "2027-12-20",
           push_reason: "Nov 2: The customer asked (Ann)",
           customer_asked: true,
+          late: true,
         },
       ],
       default_choice: "full",
+      default_reason: "customer",
       credit_if_half_off: 920,
       carried_until: "2028-03-10",
       pay_method: "card",
@@ -234,13 +241,50 @@ describe("the office's call on an inspection still owed", () => {
   });
 
   it("says why it leans the way it does (owner: half off unless a reason says the customer asked)", () => {
-    expect(renewalDefaultWords({ default_choice: "half_off" })).toBe(
-      "No push-back says the customer asked, so half off is picked.",
+    expect(renewalDefaultWords({ default_choice: "half_off", default_reason: "late" })).toBe(
+      "It is late and no push-back says the customer asked, so half off is picked.",
     );
-    expect(renewalDefaultWords({ default_choice: "full" })).toBe(
+    expect(renewalDefaultWords({ default_choice: "full", default_reason: "customer" })).toBe(
       "A push-back of it was marked as the customer asking, so charging in full is picked.",
     );
-    expect(renewalDefaultWords({ default_choice: null })).toBe("");
+    expect(renewalDefaultWords({ default_choice: null, default_reason: null })).toBe("");
+  });
+
+  // Found the same day: a renewal is made up to 60 days ahead, when the second inspection is
+  // often still inside its own window. The box leaned to half off for it.
+  it("an inspection that is not late yet does not lean to half off", () => {
+    expect(renewalDefaultWords({ default_choice: "full", default_reason: "not_late" })).toBe(
+      "It is not late yet, so charging in full is picked: it can still be done on time.",
+    );
+    const read = readRenewalOffer({
+      renews_on: "2028-01-10",
+      opens_on: "2027-11-11",
+      open: true,
+      price: 1840,
+      price_was: 1840,
+      owed: [
+        {
+          kind: "visit2",
+          due_by: "2028-01-10",
+          push_reason: null,
+          customer_asked: false,
+          late: false,
+        },
+      ],
+      default_choice: "full",
+      default_reason: "not_late",
+      credit_if_half_off: 920,
+      carried_until: "2028-03-10",
+      pay_method: "check",
+      has_renewal: false,
+    })!;
+    expect(read.owed[0]!.late).toBe(false);
+    expect(read.default_reason).toBe("not_late");
+    const sql = flat("supabase/migrations/20261119900000_roof_care_expiry.sql");
+    expect(sql).toContain("when v_asked or not v_late then 'full' else 'half_off' end,");
+    expect(flat("src/components/roof-care/plan-card.tsx")).toContain(
+      '{v.late ? ", late" : ", not late yet"}',
+    );
   });
 
   it("says the price for the year, and when it has moved", () => {

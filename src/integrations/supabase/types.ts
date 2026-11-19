@@ -3433,6 +3433,7 @@ export type Database = {
           ended_by_name: string | null
           ended_on: string | null
           ended_reason: string | null
+          expiry_notified_at: string | null
           first_days: number | null
           first_visit: string
           free_travel_calls: number
@@ -3479,6 +3480,7 @@ export type Database = {
           ended_by_name?: string | null
           ended_on?: string | null
           ended_reason?: string | null
+          expiry_notified_at?: string | null
           first_days?: number | null
           first_visit: string
           free_travel_calls?: number
@@ -3525,6 +3527,7 @@ export type Database = {
           ended_by_name?: string | null
           ended_on?: string | null
           ended_reason?: string | null
+          expiry_notified_at?: string | null
           first_days?: number | null
           first_visit?: string
           free_travel_calls?: number

@@ -798,6 +798,16 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
       console.error("Bid due notice dispatch failed", e);
       out.bidProblem = errText(e);
     }
+    // "A Roof Care plan expired" (owner, Nov 19), the same way. A failure is logged and counted;
+    // it has no line of its own on the Reminders page.
+    try {
+      if (hasServiceRole()) {
+        const { dispatchPlanExpiredNotices } = await import("@/lib/roof-care-notify.server");
+        out.failed += (await dispatchPlanExpiredNotices(await adminClient())).plans_errors;
+      }
+    } catch (e) {
+      console.error("Roof Care plan expired notice dispatch failed", e);
+    }
     return out;
   });
 

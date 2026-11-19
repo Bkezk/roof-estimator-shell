@@ -84,6 +84,20 @@ async function run(request: Request): Promise<Response> {
     bids = { error: errText(e) };
   }
 
+  // "A Roof Care plan expired" (roof-care-notify.server.ts; owner, Nov 19): the admins and the
+  // managers, once for each plan the morning run ended.
+  let plans: Record<string, number> | { error: string };
+  try {
+    const { dispatchPlanExpiredNotices } = await import("@/lib/roof-care-notify.server");
+    const p = await dispatchPlanExpiredNotices(supabaseAdmin);
+    sendsFailed += p.plans_errors;
+    plans = { ...p };
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the Roof Care plan expired pass failed", e);
+    plans = { error: errText(e) };
+  }
+
   // The scheduled run's own stamp (last_cron_at), after the passes, whatever they did: it says
   // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
   // applied yet; logged, never a failure of the run.
@@ -106,6 +120,7 @@ async function run(request: Request): Promise<Response> {
       followups,
       tasks,
       bids,
+      plans,
       cron_stamped: cronStamped,
       at: new Date().toISOString(),
     },

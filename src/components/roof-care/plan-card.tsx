@@ -49,7 +49,9 @@ import {
   CUSTOMER_ASKED_NOTE,
   DATES_FROM_PAYMENT,
   dueWords,
+  expiredWords,
   firstVisitWords,
+  isExpired,
   lostWords,
   MAP_ROOF_MORE,
   MAP_ROOF_USE,
@@ -140,10 +142,14 @@ function usePlans(siteId: string | null | undefined) {
   });
 }
 
-/** The plan in force, else the one waiting for its payment, else the one that ended last. */
+/**
+ * The plan in force, else the one waiting for its payment, else the last one that was in force
+ * (a renewal made and cancelled never was), else the one that ended last.
+ */
 const currentPlan = (plans: readonly RoofCarePlan[]): RoofCarePlan | null =>
   plans.find((p) => p.status === "active") ??
   plans.find((p) => p.status === "awaiting_payment") ??
+  plans.find((p) => !p.pay_first || !!p.starts_on) ??
   plans[0] ??
   null;
 
@@ -439,6 +445,12 @@ export function RoofCareCard({
   if (!plan) return null;
   const active = plan?.status === "active" ? plan : null;
   const waiting = plan?.status === "awaiting_payment" ? plan : null;
+  // Its twelve months are over (Nov 19): what it included has stopped, and it can be renewed.
+  const expired = isExpired(plan) ? plan : null;
+  // A plan that is waiting may be the renewal of one that has since expired.
+  const waitingRenews = waiting?.renewed_from
+    ? q.data.find((p) => p.id === waiting.renewed_from)
+    : undefined;
   // Next year's plan, made and waiting for its payment, while this year's is still in force.
   const renewal = active
     ? (q.data.find((p) => p.status === "awaiting_payment" && p.renewed_from === active.id) ?? null)
@@ -449,11 +461,50 @@ export function RoofCareCard({
   return (
     <div
       className={`space-y-1.5 ${className}`}
-      data-roof-care={active ? active.plan : waiting ? "awaiting" : "none"}
+      data-roof-care={active ? active.plan : waiting ? "awaiting" : expired ? "expired" : "none"}
     >
       {plan && <RoofCareBadge plan={plan} today={today} />}
       {plan.status === "ended" && plan.refund && plan.refund.due > 0 && (
         <RefundOwed siteId={siteId} plan={plan} />
+      )}
+      {expired && (
+        <div className="space-y-1 text-xs" data-roof-care-expired>
+          <p className="font-medium text-amber-800 dark:text-amber-300">{expiredWords(expired)}</p>
+          {/* What was not done is still owed. */}
+          {!short &&
+            expired.visits.some(
+              (v) => v.kind !== "storm" && !["done", "lost"].includes(visitState(v, today)),
+            ) && (
+              <ul className="space-y-1" data-expired-owed>
+                {expired.visits
+                  .filter(
+                    (v) => v.kind !== "storm" && !["done", "lost"].includes(visitState(v, today)),
+                  )
+                  .map((v) => (
+                    <VisitRow
+                      key={v.id}
+                      visit={v}
+                      today={today}
+                      office={false}
+                      showMoney={false}
+                      onPush={setPush}
+                    />
+                  ))}
+              </ul>
+            )}
+          {!short && office && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => setRenewing(true)}
+              data-action="roof-care-renew"
+            >
+              {RENEW_LABEL}
+            </Button>
+          )}
+        </div>
       )}
       {waiting && (
         <AwaitingPayment
@@ -462,6 +513,7 @@ export function RoofCareCard({
           office={office}
           manager={manager}
           short={short}
+          {...(waitingRenews ? { renewalOf: waitingRenews } : {})}
           onEnd={() => setEnding(true)}
         />
       )}
@@ -639,10 +691,19 @@ export function RoofCareCard({
         />
       )}
       {ending && (active ?? waiting) && (
-        <EndDialog siteId={siteId} plan={(active ?? waiting)!} onClose={() => setEnding(false)} />
+        <EndDialog
+          siteId={siteId}
+          plan={(active ?? waiting)!}
+          renewal={!active && !!waitingRenews}
+          onClose={() => setEnding(false)}
+        />
       )}
-      {renewing && active && (
-        <RenewDialog siteId={siteId} plan={active} onClose={() => setRenewing(false)} />
+      {renewing && (active ?? expired) && (
+        <RenewDialog
+          siteId={siteId}
+          plan={(active ?? expired)!}
+          onClose={() => setRenewing(false)}
+        />
       )}
       {endingRenewal && renewal && (
         <EndDialog siteId={siteId} plan={renewal} renewal onClose={() => setEndingRenewal(false)} />
@@ -914,7 +975,8 @@ function RenewDialog({
                 <ul className="text-xs text-muted-foreground">
                   {o.owed.map((v) => (
                     <li key={v.kind} data-owed={v.kind} data-customer-asked={v.customer_asked}>
-                      {VISIT_LABEL[v.kind]}, due by {longDay(v.due_by)}.{" "}
+                      {VISIT_LABEL[v.kind]}, due by {longDay(v.due_by)}
+                      {v.late ? ", late" : ", not late yet"}.{" "}
                       {v.push_reason ? `Pushed back: ${v.push_reason}` : "Never pushed back."}
                     </li>
                   ))}

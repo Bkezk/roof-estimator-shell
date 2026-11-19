@@ -57,7 +57,12 @@ import { daysBetween, shortDay } from "@/lib/followup-rules";
 import { isFlagged, visibleChecklist, type InspectionGrade } from "@/lib/inspection";
 import { ON_RECEIPT_LATE_DAYS, invoiceDue } from "@/lib/invoice-list";
 import { addDays, isHeldOn } from "@/lib/my-work";
-import { CARRY_DAYS, RENEW_LABEL, RENEWAL_OPEN_DAYS } from "@/lib/roof-care-plan";
+import {
+  CARRY_DAYS,
+  EXPIRED_LISTED_DAYS,
+  RENEW_LABEL,
+  RENEWAL_OPEN_DAYS,
+} from "@/lib/roof-care-plan";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
 import { isFinishedStage } from "@/lib/ticket-stages";
@@ -86,7 +91,8 @@ export type AttentionKind =
   | "care_plan_unpaid"
   | "care_plan_refund"
   | "care_plan_renewal"
-  | "care_plan_carried";
+  | "care_plan_carried"
+  | "care_plan_expired";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -266,6 +272,23 @@ export interface AttCareRenewal {
 }
 
 /**
+ * A Roof Care plan whose twelve months ran out without a renewal (owner, Nov 19: "we need to be
+ * notified … when a plan expires so we can reach out to renew"). Listed for 60 days, unless the
+ * property has a newer plan or a renewal waiting.
+ */
+export interface AttCareExpired {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  expired_on: string;
+  /** How many of the year's two inspections were not done. */
+  owed: number;
+  /** The yearly price it was sold at. */
+  price: number;
+}
+
+/**
  * An inspection carried into the renewed year because the customer kept us off the roof (owner,
  * Nov 19): owed for 60 days, then lost. Listed until it is done or lost.
  */
@@ -341,6 +364,8 @@ export interface AttentionIn {
   careRenewals?: readonly AttCareRenewal[];
   /** Inspections carried into a renewed year, not yet done (Nov 19). */
   careCarried?: readonly AttCareCarried[];
+  /** Roof Care plans that expired and were not renewed (Nov 19). */
+  careExpired?: readonly AttCareExpired[];
 }
 
 export interface AttentionRow {
@@ -925,6 +950,31 @@ export function attentionList(i: AttentionIn): AttentionList {
       ageText: left > 0 ? `${count(left, "day")} left` : left === 0 ? "Last day" : late(-left),
       tone: left <= 14 ? "red" : "amber",
       amount: null,
+      href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan that expired and was not renewed (Nov 19): reach out to renew.
+  for (const v of i.careExpired ?? []) {
+    if (!YMD.test(v.expired_on)) continue;
+    const age = Math.max(0, daysBetween(v.expired_on, today));
+    if (age > EXPIRED_LISTED_DAYS) continue;
+    const owed =
+      v.owed <= 0
+        ? ""
+        : ` ${v.owed === 1 ? "1 inspection was" : "Both inspections were"} not done and ${v.owed === 1 ? "is" : "are"} still owed.`;
+    rows.push({
+      key: `care_plan_expired:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_expired",
+      tag: "Roof Care",
+      title: v.title,
+      why: `The plan year ended ${shortDay(v.expired_on)} and the plan was not renewed. What it included has stopped. Reach out to renew it: open the property and press ${RENEW_LABEL}.${owed}`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: v.price > 0 ? v.price : null,
       href: `/properties/${v.site_id}`,
     });
   }

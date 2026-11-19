@@ -412,6 +412,53 @@ async function readWonBids(sb: Sb, from: string, to: string): Promise<PeriodRead
   return { rows, bidsWithoutFigures };
 }
 
+/**
+ * The refunds of Roof Care plans ended early (owner, Nov 19: "the refund should take if off of
+ * roof cares income"): one row each, on the day the plan was ended and its refund confirmed,
+ * with the refund as revenue below nothing. It is Roof Care's, so it comes off that line of
+ * business and off the total. Paid once it is marked sent.
+ */
+export async function readCareRefunds(
+  sb: Sb,
+  from: string,
+  to: string,
+): Promise<MarginInvoiceRow[]> {
+  const { data, error } = await sb
+    .from("roof_care_plans")
+    .select("id, plan_number, account_id, site_id, ended_on, refund_due, refund_sent_on")
+    .gt("refund_due", 0)
+    .gte("ended_on", from)
+    .lte("ended_on", to);
+  if (error) throw new Error(`Roof Care refunds: ${error.message}`);
+  const plans = data ?? [];
+  if (!plans.length) return [];
+  const accounts = await readInChunks(uniq(plans.map((p) => p.account_id)), (chunk) =>
+    sb.from("crm_accounts").select("id, name").in("id", chunk),
+  );
+  const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  return plans.map((p) =>
+    toMarginInvoiceRow({
+      id: `refund:${p.id}`,
+      kind: "service",
+      carePlan: true,
+      refundSite: p.site_id,
+      number: `${p.plan_number != null ? `RC-${p.plan_number}` : "Roof Care"} refund`,
+      day: p.ended_on ?? to,
+      status: p.refund_sent_on ? "paid" : "final",
+      subtotal: -(Number(p.refund_due) || 0),
+      customer: accountName.get(p.account_id) ?? "",
+      technician: null,
+      technicianId: null,
+      ticket: true,
+      hours: 0,
+      material: 0,
+      labor: 0,
+      other: 0,
+      purchaseOrders: 0,
+    }),
+  );
+}
+
 /** One period as Include asks for it: the invoices, the won bids, or both, in one list. */
 async function readPeriod(
   sb: Sb,
@@ -419,11 +466,15 @@ async function readPeriod(
   to: string,
   source: MarginSource,
 ): Promise<PeriodRead> {
-  const [invoices, bids] = await Promise.all([
+  const [invoices, refunds, bids] = await Promise.all([
     source !== "bids" ? readInvoices(sb, from, to) : [],
+    source !== "bids" ? readCareRefunds(sb, from, to) : [],
     source !== "service" ? readWonBids(sb, from, to) : { rows: [], bidsWithoutFigures: [] },
   ]);
-  return { rows: [...invoices, ...bids.rows], bidsWithoutFigures: bids.bidsWithoutFigures };
+  return {
+    rows: [...invoices, ...refunds, ...bids.rows],
+    bidsWithoutFigures: bids.bidsWithoutFigures,
+  };
 }
 
 const periodOf = (

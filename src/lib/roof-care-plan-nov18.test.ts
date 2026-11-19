@@ -166,12 +166,14 @@ describe("when a new plan's two inspections fall (the same sum as the database's
       renews: "2027-11-18",
     });
   });
-  it("a second inspection that cannot fit the plan year carries the renewal with it", () => {
+  // Nov 19: it used to carry the renewal with it (to 2028-05-15). The plan year is twelve
+  // months and no longer: such an inspection is owed at renewal.
+  it("a second inspection that cannot fit the plan year does not move the renewal", () => {
     // Signed Jan 20, first inspection 300 days on (Nov 16): four months later is past Jan 20.
     const d = planDates("2027-01-20", "days", 300)!;
     expect(d.first.from).toBe("2027-11-16");
     expect(d.second).toEqual({ from: "2028-03-15", to: "2028-05-15" });
-    expect(d.renews).toBe("2028-05-15");
+    expect(d.renews).toBe("2028-01-20");
   });
   it("the two are never both in one season", () => {
     // Late September: four months on is January, so the second waits for spring.

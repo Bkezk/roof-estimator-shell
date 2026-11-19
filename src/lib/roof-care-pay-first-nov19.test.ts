@@ -346,8 +346,10 @@ describe("the plan on the property's page while it waits", () => {
   const card = flat("src/components/roof-care/plan-card.tsx");
 
   it("is the plan shown, and Care Plan opens it, never a second sign-up", () => {
+    // Nov 19, later: after those two, the last plan that was in force (a renewal made and
+    // cancelled never was), so an expired plan is the one shown.
     expect(card).toContain(
-      'plans.find((p) => p.status === "active") ?? plans.find((p) => p.status === "awaiting_payment") ?? plans[0] ?? null;',
+      'plans.find((p) => p.status === "active") ?? plans.find((p) => p.status === "awaiting_payment") ?? plans.find((p) => !p.pay_first || !!p.starts_on) ?? plans[0] ?? null;',
     );
     expect(card).toContain('{open === "plan" && (active || waiting ? (');
     expect(card).toContain('data-care-plan-chip="awaiting"');

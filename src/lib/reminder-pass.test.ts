@@ -127,6 +127,15 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 const taskNotices = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/tasks-notify.server", () => ({ dispatchTaskNotices: taskNotices }));
 vi.mock("@/lib/cron-auth", () => ({ authenticateCron: async () => null }));
+// Nov 19: the route also runs the Roof Care "plan expired" pass; it has its own tests.
+vi.mock("@/lib/roof-care-notify.server", () => ({
+  dispatchPlanExpiredNotices: async () => ({
+    plans_checked: 0,
+    plans_notified: 0,
+    plans_skipped: 0,
+    plans_errors: 0,
+  }),
+}));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
 }));

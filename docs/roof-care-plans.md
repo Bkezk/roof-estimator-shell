@@ -271,22 +271,57 @@ stripe later". Record: `docs/qa/roof-care-refund-and-leak-calls-2026-11-19.md`.
   Only a manager makes it, and the new year starts at once with no invoice. This follows from
   the half off rule; the owner has not been asked about it in so many words.
 
+**The owner's answers, Nov 19, evening.**
+
+- **The agreement line on renewal:** "go". It is held for one more answer: the numbers he
+  asked for showed that taking half off a renewal costs more than the inspection is worth on
+  one plan, so the amount in that line waits for his word. The numbers are in the private notes.
+- **A plan is one year of coverage:** "the agreement is for one year of coverage from sign up
+  date, and the benefits dont roll over, if we push it back we can follow the owed inspection
+  rule". Built the same evening, below. The year still runs from the payment, as the terms say.
+- **Neither inspection done, and ours, makes the renewal free, a manager's:** "yes".
+- **Renewing by itself or by hand.** The customer picks one of the two. "we need to be notified
+  when an auto renew happens (this also needs to auto happen through stripe) or when a plan
+  expires so we can reach out to renew". The expiry notice is built. Renewing by itself comes
+  with Stripe.
+- **Changing plans.** "the customer should have the ability to upgrade or downgrade the plan but
+  if they downgrade it will just downgrade the next billing cycle where if they upgrade they
+  will have to pay the difference to get the benefits, this should be setup through stripe and
+  kept track of through the JBK bid site". Comes with Stripe.
+- **Refunds:** "the refund should take if off of roof cares income". Built, below.
+- **Stripe:** "ill get to stripe later".
+
+**Expiry, built Nov 19, evening.** Record: `docs/qa/roof-care-expiry-2026-11-19.md`.
+
+- **The plan year is twelve months and no longer.** Pushing an inspection back no longer moves
+  the renewal date. An inspection past the year is still owed, and the renewal's rule decides
+  it.
+- **The morning run ends a plan whose year is over as "Expired".** Its minor repairs and leak
+  calls stop. Its inspection tickets stay: what was not done is still owed.
+- **The office is told once**, the admins and the managers, at 8:00 on a working day, with a
+  link to the property. Needs attention lists the plan for 60 days, with what is still owed.
+- **An expired plan can still be renewed** from the property, as long as the property has no
+  newer plan. The new year starts the day the renewal is paid.
+- **The Renew box no longer leans to half off for an inspection that is not late yet.** A
+  renewal is made up to 60 days ahead, when the second inspection is often still inside its own
+  window. It now leans to charging in full, and says "it is not late yet".
+- **A refund comes off Roof Care's income.** The income report has a row for each refund, on the
+  day the plan was ended, with its amount below nothing. It is Roof Care's line of business.
+
 **For the owner to decide:**
 
-1. **The terms say nothing of renewal.** The half off, and the 60 days for an inspection the
-   customer kept us from, are the office's rules and are not on the agreement. A new line, and
-   a new terms version, need his word first.
-2. **A plan past its renewal date stays in force** until it is renewed or a manager ends it:
-   the minor repairs left and the leak calls still work. Needs attention says "Was due to renew".
-   Whether it should stop by itself after so many days is his call.
-3. **The plan at renewal is the same plan.** Moving a customer from one plan to another at
-   renewal is done today by ending the plan and signing the new one.
+1. **What is taken off a renewal for an inspection we did not do.** Half off is built. The
+   numbers say it should be less on one plan. See the private notes.
+2. **What a refund takes off besides the minor repairs.** The same notes.
+3. **An expired plan that is not renewed, with an inspection we never did.** Today the
+   inspection stays owed and its ticket stays on the board. Nothing is refunded by itself.
 
-**Not built yet:**
+**Not built yet, all with Stripe:**
 
-1. **Stripe**: a pay link or QR code at the sign-up, automatic renewal and its discount. The
-   owner: "ill work on stripe later".
-2. The Owner page does not take a refund off Roof Care's income.
+1. A pay link or QR code at the sign-up.
+2. Renewing by itself, its notice to the office, and its discount in dollars.
+3. Changing plans: an upgrade pays the difference and takes effect at once; a downgrade takes
+   effect at the next plan year.
 
 ## Paying up front: what was looked into first
 

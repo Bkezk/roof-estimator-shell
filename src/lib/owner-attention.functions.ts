@@ -32,6 +32,7 @@ import {
   type AttUntouched,
   type AttentionList,
   type AttCareCarried,
+  type AttCareExpired,
   type AttCareRefund,
   type AttCareRenewal,
   type AttCareUnbilled,
@@ -40,6 +41,8 @@ import {
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
 import {
+  EXPIRED_LISTED_DAYS,
+  isExpired,
   payWords,
   planName,
   renewalOpen,
@@ -50,6 +53,7 @@ import {
 } from "@/lib/roof-care-plan";
 import { plansOfSites } from "@/lib/roof-care-plan.functions";
 import { visibleToOwner } from "@/lib/owner-view";
+import { plusDays } from "@/lib/working-days";
 import { PAGE, afterId, readAll } from "@/lib/read-all";
 import { OPEN_OPP_STATUSES, parseTodayInput, viewerToday } from "@/lib/work-counts";
 
@@ -258,6 +262,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careRefunds: care.refunds,
       careRenewals: care.renewals,
       careCarried: care.carried,
+      careExpired: care.expired,
     });
   });
 
@@ -277,6 +282,7 @@ async function careVisitsOfPlans(
   refunds: AttCareRefund[];
   renewals: AttCareRenewal[];
   carried: AttCareCarried[];
+  expired: AttCareExpired[];
 }> {
   const { data: active, error } = await sb
     .from("roof_care_plans")
@@ -291,19 +297,46 @@ async function careVisitsOfPlans(
     .gt("refund_due", 0)
     .is("refund_sent_on", null);
   if (oErr) throw new Error(`Roof Care plans: ${oErr.message}`);
+  // Expired in the last 60 days (Nov 19).
+  const { data: ran, error: rErr } = await sb
+    .from("roof_care_plans")
+    .select("site_id")
+    .eq("status", "ended")
+    .eq("ended_reason", "Expired")
+    .gte("ended_on", plusDays(today, -EXPIRED_LISTED_DAYS));
+  if (rErr) throw new Error(`Roof Care plans: ${rErr.message}`);
   const siteIds = [
-    ...new Set([...(active ?? []).map((p) => p.site_id), ...(owed ?? []).map((p) => p.site_id)]),
+    ...new Set([
+      ...(active ?? []).map((p) => p.site_id),
+      ...(owed ?? []).map((p) => p.site_id),
+      ...(ran ?? []).map((p) => p.site_id),
+    ]),
   ];
   if (!siteIds.length)
-    return { notDone: [], unbilled: [], unpaid: [], refunds: [], renewals: [], carried: [] };
-  const live = (await plansOfSites(sb, siteIds, { money: true })).filter(
-    (p) => p.status !== "ended",
-  );
+    return {
+      notDone: [],
+      unbilled: [],
+      unpaid: [],
+      refunds: [],
+      renewals: [],
+      carried: [],
+      expired: [],
+    };
+  const all = await plansOfSites(sb, siteIds, { money: true });
+  const live = all.filter((p) => p.status !== "ended");
+  // An expired plan is the office's to chase unless the property has a plan in force or waiting.
+  const ranOut = all.filter((p) => isExpired(p) && !live.some((x) => x.site_id === p.site_id));
   const plans = live.filter((p) => p.status === "active");
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
     readInChunks(
-      [...new Set([...live.map((p) => p.account_id), ...(owed ?? []).map((p) => p.account_id)])],
+      [
+        ...new Set([
+          ...live.map((p) => p.account_id),
+          ...ranOut.map((p) => p.account_id),
+          ...(owed ?? []).map((p) => p.account_id),
+        ]),
+      ],
       (chunk) => sb.from("crm_accounts").select("id, name").in("id", chunk),
     ),
   ]);
@@ -406,5 +439,15 @@ async function careVisitsOfPlans(
       });
     }
   }
-  return { notDone, unbilled, unpaid, refunds, renewals, carried };
+  const expired: AttCareExpired[] = ranOut.map((p) => ({
+    plan_id: p.id,
+    site_id: p.site_id,
+    title: titleOf(p),
+    expired_on: p.ended_on ?? p.renews_on,
+    owed: p.visits.filter(
+      (v) => (v.kind === "visit1" || v.kind === "visit2") && visitState(v, today) !== "done",
+    ).length,
+    price: p.price,
+  }));
+  return { notDone, unbilled, unpaid, refunds, renewals, carried, expired };
 }

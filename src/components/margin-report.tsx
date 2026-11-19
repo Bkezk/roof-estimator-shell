@@ -236,6 +236,20 @@ function InvoiceRows({ invoices, source }: { invoices: MarginInvoiceRow[]; sourc
                       Bid
                     </Badge>
                   </span>
+                ) : i.refundSite ? (
+                  // A Roof Care refund (Nov 19): it opens the property, where it is marked sent.
+                  <span className="inline-flex items-center gap-1.5" data-margin-refund>
+                    <Link
+                      to="/properties/$id"
+                      params={{ id: i.refundSite }}
+                      className="font-medium underline-offset-2 hover:underline"
+                    >
+                      {i.number}
+                    </Link>
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
+                      Refund
+                    </Badge>
+                  </span>
                 ) : (
                   <Link
                     to="/service/invoices"
