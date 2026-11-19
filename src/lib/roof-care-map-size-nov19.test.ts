@@ -39,6 +39,7 @@ const SITE = {
   zip: "40000",
   lat: null,
   lng: null,
+  map_roof_sqft: null as number | null,
 };
 const sb = {} as never;
 const answer = (areaSqFt: number | null, note: string | null = null) => ({
@@ -92,6 +93,18 @@ describe("the lookup for a property", () => {
     });
   });
 
+  it("says the size kept on the property at once, without asking the map", async () => {
+    const find = vi.fn(async () => answer(31_260));
+    const kept = { ...SITE, map_roof_sqft: 18_472 };
+    expect(await siteMapSize(sb, kept, find as never)).toEqual({ sqft: 18_500, sure: true });
+    expect(find).not.toHaveBeenCalled();
+    // A kept size too small to be the building is not offered; the map is asked instead.
+    expect(await siteMapSize(sb, { ...SITE, map_roof_sqft: 120 }, find as never)).toEqual({
+      sqft: 31_300,
+      sure: true,
+    });
+  });
+
   it("offers nothing for a property with no street address, without asking", async () => {
     const find = vi.fn(async () => answer(31_260));
     expect(await siteMapSize(sb, { ...SITE, address1: "  " }, find as never)).toBeNull();
@@ -118,6 +131,30 @@ describe("the lookup for a property", () => {
     expect(await siteMapSize(sb, SITE, slow as never, 30)).toBeNull();
     expect(Date.now() - t0).toBeLessThan(300);
     expect(MAP_SIZE_WAIT_MS).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("what a property keeps from the map", () => {
+  const sql = flat("supabase/migrations/20261119500000_site_map_roof_size.sql");
+  const types = flat("src/integrations/supabase/types.ts");
+
+  it("is three columns, and the size is never zero or less", () => {
+    expect(sql).toContain("add column if not exists map_roof_sqft numeric,");
+    expect(sql).toContain("add column if not exists map_found_how text,");
+    expect(sql).toContain("add column if not exists map_checked_at timestamptz;");
+    expect(sql).toContain("check (map_roof_sqft is null or map_roof_sqft > 0)");
+    expect(sql).toContain(
+      "check (map_found_how is null or map_found_how in ('address', 'street'))",
+    );
+  });
+
+  it("is in the database types, and read with the property for the sign-up", () => {
+    expect(types).toContain(
+      "map_checked_at: string | null map_found_how: string | null map_roof_sqft: number | null name: string",
+    );
+    expect(flat("src/lib/roof-care-plan.functions.ts")).toContain(
+      '"id, account_id, name, address1, address2, city, state, zip, lat, lng, map_roof_sqft" as const',
+    );
   });
 });
 

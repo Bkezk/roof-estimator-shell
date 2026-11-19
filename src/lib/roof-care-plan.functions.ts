@@ -66,7 +66,8 @@ export const SITE_NOT_YOURS = "That property was not found, or it is not yours t
 export const NO_ADDRESS_FOR_PRICE =
   "This property has no street address, so the drive cannot be worked out. Add the address first.";
 
-const SITE_SELECT = "id, account_id, name, address1, address2, city, state, zip, lat, lng" as const;
+const SITE_SELECT =
+  "id, account_id, name, address1, address2, city, state, zip, lat, lng, map_roof_sqft" as const;
 
 async function siteOf(sb: Sb, siteId: string) {
   const { data, error } = await sb
@@ -159,7 +160,8 @@ export const roofCareOffer = createServerFn({ method: "GET" })
 export const MAP_SIZE_WAIT_MS = 10_000;
 
 /**
- * The building our map shows at a property's address, as a roof size to offer. Null when the
+ * The building our map shows at a property's address, as a roof size to offer: the size kept on
+ * the property when there is one, else a lookup now. Null when the
  * map has no outline there, the state's map server is slow or down, or the address cannot be
  * read: the sign-up then simply has nothing to offer, and the size is typed as before.
  */
@@ -169,6 +171,9 @@ export async function siteMapSize(
   find: typeof aerialForAddress = aerialForAddress,
   waitMs: number = MAP_SIZE_WAIT_MS,
 ): Promise<MapRoofSize | null> {
+  // The size kept on the property by an earlier lookup: said at once, with no wait on the map.
+  const kept = mapRoofSize({ areaSqFt: site.map_roof_sqft }, null);
+  if (kept) return kept;
   const street = (site.address1 ?? "").trim();
   if (!street) return null;
   const tail = [site.city, [site.state, site.zip].filter(Boolean).join(" ")]

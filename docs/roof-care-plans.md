@@ -259,8 +259,7 @@ the live database:
   repairs and no trip charge on two leak calls." The flyer says the same. The price setup counts
   the leak calls another way; the numbers are in the private notes and wait on his answer.
 
-**Still open.** Whether a card is taken at all (its fee is a share of the price; a bank transfer
-is a small flat fee). The size of the discount, and whether it comes off the whole price or only
+**Still open.** The size of the discount, and whether it comes off the whole price or only
 the list price (the drive is charged at cost). A year that closes with one inspection done
 because the customer kept us off the roof. Whether the minor repairs a plan includes cover labor
 ("do we include labor in the credits? i think thats the question"): today the plan's line takes
@@ -276,8 +275,12 @@ outline, so the outlines could not be held against a roof the company has measur
 **The map's size on the sign-up (built Nov 19).** The owner: "go with looking up the
 properties". The sign-up now asks our map for the building at the property's address and says
 its size beside the roof size box, with a "Use this size" button. The box still starts blank.
-Nothing is saved by it. A trial of fifty properties, and what is not done yet (saving a map
-point and a size on every property), is in `docs/qa/roof-care-map-size-2026-11-19.md`.
+After a trial of fifty he said "go", and every property was looked up once: a map point and,
+where our map has an outline, a size are now kept on the property. The sign-up says the kept
+size at once and looks up a property that has none. The counts are in
+`docs/qa/roof-care-map-size-2026-11-19.md`.
+
+**Cards.** "They should probably be able to pay by check or card."
 
 **Setting it up.** A Stripe account in the company's name. Its keys go in Lovable Cloud › Secrets
 by the owner's hand, never in the repository or the chat. Stripe's test mode first: with a live

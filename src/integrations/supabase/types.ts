@@ -1459,6 +1459,9 @@ export type Database = {
           id: string
           lat: number | null
           lng: number | null
+          map_checked_at: string | null
+          map_found_how: string | null
+          map_roof_sqft: number | null
           name: string
           notes: string | null
           state: string | null
@@ -1484,6 +1487,9 @@ export type Database = {
           id?: string
           lat?: number | null
           lng?: number | null
+          map_checked_at?: string | null
+          map_found_how?: string | null
+          map_roof_sqft?: number | null
           name: string
           notes?: string | null
           state?: string | null
@@ -1509,6 +1515,9 @@ export type Database = {
           id?: string
           lat?: number | null
           lng?: number | null
+          map_checked_at?: string | null
+          map_found_how?: string | null
+          map_roof_sqft?: number | null
           name?: string
           notes?: string | null
           state?: string | null

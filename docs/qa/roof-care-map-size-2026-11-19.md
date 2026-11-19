@@ -21,7 +21,7 @@ On the Roof Care sign-up, under the roof size box:
 - No outline at the address, an address outside Kentucky and Tennessee, a slow map server:
   nothing is offered and the size is typed as before. The sign-up never waits on the map for more
   than ten seconds, and never fails because of it.
-- It is a read. Nothing is saved on the property.
+- Opening the sign-up saves nothing on the property.
 
 It uses the same address finder as the ticket's aerial picture: our stored buildings and 911
 address points, then the two states' own map servers.
@@ -50,10 +50,37 @@ sign-up stops waiting at ten.
 What the trial cannot say: how close an outline's area is to the roof the company would
 measure. No bid is linked to an outline, so there is nothing to hold it against.
 
-## Not done, and waiting on the owner
+## Every property looked up and saved
 
-Saving a map point and a size on every property. It writes to about 1,100 real properties, so it
-waits for his word after he has seen the trial.
+The owner saw the trial and said "go". All 1,139 properties were looked up the same way, and the
+answers were saved on the property (`supabase/migrations/20261119500000_site_map_roof_size.sql`:
+`map_roof_sqft`, `map_found_how`, `map_checked_at`; the point goes in `lat` and `lng`, as the
+aerial picture already saves it).
+
+| What the lookup gave                                             | Of 1,139 |
+| ---------------------------------------------------------------- | -------- |
+| A building with an outline: a point and a size                   | 683      |
+| A point on our map with no outline over it                       | 90       |
+| No building in our map data; the street address from the Census  | 166      |
+| Found only by the property's name: not saved, a person checks it | 28       |
+| A point that was not a place in the country: not saved           | 7        |
+| No street address on the property                                | 10       |
+| Nothing found                                                    | 155      |
+
+- **945 properties now have a map point** (34 had one before), and **683 have a size to offer**.
+- Of the 683 sizes, 384 are under the price floor, 236 between the floor and the custom-quote
+  size, and 63 over it.
+- A point already on a property was not changed. 28 of the 34 that had one came back from the
+  lookup at the same spot, to the metre.
+- A Census point was kept only when its state is the property's state.
+- The sign-up says the size kept on the property at once. A property with none is still looked
+  up when its sign-up opens.
+
+How it was saved without disturbing anything: the answers went into a holding table that only an
+admin could write to, were checked there, tried once in a transaction that was rolled back, and
+then saved in one statement. The property history got no rows from it and no property's "last
+changed" moved, so the Customers lists read as before. The holding table was removed. No ticket
+and no bid was touched.
 
 ## How it was proven
 
