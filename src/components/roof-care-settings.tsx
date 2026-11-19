@@ -79,6 +79,7 @@ const GROUPS: { title: string; keys: SettingKey[] }[] = [
       "guard_storm_inspections",
       "guard_forecast_cost",
       "custom_quote_over_sqft",
+      "min_price_sqft",
     ],
   },
 ];

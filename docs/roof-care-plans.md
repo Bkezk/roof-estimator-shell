@@ -185,6 +185,13 @@ Record: `docs/qa/roof-care-followups-2026-11-19.md`.
 - **Push back.** The office's 30 days count from each inspection's own first date. Reasons are
   kept, each with its day and who gave it.
 
+- **A floor under the price.** "The minimum roof size pricing is always priced at … sq feet so
+  its never not profitable, thats the floor similarly to where drive time is minimum of 2 hrs no
+  matter what." A roof smaller than the floor pays the price of the floor size, on all three
+  plans. The floor is a box on the Setup page ("Smallest roof the price is worked for"); blank
+  means no floor. The plan still keeps the roof's own size, and the cost shown to admins is the
+  real roof's. Record: `docs/qa/roof-care-floor-2026-11-19.md`.
+
 ## Paying up front: looked into on Nov 19, not built
 
 The owner: "i think we are going to do payment up front rather than at time of service via

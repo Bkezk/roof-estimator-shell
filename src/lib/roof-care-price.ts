@@ -82,6 +82,12 @@ export const roofCareSettingsSchema = z.object({
   guard_forecast_cost: num,
   /** Roofs larger than this get a custom quote, not a price. */
   custom_quote_over_sqft: num,
+  /**
+   * The smallest roof the price is worked for (owner, Nov 19: "the minimum roof size pricing is
+   * always priced at … so its never not profitable, thats the floor similarly to where drive time
+   * is minimum of 2 hrs"). A smaller roof pays the price of this size. Blank: no floor.
+   */
+  min_price_sqft: num,
   plans: z.object({ watch: planSchema, care: planSchema, guard: planSchema }),
   hours: z.array(hoursRowSchema).max(40),
 });
@@ -106,6 +112,7 @@ export function emptyRoofCareSettings(): RoofCareSettings {
     guard_storm_inspections: null,
     guard_forecast_cost: null,
     custom_quote_over_sqft: null,
+    min_price_sqft: null,
     plans: { watch: blankPlan(), care: blankPlan(), guard: blankPlan() },
     hours: [],
   };
@@ -142,6 +149,7 @@ export const SETTING_LABELS = {
   guard_storm_inspections: "Roof Guard: storm inspections a year",
   guard_forecast_cost: "Roof Guard: budget forecast cost ($)",
   custom_quote_over_sqft: "Custom quote for roofs over (sq ft)",
+  min_price_sqft: "Smallest roof the price is worked for (sq ft)",
 } as const;
 export type SettingKey = keyof typeof SETTING_LABELS;
 
@@ -248,8 +256,18 @@ function ready(s: RoofCareSettings): Ready | null {
     guard_storm_inspections: n(s.guard_storm_inspections),
     guard_forecast_cost: n(s.guard_forecast_cost),
     custom_quote_over_sqft: n(s.custom_quote_over_sqft),
+    min_price_sqft: n(s.min_price_sqft),
     plans: { watch: plan("watch"), care: plan("care"), guard: plan("guard") },
   };
+}
+
+/**
+ * The roof size the price is worked for: the roof's own, and never under the floor. As the list
+ * price never goes under the baseline drive, it never goes under this size either. No floor
+ * typed: the roof's own size.
+ */
+export function pricedSqft(s: Pick<RoofCareSettings, "min_price_sqft">, sqft: number): number {
+  return Math.max(sqft, s.min_price_sqft ?? 0);
 }
 
 /** How many times a year the crew drives to the building for a plan. */
@@ -339,7 +357,9 @@ export function roofCareQuote(
   const plans = custom
     ? []
     : PLAN_KEYS.map((p): PlanPrice => {
-        const list = v.plans[p].base + v.plans[p].per_sqft * input.sqft;
+        // The price floor (owner, Nov 19): a roof under the floor pays the floor size's price.
+        // The cost above is the real roof's, so the profit shown is what such a roof earns.
+        const list = v.plans[p].base + v.plans[p].per_sqft * pricedSqft(s, input.sqft);
         const trips = tripsPerYear(s, p);
         const travel = perTrip * trips;
         const price = dollars(list + travel);

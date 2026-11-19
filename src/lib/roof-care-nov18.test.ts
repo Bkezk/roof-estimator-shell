@@ -67,6 +67,8 @@ const S = (over: Partial<RoofCareSettings> = {}): RoofCareSettings => ({
   guard_storm_inspections: 1,
   guard_forecast_cost: 30,
   custom_quote_over_sqft: 60_000,
+  // (Nov 19: the price floor; none in these cases. roof-care-floor-nov19.test.ts.)
+  min_price_sqft: null,
   plans: {
     watch: { base: 500, per_sqft: 0.02, allowance: null },
     care: { base: 800, per_sqft: 0.05, allowance: 400 },
