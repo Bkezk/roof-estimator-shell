@@ -126,7 +126,9 @@ describe("2. the refund counts the leak call travel and the storm inspection", (
 
 describe('the agreement says both (owner: "ensure it makes it into the service agreement")', () => {
   it("is a new version of eleven terms", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.2");
+    // (Nov 19, night: version 2026-11-19.3. Term 9 also says a year paid by card is refunded
+    // less the card fee. roof-care-go-aheads-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
   });

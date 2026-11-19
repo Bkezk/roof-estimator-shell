@@ -58,6 +58,7 @@ import { Route as ApiCronLeadsRouteImport } from './routes/api.cron.leads'
 import { Route as ApiCronLeadsImportRouteImport } from './routes/api.cron.leads-import'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
 import { Route as ApiCronStormsRouteImport } from './routes/api.cron.storms'
+import { Route as ApiStripeWebhookRouteImport } from './routes/api.stripe.webhook'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -304,6 +305,11 @@ const ApiCronStormsRoute = ApiCronStormsRouteImport.update({
   path: '/api/cron/storms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStripeWebhookRoute = ApiStripeWebhookRouteImport.update({
+  id: '/api/stripe/webhook',
+  path: '/api/stripe/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -355,6 +361,7 @@ export interface FileRoutesByFullPath {
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
+  '/api/stripe/webhook': typeof ApiStripeWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -406,6 +413,7 @@ export interface FileRoutesByTo {
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
+  '/api/stripe/webhook': typeof ApiStripeWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -458,6 +466,7 @@ export interface FileRoutesById {
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
+  '/api/stripe/webhook': typeof ApiStripeWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -511,6 +520,7 @@ export interface FileRouteTypes {
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
+    | '/api/stripe/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -562,6 +572,7 @@ export interface FileRouteTypes {
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
+    | '/api/stripe/webhook'
   id:
     | '__root__'
     | '/'
@@ -613,6 +624,7 @@ export interface FileRouteTypes {
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
+    | '/api/stripe/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -662,6 +674,7 @@ export interface RootRouteChildren {
   ApiCronLeadsImportRoute: typeof ApiCronLeadsImportRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
   ApiCronStormsRoute: typeof ApiCronStormsRoute
+  ApiStripeWebhookRoute: typeof ApiStripeWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1009,6 +1022,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronStormsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/stripe/webhook': {
+      id: '/api/stripe/webhook'
+      path: '/api/stripe/webhook'
+      fullPath: '/api/stripe/webhook'
+      preLoaderRoute: typeof ApiStripeWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1074,6 +1094,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCronLeadsImportRoute: ApiCronLeadsImportRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,
   ApiCronStormsRoute: ApiCronStormsRoute,
+  ApiStripeWebhookRoute: ApiStripeWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

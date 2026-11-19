@@ -222,8 +222,10 @@ describe("getTicketAerial: an address on no map of ours", () => {
     expect(s).toContain(
       "if (near) return { address, addressState, saved: null, found: null, note, near };",
     );
+    // (Nov 19, later: the town and zip code are gathered first, to say "no address" when there
+    // is none of them; aerial-no-address-nov19.test.ts.)
     expect(s.indexOf("if (near) return { address,")).toBeLessThan(
-      s.indexOf("const rough = await roughNear({"),
+      s.indexOf("const rough = await roughNear(place);"),
     );
   });
 });
@@ -267,13 +269,17 @@ describe("the map's move", () => {
 describe("the picker", () => {
   const a = flat(read("src/components/service/aerial-markup.tsx"));
   it("opens on the rough point without a pin, and offers the location button", () => {
+    // (Nov 19, later: a property with no address at all opens where the phone is, when the
+    // phone says; aerial-no-address-nov19.test.ts. The rough point still comes first.)
     expect(a).toContain(
-      "focus={view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? null)}",
+      "focus={ view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? hereAt ?? null) }",
     );
-    expect(a).toContain("focusRough={!view && !!data.nearRough}");
-    expect(a).toMatch(/focusRough=\{!view && !!data\.nearRough\}.*?locateMe/);
+    expect(a).toContain(
+      'focusRough={!view && (data.nearRough ? true : !data.near && hereAt ? "here" : false)}',
+    );
+    expect(a).toMatch(/focusRough=\{!view && \(data\.nearRough \? true.*?locateMe/);
     // Both states only when there is no point at all.
-    expect(a).toContain("fitTo={view || data.near ? undefined : data.addressState}");
+    expect(a).toContain("fitTo={view || data.near || hereAt ? undefined : data.addressState}");
   });
   it("says where it opened", () => {
     expect(a).toContain('{!view && data.nearRough ? `${pickRoughLine(data.nearPlace)} ` : ""}');

@@ -3473,6 +3473,9 @@ export type Database = {
           agreed_by: string
           agreement_error: string | null
           agreement_sent_at: string | null
+          card_paid_amount: number | null
+          card_paid_on: string | null
+          card_paid_ref: string | null
           closed_out_by_name: string | null
           closed_out_on: string | null
           closed_out_reason: string | null
@@ -3487,6 +3490,8 @@ export type Database = {
           expiry_notified_at: string | null
           first_days: number | null
           first_visit: string
+          forecast_sent_by_name: string | null
+          forecast_sent_on: string | null
           free_travel_calls: number
           id: string
           list_price: number
@@ -3528,6 +3533,9 @@ export type Database = {
           agreed_by: string
           agreement_error?: string | null
           agreement_sent_at?: string | null
+          card_paid_amount?: number | null
+          card_paid_on?: string | null
+          card_paid_ref?: string | null
           closed_out_by_name?: string | null
           closed_out_on?: string | null
           closed_out_reason?: string | null
@@ -3542,6 +3550,8 @@ export type Database = {
           expiry_notified_at?: string | null
           first_days?: number | null
           first_visit: string
+          forecast_sent_by_name?: string | null
+          forecast_sent_on?: string | null
           free_travel_calls?: number
           id?: string
           list_price: number
@@ -3583,6 +3593,9 @@ export type Database = {
           agreed_by?: string
           agreement_error?: string | null
           agreement_sent_at?: string | null
+          card_paid_amount?: number | null
+          card_paid_on?: string | null
+          card_paid_ref?: string | null
           closed_out_by_name?: string | null
           closed_out_on?: string | null
           closed_out_reason?: string | null
@@ -3597,6 +3610,8 @@ export type Database = {
           expiry_notified_at?: string | null
           first_days?: number | null
           first_visit?: string
+          forecast_sent_by_name?: string | null
+          forecast_sent_on?: string | null
           free_travel_calls?: number
           id?: string
           list_price?: number
@@ -3663,11 +3678,16 @@ export type Database = {
         Row: {
           amount: number
           carried_from: string | null
+          cleaning_at: string | null
+          cleaning_by_name: string | null
+          cleaning_note: string | null
           created_at: string
           customer_asked: boolean
+          drains_cleaned: boolean | null
           due_by: string
           due_from: string
           first_due_by: string
+          gutters_cleaned: boolean | null
           id: string
           kind: string
           lost_on: string | null
@@ -3679,11 +3699,16 @@ export type Database = {
         Insert: {
           amount?: number
           carried_from?: string | null
+          cleaning_at?: string | null
+          cleaning_by_name?: string | null
+          cleaning_note?: string | null
           created_at?: string
           customer_asked?: boolean
+          drains_cleaned: boolean | null
           due_by: string
           due_from: string
           first_due_by: string
+          gutters_cleaned?: boolean | null
           id?: string
           kind: string
           lost_on?: string | null
@@ -3695,11 +3720,16 @@ export type Database = {
         Update: {
           amount?: number
           carried_from?: string | null
+          cleaning_at?: string | null
+          cleaning_by_name?: string | null
+          cleaning_note?: string | null
           created_at?: string
           customer_asked?: boolean
+          drains_cleaned?: boolean | null
           due_by?: string
           due_from?: string
           first_due_by?: string
+          gutters_cleaned?: boolean | null
           id?: string
           kind?: string
           lost_on?: string | null
@@ -5980,6 +6010,10 @@ export type Database = {
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
       roof_care_add_storm: { Args: { p_plan: string }; Returns: string }
       roof_care_benefits: { Args: never; Returns: Json }
+      roof_care_card_paid: {
+        Args: { p_amount: number; p_on?: string; p_plan: string; p_ref: string }
+        Returns: string
+      }
       roof_care_close_out: {
         Args: { p_plan: string; p_reason: string }
         Returns: number
@@ -5991,6 +6025,10 @@ export type Database = {
       roof_care_end_refund: {
         Args: { p_plan: string; p_reason: string; p_refund?: number }
         Returns: Json
+      }
+      roof_care_forecast_sent: {
+        Args: { p_plan: string; p_sent?: boolean }
+        Returns: undefined
       }
       roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
       roof_care_mark_offered: { Args: { p_job: string }; Returns: undefined }
@@ -6023,6 +6061,15 @@ export type Database = {
         Returns: string
       }
       roof_care_renewal_offer: { Args: { p_plan: string }; Returns: Json }
+      roof_care_set_cleaning: {
+        Args: {
+          p_drains?: boolean
+          p_gutters?: boolean
+          p_note?: string
+          p_visit: string
+        }
+        Returns: undefined
+      }
       roof_care_set_email: {
         Args: { p_email: string; p_plan: string }
         Returns: undefined

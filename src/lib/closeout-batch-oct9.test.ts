@@ -121,7 +121,8 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
     // The notes are not judged (owner, Oct 9: step 6 is skippable; closeout-check.ts).
     expect(closeout).not.toContain("closing_notes: latest.current.closing_notes");
     expect(closeout).toMatch(
-      /await Promise\.all\(\[\s*repairsQ\.refetch\(\),\s*photosQ\.refetch\(\),\s*timeQ\.refetch\(\),\s*\]\)/,
+      // (Nov 19: a Roof Care plan inspection's cleaning questions are re-read with them.)
+      /await Promise\.all\(\[\s*repairsQ\.refetch\(\),\s*photosQ\.refetch\(\),\s*timeQ\.refetch\(\),\s*planVisitId \? cleaningQ\.refetch\(\) : Promise\.resolve\(cleaningQ\),\s*\]\)/,
     );
     expect(closeout).toMatch(
       /\{unread && \(\s*<Button[\s\S]*?onClick=\{\(\) => retry\.mutate\(\)\}[\s\S]*?Retry\s*<\/Button>/,

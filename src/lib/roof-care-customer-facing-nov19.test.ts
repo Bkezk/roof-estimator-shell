@@ -155,13 +155,16 @@ describe("what each plan includes, as the customer reads it", () => {
   });
   it("card says the office takes it, until Stripe's checkout is set up", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain("{PAY_CARD_NOTE_CUSTOMER}");
+    // (Nov 19, night: and says the payment page is next once online payment is set up.)
+    expect(card).toContain("{cardOnline ? PAY_CARD_NOTE_ONLINE : PAY_CARD_NOTE_CUSTOMER}");
     expect(PAY_CARD_NOTE_CUSTOMER).toContain(
       "Our office will contact you to take your card payment",
     );
     // The reminder that outlives the session.
     const agents = read("AGENTS.md");
-    expect(agents).toContain("is sent to Stripe checkout at the end");
+    // (Nov 19, night: the site's side is built; the reminder now lists what turns it on.)
+    expect(agents).toContain("is sent to Stripe checkout");
+    expect(agents).toContain("`STRIPE_WEBHOOK_SECRET`");
     expect(agents).toContain("`GOOGLE_MAPS_API_KEY`");
     expect(agents).toContain("`RESEND_API_KEY`");
   });
@@ -212,7 +215,7 @@ describe("one plan to a property, and what it has given", () => {
     );
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
     expect(card).toContain(
-      "(active || waiting ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog",
+      "(active || waiting || lapsed ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog",
     );
     // The pop-up: what the plan includes, open, and the tally.
     expect(card).toContain("<RoofCareCard siteId={siteId} visitId={visitId} includesOpen />");
@@ -236,11 +239,16 @@ describe("one plan to a property, and what it has given", () => {
       "2027-04-01",
       2,
     );
+    // (Nov 19, night: the cleaning at each inspection and the budget forecast joined the
+    // tally. roof-care-go-aheads-nov19.test.ts.)
     expect(rows.map((r) => `${r.label}: ${r.words}`)).toEqual([
       "Inspections: 1 of 2 done",
+      "Drains and scuppers cleaned: Done at 0 of 2 inspections",
+      "Gutters cleaned: Done at 0 of 2 inspections",
       "Minor repairs: $120 of $730 used, $610 left",
       "Leak calls with no trip charge: 1 of 3 used",
       "Storm inspection: 1 of 2 used",
+      "Yearly budget forecast: Not sent yet",
     ]);
   });
   it("a reader who does not see invoices is told what is included, not what was billed", () => {
@@ -249,12 +257,11 @@ describe("one plan to a property, and what it has given", () => {
       "2027-04-01",
       1,
     );
-    expect(rows.map((r) => r.words)).toEqual([
-      "0 of 2 done",
-      "$730 a year included",
-      "3 a year included",
-      "0 of 1 used",
-    ]);
+    expect(
+      rows
+        .filter((r) => ["inspections", "repairs", "leak_calls", "storm"].includes(r.key))
+        .map((r) => r.words),
+    ).toEqual(["0 of 2 done", "$730 a year included", "3 a year included", "0 of 1 used"]);
   });
   it("only what the plan includes is listed, and a storm inspection past the plan's own shows", () => {
     const watch = benefitsUsed(
@@ -269,10 +276,10 @@ describe("one plan to a property, and what it has given", () => {
       "2027-04-01",
       1,
     );
-    expect(over.at(-1)!.words).toBe("2 used, 1 included");
+    expect(over.find((r) => r.key === "storm")!.words).toBe("2 used, 1 included");
     // More used than included never reads as a negative amount left.
     const spent = benefitsUsed(tallyPlan({ allowance_used: 800 }), "2027-04-01", 1);
-    expect(spent[1]!.words).toBe("$800 of $730 used, $0 left");
+    expect(spent.find((r) => r.key === "repairs")!.words).toBe("$800 of $730 used, $0 left");
     expect(benefitsOfPlan(tallyPlan({}), 2)).toEqual(
       NUMBERS.guard === null ? null : { allowance: 730, leak_calls: 3, storm: 2 },
     );

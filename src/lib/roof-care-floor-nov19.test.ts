@@ -149,7 +149,10 @@ describe("the floor on the price setup page", () => {
     expect(SETTING_LABELS.min_price_sqft).toBe("Smallest roof the price is worked for (sq ft)");
     expect(SETTING_KEYS).toContain("min_price_sqft");
     const page = flat("src/components/roof-care-settings.tsx");
-    expect(page).toContain('"custom_quote_over_sqft", "min_price_sqft", ]');
+    // (Nov 19, night: the card fee's two boxes follow it.)
+    expect(page).toContain(
+      '"custom_quote_over_sqft", "min_price_sqft", "card_fee_pct", "card_fee_flat", ]',
+    );
   });
 
   it("starts blank, and blank is not a problem: it means no floor", () => {

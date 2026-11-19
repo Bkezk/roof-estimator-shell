@@ -13,6 +13,8 @@
  * written here: they come from the plan settings (roof_care_benefits() in the database) for a
  * plan on offer, and from the plan's own record for a plan that was signed.
  */
+import { longDay } from "@/lib/followup-rules";
+import { CLEANING_LABEL, cleaningTally } from "@/lib/roof-care-cleaning";
 import { visitsDone, visitState, type RoofCarePlan } from "@/lib/roof-care-plan";
 import {
   money0,
@@ -171,7 +173,11 @@ export const SIGN_UP_BUTTON = "Agree and sign up";
 
 // ── What a plan has given so far ────────────────────────────────────────────────────────────
 
-export type BenefitKey = "inspections" | "repairs" | "leak_calls" | "storm";
+export type BenefitKey =
+  "inspections" | "drains" | "gutters" | "repairs" | "leak_calls" | "storm" | "forecast";
+export const FORECAST_LABEL = "Yearly budget forecast";
+export const FORECAST_MARK_SENT = "Mark the budget forecast sent";
+export const FORECAST_UNDO = "Not sent after all";
 export interface BenefitUse {
   key: BenefitKey;
   label: string;
@@ -197,7 +203,7 @@ export function benefitsUsed(
     | "allowance_used"
     | "free_travel_calls"
     | "free_travel_used"
-  >,
+  > & { forecast_sent_on?: string | null },
   today: string,
   stormIncluded: number,
 ): BenefitUse[] {
@@ -210,6 +216,27 @@ export function benefitsUsed(
     of: VISITS_PER_YEAR,
     words: `${done} of ${VISITS_PER_YEAR} done`,
   });
+  // The cleaning the plan includes at each inspection (Nov 19, night): what was answered Yes.
+  if (plan.plan !== "watch") {
+    const d = cleaningTally(plan.visits, "drains");
+    out.push({
+      key: "drains",
+      label: CLEANING_LABEL.drains,
+      used: d.done,
+      of: d.of,
+      words: d.words,
+    });
+  }
+  if (plan.plan === "guard") {
+    const g = cleaningTally(plan.visits, "gutters");
+    out.push({
+      key: "gutters",
+      label: CLEANING_LABEL.gutters,
+      used: g.done,
+      of: g.of,
+      words: g.words,
+    });
+  }
   if (plan.repair_allowance > 0) {
     const used = plan.allowance_used;
     const left = used == null ? null : Math.max(0, plan.repair_allowance - used);
@@ -250,6 +277,16 @@ export function benefitsUsed(
       of: stormOf,
       words:
         storms > stormOf ? `${storms} used, ${stormOf} included` : `${storms} of ${stormOf} used`,
+    });
+  }
+  if (plan.plan === "guard") {
+    const sent = plan.forecast_sent_on ?? null;
+    out.push({
+      key: "forecast",
+      label: FORECAST_LABEL,
+      used: sent ? 1 : 0,
+      of: 1,
+      words: sent ? `Sent ${longDay(sent)}` : "Not sent yet",
     });
   }
   return out;

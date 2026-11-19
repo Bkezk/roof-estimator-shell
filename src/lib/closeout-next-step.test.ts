@@ -278,7 +278,11 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     expect(form).toMatch(
       /const goNext = \(id: StepId\) => \{\s*const next = nextStep\(id, job\.service_type\);\s*if \(next\) goTo\(next\);\s*\};/,
     );
-    expect(form).toMatch(/missing: stepMissing\(id, stepState\),\s*onNext: \(\) => goNext\(id\),/);
+    // (Nov 19: the Checklist step's line also speaks for a Roof Care plan's cleaning questions;
+    // every other step's line passes through. cleaning-ticks-nov19.test.tsx.)
+    expect(form).toMatch(
+      /missing: cleaningStepMissing\(\s*id,\s*stepMissing\(id, stepState\),\s*checklistSaved,\s*cleaning,\s*finished,\s*\),\s*onNext: \(\) => goNext\(id\),/,
+    );
     expect(form).toContain("onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}");
     // Complete still only from step 7, from the REAL open step.
     expect(form).toContain(

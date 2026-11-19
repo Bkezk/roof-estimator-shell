@@ -165,6 +165,24 @@ export interface TicketAerial {
   nearRough?: boolean;
   /** What that rough point is, in words: "Corbin, KY 40701". */
   nearPlace?: string | null;
+  /**
+   * Nothing was found because there was nothing to look for (owner, Nov 19): the ticket and its
+   * property have no street, no town and no zip code. The picker then says so, and on a phone
+   * asks for the phone's own position (components/service/aerial-no-address.ts).
+   */
+  noAddress?: boolean;
+}
+
+/**
+ * No street, no town, no zip code: nothing a map can be asked. A state alone is not a place to
+ * open on (the picker frames the state as it always did).
+ */
+export function nothingToLookUp(a: {
+  address: string | null | undefined;
+  city: string | null | undefined;
+  zip: string | null | undefined;
+}): boolean {
+  return ![a.address, a.city, a.zip].some((x) => (x ?? "").trim());
 }
 
 const toFound = (
@@ -442,6 +460,9 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     let siteCity: string | null = null;
     let siteZip: string | null = null;
     let propertyName: string | null = job.site_name ?? null;
+    // A street of its own: the ticket's address, or the property's two address boxes. (The line
+    // built from a property with only a state reads "KY", which is no street.)
+    let street = address.trim();
     if (job.site_id) {
       const { data: s } = await sb
         .from("crm_sites")
@@ -452,6 +473,7 @@ export const getTicketAerial = createServerFn({ method: "GET" })
         siteState = s.state;
         siteCity = s.city;
         siteZip = s.zip;
+        if (!street) street = `${s.address1 ?? ""} ${s.address2 ?? ""}`.trim();
         if (!address.trim()) address = siteAddressLine(s);
         if (s.name?.trim()) propertyName = s.name;
       }
@@ -524,13 +546,17 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     }
     if (near) return { address, addressState, saved: null, found: null, note, near };
     // Nothing on our maps: the middle of its zip code or town, so the picker opens close by.
-    const rough = await roughNear({
+    const place = {
       // The address that was looked for first (a ticket can carry its own), then the property's
       // boxes. (`||`: a property saved with an empty box holds "", which is not a town.)
       city: parsed?.city || siteCity?.trim() || null,
       state: parsed?.state || siteState?.trim() || null,
       zip: parsed?.zip || siteZip?.trim() || null,
-    });
+    };
+    // Nothing to ask a map at all: said as it is, with no lookup made.
+    if (nothingToLookUp({ address: street, city: place.city, zip: place.zip }))
+      return { address, addressState, saved: null, found: null, note, near: null, noAddress: true };
+    const rough = await roughNear(place);
     return {
       address,
       addressState,

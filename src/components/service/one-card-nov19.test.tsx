@@ -201,8 +201,10 @@ describe("reopening an inspection (found while checking one card on the screen)"
     expect(draft).toContain(
       "loading: opts.enabled && (q.isLoading || (q.data !== undefined && draft === null)),",
     );
+    // (Later the same day: a Roof Care plan inspection's cleaning questions settle with them;
+    // cleaning-ticks-nov19.test.tsx.)
     expect(form.replace(/\s+/g, " ")).toContain(
-      "const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading) && !insp.loading;",
+      "const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading) && !insp.loading &&",
     );
   });
 });

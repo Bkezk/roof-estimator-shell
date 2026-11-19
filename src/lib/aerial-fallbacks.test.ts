@@ -145,7 +145,9 @@ describe("the wiring", () => {
   });
   it("Pick the building opens at the nearest numbers when nothing was found", () => {
     const ui = read("../components/service/aerial-markup.tsx");
-    expect(ui).toContain("(data.near ?? null)");
-    expect(ui).toContain("fitTo={view || data.near ? undefined : data.addressState}");
+    // (Nov 19: a property with no address at all opens where the phone is, when the phone
+    // says; the nearest numbers still come first. aerial-no-address-nov19.test.ts.)
+    expect(ui).toContain("(data.near ?? hereAt ?? null)");
+    expect(ui).toContain("fitTo={view || data.near || hereAt ? undefined : data.addressState}");
   });
 });

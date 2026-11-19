@@ -150,14 +150,18 @@ describe("the screens", () => {
   });
   it("the estimator links on the first save and shows the line under Status", () => {
     const est = read("src/routes/estimate.tsx");
-    expect(est).toContain("if (search.inspection) linkInspection(search.inspection, row.id);");
+    // (Nov 19: a new bid restored from its unsaved draft in the browser remembers the inspection
+    // it was started from, so the link is `inspId`: the address's, else the draft's.
+    // bids-draft-restore-nov19.test.ts.)
+    expect(est).toContain("const inspId = search.inspection ?? draftLinks.current.inspection;");
+    expect(est).toContain("if (inspId) linkInspection(inspId, row.id);");
     expect(est).toContain("linkInspectionFn({ data: { inspectionId, bidId: newBidId } })");
     expect(est).toContain("const fromInspectionId = loadedBid?.from_job_id ?? linkedInspectionId;");
     expect(est).toContain('data-line="from-inspection"');
     expect(est).toContain("{fromInspectionLine(fromInspection.data)}");
     // The link is written after the save, never before it (the save block sets bidId first).
     expect(est.indexOf("setBidId(row.id);")).toBeLessThan(
-      est.indexOf("if (search.inspection) linkInspection(search.inspection, row.id);"),
+      est.indexOf("if (inspId) linkInspection(inspId, row.id);"),
     );
   });
   it("the Bids page reads the ticket with the list and shows the line on the row", () => {

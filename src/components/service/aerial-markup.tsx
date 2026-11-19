@@ -26,6 +26,7 @@
 import { Suspense, lazy, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Building2,
@@ -46,6 +47,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 
+import { isOffice } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { aerialImageryCanvas, canvasToPng } from "@/lib/aerial-png";
 import { placePercent, popoverSide, textBoxWidthCh } from "@/lib/aerial-place";
@@ -139,6 +141,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Box, PhotoThumb } from "@/components/service/field-shared";
 import {
+  askHere,
+  NO_ADDRESS_OPEN_PROPERTY,
+  noAddressLines,
+  shouldAskHere,
+  type HereState,
+} from "@/components/service/aerial-no-address";
+import {
+  coarsePointer,
   errText,
   FIELD_READ,
   fieldKeys,
@@ -326,6 +336,47 @@ function AerialEditor({
     setPending(null);
   };
   const [pickOpen, setPickOpen] = useState(false);
+  // A property with no address at all (owner, Nov 19): the picker says so, and on a phone asks
+  // for the phone's own position once, as it opens (aerial-no-address.ts). Never when an
+  // address or its town was found.
+  const { profile } = useAuth();
+  const office = isOffice(profile);
+  const [here, setHere] = useState<HereState>({ status: "idle" });
+  const openPicker = () => {
+    setPickOpen(true);
+    if (
+      !shouldAskHere({
+        hasView: !!view,
+        near: data.near,
+        noAddress: data.noAddress,
+        coarse: coarsePointer(),
+        here,
+      })
+    )
+      return;
+    setHere({ status: "asking" });
+    void askHere(typeof navigator === "undefined" ? null : navigator.geolocation).then(setHere);
+  };
+  const noAddress = !view && !!data.noAddress;
+  const hereAt = here.status === "here" ? { lat: here.lat, lng: here.lng } : null;
+  // What the office reads, and the link that opens the property to type its address.
+  const noAddressNote = noAddress ? (
+    <div className="space-y-1 text-sm" data-pick-no-address={here.status}>
+      {noAddressLines({ office, here }).map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+      {office && job.site_id && (
+        <Link
+          to="/properties/$id"
+          params={{ id: job.site_id }}
+          className="font-medium underline underline-offset-2"
+          data-action="open-property"
+        >
+          {NO_ADDRESS_OPEN_PROPERTY}
+        </Link>
+      )}
+    </div>
+  ) : null;
   // A tag / text row clicked in the lists under the picture: that mark pulses for FLASH_MS.
   const [flash, setFlash] = useState<string | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -433,6 +484,7 @@ function AerialEditor({
             Zoom in until the building outlines show, then tap inside the roof.
           </DialogDescription>
         </DialogHeader>
+        {noAddressNote}
         {pickOpen && (
           <Suspense
             fallback={
@@ -449,12 +501,16 @@ function AerialEditor({
                 if (!pick.isPending) pick.mutate({ lat, lng });
               }}
               // Nothing found but the street is on the map (owner, Oct 26): open there.
-              focus={view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? null)}
+              // No address at all and the phone said where it is (Nov 19): open there.
+              focus={
+                view ? { lat: view.center[1], lng: view.center[0] } : (data.near ?? hereAt ?? null)
+              }
               // Only the town or zip code is known (Nov 19): open over the town, with no pin.
-              focusRough={!view && !!data.nearRough}
+              // The phone's own position: the roofs around it, with no pin either.
+              focusRough={!view && (data.nearRough ? true : !data.near && hereAt ? "here" : false)}
               // On the roof the phone knows where the building is: a "where am I" button.
               locateMe
-              fitTo={view || data.near ? undefined : data.addressState}
+              fitTo={view || data.near || hereAt ? undefined : data.addressState}
               className="h-[60vh] w-full rounded-md border"
             />
           </Suspense>
@@ -471,12 +527,18 @@ function AerialEditor({
   if (!view || !imagery)
     return (
       <div className="space-y-2 text-sm">
-        <p className="font-medium">No aerial for this address</p>
-        <p className="text-muted-foreground">
-          {data.address ? `${data.address}. ` : ""}
-          {data.note ?? "Nothing in our map data matches it."}
+        <p className="font-medium">
+          {data.noAddress ? "No address on this property" : "No aerial for this address"}
         </p>
-        <Button type="button" variant="outline" onClick={() => setPickOpen(true)}>
+        {/* Nothing to look up is said as it is (Nov 19), not as a lookup that found nothing. */}
+        {!data.noAddress && (
+          <p className="text-muted-foreground">
+            {data.address ? `${data.address}. ` : ""}
+            {data.note ?? "Nothing in our map data matches it."}
+          </p>
+        )}
+        {!pickOpen && noAddressNote}
+        <Button type="button" variant="outline" onClick={openPicker}>
           <Building2 className="mr-2 h-4 w-4" /> Pick the building on the map
         </Button>
         {pickDialog}
@@ -644,7 +706,7 @@ function AerialEditor({
             <Scan className="mr-1 h-4 w-4" /> Fit
           </Button>
         )}
-        <Button type="button" size="sm" variant="ghost" onClick={() => setPickOpen(true)}>
+        <Button type="button" size="sm" variant="ghost" onClick={openPicker}>
           <Building2 className="mr-1 h-4 w-4" />{" "}
           {building ? "Different building" : "Pick the building"}
         </Button>

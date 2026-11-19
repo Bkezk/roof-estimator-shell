@@ -281,7 +281,9 @@ describe("item 13 — Start a bid links back", () => {
       'import { getOpportunity, linkBid } from "@/lib/opportunities.functions";',
     );
     expect(est).toMatch(
-      /if \(row && !bidId\) \{\s+setBidId\(row\.id\);\s+hydratedFor\.current = row\.id;\s+if \(search\.opportunity\) linkOpportunity\(search\.opportunity, row\.id\);/,
+      // (Nov 19: the opportunity is the address's, else the one a new bid restored from its
+      // unsaved draft was started from. bids-draft-restore-nov19.test.ts.)
+      /if \(row && !bidId\) \{\s+setBidId\(row\.id\);\s+hydratedFor\.current = row\.id;[\s\S]{0,200}?const oppId = search\.opportunity \?\? draftLinks\.current\.opportunity;[\s\S]{0,120}?if \(oppId\) linkOpportunity\(oppId, row\.id\);/,
     );
   });
 });

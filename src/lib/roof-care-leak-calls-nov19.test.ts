@@ -335,6 +335,8 @@ describe("the refund when a plan ends early", () => {
       share: 920,
       repairs: 400,
       travel: 0,
+      // (Nov 19, night: the card fee on a refund is its own line; none here.)
+      card_fee: 0,
       refund: 520,
     });
     expect(readRefundWorked({ paid: 1840 })).toBeNull();
@@ -351,6 +353,7 @@ describe("the refund when a plan ends early", () => {
         share: 920,
         repairs: 400,
         travel: 0,
+        card_fee: 0,
         refund: 520,
       }),
     ).toEqual([
@@ -371,6 +374,7 @@ describe("the refund when a plan ends early", () => {
         share: 1100,
         repairs: 0,
         travel: 0,
+        card_fee: 0,
         refund: 1100,
       }),
     ).toEqual([
@@ -390,6 +394,7 @@ describe("the refund when a plan ends early", () => {
         share: 0,
         repairs: 0,
         travel: 0,
+        card_fee: 0,
         refund: 0,
       }),
     ).toEqual(["Nothing was paid for this plan year, so there is nothing to refund."]);

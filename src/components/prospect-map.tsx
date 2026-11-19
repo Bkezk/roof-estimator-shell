@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { FOCUS_ZOOM, focusMove } from "@/components/prospect-map-focus";
+import { FOCUS_ZOOM, focusMove, type FocusKind } from "@/components/prospect-map-focus";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import {
   AttributionControl,
@@ -93,7 +93,7 @@ interface Props {
    * best to get close"): open over the town, not on a roof, and drop no pin, since the pin
    * would point at a building that is not the one.
    */
-  focusRough?: boolean | undefined;
+  focusRough?: FocusKind;
   /**
    * A "where am I" button under the zoom buttons (Nov 19): a technician picking the building is
    * usually standing on it, and the phone knows where that is when the address is on no map.

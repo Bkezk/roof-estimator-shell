@@ -1131,7 +1131,8 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     expect(f).toContain(
       // (Nov 19: a plan signed and waiting for its payment opens the plan too, never a second
       // sign-up.)
-      '{open === "plan" && (active || waiting ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
+      // (Nov 19, night: a plan whose year is over opens too, for its renewal.)
+      '{open === "plan" && (active || waiting || lapsed ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
     );
     // The button says which plan and how many inspections are done.
     expect(f).toContain("{planName(active.plan)} · {done.visits}/2");
@@ -1214,7 +1215,9 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
   it("are eleven, dated, and none of them names a price", () => {
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     // (Nov 19: terms 2, 3 and 9 changed with paying for the year first, so the version did.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.2");
+    // (Nov 19, night: version 2026-11-19.3. Term 9 also says a year paid by card is refunded
+    // less the card fee. roof-care-go-aheads-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",

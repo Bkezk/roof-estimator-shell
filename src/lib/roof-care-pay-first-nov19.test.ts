@@ -108,7 +108,9 @@ describe("a plan that is signed and not yet paid", () => {
 describe("the terms the customer agrees to", () => {
   it("say the year is paid first, when it starts, and what is refunded", () => {
     // Nov 19, later: version 2026-11-19.2, eleven terms (roof-care-credit-nov19.test.ts).
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.2");
+    // (Nov 19, night: version 2026-11-19.3. Term 9 also says a year paid by card is refunded
+    // less the card fee. roof-care-go-aheads-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
@@ -121,7 +123,7 @@ describe("the terms the customer agrees to", () => {
     // Nov 19, later, the owner's "ensure it makes it into the service agreement": the leak call
     // travel and the storm inspection are named too.
     expect(ROOF_CARE_TERMS[8]).toBe(
-      "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done.",
+      "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
     );
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/two halves|half of the yearly/);
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
@@ -356,7 +358,8 @@ describe("the plan on the property's page while it waits", () => {
     expect(card).toContain(
       'plans.find((p) => p.status === "active") ?? plans.find((p) => p.status === "awaiting_payment") ?? plans.find((p) => !p.pay_first || !!p.starts_on) ?? plans[0] ?? null;',
     );
-    expect(card).toContain('{open === "plan" && (active || waiting ? (');
+    // (Nov 19, night: a plan whose year is over opens too, for its renewal.)
+    expect(card).toContain('{open === "plan" && (active || waiting || lapsed ? (');
     expect(card).toContain('data-care-plan-chip="awaiting"');
   });
 

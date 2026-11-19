@@ -67,6 +67,13 @@ export interface PlanVisit {
    * invoices: nothing is said to them either way.
    */
   billed: boolean | null;
+  /**
+   * The cleaning the plan includes at this inspection (Nov 19, night): true, false, or null
+   * while it is not answered. Absent on an older read. roof-care-cleaning.ts.
+   */
+  drains_cleaned?: boolean | null;
+  gutters_cleaned?: boolean | null;
+  cleaning_note?: string | null;
 }
 
 /** An invoice that took from the plan's minor repairs allowance. */
@@ -175,6 +182,13 @@ export interface RoofCarePlan {
   visits: PlanVisit[];
   /** Storm inspections a year the plan includes (the plan settings); absent on an older read. */
   storm_included?: number;
+  /** The day Roof Guard's yearly budget forecast was marked sent; null until it is. */
+  forecast_sent_on?: string | null;
+  /**
+   * A card payment taken online (Nov 19, night): the day, the amount for those who see invoices
+   * (null otherwise), and its reference. Null when there was none.
+   */
+  card_paid?: { on: string; amount: number | null; ref: string | null } | null;
   /** The customer's email, and what has been sent to it (Nov 19). Absent on an older read. */
   email?: PlanEmail;
 }
@@ -469,6 +483,11 @@ export interface RefundWorked {
   repairs: number;
   /** The travel of the plan's leak calls that was not charged (Nov 19). */
   travel: number;
+  /**
+   * The card fee on what is refunded, for a year paid by card (owner, Nov 19, night: "go"): the
+   * card company keeps its fee whether or not the money goes back.
+   */
+  card_fee: number;
   refund: number;
 }
 
@@ -495,6 +514,7 @@ export function readRefundWorked(x: unknown): RefundWorked | null {
     share,
     repairs,
     travel: n("travel") ?? 0,
+    card_fee: n("card_fee") ?? 0,
     refund,
   };
 }
@@ -512,6 +532,7 @@ export function refundLines(w: RefundWorked): string[] {
   ];
   if (w.repairs > 0) out.push(`Minor repairs the plan already covered: ${cents(w.repairs)} off`);
   if (w.travel > 0) out.push(`Leak call travel that was not charged: ${cents(w.travel)} off`);
+  if (w.card_fee > 0) out.push(`Card fee on the amount refunded: ${cents(w.card_fee)} off`);
   out.push(`Refund: ${cents(w.refund)}`);
   return out;
 }
@@ -866,7 +887,9 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // service agreement": term 9 also names the leak call travel and the storm inspection, and term
 // 10 is new: the plan ends after its twelve months, the price of one inspection comes off the
 // renewal for one we did not get to, and one we were kept from can be done in the first 60 days.
-export const ROOF_CARE_TERMS_VERSION = "2026-11-19.2";
+// Nov 19, night (version 2026-11-19.3), at the owner's "go" on the card fee: term 9 says a year
+// paid by card is refunded less the card processing fee on the amount refunded.
+export const ROOF_CARE_TERMS_VERSION = "2026-11-19.3";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
@@ -876,7 +899,7 @@ export const ROOF_CARE_TERMS: readonly string[] = [
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",
   "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
   "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
-  "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done.",
+  "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
   "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
   "The plan is not a warranty and does not cover replacing the roof.",
 ];

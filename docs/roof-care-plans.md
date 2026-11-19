@@ -464,11 +464,21 @@ office sees who opened it on the ticket, and the Owner page's Business tab count
 technician against the tickets they finished (`src/lib/care-plan-offers.ts`). Record:
 `docs/qa/roof-care-offered-2026-11-19.md`.
 
+Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-19.md`):
+
+- Paying by card online, the site's side: `src/lib/roof-care-checkout.ts`, its `.server.ts` and
+  `.functions.ts`, and `src/routes/api.stripe.webhook.ts`. Off until Stripe's two secrets and
+  its webhook endpoint are set up (`AGENTS.md`).
+- The cleaning at each inspection and the budget forecast: `src/lib/roof-care-cleaning.ts`.
+- An expired plan's Care Plan button opens its renewal.
+- A refund of a year paid by card is less the card fee (term 9, version 2026-11-19.3). The
+  fee's rate is on the plan setup page.
+
 Not built, waiting on the owner's word:
 
-- A tick on a care plan inspection that the drains, scuppers and gutters were cleaned, and a
-  mark that the yearly budget forecast was sent. Today the site does not record either.
 - Technicians seeing how much of the minor repairs is used. Today they see what is included.
+- A trip charge when the crew cannot get on the roof (term 7 reschedules once at no charge).
+- A second storm inspection in a year being a paid one.
 
 ## Still to build
 

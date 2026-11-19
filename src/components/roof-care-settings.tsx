@@ -80,6 +80,8 @@ const GROUPS: { title: string; keys: SettingKey[] }[] = [
       "guard_forecast_cost",
       "custom_quote_over_sqft",
       "min_price_sqft",
+      "card_fee_pct",
+      "card_fee_flat",
     ],
   },
 ];

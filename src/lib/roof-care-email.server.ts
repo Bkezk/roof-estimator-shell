@@ -50,7 +50,7 @@ export interface PlanEmailResult {
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 const SELECT =
-  "id, plan, plan_number, site_id, agreed_by, signed_on, price, pay_method, first_visit, first_days, terms_version, status, pay_first, paid_on, starts_on, renews_on, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error" as const;
+  "id, plan, plan_number, site_id, agreed_by, signed_on, price, pay_method, first_visit, first_days, terms_version, status, pay_first, paid_on, starts_on, renews_on, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, card_paid_amount" as const;
 
 /** Why email cannot go from this server at all, or null. */
 export function planEmailHeld(): string | null {
@@ -181,7 +181,12 @@ export async function dispatchPlanEmails(
         .select("display_number, paid_amount, status")
         .eq("roof_care_plan_id", p.id)
         .neq("status", "void");
-      const paid = (inv ?? []).reduce((n, i) => n + (Number(i.paid_amount) || 0), 0);
+      // What the invoices say was paid; else a card payment taken online whose invoice is
+      // not marked paid yet.
+      const paid =
+        (inv ?? []).reduce((n, i) => n + (Number(i.paid_amount) || 0), 0) ||
+        Number(p.card_paid_amount) ||
+        0;
       // A renewal at no charge has nothing to receipt.
       if (paid <= 0) continue;
       const mail = receiptEmail({

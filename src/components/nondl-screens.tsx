@@ -9,7 +9,8 @@
  * display rounding only). Dialog grids mirror the legacy CustomList columns: Description |
  * Footage/Calc (auto) | Extra (or a single Quantity = auto + extra) | Unit Cost | Total Cost |
  * HoursPerUnit | Hours | Labor Rate | Labor Cost, with the box that adds a custom item (legacy's
- * blank last row; first in the list since Nov 19) and the "Use Estimate Labor" reset.
+ * blank last row; first in the list since Nov 19, with the custom items right under it, the
+ * newest first) and the "Use Estimate Labor" reset.
  */
 
 import { useState } from "react";
@@ -38,7 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { customBoxAdds } from "./nondl-custom-box";
+import { customBoxAdds, customRowsShown } from "./nondl-custom-box";
 
 const usd = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -541,6 +542,84 @@ function GroupGrid(props: {
               />
             </TableCell>
           </TableRow>
+          {/* The custom items, right under the box and the newest first (owner, Nov 19: adding
+              several in a row meant scrolling back up to the box each time). Only where they
+              are drawn: the list is saved in the order the items were added, so the totals and
+              the proposal read as before. */}
+          {customRowsShown(customRows).map(({ row: c, index: i }) => {
+            const line = lines.find((l) => l.isCustom && l.item === c.description);
+            const upd = (patch: Partial<NonDlCustomRow>) =>
+              onCustom(customRows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+            const hours = line?.hours ?? 0;
+            return (
+              <TableRow key={`custom-${i}`} data-nondl-custom-row={i}>
+                <TableCell>
+                  <Input
+                    className="h-7 bg-green-50 px-1 dark:bg-green-950"
+                    value={c.description}
+                    onChange={(e) => upd({ description: e.target.value })}
+                  />
+                </TableCell>
+                {split && <TableCell className="text-right tabular-nums">0</TableCell>}
+                <TableCell className="text-right">
+                  <Num
+                    value={c.qty}
+                    autoFocus={focusQtyRow === i}
+                    onChange={(n) => {
+                      const next = { ...c, qty: n };
+                      delete next.laborHours;
+                      onCustom(customRows.map((x, j) => (j === i ? next : x)));
+                    }}
+                  />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Num value={c.unitCost} step="0.01" onChange={(n) => upd({ unitCost: n })} />
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {usd(line?.materialCost ?? 0)}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Num
+                    value={c.laborPerUnit}
+                    step="0.001"
+                    onChange={(n) => {
+                      const next = { ...c, laborPerUnit: n };
+                      delete next.laborHours;
+                      onCustom(customRows.map((x, j) => (j === i ? next : x)));
+                    }}
+                  />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Num
+                    value={hours}
+                    step="0.01"
+                    onChange={(n) =>
+                      upd({
+                        laborHours: bankersRound(n, 2),
+                        ...(c.qty > 0 ? { laborPerUnit: bankersRound(n / c.qty, 2) } : {}),
+                      })
+                    }
+                  />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Num value={c.laborRate} step="0.01" onChange={(n) => upd({ laborRate: n })} />
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {usd(line?.laborCost ?? 0)}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1 text-xs text-destructive"
+                    onClick={() => onCustom(customRows.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </Button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
           {refRows.map((row) => {
             const st = rowState[row.description];
             const line = lines.find((l) => !l.isCustom && l.item === row.description);
@@ -621,80 +700,6 @@ function GroupGrid(props: {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{usd(v.laborCost)}</TableCell>
                 <TableCell />
-              </TableRow>
-            );
-          })}
-          {customRows.map((c, i) => {
-            const line = lines.find((l) => l.isCustom && l.item === c.description);
-            const upd = (patch: Partial<NonDlCustomRow>) =>
-              onCustom(customRows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-            const hours = line?.hours ?? 0;
-            return (
-              <TableRow key={`custom-${i}`}>
-                <TableCell>
-                  <Input
-                    className="h-7 bg-green-50 px-1 dark:bg-green-950"
-                    value={c.description}
-                    onChange={(e) => upd({ description: e.target.value })}
-                  />
-                </TableCell>
-                {split && <TableCell className="text-right tabular-nums">0</TableCell>}
-                <TableCell className="text-right">
-                  <Num
-                    value={c.qty}
-                    autoFocus={focusQtyRow === i}
-                    onChange={(n) => {
-                      const next = { ...c, qty: n };
-                      delete next.laborHours;
-                      onCustom(customRows.map((x, j) => (j === i ? next : x)));
-                    }}
-                  />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Num value={c.unitCost} step="0.01" onChange={(n) => upd({ unitCost: n })} />
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {usd(line?.materialCost ?? 0)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Num
-                    value={c.laborPerUnit}
-                    step="0.001"
-                    onChange={(n) => {
-                      const next = { ...c, laborPerUnit: n };
-                      delete next.laborHours;
-                      onCustom(customRows.map((x, j) => (j === i ? next : x)));
-                    }}
-                  />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Num
-                    value={hours}
-                    step="0.01"
-                    onChange={(n) =>
-                      upd({
-                        laborHours: bankersRound(n, 2),
-                        ...(c.qty > 0 ? { laborPerUnit: bankersRound(n / c.qty, 2) } : {}),
-                      })
-                    }
-                  />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Num value={c.laborRate} step="0.01" onChange={(n) => upd({ laborRate: n })} />
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {usd(line?.laborCost ?? 0)}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1 text-xs text-destructive"
-                    onClick={() => onCustom(customRows.filter((_, j) => j !== i))}
-                  >
-                    ×
-                  </Button>
-                </TableCell>
               </TableRow>
             );
           })}

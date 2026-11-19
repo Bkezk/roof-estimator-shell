@@ -37,9 +37,20 @@ import { offeredWords, offersKey } from "@/lib/care-plan-offers";
 import { carePlanOffered, markCarePlanOffered } from "@/lib/care-plan-offers.functions";
 import { allowanceMoney } from "@/lib/roof-care-allowance";
 import {
+  CARD_PAID_INVOICE_OPEN,
+  cardPaidWords,
+  CHECKOUT_BUTTON,
+  checkoutReadyKey,
+  PAY_CARD_NOTE_ONLINE,
+} from "@/lib/roof-care-checkout";
+import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
+import { markRoofCareForecast } from "@/lib/roof-care-cleaning.functions";
+import {
   AGREE_WORDS,
   benefitsOfPlan,
   benefitsUsed,
+  FORECAST_MARK_SENT,
+  FORECAST_UNDO,
   everythingIncluded,
   EMAIL_BAD,
   EMAIL_LABEL,
@@ -167,6 +178,20 @@ function usePlans(siteId: string | null | undefined) {
     enabled: !!session && !!siteId,
     staleTime: STALE_MS,
   });
+}
+
+/** Is paying by card online set up? False while it loads: Card then reads as the office's. */
+function useCheckoutReady(enabled: boolean): boolean {
+  const { session } = useAuth();
+  const fn = useServerFn(roofCareCheckoutReady);
+  const q = useQuery({
+    queryKey: checkoutReadyKey,
+    queryFn: () => fn(),
+    enabled: !!session && enabled,
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+  return q.data === true;
 }
 
 /** What each plan includes, in numbers. Null while it loads and when it cannot be read. */
@@ -369,6 +394,11 @@ export function RoofCareButtons({
   const active = (q.data ?? []).find((p) => p.status === "active") ?? null;
   // Signed and waiting for its payment (Nov 19): Care Plan opens it, never a second sign-up.
   const waiting = (q.data ?? []).find((p) => p.status === "awaiting_payment") ?? null;
+  // Its twelve months are over and it is not closed out (owner, Nov 19, night: "go"): Care Plan
+  // opens it, for its renewal, never a new sign-up. A new sign-up would drop what the renewal
+  // owes the customer for an inspection that was not done.
+  const last = currentPlan(q.data ?? []);
+  const lapsed = !active && !waiting && last && isExpired(last) && !last.closed_out ? last : null;
   const done = active ? visitsDone(active, today) : null;
   // The workflow's bar: the two side by side on a phone, each tall enough for a thumb, in the
   // logo's blue (owner, Nov 18: "color them blue, the same blue as in the logo").
@@ -376,7 +406,9 @@ export function RoofCareButtons({
   return (
     <div
       className={`${big ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"} ${className}`}
-      data-roof-care-buttons={active ? active.plan : waiting ? "awaiting" : "none"}
+      data-roof-care-buttons={
+        active ? active.plan : waiting ? "awaiting" : lapsed ? "expired" : "none"
+      }
     >
       <Button
         type="button"
@@ -425,14 +457,14 @@ export function RoofCareButtons({
         <Plus className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {ADDITIONAL_SERVICES_LABEL}
       </Button>
       {open === "plan" &&
-        (active || waiting ? (
+        (active || waiting || lapsed ? (
           <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
         ) : (
           <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} />
         ))}
       {open === "service" && <ServiceRequestDialog siteId={siteId} onClose={() => setOpen(null)} />}
       {/* Was the plan offered on this ticket? Only where there is one to offer. */}
-      {showsOffered && q.data && !active && !waiting && offered.data && (
+      {showsOffered && q.data && !active && !waiting && !lapsed && offered.data && (
         <p
           className={`basis-full text-right text-xs ${offered.data.length ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}`}
           data-care-plan-offered={offered.data.length}
@@ -501,6 +533,34 @@ export function RoofCareCard({
   const [endingRenewal, setEndingRenewal] = useState(false);
   const [closingOut, setClosingOut] = useState(false);
   const refresh = useRefresh(siteId ?? "");
+  const forecastFn = useServerFn(markRoofCareForecast);
+  const forecast = useMutation({
+    mutationFn: (a: { planId: string; sent: boolean }) =>
+      forecastFn({ data: { plan_id: a.planId, sent: a.sent } }),
+    onSuccess: (_r, a) => {
+      refresh();
+      toast.success(a.sent ? "Budget forecast marked sent" : "The mark was taken off");
+    },
+    onError: (e) => toast.error(`Could not mark the forecast: ${errText(e)}`, { duration: 20_000 }),
+  });
+  // A technician cannot renew (the office's): the customer's wish goes to the office, with the
+  // technician's name on it, as an additional service does.
+  const askFn = useServerFn(requestAdditionalService);
+  const askRenew = useMutation({
+    mutationFn: (p: RoofCarePlan) =>
+      askFn({
+        data: {
+          site_id: p.site_id,
+          services: `Renew the ${planName(p.plan)} plan`,
+          details: "The customer asked on site to renew their Roof Care plan.",
+        },
+      }),
+    onSuccess: () =>
+      toast.success("Sent to the office as a new opportunity, with your name on it", {
+        duration: 15_000,
+      }),
+    onError: (e) => toast.error(`Could not send it: ${errText(e)}`, { duration: 20_000 }),
+  });
   const stormFn = useServerFn(addRoofCareStorm);
   const storm = useMutation({
     mutationFn: (planId: string) => stormFn({ data: { plan_id: planId } }),
@@ -577,6 +637,20 @@ export function RoofCareCard({
                   ))}
               </ul>
             )}
+          {/* Renewing is the office's. On the roof, the customer's wish is sent to it. */}
+          {!short && !office && !expired.closed_out && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 text-xs"
+              disabled={askRenew.isPending || askRenew.isSuccess}
+              onClick={() => askRenew.mutate(expired)}
+              data-action="roof-care-ask-renew"
+            >
+              {askRenew.isSuccess ? "Sent to the office" : "The customer wants to renew"}
+            </Button>
+          )}
           {!short && office && (
             <div className="flex flex-wrap gap-1.5">
               <Button
@@ -640,6 +714,15 @@ export function RoofCareCard({
             Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
+          {/* A card payment taken online (Nov 19, night). */}
+          {!short && office && active.card_paid && (
+            <p className="text-xs" data-roof-care-card-paid>
+              {cardPaidWords(active.card_paid)}
+              {active.invoice && active.invoice.status !== "paid"
+                ? ` ${CARD_PAID_INVOICE_OPEN}`
+                : ""}
+            </p>
+          )}
           {/* What the plan includes and what it has given so far (owner, Nov 19). */}
           {!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}
           {!short && office && active.pay_first && active.email && (
@@ -734,6 +817,23 @@ export function RoofCareCard({
           )}
           {!short && office && (
             <div className="flex flex-wrap gap-1.5">
+              {/* Roof Guard's yearly budget forecast (Nov 19, night): marked when it is sent. */}
+              {active.plan === "guard" && (
+                <Button
+                  type="button"
+                  variant={active.forecast_sent_on ? "ghost" : "outline"}
+                  size="sm"
+                  className={`h-7 text-xs ${active.forecast_sent_on ? "text-muted-foreground" : ""}`}
+                  disabled={forecast.isPending}
+                  onClick={() =>
+                    forecast.mutate({ planId: active.id, sent: !active.forecast_sent_on })
+                  }
+                  data-action="roof-care-forecast"
+                  data-forecast-sent={!!active.forecast_sent_on}
+                >
+                  {active.forecast_sent_on ? FORECAST_UNDO : FORECAST_MARK_SENT}
+                </Button>
+              )}
               {active.plan === "guard" && (
                 <Button
                   type="button"
@@ -1024,6 +1124,18 @@ function AwaitingPayment({
   const money = seesInvoices(profile);
   const inv = plan.invoice;
   const decided = renewalDecisionWords(plan);
+  // Paying by card online, when it is set up: the page to hand or send to the customer.
+  const cardOnline = useCheckoutReady(plan.pay_method === "card");
+  const checkoutFn = useServerFn(startPlanCheckout);
+  const checkout = useMutation({
+    mutationFn: () => checkoutFn({ data: { plan_id: plan.id } }),
+    onSuccess: (r) => {
+      if (r.url) window.location.assign(r.url);
+      else toast.error(r.reason ?? "The card payment page could not be made", { duration: 20_000 });
+    },
+    onError: (e) =>
+      toast.error(`Could not open the card payment page: ${errText(e)}`, { duration: 20_000 }),
+  });
   return (
     <div
       className={`space-y-1 text-xs ${renewalOf ? "rounded-md border p-2" : ""}`}
@@ -1054,8 +1166,22 @@ function AwaitingPayment({
       {plan.pay_method && (
         <p className="font-medium" data-awaiting-pay={plan.pay_method}>
           {payWords(plan.pay_method, plan.pay_note)}
-          {plan.pay_method === "card" ? ` ${PAY_CARD_NOTE}` : ""}
+          {plan.pay_method === "card" && !cardOnline ? ` ${PAY_CARD_NOTE}` : ""}
         </p>
+      )}
+      {plan.pay_method === "card" && cardOnline && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          disabled={checkout.isPending}
+          onClick={() => checkout.mutate()}
+          data-action="roof-care-checkout"
+        >
+          {checkout.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+          {CHECKOUT_BUTTON}
+        </Button>
       )}
       {!short && !renewalOf && (
         <p className="text-muted-foreground" data-awaiting-first>
@@ -1329,6 +1455,10 @@ function SignUpDialog({
   const [payNote, setPayNote] = useState("");
   const offerFn = useServerFn(roofCareOffer);
   const signFn = useServerFn(signUpRoofCare);
+  // Card (owner, Nov 19): once online payment is set up, signing goes on to the card payment
+  // page. Until then the office takes the card.
+  const checkoutFn = useServerFn(startPlanCheckout);
+  const cardOnline = useCheckoutReady(payMethod === "card");
   // What the map shows at the address, offered beside the box. The box itself stays blank.
   const mapFn = useServerFn(roofCareMapSize);
   const mapSize = useQuery({
@@ -1362,8 +1492,8 @@ function SignUpDialog({
     plans.length > 0 &&
     !stale;
   const sign = useMutation({
-    mutationFn: () =>
-      signFn({
+    mutationFn: async () => {
+      const made = await signFn({
         data: {
           site_id: siteId,
           plan: plan!,
@@ -1379,9 +1509,27 @@ function SignUpDialog({
           // The price on the screen: the plan is saved at it or not at all (Nov 19).
           shown_price: plans.find((o) => o.plan === plan)!.price,
         },
-      }),
-    onSuccess: (made) => {
+      });
+      // The card payment page, when there is one. The plan is signed either way.
+      let pay: string | null = null;
+      if (payMethod === "card") {
+        try {
+          pay = (await checkoutFn({ data: { plan_id: made.id } })).url;
+        } catch {
+          pay = null;
+        }
+      }
+      return { made, pay };
+    },
+    onSuccess: ({ made, pay }) => {
       refresh();
+      if (pay) {
+        toast.success(`${planName(made.plan)} plan signed. Opening the card payment page.`, {
+          duration: 20_000,
+        });
+        window.location.assign(pay);
+        return;
+      }
       toast.success(
         made.invoice
           ? `${planName(made.plan)} plan signed. Invoice #${made.invoice.number} is a draft: finalise it and send it. The plan starts when it is paid.`
@@ -1634,7 +1782,7 @@ function SignUpDialog({
                       its checkout. Until then the office takes the card. */}
                   {payMethod === "card" && (
                     <p className="text-xs text-muted-foreground" data-sign-line="card-note">
-                      {PAY_CARD_NOTE_CUSTOMER}
+                      {cardOnline ? PAY_CARD_NOTE_ONLINE : PAY_CARD_NOTE_CUSTOMER}
                     </p>
                   )}
                   {payMethod === "check" && (

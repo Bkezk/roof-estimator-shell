@@ -41,7 +41,12 @@ const base: StepState = {
 
 describe("the Checklist step's rule reads the record, not a pending change", () => {
   it("closeout.tsx: checklistSaved is 'a record on the server and the last save did not fail'", () => {
-    expect(form).toContain('checklistSaved: insp.hasRecord && insp.state !== "error",');
+    // (Nov 19: the same rule under its own name, because on a Roof Care plan's inspection the
+    // step also waits for the plan's cleaning questions; cleaning-ticks-nov19.test.tsx.)
+    expect(form).toContain('const checklistSaved = insp.hasRecord && insp.state !== "error";');
+    expect(form).toContain(
+      "checklistSaved: checklistStepSaved(checklistSaved, cleaning, finished),",
+    );
     expect(form).not.toContain("checklistSaved: insp.saved,");
     // The gap dialog at Complete still judges the true saved state (Complete flushes first).
     expect(form).toContain("checklist_saved: insp.saved,");

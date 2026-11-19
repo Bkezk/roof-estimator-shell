@@ -49,7 +49,9 @@ describe("1. the box that adds a custom item is first in the list", () => {
   it("comes before the stock rows and the custom rows", () => {
     const box = at("data-nondl-add-row");
     expect(box).toBeLessThan(at("{refRows.map((row) =>"));
-    expect(box).toBeLessThan(at("{customRows.map((c, i) =>"));
+    // (Later on Nov 19: the custom rows are drawn right under the box, the newest first, before
+    // the stock rows. bids-draft-restore-nov19.test.ts.)
+    expect(box).toBeLessThan(at("{customRowsShown(customRows).map(({ row: c, index: i }) =>"));
     expect(at("Add a custom ${NON_DL_CATEGORY_LABEL[group].toLowerCase()} item…")).toBeLessThan(
       at("{refRows.map((row) =>"),
     );

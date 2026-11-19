@@ -88,6 +88,12 @@ export const roofCareSettingsSchema = z.object({
    * is minimum of 2 hrs"). A smaller roof pays the price of this size. Blank: no floor.
    */
   min_price_sqft: num,
+  /**
+   * What a card payment costs (owner, Nov 19, night): a percent of the amount and a flat sum
+   * for each payment. Taken off a refund of a year paid by card. Blank: nothing is taken off.
+   */
+  card_fee_pct: num.optional(),
+  card_fee_flat: num.optional(),
   plans: z.object({ watch: planSchema, care: planSchema, guard: planSchema }),
   hours: z.array(hoursRowSchema).max(40),
 });
@@ -113,6 +119,8 @@ export function emptyRoofCareSettings(): RoofCareSettings {
     guard_forecast_cost: null,
     custom_quote_over_sqft: null,
     min_price_sqft: null,
+    card_fee_pct: null,
+    card_fee_flat: null,
     plans: { watch: blankPlan(), care: blankPlan(), guard: blankPlan() },
     hours: [],
   };
@@ -150,6 +158,8 @@ export const SETTING_LABELS = {
   guard_forecast_cost: "Roof Guard: budget forecast cost ($)",
   custom_quote_over_sqft: "Custom quote for roofs over (sq ft)",
   min_price_sqft: "Smallest roof the price is worked for (sq ft)",
+  card_fee_pct: "Card fee, % of a payment",
+  card_fee_flat: "Card fee, flat sum per payment ($)",
 } as const;
 export type SettingKey = keyof typeof SETTING_LABELS;
 
@@ -257,6 +267,8 @@ function ready(s: RoofCareSettings): Ready | null {
     guard_forecast_cost: n(s.guard_forecast_cost),
     custom_quote_over_sqft: n(s.custom_quote_over_sqft),
     min_price_sqft: n(s.min_price_sqft),
+    card_fee_pct: n(s.card_fee_pct ?? null),
+    card_fee_flat: n(s.card_fee_flat ?? null),
     plans: { watch: plan("watch"), care: plan("care"), guard: plan("guard") },
   };
 }

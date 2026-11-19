@@ -201,6 +201,15 @@ import {
   type StepStatus,
 } from "@/lib/closeout-steps";
 import { backToStep, cardInPage, pickStep, shownCardStep } from "./one-card";
+import { CleaningQuestions } from "./cleaning";
+import {
+  checklistStepSaved,
+  cleaningGaps,
+  cleaningGate,
+  cleaningStepMissing,
+  type CleaningGate,
+} from "./cleaning-gate";
+import { useVisitCleaning } from "./use-visit-cleaning";
 import { isFlagged, issueCountText, unattachedTicketPhotos } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { pressLine, runningLabel } from "@/lib/tech-clock";
@@ -826,6 +835,14 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const inspection = isInspection(job.service_type);
   const insp = useInspectionDraft(job, { enabled: inspection });
   const inspCamera = useInspectionCamera(job.id);
+  // A Roof Care plan's own inspection (owner, Nov 19): what the plan includes here, drains and
+  // gutters cleaned, is asked in the Checklist step and the step waits for the answers
+  // (cleaning-gate.ts). Idle on every other ticket.
+  const planVisitId = inspection ? job.roof_care_visit_id : null;
+  const cleaningQ = useVisitCleaning(planVisitId);
+  const gateOf = (r: { data?: typeof cleaningQ.data; error: unknown; isLoading: boolean }) =>
+    cleaningGate({ visitId: planVisitId, data: r.data, error: r.error, loading: r.isLoading });
+  const cleaning: CleaningGate = gateOf(cleaningQ);
 
   const input = (d: TextDraft) => ({
     id: job.id,
@@ -977,12 +994,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const [unread, setUnread] = useState(false);
   // Owner, Oct 9: a read that failed or is still loading is a line of its own (closeout-check.ts
   // completeGaps) — Complete used to pass silently with no checks when one had no rows yet.
-  const gapsOf = (reads: {
-    repairs: CheckRead<JobRepairRow[]>;
-    photos: CheckRead<JobPhotoRow[]>;
-    time: CheckRead<TimeEntryRow[]>;
-  }) =>
-    completeGaps({
+  const gapsOf = (
+    reads: {
+      repairs: CheckRead<JobRepairRow[]>;
+      photos: CheckRead<JobPhotoRow[]>;
+      time: CheckRead<TimeEntryRow[]>;
+    },
+    gate: CleaningGate = cleaning,
+  ): CompleteGaps => {
+    const base = completeGaps({
       finished,
       service_type: job.service_type,
       signature_path: job.signature_path,
@@ -999,6 +1019,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           }
         : {}),
     });
+    // The plan's questions at its own inspection stand beside the checklist (Nov 19).
+    const plan = cleaningGaps(gate, finished);
+    return { gaps: [...base.gaps, ...plan.gaps], unread: base.unread || plan.unread };
+  };
   const judge = (g: CompleteGaps) => {
     if (g.gaps.length > 0) {
       setMissing(g.gaps);
@@ -1012,12 +1036,13 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // Retry re-reads the three and judges their answers (not the closure's, which may be stale).
   const retry = useMutation({
     mutationFn: async () => {
-      const [repairs, photos, time] = await Promise.all([
+      const [repairs, photos, time, plan] = await Promise.all([
         repairsQ.refetch(),
         photosQ.refetch(),
         timeQ.refetch(),
+        planVisitId ? cleaningQ.refetch() : Promise.resolve(cleaningQ),
       ]);
-      return gapsOf({ repairs, photos, time });
+      return gapsOf({ repairs, photos, time }, gateOf(plan));
     },
     onSuccess: judge,
     onError: (e) => loudError("Could not re-check the ticket", e),
@@ -1050,6 +1075,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   }, [materialsLogged, nothingUsed]);
   const notesSkipped = draft.notes_skipped;
   const markNotesSkipped = (on: boolean) => update({ notes_skipped: on });
+  // The checklist itself: the server holds a record and the last save did not fail.
+  const checklistSaved = insp.hasRecord && insp.state !== "error";
   const stepState: StepState = {
     finished,
     crewAnswered: !waiting,
@@ -1076,7 +1103,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     // steps locked. The step is done once the server holds a record and the last save did not
     // fail — a save on its way never locks anything; Complete flushes it (insp.saveNow).
     checklist: insp.items,
-    checklistSaved: insp.hasRecord && insp.state !== "error",
+    // Nov 19: on a Roof Care plan's inspection the step also waits for the plan's own questions
+    // (cleaning-gate.ts), so the bar stays on "Finish step 1" until they are answered.
+    checklistSaved: checklistStepSaved(checklistSaved, cleaning, finished),
     recommendRepairs: insp.recommendRepairs,
     recommendNewRoof: draft.recommend_new_roof,
   };
@@ -1084,7 +1113,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // Until the reads answer every list is empty, so the strip would say Before with the rest
   // locked and then jump: the steps wait for the first answers (a failed read counts — its
   // section says so, loudly). An inspection waits for its checklist too.
-  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading) && !insp.loading;
+  const ready =
+    ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading) &&
+    !insp.loading &&
+    // A plan's inspection waits for its questions too, or the first card would jump past them.
+    !(planVisitId && cleaningQ.isLoading);
   // Owner, Oct 9 ("instead of auto swapping to the next step it should have a go to next step
   // button at the bottom"): the step the tech is ON. Set once from the first open step when the
   // reads settle, then moved only by the Next step button and the bar's Finish step N — never by
@@ -1136,7 +1169,13 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       flushSync(() => setPicked(null));
       if (shownOpen) jumpTo(shownOpen);
     },
-    missing: stepMissing(id, stepState),
+    missing: cleaningStepMissing(
+      id,
+      stepMissing(id, stepState),
+      checklistSaved,
+      cleaning,
+      finished,
+    ),
     onNext: () => goNext(id),
   });
   // The header asides: what each step holds, from the same reads the rules use.
@@ -1247,6 +1286,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   draft={insp}
                   photos={photoRows}
                   camera={inspCamera}
+                />
+                {/* What the Roof Care plan includes at this inspection (owner, Nov 19): under the
+                    checklist, where the drains and the gutters are already looked at. Nothing on
+                    a ticket that is not a plan's inspection. */}
+                <CleaningQuestions
+                  gate={cleaning}
+                  locked={!extrasEditable}
+                  office={isOffice(profile)}
+                  onRetryRead={() => void cleaningQ.refetch()}
                 />
               </StepCard>
 

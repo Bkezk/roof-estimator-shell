@@ -195,7 +195,8 @@ describe("no toast when a step unlocks (owner, Oct 9, later: the tech presses Ne
   it("the reads still settle first; the unlock toast and its scroll are gone — closeout-next-step.test.ts has the button", () => {
     // Since Oct 12 an inspection's checklist read settles with the rest.
     expect(form).toMatch(
-      /const ready =\s*!\[repairsQ, photosQ, timeQ, materialsQ\]\.some\(\(q\) => q\.isLoading\) && !insp\.loading;/,
+      // (Nov 19: a Roof Care plan inspection's cleaning questions settle with them.)
+      /const ready =\s*!\[repairsQ, photosQ, timeQ, materialsQ\]\.some\(\(q\) => q\.isLoading\) &&\s*!insp\.loading &&[\s\S]*?!\(planVisitId && cleaningQ\.isLoading\);/,
     );
     expect(form).not.toContain("prevOpen");
     expect(form).not.toContain("unlockToast(");

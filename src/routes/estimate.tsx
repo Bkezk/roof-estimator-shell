@@ -129,6 +129,26 @@ import {
 } from "@/lib/bid-sanity";
 import { BidNoticeList } from "@/components/bid-notice-list";
 import { readDismissedNotices, splitNotices } from "@/lib/bid-dismissed-notices";
+import {
+  BID_DRAFT_DELAY_MS,
+  BID_DRAFT_VERSION,
+  DRAFT_DISCARD,
+  DRAFT_DISCARDED,
+  DRAFT_RESTORE,
+  DRAFT_RESTORED,
+  draftKey,
+  draftOffer,
+  draftQueue,
+  draftWords,
+  mayWriteDraft,
+  readDraft,
+  worthKeeping,
+  type BidDraft,
+  type BidDraftStore,
+  type DraftGate,
+  type DraftOffer,
+} from "@/lib/bid-draft";
+import { openBidDraftStore } from "@/lib/bid-draft-store";
 import { bidChangedSince, LOCK_BACK_UNSAVED, lockReturnAction } from "@/lib/bid-lock-return";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
@@ -649,6 +669,9 @@ function EstimatePage() {
   // Taken once the profile is known, so the holder is named (audit finding 4: taken on the
   // session alone, the first lock named the login's email).
   const lockHolderName = profile?.full_name?.trim() || session?.user.email || "Another user";
+  // The bid this tab holds the edit lock on (the unsaved-draft question waits for it, so another
+  // window's work in progress is never offered here; lib/bid-draft.ts).
+  const [lockMineFor, setLockMineFor] = useState<string | null>(null);
   const bidLock = useBidLock({
     bidId: bidParam,
     enabled: authed && !!profile,
@@ -658,6 +681,7 @@ function EstimatePage() {
     // word, and whatever was not saved went with it. With nothing unsaved the saved bid is read
     // again, and the page is replaced only when the bid really changed meanwhile.
     onAcquired: (firstTime) => {
+      setLockMineFor(bidParam ?? null);
       const action = lockReturnAction(firstTime, dirtyRef.current);
       if (action === "nothing") return;
       if (action === "keep") {
@@ -2332,6 +2356,201 @@ function EstimatePage() {
       headerJsonOf(tabHeader) !== headerJsonOf(lastSavedHeader.current));
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
+
+  // ── The unsaved work, kept in the browser and offered back (owner, Nov 19; lib/bid-draft.ts).
+  // A lost sign-in, a closed browser, a computer that shut down, or a reload of a bid started
+  // from PlanSwift used to throw away whatever was not saved. Now the page writes it to the
+  // browser a moment after each change, and opening the bid again asks: restore it or discard it.
+  const draftUserId = session?.user.id ?? null;
+  const draftSlot = draftUserId ? draftKey(draftUserId, bidParam ?? null) : null;
+  const [draftGate, setDraftGate] = useState<DraftGate>("checking");
+  const [draftAsk, setDraftAsk] = useState<DraftOffer | null>(null);
+  const draftCheckedSlot = useRef<string | null>(null);
+  const draftStoreRef = useRef<Promise<BidDraftStore> | null>(null);
+  const draftStore = () => (draftStoreRef.current ??= openBidDraftStore().then((o) => o.store));
+  const draftRun = useRef(draftQueue((e) => console.warn("Bid draft:", e))).current;
+  // What a new bid restored from a draft was started from, for its first Save.
+  const draftLinks = useRef<{ opportunity: string | null; inspection: string | null }>({
+    opportunity: null,
+    inspection: null,
+  });
+  // The page's own "is it changed" text: the same work reads the same.
+  const pagePrint = () => `${bodyJsonOf(bidName)}#${headerJsonOf(tabHeader)}`;
+  // Asked once for each bid, when the bid is on the page. A saved bid waits until this tab holds
+  // it: a second window open on the same bid is read-only and is never offered the first one's
+  // work in progress.
+  useEffect(() => {
+    if (!draftSlot || !draftUserId) return;
+    if (draftCheckedSlot.current === draftSlot) return;
+    const ready = bidParam
+      ? hydratedFor.current === bidParam && lockMineFor === bidParam && !readOnly
+      : true;
+    if (!ready) {
+      setDraftGate("checking");
+      return;
+    }
+    draftCheckedSlot.current = draftSlot;
+    draftLeft.current = false;
+    setDraftGate("checking");
+    const slot = draftSlot;
+    const page = { updatedAt: bidParam ? loadedUpdatedAt.current : null, print: pagePrint() };
+    void (async () => {
+      let offer: DraftOffer | null = null;
+      try {
+        const store = await draftStore();
+        const found = await store.get(slot);
+        offer = draftOffer(
+          readDraft(found, { userId: draftUserId, bidId: bidParam ?? null }),
+          page,
+        );
+        // Not a whole draft, or the very work the page already shows: dropped.
+        if (found !== undefined && !offer) void draftRun(() => store.remove(slot));
+      } catch {
+        // The browser's storage is blocked: nothing to offer, and the page carries on.
+      }
+      if (draftCheckedSlot.current !== slot) return;
+      setDraftAsk(offer);
+      setDraftGate(offer ? "asking" : "open");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per bid, on the loaded page
+  }, [draftSlot, draftUserId, bidParam, hydrationStamp, renderedBidId, lockMineFor, readOnly]);
+  // The draft as it would be written now; null when there is nothing unsaved to keep. Never
+  // before the question above is answered: a draft is not written over unasked.
+  // A new bid reads "changed" from its own starting fills. Until the first key or click the page
+  // as it stands is that start, and a page that is only its start is not worth keeping.
+  const draftTouched = useRef(false);
+  const newBidStart = useRef<string | null>(null);
+  useEffect(() => {
+    const touch = () => {
+      draftTouched.current = true;
+    };
+    document.addEventListener("pointerdown", touch, true);
+    document.addEventListener("keydown", touch, true);
+    return () => {
+      document.removeEventListener("pointerdown", touch, true);
+      document.removeEventListener("keydown", touch, true);
+    };
+  }, []);
+  const printNow = draftSlot && dirty ? pagePrint() : "";
+  if (!bidParam && !draftTouched.current) newBidStart.current = printNow;
+  const draftPrint =
+    mayWriteDraft({ gate: draftGate, dirty, readOnly, saving }) &&
+    worthKeeping(printNow, !bidParam, newBidStart.current)
+      ? printNow
+      : "";
+  const buildDraft = (): BidDraft | null => {
+    if (!draftSlot || !draftUserId || !draftPrint) return null;
+    return {
+      v: BID_DRAFT_VERSION,
+      key: draftSlot,
+      userId: draftUserId,
+      bidId: bidParam ?? null,
+      savedAt: new Date().toISOString(),
+      baseUpdatedAt: bidParam ? loadedUpdatedAt.current : null,
+      name: bidName,
+      accountId: linkedAccountId,
+      siteId: linkedAccountId ? linkedSiteId : null,
+      accountLabel: linkedAccountLabel,
+      linkChanged: linkDirty.current,
+      buildingId: linkedBuildingId,
+      opportunityId: bidParam ? null : (search.opportunity ?? draftLinks.current.opportunity),
+      inspectionId: bidParam ? null : (search.inspection ?? draftLinks.current.inspection),
+      header: tabHeader,
+      // What Save sends: the page's data, with the prices the bid is frozen at when it has them.
+      data: {
+        ...saved,
+        ...(snapshot
+          ? {
+              adminSnapshot: snapshot.admin,
+              ...(snapshot.warranty ? { warrantySnapshot: snapshot.warranty } : {}),
+              pricingAsOf: snapshot.asOf,
+            }
+          : {}),
+      } as unknown as BidDraft["data"],
+      print: draftPrint,
+    };
+  };
+  // The latest unsaved work not yet written (null: nothing waits). Read by the timer and by the
+  // flush below, so what is written is always the page as it is now.
+  const draftWaiting = useRef<(() => BidDraft | null) | null>(null);
+  // Set by "Leave without saving": the page is on its way out, and nothing more is kept of it.
+  const draftLeft = useRef(false);
+  draftWaiting.current = draftPrint && !draftLeft.current ? buildDraft : null;
+  const writeDraftNow = () => {
+    const make = draftWaiting.current;
+    if (!make) return;
+    const draft = make();
+    draftWaiting.current = null;
+    if (draft) void draftRun(async () => (await draftStore()).put(draft));
+  };
+  // Written a moment after the last change; the saved row moving under an unsaved page (a status
+  // or due date saved by itself) writes it again, so the draft knows what it started from.
+  const draftBase = loadedUpdatedAt.current;
+  useEffect(() => {
+    if (!draftPrint) return;
+    const t = setTimeout(writeDraftNow, BID_DRAFT_DELAY_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the print is the page's content
+  }, [draftPrint, draftBase]);
+  // The tab hidden, the page closed, or the estimator left by a way that does not ask (a lost
+  // sign-in): whatever waits is written at once.
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") writeDraftNow();
+    };
+    document.addEventListener("visibilitychange", flush);
+    window.addEventListener("pagehide", writeDraftNow);
+    return () => {
+      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", writeDraftNow);
+      writeDraftNow();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the refs
+  }, []);
+  // Saved, discarded, or left on purpose: the draft goes, and nothing waiting is written after.
+  const dropDraft = (slot: string | null = draftCheckedSlot.current) => {
+    draftWaiting.current = null;
+    if (slot) void draftRun(async () => (await draftStore()).remove(slot));
+  };
+  const restoreDraft = () => {
+    const d = draftAsk?.draft;
+    if (!d) return;
+    // A new bid's own starting fills (the PlanSwift import, a takeoff, the combiner, the default
+    // labor template and markup) must not land on top of the restored work afterwards.
+    if (!bidParam) {
+      if (planswiftParam) planswiftSeededFor.current = planswiftParam;
+      if (takeoffParam) takeoffSeededFor.current = `|${takeoffParam}`;
+      if (combineParam) combinedFor.current = combineParam;
+      appliedDefaultTemplate.current = true;
+      appliedDefaultPreset.current = true;
+      draftLinks.current = { opportunity: d.opportunityId, inspection: d.inspectionId };
+    }
+    hydrateSaved(d.data as unknown as Partial<SavedBidState> & { sections: BidSectionInput[] }, {
+      createdAt: (loadedBid as { created_at?: string } | null | undefined)?.created_at,
+      updatedAt: loadedBid?.updated_at,
+    });
+    setLink(d.accountId, d.siteId, d.accountLabel, d.linkChanged);
+    setLinkedBuildingId(d.buildingId);
+    setBidName(d.name);
+    setBidStatus(asBidStatus(d.header.status));
+    setLostReason(d.header.lostReason);
+    setWonOnDay(d.header.wonOn);
+    setBidDueDate(d.header.dueDate);
+    setBidFolder(d.header.folder);
+    setBidReminderOn(d.header.reminderOn);
+    setBidReminderNote(d.header.reminderNote);
+    setReminderOpen(!!d.header.reminderOn);
+    // The draft stays where it is until Save: the work is still unsaved.
+    setDraftAsk(null);
+    setDraftGate("open");
+    toast.success(DRAFT_RESTORED, { duration: 15_000 });
+  };
+  const discardDraft = () => {
+    dropDraft();
+    setDraftAsk(null);
+    setDraftGate("open");
+    toast(DRAFT_DISCARDED);
+  };
   // Leaving the page with unsaved changes asks (owner, Nov 4: Next no longer saves — "when you
   // leave the page it asks if you want to save the changes"): Save and leave, Leave without
   // saving, or Stay. Closing the tab keeps the browser's own warning.
@@ -2935,14 +3154,19 @@ function EstimatePage() {
       lastSavedBody.current = bodyJsonOf(row?.name ?? bidName, savedWithAcknowledged(saved, ack));
       lastSavedHeader.current = row && kept.length ? bidHeaderOfRow(row) : tabHeader;
       dirtyRef.current = false;
+      // Saved: the unsaved draft in the browser has nothing left to keep.
+      dropDraft();
       if (!snapshot && snap) setSnapshot(snap);
       // The chain line under the Status select reads the bid's status (owner, Nov 13).
       void qc.invalidateQueries({ queryKey: ["work-chain"] });
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
-        if (search.opportunity) linkOpportunity(search.opportunity, row.id);
-        if (search.inspection) linkInspection(search.inspection, row.id);
+        // (A new bid restored from its unsaved draft remembers what it was started from.)
+        const oppId = search.opportunity ?? draftLinks.current.opportunity;
+        const inspId = search.inspection ?? draftLinks.current.inspection;
+        if (oppId) linkOpportunity(oppId, row.id);
+        if (inspId) linkInspection(inspId, row.id);
         // The takeoff that built this bid is linked to it, and so locked.
         if (linkedTakeoffId) lockTakeoff(linkedTakeoffId, row.id, row.name);
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
@@ -4344,6 +4568,29 @@ function EstimatePage() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          {/* Unsaved work kept in this browser (owner, Nov 19): never put back unasked. It has
+              to be answered: until it is, nothing is written over the draft. */}
+          <AlertDialog open={!!draftAsk && !readOnly}>
+            <AlertDialogContent
+              data-dialog="bid-draft"
+              data-draft-changed-since={draftAsk?.changedSince ? "yes" : "no"}
+            >
+              <AlertDialogHeader>
+                <AlertDialogTitle>{draftAsk ? draftWords(draftAsk).title : ""}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {draftAsk ? draftWords(draftAsk).body : ""}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <Button variant="outline" onClick={discardDraft} data-action="draft-discard">
+                  {DRAFT_DISCARD}
+                </Button>
+                <AlertDialogAction onClick={restoreDraft} data-action="draft-restore">
+                  {DRAFT_RESTORE}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           {/* Leaving with unsaved changes (owner, Nov 4): save them, drop them, or stay. */}
           <AlertDialog
             open={blocker.status === "blocked" && !leaving}
@@ -4362,6 +4609,9 @@ function EstimatePage() {
                 <Button
                   variant="outline"
                   onClick={() => {
+                    // Left on purpose: the unsaved draft in the browser goes with it.
+                    draftLeft.current = true;
+                    dropDraft();
                     if (blocker.status === "blocked") blocker.proceed();
                   }}
                 >

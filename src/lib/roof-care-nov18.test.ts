@@ -69,6 +69,9 @@ const S = (over: Partial<RoofCareSettings> = {}): RoofCareSettings => ({
   custom_quote_over_sqft: 60_000,
   // (Nov 19: the price floor; none in these cases. roof-care-floor-nov19.test.ts.)
   min_price_sqft: null,
+  // (Nov 19, night: what a card payment costs, taken off a refund. Blank here.)
+  card_fee_pct: null,
+  card_fee_flat: null,
   plans: {
     watch: { base: 500, per_sqft: 0.02, allowance: null },
     care: { base: 800, per_sqft: 0.05, allowance: 400 },

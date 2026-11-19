@@ -136,7 +136,11 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
       "const isTech = !isOffice(profile);",
       "const isTech = !isOffice(profile);",
     ],
-    "src/components/service/closeout.tsx": ["const isTech = !isOffice(profile);"],
+    // (Nov 19: and who answered a Roof Care plan's cleaning questions, the office's line.)
+    "src/components/service/closeout.tsx": [
+      "const isTech = !isOffice(profile);",
+      "office={isOffice(profile)}",
+    ],
     "src/components/service/ticket-extras.tsx": ["const officeOrAdmin = isOffice(profile);"],
     // Today first and no Board items for a technician.
     "src/components/app-sidebar.tsx": ["const isTech = !!profile && !isOffice(profile);"],

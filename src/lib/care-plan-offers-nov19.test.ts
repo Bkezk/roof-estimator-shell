@@ -175,7 +175,9 @@ describe("on the ticket", () => {
     expect(card).toContain(
       "const showsOffered = !!jobId && !big && !!profile && !isFieldOnly(profile);",
     );
-    expect(card).toContain("{showsOffered && q.data && !active && !waiting && offered.data && (");
+    expect(card).toContain(
+      "{showsOffered && q.data && !active && !waiting && !lapsed && offered.data && (",
+    );
   });
 });
 
