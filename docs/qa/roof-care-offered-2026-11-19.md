@@ -69,5 +69,23 @@ Browser, two temporary finished tickets at the test customer's "site 2":
 - The Owner page then read "Opened on 1 of 2", with the other ticket as a link.
 - No page errors. The two tickets and their rows were removed.
 
-Not proven: a technician's own press from a phone. It is the same button and the same
-database function as the trial's check 3.
+## A technician's own press on a phone (Nov 19, evening)
+
+The owner asked for this one. An emulated iPhone 13 in the browser, signed in as a login set to
+technician only for the test, with one temporary ticket at the test customer's "site 2" assigned
+to it.
+
+- The login landed on the technician's day, with the ticket on its list.
+- The pinned bar of the ticket's workflow had the Care Plan button.
+- The line that says who opened Care Plan did not show. It is for the office.
+- Pressing Care Plan opened the customer's sign-up with its three plans.
+- A second press opened it again.
+- The database kept one row for the two presses, with the technician's name, the right property
+  and "had no plan".
+- The ticket and its row were removed, and the login was set back.
+
+The test opened the workflow by its address. Its tap on the ticket's number in the list opened
+nothing, and that is right: for a technician the number and name are words, not a link (the
+owner's rule of Nov 18), and the card's own button goes to the same address the test opened.
+
+Not proven: the same press on a real phone in a technician's hand.
