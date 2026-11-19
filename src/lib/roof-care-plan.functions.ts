@@ -11,6 +11,7 @@
  *    beside the sign-up's roof size box. Read only: it saves nothing.
  *  - listRoofCarePlans: the plans of some properties with their inspections and tickets.
  *  - pushBackRoofCareVisit, addRoofCareStorm, endRoofCarePlan.
+ *  - roofCareRenewalOffer, renewRoofCarePlan: the next plan year (Nov 19).
  *
  * Every write is the database's own function, called with the caller's sign-in: who may do
  * what is decided there, and said back in its words.
@@ -29,6 +30,7 @@ import {
   asPayMethod,
   asPlanKey,
   asPlanStatus,
+  asRenewalChoice,
   carePlanLineSource,
   FIRST_VISIT_CHOICES,
   mapRoofSize,
@@ -37,6 +39,9 @@ import {
   priceChangedLine,
   readPriceAnswer,
   readRefundWorked,
+  readRenewalOffer,
+  RENEWAL_CHOICE_NEEDED,
+  RENEWAL_CHOICES,
   ROOF_CARE_TERMS_VERSION,
   shownPrice,
   TERMS_NOT_AGREED,
@@ -48,6 +53,7 @@ import {
   type PlanVisit,
   type PriceEstimate,
   type RefundWorked,
+  type RenewalOffer,
   type RoofCarePlan,
   type ShownPrice,
   type VisitKind,
@@ -215,13 +221,14 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason" as const;
 const VISIT_SELECT =
-  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name" as const;
+  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on" as const;
 const TICKET_SELECT =
   "id, number, stage, scheduled_date, completed_at, invoice_id, roof_care_visit_id" as const;
 
-const ORDER: Record<VisitKind, number> = { visit1: 0, visit2: 1, storm: 2 };
+// One owed from last plan year leads: it is the one with the clock on it.
+const ORDER: Record<VisitKind, number> = { carried: -1, visit1: 0, visit2: 1, storm: 2 };
 
 /**
  * What the plans' own lines on invoices say (Nov 19): which inspections have their share of the
@@ -367,6 +374,8 @@ export async function plansOfSites(
       amount: Number(v.amount),
       push_reason: v.push_reason,
       pushed_by_name: v.pushed_by_name,
+      customer_asked: !!v.customer_asked,
+      lost_on: v.lost_on,
       ticket: ticketOf.get(v.id) ?? null,
       billed: money ? money.billed.has(v.id) : null,
     });
@@ -398,6 +407,9 @@ export async function plansOfSites(
         money && p.refund_due != null
           ? { due: Number(p.refund_due) || 0, sent_on: p.refund_sent_on, ref: p.refund_ref }
           : null,
+      renewed_from: p.renewed_from,
+      renewal_choice: asRenewalChoice(p.renewal_choice),
+      renewal_credit: Number(p.renewal_credit) || 0,
       signed_on: p.signed_on,
       renews_on: p.renews_on,
       roof_sqft: Number(p.roof_sqft),
@@ -454,9 +466,16 @@ const signUpInput = z.object({
   shown_price: z.number().finite().positive(),
 });
 
-/** The tickets a plan's inspections have, to announce the ones made when it is paid. */
+/**
+ * The tickets a plan's inspections have, to announce the ones made when it is paid. Not the
+ * ticket of an inspection carried in from last plan year: that one was announced when it was made.
+ */
 export async function ticketIdsOfPlan(sb: Sb, planId: string): Promise<string[]> {
-  const { data: visits } = await sb.from("roof_care_visits").select("id").eq("plan_id", planId);
+  const { data: visits } = await sb
+    .from("roof_care_visits")
+    .select("id")
+    .eq("plan_id", planId)
+    .neq("kind", "carried");
   const ids = (visits ?? []).map((v) => v.id);
   if (!ids.length) return [];
   const { data: jobs } = await sb
@@ -541,6 +560,9 @@ export const pushBackRoofCareVisit = createServerFn({ method: "POST" })
         visit_id: z.string().uuid(),
         days: z.number().int().min(1).max(365),
         reason: z.string().trim().max(500).optional(),
+        // The customer asked for it (Nov 19): it decides the renewal when the year closes
+        // with this inspection still owed.
+        customer: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -551,6 +573,7 @@ export const pushBackRoofCareVisit = createServerFn({ method: "POST" })
       p_visit: data.visit_id,
       p_days: data.days,
       p_reason: data.reason ?? "",
+      ...(data.customer ? { p_customer: true } : {}),
     });
     if (error) throw new Error(error.message);
     const r = (res ?? {}) as Record<string, unknown>;
@@ -650,6 +673,90 @@ export const markRoofCareRefundSent = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// ── Renewal (owner, Nov 19) ─────────────────────────────────────────────────────────────────
+
+/** What renewing the plan today would be, for the Renew box. The office's alone. */
+export const roofCareRenewalOffer = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<RenewalOffer> => {
+    await signedIn(context);
+    const { data: answer, error } = await context.supabase.rpc("roof_care_renewal_offer", {
+      p_plan: data.plan_id,
+    });
+    if (error) throw new Error(error.message);
+    const offer = readRenewalOffer(answer);
+    if (!offer) throw new Error("The renewal could not be worked out");
+    return offer;
+  });
+
+/**
+ * Renew the plan: the database makes next year's plan, waiting for its payment, and this makes
+ * its invoice when the person renewing may make invoices. `invoice_id`: the invoice to open;
+ * null when there is none (nobody here makes invoices, or the renewal is at no charge and
+ * started by itself: `started`).
+ */
+export const renewRoofCarePlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        // What happens with an inspection still owed; left out when none is.
+        choice: z
+          .enum(RENEWAL_CHOICES, { errorMap: () => ({ message: RENEWAL_CHOICE_NEEDED }) })
+          .nullable()
+          .optional(),
+        pay_method: z.enum(PAY_METHODS, { errorMap: () => ({ message: PAY_METHOD_NEEDED }) }),
+        pay_note: z.string().trim().max(120).optional(),
+        // The yearly price the box showed: the renewal is saved at that price or not at all.
+        shown_price: z.number().finite().positive(),
+      })
+      .parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ plan_id: string; invoice_id: string | null; started: boolean }> => {
+      const p = await signedIn(context);
+      const sb = context.supabase;
+      const { data: planId, error } = await sb.rpc("roof_care_renew", {
+        p_plan: data.plan_id,
+        ...(data.choice ? { p_choice: data.choice } : {}),
+        p_pay_method: data.pay_method,
+        p_pay_note: data.pay_note ?? "",
+        p_shown_price: data.shown_price,
+      });
+      if (error) throw new Error(error.message);
+      const { data: made } = await sb
+        .from("roof_care_plans")
+        .select("status")
+        .eq("id", planId)
+        .maybeSingle();
+      // At no charge (neither inspection was done): the database started the year by itself.
+      if (made?.status === "active") {
+        const { announceCarePlanTickets } = await import("@/lib/service.functions");
+        await announceCarePlanTickets(sb, await ticketIdsOfPlan(sb, planId), {
+          id: context.userId,
+          name: nameOf(p),
+        });
+        return { plan_id: planId, invoice_id: null, started: true };
+      }
+      let invoiceId: string | null = null;
+      if (seesInvoices(p)) {
+        try {
+          const { makePlanInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
+          invoiceId = (await makePlanInvoice(sb, planId, { id: context.userId, name: nameOf(p) }))
+            .id;
+        } catch {
+          // Said on the plan: "No invoice has been made for this plan yet."
+        }
+      }
+      return { plan_id: planId, invoice_id: invoiceId, started: false };
+    },
+  );
 
 /**
  * An additional service asked for on site (owner, Nov 18: "they should be able to sign others up

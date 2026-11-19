@@ -157,7 +157,7 @@ describe("the plan year's invoice", () => {
           status: "awaiting_payment",
           pay_first: true,
           plan_number: 1001,
-          price: 2100,
+          price: 1840,
           roof_sqft: 20_000,
           account_id: ACCOUNT,
           site_id: SITE,
@@ -206,9 +206,9 @@ describe("the plan year's invoice", () => {
       number: null,
       display_number: "RC-1001",
       status: "draft",
-      subtotal: 2100,
+      subtotal: 1840,
       tax_amount: 0,
-      total: 2100,
+      total: 1840,
       payment_terms: "Net 30",
       created_by: WHO.id,
       updated_by_name: "Olive Office",
@@ -221,7 +221,7 @@ describe("the plan year's invoice", () => {
     expect(env.tables["invoice_lines"]).toHaveLength(1);
     expect(env.tables["invoice_lines"]![0]).toMatchObject({
       invoice_id: r.id,
-      total: 2100,
+      total: 1840,
       taxable: false,
     });
   });
@@ -396,7 +396,7 @@ describe("Needs attention: signed and not paid", () => {
     site_id: SITE,
     title: "Roof Care · Unit 2 (Made Up Storage Co)",
     signed_on: "2026-11-20",
-    price: 2100,
+    price: 1840,
   };
 
   it("is listed from the first day, with what the office does next", () => {
@@ -412,7 +412,7 @@ describe("Needs attention: signed and not paid", () => {
       age: 3,
       ageText: "3 days",
       tone: "amber",
-      amount: 2100,
+      amount: 1840,
       href: `/properties/${SITE}`,
     });
     const inv = (status: string, paid_amount = 0) => ({

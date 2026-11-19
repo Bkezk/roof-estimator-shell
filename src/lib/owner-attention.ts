@@ -57,6 +57,7 @@ import { daysBetween, shortDay } from "@/lib/followup-rules";
 import { isFlagged, visibleChecklist, type InspectionGrade } from "@/lib/inspection";
 import { ON_RECEIPT_LATE_DAYS, invoiceDue } from "@/lib/invoice-list";
 import { addDays, isHeldOn } from "@/lib/my-work";
+import { CARRY_DAYS, RENEW_LABEL, RENEWAL_OPEN_DAYS } from "@/lib/roof-care-plan";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
 import { isFinishedStage } from "@/lib/ticket-stages";
@@ -83,7 +84,9 @@ export type AttentionKind =
   | "care_plan_late"
   | "care_plan_unbilled"
   | "care_plan_unpaid"
-  | "care_plan_refund";
+  | "care_plan_refund"
+  | "care_plan_renewal"
+  | "care_plan_carried";
 
 /** Setup › Reminders: the two limits of this list's own, and the three it shares. */
 export interface AttentionLimits {
@@ -239,6 +242,40 @@ export interface AttCareUnpaid {
   invoice: { id: string; number: string; status: string; paid_amount: number } | null;
   /** "Paying by check (#1042)."; "" when the sign-up did not say. */
   pay?: string;
+  /** It is the renewal of a plan in force, not a new sign-up. */
+  renewal?: boolean;
+}
+
+/**
+ * A Roof Care plan in the last 60 days of its year, or past it (owner, Nov 19: "sixty days
+ * before the renewal, Needs attention lists a plan with an inspection still owed"). Listed while
+ * no renewal has been made, and while an inspection the renewal did not take off is still owed.
+ */
+export interface AttCareRenewal {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  renews_on: string;
+  /** How many of the year's two inspections are not done. */
+  owed: number;
+  /** The renewal has been made and waits for its payment. */
+  renewed: boolean;
+  /** The yearly price. */
+  price: number;
+}
+
+/**
+ * An inspection carried into the renewed year because the customer kept us off the roof (owner,
+ * Nov 19): owed for 60 days, then lost. Listed until it is done or lost.
+ */
+export interface AttCareCarried {
+  visit_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** The last day it can be done. */
+  due_by: string;
 }
 
 /**
@@ -300,6 +337,10 @@ export interface AttentionIn {
   careUnpaid?: readonly AttCareUnpaid[];
   /** Roof Care plans ended early whose refund is not yet sent (Nov 19). */
   careRefunds?: readonly AttCareRefund[];
+  /** Roof Care plans in the last 60 days of their year, or past it (Nov 19). */
+  careRenewals?: readonly AttCareRenewal[];
+  /** Inspections carried into a renewed year, not yet done (Nov 19). */
+  careCarried?: readonly AttCareCarried[];
 }
 
 export interface AttentionRow {
@@ -782,7 +823,9 @@ export function attentionList(i: AttentionIn): AttentionList {
   // next: make the invoice, send the draft, or mark the payment.
   for (const v of i.careUnpaid ?? []) {
     const age = YMD.test(v.signed_on) ? Math.max(0, daysBetween(v.signed_on, today)) : 0;
-    const signed = `Signed ${shortDay(v.signed_on)} and not paid, so the plan has not started.`;
+    const signed = v.renewal
+      ? `The renewal was made ${shortDay(v.signed_on)} and is not paid, so the new plan year has not started.`
+      : `Signed ${shortDay(v.signed_on)} and not paid, so the plan has not started.`;
     const next = !v.invoice
       ? "No invoice has been made. Open the property and press Make the invoice."
       : v.invoice.status === "draft"
@@ -823,6 +866,65 @@ export function attentionList(i: AttentionIn): AttentionList {
       ageText: days(age),
       tone: age > 14 ? "red" : "amber",
       amount: v.amount,
+      href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan in the last 60 days of its year, or past it (Nov 19): the inspection still
+  // owed, and the renewal not yet made.
+  for (const v of i.careRenewals ?? []) {
+    if (!YMD.test(v.renews_on)) continue;
+    const left = daysBetween(today, v.renews_on);
+    if (left > RENEWAL_OPEN_DAYS) continue;
+    if (v.renewed && v.owed <= 0) continue;
+    const when =
+      left > 0
+        ? `Renews ${shortDay(v.renews_on)}, in ${count(left, "day")}.`
+        : left === 0
+          ? `Renews today, ${shortDay(v.renews_on)}.`
+          : `Was due to renew ${shortDay(v.renews_on)}.`;
+    const owed =
+      v.owed <= 0
+        ? ""
+        : `${v.owed === 1 ? "1 inspection is" : "Both inspections are"} still owed${v.renewed ? ", and the renewal was charged in full" : ""}. Get ${v.owed === 1 ? "it" : "them"} done.`;
+    const next = v.renewed
+      ? ""
+      : `No renewal has been made. Open the property and press ${RENEW_LABEL}.`;
+    rows.push({
+      key: `care_plan_renewal:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_renewal",
+      tag: "Roof Care",
+      title: v.title,
+      why: [when, owed, next].filter(Boolean).join(" "),
+      ...office,
+      age: Math.max(0, RENEWAL_OPEN_DAYS - left),
+      ageText: left > 0 ? `${count(left, "day")} left` : left === 0 ? "Today" : late(-left),
+      tone: left <= 14 ? "red" : "amber",
+      amount: !v.renewed && v.price > 0 ? v.price : null,
+      href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // An inspection carried into the renewed year (Nov 19): 60 days, then it is lost.
+  for (const v of i.careCarried ?? []) {
+    if (!YMD.test(v.due_by)) continue;
+    const left = daysBetween(today, v.due_by);
+    rows.push({
+      key: `care_plan_carried:${v.visit_id}`,
+      group: "office",
+      kind: "care_plan_carried",
+      tag: "Roof Care",
+      title: v.title,
+      why:
+        left >= 0
+          ? `An inspection owed from last plan year is not done. It is lost after ${shortDay(v.due_by)}.`
+          : `An inspection owed from last plan year was not done by ${shortDay(v.due_by)}. It is lost at the next morning run.`,
+      ...office,
+      age: Math.max(0, CARRY_DAYS - left),
+      ageText: left > 0 ? `${count(left, "day")} left` : left === 0 ? "Last day" : late(-left),
+      tone: left <= 14 ? "red" : "amber",
+      amount: null,
       href: `/properties/${v.site_id}`,
     });
   }

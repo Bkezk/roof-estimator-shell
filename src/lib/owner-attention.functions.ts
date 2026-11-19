@@ -31,7 +31,9 @@ import {
   type AttTicket,
   type AttUntouched,
   type AttentionList,
+  type AttCareCarried,
   type AttCareRefund,
+  type AttCareRenewal,
   type AttCareUnbilled,
   type AttCareUnpaid,
   type AttCareVisit,
@@ -40,6 +42,7 @@ import { readInChunks } from "@/lib/chunk-ids";
 import {
   payWords,
   planName,
+  renewalOpen,
   runsLate,
   VISIT_LABEL,
   visitState,
@@ -253,6 +256,8 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careUnbilled: care.unbilled,
       careUnpaid: care.unpaid,
       careRefunds: care.refunds,
+      careRenewals: care.renewals,
+      careCarried: care.carried,
     });
   });
 
@@ -270,6 +275,8 @@ async function careVisitsOfPlans(
   unbilled: AttCareUnbilled[];
   unpaid: AttCareUnpaid[];
   refunds: AttCareRefund[];
+  renewals: AttCareRenewal[];
+  carried: AttCareCarried[];
 }> {
   const { data: active, error } = await sb
     .from("roof_care_plans")
@@ -287,7 +294,8 @@ async function careVisitsOfPlans(
   const siteIds = [
     ...new Set([...(active ?? []).map((p) => p.site_id), ...(owed ?? []).map((p) => p.site_id)]),
   ];
-  if (!siteIds.length) return { notDone: [], unbilled: [], unpaid: [], refunds: [] };
+  if (!siteIds.length)
+    return { notDone: [], unbilled: [], unpaid: [], refunds: [], renewals: [], carried: [] };
   const live = (await plansOfSites(sb, siteIds, { money: true })).filter(
     (p) => p.status !== "ended",
   );
@@ -315,7 +323,8 @@ async function careVisitsOfPlans(
       site_id: p.site_id,
       title: titleOf(p),
       signed_on: p.signed_on,
-      price: p.price,
+      // What is left to pay: a renewal can have half taken off.
+      price: Math.max(0, p.price - p.renewal_credit),
       invoice: p.invoice
         ? {
             id: p.invoice.id,
@@ -325,7 +334,17 @@ async function careVisitsOfPlans(
           }
         : null,
       pay: payWords(p.pay_method, p.pay_note),
+      renewal: !!p.renewed_from,
     }));
+  // The last 60 days of a plan year (Nov 19): what is still owed, and whether the renewal is
+  // made. One the renewal took half off for is no longer owed.
+  const renewalOf = new Map(
+    live
+      .filter((p) => p.status === "awaiting_payment" && p.renewed_from)
+      .map((p) => [p.renewed_from!, p]),
+  );
+  const renewals: AttCareRenewal[] = [];
+  const carried: AttCareCarried[] = [];
   const refunds: AttCareRefund[] = (owed ?? []).map((p) => ({
     plan_id: p.id,
     site_id: p.site_id,
@@ -335,8 +354,34 @@ async function careVisitsOfPlans(
   }));
   for (const p of plans) {
     const title = titleOf(p);
-    const last = [...p.visits].filter((v) => v.kind !== "storm").pop();
+    const last = [...p.visits].filter((v) => v.kind === "visit1" || v.kind === "visit2").pop();
+    if (renewalOpen(p, today)) {
+      const renewal = renewalOf.get(p.id) ?? null;
+      const owed =
+        renewal?.renewal_choice === "half_off"
+          ? 0
+          : p.visits.filter(
+              (v) =>
+                (v.kind === "visit1" || v.kind === "visit2") && visitState(v, today) !== "done",
+            ).length;
+      renewals.push({
+        plan_id: p.id,
+        site_id: p.site_id,
+        title,
+        renews_on: p.renews_on,
+        owed,
+        renewed: !!renewal,
+        price: p.price,
+      });
+    }
     for (const v of p.visits) {
+      // One carried from last plan year has its own row, with its last day; a lost one is over.
+      if (v.kind === "carried") {
+        const state = visitState(v, today);
+        if (state !== "done" && state !== "lost")
+          carried.push({ visit_id: v.id, site_id: p.site_id, title, due_by: v.due_by });
+        continue;
+      }
       if (visitState(v, today) === "done") {
         if (visitUnbilled(v) && v.ticket)
           unbilled.push({
@@ -361,5 +406,5 @@ async function careVisitsOfPlans(
       });
     }
   }
-  return { notDone, unbilled, unpaid, refunds };
+  return { notDone, unbilled, unpaid, refunds, renewals, carried };
 }

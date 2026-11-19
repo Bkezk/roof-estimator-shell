@@ -326,22 +326,22 @@ describe("keeping a repair invoice's plan lines in step", () => {
 describe("the refund when a plan ends early", () => {
   it("reads the database's sum, and nothing that is not one", () => {
     expect(
-      readRefundWorked({ paid: 2100, inspections_done: 1, share: 1050, repairs: 400, refund: 650 }),
-    ).toEqual({ paid: 2100, inspections_done: 1, share: 1050, repairs: 400, refund: 650 });
-    expect(readRefundWorked({ paid: 2100 })).toBeNull();
+      readRefundWorked({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 }),
+    ).toEqual({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 });
+    expect(readRefundWorked({ paid: 1840 })).toBeNull();
     expect(readRefundWorked(null)).toBeNull();
-    expect(readRefundWorked("650")).toBeNull();
+    expect(readRefundWorked("520")).toBeNull();
   });
 
-  it("is shown a line at a time: the owner's own example", () => {
+  it("is shown a line at a time", () => {
     expect(
-      refundLines({ paid: 2100, inspections_done: 1, share: 1050, repairs: 400, refund: 650 }),
+      refundLines({ paid: 1840, inspections_done: 1, share: 920, repairs: 400, refund: 520 }),
     ).toEqual([
-      "Paid for the year: $2,100.00",
+      "Paid for the year: $1,840.00",
       "Inspections done: 1 of 2",
-      "Share for the inspections not done: $1,050.00",
+      "Share for the inspections not done: $920.00",
       "Minor repairs the plan already covered: $400.00 off",
-      "Refund: $650.00",
+      "Refund: $520.00",
     ]);
   });
 

@@ -9,7 +9,8 @@ import { daysBetween, longDay } from "@/lib/followup-rules";
 import { PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
 import { plusDays } from "@/lib/working-days";
 
-export const VISIT_KINDS = ["visit1", "visit2", "storm"] as const;
+// "carried": an inspection owed from last plan year, brought into the renewal for 60 days.
+export const VISIT_KINDS = ["visit1", "visit2", "storm", "carried"] as const;
 export type VisitKind = (typeof VISIT_KINDS)[number];
 export const FIRST_VISIT_CHOICES = ["now", "days", "window"] as const;
 export type FirstVisit = (typeof FIRST_VISIT_CHOICES)[number];
@@ -56,6 +57,10 @@ export interface PlanVisit {
   amount: number;
   push_reason: string | null;
   pushed_by_name: string | null;
+  /** A push-back of it was at the customer's asking. */
+  customer_asked: boolean;
+  /** A carried inspection not done in its 60 days: the day it was lost. */
+  lost_on: string | null;
   ticket: VisitTicket | null;
   /**
    * Its share of the plan is on a live invoice (Nov 19). Null for a reader who does not see
@@ -144,6 +149,12 @@ export interface RoofCarePlan {
    * reader who does not see invoices.
    */
   refund: PlanRefund | null;
+  /** The plan year this one renews; null for a plan signed up new. */
+  renewed_from: string | null;
+  /** What was decided about an inspection still owed when the renewal was made. */
+  renewal_choice: RenewalChoice | null;
+  /** What was taken off the renewal for inspections we did not get to. */
+  renewal_credit: number;
   signed_on: string;
   renews_on: string;
   roof_sqft: number;
@@ -264,14 +275,16 @@ export function visitUnbilled(v: PlanVisit): boolean {
 }
 export const VISIT_UNBILLED_WORDS = "Not invoiced";
 
-export type VisitState = "done" | "late" | "ticket" | "waiting";
+export type VisitState = "done" | "late" | "ticket" | "waiting" | "lost";
 
 /**
- * Done (the ticket is Done or further), late (not done and past its last day), a ticket is out
- * for it, or it is waiting for its time.
+ * Done (the ticket is Done or further), lost (carried from last plan year and not done in its
+ * 60 days), late (not done and past its last day), a ticket is out for it, or it is waiting for
+ * its time.
  */
 export function visitState(v: PlanVisit, today: string): VisitState {
   if (v.ticket && DONE_STAGES.includes(v.ticket.stage)) return "done";
+  if (v.lost_on) return "lost";
   if (today > v.due_by) return "late";
   return v.ticket ? "ticket" : "waiting";
 }
@@ -280,6 +293,7 @@ export const VISIT_LABEL: Record<VisitKind, string> = {
   visit1: "Inspection 1",
   visit2: "Inspection 2",
   storm: "Storm inspection",
+  carried: "Inspection owed from last plan year",
 };
 
 /** How many of the plan's inspections are done: the two visits, and the storm inspections. */
@@ -292,7 +306,8 @@ export function visitsDone(
   for (const v of plan.visits) {
     if (visitState(v, today) !== "done") continue;
     if (v.kind === "storm") storm++;
-    else visits++;
+    // One carried from last plan year is not one of this year's two.
+    else if (v.kind !== "carried") visits++;
   }
   return { visits, storm };
 }
@@ -425,6 +440,187 @@ export function refundStatusWords(r: PlanRefund): string {
 export const REFUND_MARK_SENT = "Mark the refund sent";
 export const REFUND_BAD_AMOUNT = "Type the refund, 0 or more, and no more than was paid";
 
+// ── Renewal (owner, Nov 19) ─────────────────────────────────────────────────────────────────
+//
+// A plan is one plan year. In its last 60 days the office renews it: the renewal is next year's
+// plan, priced again today, signed and waiting for its payment. An inspection still owed then is
+// the office's call, with the push-back reasons shown: "half off is the default unless a reason
+// says the customer asked". The database does all of it (20261119800000_roof_care_renewal.sql);
+// these are the words.
+
+/** A plan can be renewed, and is listed in Needs attention, this many days before its renewal. */
+export const RENEWAL_OPEN_DAYS = 60;
+/** An inspection the customer kept us from stays owed this many days into the new year. */
+export const CARRY_DAYS = 60;
+
+export const RENEWAL_CHOICES = ["half_off", "full"] as const;
+export type RenewalChoice = (typeof RENEWAL_CHOICES)[number];
+export const asRenewalChoice = (v: unknown): RenewalChoice | null =>
+  v === "half_off" || v === "full" ? v : null;
+
+/** The renewal can be made today: the plan is in the last 60 days of its year, or past it. */
+export function renewalOpen(p: Pick<RoofCarePlan, "renews_on">, today: string): boolean {
+  return daysBetween(today, p.renews_on) <= RENEWAL_OPEN_DAYS;
+}
+
+/** "Renews Jan 10, 2028, in 43 days." / "Was due to renew Jan 10, 2028, 5 days ago." */
+export function renewsWords(p: Pick<RoofCarePlan, "renews_on">, today: string): string {
+  const n = daysBetween(today, p.renews_on);
+  const day = longDay(p.renews_on);
+  if (n > 1) return `Renews ${day}, in ${n} days.`;
+  if (n === 1) return `Renews ${day}, tomorrow.`;
+  if (n === 0) return `Renews today, ${day}.`;
+  return `Was due to renew ${day}, ${-n} ${n === -1 ? "day" : "days"} ago.`;
+}
+
+export const RENEW_LABEL = "Renew for another year";
+export const RENEWAL_WORDS = "Renewal";
+export const RENEWAL_CHOICE_NEEDED = "Pick what happens with the inspection that is still owed";
+
+/** An inspection still owed when the plan is renewed, as the Renew box lists it. */
+export interface OwedInspection {
+  kind: VisitKind;
+  due_by: string;
+  push_reason: string | null;
+  customer_asked: boolean;
+}
+
+/** What renewing a plan today would be: the database's answer (roof_care_renewal_offer). */
+export interface RenewalOffer {
+  renews_on: string;
+  /** The first day it can be renewed. */
+  opens_on: string;
+  open: boolean;
+  /** The yearly price today, and what this year was sold at. */
+  price: number;
+  price_was: number;
+  owed: OwedInspection[];
+  /** Which way the rule leans; null with nothing owed. */
+  default_choice: RenewalChoice | null;
+  /** What "half off" takes off: half the price for each inspection owed. */
+  credit_if_half_off: number;
+  /** The last day an inspection charged in full stays owed, for a payment made today. */
+  carried_until: string;
+  pay_method: PayMethod | null;
+  has_renewal: boolean;
+}
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The database's answer, or null when it is not one. */
+export function readRenewalOffer(x: unknown): RenewalOffer | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const day = (k: string) => (typeof o[k] === "string" && YMD_RE.test(o[k]) ? o[k] : null);
+  const amount = (k: string) => {
+    const v = Number(o[k]);
+    return Number.isFinite(v) ? v : null;
+  };
+  const renews_on = day("renews_on");
+  const opens_on = day("opens_on");
+  const carried_until = day("carried_until");
+  const price = amount("price");
+  const price_was = amount("price_was");
+  const credit = amount("credit_if_half_off");
+  if (!renews_on || !opens_on || !carried_until || price == null || price_was == null) return null;
+  if (credit == null || !Array.isArray(o["owed"])) return null;
+  const owed: OwedInspection[] = [];
+  for (const raw of o["owed"]) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const kind = (VISIT_KINDS as readonly string[]).includes(String(r["kind"]))
+      ? (r["kind"] as VisitKind)
+      : null;
+    if (!kind || typeof r["due_by"] !== "string") return null;
+    owed.push({
+      kind,
+      due_by: r["due_by"],
+      push_reason: typeof r["push_reason"] === "string" ? r["push_reason"] : null,
+      customer_asked: r["customer_asked"] === true,
+    });
+  }
+  return {
+    renews_on,
+    opens_on,
+    open: o["open"] === true,
+    price,
+    price_was,
+    owed,
+    default_choice: owed.length ? asRenewalChoice(o["default_choice"]) : null,
+    credit_if_half_off: credit,
+    carried_until,
+    pay_method: asPayMethod(o["pay_method"]),
+    has_renewal: o["has_renewal"] === true,
+  };
+}
+
+/** "1 inspection is still owed" / "Both inspections are still owed". */
+export function owedWords(n: number): string {
+  if (n <= 0) return "";
+  return n === 1 ? "1 inspection is still owed" : "Both inspections are still owed";
+}
+
+/** The two answers, in the Renew box. */
+export function renewalChoiceWords(
+  choice: RenewalChoice,
+  offer: Pick<RenewalOffer, "credit_if_half_off" | "price" | "carried_until" | "owed">,
+): string {
+  const one = offer.owed.length === 1;
+  if (choice === "half_off") {
+    const left = Math.max(0, Math.round((offer.price - offer.credit_if_half_off) * 100) / 100);
+    return left > 0
+      ? `We did not get there. Take ${cents(offer.credit_if_half_off)} off the renewal: the customer pays ${cents(left)}. The inspection is dropped.`
+      : "We did not get there. The renewal is at no charge, and a manager makes it. The inspections are dropped.";
+  }
+  return `The customer kept us off the roof. Charge the renewal in full. ${one ? "The inspection stays" : "The inspections stay"} owed until ${longDay(offer.carried_until)}, then ${one ? "it is" : "they are"} lost.`;
+}
+
+/** Why the Renew box leans the way it does. */
+export function renewalDefaultWords(offer: Pick<RenewalOffer, "default_choice">): string {
+  if (offer.default_choice === "full")
+    return "A push-back of it was marked as the customer asking, so charging in full is picked.";
+  if (offer.default_choice === "half_off")
+    return "No push-back says the customer asked, so half off is picked.";
+  return "";
+}
+
+/** "Price for the year: $2,100" and, when it moved, what this year was. */
+export function renewalPriceWords(offer: Pick<RenewalOffer, "price" | "price_was">): string {
+  const now = wholeDollars(offer.price);
+  return Math.round(offer.price) === Math.round(offer.price_was)
+    ? `Price for the year: ${now}, the same as this year.`
+    : `Price for the year: ${now}. This year was ${wholeDollars(offer.price_was)}: the prices have changed since.`;
+}
+
+/** Under a renewal that is waiting: what was decided about the inspection owed. */
+export function renewalDecisionWords(
+  p: Pick<RoofCarePlan, "renewal_choice" | "renewal_credit">,
+): string {
+  if (p.renewal_choice === "half_off" && p.renewal_credit > 0)
+    return `${cents(p.renewal_credit)} is taken off for the inspection not done. That inspection is dropped when the renewal is paid.`;
+  if (p.renewal_choice === "full")
+    return `Charged in full. The inspection still owed comes into the new year for ${CARRY_DAYS} days.`;
+  return "";
+}
+
+export const RENEWAL_NOTE =
+  "The new plan year starts on the renewal date, or the day the payment is received when that is later.";
+
+/** The second line of a renewal's invoice: what is taken off, and why. */
+export const renewalCreditSource = (planId: string): string => `roof-care-renewal:${planId}`;
+export function renewalCreditWords(owed: number): string {
+  return owed >= 2
+    ? "Both inspections of last plan year were not done"
+    : "One inspection of last plan year was not done: half off this renewal";
+}
+
+/** "Lost Mar 11, 2028": a carried inspection whose 60 days ran out. */
+export const lostWords = (day: string): string =>
+  `Lost ${longDay(day)}: not done in its ${CARRY_DAYS} days`;
+export const CUSTOMER_ASKED_LABEL = "The customer asked for this";
+export const CUSTOMER_ASKED_NOTE =
+  "It decides the renewal: an inspection we could not do because the customer asked is charged in full.";
+export const CARRIED_NO_PUSH = "Owed from last plan year: it cannot be pushed back.";
+
 // ── Push back ───────────────────────────────────────────────────────────────────────────────
 
 export const PUSH_NEEDS_MANAGER = (total: number) =>
@@ -538,6 +734,8 @@ export const carePlanLineSource = (visitId: string): string => `roof-care:${visi
 export function carePlanLineWords(plan: unknown, kind: VisitKind, paidFirst = false): string {
   const name = planName(plan);
   if (kind === "storm") return `${name} plan: storm inspection (included in the plan)`;
+  if (kind === "carried")
+    return `${name} plan: inspection owed from last plan year (included in the plan)`;
   const which = `${name} plan: inspection ${kind === "visit1" ? 1 : 2} of 2`;
   return paidFirst ? `${which} (included in the plan)` : `${which} (half of the yearly price)`;
 }

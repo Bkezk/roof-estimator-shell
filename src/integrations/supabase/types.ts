@@ -3452,6 +3452,10 @@ export type Database = {
           refund_ref: string | null
           refund_sent_on: string | null
           refund_worked: Json | null
+          renewal_choice: string | null
+          renewal_credit: number
+          renewal_owed: number
+          renewed_from: string | null
           renews_on: string
           repair_allowance: number
           roof_sqft: number
@@ -3494,6 +3498,10 @@ export type Database = {
           refund_ref?: string | null
           refund_sent_on?: string | null
           refund_worked?: Json | null
+          renewal_choice?: string | null
+          renewal_credit?: number
+          renewal_owed?: number
+          renewed_from?: string | null
           renews_on: string
           repair_allowance?: number
           roof_sqft: number
@@ -3536,6 +3544,10 @@ export type Database = {
           refund_ref?: string | null
           refund_sent_on?: string | null
           refund_worked?: Json | null
+          renewal_choice?: string | null
+          renewal_credit?: number
+          renewal_owed?: number
+          renewed_from?: string | null
           renews_on?: string
           repair_allowance?: number
           roof_sqft?: number
@@ -3578,12 +3590,15 @@ export type Database = {
       roof_care_visits: {
         Row: {
           amount: number
+          carried_from: string | null
           created_at: string
+          customer_asked: boolean
           due_by: string
           due_from: string
           first_due_by: string
           id: string
           kind: string
+          lost_on: string | null
           plan_id: string
           push_reason: string | null
           pushed_at: string | null
@@ -3591,12 +3606,15 @@ export type Database = {
         }
         Insert: {
           amount?: number
+          carried_from?: string | null
           created_at?: string
+          customer_asked?: boolean
           due_by: string
           due_from: string
           first_due_by: string
           id?: string
           kind: string
+          lost_on?: string | null
           plan_id: string
           push_reason?: string | null
           pushed_at?: string | null
@@ -3604,12 +3622,15 @@ export type Database = {
         }
         Update: {
           amount?: number
+          carried_from?: string | null
           created_at?: string
+          customer_asked?: boolean
           due_by?: string
           due_from?: string
           first_due_by?: string
           id?: string
           kind?: string
+          lost_on?: string | null
           plan_id?: string
           push_reason?: string | null
           pushed_at?: string | null
@@ -5900,7 +5921,12 @@ export type Database = {
         Returns: Json
       }
       roof_care_push_back: {
-        Args: { p_days: number; p_reason: string; p_visit: string }
+        Args: {
+          p_customer?: boolean
+          p_days: number
+          p_reason: string
+          p_visit: string
+        }
         Returns: Json
       }
       roof_care_refund: { Args: { p_plan: string }; Returns: Json }
@@ -5908,6 +5934,17 @@ export type Database = {
         Args: { p_on: string; p_plan: string; p_ref: string }
         Returns: undefined
       }
+      roof_care_renew: {
+        Args: {
+          p_choice?: string
+          p_pay_method?: string
+          p_pay_note?: string
+          p_plan: string
+          p_shown_price?: number
+        }
+        Returns: string
+      }
+      roof_care_renewal_offer: { Args: { p_plan: string }; Returns: Json }
       roof_care_sign_up: {
         Args: {
           p_agreed_by: string

@@ -240,13 +240,53 @@ stripe later". Record: `docs/qa/roof-care-refund-and-leak-calls-2026-11-19.md`.
   amount savings that is better". It is worked as 5% of the plan price with the drive left out.
   It comes with Stripe.
 
+**Renewal, built Nov 19** (the third of "the first 3 not built yet"). Record:
+`docs/qa/roof-care-renewal-2026-11-19.md`.
+
+- **A plan is renewed in the last 60 days of its year.** The property shows "Renews Dec 19,
+  2026, in 30 days" and a "Renew for another year" button, for the office. The renewal is next
+  year's plan: priced again today from the roof size and the drive the plan was sold on, waiting
+  for its payment, with its own invoice and its own number. This year's plan stays in force
+  beside it.
+- **An inspection still owed** when the renewal is made is the office's call, in the Renew box,
+  with the push-back reasons shown. The owner's two answers:
+  - "We did not get there": half of the renewal is taken off for each inspection owed, as a
+    second line on the renewal's invoice. The inspection is dropped when the renewal is paid.
+  - "The customer kept us off the roof": the renewal is charged in full. The inspection comes
+    into the new year for 60 days, shown as "Inspection owed from last plan year". After that
+    the morning run marks it lost and takes its ticket off the board. It cannot be pushed back.
+- **Which answer is picked first.** Push back has a new tick, "The customer asked for this".
+  With no push-back of the owed inspection ticked that way, half off is picked; with one, charged
+  in full is. The person renewing can change it.
+- **When the new year starts.** The day the renewal's invoice is paid in full, the old year
+  ends as "Renewed" and the new one starts: on the old renewal date when it is paid ahead, on
+  the payment when it is paid late. The two inspections of the new year are dated from there.
+- **Needs attention** lists a plan from 60 days before its renewal until the renewal is made,
+  with what is still owed; a renewal that is not paid; and an inspection carried into the new
+  year, with the day it is lost.
+- **Cancelling a renewal.** A manager cancels a renewal that is not paid; its unpaid invoice
+  goes with it and the plan can be renewed again. This year's plan cannot be ended while its
+  renewal waits.
+- **Neither inspection done, and ours:** both halves come off, so the renewal is at no charge.
+  Only a manager makes it, and the new year starts at once with no invoice. This follows from
+  the half off rule; the owner has not been asked about it in so many words.
+
+**For the owner to decide:**
+
+1. **The terms say nothing of renewal.** The half off, and the 60 days for an inspection the
+   customer kept us from, are the office's rules and are not on the agreement. A new line, and
+   a new terms version, need his word first.
+2. **A plan past its renewal date stays in force** until it is renewed or a manager ends it:
+   the minor repairs left and the leak calls still work. Needs attention says "Was due to renew".
+   Whether it should stop by itself after so many days is his call.
+3. **The plan at renewal is the same plan.** Moving a customer from one plan to another at
+   renewal is done today by ending the plan and signing the new one.
+
 **Not built yet:**
 
-1. **Renewal.** A renewal invoice before the year ends, with the three rules for a year that
-   closes with an inspection still owed (see "More answers the same day"). The owner said go.
-2. **Stripe**: a pay link or QR code at the sign-up, automatic renewal and its discount. The
+1. **Stripe**: a pay link or QR code at the sign-up, automatic renewal and its discount. The
    owner: "ill work on stripe later".
-3. The Owner page does not take a refund off Roof Care's income.
+2. The Owner page does not take a refund off Roof Care's income.
 
 ## Paying up front: what was looked into first
 
@@ -309,17 +349,20 @@ the live database:
   refund, never below zero. It goes in the new terms.
 - **A year that closes with one inspection done.** Two parts are decided. Sixty days before the
   renewal, Needs attention lists a plan with an inspection still owed. If it is still owed at
-  renewal because we did not get there, the renewal is charged with half taken off. Not decided:
-  what happens when the customer kept us off the roof.
+  renewal because we did not get there, the renewal is charged with half taken off. Decided the
+  same day ("3. go on this"): when the customer kept us off the roof, the renewal is charged in
+  full and the inspection stays owed for 60 days into the new year, then it is lost. The office
+  makes the call at renewal with the push-back reasons shown, and half off is picked unless a
+  reason says the customer asked.
 - **Roof Guard, in his words:** "3 free inspections (one is by request after storms) … of minor
   repairs and no trip charge on two leak calls." The flyer says the same. The price setup counts
   the leak calls another way; the numbers are in the private notes and wait on his answer.
 
-**Still open.** The size of the discount, and whether it comes off the whole price or only
-the list price (the drive is charged at cost). A year that closes with one inspection done
-because the customer kept us off the roof. Whether the minor repairs a plan includes cover labor
-("do we include labor in the credits? i think thats the question"): today the plan's line takes
-off whatever the invoice bills, labor and travel with it.
+**Open then, settled since.** The discount for renewing by itself is said in dollars, worked as
+5% of the plan price with the drive left out, and comes with Stripe. A year that closes with an
+inspection the customer kept us from is charged in full, with 60 days to do it. The minor
+repairs a plan includes cover labor, materials and travel, except Roof Guard's first two leak
+calls a year, whose travel is not charged at all.
 
 **The roof size from the map (checked Nov 19).** The building outlines already in the database
 (`buildings`, Kentucky and Tennessee only) carry a roof size. Of the 34 properties that have a
@@ -352,9 +395,7 @@ key a payment made from the preview is a real one.
    several-buildings choice says to call for discounted pricing.
 2. **The printable sheets** with the QR codes and no prices.
 3. **The office's list of sign-ups waiting to be matched** to a customer.
-4. **Renewal.** A plan is one plan year. Nothing yet starts the next year or re-prices it. The
-   first plan cannot reach its renewal before Nov 18, 2027. See "Not built yet" under paying up
-   front.
+4. ~~Renewal.~~ Done, Nov 19: see "Renewal, built Nov 19" under paying up front.
 5. ~~The terms on the sign-up.~~ Done, Nov 18.
 6. **The tick boxes of services** on the request, once the owner has settled the list.
 7. ~~The roof's size from the building's outline.~~ Done, Nov 19: offered on the sign-up.

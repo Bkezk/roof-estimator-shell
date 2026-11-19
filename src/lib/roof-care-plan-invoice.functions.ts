@@ -18,11 +18,14 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { longDay } from "@/lib/followup-rules";
 import {
   PLAN_INVOICE_NOT_AWAITING,
   planInvoiceLineWords,
   planName,
   planNumberLabel,
+  renewalCreditSource,
+  renewalCreditWords,
 } from "@/lib/roof-care-plan";
 import { accountBillTo } from "@/lib/vendors";
 
@@ -50,14 +53,43 @@ export function planInvoiceLine(plan: unknown, price: number) {
   };
 }
 
+/**
+ * The second line of a renewal's invoice (Nov 19): what is taken off for the inspections of
+ * last plan year we did not get to. Null when nothing is.
+ */
+export function renewalCreditLine(planId: string, credit: number, owed: number) {
+  const amount = Math.round((Number(credit) || 0) * 100) / 100;
+  if (!(amount > 0)) return null;
+  return {
+    sort: 2,
+    kind: "other",
+    description: renewalCreditWords(owed),
+    qty: 1,
+    unit: "ea",
+    rate: -amount,
+    total: -amount,
+    cost_rate: 0,
+    cost_total: 0,
+    on_date: null,
+    source: renewalCreditSource(planId),
+    taxable: false,
+    show_on_invoice: true,
+  };
+}
+
 /** "Roof Care plan RC-1001 for Main Office, about 22,000 sq ft of roof. …" */
 export function planInvoiceDescription(p: {
   plan: unknown;
   plan_number: number;
   roof_sqft: number;
+  /** For a renewal: the day this plan year was due to renew. */
+  renews_from?: string | null;
 }): string {
   const size = Math.round(Number(p.roof_sqft) || 0).toLocaleString("en-US");
-  return `${planName(p.plan)} plan ${planNumberLabel(p.plan_number)}, for one year, on about ${size} sq ft of roof. The plan year starts the day this invoice is paid.`;
+  const what = `${planName(p.plan)} plan ${planNumberLabel(p.plan_number)}`;
+  if (p.renews_from)
+    return `${what}, renewed for one year, on about ${size} sq ft of roof. The new plan year starts ${longDay(p.renews_from)}, or the day this invoice is paid when that is later.`;
+  return `${what}, for one year, on about ${size} sq ft of roof. The plan year starts the day this invoice is paid.`;
 }
 
 /**
@@ -71,7 +103,9 @@ export async function makePlanInvoice(
 ): Promise<{ id: string; made: boolean }> {
   const { data: plan, error } = await sb
     .from("roof_care_plans")
-    .select("id, plan, status, pay_first, plan_number, price, roof_sqft, account_id, site_id")
+    .select(
+      "id, plan, status, pay_first, plan_number, price, roof_sqft, account_id, site_id, renewed_from, renewal_credit, renewal_owed",
+    )
     .eq("id", planId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -101,6 +135,21 @@ export async function makePlanInvoice(
   const { siteAddressLine } = await import("@/lib/crm.functions");
   const settings = await loadSettings(sb);
   const line = planInvoiceLine(plan.plan, Number(plan.price));
+  // A renewal (Nov 19): what is taken off for last year's inspections not done, and the day
+  // the year it renews runs out.
+  const credit = plan.renewed_from
+    ? renewalCreditLine(plan.id, Number(plan.renewal_credit), Number(plan.renewal_owed))
+    : null;
+  const lines = credit ? [line, credit] : [line];
+  let renewsFrom: string | null = null;
+  if (plan.renewed_from) {
+    const { data: old } = await sb
+      .from("roof_care_plans")
+      .select("renews_on")
+      .eq("id", plan.renewed_from)
+      .maybeSingle();
+    renewsFrom = old?.renews_on ?? null;
+  }
   // A plan is a service: no sales tax. The Tax % box on the draft is still the office's.
   const taxRate = 0;
   const { data: made, error: insErr } = await sb
@@ -119,10 +168,11 @@ export async function makePlanInvoice(
         plan: plan.plan,
         plan_number: plan.plan_number,
         roof_sqft: Number(plan.roof_sqft),
+        renews_from: renewsFrom,
       }),
       payment_terms: settings.payment_terms,
       tax_rate: taxRate,
-      ...totals([line], taxRate),
+      ...totals(lines, taxRate),
       created_by: who.id,
       updated_by_name: who.name,
     })
@@ -134,7 +184,9 @@ export async function makePlanInvoice(
     if (other) return { id: other, made: false };
     throw new Error(insErr?.message ?? "The invoice was not created");
   }
-  const { error: lErr } = await sb.from("invoice_lines").insert({ ...line, invoice_id: made.id });
+  const { error: lErr } = await sb
+    .from("invoice_lines")
+    .insert(lines.map((l) => ({ ...l, invoice_id: made.id })));
   if (lErr) {
     // No draft is left without its line: it would hold the plan's number at no amount.
     await sb.from("invoices").delete().eq("id", made.id);

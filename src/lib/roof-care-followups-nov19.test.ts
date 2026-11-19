@@ -132,6 +132,8 @@ const visitRow = (id: string, kind: string, over: Record<string, unknown> = {}) 
   amount: 1000,
   push_reason: null,
   pushed_by_name: null,
+  customer_asked: false,
+  lost_on: null,
   ...over,
 });
 const world = (
@@ -434,6 +436,8 @@ describe("6. an inspection that is done and on no invoice", () => {
     amount: 1000,
     push_reason: null,
     pushed_by_name: null,
+    customer_asked: false,
+    lost_on: null,
     ticket: {
       id: JOB,
       number: 7001,

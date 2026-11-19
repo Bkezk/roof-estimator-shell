@@ -44,13 +44,18 @@ import {
   AWAITING_PAYMENT_NOTE,
   AWAITING_PAYMENT_WORDS,
   CARE_PLAN_LABEL,
+  CARRIED_NO_PUSH,
+  CUSTOMER_ASKED_LABEL,
+  CUSTOMER_ASKED_NOTE,
   DATES_FROM_PAYMENT,
   dueWords,
   firstVisitWords,
+  lostWords,
   MAP_ROOF_MORE,
   MAP_ROOF_USE,
   mapRoofSizeLine,
   nextWindow,
+  owedWords,
   PAY_CARD_NOTE,
   PAY_METHOD_WORDS,
   PAY_METHODS,
@@ -66,6 +71,16 @@ import {
   REFUND_MARK_SENT,
   refundLines,
   refundStatusWords,
+  RENEW_LABEL,
+  RENEWAL_NOTE,
+  RENEWAL_WORDS,
+  renewalChoiceWords,
+  renewalDecisionWords,
+  renewalDefaultWords,
+  renewalOpen,
+  renewalPriceWords,
+  renewsWords,
+  RENEWAL_CHOICES,
   PRICE_ESTIMATE_JUST_NOW,
   PRICE_ESTIMATE_ROUGH,
   isPriceChanged,
@@ -82,6 +97,7 @@ import {
   type FirstVisit,
   type PayMethod,
   type PlanVisit,
+  type RenewalChoice,
   type RoofCarePlan,
 } from "@/lib/roof-care-plan";
 import {
@@ -90,10 +106,12 @@ import {
   listRoofCarePlans,
   markRoofCareRefundSent,
   pushBackRoofCareVisit,
+  renewRoofCarePlan,
   requestAdditionalService,
   roofCareMapSize,
   roofCareOffer,
   roofCareRefund,
+  roofCareRenewalOffer,
   signUpRoofCare,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
@@ -172,7 +190,13 @@ export function RoofCareBadge({ plan, today }: { plan: RoofCarePlan; today: stri
   );
 }
 
-const STATE_WORDS = { done: "Done", late: "Late", ticket: "Ticket out", waiting: "Not yet due" };
+const STATE_WORDS = {
+  done: "Done",
+  late: "Late",
+  ticket: "Ticket out",
+  waiting: "Not yet due",
+  lost: "Lost",
+};
 
 function VisitRow({
   visit,
@@ -195,9 +219,15 @@ function VisitRow({
       data-visit-state={state}
     >
       <span className="font-medium">{VISIT_LABEL[visit.kind]}</span>
-      <span className="text-muted-foreground">{dueWords(visit)}</span>
+      <span className="text-muted-foreground">
+        {visit.lost_on
+          ? lostWords(visit.lost_on)
+          : visit.kind === "carried"
+            ? `Do it by ${longDay(visit.due_by)}, or it is lost`
+            : dueWords(visit)}
+      </span>
       <Badge
-        variant={state === "late" ? "destructive" : "secondary"}
+        variant={state === "late" || state === "lost" ? "destructive" : "secondary"}
         className={state === "done" ? "bg-emerald-600 text-white hover:bg-emerald-600" : ""}
       >
         {STATE_WORDS[state]}
@@ -220,12 +250,15 @@ function VisitRow({
           {VISIT_UNBILLED_WORDS}
         </Badge>
       )}
-      {visit.due_by !== visit.first_due_by && (
-        <span className="text-muted-foreground">
+      {(visit.push_reason || (visit.kind !== "carried" && visit.due_by !== visit.first_due_by)) && (
+        <span className="text-muted-foreground" data-visit-pushed={visit.customer_asked}>
           pushed back{visit.push_reason ? `: ${visit.push_reason}` : ""}
         </span>
       )}
-      {office && state !== "done" && (
+      {office && visit.kind === "carried" && state !== "done" && state !== "lost" && (
+        <span className="text-muted-foreground">{CARRIED_NO_PUSH}</span>
+      )}
+      {office && state !== "done" && visit.kind !== "carried" && (
         <Button
           type="button"
           variant="ghost"
@@ -378,6 +411,9 @@ export function RoofCareCard({
   const q = usePlans(siteId);
   const [push, setPush] = useState<PlanVisit | null>(null);
   const [ending, setEnding] = useState(false);
+  // The renewal (Nov 19): the Renew box, and ending a renewal that is waiting.
+  const [renewing, setRenewing] = useState(false);
+  const [endingRenewal, setEndingRenewal] = useState(false);
   const refresh = useRefresh(siteId ?? "");
   const stormFn = useServerFn(addRoofCareStorm);
   const storm = useMutation({
@@ -403,6 +439,10 @@ export function RoofCareCard({
   if (!plan) return null;
   const active = plan?.status === "active" ? plan : null;
   const waiting = plan?.status === "awaiting_payment" ? plan : null;
+  // Next year's plan, made and waiting for its payment, while this year's is still in force.
+  const renewal = active
+    ? (q.data.find((p) => p.status === "awaiting_payment" && p.renewed_from === active.id) ?? null)
+    : null;
   const office = !isFieldOnly(profile);
   const manager = managesTickets(profile);
   const mine = active && visitId ? (active.visits.find((v) => v.id === visitId) ?? null) : null;
@@ -433,10 +473,16 @@ export function RoofCareCard({
       {active && (
         <>
           <p className="text-xs text-muted-foreground">
-            Signed {longDay(active.signed_on)} by {active.agreed_by}
+            {/* A renewed year says so; who first agreed and who signed them up stay with it. */}
+            {active.renewed_from
+              ? `Renewed ${longDay(active.signed_on)}. First agreed by ${active.agreed_by}`
+              : `Signed ${longDay(active.signed_on)} by ${active.agreed_by}`}
             {active.sold_by_name ? `, signed up by ${active.sold_by_name}` : ""}.
+            {/* A renewal paid ahead has not started yet: its year begins when the old one ends. */}
             {active.pay_first && active.starts_on
-              ? ` Paid, and started ${longDay(active.starts_on)}.`
+              ? active.starts_on > today
+                ? ` Paid. The plan year starts ${longDay(active.starts_on)}.`
+                : ` Paid, and started ${longDay(active.starts_on)}.`
               : ""}{" "}
             Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
@@ -494,6 +540,45 @@ export function RoofCareCard({
             <p className="text-xs text-amber-700 dark:text-amber-400" data-roof-care-late>
               Running late: an inspection was pushed past the plan year, so the renewal moved.
             </p>
+          )}
+          {/* The last 60 days of the plan year (owner, Nov 19): the renewal, or the button
+              that makes it. */}
+          {!short && office && !renewal && renewalOpen(active, today) && (
+            <div
+              className="flex flex-wrap items-center gap-2 text-xs"
+              data-roof-care-renew={active.renews_on < today ? "past" : "due"}
+            >
+              <span
+                className={
+                  active.renews_on < today
+                    ? "font-medium text-destructive"
+                    : "font-medium text-amber-800 dark:text-amber-300"
+                }
+              >
+                {renewsWords(active, today)}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => setRenewing(true)}
+                data-action="roof-care-renew"
+              >
+                {RENEW_LABEL}
+              </Button>
+            </div>
+          )}
+          {renewal && (
+            <AwaitingPayment
+              siteId={siteId}
+              plan={renewal}
+              office={office}
+              manager={manager}
+              short={short}
+              renewalOf={active}
+              onEnd={() => setEndingRenewal(true)}
+            />
           )}
           {(!short || mine) && (
             <ul className="space-y-1">
@@ -555,6 +640,12 @@ export function RoofCareCard({
       )}
       {ending && (active ?? waiting) && (
         <EndDialog siteId={siteId} plan={(active ?? waiting)!} onClose={() => setEnding(false)} />
+      )}
+      {renewing && active && (
+        <RenewDialog siteId={siteId} plan={active} onClose={() => setRenewing(false)} />
+      )}
+      {endingRenewal && renewal && (
+        <EndDialog siteId={siteId} plan={renewal} renewal onClose={() => setEndingRenewal(false)} />
       )}
     </div>
   );
@@ -625,6 +716,7 @@ function AwaitingPayment({
   office,
   manager,
   short,
+  renewalOf,
   onEnd,
 }: {
   siteId: string;
@@ -632,6 +724,8 @@ function AwaitingPayment({
   office: boolean;
   manager: boolean;
   short: boolean;
+  /** The plan year this one renews, when it is a renewal shown under it. */
+  renewalOf?: RoofCarePlan;
   onEnd: () => void;
 }) {
   const { profile } = useAuth();
@@ -648,24 +742,41 @@ function AwaitingPayment({
   });
   const money = seesInvoices(profile);
   const inv = plan.invoice;
+  const decided = renewalDecisionWords(plan);
   return (
-    <div className="space-y-1 text-xs" data-roof-care-awaiting>
+    <div
+      className={`space-y-1 text-xs ${renewalOf ? "rounded-md border p-2" : ""}`}
+      data-roof-care-awaiting={renewalOf ? "renewal" : "new"}
+    >
       <p className="font-medium text-amber-800 dark:text-amber-300">
-        {AWAITING_PAYMENT_WORDS}
+        {renewalOf
+          ? `${RENEWAL_WORDS}: ${AWAITING_PAYMENT_WORDS.toLowerCase()}`
+          : AWAITING_PAYMENT_WORDS}
         {plan.plan_number != null ? ` · ${planNumberLabel(plan.plan_number)}` : ""}
-        {office && ` · ${money0(plan.price)} for the year`}
+        {office && ` · ${money0(Math.max(0, plan.price - plan.renewal_credit))} for the year`}
       </p>
-      <p className="text-muted-foreground">
-        Signed {longDay(plan.signed_on)} by {plan.agreed_by}
-        {plan.sold_by_name ? `, signed up by ${plan.sold_by_name}` : ""}. {AWAITING_PAYMENT_NOTE}
-      </p>
+      {renewalOf ? (
+        <p className="text-muted-foreground">
+          Made {longDay(plan.signed_on)}. {RENEWAL_NOTE}
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          Signed {longDay(plan.signed_on)} by {plan.agreed_by}
+          {plan.sold_by_name ? `, signed up by ${plan.sold_by_name}` : ""}. {AWAITING_PAYMENT_NOTE}
+        </p>
+      )}
+      {office && decided && (
+        <p className="font-medium" data-renewal-decision={plan.renewal_choice}>
+          {decided}
+        </p>
+      )}
       {plan.pay_method && (
         <p className="font-medium" data-awaiting-pay={plan.pay_method}>
           {payWords(plan.pay_method, plan.pay_note)}
           {plan.pay_method === "card" ? ` ${PAY_CARD_NOTE}` : ""}
         </p>
       )}
-      {!short && (
+      {!short && !renewalOf && (
         <p className="text-muted-foreground" data-awaiting-first>
           {firstVisitWords(plan.first_visit, plan.first_days)}
         </p>
@@ -683,7 +794,7 @@ function AwaitingPayment({
             {inv.status === "draft"
               ? "is a draft. Finalise it and send it to the customer."
               : inv.paid_amount > 0
-                ? `has ${money0(inv.paid_amount)} paid of ${money0(inv.total)}. The plan starts when it is paid in full.`
+                ? `has ${money0(inv.paid_amount)} paid of ${money0(inv.total)}. ${renewalOf ? "The new plan year" : "The plan"} starts when it is paid in full.`
                 : "is waiting to be paid. Mark it paid when the payment arrives."}
           </p>
         ) : (
@@ -710,12 +821,174 @@ function AwaitingPayment({
           size="sm"
           className="h-7 text-xs text-muted-foreground"
           onClick={onEnd}
-          data-action="roof-care-end"
+          data-action={renewalOf ? "roof-care-end-renewal" : "roof-care-end"}
         >
-          End plan
+          {renewalOf ? "Cancel the renewal" : "End plan"}
         </Button>
       )}
     </div>
+  );
+}
+
+// ── Renew (owner, Nov 19) ───────────────────────────────────────────────────────────────────
+
+/**
+ * The Renew box: the price today, how they pay, and, with an inspection still owed, the office's
+ * call between the two answers with the push-back reasons in front of it. The database decides
+ * everything; this says it first.
+ */
+function RenewDialog({
+  siteId,
+  plan,
+  onClose,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const navigate = useNavigate();
+  const offerFn = useServerFn(roofCareRenewalOffer);
+  const offer = useQuery({
+    queryKey: ["roof-care-renewal-offer", plan.id],
+    queryFn: () => offerFn({ data: { plan_id: plan.id } }),
+    retry: false,
+    staleTime: 0,
+  });
+  // Null until the person picks: the rule's own answer and last year's way of paying stand.
+  const [picked, setPicked] = useState<RenewalChoice | null>(null);
+  const [pay, setPay] = useState<PayMethod | null>(null);
+  const [payNote, setPayNote] = useState("");
+  const o = offer.data;
+  const choice = o && o.owed.length ? (picked ?? o.default_choice) : null;
+  const payMethod = pay ?? o?.pay_method ?? null;
+  const renewFn = useServerFn(renewRoofCarePlan);
+  const renew = useMutation({
+    mutationFn: () =>
+      renewFn({
+        data: {
+          plan_id: plan.id,
+          choice,
+          pay_method: payMethod!,
+          pay_note: payMethod === "check" ? payNote.trim() : "",
+          shown_price: o!.price,
+        },
+      }),
+    onSuccess: (r) => {
+      refresh();
+      if (r.started) toast.success("Renewed at no charge. The new plan year has started.");
+      else if (r.invoice_id) {
+        toast.success("Renewal made. Its invoice is a draft: finalise it and send it.");
+        void navigate({ to: "/service/invoices", search: { id: r.invoice_id } });
+      } else toast.success("Renewal made. It waits for the office to make its invoice.");
+      onClose();
+    },
+    onError: (e) => {
+      // A changed price is read again, so the box shows the one that will be saved.
+      if (isPriceChanged(errText(e))) void offer.refetch();
+      toast.error(`Could not renew the plan: ${errText(e)}`, { duration: 20_000 });
+    },
+  });
+  const ready = !!o && o.open && !o.has_renewal && !!payMethod && (!o.owed.length || !!choice);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto" data-roof-care-renew-dialog>
+        <DialogHeader>
+          <DialogTitle>Renew the {planName(plan.plan)} plan</DialogTitle>
+          <DialogDescription>
+            Another plan year, paid before it starts. {RENEWAL_NOTE}
+          </DialogDescription>
+        </DialogHeader>
+        {offer.isPending && <p className="text-sm text-muted-foreground">Working it out…</p>}
+        {offer.error && (
+          <p className="text-sm text-destructive">Could not work it out: {errText(offer.error)}</p>
+        )}
+        {o && (
+          <div className="space-y-3 text-sm">
+            <p className="font-medium" data-renew-line="price">
+              {renewalPriceWords(o)}
+            </p>
+            {o.owed.length > 0 && (
+              <fieldset className="space-y-1.5 rounded-md border p-3" data-renew-owed>
+                <legend className="px-1 font-medium">{owedWords(o.owed.length)}</legend>
+                <ul className="text-xs text-muted-foreground">
+                  {o.owed.map((v) => (
+                    <li key={v.kind} data-owed={v.kind} data-customer-asked={v.customer_asked}>
+                      {VISIT_LABEL[v.kind]}, due by {longDay(v.due_by)}.{" "}
+                      {v.push_reason ? `Pushed back: ${v.push_reason}` : "Never pushed back."}
+                    </li>
+                  ))}
+                </ul>
+                {RENEWAL_CHOICES.map((c) => (
+                  <label key={c} className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="rc-renew-choice"
+                      className="mt-1"
+                      checked={choice === c}
+                      onChange={() => setPicked(c)}
+                      data-renew-choice={c}
+                    />
+                    <span>{renewalChoiceWords(c, o)}</span>
+                  </label>
+                ))}
+                <p className="text-xs text-muted-foreground" data-renew-line="default">
+                  {renewalDefaultWords(o)}
+                </p>
+              </fieldset>
+            )}
+            <fieldset className="space-y-1.5" data-renew-pay>
+              <legend className="font-medium">How they are paying for the year</legend>
+              {PAY_METHODS.map((m) => (
+                <label key={m} className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="radio"
+                    name="rc-renew-pay"
+                    checked={payMethod === m}
+                    onChange={() => setPay(m)}
+                    data-pay={m}
+                  />
+                  <span>{PAY_METHOD_WORDS[m]}</span>
+                  {m === "check" && payMethod === "check" && (
+                    <Input
+                      aria-label="Check number, if known"
+                      placeholder="Check number, if known"
+                      className="h-8 w-56"
+                      value={payNote}
+                      onChange={(e) => setPayNote(e.target.value)}
+                    />
+                  )}
+                </label>
+              ))}
+              {payMethod === "card" && (
+                <p className="text-xs text-muted-foreground">{PAY_CARD_NOTE}</p>
+              )}
+            </fieldset>
+            {o.has_renewal && <p className="text-destructive">This plan already has a renewal.</p>}
+            {!o.open && (
+              <p className="text-destructive">
+                A plan is renewed in the last 60 days of its year. This one can be renewed from{" "}
+                {longDay(o.opens_on)}.
+              </p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!ready || renew.isPending}
+            onClick={() => renew.mutate()}
+            data-action="roof-care-renew-confirm"
+          >
+            {renew.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            Renew
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1083,11 +1356,18 @@ function PushBackDialog({
   const refresh = useRefresh(siteId);
   const [days, setDays] = useState("");
   const [reason, setReason] = useState("");
+  // The customer asked for it (Nov 19): kept on the inspection, for the renewal.
+  const [customer, setCustomer] = useState(false);
   const pushFn = useServerFn(pushBackRoofCareVisit);
   const n = wholeNumber(days);
-  const preview = pushPreview(visit, n, { manager, reason });
+  // "The customer asked" is a reason by itself, as the database takes it.
+  const preview = pushPreview(visit, n, {
+    manager,
+    reason: reason.trim() || (customer ? CUSTOMER_ASKED_LABEL : ""),
+  });
   const push = useMutation({
-    mutationFn: () => pushFn({ data: { visit_id: visit.id, days: n!, reason: reason.trim() } }),
+    mutationFn: () =>
+      pushFn({ data: { visit_id: visit.id, days: n!, reason: reason.trim(), customer } }),
     onSuccess: (r) => {
       refresh();
       toast.success(
@@ -1136,6 +1416,17 @@ function PushBackDialog({
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
+          <div className="space-y-0.5">
+            <label className="flex items-center gap-2">
+              <Checkbox
+                checked={customer}
+                onCheckedChange={(c) => setCustomer(c === true)}
+                data-push-customer
+              />
+              <span>{CUSTOMER_ASKED_LABEL}</span>
+            </label>
+            <p className="pl-6 text-xs text-muted-foreground">{CUSTOMER_ASKED_NOTE}</p>
+          </div>
           {preview?.problem && (
             <p className="text-destructive" data-push-line="problem">
               {preview.problem}
@@ -1166,10 +1457,13 @@ function PushBackDialog({
 function EndDialog({
   siteId,
   plan,
+  renewal = false,
   onClose,
 }: {
   siteId: string;
   plan: RoofCarePlan;
+  /** A renewal that is waiting for its payment: this year's plan stays as it is. */
+  renewal?: boolean;
   onClose: () => void;
 }) {
   const refresh = useRefresh(siteId);
@@ -1196,11 +1490,13 @@ function EndDialog({
       refresh();
       // Its inspection tickets nobody had started are taken off the board (Nov 19).
       toast.success(
-        plan.status === "awaiting_payment"
-          ? "Plan ended. Its unpaid invoice was removed."
-          : r.refund > 0
-            ? `Plan ended. A refund of ${money0(r.refund)} is owed: send it, then mark it sent on the property.`
-            : "Plan ended. Its inspection tickets not yet started were taken off the board.",
+        renewal
+          ? "Renewal cancelled. Its unpaid invoice was removed. This year's plan is as it was."
+          : plan.status === "awaiting_payment"
+            ? "Plan ended. Its unpaid invoice was removed."
+            : r.refund > 0
+              ? `Plan ended. A refund of ${money0(r.refund)} is owed: send it, then mark it sent on the property.`
+              : "Plan ended. Its inspection tickets not yet started were taken off the board.",
         { duration: 20_000 },
       );
       onClose();
@@ -1211,15 +1507,21 @@ function EndDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md" data-roof-care-end-dialog>
         <DialogHeader>
-          <DialogTitle>End the {planName(plan.plan)} plan</DialogTitle>
+          <DialogTitle>
+            {renewal ? "Cancel the renewal" : `End the ${planName(plan.plan)} plan`}
+          </DialogTitle>
           <DialogDescription>
-            {plan.status === "awaiting_payment"
-              ? "The plan was never paid, so it never started. Its unpaid invoice is removed with it."
-              : "No more inspections are made for it. Tickets already made stay as they are."}
+            {renewal
+              ? "The renewal was not paid, so next year never started. Its unpaid invoice is removed with it. This year's plan stays as it is, and can be renewed again."
+              : plan.status === "awaiting_payment"
+                ? "The plan was never paid, so it never started. Its unpaid invoice is removed with it."
+                : "No more inspections are made for it. Tickets already made stay as they are."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1 text-sm">
-          <Label htmlFor="rc-end-reason">Why it is ending</Label>
+          <Label htmlFor="rc-end-reason">
+            {renewal ? "Why it is cancelled" : "Why it is ending"}
+          </Label>
           <Textarea
             id="rc-end-reason"
             rows={2}
@@ -1274,7 +1576,7 @@ function EndDialog({
             data-action="roof-care-end-confirm"
           >
             {end.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            End plan
+            {renewal ? "Cancel the renewal" : "End plan"}
           </Button>
         </DialogFooter>
       </DialogContent>

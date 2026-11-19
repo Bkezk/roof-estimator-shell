@@ -101,6 +101,8 @@ const visit = (over: Partial<PlanVisit> = {}): PlanVisit => ({
   amount: 500,
   push_reason: null,
   pushed_by_name: null,
+  customer_asked: false,
+  lost_on: null,
   ticket: null,
   billed: null,
   ...over,
@@ -502,6 +504,8 @@ describe("signing a customer up", () => {
             amount: 1000,
             push_reason: null,
             pushed_by_name: null,
+            customer_asked: false,
+            lost_on: null,
           },
           {
             id: V2,
@@ -513,6 +517,8 @@ describe("signing a customer up", () => {
             amount: 1000,
             push_reason: null,
             pushed_by_name: null,
+            customer_asked: false,
+            lost_on: null,
           },
         ],
         service_jobs: [
