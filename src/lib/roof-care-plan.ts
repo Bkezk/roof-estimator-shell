@@ -74,6 +74,9 @@ export interface PlanVisit {
   drains_cleaned?: boolean | null;
   gutters_cleaned?: boolean | null;
   cleaning_note?: string | null;
+  /** Who answered, and when. */
+  cleaning_by_name?: string | null;
+  cleaning_at?: string | null;
 }
 
 /** An invoice that took from the plan's minor repairs allowance. */

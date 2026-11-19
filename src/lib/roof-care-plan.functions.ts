@@ -229,7 +229,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
 const PLAN_SELECT =
   "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, forecast_sent_on, card_paid_on, card_paid_amount, card_paid_ref" as const;
 const VISIT_SELECT =
-  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on, drains_cleaned, gutters_cleaned, cleaning_note" as const;
+  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on, drains_cleaned, gutters_cleaned, cleaning_note, cleaning_by_name, cleaning_at" as const;
 const TICKET_SELECT =
   "id, number, stage, scheduled_date, completed_at, invoice_id, roof_care_visit_id" as const;
 
@@ -408,6 +408,8 @@ export async function plansOfSites(
       drains_cleaned: v.drains_cleaned ?? null,
       gutters_cleaned: v.gutters_cleaned ?? null,
       cleaning_note: v.cleaning_note ?? null,
+      cleaning_by_name: v.cleaning_by_name ?? null,
+      cleaning_at: v.cleaning_at ?? null,
     });
     byPlan.set(v.plan_id, list);
   }

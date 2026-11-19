@@ -8,7 +8,9 @@
  * year's two inspections and at one carried from last plan year, never at a storm inspection.
  * Each is answered Yes or No; a No says why (a gutter that cannot be reached without a lift).
  */
+import { shortDay } from "@/lib/followup-rules";
 import type { VisitKind } from "@/lib/roof-care-plan";
+import { localYmd, TASK_TZ } from "@/lib/tasks";
 import type { PlanKey } from "@/lib/roof-care-price";
 
 export type CleaningKey = "drains" | "gutters";
@@ -89,4 +91,27 @@ export function cleaningTally(
   ).length;
   const of = 2;
   return { done, of, words: `Done at ${done} of ${of} inspections` };
+}
+
+/**
+ * What an inspection answered, a line each, for the office (owner, Nov 19, night: the answers
+ * showed only inside the workflow): each question the plan asks with its answer, then who
+ * answered and when. Nothing for an inspection the plan asks nothing of.
+ */
+export function cleaningSummary(
+  c: Pick<VisitCleaning, "asked" | "drains" | "gutters" | "note" | "by_name" | "at">,
+  tz: string = TASK_TZ,
+): string[] {
+  const asked = CLEANING_KEYS.filter((k) => c.asked[k]);
+  if (!asked.length) return [];
+  const out = asked.map(
+    (k) => `${CLEANING_LABEL[k]}: ${cleaningAnswerWords(c[k], c[k] === false ? c.note : null)}`,
+  );
+  const answered = asked.some((k) => c[k] !== null);
+  const who = (c.by_name ?? "").trim();
+  if (answered && (who || c.at))
+    out.push(
+      `Answered${who ? ` by ${who}` : ""}${c.at ? ` on ${shortDay(localYmd(new Date(c.at), tz))}` : ""}`,
+    );
+  return out;
 }

@@ -44,7 +44,8 @@ import {
   PAY_CARD_NOTE_ONLINE,
 } from "@/lib/roof-care-checkout";
 import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
-import { markRoofCareForecast } from "@/lib/roof-care-cleaning.functions";
+import { cleaningAsked, cleaningSummary, roofCareCleaningKey } from "@/lib/roof-care-cleaning";
+import { markRoofCareForecast, roofCareCleaning } from "@/lib/roof-care-cleaning.functions";
 import {
   AGREE_WORDS,
   benefitsOfPlan,
@@ -273,8 +274,11 @@ function VisitRow({
   today,
   office,
   showMoney,
+  plan,
   onPush,
 }: {
+  /** The plan, so the office sees what the inspection answered of its cleaning. */
+  plan?: PlanKey;
   visit: PlanVisit;
   today: string;
   office: boolean;
@@ -282,6 +286,22 @@ function VisitRow({
   onPush: (v: PlanVisit) => void;
 }) {
   const state = visitState(visit, today);
+  // What the plan includes at this inspection, as answered in the workflow (Nov 19, night):
+  // shown to the office once it is answered or the inspection is done.
+  const cleaning =
+    office && plan
+      ? cleaningSummary({
+          asked: cleaningAsked(plan, visit.kind),
+          drains: visit.drains_cleaned ?? null,
+          gutters: visit.gutters_cleaned ?? null,
+          note: visit.cleaning_note ?? null,
+          by_name: visit.cleaning_by_name ?? null,
+          at: visit.cleaning_at ?? null,
+        })
+      : [];
+  const showCleaning =
+    cleaning.length > 0 &&
+    (state === "done" || visit.drains_cleaned != null || visit.gutters_cleaned != null);
   return (
     <li
       className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
@@ -340,6 +360,11 @@ function VisitRow({
           <CalendarClock className="mr-1 h-3.5 w-3.5" /> Push back
         </Button>
       )}
+      {showCleaning && (
+        <span className="basis-full text-muted-foreground" data-visit-cleaning>
+          {cleaning.join(". ")}.
+        </span>
+      )}
     </li>
   );
 }
@@ -387,6 +412,15 @@ export function RoofCareButtons({
     queryKey: offersKey(jobId ?? ""),
     queryFn: () => offeredFn({ data: { job_id: jobId! } }),
     enabled: !!session && showsOffered,
+    staleTime: STALE_MS,
+  });
+  // On the ticket of a plan's inspection: what it answered of the plan's cleaning, for the
+  // office (Nov 19, night). The workflow is where it is answered.
+  const cleaningFn = useServerFn(roofCareCleaning);
+  const cleaning = useQuery({
+    queryKey: roofCareCleaningKey(visitId ?? ""),
+    queryFn: () => cleaningFn({ data: { visit_id: visitId! } }),
+    enabled: !!session && showsOffered && !!visitId,
     staleTime: STALE_MS,
   });
   if (!siteId || !profile) return null;
@@ -470,6 +504,16 @@ export function RoofCareButtons({
           data-care-plan-offered={offered.data.length}
         >
           {offeredWords(offered.data)}
+        </p>
+      )}
+      {showsOffered && cleaning.data && cleaningSummary(cleaning.data).length > 0 && (
+        <p
+          className="basis-full text-right text-xs text-muted-foreground"
+          data-care-cleaning={
+            cleaning.data.drains === null && cleaning.data.gutters === null ? "open" : "answered"
+          }
+        >
+          {cleaningSummary(cleaning.data).join(". ")}.
         </p>
       )}
     </div>
@@ -810,6 +854,7 @@ export function RoofCareCard({
                   today={today}
                   office={office}
                   showMoney={office}
+                  plan={active.plan}
                   onPush={setPush}
                 />
               ))}

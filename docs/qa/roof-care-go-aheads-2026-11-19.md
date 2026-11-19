@@ -54,6 +54,18 @@ from its message onward is proven by tests and by a live database trial.
 - The office marks Roof Guard's yearly budget forecast sent, and can take the mark off. The
   tally shows the day, or "Not sent yet".
 
+Where the office sees the answers (the owner, later that night: "Can you do number 3?", of
+"'Answered by' shows only in the workflow, not on the ticket page"):
+
+- On the ticket of a plan's inspection, under the Care Plan button: each question with its
+  answer, then who answered and when. "Not answered" until it is.
+- On the plan, beside each inspection, once it is answered or done.
+- Tests: `src/lib/roof-care-cleaning-office-nov19.test.ts`, 6 tests.
+- Browser, a temporary Roof Guard inspection ticket at the test customer's "site 2": the
+  ticket read "Not answered" for both; after the answers it read "Drains and scuppers cleaned:
+  Yes. Gutters cleaned: No: No lift on site. Answered by …" with the day, and the plan's row
+  for that inspection read the same. The ticket and the plan were removed.
+
 ## 7. An expired plan opens its renewal
 
 Care Plan on a property whose plan has expired, and is not closed out, opens that plan with
