@@ -86,17 +86,28 @@ export function allowanceCap(a: { allowance: number; usedElsewhere: number; bill
   return r2(Math.max(0, Math.min(a.allowance - a.usedElsewhere, a.billable)));
 }
 
-/** What the customer reads on the line. */
-export const allowanceLineWords = (plan: unknown): string =>
-  `${planName(plan)} plan: minor repairs included in your plan`;
+/**
+ * What the customer reads on the line. `storm`: on the invoice of a storm inspection beyond the
+ * ones the plan includes (Nov 19, late), where what is left of the minor repairs goes toward the
+ * inspection.
+ */
+export const allowanceLineWords = (plan: unknown, storm = false): string =>
+  storm
+    ? `${planName(plan)} plan: your minor repairs amount used toward this inspection`
+    : `${planName(plan)} plan: minor repairs included in your plan`;
 
 /** The line itself: listed on the customer's copy with its amount, not taxed, no cost. */
-export function allowanceLine(plan: { id: string; plan: unknown }, amount: number, sort: number) {
+export function allowanceLine(
+  plan: { id: string; plan: unknown },
+  amount: number,
+  sort: number,
+  storm = false,
+) {
   const off = -r2(Math.max(0, amount));
   return {
     sort,
     kind: "other",
-    description: allowanceLineWords(plan.plan),
+    description: allowanceLineWords(plan.plan, storm),
     qty: 1,
     unit: "ea",
     rate: off,
@@ -129,6 +140,11 @@ export interface InvoiceAllowance {
   choice: AllowanceChoice | null;
   /** What this invoice takes now. */
   applied: number;
+  /**
+   * The invoice is a storm inspection's beyond the ones the plan includes (Nov 19, late): the
+   * allowance goes toward the inspection's price and nothing else on the invoice.
+   */
+  storm?: boolean;
 }
 
 export function invoiceAllowance(a: {
@@ -138,8 +154,16 @@ export function invoiceAllowance(a: {
   usedElsewhere: number;
   lines: readonly Totalled[];
   choice: unknown;
+  /**
+   * The one line the allowance may go toward: the billed storm inspection's own. Left out, the
+   * whole invoice is the repair.
+   */
+  towardSource?: string;
 }): InvoiceAllowance {
-  const billable = billableBefore(a.lines);
+  const billable =
+    a.towardSource === undefined
+      ? billableBefore(a.lines)
+      : billableBefore(a.lines.filter((l) => l.source === a.towardSource));
   const left = r2(Math.max(0, a.allowance - a.usedElsewhere));
   return {
     plan_id: a.plan_id,
@@ -151,6 +175,7 @@ export function invoiceAllowance(a: {
     cap: allowanceCap({ allowance: a.allowance, usedElsewhere: a.usedElsewhere, billable }),
     choice: asAllowanceChoice(a.choice),
     applied: allowanceTaken(a.lines),
+    ...(a.towardSource === undefined ? {} : { storm: true }),
   };
 }
 

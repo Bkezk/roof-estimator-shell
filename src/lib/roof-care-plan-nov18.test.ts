@@ -1217,7 +1217,10 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
     // (Nov 19: terms 2, 3 and 9 changed with paying for the year first, so the version did.)
     // (Nov 19, night: version 2026-11-19.3. Term 9 also says a year paid by card is refunded
     // less the card fee. roof-care-go-aheads-nov19.test.ts.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
+    // (Nov 19, late: version 2026-11-19.4. Term 7 charges the return trip after the first visit
+    // we could not do, and term 8 bills a further storm inspection.
+    // roof-care-no-access-storm-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.4");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",

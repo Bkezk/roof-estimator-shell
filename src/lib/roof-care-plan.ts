@@ -79,6 +79,25 @@ export interface PlanVisit {
   cleaning_at?: string | null;
 }
 
+/** One time the crew could not get on the roof for an inspection of the plan. */
+export interface PlanNoAccess {
+  id: string;
+  visit_id: string;
+  on: string;
+  note: string;
+  by_name: string;
+  /** The return trip is charged: every one after the first of the plan year. */
+  charged: boolean;
+  /** What it is charged; null for a free one, and when it could not be worked out. */
+  amount: number | null;
+  /**
+   * The invoice its charge is on. Null when it is on none, and for a reader who does not see
+   * invoices (`billed` is then null as well).
+   */
+  invoice: { id: string; number: string } | null;
+  billed: boolean | null;
+}
+
 /** An invoice that took from the plan's minor repairs allowance. */
 export interface AllowanceUse {
   invoice_id: string;
@@ -185,6 +204,12 @@ export interface RoofCarePlan {
   visits: PlanVisit[];
   /** Storm inspections a year the plan includes (the plan settings); absent on an older read. */
   storm_included?: number;
+  /**
+   * The times this plan year the crew arrived for an inspection and could not get on the roof
+   * (Nov 19; roof-care-no-access.ts). Null for a reader who is not the office: a technician
+   * reads only the ones they recorded, so no count is shown to them from here.
+   */
+  no_access?: PlanNoAccess[] | null;
   /** The day Roof Guard's yearly budget forecast was marked sent; null until it is. */
   forecast_sent_on?: string | null;
   /**
@@ -863,9 +888,18 @@ export const carePlanLineSource = (visitId: string): string => `roof-care:${visi
  * "Roof Guard plan: inspection 1 of 2 (half of the yearly price)", and for a plan paid for the
  * year before it started, "(included in the plan)".
  */
-export function carePlanLineWords(plan: unknown, kind: VisitKind, paidFirst = false): string {
+export function carePlanLineWords(
+  plan: unknown,
+  kind: VisitKind,
+  paidFirst = false,
+  /** A storm inspection beyond the ones the plan includes (Nov 19): billed by itself. */
+  billedStorm = false,
+): string {
   const name = planName(plan);
-  if (kind === "storm") return `${name} plan: storm inspection (included in the plan)`;
+  if (kind === "storm")
+    return billedStorm
+      ? `${name} plan: further storm inspection this plan year`
+      : `${name} plan: storm inspection (included in the plan)`;
   if (kind === "carried")
     return `${name} plan: inspection owed from last plan year (included in the plan)`;
   const which = `${name} plan: inspection ${kind === "visit1" ? 1 : 2} of 2`;
@@ -892,7 +926,11 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // renewal for one we did not get to, and one we were kept from can be done in the first 60 days.
 // Nov 19, night (version 2026-11-19.3), at the owner's "go" on the card fee: term 9 says a year
 // paid by card is refunded less the card processing fee on the amount refunded.
-export const ROOF_CARE_TERMS_VERSION = "2026-11-19.3";
+// Nov 19, late (version 2026-11-19.4), at the owner's "10. Go." and "11. Second inspection billed
+// at inspection price and their repair allocation contributes to the price if they have any
+// left": term 7 charges the return trip after the first visit of a plan year we could not do
+// for want of access, and term 8 bills a storm inspection beyond the one the plan includes.
+export const ROOF_CARE_TERMS_VERSION = "2026-11-19.4";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
@@ -900,8 +938,8 @@ export const ROOF_CARE_TERMS: readonly string[] = [
   "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
   "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",
-  "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
-  "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+  "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate.",
+  "A storm inspection, where the plan includes one, is done when you ask for it after a storm. A further storm inspection in the same plan year is billed at the price of one inspection, and what is left of the plan's minor repairs amount is used toward it first.",
   "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
   "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
   "The plan is not a warranty and does not cover replacing the roof.",

@@ -110,7 +110,10 @@ describe("the terms the customer agrees to", () => {
     // Nov 19, later: version 2026-11-19.2, eleven terms (roof-care-credit-nov19.test.ts).
     // (Nov 19, night: version 2026-11-19.3. Term 9 also says a year paid by card is refunded
     // less the card fee. roof-care-go-aheads-nov19.test.ts.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
+    // (Nov 19, late: version 2026-11-19.4. Term 7 charges the return trip after the first visit
+    // we could not do, and term 8 bills a further storm inspection.
+    // roof-care-no-access-storm-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.4");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",

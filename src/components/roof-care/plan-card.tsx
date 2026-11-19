@@ -72,6 +72,15 @@ import {
   SIGN_UP_TITLE,
 } from "@/lib/roof-care-benefits";
 import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
+import { NO_ACCESS_REMOVE, noAccessLine } from "@/lib/roof-care-no-access";
+import { removeRoofCareNoAccess } from "@/lib/roof-care-no-access.functions";
+import {
+  roofCareStormKey,
+  STORM_ADD_BILLED,
+  STORM_ADD_INCLUDED,
+  stormCanAdd,
+  stormOfferLines,
+} from "@/lib/roof-care-storm";
 import {
   ADDITIONAL_SERVICES_LABEL,
   AWAITING_PAYMENT_NOTE,
@@ -153,11 +162,13 @@ import {
   roofCareOffer,
   roofCareRefund,
   roofCareRenewalOffer,
+  roofCareStormOffer,
   setRoofCareEmail,
   signUpRoofCare,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
 import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
+import { NoAccessBox } from "./no-access";
 import { money0, PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -506,6 +517,11 @@ export function RoofCareButtons({
           {offeredWords(offered.data)}
         </p>
       )}
+      {/* On the ticket of a plan's inspection, for the office: we could not get on the roof
+          (Nov 19, late). The workflow has its own, for the technician. */}
+      {showsOffered && visitId && jobId && (
+        <NoAccessBox jobId={jobId} className="basis-full justify-end text-right" />
+      )}
       {showsOffered && cleaning.data && cleaningSummary(cleaning.data).length > 0 && (
         <p
           className="basis-full text-right text-xs text-muted-foreground"
@@ -605,14 +621,17 @@ export function RoofCareCard({
       }),
     onError: (e) => toast.error(`Could not send it: ${errText(e)}`, { duration: 20_000 }),
   });
-  const stormFn = useServerFn(addRoofCareStorm);
-  const storm = useMutation({
-    mutationFn: (planId: string) => stormFn({ data: { plan_id: planId } }),
+  // The storm inspection (Nov 19, late): the button opens a box that says, before anything is
+  // added, whether this one is included or billed, and what a billed one costs.
+  const [storming, setStorming] = useState(false);
+  const removeFn = useServerFn(removeRoofCareNoAccess);
+  const removeNoAccess = useMutation({
+    mutationFn: (id: string) => removeFn({ data: { id } }),
     onSuccess: () => {
       refresh();
-      toast.success("Storm inspection ticket made");
+      toast.success("Taken off");
     },
-    onError: (e) => toast.error(`Could not add the storm inspection: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not take it off: ${errText(e)}`, { duration: 20_000 }),
   });
   if (!siteId || !profile) return null;
   if (q.error)
@@ -860,6 +879,52 @@ export function RoofCareCard({
               ))}
             </ul>
           )}
+          {/* The times we could not get on the roof this plan year (Nov 19, late): which were
+              charged, and whether each charge is on an invoice. The office's. */}
+          {!short && office && (active.no_access ?? []).length > 0 && (
+            <ul className="space-y-1 text-xs" data-roof-care-no-access>
+              {(active.no_access ?? []).map((n) => (
+                <li
+                  key={n.id}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+                  data-no-access-charged={n.charged}
+                  data-no-access-billed={n.billed === null ? "unknown" : String(n.billed)}
+                >
+                  <span
+                    className={
+                      n.charged && n.billed === false
+                        ? "text-amber-800 dark:text-amber-300"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {noAccessLine(n, office)}
+                  </span>
+                  {n.invoice && (
+                    <Link
+                      to="/service/invoices"
+                      search={{ id: n.invoice.id }}
+                      className="underline underline-offset-2"
+                    >
+                      Open invoice
+                    </Link>
+                  )}
+                  {manager && !n.invoice && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground"
+                      disabled={removeNoAccess.isPending}
+                      onClick={() => removeNoAccess.mutate(n.id)}
+                      data-action="roof-care-no-access-remove"
+                    >
+                      {NO_ACCESS_REMOVE}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
           {!short && office && (
             <div className="flex flex-wrap gap-1.5">
               {/* Roof Guard's yearly budget forecast (Nov 19, night): marked when it is sent. */}
@@ -885,15 +950,10 @@ export function RoofCareCard({
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs"
-                  disabled={storm.isPending}
-                  onClick={() => storm.mutate(active.id)}
+                  onClick={() => setStorming(true)}
                   data-action="roof-care-storm"
                 >
-                  {storm.isPending ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CloudLightning className="mr-1 h-3.5 w-3.5" />
-                  )}
+                  <CloudLightning className="mr-1 h-3.5 w-3.5" />
                   Storm inspection
                 </Button>
               )}
@@ -912,6 +972,9 @@ export function RoofCareCard({
             </div>
           )}
         </>
+      )}
+      {storming && active && (
+        <StormDialog siteId={siteId} plan={active} onClose={() => setStorming(false)} />
       )}
       {push && (
         <PushBackDialog
@@ -943,6 +1006,97 @@ export function RoofCareCard({
         <EndDialog siteId={siteId} plan={renewal} renewal onClose={() => setEndingRenewal(false)} />
       )}
     </div>
+  );
+}
+
+/**
+ * Before a storm inspection is added (owner, Nov 19, late): is it one the plan includes, or a
+ * further one that is billed, and what the billed one costs after what is left of the minor
+ * repairs. Nothing is added until the button under it is pressed.
+ */
+function StormDialog({
+  siteId,
+  plan,
+  onClose,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const offerFn = useServerFn(roofCareStormOffer);
+  const offer = useQuery({
+    queryKey: roofCareStormKey(plan.id),
+    queryFn: () => offerFn({ data: { plan_id: plan.id } }),
+    // Read fresh each time the box opens: the answer changes with every inspection added.
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const addFn = useServerFn(addRoofCareStorm);
+  const add = useMutation({
+    mutationFn: (billed: boolean) => addFn({ data: { plan_id: plan.id, billed_ok: billed } }),
+    onSuccess: (_r, billed) => {
+      refresh();
+      toast.success(
+        billed
+          ? "Storm inspection ticket made. It is billed when the inspection is authorized."
+          : "Storm inspection ticket made",
+        { duration: 10_000 },
+      );
+      onClose();
+    },
+    onError: (e) =>
+      toast.error(`Could not add the storm inspection: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const o = offer.data;
+  return (
+    <Dialog open onOpenChange={(open) => !open && !add.isPending && onClose()}>
+      <DialogContent
+        className="max-w-md"
+        data-storm-dialog={o ? (o.billed ? "billed" : "included") : "loading"}
+      >
+        <DialogHeader>
+          <DialogTitle>Storm inspection</DialogTitle>
+          <DialogDescription>
+            {planName(plan.plan)} plan. A ticket is made for the inspection, due in two weeks.
+          </DialogDescription>
+        </DialogHeader>
+        {offer.isLoading && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Checking the plan…
+          </p>
+        )}
+        {offer.error && (
+          <p className="text-sm font-medium text-destructive" role="alert">
+            Could not check the plan: {errText(offer.error)}
+          </p>
+        )}
+        {o && (
+          <div
+            className={`space-y-1 rounded-md border px-3 py-2 text-sm ${o.billed ? "border-amber-500/60 bg-amber-500/10" : "bg-muted/40"}`}
+            data-storm-offer
+          >
+            {stormOfferLines(o).map((l) => (
+              <p key={l}>{l}</p>
+            ))}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" disabled={add.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!o || !stormCanAdd(o) || add.isPending}
+            onClick={() => o && add.mutate(o.billed)}
+            data-action="roof-care-storm-confirm"
+          >
+            {add.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {o?.billed ? STORM_ADD_BILLED : STORM_ADD_INCLUDED}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

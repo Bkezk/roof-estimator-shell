@@ -141,6 +141,7 @@ import { ClampedText } from "@/components/service/clamped-text";
 import { HistoryLink } from "@/components/service/site-history";
 import { TicketSharedNotes } from "@/components/service/ticket-shared-notes";
 import { SpecialInstructionsBox } from "@/components/service/special-instructions";
+import { NoAccessBox } from "@/components/roof-care/no-access";
 import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
@@ -1242,6 +1243,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
         onPick={pick}
         summary={(id) => stepSummary(id, stepState)}
       />
+
+      {/* A Roof Care plan's inspection the crew could not do (owner, Nov 19: "10. Go."): the
+          box says whether the return trip is free or charged, and records what happened.
+          Nothing on any other ticket. */}
+      {job.roof_care_visit_id && <NoAccessBox jobId={job.id} big />}
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
           answered. The card's own line says so; no second paragraph under it. Not on an

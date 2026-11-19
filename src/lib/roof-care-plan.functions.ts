@@ -22,7 +22,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { seesInvoices } from "@/lib/access";
+import { isFieldOnly, seesInvoices } from "@/lib/access";
 import { chunkIds } from "@/lib/chunk-ids";
 import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
@@ -56,6 +56,7 @@ import {
   type FirstVisit,
   type MapRoofSize,
   type PlanInvoiceRef,
+  type PlanNoAccess,
   type PlanVisit,
   type PriceEstimate,
   type RefundWorked,
@@ -67,6 +68,8 @@ import {
 } from "@/lib/roof-care-plan";
 import { NOT_PLACED_LINE, placedRoughly } from "@/lib/roof-care-locate";
 import { PLAN_KEYS } from "@/lib/roof-care-price";
+import { isTripLine, tripLineSource } from "@/lib/roof-care-no-access";
+import { readStormOffer, type StormOffer } from "@/lib/roof-care-storm";
 import { isTravelWaiverLine, travelLineSource } from "@/lib/roof-care-travel";
 import { driveTo, officeOrigin, type RoofCareDrive } from "@/lib/roof-care.functions";
 import { aerialForAddress } from "@/lib/service-aerial.functions";
@@ -241,13 +244,22 @@ const ORDER: Record<VisitKind, number> = { carried: -1, visit1: 0, visit2: 1, st
  * plan on a live invoice, and what each plan's minor repairs allowance has taken. A void invoice
  * counts for nothing. Read with the caller's sign-in, so only for someone who sees invoices.
  */
-async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly string[]) {
+async function planMoney(
+  sb: Sb,
+  visitIds: readonly string[],
+  planIds: readonly string[],
+  /** The no access records whose return trip may be on an invoice. */
+  tripIds: readonly string[] = [],
+) {
   const billed = new Set<string>();
   const uses = new Map<string, AllowanceUse[]>();
+  // The invoice each charged return trip is on.
+  const trips = new Map<string, { id: string; number: string }>();
   const sources = [
     ...visitIds.map(carePlanLineSource),
     ...planIds.map(allowanceLineSource),
     ...planIds.map(travelLineSource),
+    ...tripIds.map(tripLineSource),
   ];
   const lines: { source: string | null; total: number; invoice_id: string }[] = [];
   for (const chunk of chunkIds(sources)) {
@@ -272,6 +284,10 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
   for (const l of lines) {
     const number = live.get(l.invoice_id);
     if (number === undefined || !l.source) continue;
+    if (isTripLine(l)) {
+      trips.set(l.source.slice(tripLineSource("").length), { id: l.invoice_id, number });
+      continue;
+    }
     if (isTravelWaiverLine(l)) {
       const id = l.source.slice(travelLineSource("").length);
       calls.set(id, (calls.get(id) ?? new Set()).add(l.invoice_id));
@@ -310,7 +326,7 @@ async function planMoney(sb: Sb, visitIds: readonly string[], planIds: readonly 
       });
     }
   }
-  return { billed, uses, own, calls };
+  return { billed, uses, own, calls, trips };
 }
 
 /**
@@ -341,7 +357,14 @@ export const roofCareBenefits = createServerFn({ method: "GET" })
 export async function plansOfSites(
   sb: Sb,
   siteIds: readonly string[],
-  opts: { money?: boolean } = {},
+  opts: {
+    money?: boolean;
+    /**
+     * Also the times the crew could not get on the roof: for the office, who read all of them.
+     * A technician reads only their own, so no list is given to one.
+     */
+    noAccess?: boolean;
+  } = {},
 ): Promise<RoofCarePlan[]> {
   if (!siteIds.length) return [];
   const { data: plans, error } = await sb
@@ -380,13 +403,42 @@ export async function plansOfSites(
       invoice_id: j.invoice_id,
     });
   }
+  const { data: missed, error: nErr } = opts.noAccess
+    ? await sb
+        .from("roof_care_no_access")
+        .select("id, plan_id, visit_id, on_date, note, by_name, charged, amount, at")
+        .in(
+          "plan_id",
+          plans.map((p) => p.id),
+        )
+        .order("at", { ascending: true })
+    : { data: null, error: null };
+  if (nErr) throw new Error(nErr.message);
   const money = opts.money
     ? await planMoney(
         sb,
         visitIds,
         plans.map((p) => p.id),
+        (missed ?? []).filter((n) => n.charged).map((n) => n.id),
       )
     : null;
+  const noAccessOf = new Map<string, PlanNoAccess[]>();
+  for (const n of missed ?? []) {
+    const list = noAccessOf.get(n.plan_id) ?? [];
+    const invoice = money ? (money.trips.get(n.id) ?? null) : null;
+    list.push({
+      id: n.id,
+      visit_id: n.visit_id,
+      on: n.on_date,
+      note: n.note,
+      by_name: n.by_name,
+      charged: !!n.charged,
+      amount: n.amount == null ? null : Number(n.amount),
+      invoice,
+      billed: money && n.charged ? !!invoice : null,
+    });
+    noAccessOf.set(n.plan_id, list);
+  }
   const byPlan = new Map<string, PlanVisit[]>();
   for (const v of visits ?? []) {
     const kind = (VISIT_KINDS as readonly string[]).includes(v.kind) ? (v.kind as VisitKind) : null;
@@ -466,6 +518,7 @@ export async function plansOfSites(
         (a, b) => ORDER[a.kind] - ORDER[b.kind] || a.due_from.localeCompare(b.due_from),
       ),
       storm_included: benefits?.[plan].storm ?? 0,
+      no_access: opts.noAccess ? (noAccessOf.get(p.id) ?? []) : null,
       forecast_sent_on: p.forecast_sent_on ?? null,
       card_paid: p.card_paid_on
         ? {
@@ -492,7 +545,11 @@ export const listRoofCarePlans = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<RoofCarePlan[]> => {
     const p = await signedIn(context);
     // What is billed and what the allowance has taken: for those who see invoices.
-    return plansOfSites(context.supabase, data.site_ids, { money: seesInvoices(p) });
+    // The times we could not get on the roof: the office reads them all.
+    return plansOfSites(context.supabase, data.site_ids, {
+      money: seesInvoices(p),
+      noAccess: !isFieldOnly(p),
+    });
   });
 
 const signUpInput = z.object({
@@ -706,13 +763,42 @@ export const pushBackRoofCareVisit = createServerFn({ method: "POST" })
     };
   });
 
-export const addRoofCareStorm = createServerFn({ method: "POST" })
+/**
+ * Where the plan stands before Storm inspection is pressed (Nov 19, late): one the plan
+ * includes, or a further one that is billed, with what it costs after what is left of the minor
+ * repairs. The office's; the database refuses anyone else.
+ */
+export const roofCareStormOffer = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<StormOffer> => {
+    const { data: answer, error } = await context.supabase.rpc("roof_care_storm_offer", {
+      p_plan: data.plan_id,
+    });
+    if (error) throw new Error(error.message);
+    const offer = readStormOffer(answer);
+    if (!offer) throw new Error("The storm inspection's answer could not be read");
+    return offer;
+  });
+
+export const addRoofCareStorm = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        // The screen said this one is billed, and what it costs, before it was pressed.
+        billed_ok: z.boolean().default(false),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<{ job_id: string | null }> => {
     const p = await signedIn(context);
     const sb = context.supabase;
-    const { data: jobId, error } = await sb.rpc("roof_care_add_storm", { p_plan: data.plan_id });
+    const { data: jobId, error } = await sb.rpc("roof_care_add_storm", {
+      p_plan: data.plan_id,
+      p_billed_ok: data.billed_ok,
+    });
     if (error) throw new Error(error.message);
     if (jobId) {
       const { announceCarePlanTickets } = await import("@/lib/service.functions");

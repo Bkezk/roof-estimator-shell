@@ -474,11 +474,60 @@ Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-
 - A refund of a year paid by card is less the card fee (term 9, version 2026-11-19.3). The
   fee's rate is on the plan setup page.
 
-Not built, waiting on the owner's word:
+Decided, not to be built (owner, Nov 19, late): technicians do not see how much of the minor
+repairs is used. "The tech doesn't need to see that, they can tell them to call the office as
+they don't have that info."
 
-- Technicians seeing how much of the minor repairs is used. Today they see what is included.
-- A trip charge when the crew cannot get on the roof (term 7 reschedules once at no charge).
-- A second storm inspection in a year being a paid one.
+## No access, and a further storm inspection (Nov 19, late)
+
+Record: `docs/qa/roof-care-no-access-storm-2026-11-19.md`. Migration
+`20261119990000_roof_care_no_access_paid_storm.sql`, applied by hand.
+
+**No access (the owner: "10. Go.").** The crew arrives for one of the plan's inspections and
+cannot get on the roof.
+
+- The first time in a plan year, the return trip is free. Each time after that, it is charged at
+  the trip rate. Term 7 says so (terms version 2026-11-19.4).
+- How many are free is one named number in the database, `c_free` in
+  `roof_care_no_access_state()`. Set it to 0 and every one is charged.
+- No access is a button on the inspection's ticket: in the technician's workflow and on the
+  office's ticket page (`src/components/roof-care/no-access.tsx`). It asks what happened, says
+  before it is pressed whether this one is free or charged, and records it in
+  `roof_care_no_access` through `roof_care_no_access()`. The office reads the amount. A
+  technician is told it is charged and that the customer can call the office for the amount.
+- The inspection is marked as kept off by the customer (`roof_care_visits.customer_asked`), so a
+  renewal treats it as theirs, not ours. The admins and managers get one notice, so the
+  inspection gets a new day. The ticket itself is not moved.
+- The trip rate is worked as travel is on a service invoice: the hours of the plan's own round
+  trip (`roof_care_plans.drive_hours`, or the baseline drive when the plan has none), at the
+  standard travel rate of the technician plus that of each helper of the crew (the Service rates
+  page, and the crew size on the plan setup page). No rate is in the code. When a rate is blank
+  the amount is not worked out, the screen says so, and the office adds the charge by hand.
+- A charge is billed on that inspection's own invoice, as a line of its own
+  (`roof-care-trip:<record>`), when the invoice is made at Authorized. The database lets a
+  return trip be on one invoice only. The plan lists each record with "not invoiced yet" or its
+  invoice, and Needs attention lists a charge that is on no invoice once its inspection is
+  signed off.
+- A manager can take a record off (a mistake, or a charge that is let go), unless its charge is
+  on an invoice.
+
+**A further storm inspection (the owner: "Second inspection billed at inspection price and
+their repair allocation contributes to the price if they have any left").**
+
+- The storm inspections the plan includes stay free.
+- A further one in the same plan year is billed at the price of one inspection: half of Roof
+  Watch for that roof and drive, the same amount a renewal takes off for an inspection we did not
+  get to. Term 8 says so.
+- Anyone in the office can add it. Storm inspection opens a box that says whether this one is
+  included or billed, what it costs, how much of the minor repairs goes toward it and what the
+  customer pays (`roof_care_storm_offer()`, `src/lib/roof-care-storm.ts`). A billed one is added
+  only from that box (`roof_care_add_storm(plan, p_billed_ok)`).
+- The price is kept on the inspection (`roof_care_visits.amount`). Its invoice is made at
+  Authorized with the plan's own line at that price. The minor repairs line that every repair
+  invoice uses then takes what is left of the allowance off that line and nothing else, so the
+  plan's tally and a refund count it as minor repairs used.
+- A refund counts a storm inspection as an inspection done only when it was one the plan
+  included.
 
 ## Still to build
 
@@ -505,6 +554,10 @@ for paying the year first (version 2026-11-19), and he agreed them the same day.
 `src/lib/roof-care-plan.ts`, dated by `ROOF_CARE_TERMS_VERSION`. The sign-up shows them with a
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.
+
+The set now in use is version 2026-11-19.4 (Nov 19, late): term 7 charges the return trip after
+the first visit of a plan year we could not do for want of access, and term 8 bills a storm
+inspection beyond the one the plan includes.
 
 ## Open
 

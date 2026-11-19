@@ -149,7 +149,10 @@ describe("a year paid by card is refunded less the card fee", () => {
     expect(settingsProblems(asRoofCareSettings({})).join(" ")).not.toContain("Card fee");
   });
   it("the agreement says so, in a new version", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.3");
+    // (Nov 19, late: version 2026-11-19.4. Term 7 charges the return trip after the first visit
+    // we could not do, and term 8 bills a further storm inspection.
+    // roof-care-no-access-storm-nov19.test.ts.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.4");
     expect(ROOF_CARE_TERMS[8]).toContain(
       "A year paid by card is refunded less the card processing fee on the amount refunded.",
     );

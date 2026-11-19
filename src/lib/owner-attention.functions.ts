@@ -51,6 +51,7 @@ import {
   visitState,
   visitUnbilled,
 } from "@/lib/roof-care-plan";
+import { tripUnbilled } from "@/lib/roof-care-no-access";
 import { plansOfSites } from "@/lib/roof-care-plan.functions";
 import { visibleToOwner } from "@/lib/owner-view";
 import { plusDays } from "@/lib/working-days";
@@ -322,7 +323,7 @@ async function careVisitsOfPlans(
       carried: [],
       expired: [],
     };
-  const all = await plansOfSites(sb, siteIds, { money: true });
+  const all = await plansOfSites(sb, siteIds, { money: true, noAccess: true });
   const live = all.filter((p) => p.status !== "ended");
   // An expired plan is the office's to chase unless the property has a plan in force or waiting.
   // One a manager closed out is done with.
@@ -409,6 +410,22 @@ async function careVisitsOfPlans(
         renewed: !!renewal,
         price: p.price,
       });
+    }
+    // A charged return trip after a visit with no access (Nov 19, late): its inspection is
+    // signed off and the charge is on no invoice.
+    for (const n of p.no_access ?? []) {
+      const ticket = p.visits.find((v) => v.id === n.visit_id)?.ticket ?? null;
+      if (ticket && tripUnbilled(n, ticket.stage))
+        unbilled.push({
+          visit_id: `trip:${n.id}`,
+          job_id: ticket.id,
+          number: ticket.number,
+          title,
+          label: "Return trip after no access",
+          amount: n.amount ?? 0,
+          since: ticket.completed_at,
+          trip: true,
+        });
     }
     for (const v of p.visits) {
       // One carried from last plan year has its own row, with its last day; a lost one is over.

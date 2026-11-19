@@ -326,6 +326,11 @@ export interface AttCareUnbilled {
   amount: number;
   /** When the inspection was finished (ISO), to age the row; null when unknown. */
   since: string | null;
+  /**
+   * Not the inspection's share: the return trip charged after a visit with no access (Nov 19,
+   * late), which is on no invoice.
+   */
+  trip?: boolean;
 }
 
 export interface AttentionIn {
@@ -834,7 +839,9 @@ export function attentionList(i: AttentionIn): AttentionList {
       kind: "care_plan_unbilled",
       tag: "Roof Care",
       title: v.title,
-      why: `${v.label} is done and its share of the plan is on no invoice. Open ticket #${v.number} and press ${CARE_PLAN_BILL_LABEL}.`,
+      why: v.trip
+        ? `A return trip was charged after a visit with no access, and it is on no invoice. Open ticket #${v.number}: press ${CARE_PLAN_BILL_LABEL}, or use Rebuild from ticket on its draft invoice.`
+        : `${v.label} is done and its share of the plan is on no invoice. Open ticket #${v.number} and press ${CARE_PLAN_BILL_LABEL}.`,
       ...office,
       age,
       ageText: days(age),

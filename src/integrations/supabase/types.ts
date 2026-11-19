@@ -3422,6 +3422,77 @@ export type Database = {
           },
         ]
       }
+      roof_care_no_access: {
+        Row: {
+          amount: number | null
+          at: string
+          by_name: string
+          by_user: string | null
+          charged: boolean
+          id: string
+          job_id: string | null
+          note: string
+          on_date: string
+          plan_id: string
+          visit_id: string
+        }
+        Insert: {
+          amount?: number | null
+          at?: string
+          by_name?: string
+          by_user?: string | null
+          charged?: boolean
+          id?: string
+          job_id?: string | null
+          note: string
+          on_date: string
+          plan_id: string
+          visit_id: string
+        }
+        Update: {
+          amount?: number | null
+          at?: string
+          by_name?: string
+          by_user?: string | null
+          charged?: boolean
+          id?: string
+          job_id?: string | null
+          note?: string
+          on_date?: string
+          plan_id?: string
+          visit_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_no_access_by_user_fkey"
+            columns: ["by_user"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_no_access_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_no_access_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_no_access_visit_id_fkey"
+            columns: ["visit_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_visits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       roof_care_offers: {
         Row: {
           at: string
@@ -6008,7 +6079,10 @@ export type Database = {
         Returns: Json
       }
       restore_table_oid: { Args: { p_table: string }; Returns: unknown }
-      roof_care_add_storm: { Args: { p_plan: string }; Returns: string }
+      roof_care_add_storm: {
+        Args: { p_billed_ok?: boolean; p_plan: string }
+        Returns: string
+      }
       roof_care_benefits: { Args: never; Returns: Json }
       roof_care_card_paid: {
         Args: { p_amount: number; p_on?: string; p_plan: string; p_ref: string }
@@ -6032,6 +6106,12 @@ export type Database = {
       }
       roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
       roof_care_mark_offered: { Args: { p_job: string }; Returns: undefined }
+      roof_care_no_access: {
+        Args: { p_job: string; p_note: string }
+        Returns: Json
+      }
+      roof_care_no_access_preview: { Args: { p_job: string }; Returns: Json }
+      roof_care_no_access_remove: { Args: { p_id: string }; Returns: undefined }
       roof_care_price: {
         Args: { p_hours?: number; p_miles?: number; p_sqft: number }
         Returns: Json
@@ -6108,6 +6188,7 @@ export type Database = {
         }
         Returns: string
       }
+      roof_care_storm_offer: { Args: { p_plan: string }; Returns: Json }
       save_checklist_items: { Args: { p_items: Json }; Returns: undefined }
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] }

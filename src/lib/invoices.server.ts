@@ -415,6 +415,16 @@ export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePl
     .eq("id", v.plan_id)
     .maybeSingle();
   if (pErr) throw new Error(`The Roof Care plan of this ticket: ${pErr.message}`);
+  // The return trips charged for this inspection (Nov 19, late): visits we could not do for
+  // want of access, after the first of the plan year. One with no amount worked out is left
+  // for the office to add by hand; the plan says so.
+  const { data: missed, error: nErr } = await sb
+    .from("roof_care_no_access")
+    .select("id, on_date, amount, at")
+    .eq("visit_id", v.id)
+    .eq("charged", true)
+    .order("at", { ascending: true });
+  if (nErr) throw new Error(`The Roof Care plan of this ticket: ${nErr.message}`);
   return {
     id: v.id,
     kind: v.kind,
@@ -422,6 +432,9 @@ export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePl
     plan: p?.plan ?? null,
     ended: p?.status === "ended",
     paid_first: !!p?.pay_first,
+    trips: (missed ?? [])
+      .filter((n) => n.amount != null && Number(n.amount) > 0)
+      .map((n) => ({ id: n.id, on: n.on_date, amount: Number(n.amount) })),
   };
 }
 

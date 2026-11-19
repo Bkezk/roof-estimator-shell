@@ -15,7 +15,8 @@
  */
 import { longDay } from "@/lib/followup-rules";
 import { CLEANING_LABEL, cleaningTally } from "@/lib/roof-care-cleaning";
-import { visitsDone, visitState, type RoofCarePlan } from "@/lib/roof-care-plan";
+import { noAccessTally } from "@/lib/roof-care-no-access";
+import { visitsDone, visitState, type PlanNoAccess, type RoofCarePlan } from "@/lib/roof-care-plan";
 import {
   money0,
   PLAN_KEYS,
@@ -174,7 +175,15 @@ export const SIGN_UP_BUTTON = "Agree and sign up";
 // ── What a plan has given so far ────────────────────────────────────────────────────────────
 
 export type BenefitKey =
-  "inspections" | "drains" | "gutters" | "repairs" | "leak_calls" | "storm" | "forecast";
+  | "inspections"
+  | "drains"
+  | "gutters"
+  | "repairs"
+  | "leak_calls"
+  | "storm"
+  | "forecast"
+  | "no_access";
+export const NO_ACCESS_TALLY_LABEL = "Visits with no access";
 export const FORECAST_LABEL = "Yearly budget forecast";
 export const FORECAST_MARK_SENT = "Mark the budget forecast sent";
 export const FORECAST_UNDO = "Not sent after all";
@@ -203,7 +212,7 @@ export function benefitsUsed(
     | "allowance_used"
     | "free_travel_calls"
     | "free_travel_used"
-  > & { forecast_sent_on?: string | null },
+  > & { forecast_sent_on?: string | null; no_access?: readonly PlanNoAccess[] | null },
   today: string,
   stormIncluded: number,
 ): BenefitUse[] {
@@ -264,19 +273,24 @@ export function benefitsUsed(
           : `${Math.min(used, plan.free_travel_calls)} of ${plan.free_travel_calls} used`,
     });
   }
-  // A storm inspection is used once it is asked for: its ticket is made then.
-  const storms = plan.visits.filter(
+  // A storm inspection is used once it is asked for: its ticket is made then. One beyond the
+  // ones the plan includes is billed by itself (Nov 19, late): it carries an amount, and is
+  // told apart here.
+  const stormVisits = plan.visits.filter(
     (v) => v.kind === "storm" && visitState(v, today) !== "lost",
-  ).length;
+  );
+  const stormBilled = stormVisits.filter((v) => v.amount > 0).length;
+  const storms = stormVisits.length - stormBilled;
   const stormOf = Math.max(0, Math.round(stormIncluded));
-  if (plan.plan === "guard" && (stormOf > 0 || storms > 0)) {
+  if (plan.plan === "guard" && (stormOf > 0 || stormVisits.length > 0)) {
+    const included =
+      storms > stormOf ? `${storms} used, ${stormOf} included` : `${storms} of ${stormOf} used`;
     out.push({
       key: "storm",
-      label: storms > stormOf ? "Storm inspections" : "Storm inspection",
+      label: stormVisits.length > 1 || storms > stormOf ? "Storm inspections" : "Storm inspection",
       used: storms,
       of: stormOf,
-      words:
-        storms > stormOf ? `${storms} used, ${stormOf} included` : `${storms} of ${stormOf} used`,
+      words: stormBilled > 0 ? `${included}, and ${stormBilled} more billed` : included,
     });
   }
   if (plan.plan === "guard") {
@@ -287,6 +301,17 @@ export function benefitsUsed(
       used: sent ? 1 : 0,
       of: 1,
       words: sent ? `Sent ${longDay(sent)}` : "Not sent yet",
+    });
+  }
+  // The times we could not get on the roof (Nov 19, late): for the office, once there is one.
+  if (plan.no_access?.length) {
+    const t = noAccessTally(plan.no_access);
+    out.push({
+      key: "no_access",
+      label: NO_ACCESS_TALLY_LABEL,
+      used: t.count,
+      of: 0,
+      words: t.words,
     });
   }
   return out;
