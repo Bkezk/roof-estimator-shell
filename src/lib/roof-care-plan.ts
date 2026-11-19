@@ -345,3 +345,29 @@ export const ROOF_CARE_TERMS: readonly string[] = [
   "The plan is not a warranty and does not cover replacing the roof.",
 ];
 export const TERMS_NOT_AGREED = "The customer has to agree to the plan's terms";
+
+// ── The price that is saved is the price that was shown (owner, Nov 19: "Fix") ──────────────
+//
+// Sign-up works the drive out again on the server, so the form cannot send its own. If the road
+// router answers differently the second time, or an admin changed the numbers in between, the
+// price would have been saved different from the one the customer had just agreed to. The form
+// now sends the price it showed, and the sign-up is refused when it is no longer the price.
+
+/** Starts the refusal, so the form knows to read the prices again. */
+export const PRICE_CHANGED = "The price changed";
+const wholeDollars = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+export function priceChangedLine(shown: number, now: number): string {
+  return (
+    PRICE_CHANGED +
+    ": this plan is now " +
+    wholeDollars(now) +
+    ", not the " +
+    wholeDollars(shown) +
+    " shown. The prices have been read again. Check them with the customer and press again."
+  );
+}
+export const isPriceChanged = (message: string): boolean => message.includes(PRICE_CHANGED);
+
+/** Under the drive, when the road router did not answer and the straight line was used. */
+export const DRIVE_ESTIMATED_LINE =
+  "The road route could not be read just now, so this drive is worked from the straight-line distance. The price is an estimate. Press Show prices again in a minute for the routed drive.";

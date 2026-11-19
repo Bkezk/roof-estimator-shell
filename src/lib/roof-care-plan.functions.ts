@@ -23,6 +23,7 @@ import { readProfile } from "@/lib/profile-cache.server";
 import {
   asPlanKey,
   FIRST_VISIT_CHOICES,
+  priceChangedLine,
   readPriceAnswer,
   ROOF_CARE_TERMS_VERSION,
   TERMS_NOT_AGREED,
@@ -247,6 +248,9 @@ const signUpInput = z.object({
   // The customer agreed to the plan's terms (owner, Nov 18): the form's tick, and no plan
   // without it. The database refuses it too.
   terms_agreed: z.literal(true, { errorMap: () => ({ message: TERMS_NOT_AGREED }) }),
+  // The yearly price the form showed for this plan (Nov 19): the plan is saved at that price
+  // or not at all.
+  shown_price: z.number().finite().positive(),
 });
 
 /** The tickets a plan's inspections have, to announce the ones just made. */
@@ -272,13 +276,26 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     // The drive is worked out here, not sent by the form: it is what the price hangs on.
     const drive = await siteDrive(sb, site);
     if (!drive) throw new Error(NOT_PLACED_LINE);
+    // The price the plan would be saved at, against the one the customer was shown.
+    const { data: priced, error: pErr } = await sb.rpc("roof_care_price", {
+      p_sqft: data.sqft,
+      p_hours: drive.hours,
+      p_miles: drive.miles,
+    });
+    if (pErr) throw new Error(pErr.message);
+    const answer = readPriceAnswer(priced);
+    const now = answer.ready ? answer.plans.find((o) => o.plan === data.plan) : undefined;
+    if (now && now.price !== Math.round(data.shown_price))
+      throw new Error(priceChangedLine(data.shown_price, now.price));
     const { data: planId, error } = await sb.rpc("roof_care_sign_up", {
       p_site: site.id,
       p_plan: data.plan,
       p_sqft: data.sqft,
       p_hours: drive.hours,
       p_miles: drive.miles,
-      p_estimated: placedRoughly(drive.placed_by),
+      // An estimate when the address was placed by its zip or town, or the road router did not
+      // answer and the straight line was used.
+      p_estimated: placedRoughly(drive.placed_by) || drive.source === "estimated",
       p_first: data.first,
       p_days: data.first === "days" ? (data.days ?? 0) : 0,
       p_agreed_by: data.agreed_by,

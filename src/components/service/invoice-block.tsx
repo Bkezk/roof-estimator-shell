@@ -34,9 +34,12 @@ import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, ShieldCheck, Trash2 } 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets, seesInvoices } from "@/lib/access";
 import {
+  CARE_PLAN_AUTHORIZE_NOTE,
   CARE_PLAN_BILL_LABEL,
   INSPECTION_BILL_LABEL,
   INVOICE_STAGES,
+  authorizedAnyway,
+  carePlanAuthorizedToast,
   endsAtAuthorized,
 } from "@/lib/ticket-stage";
 import { setServiceStage } from "@/lib/service.functions";
@@ -132,7 +135,8 @@ function BillInspectionCard({ job }: { job: ServiceJobWithTech }) {
       {carePlan ? (
         <p className="text-sm text-muted-foreground" data-care-plan-billing>
           This is a Roof Care plan inspection. Its invoice bills this visit’s share of the plan.
-          Make it here. A storm inspection is included in the plan and is not invoiced.
+          Make it here. A storm inspection is included in the plan: its invoice is for nothing and
+          keeps what the trip cost.
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -163,19 +167,40 @@ function AuthorizeCard({ job, signOff }: { job: ServiceJobWithTech; signOff: boo
   const { profile } = useAuth();
   const qc = useQueryClient();
   const stageFn = useServerFn(setServiceStage);
+  // A Roof Care plan inspection's invoice is made at this press (Nov 18): the card says so.
+  const carePlan = !!job.roof_care_visit_id;
+  const reread = () => {
+    void qc.invalidateQueries({ queryKey: ["service-job", job.id] });
+    void qc.invalidateQueries({ queryKey: ["service-jobs"] });
+    void qc.invalidateQueries({ queryKey: ["service-job-events", job.id] });
+  };
   const authorize = useMutation({
     mutationFn: () => stageFn({ data: { id: job.id, stage: "authorized" } }),
     onSuccess: () => {
       toast.success(
-        signOff
-          ? `Inspection #${job.number} authorized — complete`
-          : `Ticket #${job.number} authorized — ready to invoice`,
+        carePlan
+          ? carePlanAuthorizedToast(job.number)
+          : signOff
+            ? `Inspection #${job.number} authorized — complete`
+            : `Ticket #${job.number} authorized — ready to invoice`,
       );
-      void qc.invalidateQueries({ queryKey: ["service-job", job.id] });
-      void qc.invalidateQueries({ queryKey: ["service-jobs"] });
-      void qc.invalidateQueries({ queryKey: ["service-job-events", job.id] });
+      reread();
+      if (carePlan) {
+        void qc.invalidateQueries({ queryKey: ["invoices"] });
+        void qc.invalidateQueries({ queryKey: ticketInvoicesKey(job.id) });
+      }
     },
-    onError: (e) => toast.error(`Could not authorize the ticket: ${errText(e)}`),
+    onError: (e) => {
+      // Authorized, with the invoice not made (Nov 19): the ticket is read again, so the card
+      // shows the truth and its button, and the server's words are shown whole and stay up.
+      const anyway = authorizedAnyway(e);
+      if (anyway) {
+        reread();
+        toast.error(anyway, { duration: 20000 });
+        return;
+      }
+      toast.error(`Could not authorize the ticket: ${errText(e)}`);
+    },
   });
   return (
     <section
@@ -185,10 +210,12 @@ function AuthorizeCard({ job, signOff }: { job: ServiceJobWithTech; signOff: boo
       <h2 className="flex items-center gap-2 font-semibold">
         <ShieldCheck className="h-4 w-4" /> Needs authorization
       </h2>
-      <p className="text-sm text-muted-foreground">
-        {signOff
-          ? "The inspection is done. Once it is reviewed and authorized, it is complete. Nothing is invoiced unless a manager then chooses to bill it."
-          : "The work is done. Once it is reviewed and authorized, the invoice is made from the ticket's time and materials."}
+      <p className="text-sm text-muted-foreground" data-authorize-note={carePlan ? "care" : "any"}>
+        {carePlan
+          ? CARE_PLAN_AUTHORIZE_NOTE
+          : signOff
+            ? "The inspection is done. Once it is reviewed and authorized, it is complete. Nothing is invoiced unless a manager then chooses to bill it."
+            : "The work is done. Once it is reviewed and authorized, the invoice is made from the ticket's time and materials."}
       </p>
       {managesTickets(profile) ? (
         <Button disabled={authorize.isPending} onClick={() => authorize.mutate()}>

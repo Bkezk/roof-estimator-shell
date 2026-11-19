@@ -157,6 +157,11 @@ plan as running late.
 and is still open: `office_reference_notes`, key `roof-care-audit-2026-11-18`. Read that before
 changing prices, invoices or the inspection dates.
 
+**The fixes, Nov 19.** `docs/qa/roof-care-audit-fixes-2026-11-19.md`: one live ticket for an
+inspection, the saved price is the shown price, ending a plan takes its untouched tickets off
+the board, the drive's share adds up, and a care plan invoice saves its lines. The automatic
+invoice was tried live.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".

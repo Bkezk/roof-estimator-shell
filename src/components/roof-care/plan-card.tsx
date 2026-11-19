@@ -43,6 +43,8 @@ import {
   planDates,
   planName,
   pushPreview,
+  DRIVE_ESTIMATED_LINE,
+  isPriceChanged,
   ROOF_CARE_TERMS,
   roofCarePlansKey,
   runsLate,
@@ -501,6 +503,8 @@ function SignUpDialog({
           agreed_by: agreedBy.trim(),
           notes: notes.trim(),
           terms_agreed: true as const,
+          // The price on the screen: the plan is saved at it or not at all (Nov 19).
+          shown_price: plans.find((o) => o.plan === plan)!.price,
         },
       }),
     onSuccess: (made) => {
@@ -508,7 +512,16 @@ function SignUpDialog({
       toast.success(`${planName(made.plan)} plan started`);
       onClose();
     },
-    onError: (e) => toast.error(`Could not sign them up: ${errText(e)}`),
+    onError: (e) => {
+      const message = errText(e);
+      toast.error(`Could not sign them up: ${message}`, { duration: 20_000 });
+      // The price moved since it was shown: read the prices again, so the form shows the new
+      // one and the tick has to be given again for it.
+      if (isPriceChanged(message) && size) {
+        setAgreed(false);
+        price.mutate(size);
+      }
+    },
   });
   const w = nextWindow(today);
   return (
@@ -557,6 +570,11 @@ function SignUpDialog({
           {offer?.drive && (
             <p className="text-muted-foreground" data-sign-line="drive">
               Round trip from the office: {offer.drive.hours} h, {offer.drive.miles} miles.
+            </p>
+          )}
+          {offer?.drive?.source === "estimated" && (
+            <p className="text-amber-700 dark:text-amber-400" data-sign-line="drive-estimated">
+              {DRIVE_ESTIMATED_LINE}
             </p>
           )}
           {offer?.drive && placedRoughly(offer.drive.placed_by) && (
@@ -828,7 +846,8 @@ function EndDialog({
     mutationFn: () => endFn({ data: { plan_id: plan.id, reason: reason.trim() } }),
     onSuccess: () => {
       refresh();
-      toast.success("Plan ended");
+      // Its inspection tickets nobody had started are taken off the board (Nov 19).
+      toast.success("Plan ended. Its inspection tickets not yet started were taken off the board.");
       onClose();
     },
     onError: (e) => toast.error(`Could not end the plan: ${errText(e)}`),

@@ -175,7 +175,9 @@ export function settingsProblems(s: RoofCareSettings): string[] {
   return out;
 }
 
-const r2 = (n: number) => Math.round(n * 100) / 100;
+// To the cent, as the database rounds: half a cent goes up. The sum is cleaned of binary noise
+// first (0.285 held as 0.28499999… would round down where the database rounds up).
+const r2 = (n: number) => Math.round(Number((n * 100).toFixed(6))) / 100;
 const dollars = (n: number) => Math.round(n);
 
 /**
@@ -346,7 +348,9 @@ export function roofCareQuote(
           plan: p,
           name: PLAN_NAMES[p],
           list: dollars(list),
-          travel: dollars(travel),
+          // The price less the list price, so "X plus Y for the drive" always adds up (Nov 19:
+          // each was rounded on its own and the two could be a dollar off the price).
+          travel: price - dollars(list),
           price,
           per_visit: [first, price - first],
           trips,

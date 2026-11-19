@@ -22,6 +22,19 @@ export interface CarePlanVisitRef {
   kind: string;
   amount: number;
   plan: string | null;
+  /** The plan has been ended (Nov 19): nothing is billed for it without a person pressing. */
+  ended?: boolean;
+}
+
+/**
+ * Whether the invoice is made by itself when the inspection is authorized (owner, Nov 19):
+ * a visit with its half to bill, or a storm inspection, whose invoice is for nothing but carries
+ * what the trip cost so the Owner page counts it. Never for a plan that has been ended: the
+ * office presses the button if the work was done and is owed.
+ */
+export function billsItself(visit: CarePlanVisitRef | null): boolean {
+  if (!visit || visit.ended) return false;
+  return visit.amount > 0 || visit.kind === "storm";
 }
 
 const asKind = (k: string): VisitKind =>
@@ -44,8 +57,21 @@ export function carePlanOwnLine(visit: CarePlanVisitRef) {
     source: carePlanLineSource(visit.id),
     // A service, as labor is: not taxed.
     taxable: false,
+    // The price is the plan's, not typed by hand.
+    rate_overridden: false,
     show_on_invoice: true,
+    hide_price: false,
   };
+}
+
+/**
+ * The three switches of an invoice line, each as the database would default it. Rows saved in
+ * one request must all name the same columns: a column one row names and another leaves out is
+ * saved as nothing on the row that left it out, and the database refuses the whole request
+ * (Nov 19, the live test: a care plan invoice with time on the ticket was left with no lines).
+ */
+export function withLineSwitches<T extends object>(line: T) {
+  return { rate_overridden: false, show_on_invoice: false, hide_price: false, ...line };
 }
 
 /**
@@ -53,7 +79,14 @@ export function carePlanOwnLine(visit: CarePlanVisitRef) {
  * was. Marked as typed so the editor shows the 0 in a box and not "cost + 75%".
  */
 export function carePlanCovered<T extends object>(line: T, sort: number) {
-  return { ...line, sort, rate: 0, total: 0, taxable: false, rate_overridden: true };
+  return {
+    ...withLineSwitches(line),
+    sort,
+    rate: 0,
+    total: 0,
+    taxable: false,
+    rate_overridden: true,
+  };
 }
 
 /** The plan's line, then the ticket's lines at no charge. */

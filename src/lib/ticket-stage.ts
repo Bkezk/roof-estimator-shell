@@ -65,6 +65,24 @@ export const INSPECTION_BILL_LABEL = "Invoice this inspection";
 export const INSPECTION_BILL_MANAGER = "Only a manager can bill an inspection";
 /** The same button on a Roof Care plan inspection, which is billed as a matter of course. */
 export const CARE_PLAN_BILL_LABEL = "Invoice this care plan inspection";
+/**
+ * What the Needs authorization card says on a Roof Care plan inspection (Nov 19). It used to
+ * say nothing is invoiced, as for any inspection, while the invoice is made at that press.
+ */
+export const CARE_PLAN_AUTHORIZE_NOTE =
+  "The inspection is done. Once it is reviewed and authorized, its draft invoice is made by itself. A visit bills its half of the plan. A storm inspection is included: its invoice is for nothing and keeps what the trip cost.";
+/** The toast after that press. */
+export const carePlanAuthorizedToast = (number: number | string) =>
+  `Inspection #${number} authorized. Its draft invoice is on the ticket.`;
+/**
+ * How the server's message starts when the ticket was authorized and its invoice was not made.
+ * The screen shows it whole and reads the ticket again: the ticket is authorized.
+ */
+export const AUTHORIZED_BUT = "The ticket is authorized, but";
+export const authorizedAnyway = (e: unknown): string | null => {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return m.includes(AUTHORIZED_BUT) ? m.slice(m.indexOf(AUTHORIZED_BUT)) : null;
+};
 export const isInspectionType = (serviceType: string | null | undefined): boolean =>
   serviceType === "inspection";
 /** Does the ticket end at its sign-off? An inspection, unless it has been billed. */

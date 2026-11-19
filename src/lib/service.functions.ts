@@ -51,6 +51,7 @@ import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
+  AUTHORIZED_BUT,
   AWAITS_INVOICE_OR,
   CARE_PLAN_BILL_LABEL,
   INSPECTION_STAGE_MESSAGE,
@@ -904,7 +905,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
         });
       } catch (e) {
         throw new Error(
-          `The ticket is authorized, but the invoice for this care plan inspection was not made (${e instanceof Error ? e.message : String(e)}). Open the ticket and press ${CARE_PLAN_BILL_LABEL}.`,
+          `${AUTHORIZED_BUT} the invoice for this care plan inspection was not made (${e instanceof Error ? e.message : String(e)}). Open the ticket and press ${CARE_PLAN_BILL_LABEL}.`,
         );
       }
     }

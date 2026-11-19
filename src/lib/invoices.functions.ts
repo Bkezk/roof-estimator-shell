@@ -446,7 +446,8 @@ export async function ensureCarePlanInvoice(
   if (!job?.roof_care_visit_id) return false;
   const { carePlanVisit } = await import("@/lib/invoices.server");
   const visit = await carePlanVisit(sb, job.roof_care_visit_id);
-  if (!visit || !(visit.amount > 0)) return false;
+  const { billsItself } = await import("@/lib/roof-care-invoice");
+  if (!billsItself(visit)) return false;
   if ((await liveInvoices(sb, jobId)).length) return false;
   await createInvoiceFor(sb, jobId, { id: actor.id, name: actor.name ?? "", manages: true }, true);
   return true;
@@ -685,10 +686,21 @@ async function createInvoiceFor(
   }
   if (insErr || !inv) throw new Error(insErr?.message ?? "The invoice was not created");
   if (lines.length) {
+    // Every row names the same columns (roof-care-invoice.ts withLineSwitches): the plan's own
+    // line and the ticket's lines did not, and the database refused them all (Nov 19).
+    const { withLineSwitches } = await import("@/lib/roof-care-invoice");
     const { error: lErr } = await sb
       .from("invoice_lines")
-      .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
-    if (lErr) throw new Error(lErr.message);
+      .insert(lines.map((l) => ({ ...withLineSwitches(l), invoice_id: inv.id })));
+    if (lErr) {
+      // An invoice with a total and no lines is not left behind (Nov 19: each press left one).
+      const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
+      throw new Error(
+        dErr
+          ? `${lErr.message}. An empty invoice ${inv.display_number ?? ""} was left behind and could not be removed (${dErr.message}): delete it on the Invoices page`
+          : lErr.message,
+      );
+    }
   }
   // The ticket points at its newest invoice. The database sets the pointer too when the ticket
   // had none (trigger invoices_ticket_pointer), so someone without Service access still leaves

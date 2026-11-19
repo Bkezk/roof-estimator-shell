@@ -58,6 +58,8 @@ import {
   planDates,
   pushPreview,
   PUSH_NEEDS_MANAGER,
+  isPriceChanged,
+  priceChangedLine,
   PUSH_NEEDS_REASON,
   readPriceAnswer,
   ROOF_CARE_TERMS,
@@ -518,8 +520,24 @@ describe("signing a customer up", () => {
           },
         ],
       },
-      { roof_care_sign_up: rpc },
+      // Nov 19: the sign-up asks the database for the price first, to hold it against the one
+      // the form showed (made-up numbers; the real ones are not in the repository).
+      { roof_care_sign_up: rpc, roof_care_price: () => priced.answer },
     );
+  const priced = {
+    answer: {
+      ready: true,
+      custom_quote: false,
+      baseline_hours: 2,
+      baseline_miles: 100,
+      beyond_baseline: true,
+      plans: [
+        { plan: "watch", list: 100, travel: 10, price: 110, visit1: 55, visit2: 55, trips: 2 },
+        { plan: "care", list: 200, travel: 10, price: 210, visit1: 105, visit2: 105, trips: 2 },
+        { plan: "guard", list: 300, travel: 21, price: 321, visit1: 161, visit2: 160, trips: 4 },
+      ],
+    } as Record<string, unknown>,
+  };
   const form = {
     site_id: SITE,
     plan: "guard",
@@ -529,7 +547,52 @@ describe("signing a customer up", () => {
     agreed_by: " Pat Smith ",
     notes: "",
     terms_agreed: true,
+    shown_price: 321,
   };
+
+  it("a price that is no longer the one shown is refused, and nothing is saved (Nov 19)", async () => {
+    // The owner, of the audit's finding that the saved price could differ from the shown one:
+    // "Fix". The drive is worked out again at sign-up; if it or the numbers changed, the plan
+    // would have been saved at a price the customer never saw.
+    const seen: Record<string, unknown>[] = [];
+    const env = signed((a) => {
+      seen.push(a);
+      return PLAN;
+    });
+    await expect(call(signUpRoofCare, env, { ...form, shown_price: 300 })).rejects.toThrow(
+      priceChangedLine(300, 321),
+    );
+    expect(seen).toEqual([]);
+    expect(env.writes).toEqual([]);
+    expect(announced).not.toHaveBeenCalled();
+    expect(isPriceChanged(priceChangedLine(300, 321))).toBe(true);
+    expect(priceChangedLine(1300, 12086)).toBe(
+      "The price changed: this plan is now $12,086, not the $1,300 shown. The prices have been read again. Check them with the customer and press again.",
+    );
+    // The same price goes through.
+    await call(signUpRoofCare, env, form);
+    expect(seen).toHaveLength(1);
+  });
+  it("the form sends the price it showed, and reads the prices again when it is refused", () => {
+    const card = flat(read("src/components/roof-care/plan-card.tsx"));
+    expect(card).toContain("shown_price: plans.find((o) => o.plan === plan)!.price,");
+    expect(card).toContain(
+      "if (isPriceChanged(message) && size) { setAgreed(false); price.mutate(size); }",
+    );
+  });
+  it("a drive worked from the straight line marks the price as an estimate, and the form says so", async () => {
+    drive.mockResolvedValue({ ...ROUTED, source: "estimated" });
+    const seen: Record<string, unknown>[] = [];
+    const env = signed((a) => {
+      seen.push(a);
+      return PLAN;
+    });
+    await call(signUpRoofCare, env, form);
+    expect(seen[0]!["p_estimated"]).toBe(true);
+    const card = flat(read("src/components/roof-care/plan-card.tsx"));
+    expect(card).toContain('{offer?.drive?.source === "estimated" && (');
+    expect(card).toContain("{DRIVE_ESTIMATED_LINE}");
+  });
 
   it("the database is given the server's own drive, and the price is its to work out", async () => {
     const seen: Record<string, unknown>[] = [];
@@ -730,12 +793,16 @@ describe("the invoice of a care plan inspection", () => {
       taxable: false,
       source: "time:1",
     };
+    // (Nov 19: every line now names the three switches, so the rows can be saved together;
+    // roof-care-audit-fixes-nov19.test.ts.)
     expect(carePlanCovered(labor, 1)).toEqual({
       ...labor,
       sort: 1,
       rate: 0,
       total: 0,
       rate_overridden: true,
+      show_on_invoice: false,
+      hide_price: false,
     });
     const lines = carePlanInvoiceLines([labor], ref);
     expect(lines.map((l) => l.total)).toEqual([1000, 0]);
@@ -799,7 +866,10 @@ describe("the invoice of a care plan inspection", () => {
     expect(inv).toContain(
       "if (isInspectionType(job.service_type) && !job.roof_care_visit_id && !actor.manages) {",
     );
-    expect(inv).toContain("if (!visit || !(visit.amount > 0)) return false;");
+    expect(inv).toContain(
+      // (Nov 19: the rule has a name, billsItself; roof-care-audit-fixes-nov19.test.ts.)
+      "if (!billsItself(visit)) return false;",
+    );
     expect(inv).toContain("if ((await liveInvoices(sb, jobId)).length) return false;");
     const svc = flat(read("src/lib/service.functions.ts"));
     expect(svc).toContain(

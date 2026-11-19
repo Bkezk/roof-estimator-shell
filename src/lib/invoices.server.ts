@@ -371,11 +371,17 @@ export async function carePlanVisit(sb: Client, visitId: string): Promise<CarePl
   if (!v) return null;
   const { data: p, error: pErr } = await sb
     .from("roof_care_plans")
-    .select("plan")
+    .select("plan, status")
     .eq("id", v.plan_id)
     .maybeSingle();
   if (pErr) throw new Error(`The Roof Care plan of this ticket: ${pErr.message}`);
-  return { id: v.id, kind: v.kind, amount: Number(v.amount), plan: p?.plan ?? null };
+  return {
+    id: v.id,
+    kind: v.kind,
+    amount: Number(v.amount),
+    plan: p?.plan ?? null,
+    ended: p?.status === "ended",
+  };
 }
 
 /** Totals from lines and the tax rule. */
