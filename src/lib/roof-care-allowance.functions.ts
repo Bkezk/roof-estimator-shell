@@ -6,9 +6,9 @@
  *    has nothing to do with it.
  *  - setInvoiceAllowance: the office's answer. "applied" puts one line on the invoice that takes
  *    the covered amount off; "declined" takes any such line away and keeps the answer.
- *  - invoiceAllowanceOf, keepAllowanceInStep: for the invoice functions (finalise, save,
- *    rebuild), so the answer is asked for before Finalise and the line never outgrows the
- *    invoice.
+ *  - invoiceAllowanceOf, syncAllowance: for the invoice functions (new draft, save, rebuild,
+ *    finalise), so the plan is used by itself while it has allowance left, the line never
+ *    outgrows the invoice, and Finalise is refused if nothing was ever chosen.
  *
  * Every read and write is the caller's own sign-in. The database holds the two hard rules (the
  * lines of a plan never add up past its allowance; no Finalise without an answer).
@@ -22,12 +22,10 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   ALLOWANCE_NOT_HERE,
   ALLOWANCE_NOTHING_TO_TAKE,
-  allowanceAfterChange,
   allowanceAmount,
   allowanceLine,
   allowanceLineSource,
-  allowanceTaken,
-  billableBefore,
+  allowanceStep,
   invoiceAllowance,
   isAllowanceLine,
   type InvoiceAllowance,
@@ -98,32 +96,40 @@ export async function invoiceAllowanceOf(
 }
 
 /**
- * After the invoice's other lines were written (a save, a rebuild): its allowance line is held
- * to what the invoice now bills. A line with nothing left to cover goes, and the question is
- * open again. Answers whether anything was changed, so the caller reads the lines again.
+ * After an invoice is made or its lines change (a new draft, a save, a rebuild): its allowance
+ * line is put where the rule says (roof-care-allowance.ts allowanceStep). Nobody has chosen:
+ * the plan covers all it can, ticked by itself (owner, Nov 19). A typed amount is held and only
+ * ever cut to what the invoice still bills. A "no" stays. An invoice billed to a vendor takes
+ * nothing from the customer's plan. Answers whether anything was changed, so the caller reads
+ * the invoice again; the totals are written here with the line.
  */
-export async function keepAllowanceInStep(
+export async function syncAllowance(
   sb: Sb,
-  inv: Pick<InvoiceRow, "id" | "care_allowance_choice">,
+  inv: Pick<
+    InvoiceRow,
+    "id" | "service_job_id" | "bill_to_vendor_id" | "care_allowance_choice" | "tax_rate"
+  >,
   lines: readonly LineRow[],
 ): Promise<boolean> {
   const own = lines.filter(isAllowanceLine);
-  if (!own.length) {
-    // "Applied" with no line: the line was removed by hand. The answer is asked for again.
-    if (inv.care_allowance_choice !== "applied") return false;
-    const { error } = await sb
-      .from("invoices")
-      .update({ care_allowance_choice: null, care_allowance_plan_id: null })
-      .eq("id", inv.id);
-    if (error) throw new Error(error.message);
-    return true;
+  const where = await invoiceAllowanceOf(sb, inv, lines);
+  let amount = 0;
+  let choice: InvoiceAllowance["choice"] = null;
+  if (where) {
+    ({ amount, choice } = allowanceStep({
+      choice: where.choice,
+      taken: where.applied,
+      cap: where.cap,
+    }));
+    if (amount === where.applied && choice === where.choice && own.length <= 1) return false;
+  } else {
+    // The plan has no say. Only a vendor's invoice is certain enough to take the line away:
+    // "no plan" can also mean the reader may not see the property's plan.
+    if (!inv.bill_to_vendor_id || (!own.length && !inv.care_allowance_choice)) return false;
   }
-  const taken = allowanceTaken(lines);
-  const keep = allowanceAfterChange(taken, billableBefore(lines));
-  if (keep === taken && own.length === 1) return false;
   const [first, ...extra] = own;
-  if (extra.length || keep <= 0) {
-    const gone = keep <= 0 ? own : extra;
+  const gone = amount > 0 ? extra : own;
+  if (gone.length) {
     const { error } = await sb
       .from("invoice_lines")
       .delete()
@@ -134,20 +140,38 @@ export async function keepAllowanceInStep(
       .eq("invoice_id", inv.id);
     if (error) throw new Error(error.message);
   }
-  if (keep > 0) {
-    const { error } = await sb
-      .from("invoice_lines")
-      .update({ qty: 1, rate: -keep, total: -keep })
-      .eq("id", first!.id)
-      .eq("invoice_id", inv.id);
-    if (error) throw new Error(error.message);
-  } else {
-    const { error } = await sb
-      .from("invoices")
-      .update({ care_allowance_choice: null, care_allowance_plan_id: null })
-      .eq("id", inv.id);
-    if (error) throw new Error(error.message);
+  if (amount > 0 && where) {
+    if (first) {
+      const { error } = await sb
+        .from("invoice_lines")
+        .update({ qty: 1, rate: -amount, total: -amount })
+        .eq("id", first.id)
+        .eq("invoice_id", inv.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const sort = lines.reduce((m, l) => Math.max(m, l.sort), -1) + 1;
+      const { error } = await sb.from("invoice_lines").insert({
+        ...allowanceLine({ id: where.plan_id, plan: where.plan }, amount, sort),
+        invoice_id: inv.id,
+      });
+      if (error) throw new Error(error.message);
+    }
   }
+  const { data: now, error: lErr } = await sb
+    .from("invoice_lines")
+    .select("*")
+    .eq("invoice_id", inv.id);
+  if (lErr) throw new Error(lErr.message);
+  const { totals } = await import("@/lib/invoices.server");
+  const { error: uErr } = await sb
+    .from("invoices")
+    .update({
+      ...totals(now ?? [], Number(inv.tax_rate)),
+      care_allowance_choice: choice,
+      care_allowance_plan_id: choice && where ? where.plan_id : null,
+    })
+    .eq("id", inv.id);
+  if (uErr) throw new Error(uErr.message);
   return true;
 }
 
@@ -229,6 +253,10 @@ export const setInvoiceAllowance = createServerFn({ method: "POST" })
         .eq("invoice_id", inv.id);
       if (dErr) throw new Error(dErr.message);
     }
+    // "Use the plan" with no amount typed: all it can take, and it follows the invoice from
+    // here on ("auto"). A typed amount is the office's own and is held.
+    const choice =
+      data.choice === "declined" ? "declined" : data.amount == null ? "auto" : "applied";
     if (data.choice === "applied") {
       const amount = allowanceAmount(data.amount, where.cap);
       if (!(amount > 0)) throw new Error(ALLOWANCE_NOTHING_TO_TAKE);
@@ -246,7 +274,7 @@ export const setInvoiceAllowance = createServerFn({ method: "POST" })
       .from("invoices")
       .update({
         ...totals(lines, Number(inv.tax_rate)),
-        care_allowance_choice: data.choice,
+        care_allowance_choice: choice,
         care_allowance_plan_id: where.plan_id,
         updated_by_name: nameOf(p),
       })

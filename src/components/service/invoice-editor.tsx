@@ -75,12 +75,7 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
-import {
-  allowanceMoney,
-  isAllowanceLine,
-  type AllowanceChoice,
-  type InvoiceAllowance,
-} from "@/lib/roof-care-allowance";
+import { allowanceMoney, isAllowanceLine, type InvoiceAllowance } from "@/lib/roof-care-allowance";
 import { getInvoiceAllowance, setInvoiceAllowance } from "@/lib/roof-care-allowance.functions";
 import { planName } from "@/lib/roof-care-plan";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
@@ -982,6 +977,16 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             : h,
         );
       ctx.applied(r, { quiet: true });
+      // The Roof Care plan's line is the server's (Nov 19): it follows the invoice by itself, so
+      // what came back replaces what is on the screen when the two differ.
+      const own = r.lines.filter(isAllowanceLine).map(lineFrom);
+      setLines((ls) => {
+        const mine = ls.filter(isAllowanceLine);
+        const same =
+          mine.length === own.length &&
+          mine.every((l, i) => l.key === own[i]!.key && l.rate === own[i]!.rate);
+        return same ? ls : [...ls.filter((l) => !isAllowanceLine(l)), ...own];
+      });
     },
     { what: `Invoice #${no}`, delay: 900, signal: false },
   );
@@ -1075,7 +1080,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     enabled: !!job,
     placeholderData: (prev) => prev,
   });
-  const answerAllowance = (choice: AllowanceChoice, amount: number | null) =>
+  const answerAllowance = (choice: AllowanceAnswer, amount: number | null) =>
     run("allowance", "Could not save the answer", async () => {
       // What is still waiting goes first, so the amount is worked from the lines as they are.
       await autosave.flush();
@@ -2005,6 +2010,9 @@ function usePoCost(
   };
 }
 
+/** What the office presses in the plan box: use the plan, or not. */
+type AllowanceAnswer = "applied" | "declined";
+
 /**
  * The Roof Care plan box on a repair invoice (owner, Nov 19: "I like the tick idea"; "think
  * about how we can ensure this is followed"). It says what is left of the plan's yearly minor
@@ -2017,7 +2025,7 @@ function AllowanceBox({
 }: {
   a: InvoiceAllowance;
   busy: boolean;
-  onAnswer: (choice: AllowanceChoice, amount: number | null) => void;
+  onAnswer: (choice: AllowanceAnswer, amount: number | null) => void;
 }) {
   // Blank: all that can be taken (number boxes start blank).
   const [text, setText] = useState("");
@@ -2046,9 +2054,17 @@ function AllowanceBox({
         {allowanceMoney(a.allowance)} of minor repairs is left this plan year
         {a.applied > 0 ? ", before this invoice" : ""}.
       </p>
+      {a.choice === "auto" && (
+        <p className="font-medium" data-allowance-answer>
+          Ticked by itself: {allowanceMoney(a.applied)} is taken off this invoice under the plan,
+          all it can cover. {allowanceMoney(Math.max(0, a.left - a.applied))} is left after it. It
+          follows the invoice if its lines change. If this is not a minor repair, press Does not use
+          the plan.
+        </p>
+      )}
       {a.choice === "applied" && (
         <p className="font-medium" data-allowance-answer>
-          {allowanceMoney(a.applied)} is taken off this invoice under the plan.{" "}
+          {allowanceMoney(a.applied)} is taken off this invoice under the plan, as typed.{" "}
           {allowanceMoney(Math.max(0, a.left - a.applied))} is left after it.
         </p>
       )}
@@ -2062,7 +2078,7 @@ function AllowanceBox({
           Does this invoice use the plan? Finalise waits for the answer.
         </p>
       )}
-      {!canTake && a.choice !== "applied" && (
+      {!canTake && a.choice !== "applied" && a.choice !== "auto" && (
         <p className="text-muted-foreground">
           {a.left > 0
             ? "The invoice bills nothing yet, so there is nothing for the plan to cover."
@@ -2084,7 +2100,7 @@ function AllowanceBox({
             />
           </div>
           <Button type="button" disabled={busy} onClick={apply} data-action="allowance-apply">
-            {a.choice === "applied" ? "Change the amount" : "Use the plan"}
+            {a.choice === "applied" || a.choice === "auto" ? "Change the amount" : "Use the plan"}
           </Button>
           {a.choice !== "declined" && (
             <Button
@@ -2099,7 +2115,7 @@ function AllowanceBox({
           )}
         </div>
       )}
-      {!canTake && a.choice === "applied" && (
+      {!canTake && (a.choice === "applied" || a.choice === "auto") && (
         <Button
           type="button"
           variant="outline"

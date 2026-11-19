@@ -418,8 +418,8 @@ export function RoofCareCard({
                     </p>
                   )}
                   <p className="text-muted-foreground">
-                    A repair invoice at this property asks whether it uses the plan before it can be
-                    finalised.
+                    A repair invoice at this property uses the plan by itself while any is left.
+                    Untick it on the invoice when the repair is not a minor one.
                   </p>
                 </>
               )}

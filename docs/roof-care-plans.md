@@ -170,8 +170,10 @@ Record: `docs/qa/roof-care-followups-2026-11-19.md`.
   customer or tech." The sign-up shows each plan's price and its two halves. The drive, the list
   price and what the distance adds stay on the server. The Setup page still shows them to admins.
 - **The minor repairs a plan includes each year** are kept on the plan and shown under its status
-  on the property page. A repair invoice at that property asks whether it uses the plan, and is
-  not finalised until that is answered. The owner chose the tick over taking it off by itself.
+  on the property page. A repair invoice at that property uses the plan by itself while any is
+  left ("can we have the tick auto ticked if there is still any allowance left?"). The office
+  unticks it on the invoice when the repair is not a minor one, or types a smaller amount.
+  Leak calls are not part of this: only minor repairs are included.
 - **No skips.** Two inspections are owed a year. A care plan ticket that is deleted is made
   again by the morning check, and that stands.
 - **The roof size on a plan is not changed after sign-up.** "That's fine since it's invoiced at

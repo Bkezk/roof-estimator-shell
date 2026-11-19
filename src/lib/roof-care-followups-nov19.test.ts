@@ -40,6 +40,7 @@ import {
   allowanceLineSource,
   allowancePlanOf,
   allowanceStatusWords,
+  allowanceStep,
   allowanceTaken,
   allowanceUnanswered,
   billableBefore,
@@ -48,7 +49,7 @@ import {
 } from "@/lib/roof-care-allowance";
 import {
   invoiceAllowanceOf,
-  keepAllowanceInStep,
+  syncAllowance,
   setInvoiceAllowance,
   type SetAllowanceResult,
 } from "@/lib/roof-care-allowance.functions";
@@ -746,13 +747,14 @@ describe("10. the yearly minor repairs: on an invoice", () => {
       taxable: false,
       show_on_invoice: true,
     });
+    // No amount typed: all it can take, and it follows the invoice from here on.
     expect(r.invoice).toMatchObject({
-      care_allowance_choice: "applied",
+      care_allowance_choice: "auto",
       care_allowance_plan_id: PLAN,
       subtotal: 620,
       total: 620,
     });
-    expect(r.allowance).toMatchObject({ applied: 180, choice: "applied", left: 180 });
+    expect(r.allowance).toMatchObject({ applied: 180, choice: "auto", left: 180 });
     // Pressed again with a smaller amount: still one line, at the new amount.
     const again = await call<SetAllowanceResult>(setInvoiceAllowance, env, {
       id: INV,
@@ -816,37 +818,136 @@ describe("10. the yearly minor repairs: on an invoice", () => {
     await expect(set(env, TECH)).rejects.toThrow();
     expect(env.writes).toEqual([]);
   });
-  it("after a save changed the invoice, the line is held to what it now bills", async () => {
-    type Step = Parameters<typeof keepAllowanceInStep>;
-    const step = async (env: Env) => {
-      const changed = await keepAllowanceInStep(
-        sb(env) as unknown as Step[0],
-        env.tables["invoices"]![0] as unknown as Step[1],
-        env.tables["invoice_lines"] as unknown as Step[2],
-      );
-      return { changed, lines: env.tables["invoice_lines"]!, inv: env.tables["invoices"]![0]! };
-    };
-    const applied = { care_allowance_choice: "applied", care_allowance_plan_id: PLAN };
-    // Still within what the invoice bills: nothing is touched.
-    let r = await step(
-      world({ invoices: [draft(applied)], invoice_lines: [work(1, 800), taken(2, 100, INV)] }),
+  // Owner, Nov 19: "can we have the tick auto ticked if there is still any allowance left?"
+  const step = async (env: Env, over: Record<string, unknown> = {}) => {
+    type Step = Parameters<typeof syncAllowance>;
+    const inv = { ...env.tables["invoices"]![0]!, ...over };
+    const changed = await syncAllowance(
+      sb(env) as unknown as Step[0],
+      inv as unknown as Step[1],
+      env.tables["invoice_lines"]!.filter(
+        (l) => l["invoice_id"] === inv["id"],
+      ) as unknown as Step[2],
     );
+    const lines = env.tables["invoice_lines"]!.filter((l) => l["invoice_id"] === INV);
+    return { changed, lines, own: lines.filter(isAllowanceLine), inv: env.tables["invoices"]![0]! };
+  };
+  const at = (invoice: Record<string, unknown>, lines: Tables[string], over: Tables = {}) =>
+    world({ service_jobs: [repair], invoices: [draft(invoice)], invoice_lines: lines, ...over });
+  it("it is ticked by itself: a new repair invoice takes all the plan can cover", async () => {
+    const r = await step(at({}, [work(1, 800)]));
+    expect(r.changed).toBe(true);
+    expect(r.own).toHaveLength(1);
+    expect(r.own[0]).toMatchObject({ total: -300, rate: -300, taxable: false });
+    expect(r.inv).toMatchObject({
+      care_allowance_choice: "auto",
+      care_allowance_plan_id: PLAN,
+      subtotal: 500,
+      total: 500,
+    });
+    // A smaller invoice is covered whole, and no further.
+    const small = await step(at({}, [work(1, 75)]));
+    expect(small.own[0]).toMatchObject({ total: -75 });
+    expect(small.inv["total"]).toBe(0);
+  });
+  it("ticked by itself, it follows the invoice up and down", async () => {
+    const auto = { care_allowance_choice: "auto", care_allowance_plan_id: PLAN };
+    // The work grew from 100 to 800: the line grows to all that is left.
+    let r = await step(at(auto, [work(1, 800), taken(2, 100, INV)]));
+    expect(r.own.map((l) => l["total"])).toEqual([-300]);
+    // The work was cut to 60: the line follows it down.
+    r = await step(at(auto, [work(1, 60), taken(2, 300, INV)]));
+    expect(r.own.map((l) => l["total"])).toEqual([-60]);
+    expect(r.inv["care_allowance_choice"]).toBe("auto");
+    // Nothing left to bill: the line goes, to come back with the work.
+    r = await step(at(auto, [taken(2, 300, INV)]));
+    expect(r.own).toEqual([]);
+    expect(r.inv["care_allowance_choice"]).toBeNull();
+    // Already right: nothing is written.
+    const env = at(auto, [work(1, 800), taken(2, 300, INV)]);
+    expect((await step(env)).changed).toBe(false);
+    expect(env.writes).toEqual([]);
+  });
+  it("only what the plan's other invoices left is taken", async () => {
+    const r = await step(
+      at({}, [work(1, 800), taken(2, 120, INV_B)], {
+        invoices: [draft(), { id: INV_B, status: "final", service_job_id: REPAIR }],
+      }),
+    );
+    expect(r.own.map((l) => l["total"])).toEqual([-180]);
+    // Used up: nothing is ticked and nothing is asked.
+    const none = await step(
+      at({}, [work(1, 800), taken(2, 300, INV_B)], {
+        invoices: [draft(), { id: INV_B, status: "final", service_job_id: REPAIR }],
+      }),
+    );
+    expect(none.changed).toBe(false);
+    expect(none.own).toEqual([]);
+  });
+  it("an amount typed by the office is held: it never grows, and is cut to what the invoice bills", async () => {
+    const typed = { care_allowance_choice: "applied", care_allowance_plan_id: PLAN };
+    let r = await step(at(typed, [work(1, 800), taken(2, 100, INV)]));
     expect(r.changed).toBe(false);
-    // The work was cut to 60: the line takes 60.
-    r = await step(
-      world({ invoices: [draft(applied)], invoice_lines: [work(1, 60), taken(2, 100, INV)] }),
-    );
-    expect(r.changed).toBe(true);
-    expect(r.lines.find(isAllowanceLine)).toMatchObject({ total: -60, rate: -60 });
+    r = await step(at(typed, [work(1, 60), taken(2, 100, INV)]));
+    expect(r.own.map((l) => l["total"])).toEqual([-60]);
     expect(r.inv["care_allowance_choice"]).toBe("applied");
-    // Nothing left to bill: the line goes and the question is open again.
-    r = await step(world({ invoices: [draft(applied)], invoice_lines: [taken(2, 100, INV)] }));
-    expect(r.lines).toEqual([]);
-    expect(r.inv["care_allowance_choice"]).toBeNull();
-    // The line was removed by hand: the question is open again.
-    r = await step(world({ invoices: [draft(applied)], invoice_lines: [work(1, 800)] }));
+  });
+  it("a no stays a no, whatever the invoice then bills", async () => {
+    const env = at({ care_allowance_choice: "declined", care_allowance_plan_id: PLAN }, [
+      work(1, 800),
+    ]);
+    const r = await step(env);
+    expect(r.changed).toBe(false);
+    expect(r.own).toEqual([]);
+    expect(env.writes).toEqual([]);
+  });
+  it("an invoice switched to a vendor takes nothing from the customer's plan", async () => {
+    const env = at({ care_allowance_choice: "auto", care_allowance_plan_id: PLAN }, [
+      work(1, 800),
+      taken(2, 300, INV),
+    ]);
+    const r = await step(env, { bill_to_vendor_id: "v" });
     expect(r.changed).toBe(true);
-    expect(r.inv["care_allowance_choice"]).toBeNull();
+    expect(r.own).toEqual([]);
+    expect(r.inv).toMatchObject({ care_allowance_choice: null, total: 800 });
+  });
+  it("the plan's own inspection, and a property with no plan, are left alone", async () => {
+    const own = world({
+      service_jobs: [{ ...repair, roof_care_visit_id: V1 }],
+      invoices: [draft()],
+      invoice_lines: [work(1, 800)],
+    });
+    expect((await step(own)).changed).toBe(false);
+    const none = at({}, [work(1, 800)], { roof_care_plans: [] });
+    expect((await step(none)).changed).toBe(false);
+    expect(none.writes).toEqual([]);
+  });
+  it("the rule, case by case", () => {
+    expect(allowanceStep({ choice: null, taken: 0, cap: 300 })).toEqual({
+      choice: "auto",
+      amount: 300,
+    });
+    expect(allowanceStep({ choice: null, taken: 0, cap: 0 })).toEqual({ choice: null, amount: 0 });
+    expect(allowanceStep({ choice: "auto", taken: 100, cap: 300 })).toEqual({
+      choice: "auto",
+      amount: 300,
+    });
+    expect(allowanceStep({ choice: "auto", taken: 300, cap: 0 })).toEqual({
+      choice: null,
+      amount: 0,
+    });
+    expect(allowanceStep({ choice: "applied", taken: 100, cap: 300 })).toEqual({
+      choice: "applied",
+      amount: 100,
+    });
+    expect(allowanceStep({ choice: "applied", taken: 100, cap: 60 })).toEqual({
+      choice: "applied",
+      amount: 60,
+    });
+    expect(allowanceStep({ choice: "declined", taken: 0, cap: 300 })).toEqual({
+      choice: "declined",
+      amount: 0,
+    });
   });
   it("what the allowance has taken shows on the plan, with the invoices", async () => {
     const env = world({
@@ -916,8 +1017,10 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
   it("the editor's save cannot type over the line, and a rebuild carries it", () => {
     const fn = flat(read("src/lib/invoices.functions.ts"));
     expect(fn).toContain("if (isAllowanceLine(l) || (prev && isAllowanceLine(prev))) {");
+    // The editor never drops the line either: it is kept whatever was sent.
+    expect(fn).toContain("for (const l of oldLines ?? []) if (isAllowanceLine(l)) kept.add(l.id);");
     expect(fn).toContain(
-      "if (await keepAllowanceInStep(sb, inv, lines)) lines = await readLines();",
+      "if (await syncAllowance(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {",
     );
     expect(fn).toContain(
       "? allowanceAfterChange(allowanceTaken(allowanceOld), billableBefore(lines))",
@@ -925,11 +1028,19 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     expect(fn).toContain(
       "...(allowanceGone ? { care_allowance_choice: null, care_allowance_plan_id: null } : {}),",
     );
+    // A new draft and a rebuilt one both take the plan into account.
+    expect(fn).toContain("return withPlanAllowance(sb, inv); }");
+    expect(fn).toContain("return withPlanAllowance(sb, updated);");
+    expect(fn).toContain("if (!(await syncAllowance(sb, inv, made.lines))) return made;");
   });
   it("the invoice has the box and the read-only line; the property page has the status", () => {
     const editor = flat(read("src/components/service/invoice-editor.tsx"));
     expect(editor).toContain("{job && allowanceQ.data && (");
     expect(editor).toContain("Does this invoice use the plan? Finalise waits for the answer.");
+    // Ticked by itself, and said so, with the way out.
+    expect(editor).toContain('{a.choice === "auto" && (');
+    expect(editor).toContain("If this is not a minor repair, press Does not use the plan.");
+    expect(editor).toContain("const own = r.lines.filter(isAllowanceLine).map(lineFrom);");
     expect(editor).toContain('data-action="allowance-apply"');
     expect(editor).toContain('data-action="allowance-decline"');
     expect(editor).toContain("isAllowanceLine(l) ? (");
@@ -937,6 +1048,15 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     expect(card).toContain("{!short && active.repair_allowance > 0 && (");
     expect(card).toContain("{active.allowance_used === null ? (");
     expect(card).toContain("allowanceStatusWords({");
+  });
+});
+
+describe("10. the database lets the three answers through, and no other", () => {
+  it("auto, applied, declined", () => {
+    const sql = flat(read("supabase/migrations/20261119300000_roof_care_allowance_auto.sql"));
+    expect(sql).toContain(
+      "check (care_allowance_choice is null or care_allowance_choice in ('auto', 'applied', 'declined'));",
+    );
   });
 });
 

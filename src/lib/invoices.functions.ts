@@ -727,7 +727,26 @@ async function createInvoiceFor(
     .eq("id", job.id);
   if (pErr)
     throw new Error(`The invoice was made, but the ticket was not updated: ${pErr.message}`);
-  return withLines(sb, inv);
+  return withPlanAllowance(sb, inv);
+}
+
+/**
+ * A draft just made or rebuilt, with the property's Roof Care plan taken into account (owner,
+ * Nov 19: "can we have the tick auto ticked if there is still any allowance left?"): while the
+ * plan has minor repairs left it covers the invoice by itself, and the office unticks it or
+ * types a smaller amount in the plan box.
+ */
+async function withPlanAllowance(
+  sb: SupabaseClient<Database>,
+  inv: InvoiceRow,
+): Promise<InvoiceWithLines> {
+  const made = await withLines(sb, inv);
+  if (!ofTicket(inv)) return made;
+  const { syncAllowance } = await import("@/lib/roof-care-allowance.functions");
+  if (!(await syncAllowance(sb, inv, made.lines))) return made;
+  const { data: again, error } = await sb.from("invoices").select("*").eq("id", inv.id).single();
+  if (error) throw new Error(error.message);
+  return withLines(sb, again);
 }
 
 export const getInvoice = createServerFn({ method: "GET" })
@@ -907,7 +926,7 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (uErr) throw new Error(uErr.message);
-    return withLines(sb, updated);
+    return withPlanAllowance(sb, updated);
   });
 
 const lineSchema = z.object({
@@ -1009,17 +1028,16 @@ export const saveInvoice = createServerFn({ method: "POST" })
       // added again. An id that is not this invoice's counts as a new line.
       const old = new Map((oldLines ?? []).map((l) => [l.id, l]));
       const kept = new Set<number>();
+      // The Roof Care plan's allowance line is the plan box's (Nov 19): the editor's save never
+      // types over it, adds one or drops it, whatever it sent.
+      for (const l of oldLines ?? []) if (isAllowanceLine(l)) kept.add(l.id);
       const fresh: LineWrite[] = [];
       const edits: { id: number; row: LineWrite }[] = [];
       data.lines.forEach((l, i) => {
         const prev = l.id != null ? old.get(l.id) : undefined;
-        // The Roof Care plan's allowance line is the plan box's (Nov 19): it is kept as stored,
-        // whatever the editor sent for it, and one is never added from here.
         if (isAllowanceLine(l) || (prev && isAllowanceLine(prev))) {
-          if (prev && isAllowanceLine(prev) && !kept.has(prev.id)) {
-            kept.add(prev.id);
-            if (prev.sort !== i) edits.push({ id: prev.id, row: { sort: i } as LineWrite });
-          }
+          if (prev && isAllowanceLine(prev) && prev.sort !== i)
+            edits.push({ id: prev.id, row: { sort: i } as LineWrite });
           return;
         }
         // A price typed by hand is remembered as the editor says (rate_overridden), so Rebuild
@@ -1055,10 +1073,24 @@ export const saveInvoice = createServerFn({ method: "POST" })
     const readLines = async () =>
       (await sb.from("invoice_lines").select("*").eq("invoice_id", inv.id)).data ?? [];
     let lines = await readLines();
-    // The plan's allowance line never takes more than the invoice now bills (Nov 19).
-    if (lines.some(isAllowanceLine) || inv.care_allowance_choice === "applied") {
-      const { keepAllowanceInStep } = await import("@/lib/roof-care-allowance.functions");
-      if (await keepAllowanceInStep(sb, inv, lines)) lines = await readLines();
+    // The property's Roof Care plan (Nov 19): while it has minor repairs left it covers this
+    // invoice by itself, a typed amount never takes more than the invoice now bills, and an
+    // invoice switched to a vendor takes nothing. Whom it is billed to is as this save leaves it.
+    if (ofTicket(inv)) {
+      const { syncAllowance } = await import("@/lib/roof-care-allowance.functions");
+      const billedTo =
+        data.bill_to_vendor_id === undefined
+          ? (inv.bill_to_vendor_id ?? null)
+          : data.bill_to_vendor_id;
+      if (await syncAllowance(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {
+        lines = await readLines();
+        const { data: again } = await sb
+          .from("invoices")
+          .select("care_allowance_choice, care_allowance_plan_id")
+          .eq("id", inv.id)
+          .maybeSingle();
+        if (again) Object.assign(inv, again);
+      }
     }
     const taxRate = data.tax_rate ?? Number(inv.tax_rate);
     const t = totals(lines, taxRate);

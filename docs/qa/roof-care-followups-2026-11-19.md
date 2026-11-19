@@ -99,6 +99,31 @@ customer. Saves were blocked everywhere except the temporary invoice's own butto
 
 Everything temporary was removed. No notice was sent.
 
+## Later the same day: ticked by itself
+
+The owner, after seeing it: "can we have the tick auto ticked if there is still any allowance
+left?"
+
+- A new repair invoice at a property whose plan has allowance left **takes all the plan can
+  cover by itself**. The box says so, and how to undo it.
+- While nobody has changed it, the amount **follows the invoice** as its lines change, up and
+  down.
+- An amount **typed by the office is held**: it never grows, and is only cut to what the invoice
+  still bills.
+- **"Does not use the plan" stays** whatever the invoice then bills.
+- An invoice switched to a vendor takes nothing from the customer's plan.
+
+The answer kept on the invoice has three values for this: `auto`, `applied` (a typed amount) and
+`declined`. The rule that refuses Finalise is unchanged and now rarely fires: it still stops an
+invoice on which nothing was ever chosen.
+
+Proven in a browser on a temporary repair with eight hours of labor: the new draft opened with
+the whole allowance taken off; labor cut to one hour, the line followed down to that hour;
+back to eight, back up; an amount typed, then the labor changed, the amount held; "Does not use
+the plan", the line gone and it stayed gone through another change; "Use the plan" with the box
+blank, the whole allowance again. Database change:
+`supabase/migrations/20261119300000_roof_care_allowance_auto.sql`, applied and checked live.
+
 ## The database change
 
 `supabase/migrations/20261119200000_roof_care_followups.sql`, applied to the live database on

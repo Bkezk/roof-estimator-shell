@@ -28,11 +28,40 @@ export const isAllowanceLine = (l: { source?: string | null | undefined }): bool
 export const allowancePlanOf = (l: { source?: string | null | undefined }): string | null =>
   isAllowanceLine(l) ? l.source!.slice(ALLOWANCE_SOURCE_PREFIX.length) : null;
 
-export type AllowanceChoice = "applied" | "declined";
-export const asAllowanceChoice = (v: unknown): AllowanceChoice | null =>
-  v === "applied" || v === "declined" ? v : null;
-
+/**
+ * Where the question stands (owner, Nov 19: "can we have the tick auto ticked if there is still
+ * any allowance left?"):
+ *  - "auto": nobody has chosen, so the plan covers all it can. The amount follows the invoice as
+ *    its lines change.
+ *  - "applied": a person typed the amount. It is held, and only ever cut to what the invoice
+ *    still bills.
+ *  - "declined": a person said this invoice does not use the plan.
+ */
+export type AllowanceChoice = "auto" | "applied" | "declined";
 const r2 = (n: number) => Math.round(Number((n * 100).toFixed(6))) / 100;
+export const asAllowanceChoice = (v: unknown): AllowanceChoice | null =>
+  v === "auto" || v === "applied" || v === "declined" ? v : null;
+
+/**
+ * What the invoice's allowance line should be after its other lines changed, and whose choice
+ * it then is. With nothing chosen the plan covers all it can (ticked by itself); a typed amount
+ * is held and never grows; a "no" stays a "no". Amount 0 means no line.
+ */
+export function allowanceStep(a: {
+  choice: AllowanceChoice | null;
+  /** What the invoice's line takes now. */
+  taken: number;
+  /** The most it can take: what is left of the plan, and never more than the invoice bills. */
+  cap: number;
+}): { choice: AllowanceChoice | null; amount: number } {
+  if (a.choice === "declined") return { choice: "declined", amount: 0 };
+  if (a.choice === "applied") {
+    const amount = r2(Math.max(0, Math.min(a.taken, a.cap)));
+    if (amount > 0) return { choice: "applied", amount };
+  }
+  return a.cap > 0 ? { choice: "auto", amount: r2(a.cap) } : { choice: null, amount: 0 };
+}
+
 type Totalled = { source?: string | null | undefined; total: number | string | null };
 
 /** What the allowance lines among `lines` take off: they are saved as negative totals. */
@@ -125,7 +154,10 @@ export function invoiceAllowance(a: {
   };
 }
 
-/** Finalise waits: nobody has answered, and there is something the plan could cover. */
+/**
+ * Finalise waits: nothing is chosen and there is something the plan could cover. Since the tick
+ * is given by itself this is rare (an invoice made some other way); the check stays.
+ */
 export const allowanceUnanswered = (a: InvoiceAllowance | null): a is InvoiceAllowance =>
   !!a && a.choice === null && a.cap > 0;
 
@@ -148,8 +180,8 @@ export function allowanceAmount(asked: number | null | undefined, cap: number): 
 }
 
 /**
- * After the invoice's other lines changed (a save, a rebuild): the allowance line it had, held
- * to what the invoice now bills. `amount` 0 means the line goes and the question is open again.
+ * After a rebuild threw the lines away: what the line it had still covers of the rebuilt
+ * invoice, to carry it over before the step above is taken.
  */
 export function allowanceAfterChange(taken: number, billable: number): number {
   return r2(Math.max(0, Math.min(taken, billable)));
