@@ -470,6 +470,11 @@ Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-
   `.functions.ts`, and `src/routes/api.stripe.webhook.ts`. Off until Stripe's two secrets and
   its webhook endpoint are set up (`AGENTS.md`).
 - The cleaning at each inspection and the budget forecast: `src/lib/roof-care-cleaning.ts`.
+  The questions are required (the owner, Nov 20: "those questions should be required"): no
+  path moves a plan's inspection to Done or later with one open. The database refuses it
+  (`service_jobs_cleaning_rule`, migration `20261120100000_roof_care_cleaning_required.sql`),
+  and the two server functions check first. Record:
+  `docs/qa/roof-care-cleaning-required-2026-11-20.md`.
 - An expired plan's Care Plan button opens its renewal.
 - A refund of a year paid by card is less the card fee (term 9, version 2026-11-19.3). The
   fee's rate is on the plan setup page.
@@ -487,7 +492,12 @@ Record: `docs/qa/roof-care-no-access-storm-2026-11-19.md`. Migration
 cannot get on the roof.
 
 - The first time in a plan year, the return trip is free. Each time after that, it is charged at
-  the trip rate. Term 7 says so (terms version 2026-11-19.4).
+  the trip rate. Term 7 says so.
+- What is left of the plan's minor repairs goes toward a charged return trip first, and the
+  customer pays the rest (the owner, Nov 20: "it comes out of the allocation if there is
+  allocation left"). The minor repairs line on the inspection's invoice does it, toward the
+  return trip only (`invoiceAllowanceOf` in `src/lib/roof-care-allowance.functions.ts`). Term 7
+  says so from terms version 2026-11-20.1. Record: `docs/qa/roof-care-trip-allowance-2026-11-20.md`.
 - How many are free is one named number in the database, `c_free` in
   `roof_care_no_access_state()`. Set it to 0 and every one is charged.
 - No access is a button on the inspection's ticket: in the technician's workflow and on the
@@ -555,9 +565,10 @@ for paying the year first (version 2026-11-19), and he agreed them the same day.
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.
 
-The set now in use is version 2026-11-19.4 (Nov 19, late): term 7 charges the return trip after
-the first visit of a plan year we could not do for want of access, and term 8 bills a storm
-inspection beyond the one the plan includes.
+The set now in use is version 2026-11-20.1 (Nov 20): term 7 adds that what is left of the plan's
+minor repairs amount goes toward a charged return trip first. Version 2026-11-19.4 (Nov 19,
+late) had term 7 charge the return trip after the first visit of a plan year we could not do for
+want of access, and term 8 bill a storm inspection beyond the one the plan includes.
 
 ## Open
 

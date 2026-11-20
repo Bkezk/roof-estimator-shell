@@ -93,6 +93,19 @@ export function cleaningGaps(
   return { gaps: g.open.map((k) => `Not answered: ${CLEANING_QUESTION[k]}`), unread: false };
 }
 
+/**
+ * A question the plan asks is still open, so "Complete anyway" is not offered (owner, Nov 20:
+ * "those questions should be required"). A manager's Complete anyway still skips the other gaps
+ * once the questions are answered. A read that failed or is still on its way does not hide the
+ * button: the server and the database read the plan themselves, and refuse in the same words.
+ */
+export const cleaningBlocksAnyway = (g: CleaningGate, finished: boolean): boolean =>
+  !finished && g.kind === "asked" && g.open.length > 0;
+
+/** Under the list in "Before you finish" while a question is open. */
+export const CLEANING_REQUIRED_NOTE =
+  "The Roof Care plan's questions are required. Go back and answer Yes or No in the Checklist step.";
+
 // ── Answering ───────────────────────────────────────────────────────────────────────────────
 
 export interface CleaningSend {

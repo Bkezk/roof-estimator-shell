@@ -123,10 +123,12 @@ beforeEach(() => {
 
 describe("10. no access: the first in a plan year is free, each one after it is charged", () => {
   it("the agreement says so, in a new version that can still be emailed", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.4");
+    // (Nov 20: version 2026-11-20.1. Term 7 adds that what is left of the minor repairs amount
+    // goes toward a charged return trip first.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS[6]).toBe(
-      "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate.",
+      "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate, and what is left of the plan's minor repairs amount is used toward it first.",
     );
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(TERMS_BY_VERSION[ROOF_CARE_TERMS_VERSION]).toBe(ROOF_CARE_TERMS);
@@ -146,7 +148,7 @@ describe("10. no access: the first in a plan year is free, each one after it is 
       company: "JBK",
       contact: "",
     });
-    expect(email?.text).toContain("After that, the return trip is charged at our trip rate.");
+    expect(email?.text).toContain("After that, the return trip is charged at our trip rate, and");
   });
   it("the database's answer is read strictly", () => {
     expect(preview()).toEqual({
@@ -157,6 +159,9 @@ describe("10. no access: the first in a plan year is free, each one after it is 
       charged: false,
       amount: null,
       amount_known: false,
+      // (Nov 20: whether the plan has minor repairs, and what is left of them for the office.)
+      has_allowance: false,
+      allowance_left: null,
     });
     expect(readNoAccessPreview(null)).toBeNull();
     expect(readNoAccessPreview({ count: 0, free: 1 })).toBeNull();
@@ -851,7 +856,11 @@ describe("11. a further storm inspection is billed, the minor repairs left go to
     // All used: the customer pays 220.
     expect(await where(tables(300))).toMatchObject({ left: 0, cap: 0 });
   });
-  it("toward the inspection only: never a return trip on the same invoice", async () => {
+  // (Nov 20, the owner: "it comes out of the allocation if there is allocation left". Until then
+  // this read "toward the inspection only: never a return trip on the same invoice", with
+  // billable 220. A charged return trip now takes what is left too:
+  // roof-care-trip-allowance-nov20.test.ts.)
+  it("toward the inspection and a return trip on the same invoice", async () => {
     const trip = {
       id: 3,
       invoice_id: INV,
@@ -862,7 +871,12 @@ describe("11. a further storm inspection is billed, the minor repairs left go to
       taxable: false,
       cost_total: 0,
     };
-    expect(await where(tables(0, [trip]))).toMatchObject({ billable: 220, cap: 220 });
+    expect(await where(tables(0, [trip]))).toMatchObject({
+      billable: 357.5,
+      cap: 300,
+      storm: true,
+      trip: true,
+    });
   });
   it("a storm inspection the plan includes, and the plan's two inspections, take nothing", async () => {
     expect(await where(tables(0, [], { amount: 0 }))).toBeNull();

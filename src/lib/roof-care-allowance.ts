@@ -87,27 +87,42 @@ export function allowanceCap(a: { allowance: number; usedElsewhere: number; bill
 }
 
 /**
- * What the customer reads on the line. `storm`: on the invoice of a storm inspection beyond the
- * ones the plan includes (Nov 19, late), where what is left of the minor repairs goes toward the
- * inspection.
+ * What the allowance goes toward on an invoice of the plan's own inspection, where it is not a
+ * repair: a storm inspection beyond the ones the plan includes (Nov 19, late), a return trip
+ * charged after a visit we could not do (owner, Nov 20: "it comes out of the allocation if
+ * there is allocation left"), or both. False on a repair's invoice.
  */
-export const allowanceLineWords = (plan: unknown, storm = false): string =>
-  storm
+export type AllowanceToward = false | "inspection" | "trip" | "both";
+export const allowanceToward = (a: {
+  storm?: boolean | undefined;
+  trip?: boolean | undefined;
+}): AllowanceToward => (a.storm ? (a.trip ? "both" : "inspection") : a.trip ? "trip" : false);
+
+/** What the customer reads on the line. `toward` true is the storm inspection, as it was. */
+export const allowanceLineWords = (
+  plan: unknown,
+  toward: AllowanceToward | boolean = false,
+): string =>
+  toward === true || toward === "inspection"
     ? `${planName(plan)} plan: your minor repairs amount used toward this inspection`
-    : `${planName(plan)} plan: minor repairs included in your plan`;
+    : toward === "trip"
+      ? `${planName(plan)} plan: your minor repairs amount used toward the return trip`
+      : toward === "both"
+        ? `${planName(plan)} plan: your minor repairs amount used toward this inspection and the return trip`
+        : `${planName(plan)} plan: minor repairs included in your plan`;
 
 /** The line itself: listed on the customer's copy with its amount, not taxed, no cost. */
 export function allowanceLine(
   plan: { id: string; plan: unknown },
   amount: number,
   sort: number,
-  storm = false,
+  toward: AllowanceToward | boolean = false,
 ) {
   const off = -r2(Math.max(0, amount));
   return {
     sort,
     kind: "other",
-    description: allowanceLineWords(plan.plan, storm),
+    description: allowanceLineWords(plan.plan, toward),
     qty: 1,
     unit: "ea",
     rate: off,
@@ -145,6 +160,11 @@ export interface InvoiceAllowance {
    * allowance goes toward the inspection's price and nothing else on the invoice.
    */
   storm?: boolean;
+  /**
+   * The invoice carries a return trip charged after a visit we could not do (Nov 20): the
+   * allowance goes toward the trip, on the plan's own inspection's invoice.
+   */
+  trip?: boolean;
 }
 
 export function invoiceAllowance(a: {
@@ -155,15 +175,22 @@ export function invoiceAllowance(a: {
   lines: readonly Totalled[];
   choice: unknown;
   /**
-   * The one line the allowance may go toward: the billed storm inspection's own. Left out, the
-   * whole invoice is the repair.
+   * The billed storm inspection's own line, when the invoice is one's. With it or `tripSources`
+   * the allowance goes toward those lines only. Both left out, the whole invoice is the repair.
    */
   towardSource?: string;
+  /** The lines of the return trips charged on this invoice (roof-care-no-access.ts). */
+  tripSources?: readonly string[];
 }): InvoiceAllowance {
+  const trips = a.tripSources ?? [];
+  const toward =
+    a.towardSource === undefined && trips.length === 0
+      ? null
+      : new Set([...(a.towardSource === undefined ? [] : [a.towardSource]), ...trips]);
   const billable =
-    a.towardSource === undefined
+    toward === null
       ? billableBefore(a.lines)
-      : billableBefore(a.lines.filter((l) => l.source === a.towardSource));
+      : billableBefore(a.lines.filter((l) => !!l.source && toward.has(l.source)));
   const left = r2(Math.max(0, a.allowance - a.usedElsewhere));
   return {
     plan_id: a.plan_id,
@@ -176,6 +203,7 @@ export function invoiceAllowance(a: {
     choice: asAllowanceChoice(a.choice),
     applied: allowanceTaken(a.lines),
     ...(a.towardSource === undefined ? {} : { storm: true }),
+    ...(trips.length ? { trip: true } : {}),
   };
 }
 
@@ -189,6 +217,21 @@ export const allowanceUnanswered = (a: InvoiceAllowance | null): a is InvoiceAll
 const usd = (n: number) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const allowanceMoney = usd;
+
+/**
+ * The last sentence of the invoice's Roof Care box while the plan is used by itself: what the
+ * amount goes toward. A repair's invoice is told how to say it is not a minor repair.
+ */
+export const allowanceAutoNote = (a: Pick<InvoiceAllowance, "storm" | "trip">): string => {
+  const toward = allowanceToward(a);
+  return toward === "trip"
+    ? "It goes toward the return trip, as the agreement says."
+    : toward === "inspection"
+      ? "It goes toward this storm inspection, as the agreement says."
+      : toward === "both"
+        ? "It goes toward this storm inspection and the return trip, as the agreement says."
+        : "If this is not a minor repair, press Does not use the plan.";
+};
 
 /** The server's refusal; the database's trigger says the same in its own words. */
 export const ALLOWANCE_UNANSWERED = (left: number): string =>

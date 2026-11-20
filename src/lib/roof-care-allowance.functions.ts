@@ -27,10 +27,12 @@ import {
   allowanceLine,
   allowanceLineSource,
   allowanceStep,
+  allowanceToward,
   invoiceAllowance,
   isAllowanceLine,
   type InvoiceAllowance,
 } from "@/lib/roof-care-allowance";
+import { isTripLine } from "@/lib/roof-care-no-access";
 
 type Sb = SupabaseClient<Database>;
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -58,11 +60,15 @@ export async function invoiceAllowanceOf(
     .maybeSingle();
   if (error) throw new Error(`The invoice's ticket: ${error.message}`);
   if (!job?.site_id) return null;
-  // The plan's own inspection takes nothing from the allowance. The one exception (owner, Nov
-  // 19: "their repair allocation contributes to the price if they have any left"): a storm
+  // The plan's own inspection takes nothing from the allowance, with two exceptions. A storm
   // inspection beyond the ones the plan includes is billed, and what is left of the minor
-  // repairs goes toward its price first.
+  // repairs goes toward its price first (owner, Nov 19: "their repair allocation contributes to
+  // the price if they have any left"). And a return trip charged after a visit we could not do
+  // takes what is left first too (owner, Nov 20: "it comes out of the allocation if there is
+  // allocation left").
   let storm: { plan_id: string; source: string } | null = null;
+  let ownPlan: string | null = null;
+  const tripSources = lines.filter(isTripLine).map((l) => l.source!);
   if (job.roof_care_visit_id) {
     const { data: v, error: vErr } = await sb
       .from("roof_care_visits")
@@ -70,12 +76,15 @@ export async function invoiceAllowanceOf(
       .eq("id", job.roof_care_visit_id)
       .maybeSingle();
     if (vErr) throw new Error(`The invoice's inspection: ${vErr.message}`);
-    if (!v || v.kind !== "storm" || !(Number(v.amount) > 0)) return null;
-    storm = { plan_id: v.plan_id, source: carePlanLineSource(v.id) };
+    if (!v) return null;
+    if (v.kind === "storm" && Number(v.amount) > 0)
+      storm = { plan_id: v.plan_id, source: carePlanLineSource(v.id) };
+    if (!storm && !tripSources.length) return null;
+    ownPlan = v.plan_id;
   }
   const active = sb.from("roof_care_plans").select("id, plan, repair_allowance");
   const { data: plans, error: pErr } = await (
-    storm ? active.eq("id", storm.plan_id) : active.eq("site_id", job.site_id)
+    ownPlan ? active.eq("id", ownPlan) : active.eq("site_id", job.site_id)
   )
     .eq("status", "active")
     .limit(1);
@@ -109,6 +118,8 @@ export async function invoiceAllowanceOf(
     lines,
     choice: inv.care_allowance_choice,
     ...(storm ? { towardSource: storm.source } : {}),
+    // A return trip is the plan's own inspection's: never on a repair's invoice.
+    ...(ownPlan && tripSources.length ? { tripSources } : {}),
   });
 }
 
@@ -168,7 +179,12 @@ export async function syncAllowance(
     } else {
       const sort = lines.reduce((m, l) => Math.max(m, l.sort), -1) + 1;
       const { error } = await sb.from("invoice_lines").insert({
-        ...allowanceLine({ id: where.plan_id, plan: where.plan }, amount, sort, !!where.storm),
+        ...allowanceLine(
+          { id: where.plan_id, plan: where.plan },
+          amount,
+          sort,
+          allowanceToward(where),
+        ),
         invoice_id: inv.id,
       });
       if (error) throw new Error(error.message);
@@ -279,7 +295,12 @@ export const setInvoiceAllowance = createServerFn({ method: "POST" })
       if (!(amount > 0)) throw new Error(ALLOWANCE_NOTHING_TO_TAKE);
       const sort = lines.reduce((m, l) => Math.max(m, l.sort), -1) + 1;
       const { error: iErr } = await sb.from("invoice_lines").insert({
-        ...allowanceLine({ id: where.plan_id, plan: where.plan }, amount, sort, !!where.storm),
+        ...allowanceLine(
+          { id: where.plan_id, plan: where.plan },
+          amount,
+          sort,
+          allowanceToward(where),
+        ),
         invoice_id: inv.id,
       });
       // The database's own words when the plan has less left than was read a moment ago.

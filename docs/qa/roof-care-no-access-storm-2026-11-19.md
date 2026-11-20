@@ -61,14 +61,17 @@ The owner's rule, with made-up numbers. The price of one inspection is 600.
   what the customer pays. The older site, which has no box, is refused with words that say why.
 - The price is kept on the inspection. Its invoice is made when the inspection is authorized,
   with the inspection at that price. The minor repairs line then takes what is left of the
-  allowance off that line only, never off a return trip on the same invoice.
+  allowance off that line only, never off a return trip on the same invoice. (Changed Nov 20
+  at the owner's word: a charged return trip takes what is left too. See
+  `docs/qa/roof-care-trip-allowance-2026-11-20.md`.)
 - "Used this plan year" tells the included one from a billed one: "1 of 1 used, and 1 more
   billed". The minor repairs count what went toward it.
 - A refund counts a storm inspection as an inspection done only when the plan included it.
 
 ## The agreement
 
-Terms version 2026-11-19.4. Term 7 and term 8 say the two rules. Nothing else changed.
+Terms version 2026-11-19.4. Term 7 and term 8 say the two rules. Nothing else changed. (Since Nov 20 the
+set in use is 2026-11-20.1.)
 
 ## What was proven
 

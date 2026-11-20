@@ -66,6 +66,8 @@ const draft = (over: Partial<BidDraft> = {}): BidDraft => {
 };
 
 describe("1. the unsaved work is kept and offered back", () => {
+  // (Nov 20: a bid never saved no longer shares that one slot; each has its own, see
+  // bids-new-draft-slots-nov20.test.ts. The old key is still read, so its drafts are offered.)
   it("one draft for each person and each bid; a bid never saved shares one slot", () => {
     expect(draftKey(ME, BID)).toBe("bid-draft:user-1:bid-1");
     expect(draftKey(ME, null)).toBe("bid-draft:user-1:new");
@@ -240,18 +242,21 @@ describe("1. the unsaved work is kept and offered back", () => {
       expect(page).toContain(
         "? hydratedFor.current === bidParam && lockMineFor === bidParam && !readOnly : true;",
       );
-      expect(page).toContain('setDraftGate(offer ? "asking" : "open");');
-      expect(page).toContain("<AlertDialog open={!!draftAsk && !readOnly}>");
+      // (Nov 20: the question can hold more than one new bid's work, so it is a list.)
+      expect(page).toContain('setDraftGate(offers.length ? "asking" : "open");');
+      expect(page).toContain("<AlertDialog open={draftAsk.length > 0 && !readOnly}>");
       expect(page).toContain('<AlertDialogContent data-dialog="bid-draft"');
       // Only the two buttons put the draft on the page or remove it.
       expect(page.split("hydrateSaved(d.data as unknown as").length - 1).toBe(1);
-      expect(page).toContain('onClick={restoreDraft} data-action="draft-restore"');
-      expect(page).toContain('onClick={discardDraft} data-action="draft-discard"');
+      // (Nov 20: the buttons answer for the draft they stand beside.)
+      expect(page).toContain('onClick={() => void restoreDraft()} data-action="draft-restore"');
+      expect(page).toContain('onClick={() => discardDraft()} data-action="draft-discard"');
     });
     it("a restored draft stays unsaved: the page is not re-baselined, and the draft is kept until Save", () => {
       const restore = page.slice(
-        page.indexOf("const restoreDraft = () => {"),
-        page.indexOf("const discardDraft = () => {"),
+        // (Nov 20: both take the draft they answer for.)
+        page.indexOf("const restoreDraft = async ("),
+        page.indexOf("const discardDraft = ("),
       );
       expect(restore).not.toContain("setHydrationStamp");
       expect(restore).not.toContain("lastSavedBody.current");
@@ -270,7 +275,8 @@ describe("1. the unsaved work is kept and offered back", () => {
       expect(page).toContain(
         "dirtyRef.current = false; // Saved: the unsaved draft in the browser has nothing left to keep. dropDraft();",
       );
-      expect(page).toContain("const discardDraft = () => { dropDraft();");
+      // (Nov 20: Discard removes the draft it stands beside.)
+      expect(page).toContain("if (!o) return; dropDraft(o.draft.key); draftAnswered(o.draft.key);");
       expect(page).toContain(
         'draftLeft.current = true; dropDraft(); if (blocker.status === "blocked") blocker.proceed();',
       );

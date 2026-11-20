@@ -75,7 +75,11 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
-import { allowanceMoney, type InvoiceAllowance } from "@/lib/roof-care-allowance";
+import {
+  allowanceAutoNote,
+  allowanceMoney,
+  type InvoiceAllowance,
+} from "@/lib/roof-care-allowance";
 import { getInvoiceAllowance, setInvoiceAllowance } from "@/lib/roof-care-allowance.functions";
 import {
   isPlanLine,
@@ -2179,8 +2183,7 @@ function AllowanceBox({
         <p className="font-medium" data-allowance-answer>
           Ticked by itself: {allowanceMoney(a.applied)} is taken off this invoice under the plan,
           all it can cover. {allowanceMoney(Math.max(0, a.left - a.applied))} is left after it. It
-          follows the invoice if its lines change. If this is not a minor repair, press Does not use
-          the plan.
+          follows the invoice if its lines change. {allowanceAutoNote(a)}
         </p>
       )}
       {a.choice === "applied" && (

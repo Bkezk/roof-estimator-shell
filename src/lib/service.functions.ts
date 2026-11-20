@@ -68,6 +68,8 @@ import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { assignedStage, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
+import { completesTicket } from "@/lib/cleaning-required";
+import { cleaningStop } from "@/lib/cleaning-required.server";
 import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
@@ -826,7 +828,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
     // (Nov 4, bug 15 of the Nov 3 review).
     const { data: prev, error: prevErr } = await context.supabase
       .from("service_jobs")
-      .select("stage, number, service_type, invoice_id")
+      .select("stage, number, service_type, invoice_id, roof_care_visit_id")
       .eq("id", data.id)
       .maybeSingle();
     if (prevErr) throw new Error(prevErr.message);
@@ -853,6 +855,13 @@ export const setServiceStage = createServerFn({ method: "POST" })
         .neq("status", "void");
       if (liveErr) throw new Error(liveErr.message);
       if (!count) throw new Error(INSPECTION_STAGE_MESSAGE);
+    }
+    // Owner, Nov 20 ("those questions should be required"): a Roof Care plan's own inspection
+    // does not move into Done or later while a question the plan asks there is unanswered
+    // (cleaning-required.ts). Before the clocks are stopped, so a refused move changes nothing.
+    if (completesTicket(prev.stage, data.stage)) {
+      const stop = await cleaningStop(context.supabase, prev.roof_care_visit_id);
+      if (stop) throw new Error(stop);
     }
     const { stopped } =
       prev.stage !== data.stage

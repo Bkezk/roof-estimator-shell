@@ -24,6 +24,7 @@ The rules, in `src/lib/bid-draft.ts`:
 - For whom: one draft for each person and each bid. Another person signed in on the same
   computer is never offered it.
 - A bid never saved has no id, so a person's new bids share one slot on that computer.
+  (Nov 20: each new bid now has a slot of its own. See `bids-new-draft-slots-2026-11-20.md`.)
 - A new bid nobody has typed into keeps nothing. It reads "changed" from its own starting
   fills, and those are not anyone's work.
 - Never restored unasked. The question has two buttons and cannot be waved away. Until it is

@@ -136,18 +136,26 @@ import {
   DRAFT_DISCARDED,
   DRAFT_RESTORE,
   DRAFT_RESTORED,
+  DRAFT_TAKEN,
+  claimNewSlot,
   draftKey,
+  draftListWords,
   draftOffer,
   draftQueue,
   draftWords,
   mayWriteDraft,
+  newDraftKey,
   readDraft,
+  takeOverDraft,
+  waitingNewDrafts,
   worthKeeping,
   type BidDraft,
   type BidDraftStore,
   type DraftGate,
   type DraftOffer,
+  type DraftPresence,
 } from "@/lib/bid-draft";
+import { openDraftPresence, tabSlotStore } from "@/lib/bid-draft-presence";
 import { openBidDraftStore } from "@/lib/bid-draft-store";
 import { bidChangedSince, LOCK_BACK_UNSAVED, lockReturnAction } from "@/lib/bid-lock-return";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
@@ -2362,9 +2370,45 @@ function EstimatePage() {
   // from PlanSwift used to throw away whatever was not saved. Now the page writes it to the
   // browser a moment after each change, and opening the bid again asks: restore it or discard it.
   const draftUserId = session?.user.id ?? null;
-  const draftSlot = draftUserId ? draftKey(draftUserId, bidParam ?? null) : null;
+  // A new bid has no id, so it keeps its draft under a slot of its own, which this window holds
+  // while the bid is open (owner, Nov 20: "fix on 1"; lib/bid-draft-presence.ts). Two new bids
+  // open at once in two windows no longer share one draft.
+  const [newSlot, setNewSlot] = useState<string | null>(null);
+  const newSlotRelease = useRef<(() => void) | null>(null);
+  const draftPresenceRef = useRef<DraftPresence | null>(null);
+  const draftPresence = () => (draftPresenceRef.current ??= openDraftPresence());
+  const draftTabRef = useRef<ReturnType<typeof tabSlotStore> | null>(null);
+  const draftTab = () => (draftTabRef.current ??= tabSlotStore());
+  useEffect(() => {
+    if (bidParam || !draftUserId) return;
+    let gone = false;
+    void claimNewSlot(draftPresence(), draftTab()).then((c) => {
+      if (gone) {
+        c.release();
+        return;
+      }
+      newSlotRelease.current = c.release;
+      setNewSlot(c.slot);
+    });
+    return () => {
+      gone = true;
+      newSlotRelease.current?.();
+      newSlotRelease.current = null;
+      setNewSlot(null);
+    };
+    // Once for each new bid in this tab.
+  }, [bidParam, draftUserId]);
+  const draftSlot = !draftUserId
+    ? null
+    : bidParam
+      ? draftKey(draftUserId, bidParam)
+      : newSlot
+        ? newDraftKey(draftUserId, newSlot)
+        : null;
   const [draftGate, setDraftGate] = useState<DraftGate>("checking");
-  const [draftAsk, setDraftAsk] = useState<DraftOffer | null>(null);
+  // What is asked about: a saved bid's one draft, or every new bid's draft that no open window
+  // holds, the newest first.
+  const [draftAsk, setDraftAsk] = useState<DraftOffer[]>([]);
   const draftCheckedSlot = useRef<string | null>(null);
   const draftStoreRef = useRef<Promise<BidDraftStore> | null>(null);
   const draftStore = () => (draftStoreRef.current ??= openBidDraftStore().then((o) => o.store));
@@ -2395,22 +2439,38 @@ function EstimatePage() {
     const slot = draftSlot;
     const page = { updatedAt: bidParam ? loadedUpdatedAt.current : null, print: pagePrint() };
     void (async () => {
-      let offer: DraftOffer | null = null;
+      let offers: DraftOffer[] = [];
       try {
         const store = await draftStore();
-        const found = await store.get(slot);
-        offer = draftOffer(
-          readDraft(found, { userId: draftUserId, bidId: bidParam ?? null }),
-          page,
-        );
-        // Not a whole draft, or the very work the page already shows: dropped.
-        if (found !== undefined && !offer) void draftRun(() => store.remove(slot));
+        if (bidParam) {
+          const found = await store.get(slot);
+          const offer = draftOffer(
+            readDraft(found, { userId: draftUserId, bidId: bidParam }),
+            page,
+          );
+          // Not a whole draft, or the very work the page already shows: dropped.
+          if (found !== undefined && !offer) void draftRun(() => store.remove(slot));
+          if (offer) offers = [offer];
+        } else {
+          // A new bid: this tab's own draft (a reload), and every new bid's draft whose window
+          // is gone. One that is open in another window is that window's, and is left alone.
+          const [rows, live] = await Promise.all([store.all(), draftPresence().live()]);
+          const waiting = waitingNewDrafts(rows, {
+            userId: draftUserId,
+            mySlot: newSlot,
+            live,
+            now: new Date(),
+            pagePrint: page.print,
+          });
+          offers = waiting.offers;
+          for (const key of waiting.drop) void draftRun(() => store.remove(key));
+        }
       } catch {
         // The browser's storage is blocked: nothing to offer, and the page carries on.
       }
       if (draftCheckedSlot.current !== slot) return;
-      setDraftAsk(offer);
-      setDraftGate(offer ? "asking" : "open");
+      setDraftAsk(offers);
+      setDraftGate(offers.length ? "asking" : "open");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per bid, on the loaded page
   }, [draftSlot, draftUserId, bidParam, hydrationStamp, renderedBidId, lockMineFor, readOnly]);
@@ -2512,9 +2572,40 @@ function EstimatePage() {
     draftWaiting.current = null;
     if (slot) void draftRun(async () => (await draftStore()).remove(slot));
   };
-  const restoreDraft = () => {
-    const d = draftAsk?.draft;
+  // One answered: it leaves the question, and the page opens once none is left to ask about.
+  const draftAnswered = (key: string): boolean => {
+    const left = draftAsk.filter((o) => o.draft.key !== key);
+    setDraftAsk(left);
+    if (!left.length) setDraftGate("open");
+    return !left.length;
+  };
+  const restoreDraft = async (o: DraftOffer | undefined = draftAsk[0]) => {
+    const d = o?.draft;
     if (!d) return;
+    // A new bid's work from a window that is gone: this tab takes its slot and carries on with
+    // it there. Its own draft, if it had one, stays under the slot it leaves and is offered the
+    // next time. Another window took it a moment ago: said, and nothing is put on the page.
+    if (!bidParam && d.key !== draftSlot) {
+      let took: Awaited<ReturnType<typeof takeOverDraft>> = null;
+      try {
+        took = await takeOverDraft(d, {
+          presence: draftPresence(),
+          tab: draftTab(),
+          store: await draftStore(),
+        });
+      } catch (e) {
+        console.warn("Bid draft:", e);
+      }
+      if (!took) {
+        toast.error(DRAFT_TAKEN, { duration: 15_000 });
+        draftAnswered(d.key);
+        return;
+      }
+      newSlotRelease.current?.();
+      newSlotRelease.current = took.release;
+      draftCheckedSlot.current = took.key;
+      setNewSlot(took.slot);
+    }
     // A new bid's own starting fills (the PlanSwift import, a takeoff, the combiner, the default
     // labor template and markup) must not land on top of the restored work afterwards.
     if (!bidParam) {
@@ -2540,15 +2631,16 @@ function EstimatePage() {
     setBidReminderOn(d.header.reminderOn);
     setBidReminderNote(d.header.reminderNote);
     setReminderOpen(!!d.header.reminderOn);
-    // The draft stays where it is until Save: the work is still unsaved.
-    setDraftAsk(null);
+    // The draft stays where it is until Save: the work is still unsaved. Any others waiting
+    // stay too, and are offered the next time a new bid is opened.
+    setDraftAsk([]);
     setDraftGate("open");
     toast.success(DRAFT_RESTORED, { duration: 15_000 });
   };
-  const discardDraft = () => {
-    dropDraft();
-    setDraftAsk(null);
-    setDraftGate("open");
+  const discardDraft = (o: DraftOffer | undefined = draftAsk[0]) => {
+    if (!o) return;
+    dropDraft(o.draft.key);
+    draftAnswered(o.draft.key);
     toast(DRAFT_DISCARDED);
   };
   // Leaving the page with unsaved changes asks (owner, Nov 4: Next no longer saves — "when you
@@ -4570,25 +4662,76 @@ function EstimatePage() {
           </AlertDialog>
           {/* Unsaved work kept in this browser (owner, Nov 19): never put back unasked. It has
               to be answered: until it is, nothing is written over the draft. */}
-          <AlertDialog open={!!draftAsk && !readOnly}>
+          <AlertDialog open={draftAsk.length > 0 && !readOnly}>
             <AlertDialogContent
               data-dialog="bid-draft"
-              data-draft-changed-since={draftAsk?.changedSince ? "yes" : "no"}
+              data-draft-count={draftAsk.length}
+              data-draft-changed-since={draftAsk[0]?.changedSince ? "yes" : "no"}
             >
-              <AlertDialogHeader>
-                <AlertDialogTitle>{draftAsk ? draftWords(draftAsk).title : ""}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {draftAsk ? draftWords(draftAsk).body : ""}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <Button variant="outline" onClick={discardDraft} data-action="draft-discard">
-                  {DRAFT_DISCARD}
-                </Button>
-                <AlertDialogAction onClick={restoreDraft} data-action="draft-restore">
-                  {DRAFT_RESTORE}
-                </AlertDialogAction>
-              </AlertDialogFooter>
+              {draftAsk.length > 1 ? (
+                // More than one new bid's work waits (Nov 20): each by name, each answered.
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{draftListWords(draftAsk).title}</AlertDialogTitle>
+                    <AlertDialogDescription>{draftListWords(draftAsk).body}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <ul className="space-y-2">
+                    {draftListWords(draftAsk).rows.map((row, i) => (
+                      <li
+                        key={row.key}
+                        data-draft-row={i}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3"
+                      >
+                        <span className="min-w-0">
+                          <span className="block font-medium break-words">{row.label}</span>
+                          <span className="block text-sm text-muted-foreground">{row.when}</span>
+                        </span>
+                        <span className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => discardDraft(draftAsk[i])}
+                            data-action="draft-discard"
+                          >
+                            {DRAFT_DISCARD}
+                          </Button>
+                          <Button
+                            onClick={() => void restoreDraft(draftAsk[i])}
+                            data-action="draft-restore"
+                          >
+                            {DRAFT_RESTORE}
+                          </Button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {draftAsk[0] ? draftWords(draftAsk[0]).title : ""}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {draftAsk[0] ? draftWords(draftAsk[0]).body : ""}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => discardDraft()}
+                      data-action="draft-discard"
+                    >
+                      {DRAFT_DISCARD}
+                    </Button>
+                    <AlertDialogAction
+                      onClick={() => void restoreDraft()}
+                      data-action="draft-restore"
+                    >
+                      {DRAFT_RESTORE}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </>
+              )}
             </AlertDialogContent>
           </AlertDialog>
           {/* Leaving with unsaved changes (owner, Nov 4): save them, drop them, or stay. */}

@@ -35,6 +35,7 @@ import {
   ALLOWANCE_UNANSWERED,
   allowanceAfterChange,
   allowanceAmount,
+  allowanceAutoNote,
   allowanceCap,
   allowanceLine,
   allowanceLineSource,
@@ -1047,7 +1048,12 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
     expect(editor).toContain("Does this invoice use the plan? Finalise waits for the answer.");
     // Ticked by itself, and said so, with the way out.
     expect(editor).toContain('{a.choice === "auto" && (');
-    expect(editor).toContain("If this is not a minor repair, press Does not use the plan.");
+    // (Nov 20: the sentence is allowanceAutoNote's now, because on an inspection's invoice the
+    // amount goes toward a return trip and the words say so.)
+    expect(editor).toContain("{allowanceAutoNote(a)}");
+    expect(allowanceAutoNote({})).toBe(
+      "If this is not a minor repair, press Does not use the plan.",
+    );
     expect(editor).toContain("const own = r.lines.filter(isPlanLine).map(lineFrom);");
     expect(editor).toContain('data-action="allowance-apply"');
     expect(editor).toContain('data-action="allowance-decline"');

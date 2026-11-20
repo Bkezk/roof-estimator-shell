@@ -153,7 +153,10 @@ describe("the server", () => {
   const stage = flat("src/lib/service.functions.ts");
   const inv = flat("src/lib/invoices.functions.ts");
   it("a stage move reads the ticket's invoice, so a billed inspection may go on", () => {
-    expect(stage).toContain('.select("stage, number, service_type, invoice_id")');
+    // (Nov 20: and whether it is a Roof Care plan's inspection, whose questions are required.)
+    expect(stage).toContain(
+      '.select("stage, number, service_type, invoice_id, roof_care_visit_id")',
+    );
     expect(stage).toContain(
       "if (!stagesForType(prev.service_type, !!prev.invoice_id).includes(data.stage)) throw new Error(INSPECTION_STAGE_MESSAGE);",
     );

@@ -1,6 +1,6 @@
 /**
  * Where a bid's unsaved work is kept in the browser (lib/bid-draft.ts): IndexedDB, one record
- * for each person and bid. A bid's data runs to a few hundred thousand characters with its
+ * for each person and bid, and one for each new bid's slot (Nov 20). A bid's data runs to a few hundred thousand characters with its
  * frozen prices, which a handful of would fill the browser's small key/value storage; IndexedDB
  * holds it without that limit and without stopping the page while it writes. No new dependency
  * (the same hand-made wrapper as lib/picture-store.ts).
@@ -46,6 +46,7 @@ export function indexedDbDraftStore(db: IDBDatabase): BidDraftStore {
     db.transaction(BID_DRAFT_STORE, mode).objectStore(BID_DRAFT_STORE);
   return {
     get: async (key: string) => req(tx("readonly").get(key)),
+    all: async () => req(tx("readonly").getAll()) as Promise<unknown[]>,
     put: async (draft: BidDraft) => {
       await req(tx("readwrite").put(draft));
     },

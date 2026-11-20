@@ -3,7 +3,7 @@
  *
  * The agreement's term 7: "The first visit in a plan year that we cannot do because we could not
  * get on the roof is rescheduled at no charge. After that, the return trip is charged at our
- * trip rate."
+ * trip rate, and what is left of the plan's minor repairs amount is used toward it first."
  *
  * On the ticket of a plan's inspection, No access records one: what happened, who, when. The
  * database counts them for the plan year and decides (roof_care_no_access): the first is free,
@@ -51,6 +51,14 @@ export interface NoAccessPreview {
   amount: number | null;
   /** The charge could be worked out (told to everyone, the amount is not). */
   amount_known: boolean;
+  /**
+   * The plan includes minor repairs each year (told to everyone). What is left of them goes
+   * toward a charged return trip first (owner, Nov 20: "it comes out of the allocation if there
+   * is allocation left").
+   */
+  has_allowance: boolean;
+  /** What is left of the minor repairs today: for the office only, with a charge it can read. */
+  allowance_left: number | null;
 }
 
 const whole = (v: unknown): number | null =>
@@ -68,6 +76,9 @@ export function readNoAccessPreview(x: unknown): NoAccessPreview | null {
   if (typeof plan !== "string" || typeof visit !== "string") return null;
   const raw = o["amount"];
   const amount = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : null;
+  const rawLeft = o["allowance_left"];
+  const left =
+    typeof rawLeft === "number" && Number.isFinite(rawLeft) && rawLeft >= 0 ? rawLeft : null;
   return {
     plan_id: plan,
     visit_id: visit,
@@ -76,6 +87,8 @@ export function readNoAccessPreview(x: unknown): NoAccessPreview | null {
     charged: o["charged"],
     amount,
     amount_known: o["amount_known"] === true,
+    has_allowance: o["has_allowance"] === true,
+    allowance_left: left,
   };
 }
 
@@ -101,7 +114,9 @@ export function noAccessBefore(p: NoAccessPreview, office: boolean): string[] {
   if (!office)
     return [
       which,
-      "The return trip is charged at our trip rate. The customer can call the office for the amount.",
+      p.has_allowance
+        ? "The return trip is charged at our trip rate. What is left of the plan's minor repairs is used toward it first. The customer can call the office for the amount."
+        : "The return trip is charged at our trip rate. The customer can call the office for the amount.",
     ];
   if (!p.amount_known || p.amount == null)
     return [
@@ -112,6 +127,33 @@ export function noAccessBefore(p: NoAccessPreview, office: boolean): string[] {
   return [
     which,
     `The return trip is charged ${allowanceMoney(p.amount)}. It goes on this inspection's invoice.`,
+    ...tripAllowanceLines(p.amount, p.has_allowance, p.allowance_left),
+  ];
+}
+
+/**
+ * How a charged return trip meets the plan's minor repairs, for the office: what is left goes
+ * toward it first and the customer pays the rest. "Today", because a repair invoiced before the
+ * inspection's invoice is made takes its share first.
+ */
+export function tripAllowanceLines(
+  amount: number,
+  hasAllowance: boolean,
+  left: number | null,
+): string[] {
+  if (!hasAllowance) return [];
+  if (left == null) return ["What is left of the plan's minor repairs is used toward it first."];
+  if (left <= 0)
+    return [
+      `Nothing is left of the plan's minor repairs this plan year. The customer pays ${allowanceMoney(amount)}.`,
+    ];
+  const plan = Math.min(left, amount);
+  const customer = Math.max(0, Math.round((amount - plan) * 100) / 100);
+  return [
+    `${allowanceMoney(left)} of the plan's minor repairs is left today. ${allowanceMoney(plan)} of it goes toward the trip.`,
+    customer > 0
+      ? `The customer pays ${allowanceMoney(customer)}.`
+      : "The customer pays nothing more.",
   ];
 }
 
@@ -134,7 +176,7 @@ export function noAccessLine(n: PlanNoAccess, showMoney: boolean): string {
     : "Return trip charged";
   if (n.billed === null) return `${head} ${what}.`;
   return n.invoice
-    ? `${head} ${what}, on invoice #${n.invoice.number}.`
+    ? `${head} ${what}, on ${String(n.invoice.number ?? "").trim() ? `invoice #${n.invoice.number}` : "a draft invoice"}.`
     : `${head} ${what}, not invoiced yet. It goes on this inspection's invoice.`;
 }
 

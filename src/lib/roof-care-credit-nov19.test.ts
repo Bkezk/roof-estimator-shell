@@ -131,7 +131,9 @@ describe('the agreement says both (owner: "ensure it makes it into the service a
     // (Nov 19, late: version 2026-11-19.4. Term 7 charges the return trip after the first visit
     // we could not do, and term 8 bills a further storm inspection.
     // roof-care-no-access-storm-nov19.test.ts.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-19.4");
+    // (Nov 20: version 2026-11-20.1. Term 7 adds that what is left of the minor repairs amount
+    // goes toward a charged return trip first.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
   });

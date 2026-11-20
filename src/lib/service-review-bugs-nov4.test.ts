@@ -260,7 +260,8 @@ describe("15 + 16. setServiceStage reads first, and an inspection ends at Author
     );
     expect(fn).toContain("const { data: prev, error: prevErr } = await context.supabase");
     // Nov 16: and its invoice — an inspection that has been billed may go past Authorized.
-    expect(fn).toContain('.select("stage, number, service_type, invoice_id")');
+    // Nov 20: and whether it is a Roof Care plan's inspection (the plan's questions are required).
+    expect(fn).toContain('.select("stage, number, service_type, invoice_id, roof_care_visit_id")');
     expect(fn).toContain("if (prevErr) throw new Error(prevErr.message);");
     expect(fn).toContain('if (!prev) throw new Error("Ticket not found");');
     expect(fn).toContain(

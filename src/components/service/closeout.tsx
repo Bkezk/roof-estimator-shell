@@ -205,6 +205,8 @@ import { backToStep, cardInPage, pickStep, shownCardStep } from "./one-card";
 import { CleaningQuestions } from "./cleaning";
 import {
   checklistStepSaved,
+  CLEANING_REQUIRED_NOTE,
+  cleaningBlocksAnyway,
   cleaningGaps,
   cleaningGate,
   cleaningStepMissing,
@@ -844,6 +846,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const gateOf = (r: { data?: typeof cleaningQ.data; error: unknown; isLoading: boolean }) =>
     cleaningGate({ visitId: planVisitId, data: r.data, error: r.error, loading: r.isLoading });
   const cleaning: CleaningGate = gateOf(cleaningQ);
+  // A question of the plan still open: no "Complete anyway" (cleaning-gate.ts).
+  const planQuestionsOpen = cleaningBlocksAnyway(cleaning, FINISHED.includes(job.stage));
 
   const input = (d: TextDraft) => ({
     id: job.id,
@@ -1625,6 +1629,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   {CLOSEOUT_ADD_MISSING}
                 </p>
               )}
+              {planQuestionsOpen && (
+                <p className="text-sm font-medium" data-line="plan-questions-required">
+                  {CLEANING_REQUIRED_NOTE}
+                </p>
+              )}
               <AlertDialogFooter>
                 <AlertDialogCancel className="h-12">Go back</AlertDialogCancel>
                 {unread && (
@@ -1645,7 +1654,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                 )}
                 {/* A technician's footer is Go back (and Retry): the greyed-out Complete that
                     could never be pressed is gone (owner, Nov 3, review item 20). */}
-                {manager && (
+                {/* Not while a question of the Roof Care plan is open (owner, Nov 20: "those
+                    questions should be required"): the server and the database refuse it too. */}
+                {manager && !planQuestionsOpen && (
                   <AlertDialogAction
                     className="h-12"
                     onClick={() => {

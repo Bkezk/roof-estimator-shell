@@ -75,6 +75,7 @@ import {
 } from "@/lib/travel-estimate";
 import { routedDrive } from "@/lib/drive-route";
 import { parseStreetAddress } from "@/lib/aerial-address";
+import { cleaningStop } from "@/lib/cleaning-required.server";
 import { isFinishedStage, WORK_STAGES } from "@/lib/ticket-stages";
 
 export const SERVICE_BUCKET = "service";
@@ -685,6 +686,15 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       // that stage, but its close-out is still recorded — completed_at is stamped once, so the
       // ticket page's Close-out fold says "Done <date>" instead of "not closed out yet".
       if (finished && job.completed_at) return { row: job, transition };
+      // Owner, Nov 20 ("those questions should be required"): a Roof Care plan's own inspection
+      // is not finished while a question the plan asks there is unanswered (cleaning-required.ts).
+      // Everybody's rule, a manager's Complete anyway included, and checked before the clock is
+      // touched so a refused Complete stops no clock. The database says the same
+      // (service_jobs_cleaning_rule).
+      if (!finished) {
+        const stop = await cleaningStop(sb, job.roof_care_visit_id);
+        if (stop) throw new Error(stop);
+      }
       // The labor the clock supplies (owner, Oct 15): a labor clock on this ticket, closed now.
       // With no clock, a ticket still "on site" from the old buttons supplies it from on_site_at
       // (never after Leave site: the clock wrote that labor already).

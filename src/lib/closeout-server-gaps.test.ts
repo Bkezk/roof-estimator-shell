@@ -186,8 +186,10 @@ describe("the screen", () => {
   const src = read("src/components/service/closeout.tsx");
   it("Complete anyway is a manager's; a technician sees Go back with the reasons and what to do (the greyed-out Complete is gone, Nov 3)", () => {
     expect(src).toContain("const manager = managesTickets(profile);");
+    // (Nov 20: and not while a question of the Roof Care plan is open at its own inspection,
+    // "those questions should be required"; cleaning-required-nov20.test.ts.)
     expect(src).toMatch(
-      /\{manager && \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\)\}/,
+      /\{manager && !planQuestionsOpen && \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\)\}/,
     );
     expect(src).not.toContain('data-action="complete-blocked"');
     expect(src).toContain("{!manager && (");
