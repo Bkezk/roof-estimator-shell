@@ -502,6 +502,9 @@ cannot get on the roof.
   Roof Care price page, per hour of the round trip for the whole crew and per mile. Both blank,
   the Service rates page's travel rates are used. `roof_care_trip_charge()` decides. Record:
   `docs/qa/roof-care-trip-rate-2026-11-20.md`.
+- A return trip is never charged less than it costs us (the owner, Nov 20: "why is it charging
+  less than it cost?"): the charge is the higher of what the rates come to and the trip's cost
+  by the price page's own crew and vehicle numbers. Nothing has to be typed for that.
 - How many are free is one named number in the database, `c_free` in
   `roof_care_no_access_state()`. Set it to 0 and every one is charged.
 - No access is a button on the inspection's ticket: in the technician's workflow and on the

@@ -48,3 +48,35 @@ pressed and nothing was sent. No sideways scroll at phone width. No page errors.
 
 `supabase/migrations/20261120300000_roof_care_trip_rate.sql`: one function,
 `roof_care_trip_charge`, applied by hand through the database tool and checked against the file.
+
+## Later the same day: never charged less than it costs
+
+The owner, told that the two boxes were blank and a return trip still came out under its cost:
+"why is it charging less than it cost? didnt we figure that out?"
+
+He was right. Building two blank boxes fixed nothing until he typed into them. Now there is
+nothing to type:
+
+| Before                                                            | Now                                                          |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| Both boxes blank: the travel rates, under the trip's cost         | The higher of what the rates come to and what the trip costs |
+| Rates typed under the cost: charged under the cost, with a remark | The cost is charged, and the line says so                    |
+
+- What the trip costs is worked from the Roof Care price page's own numbers: the whole crew's
+  pay for the hours of the plan's round trip, and the vehicle for its miles.
+- The two boxes stay. Their use now is to charge more than the cost.
+- When the cost cannot be worked out (the crew cost is blank), the rates are charged as before.
+
+Tests: the same file, now 10 tests. The two new ones fail on the code before this.
+
+On the live database, one trial that was rolled back, the price setup changed inside it only:
+
+1. Nothing typed, the list price's own round trip: the cost was charged, which is more than the
+   travel rates came to.
+2. A low rate typed: still the cost.
+3. A rate above the cost: that rate.
+4. The crew cost taken away: the travel rates, as before.
+5. A plan far away and a plan close by: each its own cost.
+
+Database: `supabase/migrations/20261120400000_roof_care_trip_never_under_cost.sql`, the same
+function, applied by hand and checked against the file.

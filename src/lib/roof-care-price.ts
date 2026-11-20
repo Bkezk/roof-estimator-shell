@@ -348,8 +348,21 @@ const usd2 = (n: number) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
+ * What a return trip is charged: never less than it costs us (owner, Nov 20: "why is it charging
+ * less than it cost?"). The amount the rates come to (the two boxes, or the travel rates), raised
+ * to the trip's cost when it is under it. Null when neither is known. The database does the same
+ * (roof_care_trip_charge), and is what counts.
+ */
+export function tripCharged(amount: number | null, cost: number | null): number | null {
+  const a = amount != null && amount > 0 ? amount : null;
+  const c = cost != null && cost > 0 ? cost : null;
+  if (a == null) return c;
+  return c == null ? a : Math.max(a, c);
+}
+
+/**
  * The line under the two trip charge boxes, for the round trip the list price covers: what that
- * trip costs us, and what the boxes charge for it. Null until that round trip is typed.
+ * trip costs us, and what is charged for it. Null until that round trip is typed.
  */
 export function tripChargeNote(s: RoofCareSettings): string | null {
   if (s.baseline_drive_hours == null || s.baseline_miles == null) return null;
@@ -358,14 +371,16 @@ export function tripChargeNote(s: RoofCareSettings): string | null {
     miles: s.baseline_miles,
   });
   const trip = `a round trip of ${s.baseline_drive_hours} hours and ${s.baseline_miles} miles`;
-  const costs = cost == null ? "" : ` It costs us ${usd2(cost)}.`;
+  const rule = "A return trip is never charged less than it costs us.";
+  if (cost == null)
+    return charge == null
+      ? `${rule} Type the crew and vehicle costs above to see what ${trip} costs us.`
+      : `For ${trip}: these two boxes charge ${usd2(charge)}. Type the crew and vehicle costs above to see what it costs us.`;
   if (charge == null)
-    return `Both blank: a return trip is charged at the travel rates on the Service rates page. For ${trip}:${costs || " type the crew and vehicle costs above to see what it costs us."}`;
-  const short =
-    cost != null && charge < cost
-      ? ` That is ${usd2(r2(cost - charge))} under what it costs us.`
-      : "";
-  return `For ${trip}: these two boxes charge ${usd2(charge)}.${costs}${short}`;
+    return `${rule} For ${trip}: it costs us ${usd2(cost)}, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more.`;
+  return charge < cost
+    ? `For ${trip}: these two boxes come to ${usd2(charge)}. It costs us ${usd2(cost)}, so it is charged ${usd2(cost)}. ${rule}`
+    : `For ${trip}: these two boxes charge ${usd2(charge)}. It costs us ${usd2(cost)}.`;
 }
 
 export interface PlanPrice {

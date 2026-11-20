@@ -17,6 +17,7 @@ import {
   SETTING_LABELS,
   settingsProblems,
   tripChargeNote,
+  tripCharged,
   tripCostAndCharge,
 } from "@/lib/roof-care-price";
 
@@ -93,15 +94,17 @@ describe("the price setup page", () => {
       baseline_drive_hours: 2.5,
       baseline_miles: 120,
     };
+    // (Later on Nov 20, the owner: "why is it charging less than it cost?" The line now says
+    // the trip is never charged under its cost, where it used to say how far under it was.)
     expect(tripChargeNote(s)).toBe(
-      "Both blank: a return trip is charged at the travel rates on the Service rates page. For a round trip of 2.5 hours and 120 miles: It costs us $273.00.",
+      "A return trip is never charged less than it costs us. For a round trip of 2.5 hours and 120 miles: it costs us $273.00, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more.",
     );
     expect(tripChargeNote({ ...s, trip_charge_per_hour: 100, trip_charge_per_mile: 0.5 })).toBe(
       "For a round trip of 2.5 hours and 120 miles: these two boxes charge $310.00. It costs us $273.00.",
     );
-    // Charged under the cost: it says by how much.
+    // Rates that come to less than the cost: the cost is charged, and it says so.
     expect(tripChargeNote({ ...s, trip_charge_per_hour: 80, trip_charge_per_mile: null })).toBe(
-      "For a round trip of 2.5 hours and 120 miles: these two boxes charge $200.00. It costs us $273.00. That is $73.00 under what it costs us.",
+      "For a round trip of 2.5 hours and 120 miles: these two boxes come to $200.00. It costs us $273.00, so it is charged $273.00. A return trip is never charged less than it costs us.",
     );
     // No round trip typed yet: nothing is said.
     expect(tripChargeNote(emptyRoofCareSettings())).toBeNull();
@@ -112,6 +115,36 @@ describe("the price setup page", () => {
   });
 });
 
+describe("a return trip is never charged less than it costs us", () => {
+  const FLOOR = flat(
+    read("supabase/migrations/20261120400000_roof_care_trip_never_under_cost.sql"),
+  );
+  it("the higher of what the rates come to and what the trip costs", () => {
+    expect(tripCharged(200, 273)).toBe(273);
+    expect(tripCharged(310, 273)).toBe(310);
+    // One of the two not known: the other. Neither: not known, never nothing.
+    expect(tripCharged(null, 273)).toBe(273);
+    expect(tripCharged(200, null)).toBe(200);
+    expect(tripCharged(null, null)).toBeNull();
+    expect(tripCharged(0, 0)).toBeNull();
+  });
+  it("the database does it, with nothing to type", () => {
+    // The cost: the whole crew for the hours, the vehicle for the miles, from the price setup.
+    expect(FLOOR).toContain(
+      "v_cost := round(v_hours * v_size * v_crew_cost + coalesce(v_miles, 0) * coalesce(v_vehicle, 0), 2);",
+    );
+    expect(FLOOR).toContain("return nullif(greatest(nullif(v_rate, 0), nullif(v_cost, 0)), 0);");
+    // The rates are still the two boxes when typed, else the travel rates.
+    expect(FLOOR).toContain("if v_per_hour > 0 or v_per_mile > 0 then");
+    expect(FLOOR).toContain(
+      "v_rate := round(v_hours * (v_tech + (v_size - 1) * coalesce(v_helper, 0)), 2);",
+    );
+    // No amount is typed into the repository.
+    expect(FLOOR).not.toMatch(/v_cost := \d|v_rate := \d|v_crew_cost := \d/);
+  });
+});
+
+// (The first rule of the day, kept in its own file. The rule in force is the one above.)
 describe("the database works the charge", () => {
   it("from the plan's own round trip at the two rates, when either is typed", () => {
     expect(SQL).toContain("if v_per_hour > 0 or v_per_mile > 0 then");
