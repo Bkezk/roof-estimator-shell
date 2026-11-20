@@ -1,19 +1,20 @@
 /**
  * The Tech Board on a phone (owner, Nov 17; the rules and the owner's two choices are in
- * lib/board-phone.ts): one day at a time, and a details pop-up on a tap.
+ * lib/board-phone.ts): the week as seven day cards, and a details pop-up on a tap.
  *
- *   - Seven day buttons across the top, each with its ticket count. They stay at the top of the
- *     screen while the list scrolls.
- *   - Every technician is a full-width row for the chosen day: a big target for a thumb.
- *   - The Unassigned tickets sit in a tray that stays at the bottom of the screen, so a ticket to
- *     hand out and the people to hand it to are on the screen together.
- *   - Hold a ticket and it lifts; drag it onto a technician, onto a day button (rest there a
- *     moment and the board switches to that day), back onto the tray to unassign it, or onto
- *     "A week earlier" / "A week later", which show under the day buttons while a ticket is held
- *     (hooks/use-hold-drag.ts). A swipe still scrolls.
- *   - While a ticket from the tray is held, every technician is also a small target in a block
- *     right above the tray (owner, Nov 19: assigning on a phone "isnt great"): nobody is a
- *     scroll away, and the finger moves an inch or two, not up the page.
+ *   - The week is the page (owner, Nov 20: "can we have the calendar be bigger and remove the
+ *     list of technicians so we can see the days better"): seven full-width day cards, each
+ *     with every ticket on it and the technician's name on the ticket. Before this the days were
+ *     seven small buttons, and the page was a row per technician for one day, most of them
+ *     reading "Nothing this day".
+ *   - Tap a day to choose it: it is the day a ticket dropped on a technician goes to.
+ *   - The Unassigned tickets sit in a tray that stays at the bottom of the screen.
+ *   - Hold a ticket and it lifts; the technicians come up in a block right above the tray
+ *     (owner, Nov 19 and Nov 20: "once we drag a job up the technician list appears anyway").
+ *     Drag it onto a technician there, onto a day card (rest there a moment and that day is
+ *     chosen), back onto the tray to unassign it, or onto "A week earlier" / "A week later",
+ *     which show at the top of the screen while a ticket is held (hooks/use-hold-drag.ts). A
+ *     swipe still scrolls.
  *   - A tap opens the ticket's details over the board, with Open ticket, Move (pick a technician
  *     and a day without dragging), Call and Directions. Closing it leaves the board where it was.
  *
@@ -56,7 +57,7 @@ import {
   PREV_WEEK_KEY,
   RAIL_KEY,
   cellKey,
-  dayCounts,
+  dayCountWords,
   dayKey,
   dayNumber,
   dayShort,
@@ -68,6 +69,7 @@ import {
   dockRoom,
   dockScroll,
   dockTitle,
+  liftDayIndex,
   isDayKey,
   mapsUrl,
   movableOnBoard,
@@ -173,7 +175,6 @@ export function PhoneBoard(p: PhoneBoardProps) {
   const day = p.days[dayIdx] ?? p.days[0]!;
   useEffect(() => keepDay(day), [day]);
   const [trayOpen, setTrayOpen] = useState(false);
-  const [showOthers, setShowOthers] = useState(false);
   const [peekId, setPeekId] = useState<string | null>(null);
 
   const ghost = useRef<HTMLDivElement>(null);
@@ -194,6 +195,13 @@ export function PhoneBoard(p: PhoneBoardProps) {
       // The open tray folds out of the way of the technicians, and stays folded after the drop
       // so the result is on the screen.
       setTrayOpen(false);
+      // A ticket that is on a day of this week is held for that day: dropped on a technician it
+      // keeps its day, unless the finger rests on another day first.
+      const own = liftDayIndex(
+        p.jobs.find((j) => j.id === id),
+        p.days,
+      );
+      if (own >= 0) setDayIdx(own);
       p.onDragId(id);
     },
     onOver: (key) => p.onOver(key),
@@ -216,16 +224,18 @@ export function PhoneBoard(p: PhoneBoardProps) {
     },
   });
 
-  const counts = dayCounts(p.jobs, p.days);
-  const dayTotal = counts[dayIdx] ?? 0;
+  // Everyone holding a ticket this week, technicians first: a day card lists their tickets.
+  const people = [...p.techRows, ...p.otherRows];
+  const dayItems = (d: string) =>
+    people.flatMap((r) => p.cellJobs(r.id, d).map((job) => ({ job, who: r.name })));
   const peek = peekId ? p.jobs.find((j) => j.id === peekId) : undefined;
   const expanded = trayOpen;
   // Prev and Next scroll off the top of a phone, so a lifted ticket that can move a week (it has
   // a technician and a day) is given two targets under the day buttons for as long as it is held.
   const weekTargets = p.dispatch && !!dragged?.technician_id && !!dragged.scheduled_date;
   const overClass = "ring-2 ring-inset ring-primary bg-primary/10";
-  // The technician dock (lib/board-phone.ts): shown while a dispatcher holds a ticket from the
-  // Unassigned tray. It hangs
+  // The technician dock (lib/board-phone.ts): shown while a dispatcher holds a ticket. It is the
+  // only place the technicians are listed (owner, Nov 20). It hangs
   // on the tray's top edge by itself (it is drawn inside the tray); only the room above the tray
   // is measured, before the screen is drawn, to choose two or three technicians across.
   const showDock = p.dispatch && p.techRows.length > 0 && dockFor(dragged);
@@ -258,101 +268,83 @@ export function PhoneBoard(p: PhoneBoardProps) {
     // Measured when the ticket lifts, and again if the tray or the week targets change height.
   }, [showDock, trayOpen, weekTargets, p.techRows.length]);
 
-  const row = (r: Row, shaded: boolean) => {
-    const key = cellKey(r.id, day);
-    const items = p.cellJobs(r.id, day);
+  const dayCard = (d: string, i: number) => {
+    const on = i === dayIdx;
+    const key = dayKey(d);
+    const items = dayItems(d);
+    const n = items.length;
     return (
       <section
-        key={r.id}
-        data-row={r.id}
-        data-drop={p.dispatch ? key : undefined}
-        aria-label={`${r.name}, ${dayShort(day)}`}
-        className={`min-h-[4.5rem] space-y-2 rounded-lg border p-2 transition-colors ${
-          p.over === key ? overClass : shaded ? "bg-muted/60" : "bg-card"
+        key={d}
+        data-day={d}
+        data-day-card={on ? "chosen" : "day"}
+        data-drop={p.dispatch ? dayKey(d) : undefined}
+        aria-label={`${dayTitle(d)}, ${dayCountWords(n)}`}
+        className={`space-y-2 rounded-lg border p-2 transition-colors ${
+          p.over === key
+            ? overClass
+            : on
+              ? "border-primary bg-primary/10"
+              : d === p.today
+                ? "border-primary/60 bg-card"
+                : "bg-card"
         }`}
       >
         <div className="flex items-center gap-2">
-          <UserRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{r.name}</h3>
-          {items.length > 0 && (
-            <span className="text-xs text-muted-foreground">{items.length}</span>
-          )}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => setDayIdx(i)}
+            className="flex min-h-[44px] min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-left"
+          >
+            <span className="text-lg font-semibold leading-tight">{dayTitle(d)}</span>
+            {d === p.today && <span className="text-xs font-medium text-primary">Today</span>}
+            <span className="ml-auto text-xs text-muted-foreground" data-day-count={n}>
+              {dayCountWords(n)}
+            </span>
+          </button>
           {p.dispatch && (
             <Link
               to="/service"
-              search={{ new: 1, tech: r.id, date: day }}
+              search={{ new: 1, date: d }}
               className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground"
-              aria-label={`New ticket for ${r.name} on ${dayShort(day)}`}
+              aria-label={`New ticket on ${dayShort(d)}`}
             >
               <Plus className="h-5 w-5" />
             </Link>
           )}
         </div>
-        {items.length === 0 ? (
-          <p className="pb-1 text-xs text-muted-foreground">
-            {dragging ? "Drop here" : "Nothing this day"}
-          </p>
-        ) : (
-          items.map((j) => (
-            <PhoneChip
-              key={j.id}
-              job={j}
-              drag={p.dispatch}
-              lifted={p.dragId === j.id}
-              bind={bind}
-              onOpen={setPeekId}
-            />
-          ))
-        )}
+        {items.map(({ job: j, who }) => (
+          <PhoneChip
+            key={j.id}
+            job={j}
+            who={who}
+            drag={p.dispatch}
+            lifted={p.dragId === j.id}
+            bind={bind}
+            onOpen={setPeekId}
+          />
+        ))}
+        {n === 0 && dragging && <p className="pb-1 text-xs text-muted-foreground">Drop here</p>}
       </section>
     );
   };
 
   return (
     <div className="space-y-3" data-board="phone">
+      {/* A line with no height that stays at the top of the screen. The dock measures its room
+          from it, and the two week targets hang from it while a ticket is held. */}
       <div
         ref={strip}
         data-board-top
-        role="tablist"
-        aria-label="Day"
-        className="sticky top-[var(--jbk-top-gap,0px)] z-20 -mx-4 grid grid-cols-7 gap-1 border-b bg-background px-4 py-2 sm:-mx-6 sm:px-6"
+        className="sticky top-[var(--jbk-top-gap,0px)] z-20 -mx-4 h-0 sm:-mx-6"
       >
-        {p.days.map((d, i) => {
-          const on = i === dayIdx;
-          const n = counts[i] ?? 0;
-          return (
-            <button
-              key={d}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              aria-label={`${dayTitle(d)}, ${n} ${n === 1 ? "ticket" : "tickets"}`}
-              data-day={d}
-              data-drop={p.dispatch ? dayKey(d) : undefined}
-              onClick={() => setDayIdx(i)}
-              className={`flex min-h-[60px] flex-col items-center justify-center rounded-md border text-xs leading-tight transition-colors ${
-                p.over === dayKey(d)
-                  ? overClass
-                  : on
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : d === p.today
-                      ? "border-primary/60 bg-primary/10"
-                      : "bg-card"
-              }`}
-            >
-              <span className={on ? "" : "text-muted-foreground"}>{DAY_NAMES[i]}</span>
-              <span className="text-base font-semibold">{dayNumber(d)}</span>
-              <span className="h-4 text-[11px] font-medium" data-day-count={n}>
-                {n > 0 ? n : ""}
-              </span>
-            </button>
-          );
-        })}
         {weekTargets && (
           <div
             ref={weeks}
             data-board-weeks
-            className="absolute inset-x-0 top-full grid grid-cols-2 gap-2 border-b bg-background px-4 py-2 shadow-md sm:px-6"
+            className="absolute inset-x-0 top-0 grid grid-cols-2 gap-2 border-b bg-background px-4 py-2 shadow-md sm:px-6"
           >
             <div
               data-drop={PREV_WEEK_KEY}
@@ -374,45 +366,21 @@ export function PhoneBoard(p: PhoneBoardProps) {
         )}
       </div>
 
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold" data-board-day={day}>
-          {dayTitle(day)}
-          {day === p.today && <span className="ml-2 text-xs font-medium text-primary">Today</span>}
-        </h2>
-        <span className="text-xs text-muted-foreground">
-          {dayTotal === 0 ? "No tickets" : `${dayTotal} ${dayTotal === 1 ? "ticket" : "tickets"}`}
-        </span>
-      </div>
-
-      <div className="space-y-2" role="list" aria-label={`Technicians, ${dayShort(day)}`}>
-        {p.techRows.length === 0 && (
-          <p className="rounded-lg border p-3 text-sm text-muted-foreground">
-            No technicians yet. An admin marks people as technicians on Admin › Settings › Users
-            &amp; access.
-          </p>
-        )}
-        {p.techRows.map((r, i) => row(r, i % 2 === 1))}
-        {p.otherRows.length > 0 && (
-          <>
-            <button
-              type="button"
-              className="flex min-h-[44px] w-full items-center gap-2 rounded-md bg-muted/40 px-2 text-left text-xs font-semibold uppercase tracking-wide"
-              aria-expanded={showOthers}
-              onClick={() => setShowOthers((v) => !v)}
-            >
-              {showOthers ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              Others
-              <span className="font-normal normal-case text-muted-foreground">
-                {p.otherRows.length} with tickets this week
-              </span>
-            </button>
-            {showOthers && p.otherRows.map((r, i) => row(r, i % 2 === 1))}
-          </>
-        )}
+      {p.techRows.length === 0 && (
+        <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+          No technicians yet. An admin marks people as technicians on Admin › Settings › Users &amp;
+          access.
+        </p>
+      )}
+      {/* The week: a card a day, each with every ticket on it. */}
+      <div
+        className="space-y-2"
+        role="tablist"
+        aria-label="Days"
+        aria-orientation="vertical"
+        data-board-days
+      >
+        {p.days.map((d, i) => dayCard(d, i))}
       </div>
 
       {/* The tray: it stays at the bottom of the screen, and is the target that unassigns. */}
@@ -422,7 +390,7 @@ export function PhoneBoard(p: PhoneBoardProps) {
         data-drop={p.dispatch ? RAIL_KEY : undefined}
         aria-label="Unassigned tickets"
         className={`sticky bottom-0 z-20 -mx-4 space-y-2 border-t px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 shadow-[0_-6px_16px_rgba(0,0,0,0.18)] transition-colors sm:-mx-6 sm:px-6 ${
-          p.over === RAIL_KEY ? `${overClass} bg-card` : "bg-card"
+          p.over === RAIL_KEY ? "bg-card ring-2 ring-inset ring-primary" : "bg-card"
         }`}
       >
         {/* The technician dock: every technician within an inch or two of the finger. It hangs
@@ -437,6 +405,27 @@ export function PhoneBoard(p: PhoneBoardProps) {
             style={{ maxHeight: dockSpace }}
             className="absolute inset-x-0 bottom-full mb-0 overflow-hidden border-t bg-card px-4 pb-2 pt-1 shadow-[0_-8px_20px_rgba(0,0,0,0.3)] sm:px-6"
           >
+            {/* The days, under the finger: rest on one and it is the day the technicians below
+                are for; let go on one and only the day changes. */}
+            <div className="mb-[6px] grid h-[44px] grid-cols-7 gap-1" data-dock-days>
+              {p.days.map((d, i) => (
+                <div
+                  key={d}
+                  data-drop={dayKey(d)}
+                  data-dock-day={d}
+                  className={`flex flex-col items-center justify-center rounded-md border text-[11px] leading-none transition-colors ${
+                    p.over === dayKey(d)
+                      ? overClass
+                      : i === dayIdx
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "bg-background"
+                  }`}
+                >
+                  <span>{DAY_NAMES[i]}</span>
+                  <span className="mt-0.5 text-sm font-semibold">{dayNumber(d)}</span>
+                </div>
+              ))}
+            </div>
             <p className="flex h-[30px] items-center text-xs font-semibold">{dockTitle(day)}</p>
             <div
               className={`grid gap-[6px] ${
@@ -627,6 +616,8 @@ function PhoneChip(props: {
   since?: boolean;
   /** The folded tray's side-by-side cards. */
   compact?: boolean;
+  /** On a day card: whose ticket it is. */
+  who?: string;
   /** May this viewer move it (a manager or the office)? */
   drag: boolean;
   lifted: boolean;
@@ -674,6 +665,12 @@ function PhoneChip(props: {
           )}
           <span className="font-semibold">#{j.number}</span> {j.customer_name}
         </span>
+        {props.who && (
+          <span className="flex items-center gap-1 text-xs font-semibold" data-chip-who>
+            <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{props.who}</span>
+          </span>
+        )}
         {place && <span className="block truncate text-xs opacity-80">{place}</span>}
         {facts.length > 0 && (
           <span className="block truncate text-xs font-medium">{facts.join(" · ")}</span>

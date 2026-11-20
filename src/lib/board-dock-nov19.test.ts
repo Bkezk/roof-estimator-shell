@@ -85,9 +85,13 @@ describe("which ticket gets the dock", () => {
     expect(dockFor({ technician_id: null, scheduled_date: DAY })).toBe(true);
     expect(dockFor({ technician_id: OTHER, scheduled_date: null })).toBe(true);
   });
-  it("not one lifted from a technician's row: the dock would open under the finger", () => {
-    // Let go without moving, and it would land on whoever's name came up there.
-    expect(dockFor({ technician_id: OTHER, scheduled_date: DAY })).toBe(false);
+  // (Nov 20, the owner: "remove the list of technicians ... once we drag a job up the technician
+  // list appears anyway". Until then this read "not one lifted from a technician's row: the dock
+  // would open under the finger", and expected false. With the rows gone the dock is the only
+  // list of technicians, so every held ticket gets it; a ticket let go where it lifted is put
+  // back, which is what kept the old rule. board-phone-days-nov20.test.ts.)
+  it("one held on a day too, and nothing when no ticket is held", () => {
+    expect(dockFor({ technician_id: OTHER, scheduled_date: DAY })).toBe(true);
     expect(dockFor(null)).toBe(false);
     expect(dockFor(undefined)).toBe(false);
   });
@@ -189,8 +193,9 @@ describe("the screen", () => {
     );
     expect(page).toContain("const assignFn = useServerFn(assignServiceJob);");
   });
-  it("everything that worked before is still there: the rows, the day buttons, the tray, the details pop-up", () => {
-    expect(phone).toContain("data-drop={p.dispatch ? key : undefined}");
+  // (Nov 20: the technician rows are gone from the page at the owner's word, and with them
+  // their target "data-drop={p.dispatch ? key : undefined}". The days are cards now.)
+  it("everything that worked before is still there: the days, the tray, the details pop-up", () => {
     expect(phone).toContain("data-drop={p.dispatch ? dayKey(d) : undefined}");
     expect(phone).toContain("data-drop={p.dispatch ? RAIL_KEY : undefined}");
     expect(phone).toContain('data-peek="move-button"');

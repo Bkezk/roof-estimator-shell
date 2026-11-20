@@ -166,3 +166,6 @@ block, the week targets as before, let go without moving, 0 writes.
 - Tickets 55, notifications 256, the ticket number counter at 6075: all as before.
 - The test login is an admin with the technician tick and no extra access, as before.
 - Nothing was pressed that creates a ticket or moves one.
+
+Nov 20: the phone board is day cards now, and the technicians come up for any held ticket. See
+`docs/qa/tech-board-phone-days-2026-11-20.md`.

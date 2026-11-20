@@ -279,7 +279,12 @@ describe("hold, then drag", () => {
 
 describe("the phone board's screen", () => {
   it("every target carries its key, for a dispatcher only", () => {
-    expect(phone).toContain("data-drop={p.dispatch ? key : undefined}");
+    // (Nov 20: the technician rows and their target are gone from the page at the owner's word.
+    // A technician is a target in the dock, which has no reader's version: it shows only to a
+    // dispatcher holding a ticket.)
+    expect(phone).toContain(
+      "const showDock = p.dispatch && p.techRows.length > 0 && dockFor(dragged);",
+    );
     expect(phone).toContain("data-drop={p.dispatch ? dayKey(d) : undefined}");
     expect(phone).toContain("data-drop={p.dispatch ? RAIL_KEY : undefined}");
     expect(phone).toContain("data-drop={PREV_WEEK_KEY}");
@@ -305,15 +310,17 @@ describe("the phone board's screen", () => {
     expect(phone).toContain("A week later");
   });
   it("a thumb's targets are 44 real pixels, and typing boxes do not make an iPhone zoom", () => {
-    for (const cls of ["h-[44px] w-[44px]", "min-h-[60px]", "min-h-[52px]", "min-h-[44px]"])
+    // (Nov 20: "min-h-[60px]" was the small day button, which is a full-width card now.)
+    for (const cls of ["h-[44px] w-[44px]", "min-h-[52px]", "min-h-[44px]"])
       expect(phone).toContain(cls);
     expect(phone).toContain('const PEEK_BUTTON = "h-[46px] text-[15px]";');
     expect(phone.match(/text-\[16px\]/g)?.length).toBeGreaterThanOrEqual(3);
     expect(page).toContain('phone ? "h-[44px] px-3"');
   });
   it("says how in a line", () => {
+    // (Nov 20: the technicians are no longer on the page until a ticket is held.)
     expect(PHONE_BOARD_HINT).toBe(
-      "Hold a ticket, then drag it onto a technician. Tap a ticket for its details.",
+      "Hold a ticket and the technicians come up: drag it onto one, or onto a day. Tap a ticket for its details.",
     );
     expect(page).toContain("PHONE_BOARD_HINT");
   });

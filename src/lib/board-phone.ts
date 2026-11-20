@@ -164,21 +164,45 @@ export function dayShort(ymd: string): string {
 // (the same key, cellKey), so a drop on it is the same single write with the same rules.
 
 /**
- * Which lifted ticket gets the dock: one from the Unassigned tray (no technician, or no day
- * yet). The tray is under the dock, so the dock never opens under the finger. A ticket lifted
- * from a technician's row is somewhere in the list, which is where the dock opens: a finger let
- * go without moving would then land on whoever's name came up under it. That ticket keeps the
- * rows, as before.
+ * Which lifted ticket gets the dock: any ticket (owner, Nov 20: "remove the list of technicians
+ * ... once we drag a job up the technician list appears anyway"). The dock is now the only place
+ * a phone lists the technicians, so a ticket held on a day card needs it as much as one from the
+ * tray.
+ *
+ * Until Nov 20 only a ticket from the tray got it (no technician, or no day yet). A ticket held
+ * in the list could have the dock open under the finger, and letting go without moving would
+ * have dropped it on whoever's name came up. That is covered since Nov 19: a ticket let go where
+ * it lifted is put back (lib/hold-drag.ts, carried).
  */
 export const dockFor = (
   job: Pick<MoveJob, "technician_id" | "scheduled_date"> | null | undefined,
-): boolean => !!job && (!job.technician_id || !job.scheduled_date);
+): boolean => !!job;
+
+/**
+ * The day a lifted ticket is held for: its own day when that is in the week on the screen, so a
+ * drop on a technician keeps the day. -1 when it has none here (the chosen day stays).
+ */
+export function liftDayIndex(
+  job: Pick<MoveJob, "scheduled_date"> | null | undefined,
+  days: readonly string[],
+): number {
+  return job?.scheduled_date ? days.indexOf(job.scheduled_date) : -1;
+}
+
+/** A day card's count: "No tickets", "1 ticket", "3 tickets". */
+export const dayCountWords = (n: number): string =>
+  n === 0 ? "No tickets" : `${n} ${n === 1 ? "ticket" : "tickets"}`;
 
 /** A dock target's height, and the gap between two. A thumb's 44 pixels and a little more. */
 export const DOCK_ROW_PX = 48;
 export const DOCK_GAP_PX = 6;
-/** The dock's own line of words and padding. */
-export const DOCK_HEAD_PX = 44;
+/**
+ * The dock's own line of words and padding (44), and since Nov 20 its row of seven day targets
+ * with the gap under it (50): with the technician rows gone from the page, the days a held
+ * ticket can go to are in the dock too, under the finger.
+ */
+export const DOCK_DAYS_PX = 50;
+export const DOCK_HEAD_PX = 44 + DOCK_DAYS_PX;
 
 /** The room the dock has: from the day buttons down to the tray (never less than nothing). */
 export function dockRoom(trayTop: number, listTop: number): number {
@@ -224,7 +248,7 @@ export function dockNote(count: number, hasIt: boolean): string {
 
 // ---- Words -------------------------------------------------------------------------------------
 export const PHONE_BOARD_HINT =
-  "Hold a ticket, then drag it onto a technician. Tap a ticket for its details.";
+  "Hold a ticket and the technicians come up: drag it onto one, or onto a day. Tap a ticket for its details.";
 export const PHONE_BOARD_HINT_READ = "Who is where this week. Tap a ticket for its details.";
 
 /** What a move did, said once it is saved: "Ticket #6071: Garry Peters, Tue, Nov 17." */
