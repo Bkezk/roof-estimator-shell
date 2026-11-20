@@ -121,5 +121,20 @@ export function roughPlaceLine(place: string | null): string {
   }, so this price is an estimate until the office confirms the address.`;
 }
 
+/**
+ * How a drive was worked out, for the office's own page (Nov 20): "by road, from Google" when
+ * the owner's Google key answered, "by road, from the free router" when the free public router
+ * did (no key, or Google did not answer), and "estimated" from the straight line otherwise.
+ */
+export function driveSourceWords(d: {
+  source: "routed" | "estimated";
+  router?: "google" | "free" | null;
+}): string {
+  if (d.source !== "routed") return "estimated";
+  if (d.router === "google") return "by road, from Google";
+  if (d.router === "free") return "by road, from the free router";
+  return "by road";
+}
+
 export const NOT_PLACED_LINE =
   "Neither the address nor its town could be found on the map, so no price is given. Check the street, city, state and zip.";

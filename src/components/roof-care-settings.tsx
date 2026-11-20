@@ -20,7 +20,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-store";
-import { NOT_PLACED_LINE, placedRoughly, roughPlaceLine } from "@/lib/roof-care-locate";
+import {
+  NOT_PLACED_LINE,
+  driveSourceWords,
+  placedRoughly,
+  roughPlaceLine,
+} from "@/lib/roof-care-locate";
 
 import {
   draftFrom,
@@ -534,8 +539,7 @@ function TryABuilding({ settings }: { settings: RoofCareSettings }) {
           <p data-try-line="drive">
             Round trip from the office: <b>{usable.hours} h</b>, <b>{usable.miles} miles</b>{" "}
             <span className="text-muted-foreground">
-              ({(drive as RoofCareDrive).source === "routed" ? "by road" : "estimated"}). The list
-              price covers {baseline}.
+              ({driveSourceWords(drive as RoofCareDrive)}). The list price covers {baseline}.
             </span>
           </p>
         )}

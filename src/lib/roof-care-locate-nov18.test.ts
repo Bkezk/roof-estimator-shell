@@ -22,7 +22,11 @@ vi.mock("@/lib/service-aerial.functions", () => ({
   geocodeAddressCached: async () => ({ lat: 37.13, lng: -84.08 }),
 }));
 // No road router in a test: the straight-line estimate is used.
-vi.mock("@/lib/drive-route", () => ({ routedDrive: async () => null }));
+// Nov 20: the drive asks routedDriveVia, which also says which router answered.
+vi.mock("@/lib/drive-route", () => ({
+  routedDrive: async () => null,
+  routedDriveVia: async () => null,
+}));
 
 import { censusGeocoderUrl } from "@/lib/address-census";
 import {

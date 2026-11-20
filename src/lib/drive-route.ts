@@ -143,15 +143,32 @@ export async function routedDrive(
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
   env: { GOOGLE_MAPS_API_KEY?: string | undefined } = process.env,
 ): Promise<RoutedDrive | null> {
+  return (await routedDriveVia(from, to, fetchImpl, env))?.drive ?? null;
+}
+
+/** Which router answered: Google with the owner's key, or the free public one. */
+export type RouteVia = "google" | "free";
+
+/**
+ * The same drive as routedDrive, with which router gave it (Nov 20: the owner added his Google
+ * key and has to be able to see that it is the one answering, and to notice when it stops).
+ */
+export async function routedDriveVia(
+  from: RoutePoint,
+  to: RoutePoint,
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+  env: { GOOGLE_MAPS_API_KEY?: string | undefined } = process.env,
+): Promise<{ drive: RoutedDrive; via: RouteVia } | null> {
   if (!isPoint(from) || !isPoint(to)) return null;
   try {
     const key = (env.GOOGLE_MAPS_API_KEY ?? "").trim();
     if (key) {
       const g = googleRoutesRequest(from, to, key);
       const viaGoogle = await ask(fetchImpl, g.url, g.init, parseGoogleRoute);
-      if (viaGoogle) return viaGoogle;
+      if (viaGoogle) return { drive: viaGoogle, via: "google" };
     }
-    return await ask(fetchImpl, osrmRouteUrl(from, to), { method: "GET" }, parseOsrmRoute);
+    const free = await ask(fetchImpl, osrmRouteUrl(from, to), { method: "GET" }, parseOsrmRoute);
+    return free ? { drive: free, via: "free" } : null;
   } catch {
     return null;
   }

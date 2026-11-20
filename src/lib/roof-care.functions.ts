@@ -22,7 +22,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { isAdmin } from "@/lib/access";
 import { censusGeocoderUrl, CENSUS_TIMEOUT_MS, parseCensusResponse } from "@/lib/address-census";
-import { routedDrive } from "@/lib/drive-route";
+import { routedDriveVia, type RouteVia } from "@/lib/drive-route";
 import { readProfile } from "@/lib/profile-cache.server";
 import {
   asRoofCareSettings,
@@ -114,6 +114,8 @@ export const saveRoofCareSettings = createServerFn({ method: "POST" })
 export interface RoofCareDrive extends Drive {
   /** "routed" along roads, or "estimated" from the straight-line distance. */
   source: "routed" | "estimated";
+  /** Which router gave a routed drive: Google with the owner's key, or the free public one. */
+  router?: RouteVia | null;
   /** One way, as the close-out says it: "42 mi · about 55 min each way (routed)". */
   note: string;
   /** How the address was placed. "zip" and "town" are not the building: the price is an estimate. */
@@ -233,9 +235,16 @@ export async function driveTo(
   if (!from) throw new Error("The office's address could not be found on the map.");
   if (!to) return null;
   const where = { placed_by: to.by, place: to.place };
-  const routed = await routedDrive(from, to).catch(() => null);
-  const one = (routed && travelFromRoute(routed)) ?? estimateTravelBetween(from, to);
+  const routed = await routedDriveVia(from, to).catch(() => null);
+  const byRoad = routed ? travelFromRoute(routed.drive) : null;
+  const one = byRoad ?? estimateTravelBetween(from, to);
   // The same spot as the office: nothing to drive.
   if (!one) return { hours: 0, miles: 0, source: "estimated", note: "At the office", ...where };
-  return { ...roundTrip(one), source: one.source, note: one.note, ...where };
+  return {
+    ...roundTrip(one),
+    source: one.source,
+    router: byRoad && routed ? routed.via : null,
+    note: one.note,
+    ...where,
+  };
 }

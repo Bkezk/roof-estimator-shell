@@ -386,7 +386,8 @@ describe("the drive from the office", () => {
     // Later on Nov 18 the address gained three fallbacks (roof-care-locate-nov18.test.ts); the
     // building on our own map is still asked first.
     expect(fn).toContain("const building = await geocodeAddress(sb, line, a.state ?? null);");
-    expect(fn).toContain("const routed = await routedDrive(from, to).catch(() => null);");
+    // Nov 20: the same call, now also saying which router answered.
+    expect(fn).toContain("const routed = await routedDriveVia(from, to).catch(() => null);");
     expect(fn).toContain("if (!to) return null;");
     const page = read("src/components/roof-care-settings.tsx");
     expect(page).toContain("{NOT_PLACED_LINE}");
