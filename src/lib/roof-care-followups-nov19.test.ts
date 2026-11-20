@@ -220,6 +220,9 @@ describe("9. the sign-up shows one price, and nothing of the drive", () => {
           { plan: "guard", name: "Roof Guard", price: 321, visit1: 161, visit2: 160 },
         ],
       },
+      // (Nov 20: the roof size the map has for the property, which the typed size is checked
+      // against. None on this property.)
+      map_sqft: null,
     });
     // Not the hours, the miles, the list price, what the distance adds, or that it adds anything.
     const sent = JSON.stringify(o);
@@ -294,9 +297,16 @@ describe("7. the second inspection's window is never under two weeks", () => {
     });
   });
   it("the plan year ending on the window's first day still leaves two weeks", () => {
-    const d = planDates("2027-10-15", "window", null)!;
-    expect(d.first).toEqual({ from: "2028-03-15", to: "2028-05-15" });
+    // Nov 20 (break test 19): "window" on Oct 15 now means the window open that day, so this
+    // case is reached by a first inspection 152 days on (Mar 15, 2028).
+    const d = planDates("2027-10-15", "days", 152)!;
+    expect(d.first).toEqual({ from: "2028-03-15", to: "2028-03-15" });
     expect(d.second).toEqual({ from: "2028-10-15", to: "2028-10-28" });
+    expect(planDates("2027-10-15", "window", null)).toEqual({
+      first: { from: "2027-10-15", to: "2027-12-31" },
+      second: { from: "2028-03-15", to: "2028-05-15" },
+      renews: "2028-10-15",
+    });
     // Nov 19, later: the plan year is twelve months and no longer. The renewal no longer
     // follows an inspection that ends after it (it had moved to 2028-10-28).
     expect(d.renews).toBe("2028-10-15");
@@ -500,10 +510,39 @@ describe("6. an inspection that is done and on no invoice", () => {
     expect(p!.visits.map((v) => v.billed)).toEqual([null, null]);
   });
   it("a technician's read carries no billing and no amounts used", async () => {
-    const env = world({ service_jobs: jobs });
+    // (Nov 20: the plan tables no longer answer a technician. Their plan comes from the
+    // database's roof_care_field_plans(), which leaves the money out: stood in for here.)
+    const env = world(
+      { service_jobs: jobs },
+      {
+        roof_care_field_plans: () => [
+          {
+            id: PLAN,
+            account_id: ACCOUNT,
+            site_id: SITE,
+            plan: "care",
+            status: "active",
+            signed_on: "2026-11-19",
+            renews_on: "2027-11-19",
+            repair_allowance: 500,
+            visits: [
+              {
+                id: V1,
+                kind: "visit1",
+                due_from: "2026-11-19",
+                due_by: "2026-11-19",
+                ticket: { id: JOB, number: 7001, stage: "authorized", mine: true },
+              },
+            ],
+          },
+        ],
+      },
+    );
     const [mine] = await call<RoofCarePlan[]>(listRoofCarePlans, env, { site_ids: [SITE] }, TECH);
     expect(mine!.visits[0]!.billed).toBeNull();
     expect(mine!.allowance_used).toBeNull();
+    expect(mine!.price).toBe(0);
+    expect(env.rpcCalls.map((c) => c.fn)).toEqual(["roof_care_field_plans"]);
     const [office] = await call<RoofCarePlan[]>(listRoofCarePlans, env, { site_ids: [SITE] });
     expect(office!.visits[0]!.billed).toBe(false);
     expect(office!.allowance_used).toBe(0);
@@ -542,7 +581,7 @@ describe("6. an inspection that is done and on no invoice", () => {
       kind: "care_plan_unbilled",
       tag: "Roof Care",
       title: "Roof Care · Plant 2 (Acme)",
-      why: "Inspection 1 is done and its share of the plan is on no invoice. Open ticket #7001 and press Invoice this care plan inspection.",
+      why: "Inspection 1 is done and has no invoice. Open ticket #7001 and press Invoice this care plan inspection.",
       who: "Office",
       age: 3,
       ageText: "3 days",

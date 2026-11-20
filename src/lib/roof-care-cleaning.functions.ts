@@ -14,9 +14,45 @@ import { asPlanKey, VISIT_KINDS, type VisitKind } from "@/lib/roof-care-plan";
 
 type Sb = SupabaseClient<Database>;
 
+type CleaningRow = {
+  id: string;
+  kind: string;
+  plan: unknown;
+  drains_cleaned: boolean | null;
+  gutters_cleaned: boolean | null;
+  cleaning_note: string | null;
+  cleaning_by_name: string | null;
+  cleaning_at: string | null;
+};
+
+/**
+ * An inspection the plan tables did not answer for (Nov 20: they no longer answer a
+ * technician). The database's own function gives its answers to whoever may work at the
+ * property, and nothing of the plan's money.
+ */
+async function fieldCleaning(sb: Sb, visitId: string): Promise<CleaningRow | null> {
+  const { data, error } = await sb.rpc("roof_care_field_cleaning", { p_visit: visitId });
+  if (error) throw new Error(error.message);
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const r = data as Record<string, unknown>;
+  if (typeof r["id"] !== "string" || typeof r["kind"] !== "string") return null;
+  const yesNo = (v: unknown) => (typeof v === "boolean" ? v : null);
+  const words = (v: unknown) => (typeof v === "string" ? v : null);
+  return {
+    id: r["id"],
+    kind: r["kind"],
+    plan: r["plan"],
+    drains_cleaned: yesNo(r["drains_cleaned"]),
+    gutters_cleaned: yesNo(r["gutters_cleaned"]),
+    cleaning_note: words(r["cleaning_note"]),
+    cleaning_by_name: words(r["cleaning_by_name"]),
+    cleaning_at: words(r["cleaning_at"]),
+  };
+}
+
 /** One inspection's answers; null when it is not a plan's inspection the reader can see. */
 export async function readVisitCleaning(sb: Sb, visitId: string): Promise<VisitCleaning | null> {
-  const { data: v, error } = await sb
+  const { data: own, error } = await sb
     .from("roof_care_visits")
     .select(
       "id, plan_id, kind, drains_cleaned, gutters_cleaned, cleaning_note, cleaning_by_name, cleaning_at",
@@ -24,14 +60,18 @@ export async function readVisitCleaning(sb: Sb, visitId: string): Promise<VisitC
     .eq("id", visitId)
     .maybeSingle();
   if (error) throw new Error(error.message);
+  let v: CleaningRow | null = null;
+  if (own) {
+    const { data: p, error: pErr } = await sb
+      .from("roof_care_plans")
+      .select("plan")
+      .eq("id", own.plan_id)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    v = { ...own, plan: p?.plan };
+  } else v = await fieldCleaning(sb, visitId);
   if (!v) return null;
-  const { data: p, error: pErr } = await sb
-    .from("roof_care_plans")
-    .select("plan")
-    .eq("id", v.plan_id)
-    .maybeSingle();
-  if (pErr) throw new Error(pErr.message);
-  const plan = asPlanKey(p?.plan);
+  const plan = asPlanKey(v.plan);
   const kind = (VISIT_KINDS as readonly string[]).includes(v.kind) ? (v.kind as VisitKind) : null;
   if (!plan || !kind) return null;
   return {

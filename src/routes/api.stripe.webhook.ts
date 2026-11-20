@@ -10,10 +10,17 @@
  *        A refusal of the payment itself is a 200 so Stripe does not send it again for days;
  *        the admins are told instead.
  *   500  the database could not be reached: Stripe sends it again.
+ *
+ * Nov 20 (break test, number 26). Every payment is kept as its own row by the database
+ * (roof_care_card_payments). One that cannot pay for the plan (the plan was paid another way,
+ * has ended, or the amount is short) changes nothing on the plan: it is money to send back, and
+ * the admins and managers are told how much and why. One that is over what was owed starts the
+ * plan and they are told what is over. A plan that waits with no invoice gets its invoice made
+ * first, so the payment can mark it paid and the books match.
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { cardPaidNotice, paidPlanEvent } from "@/lib/roof-care-checkout";
+import { cardPaidNotice, paidPlanEvent, type CardPaymentRow } from "@/lib/roof-care-checkout";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** A checkout event is a few kilobytes. Anything far larger is not one. */
@@ -48,7 +55,7 @@ async function run(request: Request): Promise<Response> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: plan, error: pErr } = await supabaseAdmin
     .from("roof_care_plans")
-    .select("id, plan, site_id, customer_email")
+    .select("id, plan, site_id, customer_email, status, sold_by")
     .eq("id", paid.plan_id)
     .maybeSingle();
   if (pErr) return Response.json({ ok: false, error: pErr.message }, { status: 500 });
@@ -66,6 +73,17 @@ async function run(request: Request): Promise<Response> {
     .select("name")
     .eq("id", plan.site_id)
     .maybeSingle();
+
+  // A plan that waits with no invoice (signed by a technician, who cannot make one): its invoice
+  // is made now, so the payment marks it paid. Best effort: without it the plan still starts.
+  if (plan.status === "awaiting_payment" && plan.sold_by) {
+    try {
+      const { makePlanInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
+      await makePlanInvoice(supabaseAdmin, plan.id, { id: plan.sold_by, name: "Card payment" });
+    } catch (e) {
+      console.error("Stripe webhook: the plan's invoice was not made —", errText(e));
+    }
+  }
 
   const { data: result, error } = await supabaseAdmin.rpc("roof_care_card_paid", {
     p_plan: paid.plan_id,
@@ -92,9 +110,30 @@ async function run(request: Request): Promise<Response> {
     return Response.json({ ok: false, handled: true, error: error.message });
   }
   if (result !== "already") {
+    // The payment as the database kept it: what it was for, what was owed, what is over.
+    let payment: CardPaymentRow | null = null;
     try {
-      // The email typed at Stripe, when the plan has none.
-      if (!plan.customer_email && paid.email)
+      const { data: row } = await supabaseAdmin
+        .from("roof_care_card_payments")
+        .select("amount, outcome, reason, owed, over, ref")
+        .eq("ref", paid.ref)
+        .maybeSingle();
+      if (row)
+        payment = {
+          amount: Number(row.amount) || 0,
+          outcome: row.outcome,
+          reason: row.reason,
+          owed: row.owed == null ? null : Number(row.owed) || 0,
+          over: Number(row.over) || 0,
+          ref: row.ref,
+        };
+    } catch (e) {
+      console.error("Stripe webhook: could not read the payment back —", errText(e));
+    }
+    const started = result === "started" || result === "invoice_paid";
+    try {
+      // The email typed at Stripe, when the plan has none. Only for a payment that was kept.
+      if (started && !plan.customer_email && paid.email)
         await supabaseAdmin
           .from("roof_care_plans")
           .update({ customer_email: paid.email.trim().toLowerCase() })
@@ -107,11 +146,14 @@ async function run(request: Request): Promise<Response> {
           site_id: plan.site_id,
           site: site?.name ?? null,
           result: String(result),
+          payment,
         }),
         supabaseAdmin,
       );
-      const { dispatchPlanEmails } = await import("@/lib/roof-care-email.server");
-      await dispatchPlanEmails(supabaseAdmin, { planId: plan.id });
+      if (started) {
+        const { dispatchPlanEmails } = await import("@/lib/roof-care-email.server");
+        await dispatchPlanEmails(supabaseAdmin, { planId: plan.id });
+      }
     } catch (e) {
       // The payment is recorded either way.
       console.error("Stripe webhook: after the payment —", errText(e));

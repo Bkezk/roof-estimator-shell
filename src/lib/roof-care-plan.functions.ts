@@ -22,7 +22,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { isFieldOnly, seesInvoices } from "@/lib/access";
+import { isFieldOnly, managesTickets, seesInvoices } from "@/lib/access";
 import { chunkIds } from "@/lib/chunk-ids";
 import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
@@ -43,13 +43,19 @@ import {
   PAY_METHOD_NEEDED,
   PAY_METHODS,
   priceChangedLine,
+  readFieldPlans,
   readPriceAnswer,
+  readsPlanTables,
   readRefundWorked,
   readRenewalOffer,
   RENEWAL_CHOICE_NEEDED,
   RENEWAL_CHOICES,
   ROOF_CARE_TERMS_VERSION,
   shownPrice,
+  SIZE_NEEDED,
+  sizeAgainstMap,
+  sizeSmallerLine,
+  SKIP_REASON_NEEDED,
   TERMS_NOT_AGREED,
   VISIT_KINDS,
   type AllowanceUse,
@@ -146,9 +152,16 @@ export interface RoofCareOffer {
   estimate: PriceEstimate;
   /** Null until a roof size is given and the property is placed. */
   price: ShownPrice | null;
+  /**
+   * The roof size the map has for the property (Nov 20), which the sign-up checks the typed
+   * size against; null when the map has none. Absent on an older answer.
+   */
+  map_sqft?: number | null;
 }
 
-const sqftInput = z.number().positive().max(5_000_000);
+// Any number: a size that cannot be right is answered in words by the handler and by the
+// database (Nov 20), never by a list of what the program expected.
+const sqftInput = z.number().finite();
 
 export const roofCareOffer = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -161,6 +174,7 @@ export const roofCareOffer = createServerFn({ method: "GET" })
     const site = await siteOf(sb, data.site_id);
     const drive = await siteDrive(sb, site);
     let price: ShownPrice | null = null;
+    if (data.sqft != null && !(data.sqft > 0)) throw new Error(SIZE_NEEDED);
     if (drive && data.sqft != null) {
       const { data: answer, error } = await sb.rpc("roof_care_price", {
         p_sqft: data.sqft,
@@ -177,7 +191,14 @@ export const roofCareOffer = createServerFn({ method: "GET" })
         : drive.source === "estimated"
           ? "just-now"
           : null;
-    return { site: { id: site.id, name: site.name }, placed: !!drive, estimate, price };
+    const map = site.map_roof_sqft == null ? null : Number(site.map_roof_sqft);
+    return {
+      site: { id: site.id, name: site.name },
+      placed: !!drive,
+      estimate,
+      price,
+      map_sqft: sizeAgainstMap(1, map) === "unchecked" ? null : map,
+    };
   });
 
 /** How long the sign-up waits for the map before it goes on without a size to offer. */
@@ -230,9 +251,9 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, forecast_sent_on, card_paid_on, card_paid_amount, card_paid_ref" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, forecast_sent_on, card_paid_on, card_paid_amount, card_paid_ref, size_map_sqft, size_unchecked, size_confirmed_on, size_confirmed_by_name" as const;
 const VISIT_SELECT =
-  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on, drains_cleaned, gutters_cleaned, cleaning_note, cleaning_by_name, cleaning_at" as const;
+  "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on, skipped_on, skip_reason, skipped_by_name, drains_cleaned, gutters_cleaned, cleaning_note, cleaning_by_name, cleaning_at" as const;
 const TICKET_SELECT =
   "id, number, stage, scheduled_date, completed_at, invoice_id, roof_care_visit_id" as const;
 
@@ -364,9 +385,26 @@ export async function plansOfSites(
      * A technician reads only their own, so no list is given to one.
      */
     noAccess?: boolean;
+    /**
+     * The reader is not answered by the plan tables (a technician: Nov 20): the plans come
+     * from roof_care_field_plans(), with no money in them, and each inspection's ticket
+     * whoever it is with.
+     */
+    field?: boolean;
   } = {},
 ): Promise<RoofCarePlan[]> {
   if (!siteIds.length) return [];
+  if (opts.field) {
+    const { data: answer, error: fErr } = await sb.rpc("roof_care_field_plans", {
+      p_sites: [...siteIds],
+    });
+    if (fErr) throw new Error(fErr.message);
+    const raw = Array.isArray(answer) ? answer : [];
+    const numbers = raw.some((r) => (r as { plan?: unknown } | null)?.plan === "guard")
+      ? await readPlanBenefits(sb)
+      : null;
+    return readFieldPlans(answer, numbers ? { guard: numbers.guard.storm } : {});
+  }
   const { data: plans, error } = await sb
     .from("roof_care_plans")
     .select(PLAN_SELECT)
@@ -455,6 +493,9 @@ export async function plansOfSites(
       pushed_by_name: v.pushed_by_name,
       customer_asked: !!v.customer_asked,
       lost_on: v.lost_on,
+      skipped_on: v.skipped_on ?? null,
+      skip_reason: v.skip_reason ?? null,
+      skipped_by_name: v.skipped_by_name ?? null,
       ticket: ticketOf.get(v.id) ?? null,
       billed: money ? money.billed.has(v.id) : null,
       drains_cleaned: v.drains_cleaned ?? null,
@@ -534,6 +575,13 @@ export async function plansOfSites(
         receipt_sent_at: p.receipt_sent_at ?? null,
         receipt_error: p.receipt_error ?? null,
       },
+      size: {
+        unchecked: !!p.size_unchecked,
+        map_sqft: p.size_map_sqft == null ? null : Number(p.size_map_sqft),
+        confirmed: p.size_confirmed_on
+          ? { on: p.size_confirmed_on, by_name: (p.size_confirmed_by_name ?? "").trim() }
+          : null,
+      },
     });
   }
   return out;
@@ -549,6 +597,7 @@ export const listRoofCarePlans = createServerFn({ method: "GET" })
     return plansOfSites(context.supabase, data.site_ids, {
       money: seesInvoices(p),
       noAccess: !isFieldOnly(p),
+      field: !readsPlanTables(p),
     });
   });
 
@@ -581,6 +630,9 @@ const signUpInput = z.object({
   // The yearly price the form showed for this plan (Nov 19): the plan is saved at that price
   // or not at all.
   shown_price: z.number().finite().positive(),
+  // A manager or an admin ticked that the typed size is right, though the map shows a roof
+  // more than 20% larger (Nov 20). Anyone else's tick is refused by the database.
+  size_ok: z.boolean().optional(),
 });
 
 /**
@@ -611,6 +663,14 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const site = await siteOf(sb, data.site_id);
     // The drive is worked out here, not sent by the form: it is what the price hangs on.
+    if (!(data.sqft > 0)) throw new Error(SIZE_NEEDED);
+    // The typed size against the map's (Nov 20): one more than 20% smaller is not signed,
+    // unless a manager or an admin ticked that it is right. The database checks it again.
+    const mapSqft = site.map_roof_sqft == null ? null : Number(site.map_roof_sqft);
+    if (mapSqft != null && sizeAgainstMap(data.sqft, mapSqft) === "smaller") {
+      const boss = managesTickets(p);
+      if (!boss || !data.size_ok) throw new Error(sizeSmallerLine(mapSqft, data.sqft, boss));
+    }
     const drive = await siteDrive(sb, site);
     if (!drive) throw new Error(NOT_PLACED_LINE);
     // The price the plan would be saved at, against the one the customer was shown.
@@ -642,6 +702,7 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_terms: ROOF_CARE_TERMS_VERSION,
       p_pay_method: data.pay_method,
       p_pay_note: data.pay_note ?? "",
+      ...(data.size_ok ? { p_size_ok: true } : {}),
     });
     if (error) throw new Error(error.message);
     // Where the agreement and the receipt go. A failure here does not undo the sign-up: the
@@ -669,7 +730,9 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     // The agreement, to the customer, now: they are standing there. What cannot go now (email
     // not set up, no service key on this server) goes with the scheduled run.
     if (email) await sendPlanEmailsNow(sb, planId);
-    const made = (await plansOfSites(sb, [site.id], { money })).find((x) => x.id === planId);
+    const made = (await plansOfSites(sb, [site.id], { money, field: !readsPlanTables(p) })).find(
+      (x) => x.id === planId,
+    );
     if (!made)
       throw new Error("The plan was saved, but it could not be read back. Reload the page.");
     return made;
@@ -789,6 +852,8 @@ export const addRoofCareStorm = createServerFn({ method: "POST" })
         plan_id: z.string().uuid(),
         // The screen said this one is billed, and what it costs, before it was pressed.
         billed_ok: z.boolean().default(false),
+        // One was already added today, and the box's tick says a second is wanted (Nov 20).
+        again_ok: z.boolean().default(false),
       })
       .parse(d),
   )
@@ -798,6 +863,7 @@ export const addRoofCareStorm = createServerFn({ method: "POST" })
     const { data: jobId, error } = await sb.rpc("roof_care_add_storm", {
       p_plan: data.plan_id,
       p_billed_ok: data.billed_ok,
+      ...(data.again_ok ? { p_again_ok: true } : {}),
     });
     if (error) throw new Error(error.message);
     if (jobId) {
@@ -805,6 +871,65 @@ export const addRoofCareStorm = createServerFn({ method: "POST" })
       await announceCarePlanTickets(sb, [jobId], { id: context.userId, name: nameOf(p) });
     }
     return { job_id: jobId ?? null };
+  });
+
+/**
+ * Take off a storm inspection added by mistake (Nov 20): a manager's or an admin's, while its
+ * ticket is not started and nothing of it is invoiced. `made_included`: a billed one that
+ * became the one the plan includes, with its ticket's number when it has one.
+ */
+export const removeRoofCareStorm = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ visit_id: z.string().uuid() }).parse(d))
+  .handler(
+    async ({ data, context }): Promise<{ made_included: boolean; number: number | null }> => {
+      const { data: res, error } = await context.supabase.rpc("roof_care_remove_storm", {
+        p_visit: data.visit_id,
+      });
+      if (error) throw new Error(error.message);
+      const r = (res ?? {}) as Record<string, unknown>;
+      const n = Number(r["made_included_number"]);
+      return {
+        made_included: r["made_included"] === true,
+        number: Number.isFinite(n) && n > 0 ? n : null,
+      };
+    },
+  );
+
+/**
+ * Skip an inspection (Nov 20): a manager or an admin says we will not do it, with a reason.
+ * Its ticket comes off the board and is not made again; it still counts as an inspection owed.
+ */
+export const skipRoofCareVisit = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        visit_id: z.string().uuid(),
+        reason: z.string().trim().min(1, SKIP_REASON_NEEDED).max(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ticket: number | null }> => {
+    const { data: res, error } = await context.supabase.rpc("roof_care_skip_visit", {
+      p_visit: data.visit_id,
+      p_reason: data.reason,
+    });
+    if (error) throw new Error(error.message);
+    const n = Number((res as { number?: unknown } | null)?.number);
+    return { ticket: Number.isFinite(n) && n > 0 ? n : null };
+  });
+
+/** A manager or an admin confirms a roof size that was not checked against the map (Nov 20). */
+export const confirmRoofCareSize = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    const { error } = await context.supabase.rpc("roof_care_confirm_size", {
+      p_plan: data.plan_id,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 export const endRoofCarePlan = createServerFn({ method: "POST" })

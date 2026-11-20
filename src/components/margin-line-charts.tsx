@@ -191,7 +191,8 @@ export function MarginLineCharts({ d }: { d: MarginReportResult }) {
         <p className="text-xs text-muted-foreground" data-roof-care-in-force>
           Roof Care plans in force today: {d.roofCare.plans}
           {d.roofCare.plans > 0 && `, worth ${money0(d.roofCare.yearly)} a year`}. A plan’s revenue
-          counts here when an inspection’s invoice is final.
+          counts here when the plan’s own invoice is final: the year’s price, billed when the plan
+          is sold. What an inspection cost counts when that inspection’s invoice is final.
         </p>
       )}
     </section>

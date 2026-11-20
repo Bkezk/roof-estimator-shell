@@ -88,7 +88,8 @@ describe("a plan that is signed and not yet paid", () => {
       "First inspection: 1 day after the payment is received.",
     );
     expect(firstVisitWords("window", null)).toBe(
-      "First inspection: in the next inspection window after the payment is received.",
+      // Nov 20 (break test 19): the window open at the payment is used when two weeks are left.
+      "First inspection: in the inspection window open when the payment is received, if two weeks of it are left. Otherwise in the next one.",
     );
   });
 
@@ -349,7 +350,8 @@ describe("the sign-up", () => {
     // (Nov 19, later: in the customer's words.)
     expect(card).toContain('now: "As soon as your payment is received",');
     expect(card).toContain('days: "A set number of days after your payment",');
-    expect(card).toContain('window: "In the next inspection window",');
+    // Nov 20 (break test 19): it can be the window open today.
+    expect(card).toContain('window: "In the inspection window",');
     expect(card).not.toContain("Do the first inspection today");
   });
 });

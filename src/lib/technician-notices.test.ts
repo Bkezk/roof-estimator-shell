@@ -192,8 +192,9 @@ describe("every path reaches it once", () => {
     );
     // Nov 16 audit fix 1: the same read carries the type and the invoice, for the Type lock.
     // Nov 18: and the box beside Special instructions (ticket-instructions.ts).
+    // Nov 20: and what a Roof Care plan inspection may not change (care-plan-guards.ts).
     expect(save).toContain(
-      '"technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible"',
+      '"number, technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible, roof_care_visit_id, site_id, account_id"',
     );
     expect(save).toContain(
       "await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);",

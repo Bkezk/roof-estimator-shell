@@ -172,6 +172,46 @@ export const looksLikeEmail = (s: string): boolean =>
 export const AGREE_WORDS = "I have read these terms and agree to them.";
 export const SIGN_UP_BUTTON = "Agree and sign up";
 
+/**
+ * What the sign-up still needs before "Agree and sign up" can be pressed (owner, Nov 20: the
+ * button was grey with no word why). In the order of the form, in the customer's words.
+ */
+export function signUpMissing(a: {
+  /** A price is on the screen for the size in the box. */
+  priced: boolean;
+  /** The size in the box changed since the price was shown. */
+  stale: boolean;
+  plan: boolean;
+  first: boolean;
+  /** "A set number of days" is picked and the days are not 1 to 365. */
+  daysBad: boolean;
+  pay: boolean;
+  name: boolean;
+  emailBad: boolean;
+  agreed: boolean;
+  /** The typed size is far under the map's: "blocked" for someone who cannot confirm it. */
+  size?: "ok" | "tick" | "blocked";
+}): string[] {
+  const out: string[] = [];
+  if (!a.priced) out.push("the roof size, then Show my price");
+  else if (a.stale) out.push("Show my price again: the roof size changed");
+  if (a.size === "blocked") out.push("a roof size that matches the map, or a manager to sign it");
+  else if (a.size === "tick") out.push("the tick that the typed roof size is right");
+  if (!a.plan) out.push("a plan");
+  if (!a.first) out.push("when the first inspection is");
+  else if (a.daysBad) out.push("the days to the first inspection, 1 to 365");
+  if (!a.pay) out.push("how you are paying");
+  if (!a.name) out.push("your name");
+  if (a.emailBad) out.push("an email address that reads right, or none");
+  if (!a.agreed) out.push("the tick that you agree to the terms");
+  return out;
+}
+
+/** "Still needed: a plan, your name." Empty when nothing is. */
+export function signUpMissingLine(missing: readonly string[]): string {
+  return missing.length ? `Still needed: ${missing.join("; ")}.` : "";
+}
+
 // ── What a plan has given so far ────────────────────────────────────────────────────────────
 
 export type BenefitKey =
@@ -279,7 +319,8 @@ export function benefitsUsed(
   const stormVisits = plan.visits.filter(
     (v) => v.kind === "storm" && visitState(v, today) !== "lost",
   );
-  const stormBilled = stormVisits.filter((v) => v.amount > 0).length;
+  // A technician is given no amount: the database says which ones are billed (`extra`).
+  const stormBilled = stormVisits.filter((v) => v.amount > 0 || v.extra === true).length;
   const storms = stormVisits.length - stormBilled;
   const stormOf = Math.max(0, Math.round(stormIncluded));
   if (plan.plan === "guard" && (stormOf > 0 || stormVisits.length > 0)) {
@@ -290,7 +331,10 @@ export function benefitsUsed(
       label: stormVisits.length > 1 || storms > stormOf ? "Storm inspections" : "Storm inspection",
       used: storms,
       of: stormOf,
-      words: stormBilled > 0 ? `${included}, and ${stormBilled} more billed` : included,
+      words:
+        stormBilled > 0
+          ? `${included}, and ${stormBilled} more, not included: billed by itself`
+          : included,
     });
   }
   if (plan.plan === "guard") {

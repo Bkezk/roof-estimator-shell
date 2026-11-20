@@ -13,6 +13,14 @@
  *   2. Stripe tells the site the payment is in (a signed message to /api/stripe/webhook).
  *   3. The site checks the signature and the amount, records the payment on the plan, and the
  *      plan starts (roof_care_card_paid() in the database).
+ *
+ * Put right before it is switched on (owner, Nov 20: break test, number 26). Every card payment
+ * is kept as its own row (roof_care_card_payments), and a reference is taken once. A payment
+ * that covers what is owed starts the plan and marks its waiting invoice final and paid by card.
+ * A payment for a plan that is not waiting (paid another way already, ended, or cancelled while
+ * it waited), or one that does not cover what is owed, changes nothing on the plan: it is kept
+ * as money to send back, and the admins and managers are told. Anything over what was owed is
+ * told the same way.
  */
 import { longDay } from "@/lib/followup-rules";
 import { planName, planNumberLabel } from "@/lib/roof-care-plan";
@@ -40,14 +48,22 @@ export function toCents(amount: number): number | null {
   return c >= 50 && c <= 99_999_999 ? c : null;
 }
 
-/** What the customer owes for the year: the final invoice's balance, else the plan's price. */
+/**
+ * What the customer owes for the year: the plan's price less its renewal credit, less what its
+ * invoice already holds. The invoice counts only when it is the plan's own, for that amount to
+ * the cent (Nov 20): the database starts a plan on no other (roof_care_card_paid).
+ */
 export function checkoutAmount(
   plan: { price: number; renewal_credit: number | null },
   invoice: { status: string; total: number; paid_amount: number | null } | null,
 ): number {
-  if (invoice && invoice.status === "final")
-    return Math.max(0, Math.round((invoice.total - (invoice.paid_amount ?? 0)) * 100) / 100);
-  return Math.max(0, Math.round((plan.price - (plan.renewal_credit ?? 0)) * 100) / 100);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const owed = Math.max(0, r2(plan.price - (plan.renewal_credit ?? 0)));
+  const fits =
+    !!invoice &&
+    (invoice.status === "draft" || invoice.status === "final") &&
+    r2(invoice.total) === owed;
+  return fits ? Math.max(0, r2(owed - (invoice.paid_amount ?? 0))) : owed;
 }
 
 export interface CheckoutAsk {
@@ -163,26 +179,64 @@ export function cardPaidWords(c: {
 export const CARD_PAID_INVOICE_OPEN =
   "Its invoice still has to be finalised and marked paid, so the books match.";
 
+/** A row of roof_care_card_payments, as the notice reads it. */
+export interface CardPaymentRow {
+  amount: number;
+  /** "started": it paid for the plan year. "send_back": it is owed back to the customer. */
+  outcome: string;
+  /** Why it is owed back: "paid_already", "ended" or "short". */
+  reason: string | null;
+  /** What was owed for the plan year when it came in. */
+  owed: number | null;
+  /** How much of it is over what was owed. */
+  over: number;
+  ref: string;
+}
+
+const usd = (n: number) =>
+  "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 /** What the office is told when a card payment comes in. */
 export function cardPaidNotice(a: {
   plan: unknown;
   site_id: string;
   site: string | null;
   result: string;
+  /** The payment as it was kept; absent on an older read. */
+  payment?: CardPaymentRow | null;
 }) {
   const place = (a.site ?? "").trim() || "a property";
+  const pay = a.payment ?? null;
+  const url = `/properties/${a.site_id}`;
+  if (a.result === "send_back") {
+    const amount = pay ? usd(pay.amount) : "A card payment";
+    const ref = pay ? ` Reference ${pay.ref}.` : "";
+    const lead = pay
+      ? `A card payment of ${amount} came in online`
+      : "A card payment came in online";
+    const back = pay ? `Send the ${amount} back to the customer.` : "Send it back to the customer.";
+    const body =
+      pay?.reason === "ended"
+        ? `${lead} for a ${planName(a.plan)} plan that has ended. Nothing was started. ${back}${ref}`
+        : pay?.reason === "short"
+          ? `${lead}, and ${usd(pay.owed ?? 0)} is owed for the ${planName(a.plan)} plan. The plan has not started. ${back} Then take the full payment.${ref}`
+          : `${lead} for a ${planName(a.plan)} plan that was already paid. The plan is not changed. ${back}${ref}`;
+    return { kind: "plan_card_paid", title: `Card payment to send back: ${place}`, body, url };
+  }
+  const over =
+    pay && pay.over >= 0.01
+      ? ` The card was charged ${usd(pay.amount)}, which is ${usd(pay.over)} more than the ${usd(pay.owed ?? 0)} owed. Send the ${usd(pay.over)} back to the customer. Reference ${pay.ref}.`
+      : "";
   const body =
     a.result === "invoice_paid"
-      ? "The customer paid the year by card online. Its invoice is marked paid and the plan has started."
+      ? `The customer paid the year by card online. Its invoice is marked paid and the plan has started.${over}`
       : a.result === "started"
-        ? "The customer paid the year by card online and the plan has started. Its invoice still has to be finalised and marked paid."
-        : a.result === "not_waiting"
-          ? "A card payment came in online for a plan that was not waiting for one. Check whether it was paid twice."
-          : "A card payment came in online.";
+        ? `The customer paid the year by card online and the plan has started. Its invoice still has to be put right and marked paid, so the books match.${over}`
+        : "A card payment came in online.";
   return {
     kind: "plan_card_paid",
     title: `${planName(a.plan)} plan paid by card: ${place}`,
     body,
-    url: `/properties/${a.site_id}`,
+    url,
   };
 }

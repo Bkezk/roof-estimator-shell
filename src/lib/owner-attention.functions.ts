@@ -24,6 +24,7 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   attentionLimits,
   attentionList,
+  planRunsUnpaid,
   type AttBid,
   type AttFollowup,
   type AttInvoice,
@@ -33,6 +34,8 @@ import {
   type AttentionList,
   type AttCareCarried,
   type AttCareExpired,
+  type AttCareNoPayment,
+  type AttCareSize,
   type AttCareRefund,
   type AttCareRenewal,
   type AttCareUnbilled,
@@ -261,6 +264,8 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careUnbilled: care.unbilled,
       careUnpaid: care.unpaid,
       careRefunds: care.refunds,
+      careNoPayment: care.noPayment,
+      careSizes: care.sizes,
       careRenewals: care.renewals,
       careCarried: care.carried,
       careExpired: care.expired,
@@ -281,6 +286,8 @@ async function careVisitsOfPlans(
   unbilled: AttCareUnbilled[];
   unpaid: AttCareUnpaid[];
   refunds: AttCareRefund[];
+  noPayment: AttCareNoPayment[];
+  sizes: AttCareSize[];
   renewals: AttCareRenewal[];
   carried: AttCareCarried[];
   expired: AttCareExpired[];
@@ -319,6 +326,8 @@ async function careVisitsOfPlans(
       unbilled: [],
       unpaid: [],
       refunds: [],
+      noPayment: [],
+      sizes: [],
       renewals: [],
       carried: [],
       expired: [],
@@ -389,6 +398,31 @@ async function careVisitsOfPlans(
     ended_on: p.ended_on,
     amount: Number(p.refund_due) || 0,
   }));
+  // In force with nothing paid toward it (Nov 20). A plan paid for the year before it starts
+  // only: one signed before that was billed at each inspection. A manager's free year owes
+  // nothing and is left out.
+  const noPayment: AttCareNoPayment[] = plans
+    .filter((p) => planRunsUnpaid(p))
+    .map((p) => ({
+      plan_id: p.id,
+      site_id: p.site_id,
+      title: titleOf(p),
+      starts_on: p.starts_on,
+      price: Math.max(0, p.price - p.renewal_credit),
+      invoice: p.invoice
+        ? { id: p.invoice.id, number: p.invoice.number, status: p.invoice.status }
+        : null,
+    }));
+  // Priced on a size typed by hand that nobody checked (Nov 20): in force or waiting.
+  const sizes: AttCareSize[] = live
+    .filter((p) => p.size?.unchecked)
+    .map((p) => ({
+      plan_id: p.id,
+      site_id: p.site_id,
+      title: titleOf(p),
+      roof_sqft: p.roof_sqft,
+      signed_on: p.signed_on,
+    }));
   for (const p of plans) {
     const title = titleOf(p);
     const last = [...p.visits].filter((v) => v.kind === "visit1" || v.kind === "visit2").pop();
@@ -469,5 +503,5 @@ async function careVisitsOfPlans(
     ).length,
     price: p.price,
   }));
-  return { notDone, unbilled, unpaid, refunds, renewals, carried, expired };
+  return { notDone, unbilled, unpaid, refunds, noPayment, sizes, renewals, carried, expired };
 }

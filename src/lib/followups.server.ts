@@ -345,6 +345,45 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
 }
 
 /**
+ * Start a ticket's timer for the site itself, when no person made the change (Nov 20: the 8:00
+ * run announcing the plan inspection tickets the morning run made;
+ * roof-care-ticket-announce.server.ts). The same database function as every other start, so the
+ * rules are the same. Answers the timer it started, or null when one was already running. No
+ * notice is sent here: the caller says "Assigned to you", once for several tickets.
+ */
+export async function startTicketTimerBySite(
+  a: {
+    itemId: string;
+    assigneeId: string;
+    accountId: string | null;
+    title: string;
+    url: string;
+    dueDate: string | null;
+  },
+  sb: Client,
+): Promise<{ id: string; due: Date; every: number; firstReminder: Date | null } | null> {
+  const admin = await serverClient(sb);
+  const up = await databaseRpc(admin)("followup_sync_upsert", {
+    p_kind: "ticket",
+    p_item_id: a.itemId,
+    p_assignee_id: a.assigneeId,
+    p_account_id: a.accountId,
+    p_title: a.title,
+    p_url: a.url,
+    p_due_date: a.dueDate,
+  });
+  if (up.error) throw new Error(up.error.message);
+  const out = up.data as unknown as UpsertOut;
+  if (out.action === "unchanged") return null;
+  return {
+    id: out.id,
+    due: new Date(out.due_at),
+    every: out.every_days,
+    firstReminder: out.first_remind_at ? new Date(out.first_remind_at) : null,
+  };
+}
+
+/**
  * Tell the new assignee: not when the caller already did in this step (`quiet`), and not the
  * person who made the change, unless they have "My own changes" on (own-notices.ts; owner,
  * Nov 13: "notifications should go out to myself even if im the one who did it").

@@ -8,7 +8,7 @@
  * the roof). The rules are the database's; the forms say what will happen before it is pressed
  * (lib/roof-care-plan.ts).
  */
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -70,14 +70,20 @@ import {
   SIGN_UP_BUTTON,
   SIGN_UP_LEAD,
   SIGN_UP_TITLE,
+  signUpMissing,
+  signUpMissingLine,
 } from "@/lib/roof-care-benefits";
 import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
-import { NO_ACCESS_REMOVE, noAccessLine } from "@/lib/roof-care-no-access";
+import { NO_ACCESS_REMOVE, noAccessLine, noAccessTakeOffWords } from "@/lib/roof-care-no-access";
 import { removeRoofCareNoAccess } from "@/lib/roof-care-no-access.functions";
 import {
   roofCareStormKey,
   STORM_ADD_BILLED,
   STORM_ADD_INCLUDED,
+  STORM_AGAIN_LABEL,
+  STORM_REMOVE_LABEL,
+  STORM_REMOVE_NOTE,
+  stormAgainLine,
   stormCanAdd,
   stormOfferLines,
 } from "@/lib/roof-care-storm";
@@ -102,6 +108,7 @@ import {
   MAP_ROOF_USE,
   mapRoofSizeLine,
   nextWindow,
+  onePressAtATime,
   owedWords,
   PAY_CARD_NOTE,
   PAY_METHOD_WORDS,
@@ -114,17 +121,20 @@ import {
   planEmailLines,
   planName,
   planNumberLabel,
+  planSizeWords,
   pushPreview,
   REFUND_BAD_AMOUNT,
   REFUND_MARK_SENT,
   refundLines,
   refundStatusWords,
   RENEW_LABEL,
+  RENEWAL_CHANGE_NEEDS_MANAGER,
   RENEWAL_NOTE,
   RENEWAL_WORDS,
   renewalChoiceWords,
   renewalDecisionWords,
   renewalDefaultWords,
+  renewalLapsedWords,
   renewalOpen,
   renewalPriceWords,
   renewsWords,
@@ -135,6 +145,15 @@ import {
   ROOF_CARE_TERMS,
   roofCarePlansKey,
   runsLate,
+  SIZE_CONFIRM_LABEL,
+  SIZE_OK_LABEL,
+  SIZE_UNCHECKED_STAFF_NOTE,
+  sizeAgainstMap,
+  sizeSmallerLine,
+  SKIP_LABEL,
+  SKIP_NOTE,
+  SKIP_REASON_NEEDED,
+  skippedWords,
   VISIT_LABEL,
   VISIT_UNBILLED_WORDS,
   visitsDone,
@@ -151,10 +170,12 @@ import {
 import {
   addRoofCareStorm,
   closeOutRoofCarePlan,
+  confirmRoofCareSize,
   endRoofCarePlan,
   listRoofCarePlans,
   markRoofCareRefundSent,
   pushBackRoofCareVisit,
+  removeRoofCareStorm,
   renewRoofCarePlan,
   requestAdditionalService,
   roofCareMapSize,
@@ -165,6 +186,7 @@ import {
   roofCareStormOffer,
   setRoofCareEmail,
   signUpRoofCare,
+  skipRoofCareVisit,
   type RoofCareOffer,
 } from "@/lib/roof-care-plan.functions";
 import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
@@ -278,6 +300,7 @@ const STATE_WORDS = {
   ticket: "Ticket out",
   waiting: "Not yet due",
   lost: "Lost",
+  skipped: "Skipped",
 };
 
 function VisitRow({
@@ -287,6 +310,8 @@ function VisitRow({
   showMoney,
   plan,
   onPush,
+  onSkip,
+  onStormOff,
 }: {
   /** The plan, so the office sees what the inspection answered of its cleaning. */
   plan?: PlanKey;
@@ -295,6 +320,9 @@ function VisitRow({
   office: boolean;
   showMoney: boolean;
   onPush: (v: PlanVisit) => void;
+  /** A manager's, on a plan in force (Nov 20): skip an inspection, take a storm one off. */
+  onSkip?: (v: PlanVisit) => void;
+  onStormOff?: (v: PlanVisit) => void;
 }) {
   const state = visitState(visit, today);
   // What the plan includes at this inspection, as answered in the workflow (Nov 19, night):
@@ -320,12 +348,14 @@ function VisitRow({
       data-visit-state={state}
     >
       <span className="font-medium">{VISIT_LABEL[visit.kind]}</span>
-      <span className="text-muted-foreground">
-        {visit.lost_on
-          ? lostWords(visit.lost_on)
-          : visit.kind === "carried"
-            ? `Do it by ${longDay(visit.due_by)}, or it is lost`
-            : dueWords(visit)}
+      <span className="text-muted-foreground" data-visit-skipped={state === "skipped"}>
+        {state === "skipped"
+          ? skippedWords(visit)
+          : visit.lost_on
+            ? lostWords(visit.lost_on)
+            : visit.kind === "carried"
+              ? `Do it by ${longDay(visit.due_by)}, or it is lost`
+              : dueWords(visit)}
       </span>
       <Badge
         variant={state === "late" || state === "lost" ? "destructive" : "secondary"}
@@ -333,15 +363,21 @@ function VisitRow({
       >
         {STATE_WORDS[state]}
       </Badge>
-      {visit.ticket && (
-        <Link
-          to="/service"
-          search={{ id: visit.ticket.id }}
-          className="underline underline-offset-2"
-        >
-          Ticket #{visit.ticket.number}
-        </Link>
-      )}
+      {/* A ticket that is with somebody else is named, not linked: the reader cannot open it. */}
+      {visit.ticket &&
+        (visit.ticket.mine === false ? (
+          <span className="text-muted-foreground" data-visit-ticket="other">
+            Ticket #{visit.ticket.number}
+          </span>
+        ) : (
+          <Link
+            to="/service"
+            search={{ id: visit.ticket.id }}
+            className="underline underline-offset-2"
+          >
+            Ticket #{visit.ticket.number}
+          </Link>
+        ))}
       {showMoney && visit.amount > 0 && (
         <span className="text-muted-foreground">bills {money0(visit.amount)}</span>
       )}
@@ -359,7 +395,7 @@ function VisitRow({
       {office && visit.kind === "carried" && state !== "done" && state !== "lost" && (
         <span className="text-muted-foreground">{CARRIED_NO_PUSH}</span>
       )}
-      {office && state !== "done" && visit.kind !== "carried" && (
+      {office && state !== "done" && state !== "skipped" && visit.kind !== "carried" && (
         <Button
           type="button"
           variant="ghost"
@@ -369,6 +405,32 @@ function VisitRow({
           data-action="roof-care-push"
         >
           <CalendarClock className="mr-1 h-3.5 w-3.5" /> Push back
+        </Button>
+      )}
+      {/* An inspection we will not do (Nov 20): a manager's, never by deleting its ticket. */}
+      {onSkip && visit.kind !== "storm" && !["done", "skipped", "lost"].includes(state) && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs text-muted-foreground"
+          onClick={() => onSkip(visit)}
+          data-action="roof-care-skip"
+        >
+          {SKIP_LABEL}
+        </Button>
+      )}
+      {/* A storm inspection added by mistake (Nov 20): a manager's. */}
+      {onStormOff && visit.kind === "storm" && state !== "done" && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs text-muted-foreground"
+          onClick={() => onStormOff(visit)}
+          data-action="roof-care-storm-off"
+        >
+          {STORM_REMOVE_LABEL}
         </Button>
       )}
       {showCleaning && (
@@ -624,12 +686,16 @@ export function RoofCareCard({
   // The storm inspection (Nov 19, late): the button opens a box that says, before anything is
   // added, whether this one is included or billed, and what a billed one costs.
   const [storming, setStorming] = useState(false);
+  // A manager's (Nov 20): skip an inspection, take off a storm inspection added by mistake.
+  const [skipping, setSkipping] = useState<PlanVisit | null>(null);
+  const [stormOff, setStormOff] = useState<PlanVisit | null>(null);
   const removeFn = useServerFn(removeRoofCareNoAccess);
   const removeNoAccess = useMutation({
     mutationFn: (id: string) => removeFn({ data: { id } }),
-    onSuccess: () => {
+    // The records left are worked again (Nov 20): the answer says which changed.
+    onSuccess: (r) => {
       refresh();
-      toast.success("Taken off");
+      toast.success(noAccessTakeOffWords(r), { duration: 15_000 });
     },
     onError: (e) => toast.error(`Could not take it off: ${errText(e)}`, { duration: 20_000 }),
   });
@@ -777,6 +843,7 @@ export function RoofCareCard({
             Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
             {active.price_estimated && " The price is an estimate until the address is confirmed."}
           </p>
+          {!short && office && <PlanSizeLine siteId={siteId} plan={active} manager={manager} />}
           {/* A card payment taken online (Nov 19, night). */}
           {!short && office && active.card_paid && (
             <p className="text-xs" data-roof-care-card-paid>
@@ -875,6 +942,7 @@ export function RoofCareCard({
                   showMoney={office}
                   plan={active.plan}
                   onPush={setPush}
+                  {...(manager && !short ? { onSkip: setSkipping, onStormOff: setStormOff } : {})}
                 />
               ))}
             </ul>
@@ -976,6 +1044,12 @@ export function RoofCareCard({
       {storming && active && (
         <StormDialog siteId={siteId} plan={active} onClose={() => setStorming(false)} />
       )}
+      {skipping && (
+        <SkipDialog siteId={siteId} visit={skipping} onClose={() => setSkipping(null)} />
+      )}
+      {stormOff && (
+        <StormOffDialog siteId={siteId} visit={stormOff} onClose={() => setStormOff(null)} />
+      )}
       {push && (
         <PushBackDialog
           siteId={siteId}
@@ -1033,8 +1107,11 @@ function StormDialog({
     gcTime: 0,
   });
   const addFn = useServerFn(addRoofCareStorm);
+  // One was already added today (Nov 20): a second one has to be ticked here.
+  const [again, setAgain] = useState(false);
   const add = useMutation({
-    mutationFn: (billed: boolean) => addFn({ data: { plan_id: plan.id, billed_ok: billed } }),
+    mutationFn: (billed: boolean) =>
+      addFn({ data: { plan_id: plan.id, billed_ok: billed, again_ok: again } }),
     onSuccess: (_r, billed) => {
       refresh();
       toast.success(
@@ -1081,13 +1158,30 @@ function StormDialog({
             ))}
           </div>
         )}
+        {o?.added_today && (
+          <div
+            className="space-y-2 rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm"
+            data-storm-again
+          >
+            <p>{stormAgainLine(o.added_today)}</p>
+            <label className="flex cursor-pointer items-start gap-2 font-medium">
+              <Checkbox
+                checked={again}
+                onCheckedChange={(v) => setAgain(v === true)}
+                className="mt-0.5"
+                data-storm-again-ok
+              />
+              <span>{STORM_AGAIN_LABEL}</span>
+            </label>
+          </div>
+        )}
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={add.isPending} onClick={onClose}>
             Cancel
           </Button>
           <Button
             type="button"
-            disabled={!o || !stormCanAdd(o) || add.isPending}
+            disabled={!o || !stormCanAdd(o, again) || add.isPending}
             onClick={() => o && add.mutate(o.billed)}
             data-action="roof-care-storm-confirm"
           >
@@ -1097,6 +1191,193 @@ function StormDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Skip an inspection (owner, Nov 20): a manager's, with a reason. */
+function SkipDialog({
+  siteId,
+  visit,
+  onClose,
+}: {
+  siteId: string;
+  visit: PlanVisit;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const [reason, setReason] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const fn = useServerFn(skipRoofCareVisit);
+  const skip = useMutation({
+    mutationFn: () => fn({ data: { visit_id: visit.id, reason: reason.trim() } }),
+    onSuccess: (r) => {
+      refresh();
+      toast.success(
+        r.ticket
+          ? `Inspection skipped. Ticket #${r.ticket} is off the board. It still counts as owed.`
+          : "Inspection skipped. It still counts as owed.",
+        { duration: 12_000 },
+      );
+      onClose();
+    },
+    onError: (e) => setProblem(errText(e)),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && !skip.isPending && onClose()}>
+      <DialogContent className="max-w-md" data-roof-care-skip-dialog>
+        <DialogHeader>
+          <DialogTitle>{SKIP_LABEL}</DialogTitle>
+          <DialogDescription>
+            {VISIT_LABEL[visit.kind]}. {SKIP_NOTE}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="rc-skip-reason">Why it is skipped</Label>
+          <Textarea
+            id="rc-skip-reason"
+            rows={3}
+            maxLength={500}
+            value={reason}
+            onChange={(e) => {
+              setReason(e.target.value);
+              setProblem(null);
+            }}
+          />
+        </div>
+        {problem && (
+          <p className="text-sm font-medium text-destructive" role="alert" data-skip-problem>
+            {problem}
+          </p>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" disabled={skip.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={skip.isPending}
+            onClick={() => {
+              if (!reason.trim()) return setProblem(SKIP_REASON_NEEDED);
+              skip.mutate();
+            }}
+            data-action="roof-care-skip-confirm"
+          >
+            {skip.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Skip it
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Take off a storm inspection added by mistake (owner, Nov 20): a manager's. */
+function StormOffDialog({
+  siteId,
+  visit,
+  onClose,
+}: {
+  siteId: string;
+  visit: PlanVisit;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const [problem, setProblem] = useState<string | null>(null);
+  const fn = useServerFn(removeRoofCareStorm);
+  const off = useMutation({
+    mutationFn: () => fn({ data: { visit_id: visit.id } }),
+    onSuccess: (r) => {
+      refresh();
+      toast.success(
+        r.made_included
+          ? `Storm inspection taken off. The billed one${r.number ? ` (ticket #${r.number})` : ""} is now the one the plan includes, so it is not billed.`
+          : "Storm inspection taken off.",
+        { duration: 12_000 },
+      );
+      onClose();
+    },
+    onError: (e) => setProblem(errText(e)),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && !off.isPending && onClose()}>
+      <DialogContent className="max-w-md" data-storm-off-dialog>
+        <DialogHeader>
+          <DialogTitle>Take the storm inspection off</DialogTitle>
+          <DialogDescription>
+            {STORM_REMOVE_NOTE}
+            {visit.ticket ? ` Ticket #${visit.ticket.number} comes off the board.` : ""}
+          </DialogDescription>
+        </DialogHeader>
+        {problem && (
+          <p className="text-sm font-medium text-destructive" role="alert" data-storm-off-problem>
+            {problem}
+          </p>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" disabled={off.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={off.isPending}
+            onClick={() => off.mutate()}
+            data-action="roof-care-storm-off-confirm"
+          >
+            {off.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Take it off
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The roof size against the map (owner, Nov 20), for the office: a size typed where the map
+ * had none waits for a manager to confirm it, and one a manager said was right names them.
+ */
+function PlanSizeLine({
+  siteId,
+  plan,
+  manager,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  manager: boolean;
+}) {
+  const refresh = useRefresh(siteId);
+  const fn = useServerFn(confirmRoofCareSize);
+  const confirm = useMutation({
+    mutationFn: () => fn({ data: { plan_id: plan.id } }),
+    onSuccess: () => {
+      refresh();
+      toast.success("Roof size confirmed");
+    },
+    onError: (e) => toast.error(`Could not confirm it: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const words = planSizeWords(plan);
+  if (!words) return null;
+  const unchecked = !!plan.size?.unchecked;
+  return (
+    <p
+      className={`flex flex-wrap items-center gap-2 text-xs ${unchecked ? "font-medium text-amber-800 dark:text-amber-300" : "text-muted-foreground"}`}
+      data-roof-care-size={unchecked ? "unchecked" : "confirmed"}
+    >
+      <span>{words}</span>
+      {manager && unchecked && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={confirm.isPending}
+          onClick={() => confirm.mutate()}
+          data-action="roof-care-size-confirm"
+        >
+          {SIZE_CONFIRM_LABEL}
+        </Button>
+      )}
+    </p>
   );
 }
 
@@ -1387,6 +1668,7 @@ function AwaitingPayment({
           {firstVisitWords(plan.first_visit, plan.first_days)}
         </p>
       )}
+      {!short && office && <PlanSizeLine siteId={siteId} plan={plan} manager={manager} />}
       {!short && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}
       {!short && office && plan.email && <PlanEmailLine siteId={siteId} plan={plan} paid={false} />}
       {money &&
@@ -1468,7 +1750,9 @@ function RenewDialog({
   const [pay, setPay] = useState<PayMethod | null>(null);
   const [payNote, setPayNote] = useState("");
   const o = offer.data;
-  const choice = o && o.owed.length ? (picked ?? o.default_choice) : null;
+  // The rule's own answer stands for anyone who may not pick the other one (Nov 20).
+  const choice =
+    o && o.owed.length ? (o.can_change ? (picked ?? o.default_choice) : o.default_choice) : null;
   const payMethod = pay ?? o?.pay_method ?? null;
   const renewFn = useServerFn(renewRoofCarePlan);
   const renew = useMutation({
@@ -1516,6 +1800,11 @@ function RenewDialog({
             <p className="font-medium" data-renew-line="price">
               {renewalPriceWords(o)}
             </p>
+            {o.lapsed && (
+              <p className="text-amber-800 dark:text-amber-300" data-renew-line="lapsed">
+                {renewalLapsedWords(o)}
+              </p>
+            )}
             {o.owed.length > 0 && (
               <fieldset className="space-y-1.5 rounded-md border p-3" data-renew-owed>
                 <legend className="px-1 font-medium">{owedWords(o.owed.length)}</legend>
@@ -1535,6 +1824,7 @@ function RenewDialog({
                       name="rc-renew-choice"
                       className="mt-1"
                       checked={choice === c}
+                      disabled={!o.can_change && c !== o.default_choice}
                       onChange={() => setPicked(c)}
                       data-renew-choice={c}
                     />
@@ -1544,6 +1834,11 @@ function RenewDialog({
                 <p className="text-xs text-muted-foreground" data-renew-line="default">
                   {renewalDefaultWords(o)}
                 </p>
+                {!o.can_change && (
+                  <p className="text-xs font-medium" data-renew-line="needs-manager">
+                    {RENEWAL_CHANGE_NEEDS_MANAGER}
+                  </p>
+                )}
               </fieldset>
             )}
             <fieldset className="space-y-1.5" data-renew-pay>
@@ -1608,7 +1903,7 @@ function RenewDialog({
 const FIRST_WORDS: Record<FirstVisit, string> = {
   now: "As soon as your payment is received",
   days: "A set number of days after your payment",
-  window: "In the next inspection window",
+  window: "In the inspection window",
 };
 
 /** A numbered part of the sign-up. */
@@ -1667,11 +1962,18 @@ function SignUpDialog({
     retry: false,
   });
   const size = wholeNumber(sqft);
+  // The typed size against the map's (Nov 20): one more than 20% smaller is not signed, unless
+  // a manager or an admin ticks that it is right.
+  const [sizeOk, setSizeOk] = useState(false);
+  const manager = managesTickets(profile);
+  // Two presses in the same instant are one sign-up (Nov 20).
+  const press = useRef(onePressAtATime()).current;
   const price = useMutation({
     mutationFn: (n: number) => offerFn({ data: { site_id: siteId, sqft: n } }),
     onSuccess: (o, n) => {
       setOffer(o);
       setPricedFor(n);
+      setSizeOk(false);
     },
   });
   const dayCount = wholeNumber(days);
@@ -1680,6 +1982,23 @@ function SignUpDialog({
   const plans = answer?.ready && !answer.custom_quote ? answer.plans : [];
   const stale = pricedFor !== size;
   const emailBad = email.trim() !== "" && !looksLikeEmail(email.trim());
+  const mapSqft = offer?.map_sqft ?? null;
+  const sizeCheck =
+    offer && !stale && size != null && plans.length > 0 ? sizeAgainstMap(size, mapSqft) : "ok";
+  const sizeState: "ok" | "tick" | "blocked" =
+    sizeCheck !== "smaller" ? "ok" : !manager ? "blocked" : sizeOk ? "ok" : "tick";
+  const missing = signUpMissing({
+    priced: plans.length > 0,
+    stale,
+    plan: !!plan && plans.some((o) => o.plan === plan),
+    first: !!first,
+    daysBad: first === "days" && !dates,
+    pay: !!payMethod,
+    name: agreedBy.trim().length > 0,
+    emailBad,
+    agreed,
+    size: sizeState,
+  });
   const ready =
     !!plan &&
     !!first &&
@@ -1689,7 +2008,8 @@ function SignUpDialog({
     agreed &&
     !emailBad &&
     plans.length > 0 &&
-    !stale;
+    !stale &&
+    missing.length === 0;
   const sign = useMutation({
     mutationFn: async () => {
       const made = await signFn({
@@ -1707,6 +2027,7 @@ function SignUpDialog({
           terms_agreed: true as const,
           // The price on the screen: the plan is saved at it or not at all (Nov 19).
           shown_price: plans.find((o) => o.plan === plan)!.price,
+          ...(sizeCheck === "smaller" && manager && sizeOk ? { size_ok: true } : {}),
         },
       });
       // The card payment page, when there is one. The plan is signed either way.
@@ -1828,6 +2149,25 @@ function SignUpDialog({
                 A roof over {answer.over_sqft.toLocaleString("en-US")} sq ft gets a custom quote.
                 Call the office.
               </p>
+            )}
+            {/* The typed size is far under what the map shows (Nov 20). */}
+            {sizeCheck === "smaller" && mapSqft != null && size != null && (
+              <div className="space-y-2" data-sign-line="size-smaller">
+                <p className="font-medium text-destructive">
+                  {sizeSmallerLine(mapSqft, size, manager)}
+                </p>
+                {manager && (
+                  <label className="flex cursor-pointer items-start gap-2 font-medium">
+                    <Checkbox
+                      checked={sizeOk}
+                      onCheckedChange={(v) => setSizeOk(v === true)}
+                      className="mt-0.5"
+                      data-size-ok
+                    />
+                    <span>{SIZE_OK_LABEL}</span>
+                  </label>
+                )}
+              </div>
             )}
           </SignStep>
 
@@ -2059,6 +2399,11 @@ function SignUpDialog({
                   Signed up with {(profile?.full_name ?? "").trim() || profile?.email}. Their name
                   goes on the plan.
                 </p>
+                {sizeCheck === "unchecked" && (
+                  <p className="text-xs text-muted-foreground" data-sign-line="size-unchecked">
+                    {SIZE_UNCHECKED_STAFF_NOTE}
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -2072,13 +2417,20 @@ function SignUpDialog({
             size="lg"
             className="bg-[var(--jbk-blue)] text-white hover:bg-[var(--jbk-blue-hover)]"
             disabled={!ready || sign.isPending}
-            onClick={() => sign.mutate()}
+            // The second of two presses in the same instant is dropped: one sign-up, one answer.
+            onClick={() => press(() => sign.mutateAsync())}
             data-action="roof-care-confirm"
           >
             {sign.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
             {SIGN_UP_BUTTON}
           </Button>
         </DialogFooter>
+        {/* Why the button cannot be pressed yet (Nov 20). */}
+        {!ready && !sign.isPending && missing.length > 0 && (
+          <p className="text-right text-xs text-muted-foreground" data-sign-line="missing">
+            {signUpMissingLine(missing)}
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );

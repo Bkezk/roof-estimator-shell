@@ -38,8 +38,17 @@ export const startPlanCheckout = createServerFn({ method: "POST" })
     if (!stripeConfigured()) return { url: null, reason: CHECKOUT_NOT_SET_UP };
     const base = appUrl();
     if (!base) return { url: null, reason: CHECKOUT_NO_SITE_ADDRESS };
-    // The signed-in person has to be able to see the plan: read under their own access.
-    const { data: plan, error } = await context.supabase
+    // The signed-in person has to be able to see the plan. A technician no longer reads the
+    // plans table (Nov 20, it holds money), so the database is asked whether they see this
+    // plan, and the plan is then read with the server's own key. Before, a technician's card
+    // sign-up found no plan here.
+    const { data: seen, error: sErr } = await context.supabase.rpc("roof_care_plan_seen", {
+      p_plan: data.plan_id,
+    });
+    if (sErr) throw new Error(sErr.message);
+    if (seen !== true) throw new Error("That plan was not found");
+    const admin = await serverClient(context.supabase);
+    const { data: plan, error } = await admin
       .from("roof_care_plans")
       .select("id, plan, plan_number, site_id, status, price, renewal_credit, customer_email")
       .eq("id", data.plan_id)
@@ -49,7 +58,6 @@ export const startPlanCheckout = createServerFn({ method: "POST" })
     if (plan.status !== "awaiting_payment") return { url: null, reason: CHECKOUT_NOT_WAITING };
     // The invoice decides the amount when it is final; a technician cannot read invoices, so
     // it is read with the server's own key (the amount is the customer's price, nothing more).
-    const admin = await serverClient(context.supabase);
     const [{ data: inv }, { data: site }] = await Promise.all([
       admin
         .from("invoices")

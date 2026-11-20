@@ -5,6 +5,7 @@
  * two windows, the push-back limit. What is here is their twin for the screen, so a form can
  * say what will happen before it is pressed. No prices live here.
  */
+import { canAccess, isFieldOnly, type AccessLike } from "@/lib/access";
 import { daysBetween, longDay } from "@/lib/followup-rules";
 import { PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
 import { plusDays } from "@/lib/working-days";
@@ -46,6 +47,11 @@ export interface VisitTicket {
   scheduled_date: string | null;
   completed_at: string | null;
   invoice_id: string | null;
+  /**
+   * False when the reader cannot open it: a technician's answer names every inspection's
+   * ticket, also one that is with somebody else (Nov 20). Absent for the office.
+   */
+  mine?: boolean;
 }
 
 export interface PlanVisit {
@@ -61,6 +67,18 @@ export interface PlanVisit {
   customer_asked: boolean;
   /** A carried inspection not done in its 60 days: the day it was lost. */
   lost_on: string | null;
+  /**
+   * Skipped (Nov 20): an inspection we will not do. Its ticket is off the board and is not
+   * made again; it still counts as an inspection owed. Absent on an older read.
+   */
+  skipped_on?: string | null;
+  skip_reason?: string | null;
+  skipped_by_name?: string | null;
+  /**
+   * A storm inspection beyond the ones the plan includes, for a reader who is given no amount
+   * (a technician): `amount` is 0 for them, and this says it is a billed one.
+   */
+  extra?: boolean;
   ticket: VisitTicket | null;
   /**
    * Its share of the plan is on a live invoice (Nov 19). Null for a reader who does not see
@@ -219,6 +237,19 @@ export interface RoofCarePlan {
   card_paid?: { on: string; amount: number | null; ref: string | null } | null;
   /** The customer's email, and what has been sent to it (Nov 19). Absent on an older read. */
   email?: PlanEmail;
+  /**
+   * The roof size against the map at the sign-up (Nov 20). `unchecked`: the map had no size
+   * for the property, so the typed one was taken as it is and waits for a manager to confirm
+   * it. `confirmed`: who said a typed size is right, and when. Absent on an older read.
+   */
+  size?: PlanSize;
+}
+
+export interface PlanSize {
+  unchecked: boolean;
+  /** What the map showed when the plan was signed; null when it showed nothing. */
+  map_sqft: number | null;
+  confirmed: { on: string; by_name: string } | null;
 }
 
 /** Where the agreement and the receipt go, and whether they went. */
@@ -280,9 +311,16 @@ export function windowsFrom(from: string): Window[] {
   return out.filter((w) => w.to >= from).sort((a, b) => a.from.localeCompare(b.from));
 }
 
-/** The next window to open after `today`: what "wait for the next window" means. */
+/**
+ * What "the inspection window" means for a first inspection (owner, Nov 20): the window open
+ * today when two weeks of it are left, from today to its last day; otherwise the next one to
+ * open. The same rule as roof_care_start in the database.
+ */
 export function nextWindow(today: string): Window {
-  return windowsFrom(today).find((w) => w.from > today)!;
+  const w = windowsFrom(today).find(
+    (x) => x.from > today || daysBetween(today, x.to) >= SECOND_WINDOW_MIN_DAYS - 1,
+  )!;
+  return w.from > today ? w : { from: today, to: w.to };
 }
 
 /** "Mar 15 to May 15, 2027". */
@@ -358,15 +396,16 @@ export function visitUnbilled(v: PlanVisit): boolean {
 }
 export const VISIT_UNBILLED_WORDS = "Not invoiced";
 
-export type VisitState = "done" | "late" | "ticket" | "waiting" | "lost";
+export type VisitState = "done" | "late" | "ticket" | "waiting" | "lost" | "skipped";
 
 /**
- * Done (the ticket is Done or further), lost (carried from last plan year and not done in its
- * 60 days), late (not done and past its last day), a ticket is out for it, or it is waiting for
- * its time.
+ * Done (the ticket is Done or further), skipped (a manager said we will not do it: Nov 20),
+ * lost (carried from last plan year and not done in its 60 days), late (not done and past its
+ * last day), a ticket is out for it, or it is waiting for its time.
  */
 export function visitState(v: PlanVisit, today: string): VisitState {
   if (v.ticket && DONE_STAGES.includes(v.ticket.stage)) return "done";
+  if (v.skipped_on) return "skipped";
   if (v.lost_on) return "lost";
   if (today > v.due_by) return "late";
   return v.ticket ? "ticket" : "waiting";
@@ -488,7 +527,7 @@ export function firstVisitWords(first: FirstVisit, days: number | null): string 
   if (first === "now") return "First inspection: as soon as the payment is received.";
   if (first === "days")
     return `First inspection: ${days ?? 0} ${days === 1 ? "day" : "days"} after the payment is received.`;
-  return "First inspection: in the next inspection window after the payment is received.";
+  return "First inspection: in the inspection window open when the payment is received, if two weeks of it are left. Otherwise in the next one.";
 }
 
 /** Under the dates on the sign-up: they move with the payment. */
@@ -647,6 +686,19 @@ export interface RenewalOffer {
   carried_until: string;
   pay_method: PayMethod | null;
   has_renewal: boolean;
+  /**
+   * Who may pick the answer the rule did not (Nov 20): a manager or an admin. An office user
+   * gets the rule's own answer.
+   */
+  can_change: boolean;
+  /**
+   * The plan ended more than 60 days ago (Nov 20): it renews at the full price, and
+   * `lapsed_owed` inspections of the old year are neither credited nor carried.
+   */
+  lapsed: boolean;
+  lapsed_owed: number;
+  /** The day the plan ended, for one that has. */
+  ended_on: string | null;
 }
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -700,7 +752,29 @@ export function readRenewalOffer(x: unknown): RenewalOffer | null {
     carried_until,
     pay_method: asPayMethod(o["pay_method"]),
     has_renewal: o["has_renewal"] === true,
+    can_change: o["can_change"] === true,
+    lapsed: o["lapsed"] === true,
+    lapsed_owed: Math.max(0, Math.round(Number(o["lapsed_owed"]) || 0)),
+    ended_on: day("ended_on"),
   };
+}
+
+/** Under the two answers, for someone who cannot pick the other one. */
+export const RENEWAL_CHANGE_NEEDS_MANAGER =
+  "Only a manager or an admin can pick the other answer. Ask one of them if it should be changed.";
+
+/** A plan that ended more than this many days ago is past what the old year owed. */
+export const RENEWAL_LAPSED_DAYS = 60;
+
+/** "This plan ended Sep 1, 2025, more than 60 days ago. …" Empty when it has not lapsed. */
+export function renewalLapsedWords(
+  offer: Pick<RenewalOffer, "lapsed" | "lapsed_owed" | "ended_on">,
+): string {
+  if (!offer.lapsed) return "";
+  const when = offer.ended_on ? `ended ${longDay(offer.ended_on)}, ` : "ended ";
+  const base = `This plan ${when}more than ${RENEWAL_LAPSED_DAYS} days ago, so it renews at the full price.`;
+  if (offer.lapsed_owed <= 0) return base;
+  return `${base} ${offer.lapsed_owed === 1 ? "The inspection that was not done is" : "The inspections that were not done are"} not taken off the price and not carried into the new year.`;
 }
 
 /** "1 inspection is still owed" / "Both inspections are still owed". */
@@ -773,6 +847,28 @@ export function renewalCreditWords(owed: number): string {
 /** "Lost Mar 11, 2028": a carried inspection whose 60 days ran out. */
 export const lostWords = (day: string): string =>
   `Lost ${longDay(day)}: not done in its ${CARRY_DAYS} days`;
+
+// ── Skip an inspection (owner, Nov 20) ──────────────────────────────────────────────────────
+//
+// "Skip this inspection": a manager or an admin says we will not do it, with a reason. Its
+// ticket comes off the board and the morning run does not make it again. It still counts as an
+// inspection owed to the customer: a renewal takes its price off or carries it, and a refund
+// counts it as not done. Deleting the ticket instead is refused by the database, in words
+// that point here.
+export const SKIP_LABEL = "Skip this inspection";
+export const SKIP_NOTE =
+  "For an inspection we will not do. Its ticket comes off the board and is not made again. It still counts as an inspection owed to the customer: the renewal takes its price off or carries it, and a refund counts it as not done.";
+export const SKIP_REASON_NEEDED = "Type why this inspection is skipped";
+/** "Skipped Nov 20, 2026 by Dana: the roof is being replaced. Still owed to the customer." */
+export function skippedWords(
+  v: Pick<PlanVisit, "skipped_on" | "skip_reason" | "skipped_by_name">,
+): string {
+  if (!v.skipped_on) return "";
+  const who = (v.skipped_by_name ?? "").trim();
+  const why = (v.skip_reason ?? "").trim().replace(/[.\s]+$/, "");
+  return `Skipped ${longDay(v.skipped_on)}${who ? ` by ${who}` : ""}${why ? `: ${why}` : ""}. Still owed to the customer.`;
+}
+
 export const CUSTOMER_ASKED_LABEL = "The customer asked for this";
 export const CUSTOMER_ASKED_NOTE =
   "It decides the renewal: an inspection we could not do because the customer asked is charged in full.";
@@ -1053,5 +1149,233 @@ export function mapRoofSizeLine(m: MapRoofSize): string {
     : `The map shows a building of about ${size} sq ft that matches this property's name. Check it is the right building.`;
 }
 
+// ── The typed size against the map's (owner, Nov 20) ────────────────────────────────────────
+//
+// "fix 4 (what happens if it cant be found on the map?)". When the property has a size from
+// the map, a typed size more than 20% smaller is not signed: a technician and the office are
+// told both sizes, and a manager or an admin may go on after ticking that the typed size is
+// right (their name is kept). A larger typed size is always taken: a property can have more
+// roofs than the one the map found. When the map has no size, the typed one is taken as it is,
+// the plan is marked, and the Owner page lists it until a manager confirms the size. The
+// database decides (roof_care_sign_up_await_payment); this is its twin for the screen.
+
+/** A typed size this much smaller than the map's is not signed without a manager. */
+export const SIZE_SMALLER_LIMIT = 0.2;
+export type SizeCheck = "ok" | "smaller" | "unchecked";
+
+/** `mapSqft`: the size kept on the property (crm_sites.map_roof_sqft); null when none. */
+export function sizeAgainstMap(typed: number, mapSqft: number | null | undefined): SizeCheck {
+  if (mapSqft == null || !Number.isFinite(mapSqft) || mapSqft < MAP_ROOF_MIN_SQFT)
+    return "unchecked";
+  return typed < mapSqft * (1 - SIZE_SMALLER_LIMIT) ? "smaller" : "ok";
+}
+
+const sqftWords = (n: number) => Math.round(n).toLocaleString("en-US");
+
+export const SIZE_OK_LABEL = "The typed size is right";
+
+/** What the sign-up says when the typed size is too small, to someone who can go on or not. */
+export function sizeSmallerLine(mapSqft: number, typed: number, manager: boolean): string {
+  const base = `The map shows about ${sqftWords(Math.round(mapSqft / 100) * 100)} sq ft of roof at this property, and ${sqftWords(typed)} sq ft was typed: more than 20% smaller.`;
+  return manager
+    ? `${base} Tick "${SIZE_OK_LABEL}" to sign the plan up at the typed size. Your name is kept with it.`
+    : `${base} Check the size and type the whole roof. If the typed size is right, a manager or an admin signs this plan up: they can confirm it.`;
+}
+/** On a plan signed where the map had no size. */
+export const SIZE_UNCHECKED_WORDS = "Roof size typed by hand, not checked against the map";
+export const SIZE_UNCHECKED_STAFF_NOTE =
+  "The map has no roof size for this property, so the typed size is taken as it is. The plan is marked, and a manager or an admin confirms the size afterwards.";
+export const SIZE_CONFIRM_LABEL = "Confirm the roof size";
+/** A size of 0 or below: the database's own words. */
+export const SIZE_NEEDED = "Type the roof's size in square feet: a number above 0";
+
+/** "Roof size 20,000 sq ft: typed by hand, not checked against the map." and who confirmed. */
+export function planSizeWords(p: Pick<RoofCarePlan, "roof_sqft" | "size">): string {
+  const s = p.size;
+  if (!s) return "";
+  const size = `${sqftWords(p.roof_sqft)} sq ft`;
+  if (s.unchecked)
+    return `Roof size ${size}: typed by hand, not checked against the map. A manager or an admin confirms it.`;
+  if (s.confirmed)
+    return `Roof size ${size}, confirmed by ${s.confirmed.by_name || "a manager"} on ${longDay(s.confirmed.on)}${s.map_sqft != null ? ` (the map showed about ${sqftWords(Math.round(s.map_sqft / 100) * 100)} sq ft)` : ""}.`;
+  return "";
+}
+
 /** Why a shown price is an estimate, when it is. */
 export type PriceEstimate = "rough" | "just-now" | null;
+
+// ── A technician's plans (owner, Nov 20) ────────────────────────────────────────────────────
+//
+// "A technician reads a plan only with the money left out." The database no longer answers a
+// technician from the plan tables. Their screens get the plan from roof_care_field_plans():
+// its state and dates, what it includes, and each inspection with the stage of its ticket,
+// whoever that ticket is with, so "2 of 2 done" is counted from every ticket and not only from
+// the ones that technician can open. No price, drive, refund, credit or billed amount is in
+// that answer, so none is here: the amounts read 0 or null, as for anyone who does not see
+// invoices.
+
+/**
+ * Who the plan tables answer: the office. The twin of the row rule of roof_care_plans
+ * (20261120650000): Customers or Estimate access, or Service access for someone who is not a
+ * technician. Anyone else is given the plan by the database's functions that leave the money
+ * out.
+ */
+export const readsPlanTables = (p: AccessLike | null | undefined): boolean =>
+  canAccess(p, "customers") ||
+  canAccess(p, "estimate") ||
+  (canAccess(p, "service") && !isFieldOnly(p));
+
+const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const flag = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+// One owed from last plan year leads: it is the one with the clock on it.
+const VISIT_ORDER: Record<VisitKind, number> = { carried: -1, visit1: 0, visit2: 1, storm: 2 };
+
+function readFieldVisit(raw: unknown): PlanVisit | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  const kind = (VISIT_KINDS as readonly string[]).includes(String(v["kind"]))
+    ? (v["kind"] as VisitKind)
+    : null;
+  const id = text(v["id"]);
+  const from = text(v["due_from"]);
+  const by = text(v["due_by"]);
+  if (!kind || !id || !from || !by) return null;
+  const t =
+    v["ticket"] && typeof v["ticket"] === "object"
+      ? (v["ticket"] as Record<string, unknown>)
+      : null;
+  const ticketId = t ? text(t["id"]) : null;
+  const ticket: VisitTicket | null =
+    t && ticketId && typeof t["stage"] === "string"
+      ? {
+          id: ticketId,
+          number: Number(t["number"]) || 0,
+          stage: t["stage"],
+          scheduled_date: text(t["scheduled_date"]),
+          completed_at: text(t["completed_at"]),
+          invoice_id: null,
+          mine: t["mine"] === true,
+        }
+      : null;
+  return {
+    id,
+    kind,
+    due_from: from,
+    due_by: by,
+    first_due_by: text(v["first_due_by"]) ?? by,
+    amount: 0,
+    extra: v["extra"] === true,
+    push_reason: text(v["push_reason"]),
+    pushed_by_name: text(v["pushed_by_name"]),
+    customer_asked: v["customer_asked"] === true,
+    lost_on: text(v["lost_on"]),
+    skipped_on: text(v["skipped_on"]),
+    skip_reason: text(v["skip_reason"]),
+    skipped_by_name: text(v["skipped_by_name"]),
+    ticket,
+    billed: null,
+    drains_cleaned: flag(v["drains_cleaned"]),
+    gutters_cleaned: flag(v["gutters_cleaned"]),
+    cleaning_note: text(v["cleaning_note"]),
+    cleaning_by_name: text(v["cleaning_by_name"]),
+    cleaning_at: text(v["cleaning_at"]),
+  };
+}
+
+/**
+ * The database's answer for a technician as plans. Anything that is not a plan is left out,
+ * never guessed. `stormIncluded`: the storm inspections a year each plan includes (the plan
+ * settings).
+ */
+export function readFieldPlans(
+  x: unknown,
+  stormIncluded: Partial<Record<PlanKey, number>> = {},
+): RoofCarePlan[] {
+  if (!Array.isArray(x)) return [];
+  const out: RoofCarePlan[] = [];
+  for (const raw of x) {
+    if (!raw || typeof raw !== "object") continue;
+    const p = raw as Record<string, unknown>;
+    const plan = asPlanKey(p["plan"]);
+    const id = text(p["id"]);
+    const account = text(p["account_id"]);
+    const site = text(p["site_id"]);
+    const signed = text(p["signed_on"]);
+    const renews = text(p["renews_on"]);
+    if (!plan || !id || !account || !site || !signed || !renews) continue;
+    const visits = (Array.isArray(p["visits"]) ? p["visits"] : [])
+      .map(readFieldVisit)
+      .filter((v): v is PlanVisit => !!v)
+      .sort(
+        (a, b) => VISIT_ORDER[a.kind] - VISIT_ORDER[b.kind] || a.due_from.localeCompare(b.due_from),
+      );
+    const closedOn = text(p["closed_out_on"]);
+    out.push({
+      id,
+      account_id: account,
+      site_id: site,
+      plan,
+      status: asPlanStatus(p["status"]),
+      pay_first: p["pay_first"] === true,
+      plan_number: typeof p["plan_number"] === "number" ? p["plan_number"] : null,
+      first_visit: (FIRST_VISIT_CHOICES as readonly string[]).includes(String(p["first_visit"]))
+        ? (p["first_visit"] as FirstVisit)
+        : "window",
+      first_days: typeof p["first_days"] === "number" ? p["first_days"] : null,
+      starts_on: text(p["starts_on"]),
+      invoice: null,
+      pay_method: asPayMethod(p["pay_method"]),
+      pay_note: null,
+      free_travel_calls: Number(p["free_travel_calls"]) || 0,
+      free_travel_used: null,
+      refund: null,
+      closed_out: closedOn
+        ? { on: closedOn, reason: (text(p["closed_out_reason"]) ?? "").trim() }
+        : null,
+      renewed_from: text(p["renewed_from"]),
+      renewal_choice: null,
+      renewal_credit: 0,
+      signed_on: signed,
+      renews_on: renews,
+      roof_sqft: Number(p["roof_sqft"]) || 0,
+      price: 0,
+      price_estimated: p["price_estimated"] === true,
+      repair_allowance: Number(p["repair_allowance"]) || 0,
+      allowance_used: null,
+      allowance_uses: [],
+      agreed_by: text(p["agreed_by"]) ?? "",
+      sold_by_name: text(p["sold_by_name"]) ?? "",
+      notes: "",
+      ended_on: text(p["ended_on"]),
+      ended_reason: text(p["ended_reason"]),
+      visits,
+      storm_included: stormIncluded[plan] ?? 0,
+      no_access: null,
+      forecast_sent_on: text(p["forecast_sent_on"]),
+      card_paid: null,
+      size: { unchecked: p["size_unchecked"] === true, map_sqft: null, confirmed: null },
+    });
+  }
+  return out;
+}
+
+// ── One press at a time (owner, Nov 20) ─────────────────────────────────────────────────────
+//
+// "two presses at the same instant show one message, the success". A button is greyed once its
+// work has started, but two presses in the same instant both land before the screen has drawn
+// that. This lets the first through and drops the others until the first is over.
+
+/** Wraps a press: while one run is going, another press does nothing and returns false. */
+export function onePressAtATime(): (run: () => Promise<unknown>) => boolean {
+  let busy = false;
+  return (run) => {
+    if (busy) return false;
+    busy = true;
+    void run()
+      .catch(() => undefined)
+      .finally(() => {
+        busy = false;
+      });
+    return true;
+  };
+}

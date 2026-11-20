@@ -245,3 +245,56 @@ export function tripLine(t: TripToBill, sort: number) {
 }
 
 export const roofCareNoAccessKey = (jobId: string) => ["roof-care-no-access", jobId] as const;
+
+// ── Taking a record off (owner, Nov 20) ─────────────────────────────────────────────────────
+//
+// When a record is taken off, the ones left for that plan year are worked again in date order:
+// the first is free, each after it is charged. One whose charge is already on an invoice stays
+// as billed. The database does it (roof_care_no_access_take_off) and says what changed.
+
+export interface NoAccessTakeOff {
+  /** Records that turned free or charged. */
+  changed: { id: string; on: string; charged: boolean }[];
+  /** Records that would be free now, and are on an invoice: left as billed. */
+  kept_billed: { id: string; on: string; invoice: string }[];
+}
+
+export function readNoAccessTakeOff(x: unknown): NoAccessTakeOff {
+  const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+  const rows = (k: string) => (Array.isArray(o[k]) ? (o[k] as unknown[]) : []);
+  const row = (r: unknown) => (r && typeof r === "object" ? (r as Record<string, unknown>) : {});
+  return {
+    changed: rows("changed")
+      .map(row)
+      .filter((r) => typeof r["id"] === "string" && typeof r["on_date"] === "string")
+      .map((r) => ({
+        id: r["id"] as string,
+        on: r["on_date"] as string,
+        charged: r["charged"] === true,
+      })),
+    kept_billed: rows("kept_billed")
+      .map(row)
+      .filter((r) => typeof r["id"] === "string" && typeof r["on_date"] === "string")
+      .map((r) => ({
+        id: r["id"] as string,
+        on: r["on_date"] as string,
+        invoice: typeof r["invoice"] === "string" ? r["invoice"].trim() : "",
+      })),
+  };
+}
+
+/** What the office is told after a record is taken off. */
+export function noAccessTakeOffWords(r: NoAccessTakeOff): string {
+  const out = ["Taken off."];
+  for (const c of r.changed)
+    out.push(
+      c.charged
+        ? `The visit of ${longDay(c.on)} is now charged a return trip.`
+        : `The visit of ${longDay(c.on)} is now the first of the plan year: its return trip is at no charge.`,
+    );
+  for (const k of r.kept_billed)
+    out.push(
+      `The visit of ${longDay(k.on)} is now the first of the plan year, but its return trip is on ${k.invoice ? `invoice #${k.invoice}` : "a draft invoice"}, so it stays as billed. Take it off that invoice if it should not be charged.`,
+    );
+  return out.join(" ");
+}

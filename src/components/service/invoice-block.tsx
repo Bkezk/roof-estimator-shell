@@ -134,9 +134,10 @@ function BillInspectionCard({ job }: { job: ServiceJobWithTech }) {
       </h2>
       {carePlan ? (
         <p className="text-sm text-muted-foreground" data-care-plan-billing>
-          This is a Roof Care plan inspection. Its invoice bills this visit’s share of the plan.
-          Make it here. A storm inspection is included in the plan: its invoice is for nothing and
-          keeps what the trip cost.
+          This is a Roof Care plan inspection. The plan’s year is billed on the plan’s own invoice,
+          so this inspection’s invoice is for nothing and keeps what the visit cost. Only what is
+          charged on its own goes on it at a price: a storm inspection beyond the ones the plan
+          includes, or a return trip after a visit with no access. Make it here.
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">

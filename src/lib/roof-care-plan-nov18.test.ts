@@ -128,11 +128,16 @@ describe("the two windows", () => {
     // Its last day still counts.
     expect(windowsFrom("2027-05-15")[0]).toEqual({ from: "2027-03-15", to: "2027-05-15" });
   });
-  it("“wait for the next window” is the next one to open, never the one already open", () => {
-    expect(nextWindow("2026-11-18")).toEqual({ from: "2027-03-15", to: "2027-05-15" });
+  // Nov 20 (break test 19): a window open today is used when two weeks of it are left, from
+  // today to its last day. Before, a sign-up in November waited until March.
+  it("the inspection window is the one open today with two weeks left, else the next to open", () => {
+    expect(nextWindow("2026-11-18")).toEqual({ from: "2026-11-18", to: "2026-12-31" });
     expect(nextWindow("2026-07-01")).toEqual({ from: "2026-10-15", to: "2026-12-31" });
-    expect(nextWindow("2027-03-15")).toEqual({ from: "2027-10-15", to: "2027-12-31" });
+    expect(nextWindow("2027-03-15")).toEqual({ from: "2027-03-15", to: "2027-05-15" });
     expect(nextWindow("2027-03-14")).toEqual({ from: "2027-03-15", to: "2027-05-15" });
+    // Exactly two weeks left counts; one day less waits for the next window.
+    expect(nextWindow("2026-12-18")).toEqual({ from: "2026-12-18", to: "2026-12-31" });
+    expect(nextWindow("2026-12-19")).toEqual({ from: "2027-03-15", to: "2027-05-15" });
   });
   it("are said in words", () => {
     expect(windowWords({ from: "2027-03-15", to: "2027-05-15" })).toBe("Mar 15 to May 15, 2027");
@@ -159,11 +164,19 @@ describe("when a new plan's two inspections fall (the same sum as the database's
       renews: "2027-11-18",
     });
   });
-  it("the next window: spring, then the fall window up to the plan year's end", () => {
+  // Nov 20 (break test 19): Nov 18 is inside the fall window with six weeks left, so the first
+  // inspection is in it, and the second four months on in spring. It used to wait for March.
+  it("the window: the one open today, then spring four months on", () => {
     expect(planDates("2026-11-18", "window", null)).toEqual({
-      first: { from: "2027-03-15", to: "2027-05-15" },
-      second: { from: "2027-10-15", to: "2027-11-18" },
+      first: { from: "2026-11-18", to: "2026-12-31" },
+      second: { from: "2027-03-18", to: "2027-05-15" },
       renews: "2027-11-18",
+    });
+    // Under two weeks of the window left: the next one, and the fall up to the plan year's end.
+    expect(planDates("2026-12-20", "window", null)).toEqual({
+      first: { from: "2027-03-15", to: "2027-05-15" },
+      second: { from: "2027-10-15", to: "2027-12-20" },
+      renews: "2027-12-20",
     });
   });
   // Nov 19: it used to carry the renewal with it (to 2028-05-15). The plan year is twelve
@@ -443,6 +456,8 @@ describe("the price for a property", () => {
       placed: false,
       estimate: null,
       price: null,
+      // (Nov 20: the map's roof size for the property; none here.)
+      map_sqft: null,
     });
     expect(env.rpcCalls).toEqual([]);
   });
@@ -1255,8 +1270,9 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
     expect(card).toContain("const [agreed, setAgreed] = useState(false);");
     // (Nov 19, later: an email address that is typed has to be one, and the tick is in the
     // customer's own words, "I have read these terms and agree to them.")
+    // (Nov 20: and nothing else is missing: the size check, and the line that says what is.)
     expect(card).toContain(
-      "agreedBy.trim().length > 0 && agreed && !emailBad && plans.length > 0 && !stale;",
+      "agreedBy.trim().length > 0 && agreed && !emailBad && plans.length > 0 && !stale && missing.length === 0;",
     );
     expect(card).toContain("<span>{AGREE_WORDS}</span>");
   });

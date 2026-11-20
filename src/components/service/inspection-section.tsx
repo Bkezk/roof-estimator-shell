@@ -18,7 +18,7 @@
  *
  * `FromInspectionNote` is the "From inspection #6012" link on a ticket created from one.
  */
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -195,6 +195,25 @@ function InspectionBody({
 }
 
 /**
+ * A checklist label with a place to break after each slash ("Gutters/downspouts"), for phones
+ * under 390 px wide only: from 390 px up the break is hidden and the label is one word as before.
+ */
+function slashBreaks(label: string): React.ReactNode {
+  const parts = label.split("/");
+  if (parts.length < 2) return label;
+  return parts.map((part, i) => (
+    <Fragment key={i}>
+      {part}
+      {i < parts.length - 1 && (
+        <>
+          /<wbr className="min-[390px]:hidden" />
+        </>
+      )}
+    </Fragment>
+  ));
+}
+
+/**
  * The checklist rows, controlled (owner, Oct 26: "not every part needs a comment or status, just
  * ones with problems"). Each row is one compact line: the label (a tap flags it ↔ unflags it,
  * status "issue" ↔ null), a small Issue flag, a subtle OK check and an N/A toggle. Only a
@@ -254,10 +273,19 @@ export function ChecklistRows({
             data-row={flagged ? "issue" : (item.status ?? "clear")}
             className={`space-y-2 rounded-md border px-2 py-1 ${flagged ? "border-red-300 bg-red-50/40 dark:border-red-900/60 dark:bg-red-950/20" : ""}`}
           >
-            <div className="flex items-center gap-1">
+            {/* A narrow phone (Nov 20; found at 320 px): the label could not get narrower than its
+                longest word, so the row was wider than the card and the result buttons ran about
+                42 px off the edge. Under 390 px the label may now shrink, and a long word breaks
+                after its slash ("Gutters/ downspouts"). Under 350 px the buttons also drop to a
+                line of their own when the label and they do not fit side by side. From 390 px up
+                not one of these classes applies: nothing changes. */}
+            <div
+              className="flex items-center gap-1 max-[350px]:flex-wrap"
+              data-line="checklist-row"
+            >
               <button
                 type="button"
-                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
+                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default max-[390px]:min-w-0 max-[350px]:basis-auto"
                 aria-pressed={flagged}
                 aria-label={
                   flagged
@@ -281,7 +309,12 @@ export function ChecklistRows({
                 ) : (
                   <span className="h-4 w-4 shrink-0" aria-hidden />
                 )}
-                <span className={na ? "text-muted-foreground line-through" : ""}>{item.label}</span>
+                <span
+                  data-line="checklist-label"
+                  className={`max-[390px]:min-w-0 max-[390px]:[overflow-wrap:anywhere] ${na ? "text-muted-foreground line-through" : ""}`}
+                >
+                  {slashBreaks(item.label)}
+                </span>
                 {flagged &&
                   (closed ? (
                     <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -290,7 +323,7 @@ export function ChecklistRows({
                   ))}
               </button>
               <div
-                className="flex shrink-0 items-center gap-0.5"
+                className="flex shrink-0 items-center gap-0.5 max-[350px]:ml-auto"
                 role="group"
                 aria-label={`${item.label}: result`}
               >

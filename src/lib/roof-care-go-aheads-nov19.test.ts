@@ -329,7 +329,10 @@ const paidEvent = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("the card payment page", () => {
-  it("the amount is the final invoice's balance, else the plan's price less its credit", () => {
+  // Nov 20 (break test, number 26): the invoice decides the amount only when it is the plan's
+  // own, for the plan's amount to the cent, draft or final. Until then a final invoice of any
+  // amount decided it and a draft never did (roof-care-break-fixes-payments-nov20.test.ts).
+  it("the amount is the plan's price less its credit, less what its own invoice holds", () => {
     expect(checkoutAmount({ price: 1840, renewal_credit: 0 }, null)).toBe(1840);
     expect(checkoutAmount({ price: 1840, renewal_credit: 460 }, null)).toBe(1380);
     expect(
@@ -337,8 +340,14 @@ describe("the card payment page", () => {
         { price: 1840, renewal_credit: 0 },
         { status: "final", total: 1950.4, paid_amount: 0 },
       ),
-    ).toBe(1950.4);
-    // A draft does not decide anything yet.
+    ).toBe(1840);
+    expect(
+      checkoutAmount(
+        { price: 1840, renewal_credit: 0 },
+        { status: "final", total: 1840, paid_amount: 360 },
+      ),
+    ).toBe(1480);
+    // A draft for another amount does not decide anything.
     expect(
       checkoutAmount(
         { price: 1840, renewal_credit: 0 },
@@ -436,7 +445,7 @@ describe("the card payment page", () => {
     process.env["STRIPE_SECRET_KEY"] = "sk_test_made_up";
     process.env["STRIPE_WEBHOOK_SECRET"] = SECRET;
     process.env["APP_URL"] = "https://site.example";
-    const env = fakeSupabase({
+    const tables = {
       roof_care_plans: [
         {
           id: PLAN,
@@ -449,11 +458,21 @@ describe("the card payment page", () => {
           customer_email: null,
         },
       ],
-    });
+    };
+    // Nov 20: the database is asked whether the person sees the plan (a technician no longer
+    // reads the plans table), and the plan is read with the server's own key.
+    const env = fakeSupabase(tables, { rpcs: { roof_care_plan_seen: () => true } });
     expect(await run(startPlanCheckout, env.db, { plan_id: PLAN })).toEqual({
       url: null,
       reason: CHECKOUT_NOT_WAITING,
     });
+    expect(env.rpcCalls).toEqual([{ fn: "roof_care_plan_seen", args: { p_plan: PLAN } }]);
+    // A person the database says does not see it is told it was not found, whatever the table
+    // would have answered.
+    const other = fakeSupabase(tables, { rpcs: { roof_care_plan_seen: () => false } });
+    await expect(run(startPlanCheckout, other.db, { plan_id: PLAN })).rejects.toThrow(
+      "That plan was not found",
+    );
     delete process.env["STRIPE_SECRET_KEY"];
     delete process.env["STRIPE_WEBHOOK_SECRET"];
     delete process.env["APP_URL"];
@@ -614,9 +633,13 @@ describe("the route Stripe calls", () => {
     ).toBe(
       "The customer paid the year by card online. Its invoice is marked paid and the plan has started.",
     );
+    // Nov 20 (break test, number 26): the database no longer answers "not_waiting". A payment
+    // for a plan that is not waiting is kept as money to send back, and said so.
     expect(
-      cardPaidNotice({ plan: "care", site_id: "s1", site: null, result: "not_waiting" }).body,
-    ).toContain("Check whether it was paid twice.");
+      cardPaidNotice({ plan: "care", site_id: "s1", site: null, result: "send_back" }).body,
+    ).toBe(
+      "A card payment came in online for a Roof Care plan that was already paid. The plan is not changed. Send it back to the customer.",
+    );
     expect(cardPaidWords({ on: "2027-01-08", amount: 1840, ref: "pi_1" })).toBe(
       "Paid by card online Jan 8, 2027 ($1,840.00, ref pi_1).",
     );

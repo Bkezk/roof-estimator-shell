@@ -10,12 +10,15 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { readProfile } from "@/lib/profile-cache.server";
 import {
   NO_ACCESS_NOTE_NEEDED,
   readNoAccessPreview,
+  readNoAccessTakeOff,
   type NoAccessPreview,
+  type NoAccessTakeOff,
 } from "@/lib/roof-care-no-access";
-import { planName } from "@/lib/roof-care-plan";
+import { planName, readsPlanTables } from "@/lib/roof-care-plan";
 
 type Sb = SupabaseClient<Database>;
 
@@ -38,7 +41,36 @@ export interface TicketNoAccessState {
 /** The database's refusals that mean "nothing to press here", not "something went wrong". */
 const NOTHING_TO_PRESS = /already done|not a Roof Care plan inspection/i;
 
-export async function readTicketNoAccess(sb: Sb, jobId: string): Promise<TicketNoAccessState> {
+type RecordRow = { id: string; on_date: string; note: string; by_name: string; charged: unknown };
+
+/**
+ * The records a technician made on a ticket (Nov 20): the table no longer answers a
+ * technician, so they come from the database's own function, with no amount in them.
+ */
+async function fieldRecords(sb: Sb, jobId: string): Promise<RecordRow[]> {
+  const { data, error } = await sb.rpc("roof_care_field_no_access", { p_job: jobId });
+  if (error) throw new Error(error.message);
+  const out: RecordRow[] = [];
+  for (const raw of Array.isArray(data) ? data : []) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    if (typeof r["id"] !== "string" || typeof r["on_date"] !== "string") continue;
+    out.push({
+      id: r["id"],
+      on_date: r["on_date"],
+      note: typeof r["note"] === "string" ? r["note"] : "",
+      by_name: typeof r["by_name"] === "string" ? r["by_name"] : "",
+      charged: r["charged"],
+    });
+  }
+  return out;
+}
+
+/** `field`: the reader is not answered by the plan tables (a technician). */
+export async function readTicketNoAccess(
+  sb: Sb,
+  jobId: string,
+  opts: { field?: boolean } = {},
+): Promise<TicketNoAccessState> {
   const { data: job, error: jErr } = await sb
     .from("service_jobs")
     .select("id, roof_care_visit_id")
@@ -46,13 +78,18 @@ export async function readTicketNoAccess(sb: Sb, jobId: string): Promise<TicketN
     .maybeSingle();
   if (jErr) throw new Error(jErr.message);
   if (!job?.roof_care_visit_id) return { preview: null, records: [] };
-  const { data: rows, error: rErr } = await sb
-    .from("roof_care_no_access")
-    .select("id, on_date, note, by_name, charged, at")
-    .eq("visit_id", job.roof_care_visit_id)
-    .order("at", { ascending: true });
-  if (rErr) throw new Error(rErr.message);
-  const records = (rows ?? []).map((r) => ({
+  let rows: RecordRow[];
+  if (opts.field) rows = await fieldRecords(sb, jobId);
+  else {
+    const { data, error: rErr } = await sb
+      .from("roof_care_no_access")
+      .select("id, on_date, note, by_name, charged, at")
+      .eq("visit_id", job.roof_care_visit_id)
+      .order("at", { ascending: true });
+    if (rErr) throw new Error(rErr.message);
+    rows = data ?? [];
+  }
+  const records = rows.map((r) => ({
     id: r.id,
     on: r.on_date,
     note: r.note,
@@ -70,9 +107,10 @@ export async function readTicketNoAccess(sb: Sb, jobId: string): Promise<TicketN
 export const roofCareNoAccess = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<TicketNoAccessState> =>
-    readTicketNoAccess(context.supabase, data.job_id),
-  );
+  .handler(async ({ data, context }): Promise<TicketNoAccessState> => {
+    const p = await readProfile(context.supabase, context.userId);
+    return readTicketNoAccess(context.supabase, data.job_id, { field: !readsPlanTables(p) });
+  });
 
 /** What the office is told, so the inspection gets a new day. */
 export function noAccessNotice(a: {
@@ -164,12 +202,18 @@ export const recordRoofCareNoAccess = createServerFn({ method: "POST" })
     return { charged: now.charged, amount_known: now.amount_known };
   });
 
-/** A manager takes a record off: a mistake, or a charge that is let go. */
+/**
+ * A manager takes a record off: a mistake, or a charge that is let go. The ones left for the
+ * plan year are worked again in date order (Nov 20): the answer says which changed, and which
+ * stays as billed because it is on an invoice.
+ */
 export const removeRoofCareNoAccess = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<{ ok: true }> => {
-    const { error } = await context.supabase.rpc("roof_care_no_access_remove", { p_id: data.id });
+  .handler(async ({ data, context }): Promise<NoAccessTakeOff> => {
+    const { data: res, error } = await context.supabase.rpc("roof_care_no_access_take_off", {
+      p_id: data.id,
+    });
     if (error) throw new Error(error.message);
-    return { ok: true };
+    return readNoAccessTakeOff(res);
   });

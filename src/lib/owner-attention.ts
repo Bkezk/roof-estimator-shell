@@ -62,6 +62,8 @@ import {
   EXPIRED_LISTED_DAYS,
   RENEW_LABEL,
   RENEWAL_OPEN_DAYS,
+  SIZE_CONFIRM_LABEL,
+  SIZE_UNCHECKED_WORDS,
 } from "@/lib/roof-care-plan";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
@@ -90,6 +92,8 @@ export type AttentionKind =
   | "care_plan_unbilled"
   | "care_plan_unpaid"
   | "care_plan_refund"
+  | "care_plan_no_payment"
+  | "care_plan_size"
   | "care_plan_renewal"
   | "care_plan_carried"
   | "care_plan_expired";
@@ -314,6 +318,59 @@ export interface AttCareRefund {
   amount: number;
 }
 
+/**
+ * A Roof Care plan priced on a roof size typed by hand, where the map had none to check it
+ * against (owner, Nov 20: break test, number 4). Listed until a manager or an admin confirms
+ * the size on the property.
+ */
+export interface AttCareSize {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** The size the plan was priced on. */
+  roof_sqft: number;
+  /** The day the plan was signed. */
+  signed_on: string | null;
+}
+
+/**
+ * A Roof Care plan in force with nothing recorded as paid toward it (owner, Nov 20: break test,
+ * number 1: "a payment taken back must not leave a plan running unseen"). The database refuses
+ * the ways a person could get there; this is the row that shows one all the same. A manager's
+ * free year, which has nothing to pay, is not listed.
+ */
+export interface AttCareNoPayment {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** The first day of the plan year; null when it is not known. */
+  starts_on: string | null;
+  /** What the plan year costs, less what a renewal took off. */
+  price: number;
+  /** The plan's invoice; null when it has none. */
+  invoice: { id: string; number: string; status: string } | null;
+}
+
+/**
+ * Is this plan in force with nothing paid toward it? Only a plan that is paid for the year
+ * before it starts and has something to pay: no payment on its invoice, and no card payment.
+ */
+export function planRunsUnpaid(p: {
+  status: string;
+  pay_first: boolean;
+  price: number;
+  renewal_credit: number;
+  invoice: { paid_amount: number } | null;
+  card_paid?: unknown;
+}): boolean {
+  if (p.status !== "active" || !p.pay_first) return false;
+  if (!(p.price - p.renewal_credit > 0.005)) return false;
+  if (p.card_paid) return false;
+  return !((p.invoice?.paid_amount ?? 0) > 0);
+}
+
 export interface AttCareUnbilled {
   visit_id: string;
   job_id: string;
@@ -365,6 +422,10 @@ export interface AttentionIn {
   careUnpaid?: readonly AttCareUnpaid[];
   /** Roof Care plans ended early whose refund is not yet sent (Nov 19). */
   careRefunds?: readonly AttCareRefund[];
+  /** Roof Care plans in force with nothing paid toward them (Nov 20). */
+  careNoPayment?: readonly AttCareNoPayment[];
+  /** Roof Care plans priced on a size nobody checked against the map (Nov 20). */
+  careSizes?: readonly AttCareSize[];
   /** Roof Care plans in the last 60 days of their year, or past it (Nov 19). */
   careRenewals?: readonly AttCareRenewal[];
   /** Inspections carried into a renewed year, not yet done (Nov 19). */
@@ -841,7 +902,7 @@ export function attentionList(i: AttentionIn): AttentionList {
       title: v.title,
       why: v.trip
         ? `A return trip was charged after a visit with no access, and it is on no invoice. Open ticket #${v.number}: press ${CARE_PLAN_BILL_LABEL}, or use Rebuild from ticket on its draft invoice.`
-        : `${v.label} is done and its share of the plan is on no invoice. Open ticket #${v.number} and press ${CARE_PLAN_BILL_LABEL}.`,
+        : `${v.label} is done and has no invoice. Open ticket #${v.number} and press ${CARE_PLAN_BILL_LABEL}.`,
       ...office,
       age,
       ageText: days(age),
@@ -878,6 +939,51 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: age > 14 ? "red" : "amber",
       amount: v.price > 0 ? v.price : null,
       href: v.invoice ? `/service/invoices?id=${v.invoice.id}` : `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan in force with nothing paid toward it (Nov 20): the inspections are being
+  // done for a plan nobody has paid for. Red from the first day.
+  for (const v of i.careNoPayment ?? []) {
+    const age =
+      v.starts_on && YMD.test(v.starts_on) ? Math.max(0, daysBetween(v.starts_on, today)) : 0;
+    const next = !v.invoice
+      ? "It has no invoice. Open the property: make the invoice and record the payment, or end the plan."
+      : `Find the payment and mark invoice #${v.invoice.number} paid, or end the plan on the property.`;
+    rows.push({
+      key: `care_plan_no_payment:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_no_payment",
+      tag: "Roof Care",
+      title: v.title,
+      why: `The plan is in force and nothing is recorded as paid toward it. Its inspections are still being done. ${next}`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: "red",
+      amount: v.price > 0 ? v.price : null,
+      href: v.invoice ? `/service/invoices?id=${v.invoice.id}` : `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan priced on a roof size typed by hand, with no map size to check it against
+  // (Nov 20). The price follows the size, so a manager or an admin looks at it once.
+  for (const v of i.careSizes ?? []) {
+    const age =
+      v.signed_on && YMD.test(v.signed_on) ? Math.max(0, daysBetween(v.signed_on, today)) : 0;
+    rows.push({
+      key: `care_plan_size:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_size",
+      tag: "Roof Care",
+      title: v.title,
+      why: `${SIZE_UNCHECKED_WORDS}: ${Math.round(v.roof_sqft).toLocaleString("en-US")} sq ft. The plan's price follows the size. A manager or an admin opens the property, checks the size and presses ${SIZE_CONFIRM_LABEL}.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: null,
+      href: `/properties/${v.site_id}`,
     });
   }
 

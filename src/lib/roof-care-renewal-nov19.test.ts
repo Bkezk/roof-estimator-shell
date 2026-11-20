@@ -114,6 +114,11 @@ const OFFER: RenewalOffer = {
   carried_until: "2028-03-10",
   pay_method: "check",
   has_renewal: false,
+  // (Nov 20: who may pick the other answer, and a plan that ended more than 60 days ago.)
+  can_change: true,
+  lapsed: false,
+  lapsed_owed: 0,
+  ended_on: null,
 };
 
 beforeEach(() => {
@@ -189,6 +194,11 @@ describe("the database's answer for the Renew box", () => {
       carried_until: "2028-03-10",
       pay_method: "card",
       has_renewal: false,
+      // (Nov 20: an answer from before these says nobody may change it, and nothing lapsed.)
+      can_change: false,
+      lapsed: false,
+      lapsed_owed: 0,
+      ended_on: null,
     });
   });
 
@@ -850,10 +860,14 @@ describe("the database change and the screens (pinned)", () => {
     expect(card).toContain('{renewalOf ? "Cancel the renewal" : "End plan"}');
     expect(card).toContain("data-push-customer");
     // A carried inspection has no Push back button.
-    expect(card).toContain('{office && state !== "done" && visit.kind !== "carried" && (');
-    // The choice starts on the rule's own answer, and a person's pick wins.
+    // (Nov 20: nor has a skipped one.)
     expect(card).toContain(
-      "const choice = o && o.owed.length ? (picked ?? o.default_choice) : null;",
+      '{office && state !== "done" && state !== "skipped" && visit.kind !== "carried" && (',
+    );
+    // The choice starts on the rule's own answer, and a person's pick wins. (Nov 20: for a
+    // manager or an admin. An office user gets the rule's answer.)
+    expect(card).toContain(
+      "o && o.owed.length ? (o.can_change ? (picked ?? o.default_choice) : o.default_choice) : null;",
     );
   });
 

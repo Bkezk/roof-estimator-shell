@@ -47,6 +47,13 @@ import {
   type QuickAccountInput,
 } from "@/lib/crm-account";
 import { NOT_FINISHED_INSPECTION_OR } from "@/lib/ticket-stage";
+import {
+  PLAN_HOLDING_STATUSES,
+  customerHeldMessage,
+  holdingPlan,
+  propertyHeldMessage,
+  type HoldingPlan,
+} from "@/lib/care-plan-guards";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { namesLookAlike } from "@/lib/name-match";
 import {
@@ -104,6 +111,52 @@ async function writeAccess(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string } | null) =>
   (p?.full_name ?? "").trim() || p?.email || null;
+
+/**
+ * The Roof Care plan that holds a property or a customer from being deleted (care-plan-guards.ts):
+ * one in force or waiting for its payment, named with its property. A customer's plans are the
+ * ones on its own name and the ones at its properties. A reader who may not see the plans finds
+ * none here; the database refuses the delete all the same, in the same words.
+ */
+async function planHolding(
+  sb: SupabaseClient<Database>,
+  of: { site_id: string } | { account_id: string },
+): Promise<HoldingPlan | null> {
+  const plans: { plan: string; plan_number: number | null; status: string; site_id: string }[] = [];
+  const read = async (column: "site_id" | "account_id", ids: readonly string[]) => {
+    if (!ids.length) return;
+    const { data, error } = await sb
+      .from("roof_care_plans")
+      .select("id, plan, plan_number, status, site_id")
+      .in(column, [...ids])
+      .in("status", [...PLAN_HOLDING_STATUSES])
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    plans.push(...(data ?? []));
+  };
+  if ("site_id" in of) await read("site_id", [of.site_id]);
+  else {
+    await read("account_id", [of.account_id]);
+    const { data: sites, error } = await sb
+      .from("crm_sites")
+      .select("id")
+      .eq("account_id", of.account_id)
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    await read(
+      "site_id",
+      (sites ?? []).map((s) => s.id),
+    );
+  }
+  const held = holdingPlan(plans);
+  if (!held) return null;
+  const { data: site } = await sb
+    .from("crm_sites")
+    .select("name")
+    .eq("id", held.site_id)
+    .maybeSingle();
+  return { ...held, site_name: site?.name ?? null };
+}
 
 /** Refuse a change under a customer that is gone (not found, or deleted). */
 async function assertLiveAccount(sb: SupabaseClient<Database>, accountId: string) {
@@ -1055,6 +1108,10 @@ export const deleteAccount = createServerFn({ method: "POST" })
     if (oErr) throw new Error(oErr.message);
     const blocked = deleteBlockedMessage(tickets?.length ?? 0, opps?.length ?? 0);
     if (blocked) throw new Error(blocked);
+    // A Roof Care plan in force or waiting for its payment holds its customer (break test Nov
+    // 20, number 17; care-plan-guards.ts; the database says the same, crm_accounts_plan_hold).
+    const held = await planHolding(sb, { account_id: data.id });
+    if (held) throw new Error(customerHeldMessage(held));
     // One stamp for the customer, its sites and its contacts: restoreAccount brings back
     // exactly the rows deleted with it.
     const stamp = new Date().toISOString();
@@ -1130,6 +1187,10 @@ export const deleteSite = createServerFn({ method: "POST" })
   .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<void> => {
     await writeAccess(context);
+    // A Roof Care plan in force or waiting for its payment holds its property (break test Nov
+    // 20, number 17; the database says the same, crm_sites_plan_hold).
+    const held = await planHolding(context.supabase, { site_id: data.id });
+    if (held) throw new Error(propertyHeldMessage(held));
     // Once deleted it keeps its stamp (a deleted customer's rows are restored by that stamp).
     const { data: row, error } = await context.supabase
       .from("crm_sites")

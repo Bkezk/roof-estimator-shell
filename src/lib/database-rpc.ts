@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
+import type { CareTicketToAnnounce } from "@/lib/roof-care-ticket-announce";
 
 // Generated RPC metadata omits SQL nullability and selects the oldest overload.
 // Keep the application contracts aligned with the checked-in SQL migrations.
@@ -44,6 +45,12 @@ type RpcContracts = {
       p_storms: boolean | null;
     };
     Returns: NotifyFlags[];
+  };
+  // 20261120700000_roof_care_ticket_notices.sql: a ticket with nobody on it, no date, or whose
+  // plan inspection could not be read comes back with those columns null.
+  roof_care_ticket_announce_claim: {
+    Args: { p_ids?: string[] | null };
+    Returns: CareTicketToAnnounce[];
   };
 };
 type RpcDatabase = Omit<Database, "public"> & {

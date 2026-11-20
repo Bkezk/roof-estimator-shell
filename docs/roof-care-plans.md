@@ -546,6 +546,63 @@ their repair allocation contributes to the price if they have any left").**
 - A refund counts a storm inspection as an inspection done only when it was one the plan
   included.
 
+## Break test fixes of Nov 20: the plan screens and the inspections
+
+The owner's words after the break test: "fix 1, 4 (what happens if it cant be found on the
+map?), 7, 8, 9, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30". Eight of them are
+here. The trials and the browser run are in `docs/qa/roof-care-break-fixes-plan-2026-11-20.md`.
+
+- **4. The typed roof size is checked against the map.** When the property has a roof size from
+  the map (`crm_sites.map_roof_sqft`, 500 sq ft or more) and the typed size is more than 20%
+  smaller, the plan is not signed: a technician and the office are told both sizes. A manager or
+  an admin may go on after ticking "The typed size is right", and their name and the day are
+  kept on the plan. A larger typed size is always taken: a property can have more roofs than the
+  one the map found. When the map has no size (the address was not found, or there is none), the
+  typed size is taken as before and the plan is marked "roof size typed by hand, not checked
+  against the map" (`roof_care_plans.size_unchecked`) until a manager or an admin presses
+  "Confirm the roof size" on the plan. The check is the server's and the database's
+  (`roof_care_sign_up_await_payment`, `roof_care_confirm_size`). A renewal keeps its plan's size
+  and its mark.
+- **7. One storm inspection a day.** A second one the same day has to be ticked in the Storm
+  inspection box, which says who added the first and when. A manager or an admin takes off one
+  added by mistake ("Take off" beside it) while its ticket is not started and nothing of it is
+  invoiced: the inspection and its ticket go and the plan's count goes back. When the one taken
+  off was included and a billed one is still to do and on no invoice, that one becomes the
+  included one (`roof_care_add_storm`, `roof_care_remove_storm`).
+- **8. Taking a "no access" record off works the rest again.** The records left for that plan
+  year are gone through in date order: the first is free, each after it is charged at the plan's
+  trip rate. One whose charge is already on an invoice stays as billed, and the office is told
+  so; the free one then goes to the next record that is not billed. What the next visit would be
+  is counted from the free ones used, so one return trip a plan year is free whatever was taken
+  off (`roof_care_no_access_take_off`, `roof_care_no_access_state`).
+- **9. A renewal's answer against the rule is a manager's.** With an inspection still owed, an
+  office user gets the rule's own answer (half off only for an inspection that is late with no
+  push-back saying the customer asked) and is told who can change it. A manager or an admin may
+  pick the other one. A plan that ended more than 60 days ago is renewed at the full price, with
+  no credit for an inspection not done and nothing carried, whoever asks (`roof_care_renew`,
+  `roof_care_renewal_offer`).
+- **20. Skip this inspection.** A manager or an admin skips an inspection we will not do, with a
+  reason: its ticket comes off the board and the morning run does not make it again. It still
+  counts as an inspection owed, so a renewal takes its price off or carries it and a refund
+  counts it as not done; one carried into the renewed year gets its ticket again. Putting the
+  ticket back from Deleted undoes the skip. Deleting the ticket of a plan's inspection any other
+  way is refused, in words that point to Skip (`roof_care_skip_visit`, the rule
+  `service_jobs_care_plan_delete_rule`). The site's own removals pass: a plan that ended, was
+  renewed or closed out, an inspection that is lost or skipped, the morning run.
+- **21 and 27. A technician's plan.** The plan tables no longer answer a technician. Their
+  screens get the plan from the database's own functions, with the money left out: the plan, its
+  state and dates, what it includes, each inspection with the stage of its ticket whoever that
+  ticket is with, the cleaning answers, and the "no access" records they made, without the
+  amount (`roof_care_field_plans`, `roof_care_field_no_access`, `roof_care_field_cleaning`). So
+  the Care Plan pop-up counts "2 of 2 done" from every ticket, and names a ticket that is with
+  somebody else without linking to it. What a plan includes (the minor repairs a year, the leak
+  calls) is not money: it is what the technician tells the customer, and stays. The office reads
+  as before.
+- **29. The sign-up's words.** Under "Agree and sign up", a line says what is still missing
+  while the button cannot be pressed. A roof too large to be real gets the custom-quote line. A
+  size of 0 or below and a drive below zero have their own words. Two presses in the same
+  instant are one sign-up and one message.
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".

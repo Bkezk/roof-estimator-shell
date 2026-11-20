@@ -31,7 +31,13 @@ import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { poIdOfLine } from "@/lib/invoice-po-lines";
-import { clearsPayment, hasPayment, paidStatusFor } from "@/lib/invoice-payment";
+import {
+  clearsPayment,
+  hasPayment,
+  paidStatusFor,
+  planHoldsInvoice,
+  type InvoicePlan,
+} from "@/lib/invoice-payment";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
@@ -1432,6 +1438,24 @@ export const sendInvoice = createServerFn({ method: "POST" })
   });
 
 /**
+ * The Roof Care plan a plan year's invoice belongs to, for the rule that a payment taken back
+ * must not leave a plan running unseen (Nov 20; planHoldsInvoice). Null when the invoice is not
+ * a plan's, or the reader cannot see the plan: the database then refuses in the same words.
+ */
+async function planOfInvoice(
+  sb: SupabaseClient<Database>,
+  planId: string | null,
+): Promise<InvoicePlan | null> {
+  if (!planId) return null;
+  const { data } = await sb
+    .from("roof_care_plans")
+    .select("status, plan_number, refund_due")
+    .eq("id", planId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+/**
  * Record the payment (Sage stays the ledger). The ticket is not closed here any more (owner,
  * Oct 5: "close by hand"): a manager moves it to Closed from its stage. `ticket_closed` is
  * always false; kept for the screen that reads it.
@@ -1456,7 +1480,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     // it has no stored PDF and never went through the finalise rules (finalizeDraft).
     const { data: cur, error: rErr } = await sb
       .from("invoices")
-      .select("id, status, total")
+      .select("id, status, total, paid_amount, roof_care_plan_id")
       .eq("id", data.id)
       .maybeSingle();
     if (rErr) throw new Error(rErr.message);
@@ -1467,6 +1491,13 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     // A $0 amount takes the payment off (owner, Nov 10): the day, the method and the reference
     // go with it, so the invoice is a plain Final again — Mark paid and Void are back.
     const off = clearsPayment(cur.total, data.amount);
+    // A Roof Care plan's payment is not taken off or lowered while the plan runs on it, nor
+    // while a refund worked from it stands (Nov 20): said here, and refused by the database.
+    const held = planHoldsInvoice(await planOfInvoice(sb, cur.roof_care_plan_id), cur, {
+      status: off ? "final" : paidStatusFor(cur.total, data.amount),
+      paid_amount: off ? 0 : data.amount,
+    });
+    if (held) throw new Error(held);
     const { data: inv, error } = await sb
       .from("invoices")
       .update(
@@ -1534,6 +1565,10 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
+    // The invoice a Roof Care plan runs on, or one a refund was worked from (Nov 20): the plan
+    // is ended first. Said before the plainer refusals below, so the office knows what to do.
+    const held = planHoldsInvoice(await planOfInvoice(sb, inv.roof_care_plan_id), inv, null);
+    if (held) throw new Error(held);
     // The screen never offers Void on a paid invoice; the server says the same (Nov 4, bug 8).
     if (inv.status === "paid")
       throw new Error("A paid invoice cannot be voided — edit the payment first");

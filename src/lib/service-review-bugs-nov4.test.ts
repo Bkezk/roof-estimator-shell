@@ -147,7 +147,8 @@ describe("8. the server refuses to void a paid invoice", () => {
     const fns = read("src/lib/invoices.functions.ts");
     const fn = fns.slice(
       fns.indexOf("export const voidInvoice"),
-      fns.indexOf("export const voidInvoice") + 1600,
+      // Nov 20: the function grew a Roof Care check ahead of this one, so the slice is longer.
+      fns.indexOf("export const voidInvoice") + 3200,
     );
     expect(fn).toContain(
       'if (inv.status === "paid")\n      throw new Error("A paid invoice cannot be voided — edit the payment first");',

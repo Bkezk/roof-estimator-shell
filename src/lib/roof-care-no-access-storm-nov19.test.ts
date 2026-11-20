@@ -355,10 +355,12 @@ describe("10. no access: the first in a plan year is free, each one after it is 
     const env = fakeSupabase(
       {},
       {
+        // (Nov 20: taking one off works the rest again and says what changed, so the server
+        // calls roof_care_no_access_take_off; the older name stays for a published page.)
         rpcs: {
-          roof_care_no_access_remove: (a: Record<string, unknown>) => {
+          roof_care_no_access_take_off: (a: Record<string, unknown>) => {
             calls.push(a);
-            return null;
+            return { changed: [], kept_billed: [] };
           },
         },
       },
@@ -733,10 +735,11 @@ describe("11. a further storm inspection is billed, the minor repairs left go to
     // The screen: the button opens the box, and only the box's button adds anything.
     expect(CARD).toContain('onClick={() => setStorming(true)} data-action="roof-care-storm"');
     expect(CARD).not.toContain("storm.mutate(active.id)");
+    // (Nov 20: a second one the same day is ticked in the box, and sent with it.)
     expect(CARD).toContain(
-      "mutationFn: (billed: boolean) => addFn({ data: { plan_id: plan.id, billed_ok: billed } })",
+      "mutationFn: (billed: boolean) => addFn({ data: { plan_id: plan.id, billed_ok: billed, again_ok: again } })",
     );
-    expect(CARD).toContain("disabled={!o || !stormCanAdd(o) || add.isPending}");
+    expect(CARD).toContain("disabled={!o || !stormCanAdd(o, again) || add.isPending}");
   });
   it("the database: included ones free, a further one at the price of one inspection, anyone in the office", () => {
     expect(SQL).toContain("drop function if exists public.roof_care_add_storm(uuid);");
@@ -923,7 +926,8 @@ describe("11. a further storm inspection is billed, the minor repairs left go to
       label: "Storm inspections",
       used: 1,
       of: 1,
-      words: "1 of 1 used, and 1 more billed",
+      // Nov 20: said in full, so nobody reads the billed one as part of the plan.
+      words: "1 of 1 used, and 1 more, not included: billed by itself",
     });
     expect(row({ ...plan, visits: plan.visits.slice(0, 1) })).toMatchObject({
       label: "Storm inspection",

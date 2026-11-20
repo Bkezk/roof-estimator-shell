@@ -64,6 +64,7 @@ import {
   techStageLocked,
   typeChangeProblem,
 } from "@/lib/ticket-stage";
+import { careTicketMoveProblem } from "@/lib/care-plan-guards";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { assignedStage, FINISHED_UNASSIGNED_STAGES } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
@@ -591,7 +592,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await sb
         .from("service_jobs")
         .select(
-          "technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible",
+          "number, technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible, roof_care_visit_id, site_id, account_id",
         )
         .eq("id", id)
         .maybeSingle();
@@ -611,6 +612,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // or has an invoice (ticket-stage.ts typeChangeProblem; trigger service_jobs_type_rule).
       const typeProblem = typeChangeProblem(p, cur, fields.service_type);
       if (typeProblem) throw new Error(typeProblem);
+      // A plan's inspection stays at its property, with its customer, an inspection (break test
+      // Nov 20, number 18; care-plan-guards.ts; trigger service_jobs_care_ticket_stays).
+      const moveOffPlan = careTicketMoveProblem(cur, patch);
+      if (moveOffPlan) throw new Error(moveOffPlan);
       // Owner, Oct 1: once a ticket has a date, a technician does not move it; Oct 9: the office
       // and managers do (logged on the Timeline below and in History by the database).
       const moveProblem = dateMoveProblem({
@@ -1337,18 +1342,29 @@ export async function announceCarePlanTickets(
   jobIds: readonly string[],
   actor: { id: string; name: string | null },
 ): Promise<void> {
-  for (const id of jobIds) {
-    const { data: row, error } = await sb
-      .from("service_jobs")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    if (error || !row) continue;
+  // Each ticket is taken before it is announced and marked after (Nov 20, break test number 16;
+  // roof-care-ticket-announce.server.ts): the 8:00 run announces whatever is not marked, so a
+  // ticket is told here or there, never both, and one this could not announce is told there.
+  // `mine` null: the marks could not be reached (the preview has no server key): as before.
+  const { claimCareTickets, finishCareTickets } =
+    await import("@/lib/roof-care-ticket-announce.server");
+  const mine = await claimCareTickets(sb, jobIds);
+  for (const id of mine ?? jobIds) {
+    let told = false;
     try {
-      await syncTicketFollowup(row, actor, sb, null);
+      const { data: row, error } = await sb
+        .from("service_jobs")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (!error && row) {
+        await syncTicketFollowup(row, actor, sb, null);
+        told = true;
+      }
     } catch (e) {
       console.error("Could not announce a care plan ticket", e instanceof Error ? e.message : e);
     }
+    if (mine) await finishCareTickets(sb, [id], told);
   }
 }
 

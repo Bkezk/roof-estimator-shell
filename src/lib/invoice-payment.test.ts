@@ -73,7 +73,9 @@ describe("the screens", () => {
   const fns = read("src/lib/invoices.functions.ts");
   const page = read("src/components/service/invoices-page.tsx");
   it("the server sets the status by the amount against the total; a recorded payment blocks Void", () => {
-    expect(fns).toContain('.select("id, status, total")');
+    // Nov 20: the payment already on it and its Roof Care plan are read too, for the rule that
+    // a plan's payment is not taken back while the plan runs on it (planHoldsInvoice).
+    expect(fns).toContain('.select("id, status, total, paid_amount, roof_care_plan_id")');
     expect(fns).toContain("status: paidStatusFor(cur.total, data.amount),");
     expect(fns).toContain(
       'throw new Error("A payment is recorded on this invoice, so it cannot be voided");',

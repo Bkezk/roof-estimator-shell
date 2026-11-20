@@ -112,6 +112,22 @@ async function run(request: Request): Promise<Response> {
     planEmails = { error: errText(e) };
   }
 
+  // The inspection tickets the site made for Roof Care plans (roof-care-ticket-announce.server.ts;
+  // break test Nov 20, number 16): the morning run makes them in silence, so this run says
+  // "Opened" and starts the timers, once for each ticket, one notice per person.
+  let planTickets: Record<string, number> | { error: string };
+  try {
+    const { dispatchCareTicketAnnouncements } =
+      await import("@/lib/roof-care-ticket-announce.server");
+    const t = await dispatchCareTicketAnnouncements(supabaseAdmin);
+    sendsFailed += t.tickets_errors;
+    planTickets = { ...t };
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the Roof Care ticket announcement pass failed", e);
+    planTickets = { error: errText(e) };
+  }
+
   // The scheduled run's own stamp (last_cron_at), after the passes, whatever they did: it says
   // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
   // applied yet; logged, never a failure of the run.
@@ -136,6 +152,7 @@ async function run(request: Request): Promise<Response> {
       bids,
       plans,
       plan_emails: planEmails,
+      plan_tickets: planTickets,
       cron_stamped: cronStamped,
       at: new Date().toISOString(),
     },
