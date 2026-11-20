@@ -72,6 +72,9 @@ const S = (over: Partial<RoofCareSettings> = {}): RoofCareSettings => ({
   // (Nov 19, night: what a card payment costs, taken off a refund. Blank here.)
   card_fee_pct: null,
   card_fee_flat: null,
+  // Nov 20: the two boxes of the plan's own trip rate. Blank here, as before they existed.
+  trip_charge_per_hour: null,
+  trip_charge_per_mile: null,
   plans: {
     watch: { base: 500, per_sqft: 0.02, allowance: null },
     care: { base: 800, per_sqft: 0.05, allowance: 400 },

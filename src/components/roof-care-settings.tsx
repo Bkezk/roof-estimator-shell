@@ -41,6 +41,7 @@ import {
   SETTING_LABELS,
   settingsProblems,
   TABLE_SIZES_DEFAULT,
+  tripChargeNote,
   type Drive,
   type PlanKey,
   type RoofCareQuote,
@@ -83,6 +84,10 @@ const GROUPS: { title: string; keys: SettingKey[] }[] = [
       "card_fee_pct",
       "card_fee_flat",
     ],
+  },
+  {
+    title: "A return trip after a visit we could not do",
+    keys: ["trip_charge_per_hour", "trip_charge_per_mile"],
   },
 ];
 const PLAN_FIELD_LABELS: Record<PlanField, string> = {
@@ -176,6 +181,8 @@ function Editor(props: {
   const [savedKey] = useState(() => draftKey(draftFrom(props.saved)));
   const dirty = draftKey(draft) !== savedKey;
   const read = useMemo(() => settingsFromDraft(draft), [draft]);
+  // Under the two trip charge boxes: what the baseline trip costs us and what they charge.
+  const tripNote = useMemo(() => tripChargeNote(read.settings), [read]);
   // What stops a price: a box that is not a number, then a number still missing.
   const missing = useMemo(
     () => (read.problems.length ? read.problems : settingsProblems(read.settings)),
@@ -213,6 +220,11 @@ function Editor(props: {
                   <Box id={`rc-${k}`} value={draft.values[k]} onChange={(v) => setValue(k, v)} />
                 </div>
               ))}
+              {g.keys.includes("trip_charge_per_hour") && tripNote && (
+                <p className="text-xs text-muted-foreground" data-trip-charge-note>
+                  {tripNote}
+                </p>
+              )}
             </CardContent>
           </Card>
         ))}

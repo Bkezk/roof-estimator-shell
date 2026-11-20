@@ -94,6 +94,13 @@ export const roofCareSettingsSchema = z.object({
    */
   card_fee_pct: num.optional(),
   card_fee_flat: num.optional(),
+  /**
+   * What a return trip is charged after a visit we could not do (owner, Nov 20: "go" on a trip
+   * rate of the plan's own): for each hour of the round trip, the whole crew, and for each mile.
+   * Both blank: the Service rates page's travel rates are used, as before.
+   */
+  trip_charge_per_hour: num.optional(),
+  trip_charge_per_mile: num.optional(),
   plans: z.object({ watch: planSchema, care: planSchema, guard: planSchema }),
   hours: z.array(hoursRowSchema).max(40),
 });
@@ -121,6 +128,8 @@ export function emptyRoofCareSettings(): RoofCareSettings {
     min_price_sqft: null,
     card_fee_pct: null,
     card_fee_flat: null,
+    trip_charge_per_hour: null,
+    trip_charge_per_mile: null,
     plans: { watch: blankPlan(), care: blankPlan(), guard: blankPlan() },
     hours: [],
   };
@@ -160,6 +169,8 @@ export const SETTING_LABELS = {
   min_price_sqft: "Smallest roof the price is worked for (sq ft)",
   card_fee_pct: "Card fee, % of a payment",
   card_fee_flat: "Card fee, flat sum per payment ($)",
+  trip_charge_per_hour: "Return trip charge per hour of the round trip, whole crew ($)",
+  trip_charge_per_mile: "Return trip charge per mile ($)",
 } as const;
 export type SettingKey = keyof typeof SETTING_LABELS;
 
@@ -269,6 +280,8 @@ function ready(s: RoofCareSettings): Ready | null {
     min_price_sqft: n(s.min_price_sqft),
     card_fee_pct: n(s.card_fee_pct ?? null),
     card_fee_flat: n(s.card_fee_flat ?? null),
+    trip_charge_per_hour: n(s.trip_charge_per_hour ?? null),
+    trip_charge_per_mile: n(s.trip_charge_per_mile ?? null),
     plans: { watch: plan("watch"), care: plan("care"), guard: plan("guard") },
   };
 }
@@ -298,6 +311,61 @@ export function travelPerTrip(s: RoofCareSettings, drive: Drive): number {
   const hours = Math.max(0, drive.hours - (s.baseline_drive_hours ?? 0));
   const miles = Math.max(0, drive.miles - (s.baseline_miles ?? 0));
   return r2(hours * crew + miles * (s.vehicle_cost_per_mile ?? 0));
+}
+
+/**
+ * A return trip after a visit we could not do, for a round trip of `drive`: what it costs us
+ * (the whole crew's pay for the hours, and the vehicle for the miles) and what the two trip
+ * charge boxes charge for it. `cost` is null until the numbers it needs are typed. `charge` is
+ * null when both boxes are blank: the Service rates page's travel rates are used then, and the
+ * database works that amount.
+ */
+export function tripCostAndCharge(
+  s: Pick<
+    RoofCareSettings,
+    | "crew_cost_per_hour"
+    | "crew_size"
+    | "vehicle_cost_per_mile"
+    | "trip_charge_per_hour"
+    | "trip_charge_per_mile"
+  >,
+  drive: Drive,
+): { cost: number | null; charge: number | null } {
+  const cost =
+    s.crew_cost_per_hour == null || s.crew_size == null || s.vehicle_cost_per_mile == null
+      ? null
+      : r2(
+          drive.hours * s.crew_cost_per_hour * s.crew_size + drive.miles * s.vehicle_cost_per_mile,
+        );
+  const perHour = s.trip_charge_per_hour ?? 0;
+  const perMile = s.trip_charge_per_mile ?? 0;
+  const charge =
+    perHour > 0 || perMile > 0 ? r2(drive.hours * perHour + drive.miles * perMile) : null;
+  return { cost, charge };
+}
+
+const usd2 = (n: number) =>
+  "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * The line under the two trip charge boxes, for the round trip the list price covers: what that
+ * trip costs us, and what the boxes charge for it. Null until that round trip is typed.
+ */
+export function tripChargeNote(s: RoofCareSettings): string | null {
+  if (s.baseline_drive_hours == null || s.baseline_miles == null) return null;
+  const { cost, charge } = tripCostAndCharge(s, {
+    hours: s.baseline_drive_hours,
+    miles: s.baseline_miles,
+  });
+  const trip = `a round trip of ${s.baseline_drive_hours} hours and ${s.baseline_miles} miles`;
+  const costs = cost == null ? "" : ` It costs us ${usd2(cost)}.`;
+  if (charge == null)
+    return `Both blank: a return trip is charged at the travel rates on the Service rates page. For ${trip}:${costs || " type the crew and vehicle costs above to see what it costs us."}`;
+  const short =
+    cost != null && charge < cost
+      ? ` That is ${usd2(r2(cost - charge))} under what it costs us.`
+      : "";
+  return `For ${trip}: these two boxes charge ${usd2(charge)}.${costs}${short}`;
 }
 
 export interface PlanPrice {

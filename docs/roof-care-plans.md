@@ -498,6 +498,10 @@ cannot get on the roof.
   allocation left"). The minor repairs line on the inspection's invoice does it, toward the
   return trip only (`invoiceAllowanceOf` in `src/lib/roof-care-allowance.functions.ts`). Term 7
   says so from terms version 2026-11-20.1. Record: `docs/qa/roof-care-trip-allowance-2026-11-20.md`.
+- The trip rate is the plan's own when the owner types one (Nov 20, "go"): two boxes on the
+  Roof Care price page, per hour of the round trip for the whole crew and per mile. Both blank,
+  the Service rates page's travel rates are used. `roof_care_trip_charge()` decides. Record:
+  `docs/qa/roof-care-trip-rate-2026-11-20.md`.
 - How many are free is one named number in the database, `c_free` in
   `roof_care_no_access_state()`. Set it to 0 and every one is charged.
 - No access is a button on the inspection's ticket: in the technician's workflow and on the
