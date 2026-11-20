@@ -125,7 +125,8 @@ describe("10. a second invoice brings everything, purchase orders included (owne
         invoice_lines: [],
         ...over,
       },
-      { rpcs: { technician_bill_rates: () => [] } },
+      // (Nov 20: the builder also reads what an hour of each person costs.)
+      { rpcs: { technician_bill_rates: () => [], technician_cost_rates: () => [] } },
     );
   const poIds = (lines: Awaited<ReturnType<typeof buildLinesFromJob>>) =>
     lines.map((l) => poIdOfLine(l)).filter((id): id is string => !!id);

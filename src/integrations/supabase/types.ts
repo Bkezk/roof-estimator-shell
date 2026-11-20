@@ -3030,6 +3030,42 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_labor_costs: {
+        Row: {
+          hourly_cost: number
+          profile_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          hourly_cost: number
+          profile_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          hourly_cost?: number
+          profile_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_labor_costs_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_labor_costs_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           access: string[]
@@ -6317,6 +6353,13 @@ export type Database = {
         Args: never
         Returns: {
           default_bill_rate: number
+          id: string
+        }[]
+      }
+      technician_cost_rates: {
+        Args: never
+        Returns: {
+          hourly_cost: number
           id: string
         }[]
       }

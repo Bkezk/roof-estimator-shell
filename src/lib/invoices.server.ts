@@ -204,6 +204,7 @@ export async function buildLinesFromJob(
     { data: techs },
     { data: crew, error: crewErr },
     { data: profileRates, error: rateErr },
+    { data: profileCosts, error: costErr },
     { data: pos, error: poErr },
   ] = await Promise.all([
     loadRates(sb, job.labor_rate_kind),
@@ -228,6 +229,8 @@ export async function buildLinesFromJob(
       .eq("service_job_id", jobId)
       .order("sort"),
     sb.rpc("technician_bill_rates"),
+    // What an hour of each person costs, where an admin has typed it (Nov 20).
+    sb.rpc("technician_cost_rates"),
     // The ticket's purchase orders become lines too (owner, Oct 14) — every one of them, approved
     // or not (owner, Oct 28: the purchase happened either way).
     sb
@@ -239,12 +242,16 @@ export async function buildLinesFromJob(
   ]);
   if (crewErr) throw new Error(crewErr.message);
   if (rateErr) throw new Error(`Technicians' bill rates: ${rateErr.message}`);
+  if (costErr) throw new Error(`What an hour of each person costs: ${costErr.message}`);
   if (poErr) throw new Error(`The ticket's purchase orders: ${poErr.message}`);
   const techName = new Map<string, string>();
   for (const t of techs ?? []) techName.set(t.id, (t.full_name ?? "").trim() || t.email);
   const profileRate = new Map<string, number>();
   for (const r of profileRates ?? [])
     if (r.default_bill_rate != null) profileRate.set(r.id, Number(r.default_bill_rate));
+  const profileCost = new Map<string, number>();
+  for (const r of profileCosts ?? [])
+    if (r.hourly_cost != null) profileCost.set(r.id, Number(r.hourly_cost));
   const lines: LineInsert[] = timeLines({
     times: times ?? [],
     rates,
@@ -257,6 +264,7 @@ export async function buildLinesFromJob(
       })),
     techName,
     profileRates: profileRate,
+    profileCosts: profileCost,
   });
   let sort = lines.length;
   // Materials: net quantity per catalog cell (consumed is negative in the ledger).

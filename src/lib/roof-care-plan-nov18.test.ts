@@ -862,7 +862,8 @@ describe("the invoice of a care plan inspection", () => {
         roof_care_visits: visits,
         roof_care_plans: [{ id: PLAN, plan: "care" }],
       },
-      { rpcs: { technician_bill_rates: () => [] } },
+      // (Nov 20: the builder also reads what an hour of each person costs.)
+      { rpcs: { technician_bill_rates: () => [], technician_cost_rates: () => [] } },
     );
   it("the builder gives a plan's ticket the plan line and prices nothing else", async () => {
     const env = build({ roof_care_visit_id: V1 }, [

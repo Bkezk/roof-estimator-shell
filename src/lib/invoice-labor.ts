@@ -7,8 +7,12 @@
  *   what invoices were built with before the crew existed.
  * - A ticket with a crew: every time entry is one line per crew member. Labor bills at the
  *   member's effective rate (its own $, else its profile rate, else the rate table: tech for the
- *   lead, helper for the others); travel keeps the rate table. The cost side is always the rate
- *   table (tech for the lead, helper for the others).
+ *   lead, helper for the others); travel keeps the rate table.
+ * - The cost side (owner, Nov 20: the cost "depends on the tech"): what an hour of that person
+ *   costs when an admin has typed it on Users & access, for labor and for travel alike, since
+ *   an hour on the road is paid as an hour on the roof. A person with none typed, and an
+ *   unnamed helper of an old-style ticket, cost what the rate table says (tech for the lead,
+ *   helper for the others), as every line did before.
  */
 import { effectiveBillRate, sortCrew, type CrewRow } from "@/lib/service-crew";
 
@@ -52,10 +56,14 @@ export function timeLines(input: {
   techName: ReadonlyMap<string, string>;
   /** profiles.default_bill_rate by profile id (only those set). */
   profileRates: ReadonlyMap<string, number>;
+  /** What an hour of a person costs, by profile id (only those an admin has typed). */
+  profileCosts?: ReadonlyMap<string, number>;
   /** The first line's sort (default 0). */
   startSort?: number;
 }): TimeLine[] {
   const { times, rates, techName } = input;
+  const ownCost = (id: string | null | undefined, table: number): number =>
+    (id ? input.profileCosts?.get(id) : undefined) ?? table;
   const lines: TimeLine[] = [];
   let sort = input.startSort ?? 0;
   const crew = sortCrew(input.crew);
@@ -81,8 +89,8 @@ export function timeLines(input: {
         unit: "hour",
         rate: tech.bill,
         total: r2(hours * tech.bill),
-        cost_rate: tech.cost,
-        cost_total: r2(hours * tech.cost),
+        cost_rate: ownCost(t.technician_id, tech.cost),
+        cost_total: r2(hours * ownCost(t.technician_id, tech.cost)),
         on_date: t.on_date,
         source: `time:${t.id}`,
         taxable: false,
@@ -122,8 +130,8 @@ export function timeLines(input: {
         unit: "hour",
         rate: bill,
         total: r2(hours * bill),
-        cost_rate: tableRate.cost,
-        cost_total: r2(hours * tableRate.cost),
+        cost_rate: ownCost(m.technician_id, tableRate.cost),
+        cost_total: r2(hours * ownCost(m.technician_id, tableRate.cost)),
         on_date: t.on_date,
         source: isLead ? `time:${t.id}` : `time:${t.id}:tech:${m.technician_id}`,
         taxable: false,

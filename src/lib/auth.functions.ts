@@ -30,6 +30,8 @@ export interface UserProfile {
   created_at?: string;
   /** Admin › Users only: a technician's default bill rate per labor hour (null = rate table). */
   default_bill_rate?: number | null;
+  /** Admin › Users only: what an hour of this person costs (null = the rate table's cost). */
+  hourly_cost?: number | null;
 }
 const PROFILE_COLS = "id, email, full_name, role, access, technician, created_at";
 const toProfile = (row: {
@@ -131,7 +133,16 @@ export const listUsers = createServerFn({ method: "GET" })
       .select(`${PROFILE_COLS}, default_bill_rate`)
       .order("created_at", { ascending: true });
     if (error) throw error;
-    return (data ?? []).map(toProfile);
+    // What an hour of each person costs: its own table, read by admins alone (Nov 20).
+    const { data: costs, error: cErr } = await context.supabase
+      .from("profile_labor_costs")
+      .select("profile_id, hourly_cost");
+    if (cErr) throw new Error(`What an hour of each person costs: ${cErr.message}`);
+    const cost = new Map((costs ?? []).map((c) => [c.profile_id, Number(c.hourly_cost)]));
+    return (data ?? []).map((row) => ({
+      ...toProfile(row),
+      hourly_cost: cost.get(row.id) ?? null,
+    }));
   });
 
 // The estimator roster for the Estimate → Setup "Estimator's Name" dropdown: every account with
@@ -268,6 +279,50 @@ export const setDefaultBillRate = createServerFn({ method: "POST" })
       id: row.id,
       default_bill_rate: row.default_bill_rate == null ? null : Number(row.default_bill_rate),
     };
+  });
+
+/**
+ * What an hour of a person costs (owner, Nov 20: the cost "depends on the tech"): the cost side
+ * of their labor and travel on a service invoice. null takes it away, and the rate table's cost
+ * is used for them again. An admin's alone, to read and to set.
+ */
+export const setHourlyCost = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        hourly_cost: z.number().finite().min(0).max(100000).nullable(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }): Promise<{ id: string; hourly_cost: number | null }> => {
+    await assertAdmin(context.supabase, context.userId);
+    if (data.hourly_cost == null) {
+      const { error } = await context.supabase
+        .from("profile_labor_costs")
+        .delete()
+        .eq("profile_id", data.id);
+      if (error) throw new Error(error.message);
+      return { id: data.id, hourly_cost: null };
+    }
+    const cost = Math.round(data.hourly_cost * 100) / 100;
+    const { data: row, error } = await context.supabase
+      .from("profile_labor_costs")
+      .upsert(
+        {
+          profile_id: data.id,
+          hourly_cost: cost,
+          updated_at: new Date().toISOString(),
+          updated_by: context.userId,
+        },
+        { onConflict: "profile_id" },
+      )
+      .select("profile_id, hourly_cost")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("User not found");
+    return { id: row.profile_id, hourly_cost: Number(row.hourly_cost) };
   });
 
 const setPasswordSchema = z.object({

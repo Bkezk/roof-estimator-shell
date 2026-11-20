@@ -11,6 +11,7 @@ import {
   updateUserAccess,
   deleteUser,
   setDefaultBillRate,
+  setHourlyCost,
   setUserPassword,
   signOutUserEverywhere,
   type UserProfile,
@@ -65,6 +66,9 @@ export const Route = createFileRoute("/admin/users")({
 
 const BILL_RATE_HELP =
   "What this technician bills per labor hour on a ticket's crew when the ticket's own $ box is blank. Blank here: the rate table (Setup › Service rates; tech rate as the lead, helper rate otherwise).";
+
+const HOURLY_COST_HELP =
+  "What an hour of this person costs you. It is the cost of their labor and travel on a service invoice, which the margin is worked from. Only admins see it here. Blank: the cost on Setup › Service rates is used.";
 
 const TECHNICIAN_HELP =
   "Appears on the service board, can be assigned tickets and vehicles; edits only their own tickets";
@@ -231,6 +235,7 @@ function UsersPage() {
   const updateAccessFn = useServerFn(updateUserAccess);
   const deleteUserFn = useServerFn(deleteUser);
   const rateFn = useServerFn(setDefaultBillRate);
+  const costFn = useServerFn(setHourlyCost);
   const passwordFn = useServerFn(setUserPassword);
   const signOutFn = useServerFn(signOutUserEverywhere);
   const [passwordFor, setPasswordFor] = useState<UserProfile | null>(null);
@@ -295,6 +300,19 @@ function UsersPage() {
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message || "Could not set the bill rate"),
+  });
+
+  const costMut = useMutation({
+    mutationFn: (input: { id: string; hourly_cost: number | null }) => costFn({ data: input }),
+    onSuccess: (r) => {
+      toast.success(
+        r.hourly_cost == null
+          ? "Hourly cost cleared (the Service rates page's cost applies)"
+          : `Hourly cost set to $${r.hourly_cost.toFixed(2)}/hr`,
+      );
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not set the hourly cost"),
   });
 
   const passwordMut = useMutation({
@@ -442,6 +460,7 @@ function UsersPage() {
                   <TableHead>Email</TableHead>
                   <TableHead>Access</TableHead>
                   <TableHead title={BILL_RATE_HELP}>Default bill rate</TableHead>
+                  <TableHead title={HOURLY_COST_HELP}>Hourly cost</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -509,6 +528,21 @@ function UsersPage() {
                             value={u.default_bill_rate ?? null}
                             disabled={rateMut.isPending}
                             onCommit={(v) => rateMut.mutate({ id: u.id, default_bill_rate: v })}
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">technicians only</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="w-32 align-top">
+                        {u.technician ? (
+                          <RateBox
+                            aria-label={`Hourly cost of ${u.full_name || u.email}, dollars per hour`}
+                            title={HOURLY_COST_HELP}
+                            placeholder="rate table"
+                            className="h-8"
+                            value={u.hourly_cost ?? null}
+                            disabled={costMut.isPending}
+                            onCommit={(v) => costMut.mutate({ id: u.id, hourly_cost: v })}
                           />
                         ) : (
                           <span className="text-xs text-muted-foreground">technicians only</span>

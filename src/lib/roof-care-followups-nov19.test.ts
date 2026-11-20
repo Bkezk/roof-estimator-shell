@@ -386,7 +386,8 @@ describe("1. an inspection's share of the plan goes on one live invoice", () => 
         invoices,
         invoice_lines: lines,
       },
-      { rpcs: { technician_bill_rates: () => [] } },
+      // (Nov 20: the builder also reads what an hour of each person costs.)
+      { rpcs: { technician_bill_rates: () => [], technician_cost_rates: () => [] } },
     );
   const planLine = { id: 1, invoice_id: INV, source: carePlanLineSource(V1) };
   const totalsOf = async (env: ReturnType<typeof build>, invoiceId: string | null) =>
