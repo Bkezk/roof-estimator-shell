@@ -112,7 +112,8 @@ describe("1. committedPathname: the page the Outlet renders, from the same commi
     // The decisions themselves are unchanged: bare login, spinner while signed out or blocked,
     // the shell otherwise; the signed-in visitor to /login goes home.
     // The reset page is bare too since Nov 14 (password-reset-nov14.test.ts).
-    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
+    // Nov 21: the two public pages (/care, /request) are bare and open too; nothing else is.
+    expect(gate).toContain("if (isLogin || isReset || isPublicForm) return <>{children}</>;");
     // Oct 20, audit 4 (b): the shell renders through a profile load; `loading` only holds the
     // /login redirect (work-overview-oct20-audit4.test.ts).
     expect(gate).toContain("if (!session) return <Waiting />;");

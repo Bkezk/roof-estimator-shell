@@ -84,7 +84,11 @@ describe("the words on the office's drive tool", () => {
   });
   it("the drive carries the router only when the road answer was used", () => {
     const fn = flat(read("src/lib/roof-care.functions.ts"));
-    expect(fn).toContain("const routed = await routedDriveVia(from, to).catch(() => null);");
+    // Nov 21: the same call, now handed the day's limit of Google lookups for the whole site.
+    expect(fn).toContain("const routed = await routedDriveVia( from, to, undefined, undefined,");
+    expect(fn).toContain(
+      "googleGate(sb as unknown as Parameters<typeof googleGate>[0]), ).catch(() => null);",
+    );
     expect(fn).toContain("router: byRoad && routed ? routed.via : null,");
   });
   it("Setup › Roof Care shows it beside the drive", () => {

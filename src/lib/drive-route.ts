@@ -142,8 +142,27 @@ export async function routedDrive(
   to: RoutePoint,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
   env: { GOOGLE_MAPS_API_KEY?: string | undefined } = process.env,
+  gate?: GoogleGate,
 ): Promise<RoutedDrive | null> {
-  return (await routedDriveVia(from, to, fetchImpl, env))?.drive ?? null;
+  return (await routedDriveVia(from, to, fetchImpl, env, gate))?.drive ?? null;
+}
+
+/**
+ * May the site ask Google for one more drive today? (Nov 21: a daily limit on Google lookups
+ * for the whole site, set on Setup › QR pages; the public pages let anyone type addresses.)
+ * True: ask Google. False, or a gate that fails: the free router answers, as it does when
+ * Google is down. Never an error.
+ */
+export type GoogleGate = () => Promise<boolean>;
+
+/** The gate kept in the database (google_route_take): counted for the whole site, by the day. */
+export function googleGate(sb: {
+  rpc: (fn: "google_route_take") => PromiseLike<{ data: unknown; error: unknown }>;
+}): GoogleGate {
+  return async () => {
+    const { data, error } = await sb.rpc("google_route_take");
+    return !error && data === true;
+  };
 }
 
 /** Which router answered: Google with the owner's key, or the free public one. */
@@ -158,17 +177,25 @@ export async function routedDriveVia(
   to: RoutePoint,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
   env: { GOOGLE_MAPS_API_KEY?: string | undefined } = process.env,
-): Promise<{ drive: RoutedDrive; via: RouteVia } | null> {
+  /** The day's limit of Google lookups; with none given, Google is asked whenever there is a key. */
+  gate?: GoogleGate,
+): Promise<{ drive: RoutedDrive; via: RouteVia; held?: boolean } | null> {
   if (!isPoint(from) || !isPoint(to)) return null;
   try {
     const key = (env.GOOGLE_MAPS_API_KEY ?? "").trim();
+    // Held: there is a key, and the day's limit (or a gate that could not answer) kept Google
+    // from being asked.
+    let held = false;
     if (key) {
-      const g = googleRoutesRequest(from, to, key);
-      const viaGoogle = await ask(fetchImpl, g.url, g.init, parseGoogleRoute);
-      if (viaGoogle) return { drive: viaGoogle, via: "google" };
+      const open = gate ? await gate().catch(() => false) : true;
+      if (open) {
+        const g = googleRoutesRequest(from, to, key);
+        const viaGoogle = await ask(fetchImpl, g.url, g.init, parseGoogleRoute);
+        if (viaGoogle) return { drive: viaGoogle, via: "google" };
+      } else held = true;
     }
     const free = await ask(fetchImpl, osrmRouteUrl(from, to), { method: "GET" }, parseOsrmRoute);
-    return free ? { drive: free, via: "free" } : null;
+    return free ? { drive: free, via: "free", ...(held ? { held: true } : {}) } : null;
   } catch {
     return null;
   }

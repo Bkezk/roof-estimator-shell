@@ -168,8 +168,9 @@ describe("on the ticket", () => {
     const flow = flat(read("src/components/service/closeout.tsx"));
     expect(flow.match(/visitId=\{job\.roof_care_visit_id\} jobId=\{job\.id\}/g)).toHaveLength(2);
     // A property's own page has no ticket: nothing is kept there.
+    // Nov 21: it also hands on a public Roof Care request (careRequest); still no ticket.
     expect(flat(read("src/components/property-page.tsx"))).toContain(
-      '<RoofCareButtons siteId={s.id} className="justify-end" />',
+      '<RoofCareButtons siteId={s.id} careRequest={careRequest} className="justify-end" />',
     );
     // The line is the office's, under the small buttons, where there is a plan to offer.
     expect(card).toContain(

@@ -146,10 +146,12 @@ describe("what each plan includes, as the customer reads it", () => {
     expect(SIGN_UP_BUTTON).toBe("Agree and sign up");
     // The three plans are explained before there is a price, and picked once there is.
     expect(card).toContain("{PLAN_KEYS.map((k) => { const o = offerOf(k);");
-    expect(card).toContain("{planIncludes(k, benefits?.[k] ?? null).map((line) => (");
+    // Nov 21: each plan is drawn by the flyer's own part (flyer-look.tsx FlyerPlan), which is
+    // handed the same lines, the same words while there is no price, and the same tag.
+    expect(card).toContain("lines={planIncludes(k, benefits?.[k] ?? null)}");
     expect(card).toContain("disabled={!o || stale}");
-    expect(card).toContain("{PRICE_AFTER_SIZE}");
-    expect(card).toContain("{k === PLAN_RECOMMENDED && (");
+    expect(card).toContain("waiting={PRICE_AFTER_SIZE}");
+    expect(card).toContain("recommended={k === PLAN_RECOMMENDED ? RECOMMENDED_WORDS : null}");
     // The office's part is set apart from what the customer reads.
     expect(card).toContain("data-sign-staff");
   });

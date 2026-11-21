@@ -543,7 +543,8 @@ describe("8. AuthGate reads the rendered location, not the pending one", () => {
     expect(gate).not.toContain("select: (s) => s.location.pathname,");
     // The gate still renders the login screen bare and everyone else inside the shell.
     // The reset page is bare too since Nov 14 (password-reset-nov14.test.ts).
-    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
+    // Nov 21: the two public pages (/care, /request) are bare and open too; nothing else is.
+    expect(gate).toContain("if (isLogin || isReset || isPublicForm) return <>{children}</>;");
     // Oct 20, audit 4 (b): with a session the shell renders through a profile load.
     expect(gate).toContain("if (!session) return <Waiting />;");
     expect(gate).toContain("return <AuthedShell>{children}</AuthedShell>;");

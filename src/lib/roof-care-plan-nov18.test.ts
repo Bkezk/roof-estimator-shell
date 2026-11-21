@@ -1124,7 +1124,11 @@ describe("where it shows", () => {
     expect(card).toContain("data-roof-care-badge={plan.plan}");
   });
   it("the sign-up's roof size and days boxes start blank", () => {
-    expect(card).toContain('const [sqft, setSqft] = useState("");');
+    // Nov 21: blank still, unless the sign-up was opened from a customer's own public request,
+    // which carries the size they gave.
+    expect(card).toContain(
+      'prefill?.sqft != null && prefill.sqft > 0 ? String(Math.round(prefill.sqft)) : "",',
+    );
     expect(card).toContain('const [days, setDays] = useState("");');
   });
 });
@@ -1151,7 +1155,7 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
       // (Nov 19: a plan signed and waiting for its payment opens the plan too, never a second
       // sign-up.)
       // (Nov 19, night: a plan whose year is over opens too, for its renewal.)
-      '{open === "plan" && (active || waiting || lapsed ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} /> ))}',
+      '{open === "plan" && (active || waiting || lapsed ? ( <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} /> ) : ( <SignUpDialog siteId={siteId} today={today} prefill={careRequest ? (prefill.data ?? null) : null} onClose={() => setOpen(null)} /> ))}',
     );
     // The button says which plan and how many inspections are done.
     expect(f).toContain("{planName(active.plan)} · {done.visits}/2");
@@ -1216,14 +1220,16 @@ describe("Care Plan and Additional Services (owner, Nov 18)", () => {
     const cust = read("src/components/customers-page.tsx");
     const prop = read("src/components/property-page.tsx");
     for (const src of [cust, prop]) {
-      const at = src.indexOf("<RoofCareButtons siteId={s.id}");
+      // Nov 21: the property page's tag is now on several lines (it also hands on a public
+      // Roof Care request), so the tag alone is looked for.
+      const at = src.indexOf("<RoofCareButtons");
       expect(at).toBeGreaterThan(src.indexOf('title="New service ticket at this property"'));
     }
     expect(cust).toContain(
       '{!readOnly && <RoofCareButtons siteId={s.id} className="justify-end" />}',
     );
-    expect(prop).toContain(
-      '{!deleted && <RoofCareButtons siteId={s.id} className="justify-end" />}',
+    expect(prop.replace(/\s+/g, " ")).toContain(
+      '{!deleted && ( <RoofCareButtons siteId={s.id} careRequest={careRequest} className="justify-end" /> )}',
     );
   });
 });
@@ -1270,7 +1276,10 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
   it("the form shows all ten and holds the button until the tick", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
     expect(card).toContain("{ROOF_CARE_TERMS.map((t) => ( <li key={t}>{t}</li> ))}");
-    expect(card).toContain("const [agreed, setAgreed] = useState(false);");
+    // Nov 21: unticked still, unless the customer ticked these same terms on the public page.
+    expect(card).toContain(
+      "const [agreed, setAgreed] = useState( !!prefill && prefill.terms_version === ROOF_CARE_TERMS_VERSION, );",
+    );
     // (Nov 19, later: an email address that is typed has to be one, and the tick is in the
     // customer's own words, "I have read these terms and agree to them.")
     // (Nov 20: and nothing else is missing: the size check, and the line that says what is.)

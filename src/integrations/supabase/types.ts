@@ -3176,6 +3176,203 @@ export type Database = {
           },
         ]
       }
+      public_form_settings: {
+        Row: {
+          google_daily_cap: number
+          id: number
+          qr_base_url: string | null
+          services: string[]
+          updated_at: string
+          updated_by: string | null
+          updated_by_name: string | null
+        }
+        Insert: {
+          google_daily_cap?: number
+          id?: number
+          qr_base_url?: string | null
+          services?: string[]
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Update: {
+          google_daily_cap?: number
+          id?: number
+          qr_base_url?: string | null
+          services?: string[]
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "public_form_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      public_requests: {
+        Row: {
+          account_id: string | null
+          address: string
+          agreed_by: string | null
+          building_name: string
+          city: string
+          company: string
+          contact_name: string
+          created_at: string
+          details: string
+          dismiss_reason: string | null
+          email: string
+          from_key: string | null
+          handled_at: string | null
+          handled_by: string | null
+          handled_by_name: string | null
+          id: string
+          kind: string
+          notes: string
+          opportunity_id: string | null
+          pay_method: string | null
+          phone: string
+          plan: string | null
+          quote: Json | null
+          reference: string
+          referred_by: string
+          roof_care_plan_id: string | null
+          several_buildings: boolean
+          services: string[]
+          shown_price: number | null
+          site_id: string | null
+          size_range: string | null
+          sqft: number | null
+          sqft_source: string | null
+          state: string
+          status: string
+          terms_version: string | null
+          told_at: string | null
+          zip: string
+        }
+        Insert: {
+          account_id?: string | null
+          address: string
+          agreed_by?: string | null
+          building_name?: string
+          city?: string
+          company?: string
+          contact_name: string
+          created_at?: string
+          details?: string
+          dismiss_reason?: string | null
+          email?: string
+          from_key?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          handled_by_name?: string | null
+          id?: string
+          kind: string
+          notes?: string
+          opportunity_id?: string | null
+          pay_method?: string | null
+          phone?: string
+          plan?: string | null
+          quote?: Json | null
+          reference: string
+          referred_by?: string
+          roof_care_plan_id?: string | null
+          several_buildings?: boolean
+          services?: string[]
+          shown_price?: number | null
+          site_id?: string | null
+          size_range?: string | null
+          sqft?: number | null
+          sqft_source?: string | null
+          state?: string
+          status?: string
+          terms_version?: string | null
+          told_at?: string | null
+          zip?: string
+        }
+        Update: {
+          account_id?: string | null
+          address?: string
+          agreed_by?: string | null
+          building_name?: string
+          city?: string
+          company?: string
+          contact_name?: string
+          created_at?: string
+          details?: string
+          dismiss_reason?: string | null
+          email?: string
+          from_key?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          handled_by_name?: string | null
+          id?: string
+          kind?: string
+          notes?: string
+          opportunity_id?: string | null
+          pay_method?: string | null
+          phone?: string
+          plan?: string | null
+          quote?: Json | null
+          reference?: string
+          referred_by?: string
+          roof_care_plan_id?: string | null
+          several_buildings?: boolean
+          services?: string[]
+          shown_price?: number | null
+          site_id?: string | null
+          size_range?: string | null
+          sqft?: number | null
+          sqft_source?: string | null
+          state?: string
+          status?: string
+          terms_version?: string | null
+          told_at?: string | null
+          zip?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "public_requests_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "crm_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "public_requests_handled_by_fkey"
+            columns: ["handled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "public_requests_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "crm_opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "public_requests_roof_care_plan_id_fkey"
+            columns: ["roof_care_plan_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "public_requests_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "crm_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       push_subscriptions: {
         Row: {
           auth: string
@@ -6106,6 +6303,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      google_route_take: { Args: never; Returns: boolean }
+      google_route_today: { Args: never; Returns: Json }
       has_access: { Args: { page: string }; Returns: boolean }
       has_profile: { Args: never; Returns: boolean }
       hold_followup: {
@@ -6209,6 +6408,20 @@ export type Database = {
         Returns: number
       }
       prospect_user_ids: { Args: never; Returns: string[] }
+      public_request_handle: {
+        Args: {
+          p_account?: string
+          p_id: string
+          p_opportunity?: string
+          p_plan?: string
+          p_reason?: string
+          p_site?: string
+          p_status: string
+        }
+        Returns: Database["public"]["Tables"]["public_requests"]["Row"]
+      }
+      public_request_matches: { Args: { p_id: string }; Returns: Json }
+      public_service_choices: { Args: never; Returns: string[] }
       push_subscription_claim: {
         Args: {
           p_auth: string

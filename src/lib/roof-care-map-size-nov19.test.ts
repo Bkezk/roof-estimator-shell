@@ -168,7 +168,11 @@ describe("the sign-up screen", () => {
     expect(page).toContain("onClick={() => setSqft(String(mapSize.data!.sqft))}");
     expect(page).toContain('data-action="use-map-size"');
     // The box starts blank, as every number box does.
-    expect(page).toContain('const [sqft, setSqft] = useState("");');
+    // Nov 21: blank still, unless the sign-up was opened from a customer's own public request,
+    // which carries the size they gave.
+    expect(page).toContain(
+      'prefill?.sqft != null && prefill.sqft > 0 ? String(Math.round(prefill.sqft)) : "",',
+    );
   });
 
   it("asks once per property and does not ask again on a miss", () => {

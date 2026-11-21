@@ -678,7 +678,8 @@ describe("Nov 16 audit fix 21: the read is not cut at 1,000 rows, and long id li
     await expect(run(client(t).db, LEE)).rejects.toThrow("Forbidden: admin only");
     const fn = readFileSync("src/lib/owner-attention.functions.ts", "utf8").replace(/\s+/g, " ");
     expect(fn).not.toMatch(/\.limit\((?!PAGE\))/);
-    expect(fn.match(/\.order\("id"\) ?\.limit\(PAGE\)/g)).toHaveLength(9);
+    // Nov 21: ten now, with the requests from the public pages (publicRequestsWaiting).
+    expect(fn.match(/\.order\("id"\) ?\.limit\(PAGE\)/g)).toHaveLength(10);
     expect(fn.match(/readAll\(/g)!.length).toBeGreaterThanOrEqual(9);
     expect(fn).toContain("const sb = context.supabase;");
     expect(fn).not.toMatch(/supabaseAdmin|serverClient|service_role/);

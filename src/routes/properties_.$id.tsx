@@ -5,13 +5,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PropertyPage } from "@/components/property-page";
+import { careRequestFromSearch } from "@/lib/public-requests";
 
 export const Route = createFileRoute("/properties_/$id")({
   head: () => ({ meta: [{ title: "Property — JBK Portal" }] }),
+  // `care_request`: a Roof Care request from the public page, matched to this property by the
+  // office (Nov 21). The sign-up opens with what the customer typed. Anything that is not a
+  // request's id is dropped.
+  validateSearch: (search: Record<string, unknown>): { care_request?: string } =>
+    careRequestFromSearch(search),
   component: PropertyRoute,
 });
 
 function PropertyRoute() {
   const { id } = Route.useParams();
-  return <PropertyPage key={id} id={id} />;
+  const { care_request } = Route.useSearch();
+  return <PropertyPage key={id} id={id} careRequest={care_request ?? null} />;
 }

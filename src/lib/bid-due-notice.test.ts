@@ -379,8 +379,9 @@ describe("where it runs", () => {
     // Nov 19: the Roof Care "plan expired" pass reports beside them.
     // (Nov 19, later: and the pass that emails a Roof Care customer their agreement and receipt.)
     // (Nov 20: and the pass that announces the inspection tickets the site made for plans.)
+    // (Nov 21: and the pass that tells the office about a request from a public page.)
     expect(src).toMatch(
-      /followups,\s*tasks,\s*bids,\s*plans,\s*plan_emails: planEmails,\s*plan_tickets: planTickets,\s*cron_stamped: cronStamped,/,
+      /followups,\s*tasks,\s*bids,\s*plans,\s*plan_emails: planEmails,\s*plan_tickets: planTickets,\s*public_requests: publicRequests,\s*cron_stamped: cronStamped,/,
     );
   });
   it("the app's own pass: after the task notices, the same admin client, under the same server-key guard", () => {

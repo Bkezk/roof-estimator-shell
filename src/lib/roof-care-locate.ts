@@ -129,9 +129,13 @@ export function roughPlaceLine(place: string | null): string {
 export function driveSourceWords(d: {
   source: "routed" | "estimated";
   router?: "google" | "free" | null;
+  google_held?: boolean;
 }): string {
   if (d.source !== "routed") return "estimated";
   if (d.router === "google") return "by road, from Google";
+  // Nov 21: the day's limit of Google lookups (Setup › QR pages) was reached.
+  if (d.router === "free" && d.google_held)
+    return "by road, from the free router: today's limit of Google lookups is reached";
   if (d.router === "free") return "by road, from the free router";
   return "by road";
 }

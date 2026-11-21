@@ -22,7 +22,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { isAdmin } from "@/lib/access";
 import { censusGeocoderUrl, CENSUS_TIMEOUT_MS, parseCensusResponse } from "@/lib/address-census";
-import { routedDriveVia, type RouteVia } from "@/lib/drive-route";
+import { googleGate, routedDriveVia, type RouteVia } from "@/lib/drive-route";
 import { readProfile } from "@/lib/profile-cache.server";
 import {
   asRoofCareSettings,
@@ -116,6 +116,8 @@ export interface RoofCareDrive extends Drive {
   source: "routed" | "estimated";
   /** Which router gave a routed drive: Google with the owner's key, or the free public one. */
   router?: RouteVia | null;
+  /** True when the free router answered because the day's limit of Google lookups was reached. */
+  google_held?: boolean;
   /** One way, as the close-out says it: "42 mi · about 55 min each way (routed)". */
   note: string;
   /** How the address was placed. "zip" and "town" are not the building: the price is an estimate. */
@@ -235,7 +237,15 @@ export async function driveTo(
   if (!from) throw new Error("The office's address could not be found on the map.");
   if (!to) return null;
   const where = { placed_by: to.by, place: to.place };
-  const routed = await routedDriveVia(from, to).catch(() => null);
+  // The day's limit of Google lookups is the whole site's (Nov 21): asked for through this
+  // caller's own client, and the free router answers when it is reached.
+  const routed = await routedDriveVia(
+    from,
+    to,
+    undefined,
+    undefined,
+    googleGate(sb as unknown as Parameters<typeof googleGate>[0]),
+  ).catch(() => null);
   const byRoad = routed ? travelFromRoute(routed.drive) : null;
   const one = byRoad ?? estimateTravelBetween(from, to);
   // The same spot as the office: nothing to drive.
@@ -244,6 +254,7 @@ export async function driveTo(
     ...roundTrip(one),
     source: one.source,
     router: byRoad && routed ? routed.via : null,
+    ...(byRoad && routed?.held ? { google_held: true } : {}),
     note: one.note,
     ...where,
   };

@@ -1,0 +1,420 @@
+/**
+ * The two public pages' server functions (Roof Care step 4; owner, Nov 18 and Nov 20): what a
+ * visitor with NO sign-in can ask of the site. Four things, and nothing else:
+ *
+ *   publicRoofCareQuote    the three yearly prices for one building
+ *   submitRoofCareRequest  "sign me up for this plan": held for the office
+ *   publicServiceChoices   the services on the request form
+ *   submitServiceRequest   "my roof needs this": held for the office
+ *
+ * How it is kept safe:
+ *  - The database is reached with the site's own key only, as the two share links do. Nothing
+ *    is granted to the anonymous role, so a stranger holding the page's public key can call no
+ *    database function and read no table.
+ *  - Every answer is prices and plain words. Never a cost, a margin, a drive, an id of ours, or
+ *    anything about who is already a customer.
+ *  - Each connection, and everyone together, is limited (public_form_take in the database).
+ *  - Everything typed is checked here and again in the database, and kept as plain text.
+ *  - A robot (the hidden box filled, or a form sent at once) is answered as if it worked and
+ *    nothing is kept.
+ *
+ * On the local test server there is no server key: the functions then answer with made-up
+ * sample numbers marked `sample`, and keep nothing, so the pages can be tried.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+import type { Json } from "@/integrations/supabase/types";
+import type { Client } from "@/lib/notify.server";
+import {
+  PUBLIC_MIN_OPEN_MS,
+  PUBLIC_NOT_READY,
+  PUBLIC_SIZE_RANGE_SQFT,
+  PUBLIC_TERMS_MOVED,
+  PUBLIC_TOO_MANY,
+  PUBLIC_TRY_AGAIN,
+  type PublicCareRequest,
+  type PublicPlanOffer,
+  type PublicQuote,
+  type PublicQuoteAsk,
+  type PublicSent,
+  type PublicServiceRequest,
+} from "@/lib/public-forms";
+import { placedRoughly } from "@/lib/roof-care-locate";
+import { mapRoofSize, ROOF_CARE_TERMS_VERSION } from "@/lib/roof-care-plan";
+import type { RoofCareDrive } from "@/lib/roof-care.functions";
+
+const short = (max: number) => z.string().trim().max(max);
+
+const addressShape = {
+  address: z.string().trim().min(3, "Type the building's street address.").max(200),
+  city: short(120).default(""),
+  state: short(40).default(""),
+  zip: short(12).default(""),
+};
+const sizeRange = z.enum(["under_10k", "10k_25k", "25k_50k", "50k_75k", "over_75k"]);
+const sqft = z.number().finite().positive().max(100_000_000);
+
+export const quoteAskSchema = z.object({
+  ...addressShape,
+  sqft: sqft.nullable().optional(),
+  size_range: sizeRange.nullable().optional(),
+});
+
+const contactShape = {
+  contact_name: z.string().trim().min(2, "Type your name.").max(120),
+  company: short(160).default(""),
+  phone: short(40).default(""),
+  email: short(200).default(""),
+  building_name: short(160).default(""),
+  referred_by: short(160).default(""),
+  // The hidden box and the time the form was open: read, never trusted.
+  website: z.string().max(400).default(""),
+  open_ms: z.number().finite().default(0),
+};
+
+export const careRequestSchema = z.object({
+  ...addressShape,
+  ...contactShape,
+  plan: z.enum(["watch", "care", "guard"]),
+  sqft: sqft.nullable().optional(),
+  size_range: sizeRange.nullable().optional(),
+  shown_price: z.number().finite().min(0).max(100_000_000),
+  quote_token: z.string().trim().min(1).max(80),
+  pay_method: z.enum(["check", "card"]),
+  agreed: z.boolean().refine((v) => v === true, "Tick the box to agree to the plan's terms."),
+  terms_version: short(40),
+  agreed_by: z.string().trim().min(2, "Type your full name to agree to the terms.").max(120),
+  several_buildings: z.boolean().default(false),
+  notes: short(2000).default(""),
+});
+
+export const serviceRequestSchema = z.object({
+  ...addressShape,
+  ...contactShape,
+  services: z.array(short(80)).min(1, "Tick at least one service.").max(40),
+  details: short(2000).default(""),
+});
+
+/** The first problem as one plain sentence; never a list of what a program expected. */
+function parsePlain<T>(schema: z.ZodType<T>, d: unknown): T {
+  const r = schema.safeParse(d);
+  if (r.success) return r.data;
+  const first = r.error.issues[0];
+  const custom = first && !/^(Invalid|Expected|Required|Too|String|Number)/i.test(first.message);
+  throw new Error(
+    custom && first ? first.message : "Check the form: one of the boxes is not filled in right.",
+  );
+}
+
+/** A phone number with its area code, or an email address. */
+export function reachable(phone: string, email: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return (digits.length >= 10 && digits.length <= 15) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+}
+export const PUBLIC_NEED_CONTACT =
+  "Type a phone number with its area code, or an email address, so we can reach you.";
+
+/** A form no person filled in: the hidden box holds something, or it was sent at once. */
+export const looksLikeRobot = (d: { website: string; open_ms: number }): boolean =>
+  d.website.trim() !== "" || !(d.open_ms >= PUBLIC_MIN_OPEN_MS);
+
+/**
+ * What a robot is told: a reference that looks real. Nothing was kept. Three digits, which a
+ * real reference never has (they start at R-4001), so one quoted on the phone cannot be taken
+ * for another person's request.
+ */
+const pretendSent = (): PublicSent => ({
+  reference: `R-${100 + Math.floor(Math.random() * 900)}`,
+});
+
+/** What the functions are given: the site's own client, and who is asking. */
+export interface PublicDeps {
+  /** Null on the local test server. */
+  admin: Client | null;
+  /** The connection's key (public-forms.server.ts connectionKey). */
+  key: string;
+  /** True on the local test server only. */
+  sample: boolean;
+  /** The round trip from the office to an address; null when it cannot be placed. */
+  drive: (admin: Client, a: PublicQuoteAsk) => Promise<RoofCareDrive | null>;
+  /** The roof size our map shows at an address; null when it shows none. */
+  mapSize: (admin: Client, a: PublicQuoteAsk) => Promise<number | null>;
+  /** Tells the office about requests nobody was told of. Best effort. */
+  tell: (admin: Client) => Promise<unknown>;
+}
+
+type Rpc = (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message: string; code?: string } | null }>;
+const rpcOf =
+  (admin: Client): Rpc =>
+  (fn, args) =>
+    (admin as unknown as { rpc: Rpc }).rpc(fn, args);
+
+/**
+ * A database refusal as words for the visitor. The public functions in the database raise
+ * their own plain sentences under two codes; anything else (a fault of ours) is never shown.
+ */
+function plainRefusal(error: { message: string; code?: string }): Error {
+  if (error.code === "22023" || error.code === "P0001") return new Error(error.message);
+  console.error("Public form: the database refused —", error.code ?? "", error.message);
+  return new Error(PUBLIC_TRY_AGAIN);
+}
+
+async function withinLimit(admin: Client, kind: "quote" | "request", key: string) {
+  const { data, error } = await rpcOf(admin)("public_form_take", { p_kind: kind, p_key: key });
+  if (error) {
+    console.error("Public form: the limit could not be read —", error.message);
+    throw new Error(PUBLIC_TRY_AGAIN);
+  }
+  if (data !== true) throw new Error(PUBLIC_TOO_MANY);
+}
+
+/** Made-up numbers for the local test server. They match no real price. */
+export function sampleQuote(ask: PublicQuoteAsk): PublicQuote {
+  const custom = ask.size_range === "over_75k";
+  const size = ask.sqft ?? (ask.size_range ? PUBLIC_SIZE_RANGE_SQFT[ask.size_range] : null);
+  const plans: PublicPlanOffer[] =
+    custom || size == null
+      ? []
+      : [
+          {
+            plan: "watch",
+            name: "Roof Watch",
+            price: 1111,
+            benefits: { allowance: 0, leak_calls: 0, storm: 0 },
+          },
+          {
+            plan: "care",
+            name: "Roof Care",
+            price: 2222,
+            benefits: { allowance: 444, leak_calls: 0, storm: 0 },
+          },
+          {
+            plan: "guard",
+            name: "Roof Guard",
+            price: 3333,
+            benefits: { allowance: 1333, leak_calls: 2, storm: 1 },
+          },
+        ];
+  return {
+    found: true,
+    rough: false,
+    place: null,
+    sqft: custom ? null : size,
+    sqft_source: custom || size == null ? null : ask.sqft != null ? "typed" : "range",
+    custom_quote: custom,
+    plans,
+    quote_token: "sample",
+    sample: true,
+  };
+}
+
+function readOffers(x: unknown): PublicPlanOffer[] {
+  if (!Array.isArray(x)) return [];
+  const out: PublicPlanOffer[] = [];
+  for (const raw of x) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const b = (r["benefits"] ?? {}) as Record<string, unknown>;
+    const plan = r["plan"];
+    const price = Number(r["price"]);
+    if ((plan !== "watch" && plan !== "care" && plan !== "guard") || !Number.isFinite(price))
+      continue;
+    // Only these fields leave the server, whatever the database answered.
+    out.push({
+      plan,
+      name: typeof r["name"] === "string" ? r["name"] : plan,
+      price,
+      benefits: {
+        allowance: Number(b["allowance"]) || 0,
+        leak_calls: Number(b["leak_calls"]) || 0,
+        storm: Number(b["storm"]) || 0,
+      },
+    });
+  }
+  return out;
+}
+
+/** The three yearly prices for one building. */
+export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<PublicQuote> {
+  const ask = parsePlain(quoteAskSchema, askIn) as PublicQuoteAsk;
+  if (!deps.admin) {
+    if (deps.sample) return sampleQuote(ask);
+    throw new Error(PUBLIC_NOT_READY);
+  }
+  const admin = deps.admin;
+  await withinLimit(admin, "quote", deps.key);
+
+  let drive: RoofCareDrive | null;
+  let mapSqft: number | null;
+  try {
+    [drive, mapSqft] = await Promise.all([
+      deps.drive(admin, ask),
+      deps.mapSize(admin, ask).catch(() => null),
+    ]);
+  } catch (e) {
+    console.error("Public quote: the drive could not be worked out —", e);
+    throw new Error(PUBLIC_TRY_AGAIN);
+  }
+  const over = ask.size_range === "over_75k";
+  // The map's outline first, then what the visitor typed, then the middle of the range picked.
+  const typed = ask.sqft ?? null;
+  const ranged = ask.size_range ? PUBLIC_SIZE_RANGE_SQFT[ask.size_range] : null;
+  const size = over ? null : (mapSqft ?? typed ?? ranged);
+  const source = size == null ? null : mapSqft != null ? "map" : typed != null ? "typed" : "range";
+  const found = !!drive;
+  const rough = drive ? placedRoughly(drive.placed_by) : false;
+  const place = drive?.place ?? null;
+
+  const { data, error } = await rpcOf(admin)("public_care_quote", {
+    p_key: deps.key,
+    p: {
+      address: ask.address,
+      city: ask.city,
+      state: ask.state,
+      zip: ask.zip,
+      found,
+      rough,
+      place,
+      sqft: size,
+      sqft_source: source,
+    } as unknown as Json,
+    p_hours: drive?.hours ?? null,
+    p_miles: drive?.miles ?? null,
+  });
+  if (error) throw plainRefusal(error);
+  const o = (data ?? {}) as Record<string, unknown>;
+  const token = typeof o["quote_token"] === "string" ? o["quote_token"] : "";
+  if (!token) throw new Error(PUBLIC_TRY_AGAIN);
+  const custom = over || o["custom_quote"] === true;
+  return {
+    found,
+    rough,
+    place,
+    sqft: size,
+    sqft_source: source,
+    custom_quote: custom,
+    plans: custom || !found ? [] : readOffers(o["plans"]),
+    quote_token: token,
+  };
+}
+
+/** "Sign me up for this plan": checked, kept for the office, and the office told. */
+export async function sendCare(dataIn: unknown, deps: PublicDeps): Promise<PublicSent> {
+  const d = parsePlain(careRequestSchema, dataIn) as PublicCareRequest;
+  if (looksLikeRobot(d)) return pretendSent();
+  if (!reachable(d.phone, d.email)) throw new Error(PUBLIC_NEED_CONTACT);
+  if (d.terms_version !== ROOF_CARE_TERMS_VERSION) throw new Error(PUBLIC_TERMS_MOVED);
+  if (!deps.admin) {
+    if (deps.sample) return { reference: "R-0000", sample: true };
+    throw new Error(PUBLIC_NOT_READY);
+  }
+  await withinLimit(deps.admin, "request", deps.key);
+  const { website: _w, open_ms: _o, ...kept } = d;
+  const { data, error } = await rpcOf(deps.admin)("public_request_submit", {
+    p_key: deps.key,
+    p: { kind: "care", ...kept } as unknown as Json,
+  });
+  if (error) throw plainRefusal(error);
+  if (typeof data !== "string" || !data) throw new Error(PUBLIC_TRY_AGAIN);
+  await deps
+    .tell(deps.admin)
+    .catch((e) => console.error("Public request: the office was not told —", e));
+  return { reference: data };
+}
+
+/** "My roof needs this": checked, kept for the office, and the office told. */
+export async function sendService(dataIn: unknown, deps: PublicDeps): Promise<PublicSent> {
+  const d = parsePlain(serviceRequestSchema, dataIn) as PublicServiceRequest;
+  if (looksLikeRobot(d)) return pretendSent();
+  if (!reachable(d.phone, d.email)) throw new Error(PUBLIC_NEED_CONTACT);
+  if (!deps.admin) {
+    if (deps.sample) return { reference: "R-0000", sample: true };
+    throw new Error(PUBLIC_NOT_READY);
+  }
+  await withinLimit(deps.admin, "request", deps.key);
+  const { website: _w, open_ms: _o, ...kept } = d;
+  const { data, error } = await rpcOf(deps.admin)("public_request_submit", {
+    p_key: deps.key,
+    p: { kind: "service", ...kept } as unknown as Json,
+  });
+  if (error) throw plainRefusal(error);
+  if (typeof data !== "string" || !data) throw new Error(PUBLIC_TRY_AGAIN);
+  await deps
+    .tell(deps.admin)
+    .catch((e) => console.error("Public request: the office was not told —", e));
+  return { reference: data };
+}
+
+/** Made-up services for the local test server. */
+export const SAMPLE_SERVICES = ["Roof leak or repair", "Roof inspection", "Something else"];
+
+export async function serviceChoices(deps: PublicDeps): Promise<{ services: string[] }> {
+  if (!deps.admin) {
+    if (deps.sample) return { services: SAMPLE_SERVICES };
+    throw new Error(PUBLIC_NOT_READY);
+  }
+  const { data, error } = await rpcOf(deps.admin)("public_service_choices");
+  if (error) {
+    console.error("Public form: the services could not be read —", error.message);
+    throw new Error(PUBLIC_TRY_AGAIN);
+  }
+  return {
+    services: Array.isArray(data) ? data.filter((s): s is string => typeof s === "string") : [],
+  };
+}
+
+/** How long the price question waits for the map's outline before going on without it. */
+export const PUBLIC_MAP_WAIT_MS = 8_000;
+
+/** The real doors, made from the request that came in. SERVER ONLY. */
+async function realDeps(): Promise<PublicDeps> {
+  const [{ getRequest }, server, care, aerial] = await Promise.all([
+    import("@tanstack/react-start/server"),
+    import("@/lib/public-forms.server"),
+    import("@/lib/roof-care.functions"),
+    import("@/lib/service-aerial.functions"),
+  ]);
+  return {
+    admin: await server.publicAdmin(),
+    key: server.connectionKey(getRequest().headers),
+    sample: server.publicSampleMode(),
+    drive: async (admin, a) => care.driveTo(admin, await care.officeOrigin(admin), a),
+    mapSize: async (admin, a) => {
+      const line = care.addressLine(a);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const found = await Promise.race([
+          aerial.aerialForAddress(admin, line, { stateHint: a.state || null }),
+          new Promise<null>((done) => {
+            timer = setTimeout(() => done(null), PUBLIC_MAP_WAIT_MS);
+          }),
+        ]);
+        const size = found ? mapRoofSize(found.found, found.note) : null;
+        // Only an outline found by the address itself: one found by a name is a guess.
+        return size?.sure ? size.sqft : null;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+    tell: (admin) => server.dispatchPublicRequestNotices(admin),
+  };
+}
+
+export const publicRoofCareQuote = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d)
+  .handler(async ({ data }): Promise<PublicQuote> => quoteFor(data, await realDeps()));
+
+export const submitRoofCareRequest = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d)
+  .handler(async ({ data }): Promise<PublicSent> => sendCare(data, await realDeps()));
+
+export const submitServiceRequest = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d)
+  .handler(async ({ data }): Promise<PublicSent> => sendService(data, await realDeps()));
+
+export const publicServiceChoices = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ services: string[] }> => serviceChoices(await realDeps()),
+);

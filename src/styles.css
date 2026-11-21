@@ -1,6 +1,9 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+/* The heavy condensed headline face of the Roof Care flyer, kept in the site's own files so
+   nothing is loaded from another site (Nov 21). One weight, Latin only. */
+@import "@fontsource/barlow-condensed/latin-800.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -76,6 +79,17 @@
      themes; the lighter one is for a press or a hover. */
   --jbk-blue: #014b96;
   --jbk-blue-hover: #0a5fb8;
+  /* The Roof Care flyer's colours (owner, Nov 20: "a bit more color similar to the one sheeter"):
+     its lime green, measured from the sheet, with the near-black that is printed on it (8.6 to
+     1). The flyer-* ones are what the plan columns are drawn with, so they can change with the
+     theme: the plan names' blue, the text, the thin rules and the small grey print. */
+  --jbk-green: #7eaf28;
+  --jbk-green-ink: #15171b;
+  --flyer-name: #014b96;
+  --flyer-ink: #15171b;
+  --flyer-rule: #23262c;
+  --flyer-soft: #566070;
+  --flyer-tint: #eaf2fb;
   --radius: 0.625rem;
   --background: oklch(0.968 0.006 247.9);
   --foreground: oklch(0.129 0.042 264.695);
@@ -131,6 +145,15 @@
   /* The logo's blue is the logo's blue on either ground. */
   --jbk-blue: #014b96;
   --jbk-blue-hover: #0a5fb8;
+  /* The flyer's green is the same on either ground, with dark print on it. On the dark cards the
+     plan names take a lighter blue (the logo's blue reads at under 2 to 1 there). */
+  --jbk-green: #7eaf28;
+  --jbk-green-ink: #15171b;
+  --flyer-name: #8ec1ff;
+  --flyer-ink: #f0f1f3;
+  --flyer-rule: #aab0ba;
+  --flyer-soft: #b3b9c4;
+  --flyer-tint: #1f3350;
   --primary: oklch(0.921 0.009 247.9); /* hsl(210 20% 90%) */
   --primary-foreground: oklch(0.254 0.01 264.4);
   --secondary: oklch(0.352 0.015 264.4); /* hsl(220 10% 24%) */
@@ -322,4 +345,72 @@
     outline-offset: 3px;
     border-radius: 2px;
   }
+}
+
+/*
+ * The Roof Care flyer's look (Nov 21): the sign-up pop-up and the two public pages share it
+ * (components/roof-care/flyer-look.tsx). The headline face is heavy, condensed and in capitals;
+ * the next faces are what a phone has when the file has not arrived yet. The sizes grow with the
+ * site's text size like every other one.
+ */
+.flyer-head {
+  font-family:
+    "Barlow Condensed", "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 800;
+  font-stretch: condensed;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  line-height: 0.95;
+}
+.flyer-h1 {
+  font-size: calc(2.9rem * var(--jbk-text-scale, 1));
+}
+.flyer-h2 {
+  font-size: calc(2.1rem * var(--jbk-text-scale, 1));
+}
+.flyer-h3 {
+  font-size: calc(1.55rem * var(--jbk-text-scale, 1));
+}
+@media (min-width: 640px) {
+  .flyer-h1 {
+    font-size: calc(3.9rem * var(--jbk-text-scale, 1));
+  }
+  .flyer-h2 {
+    font-size: calc(2.5rem * var(--jbk-text-scale, 1));
+  }
+}
+
+/*
+ * The public pages (/care and /request) are the flyer on white, whatever the visitor's phone is
+ * set to: a phone in dark mode still gets the printed sheet's colours. Every colour the page's
+ * parts read is put back to its light value here.
+ */
+.jbk-public {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #15171b;
+  --card: #ffffff;
+  --card-foreground: #15171b;
+  --border: #c9ced6;
+  --input: #c9ced6;
+  --muted-foreground: #566070;
+  --color-background: #ffffff;
+  --color-foreground: #15171b;
+  --color-card: #ffffff;
+  --color-card-foreground: #15171b;
+  --color-border: #c9ced6;
+  --color-input: #c9ced6;
+  --color-muted-foreground: #566070;
+  --flyer-name: #014b96;
+  --flyer-ink: #15171b;
+  --flyer-rule: #23262c;
+  --flyer-soft: #566070;
+  --flyer-tint: #eaf2fb;
+  /* The page's own: the paper, a box's edge, what is wrong (red) and a caution (brown). */
+  --pub-paper: #ffffff;
+  --pub-line: #9aa2ae;
+  --pub-bad: #b42318;
+  --pub-warn: #8a5a00;
+  background-color: #ffffff;
+  color: #15171b;
 }

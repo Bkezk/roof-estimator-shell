@@ -73,7 +73,7 @@ import {
   travelOrigin,
   type TravelEstimate,
 } from "@/lib/travel-estimate";
-import { routedDrive } from "@/lib/drive-route";
+import { googleGate, routedDrive } from "@/lib/drive-route";
 import { parseStreetAddress } from "@/lib/aerial-address";
 import { cleaningStop } from "@/lib/cleaning-required.server";
 import { isFinishedStage, WORK_STAGES } from "@/lib/ticket-stages";
@@ -1047,7 +1047,14 @@ export const estimateTravel = createServerFn({ method: "GET" })
         geocodeAddress(sb, dest.line, dest.state),
       ]);
       if (!from || !to) return null;
-      const routed = await routedDrive(from, to);
+      // The day's limit of Google lookups is the whole site's (Nov 21).
+      const routed = await routedDrive(
+        from,
+        to,
+        undefined,
+        undefined,
+        googleGate(sb as unknown as Parameters<typeof googleGate>[0]),
+      );
       return (routed && travelFromRoute(routed)) ?? estimateTravelBetween(from, to);
     } catch {
       // A read, a router or the state server failing is "no estimate", never an error on the

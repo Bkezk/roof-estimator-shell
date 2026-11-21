@@ -700,17 +700,16 @@ Later the same evening the owner added: "go with ... 14, new issue 1, new issue 
 
 ## Still to build
 
-**Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".
+Step 4 was built on Nov 21: see "Step 4, built Nov 21" below. What is left of it:
 
-1. **The two public pages** opened by QR codes, with no sign-in: "request service" and "Roof
-   Care plans". The plans page hides prices until the address is typed. A possible match with an
-   existing customer is held for the office. A "who referred you" box fills `referred_by`. A
-   several-buildings choice says to call for discounted pricing.
-2. **The printable sheets** with the QR codes and no prices.
-3. **The office's list of sign-ups waiting to be matched** to a customer.
+1. ~~The two public pages.~~ Built, Nov 21: `/care` and `/request`.
+2. ~~The printable sheets.~~ Built, Nov 21: Setup › QR pages.
+3. ~~The office's list of sign-ups waiting to be matched.~~ Built, Nov 21: Customers › Public
+   requests.
 4. ~~Renewal.~~ Done, Nov 19: see "Renewal, built Nov 19" under paying up front.
 5. ~~The terms on the sign-up.~~ Done, Nov 18.
-6. **The tick boxes of services** on the request, once the owner has settled the list.
+6. ~~The tick boxes of services.~~ Built, Nov 21, from a list the office edits on Setup › QR
+   pages. The list it starts with is a guess: see Open 1.
 7. ~~The roof's size from the building's outline.~~ Done, Nov 19: offered on the sign-up.
 8. ~~An "Opened" notice for a ticket the morning check makes.~~ Done, Nov 20: the 8:00 run
    announces them (`src/lib/roof-care-ticket-announce.server.ts`).
@@ -731,11 +730,17 @@ want of access, and term 8 bill a storm inspection beyond the one the plan inclu
 
 ## Open
 
-1. **The list of services** for the request form. On hold at the owner's word (Nov 18). The
-   leave-behind's list is not right. Ask before building the tick boxes.
+1. **The list of services** for the request form. The owner has not settled it (Nov 18: the
+   leave-behind's list is not right). The tick boxes were built on Nov 21 over a starter list of
+   eight that anyone who manages Setup can change on Setup › QR pages, with no new code. Ask him
+   to read the list there before the sheets are printed.
 2. ~~The sign-up's terms.~~ Agreed on Nov 18: see "The terms: agreed".
-3. **The web address in the QR codes.** Printed codes are permanent. The owner does not know how
-   to set up a forwarding address on flatroofonline.com and needs step-by-step help.
+3. **The web address in the QR codes.** Printed codes are permanent. The owner does not have the
+   login for the company's domain (Nov 20: "i dont have the godaddy login") and may buy a new
+   one. Until an address is saved on Setup › QR pages the codes hold the site's own address,
+   and the page warns not to print them: that address is borrowed and can change. Once he
+   has a domain: point it at the site, save `https://` and the name on that page, scan each
+   code with a phone, then print.
 
 ## Build order
 
@@ -743,5 +748,40 @@ want of access, and term 8 bill a storm inspection beyond the one the plan inclu
 2. Plan records, the customer badge, care plan inspections made by the site, push-back, the
    half-and-half invoices. **Done.**
 3. On-site sign-up with credit. **Done.**
-4. The two public pages, the office's match list, the printable sheets with QR codes. **Next,
-   when the owner says.**
+4. The two public pages, the office's match list, the printable sheets with QR codes. **Built,
+   Nov 21.** It is live for visitors once it is published and the address is settled (Open 3).
+
+## Step 4, built Nov 21
+
+The pages a visitor sees are in `docs/qa/roof-care-flyer-look-and-public-pages-2026-11-21.md`.
+What is behind them is in `docs/qa/public-forms-2026-11-21.md`. In short:
+
+- **Two pages with no sign-in**: `/care` (Roof Care plans) and `/request` (Request service).
+  They are the only pages a stranger can open besides the sign-in screens.
+- **Nothing in the database is open to a stranger.** The pages ask the site's own server, and
+  the server asks the database with its own key. The rule of Nov 14 (no database call without a
+  sign-in) stands, and its test still fails on any grant to the anonymous role.
+- **Prices** come from the same price function the sign-up uses. The answer holds the three
+  yearly prices and what each plan includes, and nothing else: no cost, no profit, no drive, and
+  nothing about who is already a customer. The price shown is kept, and the request must match
+  it.
+- **A roof with no price** (over the custom quote size, the largest size range, several
+  buildings, or an address the map cannot place) is sent as a request to be called with a
+  custom quote. Nothing is signed, and the office never opens a sign-up from it.
+- **Limits.** A connection: 20 price questions and 5 requests an hour. Everyone together: 400
+  price questions and 60 requests a day. Over a limit the page says to wait or call.
+- **The office's list**: Customers › Public requests. Each request shows the customers who may
+  be the sender (same phone, same email, a name alike, or the same street address: broad on
+  purpose), and a person says which, or "New customer", or dismisses it with a reason. A
+  service request becomes an opportunity for the person who matched it, due the next working
+  day. A Roof Care request opens the normal sign-up on the property with what the visitor
+  picked. An unanswered request is on the owner's Needs attention list, and the admins and
+  managers get one notice.
+- **Setup › QR pages**: the two printable sheets with the codes (made by the site, no prices),
+  the web address inside the codes, the list of services, and the limit on Google drive lookups
+  a day (200 to start; over it the free router answers and the drive tool says so).
+- **The database**: `supabase/migrations/20261121100000_public_forms.sql`, applied by hand on
+  Nov 21.
+
+Not proven until it is published: a real request from a phone through to the office's list, the
+notice, and a printed code scanned off paper.

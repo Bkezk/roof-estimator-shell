@@ -124,8 +124,11 @@ describe("the sidebar", () => {
     );
     expect(setupHomeFor({ money: true })).toBe("/setup");
     expect(setupHomeFor({ money: false })).toBe("/admin/documents");
-    // Nothing follows Setup in that group.
-    expect(items.slice(setupAt).match(/title: "/g)).toHaveLength(1);
+    // One item follows Setup in that group since Nov 21: the QR pages, a manager's like Setup.
+    expect(items.slice(setupAt).match(/title: "[^"]*"/g)).toEqual([
+      'title: "Setup"',
+      'title: "QR pages"',
+    ]);
   });
   it("no longer lists Service Rates, and the Admin group is admins only", () => {
     expect(nav).not.toMatch(/title: "Service Rates"/);

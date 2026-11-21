@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
+import { Route as CareRouteImport } from './routes/care'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as EstimateRouteImport } from './routes/estimate'
@@ -24,6 +25,7 @@ import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as OwnerRouteImport } from './routes/owner'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
+import { Route as RequestRouteImport } from './routes/request'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ServiceRouteImport } from './routes/service'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -47,6 +49,7 @@ import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiRestoreRouteImport } from './routes/api.restore'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
+import { Route as CustomersRequestsRouteImport } from './routes/customers_.requests'
 import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as ITokenRouteImport } from './routes/i.$token'
 import { Route as PropertiesIdRouteImport } from './routes/properties_.$id'
@@ -54,6 +57,7 @@ import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
+import { Route as SetupQrRouteImport } from './routes/setup_.qr'
 import { Route as ApiCronLeadsRouteImport } from './routes/api.cron.leads'
 import { Route as ApiCronLeadsImportRouteImport } from './routes/api.cron.leads-import'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
@@ -73,6 +77,11 @@ const AccountRoute = AccountRouteImport.update({
 const BidsRoute = BidsRouteImport.update({
   id: '/bids',
   path: '/bids',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CareRoute = CareRouteImport.update({
+  id: '/care',
+  path: '/care',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CustomersRoute = CustomersRouteImport.update({
@@ -133,6 +142,11 @@ const ProposalRoute = ProposalRouteImport.update({
 const ProspectRoute = ProspectRouteImport.update({
   id: '/prospect',
   path: '/prospect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RequestRoute = RequestRouteImport.update({
+  id: '/request',
+  path: '/request',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -250,6 +264,11 @@ const CustomersIdRoute = CustomersIdRouteImport.update({
   path: '/customers/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CustomersRequestsRoute = CustomersRequestsRouteImport.update({
+  id: '/customers_/requests',
+  path: '/customers/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DTokenRoute = DTokenRouteImport.update({
   id: '/d/$token',
   path: '/d/$token',
@@ -285,6 +304,11 @@ const ServiceTodayRoute = ServiceTodayRouteImport.update({
   path: '/today',
   getParentRoute: () => ServiceRoute,
 } as any)
+const SetupQrRoute = SetupQrRouteImport.update({
+  id: '/setup_/qr',
+  path: '/setup/qr',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCronLeadsRoute = ApiCronLeadsRouteImport.update({
   id: '/api/cron/leads',
   path: '/api/cron/leads',
@@ -315,6 +339,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/care': typeof CareRoute
   '/customers': typeof CustomersRoute
   '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
@@ -327,6 +352,7 @@ export interface FileRoutesByFullPath {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/request': typeof RequestRoute
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
@@ -350,6 +376,7 @@ export interface FileRoutesByFullPath {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/customers/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties/$id': typeof PropertiesIdRoute
@@ -357,6 +384,7 @@ export interface FileRoutesByFullPath {
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/setup/qr': typeof SetupQrRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
@@ -367,6 +395,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/care': typeof CareRoute
   '/customers': typeof CustomersRoute
   '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
@@ -379,6 +408,7 @@ export interface FileRoutesByTo {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/request': typeof RequestRoute
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
@@ -402,6 +432,7 @@ export interface FileRoutesByTo {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/customers/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties/$id': typeof PropertiesIdRoute
@@ -409,6 +440,7 @@ export interface FileRoutesByTo {
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/setup/qr': typeof SetupQrRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
@@ -420,6 +452,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/care': typeof CareRoute
   '/customers': typeof CustomersRoute
   '/documents': typeof DocumentsRoute
   '/estimate': typeof EstimateRoute
@@ -432,6 +465,7 @@ export interface FileRoutesById {
   '/owner': typeof OwnerRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/request': typeof RequestRoute
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRouteWithChildren
   '/setup': typeof SetupRoute
@@ -455,6 +489,7 @@ export interface FileRoutesById {
   '/api/backup': typeof ApiBackupRoute
   '/api/restore': typeof ApiRestoreRoute
   '/customers_/$id': typeof CustomersIdRoute
+  '/customers_/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/properties_/$id': typeof PropertiesIdRoute
@@ -462,6 +497,7 @@ export interface FileRoutesById {
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/setup_/qr': typeof SetupQrRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
@@ -474,6 +510,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/care'
     | '/customers'
     | '/documents'
     | '/estimate'
@@ -486,6 +523,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/request'
     | '/reset-password'
     | '/service'
     | '/setup'
@@ -509,6 +547,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers/$id'
+    | '/customers/requests'
     | '/d/$token'
     | '/i/$token'
     | '/properties/$id'
@@ -516,6 +555,7 @@ export interface FileRouteTypes {
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/setup/qr'
     | '/api/cron/leads'
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
@@ -526,6 +566,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/care'
     | '/customers'
     | '/documents'
     | '/estimate'
@@ -538,6 +579,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/request'
     | '/reset-password'
     | '/service'
     | '/setup'
@@ -561,6 +603,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers/$id'
+    | '/customers/requests'
     | '/d/$token'
     | '/i/$token'
     | '/properties/$id'
@@ -568,6 +611,7 @@ export interface FileRouteTypes {
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/setup/qr'
     | '/api/cron/leads'
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
@@ -578,6 +622,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/care'
     | '/customers'
     | '/documents'
     | '/estimate'
@@ -590,6 +635,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/proposal'
     | '/prospect'
+    | '/request'
     | '/reset-password'
     | '/service'
     | '/setup'
@@ -613,6 +659,7 @@ export interface FileRouteTypes {
     | '/api/backup'
     | '/api/restore'
     | '/customers_/$id'
+    | '/customers_/requests'
     | '/d/$token'
     | '/i/$token'
     | '/properties_/$id'
@@ -620,6 +667,7 @@ export interface FileRouteTypes {
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/setup_/qr'
     | '/api/cron/leads'
     | '/api/cron/leads-import'
     | '/api/cron/reminders'
@@ -631,6 +679,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
   BidsRoute: typeof BidsRoute
+  CareRoute: typeof CareRoute
   CustomersRoute: typeof CustomersRoute
   DocumentsRoute: typeof DocumentsRoute
   EstimateRoute: typeof EstimateRoute
@@ -643,6 +692,7 @@ export interface RootRouteChildren {
   OwnerRoute: typeof OwnerRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
+  RequestRoute: typeof RequestRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ServiceRoute: typeof ServiceRouteWithChildren
   SetupRoute: typeof SetupRoute
@@ -666,10 +716,12 @@ export interface RootRouteChildren {
   ApiBackupRoute: typeof ApiBackupRoute
   ApiRestoreRoute: typeof ApiRestoreRoute
   CustomersIdRoute: typeof CustomersIdRoute
+  CustomersRequestsRoute: typeof CustomersRequestsRoute
   DTokenRoute: typeof DTokenRoute
   ITokenRoute: typeof ITokenRoute
   PropertiesIdRoute: typeof PropertiesIdRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
+  SetupQrRoute: typeof SetupQrRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
   ApiCronLeadsImportRoute: typeof ApiCronLeadsImportRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
@@ -698,6 +750,13 @@ declare module '@tanstack/react-router' {
       path: '/bids'
       fullPath: '/bids'
       preLoaderRoute: typeof BidsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/care': {
+      id: '/care'
+      path: '/care'
+      fullPath: '/care'
+      preLoaderRoute: typeof CareRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/customers': {
@@ -782,6 +841,13 @@ declare module '@tanstack/react-router' {
       path: '/prospect'
       fullPath: '/prospect'
       preLoaderRoute: typeof ProspectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/request': {
+      id: '/request'
+      path: '/request'
+      fullPath: '/request'
+      preLoaderRoute: typeof RequestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -945,6 +1011,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomersIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/customers_/requests': {
+      id: '/customers_/requests'
+      path: '/customers/requests'
+      fullPath: '/customers/requests'
+      preLoaderRoute: typeof CustomersRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/d/$token': {
       id: '/d/$token'
       path: '/d/$token'
@@ -993,6 +1066,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/service/today'
       preLoaderRoute: typeof ServiceTodayRouteImport
       parentRoute: typeof ServiceRoute
+    }
+    '/setup_/qr': {
+      id: '/setup_/qr'
+      path: '/setup/qr'
+      fullPath: '/setup/qr'
+      preLoaderRoute: typeof SetupQrRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/cron/leads': {
       id: '/api/cron/leads'
@@ -1051,6 +1131,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   BidsRoute: BidsRoute,
+  CareRoute: CareRoute,
   CustomersRoute: CustomersRoute,
   DocumentsRoute: DocumentsRoute,
   EstimateRoute: EstimateRoute,
@@ -1063,6 +1144,7 @@ const rootRouteChildren: RootRouteChildren = {
   OwnerRoute: OwnerRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
+  RequestRoute: RequestRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ServiceRoute: ServiceRouteWithChildren,
   SetupRoute: SetupRoute,
@@ -1086,10 +1168,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBackupRoute: ApiBackupRoute,
   ApiRestoreRoute: ApiRestoreRoute,
   CustomersIdRoute: CustomersIdRoute,
+  CustomersRequestsRoute: CustomersRequestsRoute,
   DTokenRoute: DTokenRoute,
   ITokenRoute: ITokenRoute,
   PropertiesIdRoute: PropertiesIdRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
+  SetupQrRoute: SetupQrRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,
   ApiCronLeadsImportRoute: ApiCronLeadsImportRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,

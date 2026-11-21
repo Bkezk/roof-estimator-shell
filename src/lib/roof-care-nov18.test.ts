@@ -390,7 +390,14 @@ describe("the drive from the office", () => {
     // building on our own map is still asked first.
     expect(fn).toContain("const building = await geocodeAddress(sb, line, a.state ?? null);");
     // Nov 20: the same call, now also saying which router answered.
-    expect(fn).toContain("const routed = await routedDriveVia(from, to).catch(() => null);");
+    // Nov 21: the same call, now handed the day's limit of Google lookups for the whole site.
+    const oneLine = fn.replace(/\s+/g, " ");
+    expect(oneLine).toContain(
+      "const routed = await routedDriveVia( from, to, undefined, undefined,",
+    );
+    expect(oneLine).toContain(
+      "googleGate(sb as unknown as Parameters<typeof googleGate>[0]), ).catch(() => null);",
+    );
     expect(fn).toContain("if (!to) return null;");
     const page = read("src/components/roof-care-settings.tsx");
     expect(page).toContain("{NOT_PLACED_LINE}");

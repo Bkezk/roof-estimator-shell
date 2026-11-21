@@ -215,7 +215,11 @@ describe("the route and the page (source)", () => {
     const route = read("src/routes/properties_.$id.tsx");
     expect(route).toContain('createFileRoute("/properties_/$id")');
     expect(route).toContain('title: "Property — JBK Portal"');
-    expect(route).toContain("return <PropertyPage key={id} id={id} />;");
+    // Nov 21: the page is also handed a public Roof Care request from the search, when there
+    // is one.
+    expect(route).toContain(
+      "return <PropertyPage key={id} id={id} careRequest={care_request ?? null} />;",
+    );
     // The generated tree resolves the underscore file to /properties/$id.
     const tree = read("src/routeTree.gen.ts");
     expect(tree).toContain("'/properties/$id'");

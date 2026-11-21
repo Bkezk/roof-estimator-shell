@@ -8,13 +8,22 @@
  * the roof). The rules are the database's; the forms say what will happen before it is pressed
  * (lib/roof-care-plan.ts).
  */
-import { Fragment, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CalendarClock, Check, CloudLightning, Loader2, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  FLYER_BAND,
+  FLYER_BAND_LEAD,
+  FLYER_BAND_TITLE,
+  FLYER_FOOT,
+  FLYER_HEAD,
+  FlyerPlan,
+  FlyerStepHead,
+} from "@/components/roof-care/flyer-look";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,6 +52,8 @@ import {
   checkoutReadyKey,
   PAY_CARD_NOTE_ONLINE,
 } from "@/lib/roof-care-checkout";
+import { carePrefillNote, carePrefillWords, type CareSignUpPrefill } from "@/lib/public-requests";
+import { handlePublicRequest, publicCarePrefill } from "@/lib/public-requests.functions";
 import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
 import { cleaningAsked, cleaningSummary, roofCareCleaningKey } from "@/lib/roof-care-cleaning";
 import { markRoofCareForecast, roofCareCleaning } from "@/lib/roof-care-cleaning.functions";
@@ -152,6 +163,7 @@ import {
   PRICE_ESTIMATE_ROUGH,
   isPriceChanged,
   ROOF_CARE_TERMS,
+  ROOF_CARE_TERMS_VERSION,
   roofCarePlansKey,
   runsLate,
   SIZE_CONFIRM_LABEL,
@@ -467,6 +479,7 @@ export function RoofCareButtons({
   jobId,
   big = false,
   className = "",
+  careRequest = null,
 }: {
   siteId: string | null | undefined;
   visitId?: string | null;
@@ -477,11 +490,33 @@ export function RoofCareButtons({
   jobId?: string | null;
   big?: boolean;
   className?: string;
+  /**
+   * A Roof Care request from the public page that the office matched to this property (Nov 21):
+   * the sign-up opens by itself, with what the customer typed already in it.
+   */
+  careRequest?: string | null;
 }) {
   const { profile, session } = useAuth();
   const q = usePlans(siteId);
   const qc = useQueryClient();
   const [open, setOpen] = useState<"plan" | "service" | null>(null);
+  const prefillFn = useServerFn(publicCarePrefill);
+  const prefill = useQuery({
+    queryKey: ["public-care-prefill", careRequest ?? "", siteId ?? ""],
+    queryFn: () => prefillFn({ data: { id: careRequest!, site_id: siteId! } }),
+    enabled: !!session && !!careRequest && !!siteId,
+    staleTime: 60_000,
+    retry: false,
+  });
+  // Opened once, when both the request and the property's plans are read. A property that
+  // already has a plan opens that plan instead, as the button does: never a second sign-up.
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!careRequest || !prefill.data || !q.data) return;
+    if (openedFor.current === careRequest) return;
+    openedFor.current = careRequest;
+    setOpen("plan");
+  }, [careRequest, prefill.data, q.data]);
   const markFn = useServerFn(markCarePlanOffered);
   const mark = useMutation({
     mutationFn: (id: string) => markFn({ data: { job_id: id } }),
@@ -578,7 +613,12 @@ export function RoofCareButtons({
         (active || waiting || lapsed ? (
           <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
         ) : (
-          <SignUpDialog siteId={siteId} today={today} onClose={() => setOpen(null)} />
+          <SignUpDialog
+            siteId={siteId}
+            today={today}
+            prefill={careRequest ? (prefill.data ?? null) : null}
+            onClose={() => setOpen(null)}
+          />
         ))}
       {open === "service" && <ServiceRequestDialog siteId={siteId} onClose={() => setOpen(null)} />}
       {/* Was the plan offered on this ticket? Only where there is one to offer. */}
@@ -2086,16 +2126,11 @@ const FIRST_WORDS: Record<FirstVisit, string> = {
   window: "In the inspection window",
 };
 
-/** A numbered part of the sign-up. */
+/** A numbered part of the sign-up, headed as the flyer heads things (Nov 21: the look only). */
 function SignStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
-    <section className="space-y-2.5" data-sign-step={n}>
-      <h3 className="flex items-center gap-2 text-base font-semibold">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--jbk-blue)] text-xs font-bold text-white">
-          {n}
-        </span>
-        {title}
-      </h3>
+    <section className="space-y-3" data-sign-step={n}>
+      <FlyerStepHead n={n} title={title} />
       {children}
     </section>
   );
@@ -2105,27 +2140,40 @@ function SignUpDialog({
   siteId,
   today,
   onClose,
+  prefill = null,
 }: {
   siteId: string;
   today: string;
   onClose: () => void;
+  /**
+   * What a customer typed on the public Roof Care page (Nov 21). It only fills the boxes: the
+   * price is still read fresh, every rule of the sign-up still runs, and the first inspection
+   * is still the office's to choose.
+   */
+  prefill?: CareSignUpPrefill | null;
 }) {
   const { profile } = useAuth();
   const refresh = useRefresh(siteId);
-  const [sqft, setSqft] = useState("");
+  const [sqft, setSqft] = useState(() =>
+    prefill?.sqft != null && prefill.sqft > 0 ? String(Math.round(prefill.sqft)) : "",
+  );
   const [offer, setOffer] = useState<RoofCareOffer | null>(null);
   const [pricedFor, setPricedFor] = useState<number | null>(null);
-  const [plan, setPlan] = useState<PlanKey | null>(null);
+  const [plan, setPlan] = useState<PlanKey | null>(prefill?.plan ?? null);
   const [first, setFirst] = useState<FirstVisit | null>(null);
   const [days, setDays] = useState("");
-  const [agreedBy, setAgreedBy] = useState("");
-  const [notes, setNotes] = useState("");
-  const [agreed, setAgreed] = useState(false);
+  const [agreedBy, setAgreedBy] = useState(prefill?.agreed_by ?? "");
+  const [notes, setNotes] = useState(() => (prefill ? carePrefillNote(prefill) : ""));
+  // The customer's own tick on the public page stands only for the terms now in use.
+  const [agreed, setAgreed] = useState(
+    !!prefill && prefill.terms_version === ROOF_CARE_TERMS_VERSION,
+  );
   // Where the agreement and the receipt are emailed (owner, Nov 19).
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefill?.customer_email ?? "");
+  const handleFn = useServerFn(handlePublicRequest);
   const benefits = useBenefits().data ?? null;
   // How they pay for the year (owner, Nov 19: "by check or card either one during sign up").
-  const [payMethod, setPayMethod] = useState<PayMethod | null>(null);
+  const [payMethod, setPayMethod] = useState<PayMethod | null>(prefill?.pay_method ?? null);
   const [payNote, setPayNote] = useState("");
   const offerFn = useServerFn(roofCareOffer);
   const signFn = useServerFn(signUpRoofCare);
@@ -2212,6 +2260,20 @@ function SignUpDialog({
           ...(sizeCheck === "smaller" && manager && sizeOk ? { size_ok: true } : {}),
         },
       });
+      // Opened from a public request: the request is done, and it points at the plan it became.
+      // The plan is signed either way; a request left open is only a row for the office to close.
+      if (prefill) {
+        try {
+          await handleFn({
+            data: { id: prefill.request_id, status: "matched", site_id: siteId, plan_id: made.id },
+          });
+        } catch {
+          toast.warning(
+            `The plan is signed, but request ${prefill.reference} could not be marked as done. Dismiss it on Customers, Public requests, with the reason "signed up".`,
+            { duration: 30_000 },
+          );
+        }
+      }
       // The card payment page, when there is one. The plan is signed either way.
       let pay: string | null = null;
       if (payMethod === "card") {
@@ -2257,12 +2319,27 @@ function SignUpDialog({
   // the price for their roof. The steps run top to bottom; nothing here names a cost of ours.
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto" data-roof-care-sign-up>
-        <DialogHeader className="mt-4 rounded-xl bg-[var(--jbk-blue)] px-4 py-4 text-left text-white sm:px-6">
-          <DialogTitle className="text-2xl font-bold tracking-tight">{SIGN_UP_TITLE}</DialogTitle>
-          <DialogDescription className="text-sm text-white/90">{SIGN_UP_LEAD}</DialogDescription>
+      {/* The look of the Roof Care flyer (owner, Nov 20: "a bit more color similar to the one
+          sheeter"): the green band with the heavy headline, the plans as the sheet's columns, the
+          blue band at the foot. Only the look: every step, box, rule and word is as it was. The
+          close cross sits on the green, so it takes the green's dark print. */}
+      <DialogContent
+        className="max-h-[92vh] max-w-5xl gap-0 overflow-y-auto p-0 [&>button:last-child]:text-[var(--jbk-green-ink)]"
+        data-roof-care-sign-up
+      >
+        <DialogHeader className={`${FLYER_BAND} space-y-0 pr-12`} data-flyer="band">
+          <DialogTitle className={FLYER_BAND_TITLE}>{SIGN_UP_TITLE}.</DialogTitle>
+          <DialogDescription className={FLYER_BAND_LEAD}>{SIGN_UP_LEAD}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-6 text-sm">
+        <div className="space-y-7 px-4 py-5 text-sm sm:px-7">
+          {prefill && (
+            <p
+              className="rounded-lg border-2 border-[var(--jbk-blue)]/40 bg-[var(--jbk-blue)]/5 p-3 text-sm"
+              data-care-prefill={prefill.reference}
+            >
+              {carePrefillWords(prefill, ROOF_CARE_TERMS_VERSION)}
+            </p>
+          )}
           <SignStep n={1} title="Your roof">
             <div className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
@@ -2357,59 +2434,28 @@ function SignUpDialog({
             {/* The three plans are explained before there is a price; one is picked once
                 there is. */}
             <div
-              className={`grid gap-4 pt-2 sm:grid-cols-3 ${stale && plans.length > 0 ? "opacity-60" : ""}`}
+              className={`grid gap-y-5 sm:grid-cols-3 ${stale && plans.length > 0 ? "opacity-60" : ""}`}
               data-plan-cards
             >
               {PLAN_KEYS.map((k) => {
                 const o = offerOf(k);
                 const picked = plan === k && !!o;
                 return (
-                  <button
+                  <FlyerPlan
                     key={k}
-                    type="button"
+                    planKey={k}
                     disabled={!o || stale}
                     onClick={() => setPlan(k)}
-                    aria-pressed={picked}
                     data-plan-offer={o ? k : undefined}
-                    data-plan-card={k}
-                    className={`relative flex h-full flex-col rounded-xl border-2 p-4 text-left transition ${picked ? "border-[var(--jbk-blue)] bg-[var(--jbk-blue)]/5 shadow-md" : "border-border bg-card enabled:hover:border-[var(--jbk-blue)]/50"}`}
-                  >
-                    {k === PLAN_RECOMMENDED && (
-                      <span
-                        className="absolute -top-3 left-4 whitespace-nowrap rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
-                        data-plan-recommended
-                      >
-                        {RECOMMENDED_WORDS}
-                      </span>
-                    )}
-                    <span className="text-lg font-bold">{PLAN_NAMES[k]}</span>
-                    <span className="mt-0.5 text-sm text-muted-foreground">{PLAN_PITCH[k]}</span>
-                    {o ? (
-                      <span className="mt-3 block" data-plan-price>
-                        <span className="text-3xl font-bold tracking-tight">{money0(o.price)}</span>
-                        <span className="text-sm text-muted-foreground"> a year</span>
-                      </span>
-                    ) : (
-                      <span className="mt-3 block text-sm italic text-muted-foreground">
-                        {PRICE_AFTER_SIZE}
-                      </span>
-                    )}
-                    <ul className="mt-3 flex-1 space-y-1.5 text-sm" data-plan-includes={k}>
-                      {planIncludes(k, benefits?.[k] ?? null).map((line) => (
-                        <li key={line} className="flex gap-2">
-                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                          <span>{line}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    {o && (
-                      <span
-                        className={`mt-4 rounded-lg px-3 py-2 text-center text-sm font-semibold ${picked ? "bg-[var(--jbk-blue)] text-white" : "border border-[var(--jbk-blue)] text-[var(--jbk-blue)] dark:border-white/60 dark:text-white"}`}
-                      >
-                        {picked ? "Selected" : `Choose ${PLAN_NAMES[k]}`}
-                      </span>
-                    )}
-                  </button>
+                    name={PLAN_NAMES[k]}
+                    promise={PLAN_PITCH[k]}
+                    price={o ? money0(o.price) : null}
+                    waiting={PRICE_AFTER_SIZE}
+                    lines={planIncludes(k, benefits?.[k] ?? null)}
+                    recommended={k === PLAN_RECOMMENDED ? RECOMMENDED_WORDS : null}
+                    picked={picked}
+                    action={o ? (picked ? "Selected" : `Choose ${PLAN_NAMES[k]}`) : null}
+                  />
                 );
               })}
             </div>
@@ -2595,29 +2641,54 @@ function SignUpDialog({
             </>
           )}
         </div>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Not now
-          </Button>
-          <Button
-            type="button"
-            size="lg"
-            className="bg-[var(--jbk-blue)] text-white hover:bg-[var(--jbk-blue-hover)]"
-            disabled={!ready || sign.isPending}
-            // The second of two presses in the same instant is dropped: one sign-up, one answer.
-            onClick={() => press(() => sign.mutateAsync())}
-            data-action="roof-care-confirm"
-          >
-            {sign.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            {SIGN_UP_BUTTON}
-          </Button>
-        </DialogFooter>
-        {/* Why the button cannot be pressed yet (Nov 20). */}
-        {!ready && !sign.isPending && missing.length > 0 && (
-          <p className="text-right text-xs text-muted-foreground" data-sign-line="missing">
-            {signUpMissingLine(missing)}
-          </p>
-        )}
+        {/* The blue band at the foot of the sheet: the plan picked and its yearly price, already
+            shown above, said once more beside the button that signs. */}
+        <div className={`${FLYER_FOOT} space-y-3`} data-flyer="foot">
+          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+            <p className="min-w-0" data-sign-line="picked">
+              {plan && offerOf(plan) && !stale ? (
+                <>
+                  <span className={`${FLYER_HEAD} flyer-h2 block text-white`}>
+                    {PLAN_NAMES[plan]}
+                  </span>
+                  <span className="block text-base font-semibold text-white">
+                    {money0(offerOf(plan)!.price)} per year
+                  </span>
+                </>
+              ) : (
+                <span className={`${FLYER_HEAD} flyer-h2 block text-white`}>Pick your plan</span>
+              )}
+            </p>
+            <DialogFooter className="w-full gap-2 sm:w-auto sm:items-center sm:space-x-0">
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-[44px] text-white hover:bg-white/15 hover:text-white"
+                onClick={onClose}
+              >
+                Not now
+              </Button>
+              <Button
+                type="button"
+                size="lg"
+                className="min-h-[48px] rounded-none bg-[var(--jbk-green)] px-6 text-base font-bold text-[var(--jbk-green-ink)] hover:bg-[#8fc238] disabled:bg-white/25 disabled:text-white disabled:opacity-100"
+                disabled={!ready || sign.isPending}
+                // The second of two presses in the same instant is dropped: one sign-up, one answer.
+                onClick={() => press(() => sign.mutateAsync())}
+                data-action="roof-care-confirm"
+              >
+                {sign.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {SIGN_UP_BUTTON}
+              </Button>
+            </DialogFooter>
+          </div>
+          {/* Why the button cannot be pressed yet (Nov 20). */}
+          {!ready && !sign.isPending && missing.length > 0 && (
+            <p className="text-right text-xs text-white/90" data-sign-line="missing">
+              {signUpMissingLine(missing)}
+            </p>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

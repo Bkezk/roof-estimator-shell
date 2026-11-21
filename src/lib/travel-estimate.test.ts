@@ -269,7 +269,9 @@ function world(over: {
       crm_sites: over.sites ?? [],
       crm_accounts: over.accounts ?? [],
     },
-    { rpcs: over.rpcs ?? storedRpc },
+    // Nov 21: the day's limit of Google lookups is asked before Google is (google_route_take);
+    // here the day is always under its limit.
+    { rpcs: { google_route_take: () => true, ...(over.rpcs ?? storedRpc) } },
   );
   // The routers (OSRM: no route unless the test says; Google: never expected without a key) and
   // the state servers (the live geocode fallback): nothing found anywhere.
@@ -694,7 +696,8 @@ describe("the Time section prefills a Travel line from the estimate (close-out o
       /geocodeAddressCached\(sb, origin\.line, origin\.state\),\s*geocodeAddress\(sb, dest\.line, dest\.state\),/,
     );
     expect(fns).toMatch(
-      /const routed = await routedDrive\(from, to\);\s*return \(routed && travelFromRoute\(routed\)\) \?\? estimateTravelBetween\(from, to\);/,
+      // Nov 21: the same call, handed the day's limit of Google lookups for the whole site.
+      /const routed = await routedDrive\(\s*from,\s*to,\s*undefined,\s*undefined,\s*googleGate\(sb as unknown as Parameters<typeof googleGate>\[0\]\),\s*\);\s*return \(routed && travelFromRoute\(routed\)\) \?\? estimateTravelBetween\(from, to\);/,
     );
     // The destination: property with a street line (typed, else its site row), else the customer.
     expect(fns).toMatch(

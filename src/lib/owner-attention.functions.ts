@@ -33,6 +33,7 @@ import {
   type AttUntouched,
   type AttentionList,
   type AttCareCardBack,
+  type AttPublicRequest,
   type AttCareCarried,
   type AttCareExpired,
   type AttCareNoPayment,
@@ -43,6 +44,9 @@ import {
   type AttCareUnpaid,
   type AttCareVisit,
 } from "@/lib/owner-attention";
+import type { PublicPlanKey } from "@/lib/public-forms";
+import { requestAsk, requestFrom } from "@/lib/public-requests";
+import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { readInChunks } from "@/lib/chunk-ids";
 import {
   cardBackOf,
@@ -251,6 +255,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
 
     const care = await careVisitsOfPlans(sb, today);
     const cardBack = await careCardBackOwed(sb);
+    const publicRequests = await publicRequestsWaiting(sb);
     return attentionList({
       today,
       now: now.toISOString(),
@@ -271,6 +276,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careNoPayment: care.noPayment,
       careSizes: care.sizes,
       careCardBack: cardBack,
+      publicRequests,
       careRenewals: care.renewals,
       careCarried: care.carried,
       careExpired: care.expired,
@@ -288,6 +294,42 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
  * plan it came in for may have ended long ago, so this is read on its own, not from the plans
  * in force.
  */
+/**
+ * Requests from the two public pages that nobody has matched or dismissed (Nov 21). Read with
+ * the caller's sign-in: the Owner page's readers hold Customers access, which the table asks.
+ */
+export async function publicRequestsWaiting(sb: Sb): Promise<AttPublicRequest[]> {
+  const read = await readAll((after) =>
+    afterId(
+      sb
+        .from("public_requests")
+        .select(
+          "id, reference, kind, created_at, contact_name, company, plan, services, several_buildings, shown_price",
+        )
+        .eq("status", "new")
+        .order("id")
+        .limit(PAGE),
+      after,
+    ),
+  );
+  if (read.error) throw new Error(`Requests from the public pages: ${read.error.message}`);
+  const data = read.data;
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    reference: r.reference,
+    from: requestFrom(r),
+    ask: requestAsk({
+      kind: r.kind === "care" ? "care" : "service",
+      plan: (r.plan as PublicPlanKey | null) ?? null,
+      services: r.services ?? [],
+      several_buildings: r.several_buildings,
+      shown_price: r.shown_price,
+    }),
+    kind: r.kind === "care" ? "care" : "service",
+    sent_on: localYmd(new Date(r.created_at), TASK_TZ),
+  }));
+}
+
 export async function careCardBackOwed(sb: Sb): Promise<AttCareCardBack[]> {
   const { data: cards, error } = await sb
     .from("roof_care_card_payments")

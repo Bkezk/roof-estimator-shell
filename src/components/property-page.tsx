@@ -51,7 +51,14 @@ const money = (n: number) =>
 const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-export function PropertyPage({ id }: { id: string }) {
+export function PropertyPage({
+  id,
+  careRequest = null,
+}: {
+  id: string;
+  /** A public Roof Care request matched to this property: its sign-up opens prefilled. */
+  careRequest?: string | null;
+}) {
   const { session } = useAuth();
   const getFn = useServerFn(getProperty);
   const detail = useQuery({
@@ -87,13 +94,21 @@ export function PropertyPage({ id }: { id: string }) {
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the property…
         </p>
       ) : (
-        <PropertyDetailPane id={id} d={detail.data} />
+        <PropertyDetailPane id={id} d={detail.data} careRequest={careRequest} />
       )}
     </div>
   );
 }
 
-function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
+function PropertyDetailPane({
+  id,
+  d,
+  careRequest = null,
+}: {
+  id: string;
+  d: PropertyDetail;
+  careRequest?: string | null;
+}) {
   const { can, profile } = useAuth();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -194,7 +209,13 @@ function PropertyDetailPane({ id, d }: { id: string; d: PropertyDetail }) {
                   )}
                 </div>
                 {/* Owner, Nov 18: Care Plan and Additional Services, under New ticket. */}
-                {!deleted && <RoofCareButtons siteId={s.id} className="justify-end" />}
+                {!deleted && (
+                  <RoofCareButtons
+                    siteId={s.id}
+                    careRequest={careRequest}
+                    className="justify-end"
+                  />
+                )}
               </div>
             </div>
             {s.technician_instructions && (

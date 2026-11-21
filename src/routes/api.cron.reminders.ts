@@ -128,6 +128,20 @@ async function run(request: Request): Promise<Response> {
     planTickets = { error: errText(e) };
   }
 
+  // Requests sent from the two public pages (public-forms.server.ts; Nov 21): the office is told
+  // where the request is made. This picks up any whose notice did not go out then, once each.
+  let publicRequests: Record<string, number> | { error: string };
+  try {
+    const { dispatchPublicRequestNotices } = await import("@/lib/public-forms.server");
+    const r = await dispatchPublicRequestNotices(supabaseAdmin);
+    sendsFailed += r.requests_errors;
+    publicRequests = { ...r };
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the public request notice pass failed", e);
+    publicRequests = { error: errText(e) };
+  }
+
   // The scheduled run's own stamp (last_cron_at), after the passes, whatever they did: it says
   // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
   // applied yet; logged, never a failure of the run.
@@ -153,6 +167,7 @@ async function run(request: Request): Promise<Response> {
       plans,
       plan_emails: planEmails,
       plan_tickets: planTickets,
+      public_requests: publicRequests,
       cron_stamped: cronStamped,
       at: new Date().toISOString(),
     },

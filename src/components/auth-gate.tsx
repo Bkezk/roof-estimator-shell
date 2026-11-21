@@ -23,6 +23,7 @@ import { GlobalSearch } from "@/components/global-search";
 import { StalledNotice } from "@/components/stalled-sign-in";
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import { foldMenuOnArrival } from "@/lib/narrow-menu";
+import { isPublicFormPath } from "@/lib/public-forms";
 import { onRecoveryChange, recoveryState } from "@/lib/recovery-link";
 
 /**
@@ -143,6 +144,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // page, wherever the link happened to land: no app page shows until a password is set or the
   // reset is walked away from, which signs the tab out.
   const isReset = pathname === "/reset-password";
+  // The two pages the printed QR codes open (Roof Care step 4, Nov 21; lib/public-forms.ts):
+  // /care and /request. Bare like the sign-in screen, and open with or without a session.
+  // Nothing else is opened by this: every other path still sends a visitor to the sign-in.
+  const isPublicForm = isPublicFormPath(pathname);
   const recovery = useSyncExternalStore(
     onRecoveryChange,
     () => recoveryState(window.sessionStorage),
@@ -179,7 +184,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return;
     }
     if (loading) return;
-    if (!session && !isLogin && !isReset) {
+    if (!session && !isLogin && !isReset && !isPublicForm) {
       navigate({ to: "/login" });
     } else if (session && isLogin) {
       if (decision === "home") {
@@ -200,6 +205,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     pathname,
     isLogin,
     isReset,
+    isPublicForm,
     recovery,
     blocked,
     home,
@@ -231,8 +237,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // On its way to the reset page: nothing of the app shows in between.
   if (recovery && !isReset) return <Waiting />;
 
-  // The login screen and the reset page render full-bleed, with no app chrome.
-  if (isLogin || isReset) return <>{children}</>;
+  // The login screen, the reset page and the two public pages render full-bleed, with no app
+  // chrome: no menu, no search, no bell, signed in or not.
+  if (isLogin || isReset || isPublicForm) return <>{children}</>;
 
   // Oct 20 (b): with a session the shell renders through a profile load — `loading` only holds
   // the /login redirect (above). A tab wake that re-read a null profile used to swap the whole

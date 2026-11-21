@@ -65,6 +65,7 @@ import {
   SIZE_CONFIRM_LABEL,
   SIZE_UNCHECKED_WORDS,
 } from "@/lib/roof-care-plan";
+import { PUBLIC_REQUESTS_PATH } from "@/lib/public-requests";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
 import { isFinishedStage } from "@/lib/ticket-stages";
@@ -95,6 +96,7 @@ export type AttentionKind =
   | "care_plan_no_payment"
   | "care_plan_size"
   | "care_plan_card_back"
+  | "public_request"
   | "care_plan_renewal"
   | "care_plan_carried"
   | "care_plan_expired";
@@ -325,6 +327,19 @@ export interface AttCareRefund {
  * one that did not cover what was owed, or the part of a payment over what was owed. Listed
  * until a manager or an admin marks it sent back on the property.
  */
+export interface AttPublicRequest {
+  id: string;
+  /** "R-4012". */
+  reference: string;
+  /** Who it is from: the company when one was typed, else the person. */
+  from: string;
+  /** What they asked for: the plan, "a custom quote for …", or the services ticked. */
+  ask: string;
+  kind: "care" | "service";
+  /** The day it came in. */
+  sent_on: string | null;
+}
+
 export interface AttCareCardBack {
   payment_id: string;
   site_id: string;
@@ -450,6 +465,11 @@ export interface AttentionIn {
   careSizes?: readonly AttCareSize[];
   /** Card money still to send back to a customer (Nov 20). */
   careCardBack?: readonly AttCareCardBack[];
+  /**
+   * Requests from the two public pages that nobody has matched to a customer or dismissed
+   * (Nov 21): a person asked for something and is waiting to hear back.
+   */
+  publicRequests?: readonly AttPublicRequest[];
   /** Roof Care plans in the last 60 days of their year, or past it (Nov 19). */
   careRenewals?: readonly AttCareRenewal[];
   /** Inspections carried into a renewed year, not yet done (Nov 19). */
@@ -1050,6 +1070,31 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: "red",
       amount: v.amount,
       href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A request from a public page (Nov 21) that nobody has matched to a customer or dismissed. A
+  // person is waiting to hear back: amber from the first day, red after two.
+  for (const v of i.publicRequests ?? []) {
+    const age = v.sent_on && YMD.test(v.sent_on) ? Math.max(0, daysBetween(v.sent_on, today)) : 0;
+    rows.push({
+      key: `public_request:${v.id}`,
+      group: "office",
+      kind: "public_request",
+      tag:
+        v.kind !== "care"
+          ? "Service request"
+          : v.ask.startsWith("a custom quote")
+            ? "Custom quote request"
+            : "Roof Care request",
+      title: v.from,
+      why: `Sent from the public ${v.kind === "care" ? "Roof Care plans" : "Request service"} page, asking for ${v.ask}. Nobody has answered it. Open Requests from the public pages, say whose it is, and call them. Reference ${v.reference}.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 2 ? "red" : "amber",
+      amount: null,
+      href: PUBLIC_REQUESTS_PATH,
     });
   }
 

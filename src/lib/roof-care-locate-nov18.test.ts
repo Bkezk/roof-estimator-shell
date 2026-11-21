@@ -26,6 +26,8 @@ vi.mock("@/lib/service-aerial.functions", () => ({
 vi.mock("@/lib/drive-route", () => ({
   routedDrive: async () => null,
   routedDriveVia: async () => null,
+  // Nov 21: the drive is also handed the day's limit of Google lookups.
+  googleGate: () => async () => true,
 }));
 
 import { censusGeocoderUrl } from "@/lib/address-census";

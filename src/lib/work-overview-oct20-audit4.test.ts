@@ -481,7 +481,8 @@ describe("b. shouldHoldForProfile; the gate keeps the shell while a session load
   });
   it("the gate: Waiting only without a session; the shell renders while the profile loads", () => {
     // The reset page is bare too since Nov 14 (password-reset-nov14.test.ts).
-    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
+    // Nov 21: the two public pages (/care, /request) are bare and open too; nothing else is.
+    expect(gate).toContain("if (isLogin || isReset || isPublicForm) return <>{children}</>;");
     expect(gate).toContain("if (!session) return <Waiting />;");
     expect(gate).not.toContain("if (loading || !session) return <Waiting />;");
     expect(gate).toContain("if (blocked) return <Waiting />;");
@@ -553,7 +554,7 @@ describe("d. landingDecision: retry for the profile, then home with a toast", ()
     // The signed-out and blocked legs are as they were.
     // The reset page needs no session either since Nov 14 (password-reset-nov14.test.ts).
     expect(gate).toMatch(
-      /if \(!session && !isLogin && !isReset\) \{\s*navigate\(\{ to: "\/login" \}\);/,
+      /if \(!session && !isLogin && !isReset && !isPublicForm\) \{\s*navigate\(\{ to: "\/login" \}\);/,
     );
     // Nov 16 audit fix 26: home, except Setup for a Documents-only person (closedTo).
     expect(gate).toMatch(

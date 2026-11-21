@@ -262,7 +262,8 @@ describe("the gate and the first moment of the page", () => {
     expect(gate).toContain("if (recovery && !isReset) return <Waiting />;");
   });
   it("the reset page is bare and needs no session; every other page still does", () => {
-    expect(gate).toContain("if (isLogin || isReset) return <>{children}</>;");
-    expect(gate).toContain("if (!session && !isLogin && !isReset) {");
+    // Nov 21: the two public pages (/care, /request) are bare and open too; nothing else is.
+    expect(gate).toContain("if (isLogin || isReset || isPublicForm) return <>{children}</>;");
+    expect(gate).toContain("if (!session && !isLogin && !isReset && !isPublicForm) {");
   });
 });
