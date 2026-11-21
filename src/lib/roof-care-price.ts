@@ -344,6 +344,23 @@ export function tripCostAndCharge(
   return { cost, charge };
 }
 
+/**
+ * The round trip a return trip is worked on (owner, Nov 20, break test 11): the property's own
+ * drive, and never less than the round trip the list price covers. A crew sent to a property a
+ * quarter of an hour away is still a crew sent out and back, and used to be charged a few
+ * dollars; a plan priced on a drive of 0 had no amount at all. Each of the two is raised on its
+ * own. The database does the same (roof_care_trip_charge), and is what counts.
+ */
+export function returnTripDrive(
+  s: Pick<RoofCareSettings, "baseline_drive_hours" | "baseline_miles">,
+  drive: Drive,
+): Drive {
+  return {
+    hours: Math.max(drive.hours, s.baseline_drive_hours ?? 0, 0),
+    miles: Math.max(drive.miles, s.baseline_miles ?? 0, 0),
+  };
+}
+
 const usd2 = (n: number) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -360,6 +377,10 @@ export function tripCharged(amount: number | null, cost: number | null): number 
   return c == null ? a : Math.max(a, c);
 }
 
+/** The smallest return trip, in the words the office reads. */
+export const TRIP_FLOOR_LINE =
+  "This round trip is the smallest return trip: a property nearer than this is charged it too.";
+
 /**
  * The line under the two trip charge boxes, for the round trip the list price covers: what that
  * trip costs us, and what is charged for it. Null until that round trip is typed.
@@ -372,15 +393,17 @@ export function tripChargeNote(s: RoofCareSettings): string | null {
   });
   const trip = `a round trip of ${s.baseline_drive_hours} hours and ${s.baseline_miles} miles`;
   const rule = "A return trip is never charged less than it costs us.";
+  // Nov 20: the smallest return trip. A nearer property is charged this round trip.
+  const floor = `${TRIP_FLOOR_LINE} A property further away is charged its own drive.`;
   if (cost == null)
     return charge == null
-      ? `${rule} Type the crew and vehicle costs above to see what ${trip} costs us.`
-      : `For ${trip}: these two boxes charge ${usd2(charge)}. Type the crew and vehicle costs above to see what it costs us.`;
+      ? `${rule} Type the crew and vehicle costs above to see what ${trip} costs us. ${floor}`
+      : `For ${trip}: these two boxes charge ${usd2(charge)}. Type the crew and vehicle costs above to see what it costs us. ${floor}`;
   if (charge == null)
-    return `${rule} For ${trip}: it costs us ${usd2(cost)}, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more.`;
+    return `${rule} For ${trip}: it costs us ${usd2(cost)}, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more. ${floor}`;
   return charge < cost
-    ? `For ${trip}: these two boxes come to ${usd2(charge)}. It costs us ${usd2(cost)}, so it is charged ${usd2(cost)}. ${rule}`
-    : `For ${trip}: these two boxes charge ${usd2(charge)}. It costs us ${usd2(cost)}.`;
+    ? `For ${trip}: these two boxes come to ${usd2(charge)}. It costs us ${usd2(cost)}, so it is charged ${usd2(cost)}. ${rule} ${floor}`
+    : `For ${trip}: these two boxes charge ${usd2(charge)}. It costs us ${usd2(cost)}. ${floor}`;
 }
 
 export interface PlanPrice {
@@ -392,8 +415,6 @@ export interface PlanPrice {
   travel: number;
   /** What the customer pays for the year: list + travel, to the dollar. */
   price: number;
-  /** Half the yearly price, billed at each of the two visits (the first takes the odd dollar). */
-  per_visit: [number, number];
   trips: number;
   /** What the year costs JBK at this drive, as the costing sheet builds it. */
   cost: number;
@@ -458,7 +479,6 @@ export function roofCareQuote(
         const trips = tripsPerYear(s, p);
         const travel = perTrip * trips;
         const price = dollars(list + travel);
-        const first = Math.ceil(price / 2);
         return {
           plan: p,
           name: PLAN_NAMES[p],
@@ -467,7 +487,6 @@ export function roofCareQuote(
           // each was rounded on its own and the two could be a dollar off the price).
           travel: price - dollars(list),
           price,
-          per_visit: [first, price - first],
           trips,
           cost: dollars(cost[p]),
           profit: price - dollars(cost[p]),

@@ -226,7 +226,8 @@ export function FromTicketPhotosButton({
       <Button
         type="button"
         variant="outline"
-        className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+        // A thumb (44 px) on a phone; the office's size from 640 px up.
+        className={compact ? "h-[44px] px-3 text-sm sm:h-10" : "h-11 text-base"}
         disabled={pickable.length === 0}
         title={
           pickable.length === 0
@@ -363,7 +364,7 @@ export function AddItemPicturesButton({
       <Button
         type="button"
         variant="outline"
-        className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+        className={compact ? "h-[44px] px-3 text-sm sm:h-10" : "h-11 text-base"}
         aria-label={`${itemLabel}: add pictures`}
         title="Add new pictures to this item — on a phone, the camera or the camera roll"
         onClick={() => fileRef.current?.click()}

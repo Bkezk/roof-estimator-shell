@@ -68,7 +68,8 @@ describe("11. the list price and the drive's share add up to the price", () => {
             cases++;
             if (p.list + p.travel !== p.price) off.push(`${sqft}/${hours}/${miles}/${p.plan}`);
             expect(p.travel).toBeGreaterThanOrEqual(0);
-            expect(p.per_visit[0] + p.per_visit[1]).toBe(p.price);
+            // Nov 20: the two halves per visit are gone (a plan is paid for the year up front).
+            expect(Number.isInteger(p.price)).toBe(true);
           }
         }
     expect(cases).toBe(6 * 8 * 7 * 3);

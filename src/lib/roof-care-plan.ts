@@ -153,6 +153,36 @@ export interface PlanRefund {
   due: number;
   sent_on: string | null;
   ref: string | null;
+  /** Each change a manager made to it (Nov 20), oldest first. Absent on an older read. */
+  changes?: RefundChange[];
+}
+
+/** One change a manager made to a refund that was owed. */
+export interface RefundChange {
+  from: number;
+  to: number;
+  reason: string;
+  by_name: string;
+  on: string;
+}
+
+/**
+ * Card money that has to go back to the customer (Nov 20; roof_care_card_payments): a payment
+ * for a plan already paid, for a plan that had ended, one that did not cover what was owed, or
+ * the part of a payment over what was owed.
+ */
+export interface PlanCardBack {
+  id: string;
+  /** What is owed back of it. */
+  owed: number;
+  /** Why: "paid_already", "ended", "short", or "over" for the part over what was owed. */
+  why: "paid_already" | "ended" | "short" | "over";
+  /** The card processor's own reference of the payment. */
+  ref: string;
+  paid_on: string;
+  /** What was owed for the plan year when it came in; null when not kept. */
+  was_owed: number | null;
+  sent_back: { on: string; ref: string | null; by_name: string } | null;
 }
 
 export type PlanStatus = "awaiting_payment" | "active" | "ended";
@@ -235,6 +265,11 @@ export interface RoofCarePlan {
    * (null otherwise), and its reference. Null when there was none.
    */
   card_paid?: { on: string; amount: number | null; ref: string | null } | null;
+  /**
+   * Card money to send back for this plan, sent or not (Nov 20). Null for a reader who does
+   * not see invoices; absent on an older read.
+   */
+  card_back?: PlanCardBack[] | null;
   /** The customer's email, and what has been sent to it (Nov 19). Absent on an older read. */
   email?: PlanEmail;
   /**
@@ -522,6 +557,47 @@ export function planInvoiceLineWords(plan: unknown): string {
   return `${planName(plan)} plan, one year: two inspections with a photo report after each`;
 }
 
+// ── A first inspection pushed too far (owner, Nov 20: "go with ... 14") ─────────────────────
+//
+// The second inspection is at least four months after the first, in a window with two weeks
+// left. With "first inspection in 250 days" it fell after the plan's last day: its ticket was
+// never made. Such a number of days is refused, on the sign-up and by the database
+// (roof_care_second_fits, roof_care_max_first_days: the same rule, the same test days).
+
+/** Does the second inspection start on or before the plan's last day? */
+export function secondFits(d: { second: Window; renews: string }): boolean {
+  return d.second.from <= d.renews;
+}
+
+/** The largest number of days the first inspection can be pushed back for a plan signed today. */
+export function maxFirstDays(today: string): number {
+  let max = 0;
+  for (let n = 1; n <= 365; n++) {
+    const d = planDates(today, "days", n);
+    if (d && secondFits(d)) max = n;
+  }
+  return max;
+}
+
+/** The refusal, in the database's own words. */
+export const firstDaysTooFar = (max: number): string =>
+  `The second inspection would fall after the plan ends. Choose ${max} days or fewer, or pick the inspection window.`;
+
+/**
+ * What is wrong with the first inspection's days, or null. A number that is not 1 to 365 has its
+ * own line on the form; "today" and "in the inspection window" always fit.
+ */
+export function firstDaysProblem(
+  today: string,
+  first: FirstVisit | null,
+  days: number | null,
+): string | null {
+  if (first !== "days" || days == null) return null;
+  const d = planDates(today, "days", days);
+  if (!d || secondFits(d)) return null;
+  return firstDaysTooFar(maxFirstDays(today));
+}
+
 /** When the first inspection is, counted from the payment: for the plan that is waiting. */
 export function firstVisitWords(first: FirstVisit, days: number | null): string {
   if (first === "now") return "First inspection: as soon as the payment is received.";
@@ -604,14 +680,139 @@ export function refundLines(w: RefundWorked): string[] {
   return out;
 }
 
-/** "Refund owed: $650.00." / "Refund of $650.00 sent Nov 20, 2026 (check 2001)." */
+/**
+ * "Refund owed: $612.00." / "Refund of $612.00 sent Nov 20, 2026 (check 2001)." / "No refund is
+ * owed." for one a manager changed to nothing.
+ */
 export function refundStatusWords(r: PlanRefund): string {
-  if (!(r.due > 0)) return "";
+  if (!(r.due > 0)) return r.changes?.length ? "No refund is owed." : "";
   if (!r.sent_on) return `Refund owed: ${cents(r.due)}.`;
   return `Refund of ${cents(r.due)} sent ${longDay(r.sent_on)}${r.ref ? ` (${r.ref})` : ""}.`;
 }
 export const REFUND_MARK_SENT = "Mark the refund sent";
 export const REFUND_BAD_AMOUNT = "Type the refund, 0 or more, and no more than was paid";
+
+// ── A manager changes a refund that is owed (owner, Nov 20: "go with ... new issue 2") ──────
+//
+// His example: the plan ended early, the site worked out an amount to send back, and then the
+// customer's own check for the year bounced. A manager sets the refund to 0 with the reason
+// "check bounced". Every change is kept: what it was, what it is, why, who and when.
+
+export const REFUND_CHANGE = "Change refund";
+export const REFUND_CHANGE_SAVE = "Save the new refund";
+export const REFUND_CHANGE_REASON_NEEDED = "Type why the refund is changed";
+export const REFUND_CHANGE_HELP =
+  "For a manager or an admin. Type what is owed back now, 0 for nothing, and why. It cannot be more than was paid for the plan year. The old amount, the reason, your name and the day are kept.";
+export const REFUND_SENT_NO_CHANGE = "A refund that is marked sent cannot be changed.";
+
+/** roof_care_plans.refund_changes, read strictly: anything that is not a change is left out. */
+export function readRefundChanges(x: unknown): RefundChange[] {
+  if (!Array.isArray(x)) return [];
+  const out: RefundChange[] = [];
+  for (const raw of x) {
+    if (!raw || typeof raw !== "object") continue;
+    const c = raw as Record<string, unknown>;
+    const from = Number(c["from"]);
+    const to = Number(c["to"]);
+    const on = typeof c["on"] === "string" ? c["on"] : "";
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !/^\d{4}-\d{2}-\d{2}$/.test(on)) continue;
+    out.push({
+      from,
+      to,
+      reason: typeof c["reason"] === "string" ? c["reason"].trim() : "",
+      by_name: typeof c["by_name"] === "string" ? c["by_name"].trim() : "",
+      on,
+    });
+  }
+  return out;
+}
+
+/** "Changed from $612.00 to $0.00 by Mo Manager on Nov 20, 2026: check bounced" */
+export function refundChangeWords(c: RefundChange): string {
+  return `Changed from ${cents(c.from)} to ${cents(c.to)}${c.by_name ? ` by ${c.by_name}` : ""} on ${longDay(c.on)}${c.reason ? `: ${c.reason}` : ""}`;
+}
+
+/** What is wrong with a new refund typed in the box, or null. `current`: what is owed now. */
+export function refundChangeProblem(
+  amountText: string,
+  reason: string,
+  current: number,
+): string | null {
+  const t = amountText.trim().replace(/[$,\s]/g, "");
+  const n = t === "" ? NaN : Number(t);
+  if (!Number.isFinite(n) || n < 0) return "Type the refund: 0 or more";
+  if (Math.round(n * 100) === Math.round(current * 100))
+    return `The refund is already ${cents(current)}.`;
+  if (!reason.trim()) return REFUND_CHANGE_REASON_NEEDED;
+  return null;
+}
+
+// ── Card money to send back (owner, Nov 20: "go with ... new issue 1") ──────────────────────
+
+export const CARD_BACK_MARK = "Mark sent back";
+
+/** What is owed back of a card payment row, and why; null when nothing of it is. */
+export function cardBackOf(row: {
+  id: string;
+  outcome: string;
+  reason: string | null;
+  amount: number | string;
+  over: number | string | null;
+  owed: number | string | null;
+  ref: string;
+  paid_on: string;
+  sent_back_on: string | null;
+  sent_back_ref: string | null;
+  sent_back_by_name?: string | null;
+}): PlanCardBack | null {
+  const sendBack = row.outcome === "send_back";
+  const owed = Math.round((Number(sendBack ? row.amount : row.over) || 0) * 100) / 100;
+  if (!(owed > 0)) return null;
+  const why =
+    !sendBack || !row.reason
+      ? "over"
+      : row.reason === "ended" || row.reason === "short"
+        ? row.reason
+        : "paid_already";
+  return {
+    id: row.id,
+    owed,
+    why,
+    ref: row.ref,
+    paid_on: row.paid_on,
+    was_owed: row.owed == null ? null : Number(row.owed),
+    sent_back: row.sent_back_on
+      ? {
+          on: row.sent_back_on,
+          ref: (row.sent_back_ref ?? "").trim() || null,
+          by_name: (row.sent_back_by_name ?? "").trim(),
+        }
+      : null,
+  };
+}
+
+const CARD_BACK_WHY: Record<PlanCardBack["why"], (c: PlanCardBack) => string> = {
+  paid_already: () => "The plan was already paid when this card payment came in.",
+  ended: () => "The plan had ended when this card payment came in.",
+  short: (c) =>
+    c.was_owed != null
+      ? `It did not cover the ${cents(c.was_owed)} owed, so the plan did not start on it.`
+      : "It did not cover what was owed, so the plan did not start on it.",
+  over: () => "The card was charged more than was owed for the plan year.",
+};
+
+/** Why a card payment goes back, in a sentence. */
+export const cardBackWhy = (c: PlanCardBack): string => CARD_BACK_WHY[c.why](c);
+
+/**
+ * "Card money to send back: $840.00. The plan was already paid when this card payment came in.
+ * Paid Nov 20, 2026, reference pi_9." / "Sent back $840.00 on Nov 21, 2026 (re_3) by Mo Manager."
+ */
+export function cardBackWords(c: PlanCardBack): string {
+  if (c.sent_back)
+    return `Sent back ${cents(c.owed)} on ${longDay(c.sent_back.on)}${c.sent_back.ref ? ` (${c.sent_back.ref})` : ""}${c.sent_back.by_name ? ` by ${c.sent_back.by_name}` : ""}.`;
+  return `Card money to send back: ${cents(c.owed)}. ${CARD_BACK_WHY[c.why](c)} Paid ${longDay(c.paid_on)}, reference ${c.ref}.`;
+}
 
 // ── Renewal (owner, Nov 19) ─────────────────────────────────────────────────────────────────
 //
@@ -630,6 +831,35 @@ export const RENEWAL_CHOICES = ["half_off", "full"] as const;
 export type RenewalChoice = (typeof RENEWAL_CHOICES)[number];
 export const asRenewalChoice = (v: unknown): RenewalChoice | null =>
   v === "half_off" || v === "full" ? v : null;
+
+/**
+ * What a plan that renews BY ITSELF may charge (owner, Nov 20: "we should probably ensure if
+ * someone ticks auto renew we dont charge them more if prices change and they auto renew w/o
+ * knowing"). Renewing by itself is not built yet (it comes with Stripe); this is the rule it has
+ * to go by, kept here so it is one rule and a tested one:
+ *
+ *   - never more than the yearly price the customer last agreed to (`agreed`: the price of the
+ *     plan year that is ending), UNLESS they were told the new price before the renewal day and
+ *     the telling is on record (`told`: the price they were told, and the day);
+ *   - told a price: never more than the price they were told;
+ *   - a price that went down is charged as it is today.
+ *
+ * `held`: the price went up and they were not told, so the old price is charged. The office
+ * should hear that, to tell the customer before the year after.
+ * A renewal a person makes by hand is not this: the box shows today's price and the database
+ * refuses a price that moved since it was shown (roof_care_renew, p_shown_price).
+ */
+export function autoRenewCharge(
+  agreed: number,
+  now: number,
+  told: { price: number; on: string } | null,
+  renewsOn: string,
+): { charge: number; held: boolean } {
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  const cap = told && told.on < renewsOn && told.price > agreed ? told.price : agreed;
+  if (now <= cap) return { charge: cents(now), held: false };
+  return { charge: cents(cap), held: true };
+}
 
 /** The renewal can be made today: the plan is in the last 60 days of its year, or past it. */
 export function renewalOpen(p: Pick<RoofCarePlan, "renews_on">, today: string): boolean {
@@ -1283,6 +1513,18 @@ function readFieldVisit(raw: unknown): PlanVisit | null {
 }
 
 /**
+ * The storm inspections a plan includes in its year (owner, Nov 20, break test 31): the number
+ * kept on the plan when it was signed, so a change of the setting reaches new plans only.
+ * `fromSettings` is used only for a plan from before the number was kept.
+ */
+export function ownStormCount(own: unknown, fromSettings: number | null | undefined): number {
+  const n =
+    typeof own === "number" ? own : typeof own === "string" && own.trim() ? Number(own) : NaN;
+  if (Number.isFinite(n) && n >= 0) return Math.round(n);
+  return Math.max(0, Math.round(fromSettings ?? 0));
+}
+
+/**
  * The database's answer for a technician as plans. Anything that is not a plan is left out,
  * never guessed. `stormIncluded`: the storm inspections a year each plan includes (the plan
  * settings).
@@ -1349,7 +1591,7 @@ export function readFieldPlans(
       ended_on: text(p["ended_on"]),
       ended_reason: text(p["ended_reason"]),
       visits,
-      storm_included: stormIncluded[plan] ?? 0,
+      storm_included: ownStormCount(p["storm_included"], stormIncluded[plan]),
       no_access: null,
       forecast_sent_on: text(p["forecast_sent_on"]),
       card_paid: null,

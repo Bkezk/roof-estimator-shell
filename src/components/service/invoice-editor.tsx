@@ -76,11 +76,19 @@ import { getAccount, listContacts } from "@/lib/crm.functions";
 import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { computedRateHint, rateIsComputed } from "@/lib/invoice-lines-view";
 import {
+  PLAN_LINES_LOOK_AGAIN,
   allowanceAutoNote,
   allowanceMoney,
+  tripWorkedOutWords,
   type InvoiceAllowance,
 } from "@/lib/roof-care-allowance";
-import { getInvoiceAllowance, setInvoiceAllowance } from "@/lib/roof-care-allowance.functions";
+import {
+  getInvoiceAllowance,
+  getInvoiceTripCharges,
+  reworkInvoicePlanLines,
+  setInvoiceAllowance,
+} from "@/lib/roof-care-allowance.functions";
+import { isTripLine } from "@/lib/roof-care-no-access";
 import {
   isPlanLine,
   TRAVEL_CHARGE_IT,
@@ -1105,6 +1113,36 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     lastPushed.current = editKey(headFrom(r.invoice), r.lines.map(lineFrom));
     ctx.applied(r);
   };
+  // The plan's lines are worked out again when the draft is opened (owner, Nov 20: break test,
+  // number 2): a draft kept the credit it was first given, also after another invoice of the
+  // plan was deleted and its credit came free. What changed is said, and stays on the screen
+  // until it is closed. Once per draft: this component is mounted once per draft.
+  const reworkFn = useServerFn(reworkInvoicePlanLines);
+  const reworked = useRef(false);
+  // Only the plan's own lines are replaced (they are the server's): whatever was typed in the
+  // moment the page opened stays, and is saved by the autosave as usual.
+  const takePlanLines = (r: InvoiceWithLines) => {
+    ctx.applied(r, { quiet: true });
+    const own = r.lines.filter(isPlanLine).map(lineFrom);
+    setLines((ls) => [...ls.filter((l) => !isPlanLine(l)), ...own]);
+  };
+  const takeRework = useRef(takePlanLines);
+  takeRework.current = takePlanLines;
+  useEffect(() => {
+    if (reworked.current || !job) return;
+    reworked.current = true;
+    reworkFn({ data: { id: inv.id } })
+      .then((w) => {
+        if (!w) return;
+        takeRework.current({ invoice: w.invoice, lines: w.lines });
+        if (w.note) toast.warning(w.note, { duration: Infinity, closeButton: true });
+      })
+      .catch((e: unknown) =>
+        toast.error(
+          `Could not check this invoice against its Roof Care plan: ${errText(e)}. It is checked again when it is finalised.`,
+        ),
+      );
+  }, [reworkFn, inv.id, job]);
   const rebuild = () =>
     run("rebuild", "Could not rebuild the invoice", async () => {
       // What is still waiting goes first, or it would land on top of the rebuilt lines.
@@ -1126,6 +1164,25 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     enabled: !!job,
     placeholderData: (prev) => prev,
   });
+  // A return trip's line stays the office's to price (owner, Nov 20: "this should be editable
+  // though no?"). What the trip was worked out at is read here, and said under the line when
+  // the typed price is something else, so a typo stands out. The plan's minor repairs pay
+  // toward the trip no more than the worked-out amount; the server holds that.
+  const tripChargesFn = useServerFn(getInvoiceTripCharges);
+  const tripKeys = lines
+    .filter(isTripLine)
+    .map((l) => l.source)
+    .join(",");
+  const tripChargesQ = useQuery({
+    queryKey: ["invoice-trip-charges", inv.id, tripKeys],
+    queryFn: () => tripChargesFn({ data: { id: inv.id } }),
+    enabled: !!job && tripKeys.length > 0,
+    placeholderData: (prev) => prev,
+  });
+  const tripNote = (l: LineDraft): string | null =>
+    isTripLine(l) && l.source
+      ? tripWorkedOutWords(r2((l.qty ?? 0) * (l.rate ?? 0)), tripChargesQ.data?.[l.source])
+      : null;
   // Roof Guard's leak calls with no travel charge (owner, Nov 19): where this invoice stands.
   const travelFn = useServerFn(getInvoiceTravel);
   const setTravelFn = useServerFn(setInvoiceTravel);
@@ -1165,6 +1222,21 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       async () => {
         await autosave.flush();
         await saveIfNeeded(true);
+        // Worked out again before it is final: when an amount moved, the invoice is shown as
+        // it now stands and nothing is finalised until the button is pressed again. (The
+        // server does the same by itself, whatever this page did.)
+        if (job) {
+          const w = await reworkFn({ data: { id: inv.id } });
+          if (w) takeServer({ invoice: w.invoice, lines: w.lines });
+          if (w?.note) {
+            setConfirm(null);
+            toast.warning(`${w.note} ${PLAN_LINES_LOOK_AGAIN}`, {
+              duration: Infinity,
+              closeButton: true,
+            });
+            return;
+          }
+        }
         const r = await finalizeFn({ data: { id: inv.id } });
         setConfirm(null);
         ctx.applied(r, { stage: true });
@@ -1499,6 +1571,14 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                         {l.on_date && (
                           <span className="mt-0.5 block text-xs text-muted-foreground">
                             {shortDay(l.on_date)}
+                          </span>
+                        )}
+                        {tripNote(l) && (
+                          <span
+                            className="mt-0.5 block text-xs font-medium text-amber-700 dark:text-amber-400"
+                            data-trip-worked-out
+                          >
+                            {tripNote(l)}
                           </span>
                         )}
                       </div>

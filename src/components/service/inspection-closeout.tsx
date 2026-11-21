@@ -111,7 +111,8 @@ function PhotoRoll({
     <Button
       type="button"
       variant="outline"
-      className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+      // A thumb (44 px) in the row too, as the repairs' camera buttons are (Nov 20).
+      className={compact ? "h-[44px] px-3 text-sm" : "h-11 text-base"}
       onClick={camera.onPhoto}
       aria-label={`${label}: photo`}
     >
@@ -262,6 +263,10 @@ export function InspectionChecklistStep({
             readOnly={false}
             onChange={draft.setItem}
             jobId={job.id}
+            // Pictures on any row (Nov 20): the row's own, with the ones still going up.
+            photoCount={(item) =>
+              itemPhotos(photos, item.id).length + camera.controls(item.id).pending.length
+            }
             extra={(item: InspectionItem) => (
               <PhotoRoll
                 photos={itemPhotos(photos, item.id)}

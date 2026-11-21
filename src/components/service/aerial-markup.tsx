@@ -51,7 +51,16 @@ import { isOffice } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { aerialImageryCanvas, canvasToPng } from "@/lib/aerial-png";
 import { placePercent, popoverSide, textBoxWidthCh } from "@/lib/aerial-place";
+import { scrollToClearSpot, sheetStyleFor } from "@/lib/keyboard-inset";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { listJobPhotos } from "@/lib/service-field.functions";
 import {
@@ -335,6 +344,35 @@ function AerialEditor({
     });
     setPending(null);
   };
+  // A phone (owner, Nov 20: "the tags pop up box is half off screen"). The tag's menu is 320 px
+  // wide and opened beside the tag, so on a phone half of it ran off the side of the screen; the
+  // text box was cut by the picture's edge the same way. On a phone both are now a sheet pinned
+  // to the bottom of the screen: always whole, lifted onto the keyboard when it is up
+  // (lib/keyboard-inset.ts), with thumb-sized buttons. The picture is not dimmed, the page moves
+  // up when the tag would sit under the sheet, and a tap on the picture moves the tag there.
+  const coarse = useMemo(() => coarsePointer(), []);
+  const phoneSheet = coarse && canEdit && !!pending;
+  const keyboard = useKeyboardInset(phoneSheet);
+  const spot = useRef<HTMLSpanElement | null>(null);
+  const sheetBox = useRef<HTMLDivElement | null>(null);
+  const sheetInput = useRef<HTMLInputElement | null>(null);
+  const pendingAt = pending ? `${pending.at[0]},${pending.at[1]}` : "";
+  useEffect(() => {
+    if (!phoneSheet) return;
+    // Once the sheet is laid out: move the page so the spot shows above it.
+    const id = window.setTimeout(() => {
+      const at = spot.current?.getBoundingClientRect();
+      const box = sheetBox.current;
+      if (!at || !box) return;
+      const by = scrollToClearSpot({
+        spotY: at.top,
+        sheetTop: window.innerHeight - keyboard.bottom - box.offsetHeight,
+        topLimit: 56,
+      });
+      if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+    }, 60);
+    return () => window.clearTimeout(id);
+  }, [phoneSheet, pendingAt, keyboard.bottom]);
   const [pickOpen, setPickOpen] = useState(false);
   // A property with no address at all (owner, Nov 19): the picker says so, and on a phone asks
   // for the phone's own position once, as it opens (aerial-no-address.ts). Never when an
@@ -608,7 +646,15 @@ function AerialEditor({
           areaDraw={areaDraw}
           onArea={areaInput}
           onView={setView}
-          onPlace={(kind, at) => setPending({ kind, at, label: "" })}
+          onPlace={(kind, at) =>
+            // On a phone a tap on the picture while the sheet is open moves the tag there and
+            // keeps what was typed (a wrong spot is one tap to put right).
+            setPending(
+              coarse && pending && pending.kind === kind
+                ? { ...pending, at }
+                : { kind, at, label: "" },
+            )
+          }
           flash={flash}
           draft={pending}
         >
@@ -617,6 +663,78 @@ function AerialEditor({
             (() => {
               const [x, y] = project(view, pending.at);
               const pos = placePercent(x, y, view);
+              if (coarse)
+                return (
+                  <>
+                    <span
+                      ref={spot}
+                      className="pointer-events-none absolute h-0 w-0"
+                      style={pos}
+                      data-spot="new-label"
+                    />
+                    {pending.kind === "text" && pending.label && (
+                      // The words where they will go, as they are typed in the sheet.
+                      <span
+                        className="pointer-events-none absolute -translate-y-1/2 whitespace-nowrap text-xl font-bold"
+                        style={{
+                          ...pos,
+                          color: colorHex(color),
+                          textShadow: "0 0 3px #000, 0 0 3px #000",
+                        }}
+                        aria-hidden
+                      >
+                        {pending.label}
+                      </span>
+                    )}
+                    <Sheet open modal={false} onOpenChange={(o) => !o && setPending(null)}>
+                      <SheetContent
+                        ref={sheetBox}
+                        side="bottom"
+                        className="max-h-[70vh] overflow-y-auto rounded-t-xl px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700 [&>button]:right-1 [&>button]:top-1 [&>button]:flex [&>button]:h-[44px] [&>button]:w-[44px] [&>button]:items-center [&>button]:justify-center"
+                        style={sheetStyleFor(keyboard)}
+                        data-sheet="place-label"
+                        data-kind={pending.kind}
+                        onOpenAutoFocus={(e) => {
+                          // A tag: no keyboard until the label box is tapped (the ready-made
+                          // labels are a thumb away and the picture stays in view). A text has
+                          // to be typed, so its box takes the keyboard at once.
+                          e.preventDefault();
+                          if (pending.kind === "text") sheetInput.current?.focus();
+                        }}
+                        onEscapeKeyDown={() => setPending(null)}
+                        onInteractOutside={(e) => {
+                          // A tap on the picture moves the tag (onPlace); the sheet stays.
+                          const t = e.target;
+                          if (t instanceof Node && stageBox.current?.contains(t)) {
+                            e.preventDefault();
+                            return;
+                          }
+                          // A tap elsewhere: keep a labelled one, drop an unlabelled one.
+                          e.preventDefault();
+                          addPending({ label: pending.label, note: "" });
+                        }}
+                      >
+                        <SheetHeader className="space-y-0 pr-8 text-left">
+                          <SheetTitle className="text-base">
+                            {pending.kind === "pin" ? "New tag" : "New text"}
+                          </SheetTitle>
+                          <SheetDescription className="text-xs">
+                            Goes where you tapped. Tap the picture to move it.
+                          </SheetDescription>
+                        </SheetHeader>
+                        <PlaceForm
+                          kind={pending.kind}
+                          phone
+                          inputRef={sheetInput}
+                          label={pending.label}
+                          onLabel={(label) => setPending({ ...pending, label })}
+                          onAdd={addPending}
+                          onCancel={() => setPending(null)}
+                        />
+                      </SheetContent>
+                    </Sheet>
+                  </>
+                );
               if (pending.kind === "pin")
                 return (
                   <Popover open modal={false}>
@@ -1448,17 +1566,108 @@ function PlaceForm({
   onLabel,
   onAdd,
   onCancel,
+  phone = false,
+  inputRef,
 }: {
   kind: "pin" | "text";
   label: string;
   onLabel: (label: string) => void;
   onAdd: (f: { label: string; note: string }) => void;
   onCancel: () => void;
+  /** The phone's bottom sheet (Nov 20): thumb-sized buttons, the note behind "Add a note". */
+  phone?: boolean | undefined;
+  inputRef?: React.RefObject<HTMLInputElement | null> | undefined;
 }) {
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
   const setLabel = onLabel;
   const max = kind === "pin" ? TAG_LABEL_MAX : TEXT_MAX;
   const ok = label.trim().length > 0;
+  if (phone)
+    return (
+      <form
+        className="space-y-2 pt-2"
+        data-form="place-label"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ok) onAdd({ label: label.trim(), note: note.trim() });
+        }}
+      >
+        {kind === "pin" && (
+          <div className="flex flex-wrap gap-1.5" data-chips="presets">
+            {TAG_PRESETS.map((t) => (
+              <Button
+                key={t}
+                type="button"
+                variant={label === t ? "default" : "outline"}
+                aria-pressed={label === t}
+                className="h-[44px] px-3 text-sm"
+                onClick={() => setLabel(t)}
+              >
+                {t}
+              </Button>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            id="aerial-label"
+            ref={inputRef}
+            aria-label={kind === "pin" ? "Label" : "Text"}
+            className="h-[44px] text-base"
+            maxLength={max}
+            value={label}
+            placeholder={kind === "pin" ? "Or type your own" : "e.g. Leak here"}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+          <Button
+            type="submit"
+            className="h-[44px] shrink-0 px-5"
+            disabled={!ok}
+            data-action="done"
+          >
+            {kind === "pin" ? "Add tag" : "Add text"}
+          </Button>
+        </div>
+        {kind === "pin" && (noteOpen || note) && (
+          <div className="space-y-1">
+            <Label htmlFor="aerial-note" className="text-xs">
+              Note
+            </Label>
+            <Textarea
+              id="aerial-note"
+              rows={2}
+              className="text-base"
+              maxLength={TAG_NOTE_MAX}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+        )}
+        <div className="flex gap-2">
+          {kind === "pin" && !noteOpen && !note && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-[44px] flex-1"
+              onClick={() => setNoteOpen(true)}
+              data-action="add-note"
+            >
+              Add a note
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-[44px] flex-1"
+            onClick={onCancel}
+            data-action="cancel"
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> Cancel
+          </Button>
+        </div>
+      </form>
+    );
   return (
     <form
       className="space-y-2"

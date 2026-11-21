@@ -411,9 +411,12 @@ describe("1. an inspection's share of the plan goes on one live invoice", () => 
       ["material", 0],
     ]);
   });
+  // Nov 20 (break test, number 6): the further invoice still has no second half, and the visit
+  // the plan covers is at no charge on it too. It used to be priced at the standard rates
+  // (the material here at 100).
   it("another invoice on the ticket is built from its work, without the half again", async () => {
     const env = build([{ id: INV, service_job_id: JOB, status: "draft" }], [planLine]);
-    expect(await totalsOf(env, null)).toEqual([["material", 100]]);
+    expect(await totalsOf(env, null)).toEqual([["material", 0]]);
   });
   it("the invoice that has the line keeps it when it is rebuilt", async () => {
     const env = build([{ id: INV, service_job_id: JOB, status: "draft" }], [planLine]);
@@ -707,7 +710,15 @@ describe("10. the yearly minor repairs: the sums", () => {
 });
 
 describe("10. the yearly minor repairs: on an invoice", () => {
-  const repair = { id: REPAIR, site_id: SITE, roof_care_visit_id: null, deleted_at: null };
+  // Nov 20 (break test, number 3): the plan is found by the day the work was done, so the
+  // repair has one. Dec 1, 2026 is inside the fixture plan's year (Nov 18, 2026 to Nov 18, 2027).
+  const repair = {
+    id: REPAIR,
+    site_id: SITE,
+    roof_care_visit_id: null,
+    deleted_at: null,
+    completed_at: "2026-12-01T15:00:00Z",
+  };
   const draft = (over: Record<string, unknown> = {}) => ({
     id: INV,
     status: "draft",
@@ -771,7 +782,15 @@ describe("10. the yearly minor repairs: on an invoice", () => {
     expect(await none({}, draft({ bill_to_vendor_id: "v" }))).toBeNull();
     expect(await none({}, draft({ service_job_id: null }))).toBeNull();
     expect(await none({ roof_care_plans: [planRow({ repair_allowance: 0 })] })).toBeNull();
-    expect(await none({ roof_care_plans: [planRow({ status: "ended" })] })).toBeNull();
+    // Nov 20 (break test, number 3): a plan that ended before the work was done has no say.
+    // One that ended after it still covers it (it used to have no say once it had ended).
+    expect(
+      await none({ roof_care_plans: [planRow({ status: "ended", ended_on: "2026-11-25" })] }),
+    ).toBeNull();
+    expect(
+      await none({ roof_care_plans: [planRow({ status: "ended", ended_on: "2027-03-01" })] }),
+    ).not.toBeNull();
+    expect(await none({ roof_care_plans: [planRow({ status: "awaiting_payment" })] })).toBeNull();
     expect(await none({ roof_care_plans: [] })).toBeNull();
     expect(await none({})).not.toBeNull();
   });
@@ -1071,8 +1090,10 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
       // (Later on Nov 19: the leak call's travel first, then the credit, in syncPlanLines.)
       "if (await syncPlanLines(sb, { ...inv, bill_to_vendor_id: billedTo }, lines)) {",
     );
+    // Nov 20 (break test, numbers 3 and 5): carried while its plan covers the work, held to
+    // what the plan can still cover here.
     expect(fn).toContain(
-      "? allowanceAfterChange(allowanceTaken(allowanceOld), billableBefore(lines))",
+      "if (where) allowanceKept = Math.min(allowanceAfterChange(taken, where.billable), where.left);",
     );
     expect(fn).toContain(
       "...(allowanceGone ? { care_allowance_choice: null, care_allowance_plan_id: null } : {}),",

@@ -79,7 +79,11 @@ import {
   servicePiece,
 } from "@/lib/service-materials";
 import { loadServiceMaterials } from "@/lib/service-materials.server";
-import { carePlanInvoiceLines, type CarePlanVisitRef } from "@/lib/roof-care-invoice";
+import {
+  carePlanFurtherLines,
+  carePlanInvoiceLines,
+  type CarePlanVisitRef,
+} from "@/lib/roof-care-invoice";
 import { isAllowanceLine } from "@/lib/roof-care-allowance";
 import { isPlanLine, isTravelWaiverLine } from "@/lib/roof-care-travel";
 import { carePlanLineSource } from "@/lib/roof-care-plan";
@@ -371,11 +375,18 @@ export async function buildLinesFromJob(
   // covered by it: listed at no charge, with their cost kept.
   // Once (owner, Nov 19: "Go with 1"): "Another invoice" on the same ticket used to open with
   // the plan's half on it again. When a live invoice of this ticket carries the plan's line, a
-  // further one is built as any ticket's is, from its time and materials at their own prices.
+  // further one is built without it.
+  // Every invoice of the ticket leaves the covered visit at no charge (owner, Nov 20: break
+  // test, number 6). A further invoice was built "as any ticket's is", so the inspection the
+  // plan covers was priced at the standard rates on it. Now its lines are the same covered
+  // lines the first invoice has, without the plan's own line and the return trips, which are
+  // billed once on the first.
   if (job.roof_care_visit_id) {
     const visit = await carePlanVisit(sb, job.roof_care_visit_id);
-    if (visit && !(await planLineElsewhere(sb, jobId, visit.id, opts.invoiceId ?? null)))
-      return carePlanInvoiceLines(lines, visit);
+    if (visit)
+      return (await planLineElsewhere(sb, jobId, visit.id, opts.invoiceId ?? null))
+        ? carePlanFurtherLines(lines)
+        : carePlanInvoiceLines(lines, visit);
   }
   return lines;
 }

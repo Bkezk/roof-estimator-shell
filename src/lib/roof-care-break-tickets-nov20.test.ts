@@ -182,6 +182,23 @@ const announceRpcs = (timer?: FakeRpc): Record<string, FakeRpc> => ({
     else tables["roof_care_ticket_notices"] = notices.filter((n) => !mine.includes(n));
     return mine.length;
   },
+  // Nov 20, evening (20261120840000): who was told which ticket, so a retry tells only who has
+  // not heard. Tested in roof-care-go-aheads-nov20-evening.test.ts.
+  roof_care_ticket_told_list: (args, tables) =>
+    (tables["roof_care_ticket_told"] ?? []).filter((r) =>
+      (args["p_ids"] as string[]).includes(String(r["service_job_id"])),
+    ),
+  roof_care_ticket_told_mark: (args, tables) => {
+    const rows = (tables["roof_care_ticket_told"] ??= []);
+    let n = 0;
+    for (const j of args["p_jobs"] as string[])
+      for (const who of args["p_people"] as string[]) {
+        if (rows.some((r) => r["service_job_id"] === j && r["profile_id"] === who)) continue;
+        rows.push({ service_job_id: j, profile_id: who });
+        n++;
+      }
+    return n;
+  },
   followup_sync_upsert:
     timer ??
     ((args) => ({
@@ -793,14 +810,16 @@ describe("30. wording, and the checklist on a narrow phone", () => {
     expect(block).toContain("a storm inspection beyond the ones the plan includes");
   });
 
-  it("the checklist row may narrow under 390 px only, and drops its buttons a line under 350 px", () => {
+  // Later on Nov 20 each row got a Pictures button (pictures on any row), so the label may now
+  // narrow and break after its slash on any phone (under 640 px), not only under 390 px.
+  it("the checklist row may narrow on a phone only, and drops its buttons a line under 390 px", () => {
     const src = flat("src/components/service/inspection-section.tsx");
-    expect(src).toContain('className="flex items-center gap-1 max-[350px]:flex-wrap"');
-    expect(src).toContain("disabled:cursor-default max-[390px]:min-w-0 max-[350px]:basis-auto");
-    expect(src).toContain('className="flex shrink-0 items-center gap-0.5 max-[350px]:ml-auto"');
-    expect(src).toContain("max-[390px]:min-w-0 max-[390px]:[overflow-wrap:anywhere]");
-    expect(src).toContain('<wbr className="min-[390px]:hidden" />');
-    // Every new class is behind a width: from 390 px up the row is as it was.
+    expect(src).toContain('className="flex items-center gap-1 max-[389px]:flex-wrap"');
+    expect(src).toContain("disabled:cursor-default max-sm:min-w-0 max-[389px]:basis-auto");
+    expect(src).toContain('className="flex shrink-0 items-center gap-0.5 max-[389px]:ml-auto"');
+    expect(src).toContain("max-sm:min-w-0 max-sm:[overflow-wrap:anywhere]");
+    expect(src).toContain('<wbr className="sm:hidden" />');
+    // Every new class is behind a width: on a computer the row is as it was.
     const row = src.slice(
       src.indexOf('data-line="checklist-row"') - 200,
       src.indexOf("N/A </Button>"),
@@ -820,7 +839,7 @@ describe("30. wording, and the checklist on a narrow phone", () => {
     const labels = [...html.matchAll(/data-line="checklist-label"[^>]*>(.*?)<\/span>/g)].map(
       (m) => m[1]!,
     );
-    expect(labels).toEqual(['Gutters/<wbr class="min-[390px]:hidden"/>downspouts', "Seams"]);
+    expect(labels).toEqual(['Gutters/<wbr class="sm:hidden"/>downspouts', "Seams"]);
     expect(html.match(/data-line="checklist-row"/g)).toHaveLength(2);
   });
 });

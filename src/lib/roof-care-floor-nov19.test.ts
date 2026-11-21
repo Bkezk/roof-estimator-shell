@@ -98,9 +98,12 @@ describe("the price of a small roof", () => {
     });
   });
 
-  it("is split into two halves of the floor price", () => {
+  // Nov 20: it used to be split into two halves "billed at each visit". A plan is paid for the
+  // year before it starts, so the quote holds the yearly price only.
+  it("is one yearly amount at the floor price", () => {
     const care = quote(S(), 3_000).plans.find((p) => p.plan === "care")!;
-    expect(care.per_visit).toEqual([700, 700]);
+    expect(care.price).toBe(1400);
+    expect("per_visit" in care).toBe(false);
   });
 
   it("still pays for a long drive on top of the floor price", () => {

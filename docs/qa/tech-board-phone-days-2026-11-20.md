@@ -1,5 +1,8 @@
 # Tech Board on a phone: the week as day cards (Nov 20)
 
+Later the same day the pop-up on a ticket became the easy way to move it: see
+`tech-board-phone-move-2026-11-20.md`.
+
 The owner: "on mobile on the tech board can we have the calendar be bigger and remove the list of
 technicians so we can see the days better and since once we drag a job up the technician list
 appears anyway?"

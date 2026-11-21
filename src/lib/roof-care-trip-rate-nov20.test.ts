@@ -96,15 +96,17 @@ describe("the price setup page", () => {
     };
     // (Later on Nov 20, the owner: "why is it charging less than it cost?" The line now says
     // the trip is never charged under its cost, where it used to say how far under it was.)
+    // (Nov 20, evening, break test 11: each line now ends by saying this round trip is the
+    // smallest return trip.)
     expect(tripChargeNote(s)).toBe(
-      "A return trip is never charged less than it costs us. For a round trip of 2.5 hours and 120 miles: it costs us $273.00, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more.",
+      "A return trip is never charged less than it costs us. For a round trip of 2.5 hours and 120 miles: it costs us $273.00, so it is charged at least that. Leave both boxes blank for that, or type rates here to charge more. This round trip is the smallest return trip: a property nearer than this is charged it too. A property further away is charged its own drive.",
     );
     expect(tripChargeNote({ ...s, trip_charge_per_hour: 100, trip_charge_per_mile: 0.5 })).toBe(
-      "For a round trip of 2.5 hours and 120 miles: these two boxes charge $310.00. It costs us $273.00.",
+      "For a round trip of 2.5 hours and 120 miles: these two boxes charge $310.00. It costs us $273.00. This round trip is the smallest return trip: a property nearer than this is charged it too. A property further away is charged its own drive.",
     );
     // Rates that come to less than the cost: the cost is charged, and it says so.
     expect(tripChargeNote({ ...s, trip_charge_per_hour: 80, trip_charge_per_mile: null })).toBe(
-      "For a round trip of 2.5 hours and 120 miles: these two boxes come to $200.00. It costs us $273.00, so it is charged $273.00. A return trip is never charged less than it costs us.",
+      "For a round trip of 2.5 hours and 120 miles: these two boxes come to $200.00. It costs us $273.00, so it is charged $273.00. A return trip is never charged less than it costs us. This round trip is the smallest return trip: a property nearer than this is charged it too. A property further away is charged its own drive.",
     );
     // No round trip typed yet: nothing is said.
     expect(tripChargeNote(emptyRoofCareSettings())).toBeNull();

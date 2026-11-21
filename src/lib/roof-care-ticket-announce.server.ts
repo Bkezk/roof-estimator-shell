@@ -17,6 +17,10 @@
  *      (roof_care_ticket_announce_finish … true). When a send fails, the tickets in it are given
  *      back (… false) and the next run tells them. A run that dies holds its tickets for 15
  *      minutes, then they are free again.
+ *   3. Who was told which ticket is written right after each notice (roof_care_ticket_told_mark,
+ *      20261120840000). The next run leaves out, for each person, what they have already heard
+ *      (owner, Nov 20: "go with 4"). Before, one group's failed notice made every group hear
+ *      the same tickets again.
  * Nothing goes out before 8:00 on the office's clock, nor on a Saturday or Sunday (owner, Nov
  * 13 and 18): tickets made on a weekend are told on Monday.
  *
@@ -35,6 +39,7 @@ import {
   careNoticeGroups,
   careOpenedNotice,
   careTicketTitle,
+  toldSet,
   type CareTicketToAnnounce,
 } from "@/lib/roof-care-ticket-announce";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
@@ -96,9 +101,18 @@ export async function dispatchCareTicketAnnouncements(
     // Nobody could be read (loadAlertContext never throws): not "nobody is to be told".
     if (!ctx.people.length) throw new Error("the people could not be read");
     const watchers = recipientsFor(ctx, "ticket.steps", null);
+    // Who has already heard which of these tickets, from a run that got part of the way. If
+    // that cannot be read the run goes on as if nobody had: a second notice beats none.
+    const heard = await rpc("roof_care_ticket_told_list", { p_ids: tickets.map((t) => t.id) });
+    if (heard.error)
+      console.error(
+        "Roof Care ticket announcement: could not read who was told already —",
+        heard.error.message,
+      );
+    const told = toldSet(heard.error ? [] : heard.data);
 
     // 1. The admins and the managers: one notice each for their tickets together.
-    for (const g of careNoticeGroups(tickets, watchers)) {
+    for (const g of careNoticeGroups(tickets, watchers, told)) {
       const [only] = g.tickets;
       const notice = careOpenedNotice(
         g.tickets,
@@ -110,7 +124,18 @@ export async function dispatchCareTicketAnnouncements(
         out.notices_sent++;
       } catch (e) {
         fail(g.tickets, "the Opened notice was not written", e);
+        continue;
       }
+      // Written: remember who heard, so a retry for another group's sake leaves them out.
+      const marked = await rpc("roof_care_ticket_told_mark", {
+        p_jobs: g.tickets.map((t) => t.id),
+        p_people: g.ids,
+      });
+      if (marked.error)
+        console.error(
+          "Roof Care ticket announcement: could not remember who was told —",
+          marked.error.message,
+        );
     }
 
     // 2. The technicians: the reminder timer of each ticket that has one, as for any new ticket,

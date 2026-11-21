@@ -352,9 +352,16 @@ describe("1. the draft saves itself (invoice-editor.tsx)", () => {
       draft.indexOf("const finalise = () =>"),
       draft.indexOf("const removeDraft"),
     );
-    expect(fin).toMatch(
-      /await autosave\.flush\(\);\s*await saveIfNeeded\(true\);\s*const r = await finalizeFn/,
+    // Nov 20 (break test, number 2): between the save and the Finalise, the Roof Care plan's
+    // lines are worked out again; when an amount moved the page stops there and shows it.
+    expect(fin).toMatch(/await autosave\.flush\(\);\s*await saveIfNeeded\(true\);/);
+    expect(fin.indexOf("await saveIfNeeded(true);")).toBeLessThan(
+      fin.indexOf("const w = await reworkFn({ data: { id: inv.id } });"),
     );
+    expect(fin.indexOf("const w = await reworkFn({ data: { id: inv.id } });")).toBeLessThan(
+      fin.indexOf("const r = await finalizeFn"),
+    );
+    expect(fin.indexOf("const w = await reworkFn({ data: { id: inv.id } });")).toBeGreaterThan(0);
     const rebuild = draft.slice(
       draft.indexOf("const rebuild = () =>"),
       draft.indexOf("const finalise"),

@@ -124,3 +124,16 @@ export function carePlanInvoiceLines<T extends object>(
     ...built.map((l, i) => carePlanCovered(l, i + 1 + trips.length)),
   ];
 }
+
+/**
+ * A further invoice on a plan inspection's ticket (owner, Nov 20: break test, number 6). The
+ * plan's own line is on the ticket's first invoice and is billed once, so it is not repeated
+ * here. The ticket's time, materials and purchase orders are covered by the plan on every
+ * invoice of the ticket, the first or a later one: listed at no charge with their cost kept,
+ * exactly as the first invoice lists them. Until now "Another invoice" priced the covered visit
+ * at the standard rates. The office types a price on a line that is beyond what the plan
+ * includes; a typed price is kept when the invoice is built again.
+ */
+export function carePlanFurtherLines<T extends object>(built: readonly T[]) {
+  return built.map((l, i) => carePlanCovered(l, i));
+}

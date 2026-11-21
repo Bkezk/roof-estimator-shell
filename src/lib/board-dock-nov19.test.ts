@@ -198,7 +198,9 @@ describe("the screen", () => {
   it("everything that worked before is still there: the days, the tray, the details pop-up", () => {
     expect(phone).toContain("data-drop={p.dispatch ? dayKey(d) : undefined}");
     expect(phone).toContain("data-drop={p.dispatch ? RAIL_KEY : undefined}");
-    expect(phone).toContain('data-peek="move-button"');
+    // Nov 20, later: the pop-up's Move button is gone; its choices are open at once.
+    expect(phone).toContain('data-peek="move"');
+    expect(phone).toContain('data-peek="save-move"');
   });
 });
 

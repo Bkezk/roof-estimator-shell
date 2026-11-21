@@ -27,6 +27,7 @@ import {
   HOLD_MS,
   carried,
   edgeScrollAfterWait,
+  ghostCentre,
   lift,
   move,
   press,
@@ -85,7 +86,11 @@ export function useHoldDrag(opts: HoldDragOptions) {
       const ghost = () => o.current.ghost.current;
       const place = () => {
         const g = ghost();
-        if (g) g.style.transform = `translate3d(${state.x}px, ${state.y}px, 0)`;
+        if (!g) return;
+        // Centred on the finger, kept on the screen (the picture carries words).
+        const width = g.firstElementChild?.getBoundingClientRect().width ?? 0;
+        const x = ghostCentre(state.x, width, window.innerWidth);
+        g.style.transform = `translate3d(${x}px, ${state.y}px, 0)`;
       };
       const locate = () => {
         const hit = document.elementFromPoint(state.x, state.y)?.closest("[data-drop]");

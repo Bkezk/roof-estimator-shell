@@ -567,7 +567,6 @@ function TryABuilding({ settings }: { settings: RoofCareSettings }) {
                   <th className="pb-2 pr-4 font-medium">List price</th>
                   <th className="pb-2 pr-4 font-medium">Added for the drive</th>
                   <th className="pb-2 pr-4 font-medium">Price a year</th>
-                  <th className="pb-2 pr-4 font-medium">Billed at each visit</th>
                   <th className="pb-2 pr-4 font-medium">Cost</th>
                   <th className="pb-2 font-medium">Profit</th>
                 </tr>
@@ -581,10 +580,6 @@ function TryABuilding({ settings }: { settings: RoofCareSettings }) {
                       {p.travel > 0 ? `${money0(p.travel)} (${p.trips} trips)` : "Nothing"}
                     </td>
                     <td className="py-2 pr-4 font-semibold">{money0(p.price)}</td>
-                    <td className="py-2 pr-4">
-                      {money0(p.per_visit[0])}
-                      {p.per_visit[1] !== p.per_visit[0] ? ` then ${money0(p.per_visit[1])}` : ""}
-                    </td>
                     <td className="py-2 pr-4">{money0(p.cost)}</td>
                     <td className={`py-2 ${p.profit < 0 ? "font-semibold text-destructive" : ""}`}>
                       {money0(p.profit)}

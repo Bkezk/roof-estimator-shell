@@ -32,6 +32,7 @@ import {
   type AttTicket,
   type AttUntouched,
   type AttentionList,
+  type AttCareCardBack,
   type AttCareCarried,
   type AttCareExpired,
   type AttCareNoPayment,
@@ -44,6 +45,8 @@ import {
 } from "@/lib/owner-attention";
 import { readInChunks } from "@/lib/chunk-ids";
 import {
+  cardBackOf,
+  cardBackWhy,
   EXPIRED_LISTED_DAYS,
   isExpired,
   payWords,
@@ -247,6 +250,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       names[p.id] = (p.full_name ?? "").trim() || (p.email ?? "").trim();
 
     const care = await careVisitsOfPlans(sb, today);
+    const cardBack = await careCardBackOwed(sb);
     return attentionList({
       today,
       now: now.toISOString(),
@@ -266,6 +270,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careRefunds: care.refunds,
       careNoPayment: care.noPayment,
       careSizes: care.sizes,
+      careCardBack: cardBack,
       careRenewals: care.renewals,
       careCarried: care.carried,
       careExpired: care.expired,
@@ -278,6 +283,57 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
  * push-back carried past the plan year), and the ones done with their share of the plan on no
  * invoice.
  */
+/**
+ * Card money that has to go back to a customer and is not marked sent back (owner, Nov 20). The
+ * plan it came in for may have ended long ago, so this is read on its own, not from the plans
+ * in force.
+ */
+export async function careCardBackOwed(sb: Sb): Promise<AttCareCardBack[]> {
+  const { data: cards, error } = await sb
+    .from("roof_care_card_payments")
+    .select(
+      "id, plan_id, outcome, reason, amount, over, owed, ref, paid_on, sent_back_on, sent_back_ref, sent_back_by_name",
+    )
+    .is("sent_back_on", null)
+    .order("paid_on", { ascending: true });
+  if (error) throw new Error(`Roof Care card payments: ${error.message}`);
+  const owed = (cards ?? []).flatMap((c) => {
+    const back = cardBackOf(c);
+    return back ? [{ plan_id: c.plan_id, back }] : [];
+  });
+  if (!owed.length) return [];
+  const plans = await readInChunks([...new Set(owed.map((o) => o.plan_id))], (chunk) =>
+    sb.from("roof_care_plans").select("id, plan, site_id, account_id").in("id", chunk),
+  );
+  const [sites, accounts] = await Promise.all([
+    readInChunks([...new Set(plans.map((p) => p.site_id))], (chunk) =>
+      sb.from("crm_sites").select("id, name").in("id", chunk),
+    ),
+    readInChunks([...new Set(plans.map((p) => p.account_id))], (chunk) =>
+      sb.from("crm_accounts").select("id, name").in("id", chunk),
+    ),
+  ]);
+  const planOf = new Map(plans.map((p) => [p.id, p]));
+  const siteName = new Map(sites.map((x) => [x.id, (x.name ?? "").trim()]));
+  const accountName = new Map(accounts.map((x) => [x.id, (x.name ?? "").trim()]));
+  return owed.flatMap(({ plan_id, back }) => {
+    const p = planOf.get(plan_id);
+    if (!p) return [];
+    const where = [siteName.get(p.site_id), accountName.get(p.account_id)].filter(Boolean);
+    return [
+      {
+        payment_id: back.id,
+        site_id: p.site_id,
+        title: `${planName(p.plan)} · ${where[0] ?? "Property"}${where[1] ? ` (${where[1]})` : ""}`,
+        amount: back.owed,
+        ref: back.ref,
+        paid_on: back.paid_on,
+        why: cardBackWhy(back),
+      },
+    ];
+  });
+}
+
 async function careVisitsOfPlans(
   sb: Sb,
   today: string,

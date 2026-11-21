@@ -336,7 +336,15 @@ then said: "we need some rules so the worst case on roof guard … doesnt happen
 **Not built yet, all with Stripe:**
 
 1. A pay link or QR code at the sign-up.
-2. Renewing by itself, its notice to the office, and its discount in dollars.
+2. Renewing by itself, its notice to the office, and its discount in dollars. **A rule it has
+   to keep (the owner, Nov 20):** "we should probably ensure if someone ticks auto renew we dont
+   charge them more if prices change and they auto renew w/o knowing". A plan that renews by
+   itself never charges more than the yearly price the customer last agreed to, unless they
+   were told the new price before the renewal day and the telling is on record; told a price,
+   never more than that price; a price that went down is charged as it is. The rule is written
+   and tested as `autoRenewCharge()` in `src/lib/roof-care-plan.ts`, for the Stripe work to
+   call. When the old price is charged because nobody told them, the office has to hear it. Not
+   decided yet: how many days before the renewal the customer has to be told.
 3. Changing plans: an upgrade pays the difference and takes effect at once; a downgrade takes
    effect at the next plan year.
 
@@ -516,7 +524,8 @@ cannot get on the roof.
   renewal treats it as theirs, not ours. The admins and managers get one notice, so the
   inspection gets a new day. The ticket itself is not moved.
 - The trip rate is worked as travel is on a service invoice: the hours of the plan's own round
-  trip (`roof_care_plans.drive_hours`, or the baseline drive when the plan has none), at the
+  trip (`roof_care_plans.drive_hours`), and never less than the round trip the list price covers
+  (Nov 20, evening: see "Go-aheads of Nov 20, evening"), at the
   standard travel rate of the technician plus that of each helper of the crew (the Service rates
   page, and the crew size on the plan setup page). No rate is in the code. When a rate is blank
   the amount is not worked out, the screen says so, and the office adds the charge by hand.
@@ -603,6 +612,92 @@ here. The trials and the browser run are in `docs/qa/roof-care-break-fixes-plan-
   size of 0 or below and a drive below zero have their own words. Two presses in the same
   instant are one sign-up and one message.
 
+## Go-aheads of Nov 20, evening
+
+The owner: "go with 2, 11, 25, 31 ( we should probably ensure if someone ticks auto renew we
+dont charge them more if prices change and they auto renew w/o knowing)", "go with 4" (the 8:00
+notice), and "why does it say billed at each visit?". Record:
+`docs/qa/roof-care-go-aheads-2026-11-20-evening.md`. Number 2 (a draft invoice's credit) is in
+its own record.
+
+- **11. The smallest return trip.** A return trip after a visit we could not do is worked on the
+  property's own round trip, and never less than the round trip the list price covers (the two
+  baseline boxes on the price page): the larger hours, and the larger miles, each on its own.
+  Then as before: the higher of what the rates come to and what the trip costs us. A property
+  next door is charged the baseline trip; one further away its own. `roof_care_trip_charge()`
+  decides; `returnTripDrive()` in `src/lib/roof-care-price.ts` is the same rule for the page's
+  note.
+- **25. The database refuses nonsense itself.** `roof_care_price()` refuses a roof size or a
+  drive that is not a real number, a round trip over 24 hours or 2,000 miles, and a roof over
+  100,000,000 sq ft. The sign-up (`roof_care_sign_up_await_payment`) refuses the same drive, any
+  terms text that is not a terms version, a sign-up with no check or card picked, and, with the
+  price the screen showed (`p_shown_price`, which the site's server sends), a plan at any other
+  price. None of it could be reached from the screens, which check first.
+- **31. Settings changed during a plan's year.**
+  - The storm inspections a plan includes are kept on the plan when it is signed or renewed
+    (`roof_care_plans.storm_included`), as the minor repairs amount and the leak calls already
+    were. A change of the setting reaches new plans and renewals only. Plans from before were
+    filled in once from the setting of that day.
+  - What a return trip is charged and what a further storm inspection is billed keep following
+    today's settings: they are prices of work not yet done.
+  - The free visit we could not do starts again each plan year. Unchanged.
+  - A renewal paid before the old year is over: the new plan is in force at once, the old one
+    ends as "Renewed" that day, and the new year is dated from the old year's last day to one
+    year after it (`roof_care_start`). No day is lost and none is given twice. What the new
+    year includes can be used from the payment. The receipt says "Your new plan year starts …"
+    and the plan says "Paid. The plan year starts …". A renewal paid on or after the old year's
+    last day is dated from the payment.
+  - Refunds stay by inspections done. Return trips and a billed storm inspection keep using the
+    minor repairs amount first. Unchanged.
+- **Renewing by itself:** the price rule above, under "Not built yet, all with Stripe".
+- **The 8:00 notice does not repeat.** Who was told about which site-made ticket is kept
+  (`roof_care_ticket_told`), written right after each notice. When one group's notice fails and
+  the tickets are told again on the next run, the people who already heard are left out.
+- **"Billed at each visit" is gone** from Try a building on the price page. It was left from
+  before a plan was paid for the year up front (Nov 19). The yearly price is what is charged.
+
+Later the same evening the owner added: "go with ... 14, new issue 1, new issue 2".
+
+- **14. A first inspection pushed too far.** The second inspection is at least four months
+  after the first, in a window with two weeks left. A number of days whose second inspection
+  would start after the plan's last day is refused: a red line under the days box says "The
+  second inspection would fall after the plan ends. Choose N days or fewer, or pick the
+  inspection window.", with the largest number that works that day, and the button stays off.
+  The database refuses the same (`roof_care_second_fits`, `roof_care_max_first_days`,
+  the sign-up function); `maxFirstDays()` and `firstDaysProblem()` in
+  `src/lib/roof-care-plan.ts` are the same rule, tested on the same days. The days are counted
+  from the payment, which can come after the signing. If the number no longer fits then, the
+  payment is not refused: `roof_care_start` brings the first inspection forward to the last day
+  that fits and the plan keeps that number. "Today", "in the inspection window" and a renewal
+  always fit.
+- **A manager can change a refund that is owed (new issue 2).** On the property page, on the
+  plan's card of an ended plan, beside "Mark the refund sent": "Change refund", for a manager or
+  an admin. The new amount is 0 or more and never more than was paid for the plan year; a
+  reason is required; a refund marked sent cannot be changed. Every change is kept on the plan
+  and shown ("Changed from … to … by … on …: reason"; `roof_care_plans.refund_changes`,
+  `roof_care_change_refund`). The owner's example: the plan ended early, an amount to send back
+  was worked out, then the customer's own check bounced: the manager sets it to 0 with the
+  reason "check bounced". What follows by itself: the Needs attention row goes at 0, the Roof
+  Care income on the Owner page takes off the new amount (nothing at 0), and the payment on the
+  plan's invoice, which is held "while that refund stands", can come off at 0.
+- **Card money to send back can be marked sent back (new issue 1).** A card payment that has to
+  go back (a plan already paid, a plan that had ended, a payment that did not cover what was
+  owed, the part over what was owed) is on the Owner page's Needs attention list, red from the
+  first day, until a manager or an admin marks it on the plan's card: "Mark sent back", with
+  the day and a reference. Who marked it is kept (`roof_care_card_sent_back`,
+  `roof_care_card_payments.sent_back_by_name`). It matters once Stripe is on.
+
+**The owner's other answers of Nov 20, for the record.**
+
+- A technician keeps seeing the minor repairs amount a plan includes, not what is used: "keep,
+  they can see that".
+- Roof Guard's "no trip charge" goes to the first two repair invoices of the plan year, whatever
+  the call was: "yes this is correct".
+- An inspection pushed past the plan's last day, and the trips a plan's price is built on: no
+  change asked for.
+- The Google Routes key is in and proven: Try a building on the price page says "by road, from
+  Google".
+
 ## Still to build
 
 **Do not forget step 4.** The owner, Nov 18: "we'll work on 3 later but dont forget".
@@ -617,8 +712,8 @@ here. The trials and the browser run are in `docs/qa/roof-care-break-fixes-plan-
 5. ~~The terms on the sign-up.~~ Done, Nov 18.
 6. **The tick boxes of services** on the request, once the owner has settled the list.
 7. ~~The roof's size from the building's outline.~~ Done, Nov 19: offered on the sign-up.
-8. **An "Opened" notice** for a ticket the morning check makes. Today it shows as unassigned work
-   and the "Nobody is on it" reminder covers it.
+8. ~~An "Opened" notice for a ticket the morning check makes.~~ Done, Nov 20: the 8:00 run
+   announces them (`src/lib/roof-care-ticket-announce.server.ts`).
 
 ## The terms: agreed
 

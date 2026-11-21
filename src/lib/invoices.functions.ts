@@ -58,8 +58,10 @@ import { stampSent } from "@/lib/invoice-sent";
 import {
   ALLOWANCE_UNANSWERED,
   allowanceAfterChange,
+  allowancePlanOf,
   allowanceTaken,
   allowanceUnanswered,
+  PLAN_LINES_LOOK_AGAIN,
   billableBefore,
   isAllowanceLine,
 } from "@/lib/roof-care-allowance";
@@ -289,6 +291,22 @@ async function finalizeDraft(
   // The ticket's stage as loaded with the bundle (loadBundle reads it fresh for this call).
   const stageProblem = finalizeStageProblem(ofTicket(b.invoice) ? b.job?.stage : null);
   if (stageProblem) throw new Error(stageProblem);
+  // The Roof Care plan's lines are worked out again first (owner, Nov 20: break test, number
+  // 2). A draft kept the credit it was first given: when another invoice of the plan was then
+  // deleted its credit came free, this draft still took the old amount, and Finalise accepted
+  // it. Now the draft is saved with what is true and, when an amount moved, the Finalise stops
+  // and says what changed: nobody finalises a total they have not seen. Whatever the screen
+  // did, this runs here (Send on a draft comes this way too).
+  if (ofTicket(b.invoice)) {
+    const { reworkDraftPlanLines } = await import("@/lib/roof-care-allowance.functions");
+    const again = await reworkDraftPlanLines(sb, b.invoice, b.lines);
+    if (again?.note) throw new Error(`${again.note} ${PLAN_LINES_LOOK_AGAIN}`);
+    if (again) {
+      // Rows tidied and no amount moved: go on with the invoice as it now stands.
+      const { loadBundle } = await import("@/lib/invoices.server");
+      b = await loadBundle(sb, b.invoice.id);
+    }
+  }
   // A repair at a property whose Roof Care plan has minor repairs left (owner, Nov 19): the
   // office answers on the invoice whether it uses the plan, before it is final. Asked here, ahead
   // of the PDF, so nothing is stored for an invoice that is refused; the database refuses it too.
@@ -936,9 +954,23 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     // (Nov 19): it is carried over, held to what the rebuilt invoice bills. With nothing left to
     // cover it goes, and the question is open again.
     const allowanceOld = (oldLines ?? []).filter(isAllowanceLine);
-    const allowanceKept = allowanceOld.length
-      ? allowanceAfterChange(allowanceTaken(allowanceOld), billableBefore(lines))
-      : 0;
+    // One rule for the plan's two lines (owner, Nov 20: break test, number 3). The credit is
+    // carried while its plan covers the day this ticket's work was done, also after the plan
+    // has ended, and held to what the plan can still cover here (the trips at what they were
+    // worked out at, number 5). A plan that is read and does not cover the work gives nothing:
+    // the line is not carried. The leak call's line is put back by the same rule just below
+    // (withPlanAllowance); until now it was lost on a rebuild after the plan ended while the
+    // credit stayed.
+    let allowanceKept = 0;
+    if (allowanceOld.length) {
+      const { invoiceAllowanceOf, planLineOutside } =
+        await import("@/lib/roof-care-allowance.functions");
+      const taken = allowanceTaken(allowanceOld);
+      const where = await invoiceAllowanceOf(sb, inv, lines);
+      if (where) allowanceKept = Math.min(allowanceAfterChange(taken, where.billable), where.left);
+      else if (!(await planLineOutside(sb, inv.service_job_id, allowancePlanOf(allowanceOld[0]!))))
+        allowanceKept = allowanceAfterChange(taken, billableBefore(lines));
+    }
     if (allowanceKept > 0) {
       const from = allowanceOld[0]!;
       lines.push({

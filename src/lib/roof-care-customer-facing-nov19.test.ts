@@ -165,7 +165,9 @@ describe("what each plan includes, as the customer reads it", () => {
     // (Nov 19, night: the site's side is built; the reminder now lists what turns it on.)
     expect(agents).toContain("is sent to Stripe checkout");
     expect(agents).toContain("`STRIPE_WEBHOOK_SECRET`");
-    expect(agents).toContain("`GOOGLE_MAPS_API_KEY`");
+    // Nov 20: the Google Routes key is proven (Try a building said "by road, from Google"), so
+    // it came off the list. The two that are still waiting stay.
+    expect(agents).not.toContain("`GOOGLE_MAPS_API_KEY` in Lovable Cloud");
     expect(agents).toContain("`RESEND_API_KEY`");
   });
 });
@@ -290,7 +292,9 @@ describe("one plan to a property, and what it has given", () => {
     const down = fakeSupabase({}, { rpcs: { roof_care_benefits: () => "nonsense" } });
     expect(await readPlanBenefits(down.db as never)).toBeNull();
     const f = flat(read("src/lib/roof-care-plan.functions.ts"));
-    expect(f).toContain("storm_included: benefits?.[plan].storm ?? 0,");
+    // Nov 20 (break test 31): the plan's own number as signed; the settings only for a plan
+    // from before the number was kept.
+    expect(f).toContain("storm_included: ownStormCount(p.storm_included, benefits?.[plan].storm),");
     const sql = flat(read("supabase/migrations/20261119960000_roof_care_agreement_email.sql"));
     // What the customer is told is for anyone signed in; the settings stay the admins'.
     expect(sql).toContain(

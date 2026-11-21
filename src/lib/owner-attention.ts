@@ -94,6 +94,7 @@ export type AttentionKind =
   | "care_plan_refund"
   | "care_plan_no_payment"
   | "care_plan_size"
+  | "care_plan_card_back"
   | "care_plan_renewal"
   | "care_plan_carried"
   | "care_plan_expired";
@@ -319,6 +320,27 @@ export interface AttCareRefund {
 }
 
 /**
+ * Card money that has to go back to a customer and is not marked sent back (owner, Nov 20:
+ * "go with ... new issue 1"). A card payment for a plan already paid, for one that had ended,
+ * one that did not cover what was owed, or the part of a payment over what was owed. Listed
+ * until a manager or an admin marks it sent back on the property.
+ */
+export interface AttCareCardBack {
+  payment_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** What is owed back. */
+  amount: number;
+  /** The card processor's reference of the payment. */
+  ref: string;
+  /** The day the payment came in. */
+  paid_on: string | null;
+  /** Why it goes back, in a sentence (cardBackWords' middle). */
+  why: string;
+}
+
+/**
  * A Roof Care plan priced on a roof size typed by hand, where the map had none to check it
  * against (owner, Nov 20: break test, number 4). Listed until a manager or an admin confirms
  * the size on the property.
@@ -426,6 +448,8 @@ export interface AttentionIn {
   careNoPayment?: readonly AttCareNoPayment[];
   /** Roof Care plans priced on a size nobody checked against the map (Nov 20). */
   careSizes?: readonly AttCareSize[];
+  /** Card money still to send back to a customer (Nov 20). */
+  careCardBack?: readonly AttCareCardBack[];
   /** Roof Care plans in the last 60 days of their year, or past it (Nov 19). */
   careRenewals?: readonly AttCareRenewal[];
   /** Inspections carried into a renewed year, not yet done (Nov 19). */
@@ -1003,6 +1027,27 @@ export function attentionList(i: AttentionIn): AttentionList {
       age,
       ageText: days(age),
       tone: age > 14 ? "red" : "amber",
+      amount: v.amount,
+      href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // Card money that has to go back to a customer (Nov 20), until it is marked sent back. It is
+  // somebody else's money: red from the first day.
+  for (const v of i.careCardBack ?? []) {
+    if (!(v.amount > 0)) continue;
+    const age = v.paid_on && YMD.test(v.paid_on) ? Math.max(0, daysBetween(v.paid_on, today)) : 0;
+    rows.push({
+      key: `care_plan_card_back:${v.payment_id}`,
+      group: "office",
+      kind: "care_plan_card_back",
+      tag: "Roof Care",
+      title: v.title,
+      why: `A card payment has to go back to the customer. ${v.why} Reference ${v.ref}. Send it back, then a manager or an admin marks it sent back on the property.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: "red",
       amount: v.amount,
       href: `/properties/${v.site_id}`,
     });

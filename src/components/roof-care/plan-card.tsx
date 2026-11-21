@@ -117,6 +117,7 @@ import {
   planBadge,
   PLAN_MAKE_INVOICE,
   PLAN_NO_INVOICE,
+  firstDaysProblem,
   planDates,
   planEmailLines,
   planName,
@@ -125,8 +126,16 @@ import {
   pushPreview,
   REFUND_BAD_AMOUNT,
   REFUND_MARK_SENT,
+  REFUND_CHANGE,
+  REFUND_CHANGE_HELP,
+  REFUND_CHANGE_SAVE,
+  refundChangeProblem,
+  refundChangeWords,
   refundLines,
   refundStatusWords,
+  CARD_BACK_MARK,
+  cardBackWords,
+  type PlanCardBack,
   RENEW_LABEL,
   RENEWAL_CHANGE_NEEDS_MANAGER,
   RENEWAL_NOTE,
@@ -174,6 +183,8 @@ import {
   endRoofCarePlan,
   listRoofCarePlans,
   markRoofCareRefundSent,
+  changeRoofCareRefund,
+  markRoofCareCardSentBack,
   pushBackRoofCareVisit,
   removeRoofCareStorm,
   renewRoofCarePlan,
@@ -733,9 +744,17 @@ export function RoofCareCard({
       data-roof-care={active ? active.plan : waiting ? "awaiting" : expired ? "expired" : "none"}
     >
       {plan && <RoofCareBadge plan={plan} today={today} />}
-      {plan.status === "ended" && plan.refund && plan.refund.due > 0 && (
-        <RefundOwed siteId={siteId} plan={plan} />
-      )}
+      {plan.status === "ended" &&
+        plan.refund &&
+        (plan.refund.due > 0 || (plan.refund.changes?.length ?? 0) > 0) && (
+          <RefundOwed siteId={siteId} plan={plan} manager={manager} />
+        )}
+      {/* Card money that has to go back, of any plan of this property (Nov 20). */}
+      {q.data
+        .flatMap((p) => p.card_back ?? [])
+        .map((c) => (
+          <CardBackLine key={c.id} siteId={siteId} back={c} manager={manager} today={today} />
+        ))}
       {expired && (
         <div className="space-y-1 text-xs" data-roof-care-expired>
           <p className="font-medium text-amber-800 dark:text-amber-300">{expiredWords(expired)}</p>
@@ -1512,9 +1531,40 @@ function PlanEmailLine({
 // ── The refund of a plan ended early (owner, Nov 19) ────────────────────────────────────────
 
 /** The refund a manager confirmed, until it is marked sent. Only for those who see invoices. */
-function RefundOwed({ siteId, plan }: { siteId: string; plan: RoofCarePlan }) {
+function RefundOwed({
+  siteId,
+  plan,
+  manager,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  manager: boolean;
+}) {
   const refresh = useRefresh(siteId);
   const [ref, setRef] = useState("");
+  // A manager changes what is owed (Nov 20): the customer's own check bounced, say.
+  const [changing, setChanging] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [why, setWhy] = useState("");
+  const changeFn = useServerFn(changeRoofCareRefund);
+  const change = useMutation({
+    mutationFn: () =>
+      changeFn({
+        data: {
+          plan_id: plan.id,
+          amount: Number(amount.trim().replace(/[$,\s]/g, "")),
+          reason: why.trim(),
+        },
+      }),
+    onSuccess: () => {
+      refresh();
+      setChanging(false);
+      setAmount("");
+      setWhy("");
+      toast.success("Refund changed");
+    },
+    onError: (e) => toast.error(`Could not change the refund: ${errText(e)}`, { duration: 20_000 }),
+  });
   const sentFn = useServerFn(markRoofCareRefundSent);
   const sent = useMutation({
     mutationFn: () => sentFn({ data: { plan_id: plan.id, on: easternYmd(), ref: ref.trim() } }),
@@ -1534,7 +1584,12 @@ function RefundOwed({ siteId, plan }: { siteId: string; plan: RoofCarePlan }) {
       >
         {refundStatusWords(r)}
       </p>
-      {!r.sent_on && (
+      {(r.changes ?? []).map((c, i) => (
+        <p key={i} className="text-muted-foreground" data-refund-change>
+          {refundChangeWords(c)}
+        </p>
+      ))}
+      {!r.sent_on && r.due > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <Input
             aria-label="Check number or note for the refund"
@@ -1554,6 +1609,131 @@ function RefundOwed({ siteId, plan }: { siteId: string; plan: RoofCarePlan }) {
           >
             {sent.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
             {REFUND_MARK_SENT}
+          </Button>
+        </div>
+      )}
+      {manager && !r.sent_on && !changing && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={() => setChanging(true)}
+          data-action="roof-care-refund-change"
+        >
+          {REFUND_CHANGE}
+        </Button>
+      )}
+      {manager && !r.sent_on && changing && (
+        <div className="space-y-1 rounded-md border p-2" data-refund-change-form>
+          <p className="text-muted-foreground">{REFUND_CHANGE_HELP}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              aria-label="The refund owed now, in dollars"
+              inputMode="decimal"
+              placeholder="New refund"
+              className="h-7 w-28 text-xs"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <Input
+              aria-label="Why the refund is changed"
+              placeholder="Why (for example: check bounced)"
+              className="h-7 w-64 text-xs"
+              value={why}
+              onChange={(e) => setWhy(e.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={!!refundChangeProblem(amount, why, r.due) || change.isPending}
+              onClick={() => change.mutate()}
+              data-action="roof-care-refund-change-save"
+            >
+              {change.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              {REFUND_CHANGE_SAVE}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => setChanging(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+          {amount.trim() !== "" && refundChangeProblem(amount, why, r.due) && (
+            <p className="text-destructive" data-refund-change-problem>
+              {refundChangeProblem(amount, why, r.due)}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Card money to send back (owner, Nov 20) ─────────────────────────────────────────────────
+
+/** One amount of card money that has to go back, with a manager's "Mark sent back". */
+function CardBackLine({
+  siteId,
+  back,
+  manager,
+  today,
+}: {
+  siteId: string;
+  back: PlanCardBack;
+  manager: boolean;
+  today: string;
+}) {
+  const refresh = useRefresh(siteId);
+  const [on, setOn] = useState(today);
+  const [ref, setRef] = useState("");
+  const sentFn = useServerFn(markRoofCareCardSentBack);
+  const sent = useMutation({
+    mutationFn: () => sentFn({ data: { payment_id: back.id, on, ref: ref.trim() } }),
+    onSuccess: () => {
+      refresh();
+      toast.success("Marked sent back");
+    },
+    onError: (e) => toast.error(`Could not mark it sent back: ${errText(e)}`, { duration: 20_000 }),
+  });
+  return (
+    <div className="space-y-1 text-xs" data-roof-care-card-back={back.sent_back ? "sent" : "owed"}>
+      <p className={back.sent_back ? "text-muted-foreground" : "font-medium text-destructive"}>
+        {cardBackWords(back)}
+      </p>
+      {!back.sent_back && manager && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            aria-label="The day the money was sent back"
+            className="h-7 w-36 text-xs"
+            max={today}
+            value={on}
+            onChange={(e) => setOn(e.target.value)}
+          />
+          <Input
+            aria-label="Reference of the money sent back"
+            placeholder="Reference or note"
+            className="h-7 w-44 text-xs"
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={!on || on > today || sent.isPending}
+            onClick={() => sent.mutate()}
+            data-action="roof-care-card-sent-back"
+          >
+            {sent.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+            {CARD_BACK_MARK}
           </Button>
         </div>
       )}
@@ -1978,6 +2158,8 @@ function SignUpDialog({
   });
   const dayCount = wholeNumber(days);
   const dates = first ? planDates(today, first, first === "days" ? dayCount : null) : null;
+  // Pushed so far that the second inspection would fall after the plan ends (Nov 20).
+  const daysTooFar = firstDaysProblem(today, first, dayCount);
   const answer = offer?.price ?? null;
   const plans = answer?.ready && !answer.custom_quote ? answer.plans : [];
   const stale = pricedFor !== size;
@@ -1992,7 +2174,7 @@ function SignUpDialog({
     stale,
     plan: !!plan && plans.some((o) => o.plan === plan),
     first: !!first,
-    daysBad: first === "days" && !dates,
+    daysBad: first === "days" && (!dates || !!daysTooFar),
     pay: !!payMethod,
     name: agreedBy.trim().length > 0,
     emailBad,
@@ -2281,6 +2463,11 @@ function SignUpDialog({
                   ))}
                   {first === "days" && !dates && (
                     <p className="text-xs text-destructive">Type the days, 1 to 365.</p>
+                  )}
+                  {daysTooFar && (
+                    <p className="text-xs text-destructive" data-sign-line="days-too-far">
+                      {daysTooFar}
+                    </p>
                   )}
                   {dates && (
                     <p className="text-xs text-muted-foreground" data-sign-line="dates">

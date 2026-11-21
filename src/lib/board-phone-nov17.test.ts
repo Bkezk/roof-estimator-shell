@@ -319,8 +319,9 @@ describe("the phone board's screen", () => {
   });
   it("says how in a line", () => {
     // (Nov 20: the technicians are no longer on the page until a ticket is held.)
+    // (Nov 20, later: the owner still found moving a ticket hard, so the taps are said first.)
     expect(PHONE_BOARD_HINT).toBe(
-      "Hold a ticket and the technicians come up: drag it onto one, or onto a day. Tap a ticket for its details.",
+      "Tap a ticket, tap the technician or the day it goes to, then the button at the bottom. Or hold a ticket and drag it there.",
     );
     expect(page).toContain("PHONE_BOARD_HINT");
   });
@@ -442,7 +443,10 @@ describe("the details pop-up", () => {
     // Open ticket returns to this week's board on Back.
     expect(phone).toContain('search={{ id: j.id, from: "board", week: props.week }}');
     expect(phone).toContain("const canMove = props.dispatch && movableOnBoard(j);");
-    expect(phone).toMatch(/\{canMove && \(\s*<Button[\s\S]*?data-peek="move-button"/);
+    // Nov 20, later: Move is no longer a button to press first. The choices are open at once
+    // at the top (board-phone-move-nov20.test.ts), only for a ticket that may move.
+    expect(phone).toMatch(/\{canMove && \(\s*<div className="[^"]*" data-peek="move">/);
+    expect(phone).not.toContain('data-peek="move-button"');
     expect(phone).toMatch(/\{phone && \(\s*<Button[\s\S]*?href=\{`tel:\$\{phone\}`\}/);
     expect(phone).toMatch(/\{mapQuery && \(\s*<Button[\s\S]*?href=\{mapsUrl\(mapQuery\)\}/);
   });
@@ -466,6 +470,9 @@ describe("the details pop-up", () => {
   });
   it("a failed read says so in plain words and still leaves Open ticket", () => {
     expect(phone).toContain("Could not load the special instructions and contact (");
-    expect(phone).toContain("Open\n            the ticket to see them.");
+    // (Nov 20, later: the same words, one step further in.)
+    expect(phone.replace(/\s+/g, " ")).toContain(
+      "Could not load the special instructions and contact ({plainErrText(more.error)}). Open the ticket to see them.",
+    );
   });
 });

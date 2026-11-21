@@ -15,8 +15,10 @@
  *     chosen), back onto the tray to unassign it, or onto "A week earlier" / "A week later",
  *     which show at the top of the screen while a ticket is held (hooks/use-hold-drag.ts). A
  *     swipe still scrolls.
- *   - A tap opens the ticket's details over the board, with Open ticket, Move (pick a technician
- *     and a day without dragging), Call and Directions. Closing it leaves the board where it was.
+ *   - A tap opens the ticket over the board. For a person who may move tickets, Move or reassign
+ *     is at the top, already open (owner, Nov 20): the days and the technicians as buttons, then
+ *     one button at the bottom that says what it will do. Open ticket, Call and Directions are
+ *     in the same bar. Closing it leaves the board where it was.
  *
  * Every move is the same single write the desk grid makes (assignServiceJob, through the board's
  * own mutation in board-page.tsx), so the same rules, the same history and the same notices apply.
@@ -40,6 +42,7 @@ import {
   Phone,
   Plus,
   SquareArrowOutUpRight,
+  Undo2,
   UserRound,
 } from "lucide-react";
 
@@ -73,16 +76,21 @@ import {
   isDayKey,
   mapsUrl,
   movableOnBoard,
+  moveWords,
+  moveWordsLine,
   parseDropKey,
   peekAddressLines,
   peekMapQuery,
   peekPhone,
   planDrop,
   startDayIndex,
+  weekDays,
+  weekWords,
+  DRAG_NO_CHANGE,
   type MovePlan,
 } from "@/lib/board-phone";
 import { plainErrText } from "@/lib/plain-error";
-import { boardDay, inStageSince } from "@/lib/service-schedule";
+import { boardDay, inStageSince, shiftDays } from "@/lib/service-schedule";
 import {
   SERVICE_STAGES,
   STAGE_LABELS,
@@ -230,6 +238,20 @@ export function PhoneBoard(p: PhoneBoardProps) {
     people.flatMap((r) => p.cellJobs(r.id, d).map((job) => ({ job, who: r.name })));
   const peek = peekId ? p.jobs.find((j) => j.id === peekId) : undefined;
   const expanded = trayOpen;
+  // What letting go of the lifted ticket here will do, in the words the pop-up's button uses.
+  const dropPlan = dragged ? planDrop(dragged, parseDropKey(p.over)) : null;
+  const dropWords =
+    dragged && dropPlan
+      ? moveWords(
+          dragged,
+          dropPlan,
+          dropPlan.technician_id
+            ? (people.find((r) => r.id === dropPlan.technician_id)?.name ??
+                (dropPlan.technician_id === dragged.technician_id ? dragged.technician_name : null))
+            : null,
+          dragged.technician_name ?? null,
+        )
+      : null;
   // Prev and Next scroll off the top of a phone, so a lifted ticket that can move a week (it has
   // a technician and a day) is given two targets under the day buttons for as long as it is held.
   const weekTargets = p.dispatch && !!dragged?.technician_id && !!dragged.scheduled_date;
@@ -577,8 +599,22 @@ export function PhoneBoard(p: PhoneBoardProps) {
         data-board-ghost
         className="pointer-events-none fixed left-0 top-0 z-50 hidden"
       >
-        <div className="max-w-[70vw] -translate-x-1/2 -translate-y-[140%] truncate rounded-md border bg-card px-3 py-2 text-sm font-semibold shadow-xl ring-2 ring-primary">
-          {dragged ? `#${dragged.number} ${dragged.customer_name}` : ""}
+        {/* Two lines above the finger: the ticket, and what letting go here will do (Nov 20: the
+            finger covers the target it is on, so the words ride with the ticket). */}
+        <div
+          className="max-w-[80vw] -translate-x-1/2 -translate-y-[125%] rounded-md border bg-card px-3 py-2 text-sm shadow-xl ring-2 ring-primary"
+          data-ghost-says={dropWords ? "move" : "nothing"}
+        >
+          <span className="block truncate font-semibold" data-ghost-main>
+            {dropWords
+              ? dropWords.main
+              : dragged
+                ? `#${dragged.number} ${dragged.customer_name}`
+                : ""}
+          </span>
+          <span className="block truncate text-xs" data-ghost-words>
+            {dropWords ? dropWords.sub : DRAG_NO_CHANGE}
+          </span>
         </div>
       </div>
 
@@ -590,6 +626,7 @@ export function PhoneBoard(p: PhoneBoardProps) {
           today={p.today}
           dispatch={p.dispatch}
           techRows={p.techRows}
+          countOn={(id, d) => p.cellJobs(id, d).length}
           onMove={p.onMove}
           onClose={() => setPeekId(null)}
         />
@@ -639,7 +676,7 @@ function PhoneChip(props: {
       data-chip={j.id}
       data-movable={canDrag ? "1" : undefined}
       aria-label={`Ticket #${j.number} ${j.customer_name}, ${STAGE_LABELS[stage]}. ${
-        canDrag ? "Tap for details, hold to move." : "Tap for details."
+        canDrag ? "Tap to move it or see its details, hold to drag it." : "Tap for details."
       }`}
       onClick={() => props.onOpen(j.id)}
       onContextMenu={(e) => e.preventDefault()}
@@ -687,7 +724,14 @@ function PhoneChip(props: {
   );
 }
 
-/** The details pop-up: what the ticket is, and the four things to do with it. */
+/**
+ * The details pop-up. For a person who may move tickets it opens with Move or reassign at the
+ * top, already open (owner, Nov 20: "it seems difficult to reassign or move tickets when theyre
+ * already on the board"): the week's days and every technician as buttons, the ticket's own day
+ * and technician marked. A tap on one, then the one button in the bar at the bottom, which says
+ * in words what it will do. Until something is picked the bar holds Open ticket, Call and
+ * Directions. The bar never scrolls away.
+ */
 function TicketPeek(props: {
   job: Job;
   /** The week on the board (its Monday): the ticket's Back returns here. */
@@ -696,6 +740,8 @@ function TicketPeek(props: {
   today: string;
   dispatch: boolean;
   techRows: Row[];
+  /** How many tickets a technician has on a day of the board's week. */
+  countOn: (techId: string, ymd: string) => number;
   onMove: (job: Job, plan: MovePlan) => void;
   onClose: () => void;
 }) {
@@ -720,208 +766,320 @@ function TicketPeek(props: {
   });
   const phone = more.data ? peekPhone(more.data) : null;
 
-  const [moving, setMoving] = useState(false);
   const [tech, setTech] = useState(j.technician_id ?? "");
   const [date, setDate] = useState(j.scheduled_date ?? "");
+  // The week the day buttons show: the board's own to begin with, moved by the two arrows.
+  const [shown, setShown] = useState<string[]>(props.days);
+  const pickDate = (d: string) => {
+    setDate(d);
+    // A date typed in the box brings its own week to the buttons.
+    if (d && !shown.includes(d)) setShown(weekDays(d));
+  };
   const changed = tech !== (j.technician_id ?? "") || date !== (j.scheduled_date ?? "");
   const techOptions = [...props.techRows];
   if (j.technician_id && !techOptions.some((t) => t.id === j.technician_id))
     techOptions.push({ id: j.technician_id, name: j.technician_name ?? "Former assignee" });
+  const nameOf = (id: string) => techOptions.find((t) => t.id === id)?.name ?? null;
+  const words = changed
+    ? moveWords(
+        j,
+        { technician_id: tech || null, scheduled_date: date || null },
+        tech ? nameOf(tech) : null,
+        j.technician_name ?? (j.technician_id ? nameOf(j.technician_id) : null),
+      )
+    : null;
+  const putBack = () => {
+    setTech(j.technician_id ?? "");
+    setDate(j.scheduled_date ?? "");
+    setShown(props.days);
+  };
+  // What a technician's button says under the name: who has it now, else how busy that day is
+  // (known for the days of the board's week only).
+  const techNote = (id: string): string => {
+    const hasIt = id === j.technician_id;
+    if (date && props.days.includes(date)) return dockNote(props.countOn(id, date), hasIt);
+    return hasIt ? "has it now" : "";
+  };
+  const pick = "border-primary bg-primary text-primary-foreground";
+  const now = "border-primary/70 bg-primary/10";
 
   return (
     <Sheet open onOpenChange={(open) => !open && props.onClose()}>
       <SheetContent
         side="bottom"
         data-board-peek={j.id}
-        className="max-h-[88dvh] space-y-3 overflow-y-auto rounded-t-xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] [&>button:first-child]:right-2 [&>button:first-child]:top-2 [&>button:first-child]:flex [&>button:first-child]:h-[44px] [&>button:first-child]:w-[44px] [&>button:first-child]:items-center [&>button:first-child]:justify-center [&>button:first-child>svg]:h-5 [&>button:first-child>svg]:w-5"
+        className="flex max-h-[88dvh] flex-col gap-0 rounded-t-xl p-0 [&>button:first-child]:right-2 [&>button:first-child]:top-2 [&>button:first-child]:z-10 [&>button:first-child]:flex [&>button:first-child]:h-[44px] [&>button:first-child]:w-[44px] [&>button:first-child]:items-center [&>button:first-child]:justify-center [&>button:first-child>svg]:h-5 [&>button:first-child>svg]:w-5"
       >
-        <SheetTitle className="pr-8 text-left text-lg leading-snug">
-          #{j.number} · {j.customer_name}
-        </SheetTitle>
-        <SheetDescription className="sr-only">
-          Ticket details. Open ticket shows the whole ticket.
-        </SheetDescription>
-        <div className="flex flex-wrap items-center gap-2 text-xs" data-peek="facts">
-          <span
-            className={`rounded-md border px-2 py-0.5 font-semibold ${STAGE_TONES[toneKey].chip}`}
-          >
-            {toneKey === "en_route" || toneKey === "on_site"
-              ? FIELD_TONE_LABELS[toneKey]
-              : STAGE_LABELS[stage]}
-          </span>
-          {badge && <RateBadge kind={badge.kind} />}
-          {facts.length > 0 && <span className="font-medium">{facts.join(" · ")}</span>}
-        </div>
-
-        {(j.site_name || lines.length > 0) && (
-          <div className="flex items-start gap-2 text-sm" data-peek="place">
-            <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-            <div className="min-w-0">
-              {j.site_name && <p className="font-medium">{j.site_name}</p>}
-              {lines.map((l) => (
-                <p key={l}>{l}</p>
-              ))}
-            </div>
+        <div
+          data-peek="body"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 pb-3 pt-3"
+        >
+          <SheetTitle className="pr-10 text-left text-lg leading-snug">
+            #{j.number} · {j.customer_name}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            {canMove
+              ? "Move or reassign the ticket, then its details. Open ticket shows the whole ticket."
+              : "Ticket details. Open ticket shows the whole ticket."}
+          </SheetDescription>
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-peek="facts">
+            <span
+              className={`rounded-md border px-2 py-0.5 font-semibold ${STAGE_TONES[toneKey].chip}`}
+            >
+              {toneKey === "en_route" || toneKey === "on_site"
+                ? FIELD_TONE_LABELS[toneKey]
+                : STAGE_LABELS[stage]}
+            </span>
+            {badge && <RateBadge kind={badge.kind} />}
+            {facts.length > 0 && <span className="font-medium">{facts.join(" · ")}</span>}
           </div>
-        )}
 
-        <div className="flex items-start gap-2 text-sm" data-peek="who">
-          <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-          <p>
-            <span className="font-medium">{j.technician_name ?? "Nobody assigned"}</span>
-            {" · "}
-            {day ? dayShort(day) : "no day"}
-            {arrival && !facts.includes(arrival) ? ` · ${arrival}` : ""}
-          </p>
-        </div>
+          <div className="flex items-start gap-2 text-sm" data-peek="who">
+            <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <p>
+              <span className="font-medium">{j.technician_name ?? "Nobody assigned"}</span>
+              {" · "}
+              {day ? dayShort(day) : "no day"}
+              {arrival && !facts.includes(arrival) ? ` · ${arrival}` : ""}
+            </p>
+          </div>
 
-        {description && (
-          <p className="whitespace-pre-line text-sm" data-peek="description">
-            {description}
-          </p>
-        )}
-
-        {more.isLoading ? (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the special instructions and
-            contact…
-          </p>
-        ) : more.error ? (
-          <p className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
-            Could not load the special instructions and contact ({plainErrText(more.error)}). Open
-            the ticket to see them.
-          </p>
-        ) : (
-          <>
-            {more.data?.notes && (
-              <p
-                className="whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-50"
-                data-peek="instructions"
-              >
-                <span className="font-semibold">Special instructions: </span>
-                {more.data.notes}
+          {canMove && (
+            <div className="space-y-2 border-y py-2" data-peek="move">
+              <p className="flex items-center gap-1 text-sm font-semibold">
+                <ArrowRightLeft className="h-4 w-4" aria-hidden /> Move or reassign
               </p>
-            )}
-            {(more.data?.contact_name || phone) && (
-              <p className="flex items-center gap-2 text-sm" data-peek="contact">
-                <Phone className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-                <span>
-                  {more.data?.contact_name && (
-                    <span className="font-medium">{more.data.contact_name}</span>
-                  )}
-                  {more.data?.contact_name && phone ? " · " : ""}
-                  {phone}
-                </span>
-              </p>
-            )}
-          </>
-        )}
-
-        {moving ? (
-          <div className="space-y-3 rounded-lg border p-3" data-peek="move">
-            <div className="space-y-1">
-              <Label htmlFor="peek-tech">Technician</Label>
-              <select
-                id="peek-tech"
-                value={tech}
-                onChange={(e) => setTech(e.target.value)}
-                className="h-[46px] w-full rounded-md border bg-background px-3 text-[16px]"
-              >
-                <option value="">Nobody (unassigned)</option>
-                {techOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="peek-date">Day</Label>
-              <Input
-                id="peek-date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="h-[46px] text-[16px]"
-              />
-              <div className="grid grid-cols-7 gap-1" aria-label="This week">
-                {props.days.map((d, i) => (
-                  <button
-                    key={d}
+              {/* The days first: one row, so the technicians under it are on the screen too. */}
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Label htmlFor="peek-date">Day</Label>
+                  <span className="text-xs text-muted-foreground" data-peek="week-words">
+                    {weekWords(shown)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
                     type="button"
-                    data-peek-day={d}
-                    aria-pressed={date === d}
-                    onClick={() => setDate(d)}
-                    className={`flex min-h-[44px] flex-col items-center justify-center rounded-md border text-[11px] leading-tight ${
-                      date === d
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : d === props.today
-                          ? "border-primary/60 bg-primary/10"
-                          : "bg-card"
-                    }`}
+                    variant="outline"
+                    aria-label="The week before"
+                    data-peek="week-before"
+                    className="h-[46px] w-[46px] shrink-0 p-0"
+                    onClick={() => setShown(weekDays(shiftDays(shown[0]!, -7)))}
                   >
-                    <span>{DAY_NAMES[i]}</span>
-                    <span className="text-sm font-semibold">{dayNumber(d)}</span>
-                  </button>
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <Input
+                    id="peek-date"
+                    type="date"
+                    value={date}
+                    onChange={(e) => pickDate(e.target.value)}
+                    className="h-[46px] min-w-0 flex-1 text-[16px]"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-label="The week after"
+                    data-peek="week-after"
+                    className="h-[46px] w-[46px] shrink-0 p-0"
+                    onClick={() => setShown(weekDays(shiftDays(shown[0]!, 7)))}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div
+                  className="grid grid-cols-7 gap-[3px]"
+                  aria-label={`Days, ${weekWords(shown)}`}
+                >
+                  {shown.map((d, i) => {
+                    const own = d === j.scheduled_date;
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        data-peek-day={d}
+                        data-now={own ? "1" : undefined}
+                        aria-pressed={date === d}
+                        aria-label={`${dayShort(d)}${own ? ", its day now" : ""}`}
+                        onClick={() => setDate(d)}
+                        className={`flex min-h-[48px] flex-col items-center justify-center rounded-md border text-[11px] leading-tight ${
+                          date === d ? pick : own ? now : d === props.today ? "bg-muted" : "bg-card"
+                        }`}
+                      >
+                        <span>{DAY_NAMES[i]}</span>
+                        <span className="text-[15px] font-semibold">{dayNumber(d)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!date && <p className="text-xs text-muted-foreground">Pick a day to save.</p>}
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium leading-none" id="peek-tech-label">
+                  Technician
+                </p>
+                <div
+                  className="grid grid-cols-2 gap-[6px]"
+                  role="group"
+                  aria-labelledby="peek-tech-label"
+                >
+                  {[...techOptions, { id: "", name: "Nobody" }].map((t) => {
+                    const own = t.id === (j.technician_id ?? "");
+                    const note = t.id ? techNote(t.id) : own ? "nobody has it now" : "unassigned";
+                    return (
+                      <button
+                        key={t.id || "none"}
+                        type="button"
+                        data-peek-tech={t.id || "none"}
+                        data-now={own ? "1" : undefined}
+                        aria-pressed={tech === t.id}
+                        onClick={() => setTech(t.id)}
+                        className={`flex min-h-[46px] min-w-0 items-center gap-2 rounded-md border px-2 text-left ${
+                          tech === t.id ? pick : own ? now : "bg-card"
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 leading-tight">
+                          <span className="block truncate text-[15px] font-semibold">{t.name}</span>
+                          {note && (
+                            <span className="block truncate text-[11px] opacity-80">{note}</span>
+                          )}
+                        </span>
+                        {tech === t.id && <Check className="h-4 w-4 shrink-0" aria-hidden />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          {props.dispatch && !canMove && (
+            <p className="rounded-md border bg-muted/50 px-3 py-2 text-sm" data-peek="stays">
+              A ticket that is Done or later stays where it is on the board.
+            </p>
+          )}
+
+          {(j.site_name || lines.length > 0) && (
+            <div className="flex items-start gap-2 text-sm" data-peek="place">
+              <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0">
+                {j.site_name && <p className="font-medium">{j.site_name}</p>}
+                {lines.map((l) => (
+                  <p key={l}>{l}</p>
                 ))}
               </div>
-              {!date && <p className="text-xs text-muted-foreground">Pick a day to save.</p>}
             </div>
-            <div className="grid grid-cols-2 gap-2">
+          )}
+
+          {description && (
+            <p className="whitespace-pre-line text-sm" data-peek="description">
+              {description}
+            </p>
+          )}
+
+          {more.isLoading ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the special instructions and
+              contact…
+            </p>
+          ) : more.error ? (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
+              Could not load the special instructions and contact ({plainErrText(more.error)}). Open
+              the ticket to see them.
+            </p>
+          ) : (
+            <>
+              {more.data?.notes && (
+                <p
+                  className="whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-50"
+                  data-peek="instructions"
+                >
+                  <span className="font-semibold">Special instructions: </span>
+                  {more.data.notes}
+                </p>
+              )}
+              {(more.data?.contact_name || phone) && (
+                <p className="flex items-center gap-2 text-sm" data-peek="contact">
+                  <Phone className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span>
+                    {more.data?.contact_name && (
+                      <span className="font-medium">{more.data.contact_name}</span>
+                    )}
+                    {more.data?.contact_name && phone ? " · " : ""}
+                    {phone}
+                  </span>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* The bar: always on the screen. With a change picked it is the one button that saves
+            it, saying what it will do; with none it is the things to do with the ticket. */}
+        <div
+          data-peek="bar"
+          className="shrink-0 border-t bg-card px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        >
+          {canMove && changed ? (
+            <div className="flex items-stretch gap-2" data-peek="save-bar">
               <Button
-                className={PEEK_BUTTON}
+                className="h-auto min-h-[56px] min-w-0 flex-1 flex-col items-start justify-center gap-0 whitespace-normal px-3 py-1.5 text-left"
                 data-peek="save-move"
+                aria-label={words ? moveWordsLine(words) : "Pick a day to save"}
                 disabled={!changed || !date}
                 onClick={() => {
                   props.onMove(j, { technician_id: tech || null, scheduled_date: date || null });
                   props.onClose();
                 }}
               >
-                Save move
+                <span className="line-clamp-2 block w-full break-words text-[16px] font-semibold leading-tight">
+                  {!date ? "Pick a day to save" : (words?.main ?? "Save")}
+                </span>
+                {date && words && (
+                  <span className="line-clamp-2 block w-full break-words text-[13px] font-normal leading-tight opacity-90">
+                    {words.sub}
+                  </span>
+                )}
               </Button>
-              <Button variant="outline" className={PEEK_BUTTON} onClick={() => setMoving(false)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2" data-peek="actions">
-            <Button asChild className={PEEK_BUTTON}>
-              <Link to="/service" search={{ id: j.id, from: "board", week: props.week }}>
-                <SquareArrowOutUpRight className="mr-1 h-4 w-4" /> Open ticket
-              </Link>
-            </Button>
-            {canMove && (
               <Button
                 variant="outline"
-                className={PEEK_BUTTON}
-                data-peek="move-button"
-                onClick={() => setMoving(true)}
+                className="h-auto min-h-[56px] min-w-[46px] shrink-0 gap-1 px-3 text-[15px]"
+                data-peek="put-back"
+                aria-label="Put back: change nothing"
+                onClick={putBack}
               >
-                <ArrowRightLeft className="mr-1 h-4 w-4" /> Move
+                {/* A small phone has no room for the words beside the button that saves. */}
+                <Undo2 className="h-4 w-4 min-[360px]:hidden" aria-hidden />
+                <span className="max-[359px]:hidden">Put back</span>
               </Button>
-            )}
-            {phone && (
-              <Button asChild variant="outline" className={PEEK_BUTTON}>
-                <a href={`tel:${phone}`} data-peek="call">
-                  <Phone className="mr-1 h-4 w-4" /> Call
-                </a>
+            </div>
+          ) : (
+            <div className="flex gap-2" data-peek="actions">
+              <Button asChild className={`${PEEK_BUTTON} min-w-0 flex-1 px-2`}>
+                <Link to="/service" search={{ id: j.id, from: "board", week: props.week }}>
+                  <SquareArrowOutUpRight className="mr-1 h-4 w-4 max-[359px]:hidden" /> Open ticket
+                </Link>
               </Button>
-            )}
-            {mapQuery && (
-              <Button asChild variant="outline" className={PEEK_BUTTON}>
-                <a href={mapsUrl(mapQuery)} target="_blank" rel="noreferrer" data-peek="directions">
-                  <MapPin className="mr-1 h-4 w-4" /> Directions
-                </a>
-              </Button>
-            )}
-          </div>
-        )}
-        {props.dispatch && !canMove && !moving && (
-          <p className="text-xs text-muted-foreground">
-            A ticket that is Done or later stays where it is on the board.
-          </p>
-        )}
+              {phone && (
+                <Button asChild variant="outline" className={`${PEEK_BUTTON} shrink-0 px-3`}>
+                  <a href={`tel:${phone}`} data-peek="call">
+                    <Phone className="mr-1 h-4 w-4 max-[359px]:hidden" /> Call
+                  </a>
+                </Button>
+              )}
+              {mapQuery && (
+                <Button asChild variant="outline" className={`${PEEK_BUTTON} shrink-0 px-3`}>
+                  <a
+                    href={mapsUrl(mapQuery)}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-peek="directions"
+                  >
+                    <MapPin className="mr-1 h-4 w-4 max-[359px]:hidden" /> Directions
+                  </a>
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       </SheetContent>
     </Sheet>
   );

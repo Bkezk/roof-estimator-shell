@@ -161,11 +161,14 @@ describe("a building further than the list price covers pays for the extra drive
     expect(q.plans[0]!.profit).toBe(380); // trip 50, visit 160, cost 320
     expect(q.beyond_baseline).toBe(false);
   });
-  it("half is billed at each visit; an odd dollar goes on the first", () => {
-    expect(quote(S(), 10_000, far).plans[0]!.per_visit).toEqual([515, 515]);
+  // Nov 20: the two halves ("billed at each visit") are gone from this quote. A plan is paid
+  // for the year before it starts (Nov 19), and the owner asked why the Setup page still showed
+  // a half per visit. The yearly price is what is charged.
+  it("the yearly price is one amount: no half per visit", () => {
+    expect(quote(S(), 10_000, far).plans[0]!.price).toBe(1030);
     const odd = quote(S(), 10_050).plans[0]!;
     expect(odd.price).toBe(701);
-    expect(odd.per_visit).toEqual([351, 350]);
+    expect("per_visit" in odd).toBe(false);
   });
 });
 

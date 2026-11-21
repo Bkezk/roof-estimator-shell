@@ -246,9 +246,89 @@ export function dockNote(count: number, hasIt: boolean): string {
   return count === 0 ? "free" : `${count} ${count === 1 ? "ticket" : "tickets"}`;
 }
 
+// ---- Move or reassign by taps -------------------------------------------------------------------
+// Owner, Nov 20: "im still not thrilled with the tech board on mobile it seems difficult to
+// reassign or move tickets when theyre already on the board, i really need that to be a user
+// friendly as possible". Moving one that is on a day card took a hold and a carry to a block that
+// covers most of the screen, or a tap, Move, a drop-down list, and Save. Now a tap on a ticket
+// opens it with the week's days and every technician as buttons, already open: tap where it
+// goes, then the one button at the bottom, which says in words what it will do. The same words
+// ride above the finger while a ticket is dragged, so a finger that covers a target still shows
+// what letting go will do.
+
+/** The seven days, Monday first, of the week `ymd` is in. */
+export function weekDays(ymd: string): string[] {
+  const [y, m, d] = parts(ymd);
+  const fromMonday = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  const monday = shiftDays(ymd, -fromMonday);
+  return Array.from({ length: 7 }, (_, i) => shiftDays(monday, i));
+}
+
+/** A week in words: "Nov 16 to 22", or "Nov 30 to Dec 6" across two months. */
+export function weekWords(days: readonly string[]): string {
+  const first = days[0];
+  const last = days[days.length - 1];
+  if (!first || !last) return "";
+  const [, m1, d1] = parts(first);
+  const [, m2, d2] = parts(last);
+  return m1 === m2
+    ? `${MONTHS[m1 - 1]} ${d1} to ${d2}`
+    : `${MONTHS[m1 - 1]} ${d1} to ${MONTHS[m2 - 1]} ${d2}`;
+}
+
+export interface MoveWords {
+  /** What happens: "Give to Garry Peters", "Move to Tue, Nov 24", "Take it off Claude". */
+  main: string;
+  /** What stays or goes with it: "Same day: Fri, Nov 20", "Stays with Claude". */
+  sub: string;
+}
+
+/**
+ * What a move will do, in words, before it is saved: the button under the choices says it, and
+ * so does the ticket while it is dragged. Null when the move changes nothing. `toName` is the
+ * technician it goes to, `fromName` the one who has it now.
+ */
+export function moveWords(
+  job: MoveJob,
+  plan: MovePlan,
+  toName: string | null,
+  fromName: string | null,
+): MoveWords | null {
+  const tech = job.technician_id ?? null;
+  const day = job.scheduled_date ?? null;
+  const techChanged = (plan.technician_id ?? null) !== tech;
+  const dayChanged = (plan.scheduled_date ?? null) !== day;
+  if (!techChanged && !dayChanged) return null;
+  const to = plan.scheduled_date ? dayShort(plan.scheduled_date) : null;
+  if (!techChanged)
+    return {
+      main: to ? `Move to ${to}` : "Take its day off",
+      sub: tech ? `Stays with ${fromName ?? "its technician"}` : "Nobody assigned yet",
+    };
+  if (!plan.technician_id)
+    return {
+      main: `Take it off ${fromName ?? "its technician"}`,
+      sub: !to
+        ? "Unassigned, no day"
+        : dayChanged
+          ? `Unassigned, moves to ${to}`
+          : `Unassigned, still ${to}`,
+    };
+  return {
+    main: `Give to ${toName ?? "this technician"}`,
+    sub: !to ? "No day yet" : !dayChanged ? `Same day: ${to}` : day ? `Moves to ${to}` : `On ${to}`,
+  };
+}
+
+/** The same in one line, for a screen reader and the dragged ticket: "Give to Garry Peters. Same day: Fri, Nov 20." */
+export const moveWordsLine = (w: MoveWords): string => `${w.main}. ${w.sub}.`;
+
+/** Under a dragged ticket when letting go would change nothing. */
+export const DRAG_NO_CHANGE = "Let go to put it back";
+
 // ---- Words -------------------------------------------------------------------------------------
 export const PHONE_BOARD_HINT =
-  "Hold a ticket and the technicians come up: drag it onto one, or onto a day. Tap a ticket for its details.";
+  "Tap a ticket, tap the technician or the day it goes to, then the button at the bottom. Or hold a ticket and drag it there.";
 export const PHONE_BOARD_HINT_READ = "Who is where this week. Tap a ticket for its details.";
 
 /** What a move did, said once it is saved: "Ticket #6071: Garry Peters, Tue, Nov 17." */

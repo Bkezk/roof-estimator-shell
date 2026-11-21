@@ -37,16 +37,20 @@ import {
   asPlanKey,
   asPlanStatus,
   asRenewalChoice,
+  cardBackOf,
   carePlanLineSource,
   FIRST_VISIT_CHOICES,
   mapRoofSize,
+  ownStormCount,
   PAY_METHOD_NEEDED,
   PAY_METHODS,
   priceChangedLine,
   readFieldPlans,
   readPriceAnswer,
+  readRefundChanges,
   readsPlanTables,
   readRefundWorked,
+  REFUND_CHANGE_REASON_NEEDED,
   readRenewalOffer,
   RENEWAL_CHOICE_NEEDED,
   RENEWAL_CHOICES,
@@ -61,6 +65,7 @@ import {
   type AllowanceUse,
   type FirstVisit,
   type MapRoofSize,
+  type PlanCardBack,
   type PlanInvoiceRef,
   type PlanNoAccess,
   type PlanVisit,
@@ -251,7 +256,7 @@ export const roofCareMapSize = createServerFn({ method: "GET" })
   });
 
 const PLAN_SELECT =
-  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, forecast_sent_on, card_paid_on, card_paid_amount, card_paid_ref, size_map_sqft, size_unchecked, size_confirmed_on, size_confirmed_by_name" as const;
+  "id, account_id, site_id, plan, status, pay_first, plan_number, first_visit, first_days, starts_on, signed_on, renews_on, roof_sqft, price, price_estimated, repair_allowance, free_travel_calls, storm_included, pay_method, pay_note, refund_due, refund_sent_on, refund_ref, refund_changes, closed_out_on, closed_out_reason, renewed_from, renewal_choice, renewal_credit, agreed_by, sold_by_name, notes, ended_on, ended_reason, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, forecast_sent_on, card_paid_on, card_paid_amount, card_paid_ref, size_map_sqft, size_unchecked, size_confirmed_on, size_confirmed_by_name" as const;
 const VISIT_SELECT =
   "id, plan_id, kind, due_from, due_by, first_due_by, amount, push_reason, pushed_by_name, customer_asked, lost_on, skipped_on, skip_reason, skipped_by_name, drains_cleaned, gutters_cleaned, cleaning_note, cleaning_by_name, cleaning_at" as const;
 const TICKET_SELECT =
@@ -460,6 +465,26 @@ export async function plansOfSites(
         (missed ?? []).filter((n) => n.charged).map((n) => n.id),
       )
     : null;
+  // Card money that has to go back, sent or not (Nov 20). The office reads the table; anyone
+  // else is answered with no rows.
+  const cardBackOfPlan = new Map<string, PlanCardBack[]>();
+  if (money) {
+    const { data: cards, error: cErr } = await sb
+      .from("roof_care_card_payments")
+      .select(
+        "id, plan_id, outcome, reason, amount, over, owed, ref, paid_on, sent_back_on, sent_back_ref, sent_back_by_name",
+      )
+      .in(
+        "plan_id",
+        plans.map((p) => p.id),
+      )
+      .order("paid_on", { ascending: true });
+    if (cErr) throw new Error(`The plans' card payments: ${cErr.message}`);
+    for (const c of cards ?? []) {
+      const back = cardBackOf(c);
+      if (back) cardBackOfPlan.set(c.plan_id, [...(cardBackOfPlan.get(c.plan_id) ?? []), back]);
+    }
+  }
   const noAccessOf = new Map<string, PlanNoAccess[]>();
   for (const n of missed ?? []) {
     const list = noAccessOf.get(n.plan_id) ?? [];
@@ -532,8 +557,14 @@ export async function plansOfSites(
       free_travel_used: money ? (money.calls.get(p.id)?.size ?? 0) : null,
       refund:
         money && p.refund_due != null
-          ? { due: Number(p.refund_due) || 0, sent_on: p.refund_sent_on, ref: p.refund_ref }
+          ? {
+              due: Number(p.refund_due) || 0,
+              sent_on: p.refund_sent_on,
+              ref: p.refund_ref,
+              changes: readRefundChanges(p.refund_changes),
+            }
           : null,
+      card_back: money ? (cardBackOfPlan.get(p.id) ?? []) : null,
       closed_out: p.closed_out_on
         ? { on: p.closed_out_on, reason: (p.closed_out_reason ?? "").trim() }
         : null,
@@ -558,7 +589,9 @@ export async function plansOfSites(
       visits: (byPlan.get(p.id) ?? []).sort(
         (a, b) => ORDER[a.kind] - ORDER[b.kind] || a.due_from.localeCompare(b.due_from),
       ),
-      storm_included: benefits?.[plan].storm ?? 0,
+      // The plan's own number, as signed (Nov 20): a change of the setting does not reach a
+      // plan already sold. One from before the number was kept reads the setting.
+      storm_included: ownStormCount(p.storm_included, benefits?.[plan].storm),
       no_access: opts.noAccess ? (noAccessOf.get(p.id) ?? []) : null,
       forecast_sent_on: p.forecast_sent_on ?? null,
       card_paid: p.card_paid_on
@@ -703,6 +736,8 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       p_pay_method: data.pay_method,
       p_pay_note: data.pay_note ?? "",
       ...(data.size_ok ? { p_size_ok: true } : {}),
+      // The database checks it again (Nov 20): saved at the price shown, or not at all.
+      p_shown_price: data.shown_price,
     });
     if (error) throw new Error(error.message);
     // Where the agreement and the receipt go. A failure here does not undo the sign-up: the
@@ -988,6 +1023,55 @@ export const markRoofCareRefundSent = createServerFn({ method: "POST" })
     await signedIn(context);
     const { error } = await context.supabase.rpc("roof_care_refund_sent", {
       p_plan: data.plan_id,
+      p_on: data.on,
+      p_ref: data.ref ?? "",
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+/**
+ * A manager changes a refund that is owed (owner, Nov 20). The database decides who may, checks
+ * the amount against what was paid, and keeps the change (roof_care_change_refund).
+ */
+export const changeRoofCareRefund = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        amount: z.number().finite().min(0, "Type the refund: 0 or more").max(100_000_000),
+        reason: z.string().trim().min(1, REFUND_CHANGE_REASON_NEEDED).max(300),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await signedIn(context);
+    const { error } = await context.supabase.rpc("roof_care_change_refund", {
+      p_plan: data.plan_id,
+      p_amount: data.amount,
+      p_reason: data.reason,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+/** Card money that had to go back was sent back (owner, Nov 20). A manager's or an admin's. */
+export const markRoofCareCardSentBack = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        payment_id: z.string().uuid(),
+        on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        ref: z.string().trim().max(80).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await signedIn(context);
+    const { error } = await context.supabase.rpc("roof_care_card_sent_back", {
+      p_payment: data.payment_id,
       p_on: data.on,
       p_ref: data.ref ?? "",
     });

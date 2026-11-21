@@ -74,6 +74,8 @@ import {
 } from "lucide-react";
 
 import { TAG_PRESETS } from "@/lib/aerial-markup";
+import { sheetStyleFor } from "@/lib/keyboard-inset";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { screenScale, screenToView } from "@/lib/aerial-geo";
 import {
   DEFAULT_PHOTO_COLOR,
@@ -1054,6 +1056,9 @@ export function PhotoMarkupSurface({
   const [colorOpen, setColorOpen] = useState(false);
   // A phone (a finger): the sheet for Text / Tag, finger-sized handles, labels one size up.
   const coarse = useMemo(() => coarsePointer(), []);
+  // The label sheet rides on top of the keyboard (Nov 20; lib/keyboard-inset.ts): on an iPhone
+  // the keyboard covers the bottom of the page, and the sheet's lower half sat behind the keys.
+  const keyboard = useKeyboardInset(coarse && !!pending);
   const textScale = textScaleFor(coarse);
   const handle = handleSizes(coarse);
   const svg = useRef<SVGSVGElement>(null);
@@ -1608,7 +1613,8 @@ export function PhotoMarkupSurface({
         <Sheet open onOpenChange={(o) => !o && closeSheet(true)}>
           <SheetContent
             side="bottom"
-            className="max-h-[70vh] overflow-y-auto rounded-t-xl px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700"
+            className="max-h-[70vh] overflow-y-auto rounded-t-xl px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700 [&>button]:right-1 [&>button]:top-1 [&>button]:flex [&>button]:h-[44px] [&>button]:w-[44px] [&>button]:items-center [&>button]:justify-center"
+            style={sheetStyleFor(keyboard)}
             data-sheet="place-label"
             onOpenAutoFocus={(e) => {
               e.preventDefault();
@@ -1715,7 +1721,8 @@ function PlaceForm({
       type="button"
       size="sm"
       variant={label === t ? "default" : "outline"}
-      className="h-9 sm:h-8"
+      // The phone's sheet (compact): a thumb, 44 px. Inline on a computer: as before.
+      className={compact ? "h-[44px] px-3" : "h-9 sm:h-8"}
       onClick={() => setLabel(t)}
     >
       {t}
@@ -1745,14 +1752,19 @@ function PlaceForm({
             ref={inputRef}
             autoFocus={autoFocus}
             aria-label={compact ? (kind === "tag" ? "Label" : "Text") : undefined}
-            className="h-11 text-base sm:h-10"
+            className={compact ? "h-[44px] text-base" : "h-11 text-base sm:h-10"}
             maxLength={kind === "tag" ? TAG_LABEL_MAX : TEXT_MAX}
             value={label}
             placeholder={kind === "tag" ? "e.g. Open seam" : "e.g. Leak here"}
             onChange={(e) => setLabel(e.target.value)}
           />
           {compact && (
-            <Button type="submit" className="h-11 shrink-0 px-5" disabled={!ok} data-action="done">
+            <Button
+              type="submit"
+              className="h-[44px] shrink-0 px-5"
+              disabled={!ok}
+              data-action="done"
+            >
               {submitLabel ?? "Done"}
             </Button>
           )}
@@ -1779,7 +1791,7 @@ function PlaceForm({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-9 px-2 text-xs"
+          className="h-[44px] px-3 text-sm"
           onClick={() => setNoteOpen(true)}
           data-action="add-note"
         >
@@ -1812,7 +1824,13 @@ function PlaceForm({
             {submitLabel ?? (kind === "tag" ? "Add tag" : "Add text")}
           </Button>
         )}
-        <Button type="button" size="sm" variant="ghost" className="h-11 sm:h-9" onClick={onCancel}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className={compact ? "h-[44px] px-4" : "h-11 sm:h-9"}
+          onClick={onCancel}
+        >
           Cancel
         </Button>
       </div>

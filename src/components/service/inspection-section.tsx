@@ -25,6 +25,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Calculator,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -72,6 +73,9 @@ import {
   officePreselect,
   outcomeLine,
   parseInspection,
+  photosOnItem,
+  picturesButtonLabel,
+  rowPicturesOpen,
   visibleChecklist,
   type InspectionGrade,
   type InspectionItem,
@@ -169,6 +173,7 @@ function InspectionBody({
         readOnly={!canEdit}
         onChange={draft.setItem}
         jobId={job.id}
+        photoCount={(item) => photosOnItem(photos.data ?? [], item.id).length}
         extra={(item: InspectionItem) => (
           <ItemPhotoTools
             jobId={job.id}
@@ -195,8 +200,9 @@ function InspectionBody({
 }
 
 /**
- * A checklist label with a place to break after each slash ("Gutters/downspouts"), for phones
- * under 390 px wide only: from 390 px up the break is hidden and the label is one word as before.
+ * A checklist label with a place to break after each slash ("Gutters/downspouts"), on a phone
+ * only (under 640 px; it was under 390 px until each row got its Pictures button, Nov 20): on a
+ * computer the break is hidden and the label is one word as before.
  */
 function slashBreaks(label: string): React.ReactNode {
   const parts = label.split("/");
@@ -206,7 +212,7 @@ function slashBreaks(label: string): React.ReactNode {
       {part}
       {i < parts.length - 1 && (
         <>
-          /<wbr className="min-[390px]:hidden" />
+          /<wbr className="sm:hidden" />
         </>
       )}
     </Fragment>
@@ -223,18 +229,30 @@ function slashBreaks(label: string): React.ReactNode {
  * render the checklist with this. With `jobId`, each row ends with what an earlier ticket at this
  * property found for that item ("Last time: Jun 12 — …" and its photo; owner, Oct 21,
  * site-history.tsx LastTimeLine) — photos carry the item's id as item_key.
+ *
+ * Pictures on any row (owner, Nov 20: "for the inspections we need to be able to add pictures
+ * even if the section is good and has a checkmark, it needs to be available via opening the
+ * camera or from camera roll just like the repairs are"). Every row ends with a Pictures button
+ * (a camera, with the row's count once it has any). On a row that is not an issue it opens the
+ * same `extra` an issue row has — the camera, From my photos, From ticket photos, the
+ * thumbnails — and nothing else: no note is asked and the row's answer is not touched, so a good
+ * row stays good. A row that already has pictures shows them without a press. `photoCount`
+ * gives each row's count; without `extra` there is no button.
  */
 export function ChecklistRows({
   items,
   readOnly,
   onChange,
   extra,
+  photoCount,
   jobId,
 }: {
   items: readonly InspectionItem[];
   readOnly: boolean;
   onChange: (id: string, patch: Partial<InspectionItem>) => void;
   extra?: ((item: InspectionItem) => React.ReactNode) | undefined;
+  /** How many pictures a row has (and has going up): the number on its Pictures button. */
+  photoCount?: ((item: InspectionItem) => number) | undefined;
   /** The ticket, for the "Last time" line under each item. */
   jobId?: string | undefined;
 }) {
@@ -249,6 +267,9 @@ export function ChecklistRows({
       else next.add(id);
       return next;
     });
+  // A row's pictures, on a row that is not an issue (Nov 20): what the person pressed, by row.
+  // Not pressed yet: open when the row has pictures, closed when it has none.
+  const [picsPressed, setPicsPressed] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   if (items.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
@@ -262,6 +283,23 @@ export function ChecklistRows({
         const ok = item.status === "ok";
         const na = item.status === "na";
         const closed = flagged && folded.has(item.id);
+        const pictures = photoCount ? Math.max(0, photoCount(item)) : 0;
+        const picsOpen = rowPicturesOpen({
+          flagged,
+          folded: closed,
+          pressed: picsPressed.get(item.id),
+          count: pictures,
+        });
+        // Somebody who cannot edit sees the button only where there is something to look at.
+        const picsButton = !!extra && (!readOnly || pictures > 0);
+        const pressPictures = () => {
+          // An issue row's pictures are in its own fold: the button opens a folded one.
+          if (flagged) {
+            if (closed) toggleFold(item.id);
+            return;
+          }
+          setPicsPressed((prev) => new Map(prev).set(item.id, !picsOpen));
+        };
         const set = (pressed: NonNullable<InspectionItem["status"]>) => {
           const r = pressStatus(item.status, pressed);
           if (r.fold) toggleFold(item.id);
@@ -278,14 +316,17 @@ export function ChecklistRows({
                 42 px off the edge. Under 390 px the label may now shrink, and a long word breaks
                 after its slash ("Gutters/ downspouts"). Under 350 px the buttons also drop to a
                 line of their own when the label and they do not fit side by side. From 390 px up
-                not one of these classes applies: nothing changes. */}
+                not one of these classes applies: nothing changes.
+                Later that day each row got a fourth button, Pictures: the label may now narrow
+                and break after its slash on any phone (under 640 px), and the buttons drop to
+                their own line under 390 px (it was 350), so no word is ever cut in two. */}
             <div
-              className="flex items-center gap-1 max-[350px]:flex-wrap"
+              className="flex items-center gap-1 max-[389px]:flex-wrap"
               data-line="checklist-row"
             >
               <button
                 type="button"
-                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default max-[390px]:min-w-0 max-[350px]:basis-auto"
+                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default max-sm:min-w-0 max-[389px]:basis-auto"
                 aria-pressed={flagged}
                 aria-label={
                   flagged
@@ -311,7 +352,7 @@ export function ChecklistRows({
                 )}
                 <span
                   data-line="checklist-label"
-                  className={`max-[390px]:min-w-0 max-[390px]:[overflow-wrap:anywhere] ${na ? "text-muted-foreground line-through" : ""}`}
+                  className={`max-sm:min-w-0 max-sm:[overflow-wrap:anywhere] ${na ? "text-muted-foreground line-through" : ""}`}
                 >
                   {slashBreaks(item.label)}
                 </span>
@@ -323,7 +364,7 @@ export function ChecklistRows({
                   ))}
               </button>
               <div
-                className="flex shrink-0 items-center gap-0.5 max-[350px]:ml-auto"
+                className="flex shrink-0 items-center gap-0.5 max-[389px]:ml-auto"
                 role="group"
                 aria-label={`${item.label}: result`}
               >
@@ -364,6 +405,23 @@ export function ChecklistRows({
                 >
                   N/A
                 </Button>
+                {picsButton && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={picturesButtonLabel(item.label, pictures)}
+                    aria-expanded={picsOpen}
+                    title="Pictures for this part: the camera, or pictures already on the phone"
+                    data-action="row-pictures"
+                    data-count={pictures}
+                    className={`h-[44px] min-w-[44px] gap-0.5 px-1.5 ${pictures > 0 ? "text-primary" : "text-muted-foreground"}`}
+                    onClick={pressPictures}
+                  >
+                    <Camera className="h-4 w-4" aria-hidden />
+                    {pictures > 0 && <span className="text-xs font-semibold">{pictures}</span>}
+                  </Button>
+                )}
               </div>
             </div>
             {flagged && !closed ? (
@@ -387,6 +445,13 @@ export function ChecklistRows({
                   {item.note}
                 </p>
               )
+            )}
+            {!flagged && extra && picsOpen && (
+              // A row that is not an issue: its pictures and the two ways to add one, and no
+              // note box. Nothing here changes the row's answer.
+              <div className="pb-1" data-row-pictures={item.id}>
+                {extra(item)}
+              </div>
             )}
             {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
           </li>

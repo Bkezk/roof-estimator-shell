@@ -287,6 +287,31 @@ export function isPhotoOnItem(p: ItemPhotoLike, itemKey: string): boolean {
 export function photosOnItem<T extends ItemPhotoLike>(photos: readonly T[], itemKey: string): T[] {
   return photos.filter((p) => isPhotoOnItem(p, itemKey));
 }
+
+/**
+ * Are a checklist row's pictures showing? (owner, Nov 20: pictures on any row, "even if the
+ * section is good and has a checkmark".) An issue row shows them inside its own fold, so the
+ * fold decides. Any other row: what the person last pressed on its Pictures button, and until
+ * they press, open when the row has pictures and closed when it has none, so a good row's
+ * pictures are seen without a press and an empty row stays one line.
+ */
+export function rowPicturesOpen(row: {
+  flagged: boolean;
+  /** An issue row folded shut. */
+  folded: boolean;
+  /** The last press on the row's Pictures button: true opened it, false closed it. */
+  pressed: boolean | undefined;
+  /** Pictures on the row, with the ones still going up. */
+  count: number;
+}): boolean {
+  if (row.flagged) return !row.folded;
+  return row.pressed ?? row.count > 0;
+}
+
+/** What the Pictures button says to a screen reader: "Seams: pictures (2)". */
+export function picturesButtonLabel(label: string, count: number): string {
+  return count > 0 ? `${label}: pictures (${count})` : `${label}: add pictures`;
+}
 /**
  * The ticket's photos on no checklist item at all (the findings roll, "Other photos"): ticket
  * pictures — role "other", on no repair — with no link. A repair's Before / After, the signature

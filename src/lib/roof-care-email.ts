@@ -172,7 +172,12 @@ export function receiptEmail(f: ReceiptFacts): Email {
     { kind: "h", text: "Your plan year" },
     {
       kind: "p",
-      text: `Your plan started ${longDay(f.starts_on)} and runs until ${longDay(f.renews_on)}. We will be in touch to set the day of each inspection.`,
+      // A renewal paid before the old year was over (Nov 20): the new year is dated from the
+      // old year's last day, so no day is lost and none is given twice. It has not "started".
+      text:
+        f.starts_on > f.paid_on
+          ? `Your new plan year starts ${longDay(f.starts_on)}, the day your current plan year ends, and runs until ${longDay(f.renews_on)}. You are covered without a break. We will be in touch to set the day of each inspection.`
+          : `Your plan started ${longDay(f.starts_on)} and runs until ${longDay(f.renews_on)}. We will be in touch to set the day of each inspection.`,
     },
     ...signOff(f),
   ];

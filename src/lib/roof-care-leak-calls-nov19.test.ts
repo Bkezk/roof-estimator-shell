@@ -407,7 +407,10 @@ describe("the refund when a plan ends early", () => {
     );
     expect(refundStatusWords({ due: 0, sent_on: null, ref: null })).toBe("");
     const card = flat("src/components/roof-care/plan-card.tsx");
-    expect(card).toContain('{plan.status === "ended" && plan.refund && plan.refund.due > 0 && (');
+    // Nov 20: also shown for a refund a manager changed, so "changed to $0.00" stays in view.
+    expect(card).toContain(
+      '{plan.status === "ended" && plan.refund && (plan.refund.due > 0 || (plan.refund.changes?.length ?? 0) > 0) && (',
+    );
     expect(card).toContain('data-action="roof-care-refund-sent"');
   });
 

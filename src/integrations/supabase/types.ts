@@ -3471,6 +3471,7 @@ export type Database = {
           plan_id: string
           reason: string | null
           ref: string
+          sent_back_by_name: string | null
           sent_back_on: string | null
           sent_back_ref: string | null
         }
@@ -3486,6 +3487,7 @@ export type Database = {
           plan_id: string
           reason?: string | null
           ref: string
+          sent_back_by_name?: string | null
           sent_back_on?: string | null
           sent_back_ref?: string | null
         }
@@ -3501,6 +3503,7 @@ export type Database = {
           plan_id?: string
           reason?: string | null
           ref?: string
+          sent_back_by_name?: string | null
           sent_back_on?: string | null
           sent_back_ref?: string | null
         }
@@ -3677,6 +3680,7 @@ export type Database = {
           receipt_error: string | null
           receipt_sent_at: string | null
           referred_by: string | null
+          refund_changes: Json
           refund_due: number | null
           refund_ref: string | null
           refund_sent_on: string | null
@@ -3698,6 +3702,7 @@ export type Database = {
           sold_by_name: string
           starts_on: string | null
           status: string
+          storm_included: number | null
           terms_version: string | null
           travel_price: number
           updated_at: string
@@ -3741,6 +3746,7 @@ export type Database = {
           receipt_error?: string | null
           receipt_sent_at?: string | null
           referred_by?: string | null
+          refund_changes?: Json
           refund_due?: number | null
           refund_ref?: string | null
           refund_sent_on?: string | null
@@ -3762,6 +3768,7 @@ export type Database = {
           sold_by_name?: string
           starts_on?: string | null
           status?: string
+          storm_included?: number | null
           terms_version?: string | null
           travel_price?: number
           updated_at?: string
@@ -3805,6 +3812,7 @@ export type Database = {
           receipt_error?: string | null
           receipt_sent_at?: string | null
           referred_by?: string | null
+          refund_changes?: Json
           refund_due?: number | null
           refund_ref?: string | null
           refund_sent_on?: string | null
@@ -3826,6 +3834,7 @@ export type Database = {
           sold_by_name?: string
           starts_on?: string | null
           status?: string
+          storm_included?: number | null
           terms_version?: string | null
           travel_price?: number
           updated_at?: string
@@ -3871,6 +3880,24 @@ export type Database = {
           announced_at?: string | null
           claimed_at?: string
           service_job_id?: string
+        }
+        Relationships: []
+      }
+      roof_care_ticket_told: {
+        Row: {
+          profile_id: string
+          service_job_id: string
+          told_at: string
+        }
+        Insert: {
+          profile_id: string
+          service_job_id: string
+          told_at?: string
+        }
+        Update: {
+          profile_id?: string
+          service_job_id?: string
+          told_at?: string
         }
         Relationships: []
       }
@@ -6229,6 +6256,14 @@ export type Database = {
         Args: { p_amount: number; p_on?: string; p_plan: string; p_ref: string }
         Returns: string
       }
+      roof_care_card_sent_back: {
+        Args: { p_on: string; p_payment: string; p_ref: string }
+        Returns: undefined
+      }
+      roof_care_change_refund: {
+        Args: { p_amount: number; p_plan: string; p_reason: string }
+        Returns: Json
+      }
       roof_care_close_out: {
         Args: { p_plan: string; p_reason: string }
         Returns: number
@@ -6330,6 +6365,7 @@ export type Database = {
           p_pay_method?: string
           p_pay_note?: string
           p_plan: string
+          p_shown_price?: number
           p_site: string
           p_size_ok?: boolean
           p_sqft: number
@@ -6362,6 +6398,17 @@ export type Database = {
       }
       roof_care_ticket_announce_finish: {
         Args: { p_ids: string[]; p_written: boolean }
+        Returns: number
+      }
+      roof_care_ticket_told_list: {
+        Args: { p_ids: string[] }
+        Returns: {
+          profile_id: string
+          service_job_id: string
+        }[]
+      }
+      roof_care_ticket_told_mark: {
+        Args: { p_jobs: string[]; p_people: string[] }
         Returns: number
       }
       save_checklist_items: { Args: { p_items: Json }; Returns: undefined }

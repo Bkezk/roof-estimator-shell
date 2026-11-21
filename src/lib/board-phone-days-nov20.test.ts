@@ -76,7 +76,9 @@ describe("the page is the week", () => {
     expect(phone).toContain("search={{ new: 1, date: d }}");
   });
   it("says how in a line", () => {
-    expect(PHONE_BOARD_HINT).toContain("the technicians come up");
+    // Later the same day the taps came first ("Tap a ticket, tap the technician or the day");
+    // the hold and drag is still said.
+    expect(PHONE_BOARD_HINT).toContain("hold a ticket and drag it there");
   });
 });
 

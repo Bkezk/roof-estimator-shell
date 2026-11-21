@@ -87,6 +87,17 @@ export const carried = (liftX: number, liftY: number, x: number, y: number): boo
   Math.hypot(x - liftX, y - liftY) > SLOP_PX;
 
 /**
+ * Where the lifted ticket's picture is centred across the screen: on the finger, but never so
+ * far to a side that its words run off the edge (Nov 20: the picture now says what letting go
+ * will do, and near the right edge half of that was off the screen).
+ */
+export function ghostCentre(fingerX: number, width: number, screen: number, margin = 6): number {
+  const half = width / 2 + margin;
+  if (screen <= half * 2) return screen / 2;
+  return Math.min(Math.max(fingerX, half), screen - half);
+}
+
+/**
  * How far the page scrolls this frame with the finger at `y`, between the list's `top` and
  * `bottom` edges on the screen: up (negative) in the top band, down in the bottom band, faster
  * the deeper in, nothing in between or outside the list (over the day buttons or the tray, which

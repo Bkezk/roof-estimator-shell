@@ -18,7 +18,10 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { planTravelAtRefund } from "@/lib/roof-care-allowance";
+import { planLineOutside, planOfWork } from "@/lib/roof-care-allowance.functions";
 import {
+  TRAVEL_SOURCE_PREFIX,
   asTravelChoice,
   isTravelWaiverLine,
   travelBilled,
@@ -53,21 +56,20 @@ export async function invoiceTravelOf(
   if (!inv.service_job_id || inv.bill_to_vendor_id) return null;
   const { data: job, error } = await sb
     .from("service_jobs")
-    .select("site_id, roof_care_visit_id")
+    .select("site_id, roof_care_visit_id, completed_at, on_site_at, scheduled_date")
     .eq("id", inv.service_job_id)
     .maybeSingle();
   if (error) throw new Error(`The invoice's ticket: ${error.message}`);
   if (!job?.site_id || job.roof_care_visit_id) return null;
-  const { data: plans, error: pErr } = await sb
-    .from("roof_care_plans")
-    .select("id, plan, free_travel_calls")
-    .eq("site_id", job.site_id)
-    .eq("status", "active")
-    .limit(1);
-  if (pErr) throw new Error(`The property's Roof Care plan: ${pErr.message}`);
-  const plan = plans?.[0];
+  // The plan the work belongs to, by the same rule as the minor repairs credit (owner, Nov 20:
+  // break test, number 3): the one whose year holds the day the work was done, also when it
+  // has ended since. Until now only a plan in force was looked at, so a leak call's line was
+  // lost when its invoice was built again after the year ended, while the credit stayed.
+  const plan = await planOfWork(sb, job);
   const calls = Number(plan?.free_travel_calls) || 0;
   if (!plan || !(calls > 0)) return null;
+  // A plan whose refund was sent gives no leak call it had not given by then.
+  if (planTravelAtRefund(plan) != null && !(travelWaived(lines) > 0)) return null;
   // The plan's other invoices that hold a leak call. A void one gives its call back.
   const { data: held, error: hErr } = await sb
     .from("invoice_lines")
@@ -119,9 +121,18 @@ export async function syncTravel(
     }));
     if (amount === where.waived && choice === where.choice && own.length <= 1) return same;
   } else {
-    // The plan has no say. Only a vendor's invoice is certain enough to take the line away:
-    // "no plan" can also mean the reader may not see the property's plan.
-    if (!inv.bill_to_vendor_id || (!own.length && !inv.care_travel_choice)) return same;
+    // The plan has no say. A vendor's invoice is certain enough to take the line away, and so
+    // is a line whose plan is read and does not cover the day this work was done (Nov 20).
+    // Otherwise it is left: "no plan" can also mean the reader may not see the property's plan.
+    const outside = own.length
+      ? await planLineOutside(
+          sb,
+          inv.service_job_id,
+          own[0]!.source!.slice(TRAVEL_SOURCE_PREFIX.length),
+        )
+      : false;
+    if (!outside && (!inv.bill_to_vendor_id || (!own.length && !inv.care_travel_choice)))
+      return same;
   }
   const [first, ...extra] = own;
   const gone = amount > 0 ? extra : own;

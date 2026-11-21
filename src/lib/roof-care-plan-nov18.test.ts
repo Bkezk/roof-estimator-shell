@@ -657,6 +657,9 @@ describe("signing a customer up", () => {
         p_terms: ROOF_CARE_TERMS_VERSION,
         p_pay_method: "check",
         p_pay_note: "",
+        // Nov 20 (break test 25): the price the customer was shown goes along, and the
+        // database saves the plan at that price or not at all.
+        p_shown_price: 321,
       },
     ]);
     expect(made.plan).toBe("guard");

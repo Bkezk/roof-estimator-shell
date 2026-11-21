@@ -105,18 +105,37 @@ export function careAssignedNotice(list: readonly CareTicketToAnnounce[]): CareN
   };
 }
 
+/** One "this person was told about this ticket" (roof_care_ticket_told, 20261120840000). */
+export interface CareTicketTold {
+  service_job_id: string;
+  profile_id: string;
+}
+
+/** The key one telling is kept under: the ticket, then the person. */
+export const toldKey = (ticketId: string, personId: string): string => `${ticketId}|${personId}`;
+
+/** What roof_care_ticket_told_list answers, as a set to look a telling up in. */
+export function toldSet(rows: readonly CareTicketTold[] | null | undefined): Set<string> {
+  return new Set((rows ?? []).map((r) => toldKey(r.service_job_id, r.profile_id)));
+}
+
 /**
  * Who hears which tickets. `watchers`: the people on the tickets' "Each step" line. A ticket's
  * own technician is left out of its "Opened" notice: they hear "Assigned to you" for it instead,
  * as for a ticket a person opens. People with the same tickets share one group (one send).
+ *
+ * `told` (owner, Nov 20: "go with 4"): who has already heard which ticket, from a run whose
+ * notice to them went out while another group's did not. Those tickets are left out for that
+ * person, so a retry tells only who has not heard. A person who has heard them all gets nothing.
  */
 export function careNoticeGroups(
   tickets: readonly CareTicketToAnnounce[],
   watchers: readonly string[],
+  told: ReadonlySet<string> = new Set(),
 ): { ids: string[]; tickets: CareTicketToAnnounce[] }[] {
   const groups = new Map<string, { ids: string[]; tickets: CareTicketToAnnounce[] }>();
   for (const id of [...new Set(watchers)]) {
-    const mine = tickets.filter((t) => t.technician_id !== id);
+    const mine = tickets.filter((t) => t.technician_id !== id && !told.has(toldKey(t.id, id)));
     if (!mine.length) continue;
     const key = mine.map((t) => t.id).join(",");
     const g = groups.get(key);
