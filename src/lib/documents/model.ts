@@ -360,6 +360,12 @@ export interface PhotoGridModule extends ModuleBase {
   columns: 2 | 3;
   /** Each cell's picture height in inches (owner, Oct 28); absent or 0 = the cell's 4:3 box. */
   photoHeightIn?: number | undefined;
+  /**
+   * A heading that belongs to these pictures (Nov 23; owner: "4 go"): printed over the grid
+   * only when the grid prints a picture. With Photos off, or no picture in the grid, it is not
+   * printed at all, so it can never stand over nothing. Absent on a grid without one.
+   */
+  heading?: string | undefined;
 }
 /**
  * The inspection's findings (phase 2): one row per checklist item flagged as an issue — the
@@ -568,6 +574,7 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       images: z.array(z.object({ image: imageRefSchema, caption: z.string() })).max(60),
       columns: z.union([z.literal(2), z.literal(3)]),
       photoHeightIn: photoHeightSchema,
+      heading: z.string().max(200).optional(),
     }),
     z.object({
       id: z.string(),

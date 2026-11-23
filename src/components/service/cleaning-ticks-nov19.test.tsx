@@ -158,12 +158,15 @@ describe("the Checklist step and Complete wait for the answers", () => {
     expect(form).toContain(
       "checklistSaved: checklistStepSaved(checklistSaved, cleaning, finished),",
     );
+    // (Nov 23: the same call, now inside the line for a plan inspection's checklist rows that
+    // still need an answer, which comes first; inspection-answers-nov23.test.ts.)
     expect(form).toContain(
-      "missing: cleaningStepMissing( id, stepMissing(id, stepState), checklistSaved, cleaning, finished, ),",
+      "missing: planRowsStepMissing( id, cleaningStepMissing(id, stepMissing(id, stepState), checklistSaved, cleaning, finished), planRowsOpen, ),",
     );
     expect(form).toContain("const plan = cleaningGaps(gate, finished);");
+    // (Nov 23: with the checklist rows a plan's inspection still waits for between them.)
     expect(form).toContain(
-      "return { gaps: [...base.gaps, ...plan.gaps], unread: base.unread || plan.unread };",
+      "return { gaps: [...base.gaps, ...planRowsGaps(planRowsOpen), ...plan.gaps], unread: base.unread || plan.unread, };",
     );
     // Retry reads the plan's questions again with the rest, and judges that answer.
     expect(form).toContain("planVisitId ? cleaningQ.refetch() : Promise.resolve(cleaningQ),");

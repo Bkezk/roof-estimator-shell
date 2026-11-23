@@ -71,6 +71,7 @@ import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 import { completesTicket } from "@/lib/cleaning-required";
 import { cleaningStop } from "@/lib/cleaning-required.server";
+import { planRowsStop } from "@/lib/inspection-answers.server";
 import { FINISHED_STAGES } from "@/lib/ticket-stages";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
@@ -867,6 +868,10 @@ export const setServiceStage = createServerFn({ method: "POST" })
     if (completesTicket(prev.stage, data.stage)) {
       const stop = await cleaningStop(context.supabase, prev.roof_care_visit_id);
       if (stop) throw new Error(stop);
+      // Nov 23 (owner: "3 go"): nor while a row of its checklist has no answer. The customer's
+      // Care plan report prints "Not checked" for a blank row (inspection-answers.ts).
+      const rows = await planRowsStop(context.supabase, { id: data.id, ...prev });
+      if (rows) throw new Error(rows);
     }
     const { stopped } =
       prev.stage !== data.stage

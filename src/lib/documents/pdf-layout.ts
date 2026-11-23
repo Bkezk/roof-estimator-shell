@@ -954,6 +954,19 @@ export function layoutModule(m: DocModule, x: number, width: number, ctx: Layout
   }
 }
 
+/** A Photo Grid's heading as it prints: trimmed, "" when it has none. */
+export const photoGridHeading = (m: Pick<PhotoGridModule, "heading">): string =>
+  (m.heading ?? "").trim();
+/** Is the heading shown: the grid has one, Photos is on, and there is a picture under it. */
+export const photoGridHeadingShown = (
+  m: Pick<PhotoGridModule, "heading" | "images">,
+  photosOn: boolean,
+): boolean => photosOn && m.images.length > 0 && photoGridHeading(m) !== "";
+const headingDoc = (text: string): RichDoc => ({
+  type: "doc",
+  content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text }] }],
+});
+
 /** The key the server loads a Photo Grid cell's picture under. */
 export const photoGridKey = (moduleId: string, cell: number) => `${moduleId}:${cell}`;
 /** The key the server loads a Repair List row's picture under. */
@@ -1030,7 +1043,15 @@ export function layoutPhotoGrid(
     if (out.length) out.push({ kind: "gap", height: GRID_GUTTER });
     out.push(columnsPiece(columns));
   }
-  return out;
+  // The grid's own heading (Nov 23; owner: "4 go"): only over pictures. Photos off returned
+  // above and an empty grid has no row, so the heading never prints over nothing. It stays with
+  // the first row of pictures on the page.
+  const heading = photoGridHeading(m);
+  if (!out.length || !heading) return out;
+  return [
+    ...keepTogether([...layoutRich(headingDoc(heading), x, width, ctx), out[0]!]),
+    ...out.slice(1),
+  ];
 }
 
 /**

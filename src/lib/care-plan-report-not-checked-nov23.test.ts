@@ -276,19 +276,18 @@ describe("2. the ticket's pictures that are on no row", () => {
     expect(pagesSchema.safeParse(out).success).toBe(true);
     const last: DocModule[] = out[out.length - 1]!.modules;
     const before = pages[pages.length - 1]!.modules;
-    expect(last).toHaveLength(before.length + 2);
+    // Nov 23, later (owner: "4 go"): one module, not two. The heading is the grid's own, so it
+    // can only print with a picture under it (photo-grid-heading-nov23.test.ts).
+    expect(last).toHaveLength(before.length + 1);
     // What was there is untouched, and so is every earlier page.
     expect(last.slice(0, before.length)).toEqual(before);
     expect(out.slice(0, -1)).toEqual(pages.slice(0, -1));
-    const [heading, grid] = last.slice(-2) as [DocModule, DocModule];
-    expect(heading.type).toBe("body");
-    expect(heading.type === "body" && richToText(heading.text as RichDoc)).toBe(
-      "Other pictures from this visit",
-    );
+    const grid = last[last.length - 1]!;
     expect(OTHER_PICTURES_HEADING).toBe("Other pictures from this visit");
     expect(noIds(grid)).toEqual({
       type: "photoGrid",
       columns: 3,
+      heading: "Other pictures from this visit",
       // The ticket's own files, by reference: nothing is copied or made smaller.
       images: [
         { image: { kind: "ticketPhoto", photoId: X1, marks: true }, caption: "" },
@@ -299,7 +298,7 @@ describe("2. the ticket's pictures that are on no row", () => {
   it("print on the page: the heading, then one line of pictures", () => {
     const out = withOtherPictures(pages, [X1, X2]);
     const last = out[out.length - 1]!.modules;
-    const laid = layoutModules(last.slice(-2), ctx());
+    const laid = layoutModules(last.slice(-1), ctx());
     expect(words(laid)).toEqual(["Other pictures from this visit"]);
     expect(laid.filter((p) => p.kind === "columns")).toHaveLength(1);
     const refs = [...imageRefs(out, { inspection: insp }).values()];

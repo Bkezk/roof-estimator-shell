@@ -593,7 +593,8 @@ describe("the database's side", () => {
     expect(types).toContain("roof_care_sign_up_await_payment: { Args: {");
     expect(types).toContain(
       // (Later on Nov 19: how they pay sits between them.)
-      "paid_on: string | null pay_first: boolean pay_method: string | null pay_note: string | null plan: string plan_number: number | null",
+      // Nov 23: the customer's own card payment link added pay_link_sent_at and pay_token.
+      "paid_on: string | null pay_first: boolean pay_link_sent_at: string | null pay_method: string | null pay_note: string | null pay_token: string plan: string plan_number: number | null",
     );
     expect(types).toContain("property: Json roof_care_plan_id: string | null");
   });

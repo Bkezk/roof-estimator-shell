@@ -76,6 +76,7 @@ import {
 import { googleGate, routedDrive } from "@/lib/drive-route";
 import { parseStreetAddress } from "@/lib/aerial-address";
 import { cleaningStop } from "@/lib/cleaning-required.server";
+import { planRowsStop } from "@/lib/inspection-answers.server";
 import { isFinishedStage, WORK_STAGES } from "@/lib/ticket-stages";
 
 export const SERVICE_BUCKET = "service";
@@ -694,6 +695,12 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       if (!finished) {
         const stop = await cleaningStop(sb, job.roof_care_visit_id);
         if (stop) throw new Error(stop);
+        // Nov 23 (owner: "3 go"): nor while a row of its checklist has no answer, a manager's
+        // Complete anyway included. The customer's Care plan report prints "Not checked" for a
+        // blank row (inspection-answers.ts). The database says the same
+        // (service_jobs_checklist_rule).
+        const rows = await planRowsStop(sb, job);
+        if (rows) throw new Error(rows);
       }
       // The labor the clock supplies (owner, Oct 15): a labor clock on this ticket, closed now.
       // With no clock, a ticket still "on site" from the old buttons supplies it from on_site_at

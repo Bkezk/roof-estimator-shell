@@ -410,15 +410,18 @@ export function requestStripTitle(r: Pick<PublicRequestRow, "kind" | "shown_pric
 /**
  * Where a request stands, for the strip: whose it is has not been said ("who"), a Roof Care
  * sign-up is ready to open ("sign_up"), a custom quote is to be called with a price ("quote"),
- * the plan is signed ("signed"), a Roof Care request whose opportunity has a customer but no
- * property yet ("property"), or nothing more is asked of anyone ("done").
+ * the plan is signed and waits for its payment ("signed"), the plan is paid and has started
+ * ("paid"), a Roof Care request whose opportunity has a customer but no property yet
+ * ("property"), or nothing more is asked of anyone ("done").
  */
-export type RequestStep = "who" | "property" | "sign_up" | "quote" | "signed" | "done";
+export type RequestStep = "who" | "property" | "sign_up" | "quote" | "signed" | "paid" | "done";
 export function requestStep(
   r: Pick<PublicRequestRow, "kind" | "shown_price" | "plan" | "roof_care_plan_id">,
   opp: { account_id: string | null; site_id: string | null },
+  /** The status of the plan the request became, when it became one. */
+  planStatus?: string | null,
 ): RequestStep {
-  if (r.roof_care_plan_id) return "signed";
+  if (r.roof_care_plan_id) return planStatus === "active" ? "paid" : "signed";
   if (!opp.account_id) return "who";
   if (r.kind !== "care") return "done";
   if (isCustomQuoteAsk(r)) return "quote";
@@ -438,7 +441,9 @@ export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "k
     case "quote":
       return "No price was shown on the page, so nothing was signed. Call them with a price.";
     case "signed":
-      return "The plan is signed. This opportunity was set to Won.";
+      return "The plan is signed and waits for its payment. This opportunity turns Won the day the payment is received.";
+    case "paid":
+      return "The plan is paid and has started. This opportunity was set to Won.";
     case "done":
       return r.kind === "care"
         ? "The customer is on this opportunity."

@@ -480,12 +480,32 @@ Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-
 - Paying by card online, the site's side: `src/lib/roof-care-checkout.ts`, its `.server.ts` and
   `.functions.ts`, and `src/routes/api.stripe.webhook.ts`. Off until Stripe's two secrets and
   its webhook endpoint are set up (`AGENTS.md`).
+- **The customer's own card payment link** (Nov 23, the owner: "1. A go"). A customer who signs
+  up through the QR page is not at the office's screen, so each plan has a link of its own:
+  the site's address, `/pay/`, and a long random token that belongs to that plan. The page it
+  opens needs no sign-in. It shows the plan's name, the property's name, the amount and one
+  button, which opens the card payment page; the payment starts the plan as any card payment
+  does. A link that is over, or made up, says to call. The link is in the agreement email of a
+  plan that pays by card, and the office can copy it or email it again from the plan (Card
+  payment link). A plan signed from a public request with Card does not open the card page on
+  the office's screen. Off until Stripe is set up; emailing it also needs Email set up.
+  Record: `docs/qa/roof-care-pay-link-2026-11-23.md`.
 - The cleaning at each inspection and the budget forecast: `src/lib/roof-care-cleaning.ts`.
   The questions are required (the owner, Nov 20: "those questions should be required"): no
   path moves a plan's inspection to Done or later with one open. The database refuses it
   (`service_jobs_cleaning_rule`, migration `20261120100000_roof_care_cleaning_required.sql`),
   and the two server functions check first. Record:
   `docs/qa/roof-care-cleaning-required-2026-11-20.md`.
+- Every checklist row is answered on a plan's inspection (the owner, Nov 23: "3 go"). An
+  ordinary inspection keeps the Oct 26 rule, a row left blank reads as OK. On a Roof Care
+  plan's own inspection each row needs OK, Issue or N/A before the ticket is finished, because
+  the customer's Care plan report prints "Not checked" for a blank row. The Checklist step
+  marks the rows still to answer, says how many are left and goes to the first one; Complete
+  lists them and offers no "Complete anyway"; the two server functions refuse before a clock
+  is touched (`src/lib/inspection-answers.ts`). The database rule that binds every path is
+  written and tried (`service_jobs_checklist_rule`, migration
+  `20261124100000_roof_care_checklist_answers.sql`). Record:
+  `docs/qa/plan-inspection-answers-2026-11-23.md`.
 - An expired plan's Care Plan button opens its renewal.
 - A refund of a year paid by card is less the card fee (term 9, version 2026-11-19.3). The
   fee's rate is on the plan setup page.
@@ -765,9 +785,9 @@ Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
   prints "Not checked" on this report, and its Summary counts those rows apart ("1 issue · 2 OK
   · 1 N/A · 6 not checked"). Everywhere else such a row still reads as OK, the Oct 26 rule. And
   the ticket's pictures that are on no row go on the last page under "Other pictures from this
-  visit"; with none there is no heading. Technicians are not made to answer every row (owner,
-  Oct 26), so a row a technician looked at and left blank prints "Not checked": on a plan's
-  inspection they tick OK on what they checked.
+  visit"; with none there is no heading. That heading is the Photo Grid's own (the owner, Nov
+  23: "4 go"), so it prints only when a picture is under it: with Photos switched off, or the
+  pictures taken out of the grid, it is not printed, in the PDF or in the editor.
 
 **The owner's other answers of Nov 23, for the record. Nothing was built for these.**
 
@@ -862,8 +882,9 @@ What is behind them is in `docs/qa/public-forms-2026-11-21.md`. In short:
   or the same street address: broad on purpose). A person says which, or "New customer". The
   site never picks by itself. A request that is not real is answered by deleting its
   opportunity. A Roof Care request then shows "Open the sign-up", which opens the normal
-  sign-up on the property with what the visitor picked; when the plan is signed the
-  opportunity is set to Won. No payment is taken on the public page: the plan starts when the
+  sign-up on the property with what the visitor picked. The opportunity is set to Won
+  the day the plan is paid and starts (the owner, Nov 23: "2 go"; the database does it, for a
+  check and for a card alike), not the day it is signed. No payment is taken on the public page: the plan starts when the
   office receives the payment, as for any plan. An unanswered request is on the owner's Needs
   attention list, and the admins and managers get one notice that opens the opportunity.
   Record: `docs/qa/public-requests-opportunities-2026-11-23.md`.

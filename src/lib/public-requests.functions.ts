@@ -47,6 +47,11 @@ export interface OpportunityRequest {
   request: PublicRequestRow;
   /** Customers who may be the sender. Worked out only while nobody has said whose it is. */
   matches: PublicMatch[];
+  /**
+   * The status of the plan the request became ("awaiting_payment", "active", "ended"), or
+   * null: the strip says whether the plan still waits for its payment.
+   */
+  plan_status: string | null;
 }
 
 /**
@@ -71,10 +76,21 @@ export const getOpportunityRequest = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const r = (rows?.[0] ?? null) as unknown as PublicRequestRow | null;
     if (!r) return null;
-    if (r.status !== "new") return { request: r, matches: [] };
+    if (r.status !== "new") {
+      let plan_status: string | null = null;
+      if (r.roof_care_plan_id) {
+        const plan = await sb
+          .from("roof_care_plans")
+          .select("status")
+          .eq("id", r.roof_care_plan_id)
+          .maybeSingle();
+        plan_status = plan.data?.status ?? null;
+      }
+      return { request: r, matches: [], plan_status };
+    }
     const found = await sb.rpc("public_request_matches", { p_id: r.id });
     if (found.error) throw new Error(`The possible matches: ${found.error.message}`);
-    return { request: r, matches: readMatches(found.data) };
+    return { request: r, matches: readMatches(found.data), plan_status: null };
   });
 
 const handleInput = z.object({
@@ -90,14 +106,14 @@ const handleInput = z.object({
 /**
  * The office's answer to a request. The database checks who, and what is allowed, and puts the
  * customer and the property on the request's opportunity. When the answer names the Roof Care
- * plan the request became, its opportunity is set to Won here, the way a status set by hand is
- * (the follow-up closes). A plan that is signed stands even if that last step fails: the
- * answer then says so in `opportunity_note` and the page tells the office.
+ * plan the request became, the request points at that plan. Its opportunity is set to Won by
+ * the database the day the plan is paid and starts (owner, Nov 23: "2 go"; it was at sign-up
+ * for a few hours), by whichever way the payment arrives.
  */
 export const handlePublicRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => handleInput.parse(d))
-  .handler(async ({ data, context }): Promise<PublicRequestRow & { opportunity_note?: string }> => {
+  .handler(async ({ data, context }): Promise<PublicRequestRow> => {
     await office(context);
     const { data: row, error } = await context.supabase.rpc("public_request_handle", {
       p_id: data.id,
@@ -109,19 +125,7 @@ export const handlePublicRequest = createServerFn({ method: "POST" })
       ...(data.reason ? { p_reason: data.reason } : {}),
     });
     if (error) throw new Error(error.message);
-    const out = row as unknown as PublicRequestRow;
-    if (data.plan_id && out.opportunity_id) {
-      try {
-        const { winOpportunity } = await import("@/lib/opportunities.functions");
-        await winOpportunity(context, out.opportunity_id);
-      } catch (e) {
-        return {
-          ...out,
-          opportunity_note: `Its opportunity could not be set to Won: ${e instanceof Error ? e.message : String(e)}`,
-        };
-      }
-    }
-    return out;
+    return row as unknown as PublicRequestRow;
   });
 
 /**

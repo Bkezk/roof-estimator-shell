@@ -482,7 +482,9 @@ describe("the card payment page", () => {
   it("signing with Card goes on to the page when there is one, and stays as before when there is not", () => {
     const card = flat(CARD);
     expect(card).toContain(
-      'if (payMethod === "card") { try { pay = (await checkoutFn({ data: { plan_id: made.id } })).url; } catch { pay = null; } }',
+      // Nov 23: not for a plan signed from a public request. That customer is not at this
+      // screen and pays from their own link (roof-care-pay-link-nov23.test.ts).
+      'if (payMethod === "card" && !prefill) { try { pay = (await checkoutFn({ data: { plan_id: made.id } })).url; } catch { pay = null; } }',
     );
     expect(card).toContain("window.location.assign(pay); return;");
     expect(card).toContain("{cardOnline ? PAY_CARD_NOTE_ONLINE : PAY_CARD_NOTE_CUSTOMER}");

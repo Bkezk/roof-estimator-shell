@@ -231,9 +231,9 @@ no row.
 ### Not proven
 
 - A report with many loose pictures, for how the grid breaks across pages.
-- With the document's Photos box unticked, the pictures are hidden like every picture, and the
-  heading "Other pictures from this visit" still prints over nothing. The office can delete
-  the heading in the editor.
+- ~~With the document's Photos box unticked, the pictures are hidden like every picture, and
+  the heading "Other pictures from this visit" still prints over nothing.~~ Fixed later the
+  same day: see "The heading belongs to its pictures" at the end.
 
 ### Cleanup
 
@@ -242,3 +242,30 @@ pictures and their six small copies, the temporary ticket with its history entri
 "Care plan report" template row that listing the templates had added to the live site ahead
 of the publish. Counts afterwards as before: 58 tickets, 0 temporary, 45 documents, 7
 templates, 314 notices.
+
+## The heading belongs to its pictures (Nov 23, the owner: "4 go")
+
+The heading "Other pictures from this visit" was a text module of its own, put before the Photo
+Grid. With Photos switched off, or once the pictures were taken out of the grid, it printed with
+nothing under it.
+
+It is now the grid's own heading (`PhotoGridModule.heading`). The grid prints it over its first
+line of pictures, and keeps the two on the same page. It is printed only when a picture is
+printed under it:
+
+- Photos off: nothing of the grid is printed, so no heading.
+- No picture in the grid: no heading.
+- The editor draws the same. With Photos off the grid is its one muted line. With pictures the
+  heading is a box the office can reword or clear. With an empty grid a small note says the
+  heading waits for a picture.
+
+A Photo Grid without a heading prints exactly as before, and a grid saved before this change
+still opens. No database change.
+
+Tests: `src/lib/documents/photo-grid-heading-nov23.test.ts`. On the code before the change 8 of
+its 12 fail. Two pins in `src/lib/care-plan-report-not-checked-nov23.test.ts` moved, with a note.
+
+Browser proof on a temporary plan inspection (ticket 999901, removed after): the report's last
+sheet showed the heading over two pictures, and the exported PDF's text held "Other pictures
+from this visit" once. With the Photos box unticked the editor showed no heading and one muted
+line, and the exported PDF's text did not hold the words. Ticked again, the heading was back.

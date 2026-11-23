@@ -8,8 +8,9 @@
  *  - The notice and the Needs attention row open that opportunity.
  *  - On the opportunity a strip shows what the customer sent and offers the possible matches.
  *    Saying whose it is puts the customer on the opportunity (the database's own function).
- *  - A Roof Care request then opens the normal sign-up. When the plan is signed the opportunity
- *    is set to Won. No payment is taken on the public page.
+ *  - A Roof Care request then opens the normal sign-up. The opportunity is set to Won the day
+ *    the plan is paid (it was the day it is signed until later on Nov 23). No payment is taken
+ *    on the public page.
  *  - The request follows its opportunity: deleted, restored, or a customer picked on the form.
  *
  * Names and figures are made up and match no plan price.
@@ -299,9 +300,6 @@ describe("the strip on the opportunity", () => {
     expect(requestStepWords("quote", { kind: "care" })).toBe(
       "No price was shown on the page, so nothing was signed. Call them with a price.",
     );
-    expect(requestStepWords("signed", { kind: "care" })).toBe(
-      "The plan is signed. This opportunity was set to Won.",
-    );
     expect(requestStepWords("done", { kind: "service" })).toBe(
       "The customer is on this opportunity. Call them, then start a ticket or a bid from here.",
     );
@@ -376,62 +374,110 @@ describe("the strip on the opportunity", () => {
   });
 });
 
-describe("a plan signed from a request sets its opportunity to Won", () => {
-  const handled = (over: Record<string, unknown> = {}) =>
-    request({
-      status: "matched",
-      account_id: ACC,
-      site_id: SITE,
-      roof_care_plan_id: PLAN,
-      ...over,
-    });
-  const env = (opp: Record<string, unknown>, req = handled()) =>
-    fakeSupabase(
-      { profiles: people, crm_opportunities: [opportunity(opp)], crm_followups: [] },
-      { rpcs: { public_request_handle: () => req } },
+describe("the opportunity is Won the day the plan is paid, not the day it is signed", () => {
+  // Nov 23, the owner on new issue 2: "2 go". For a few hours it was set to Won at sign-up, by
+  // the page's server function. A plan signed and never paid then left a Won opportunity.
+  const sql = flat(read("supabase/migrations/20261123300000_plan_pay_link_and_won_when_paid.sql"));
+  it("signing a plan from a request ties the request to it, and changes no opportunity", async () => {
+    const e = fakeSupabase(
+      {
+        profiles: people,
+        crm_opportunities: [opportunity({ account_id: ACC, site_id: SITE })],
+        crm_followups: [],
+      },
+      {
+        rpcs: {
+          public_request_handle: () =>
+            request({ status: "matched", account_id: ACC, site_id: SITE, roof_care_plan_id: PLAN }),
+        },
+      },
     );
-  const ask = { id: REQ, status: "matched", site_id: SITE, plan_id: PLAN };
-  it("an open one becomes Won, in the name of the person who signed the plan", async () => {
-    const e = env({ account_id: ACC, site_id: SITE });
-    const out = (await run(handlePublicRequest, e.db, ask)) as { opportunity_note?: string };
-    expect(out.opportunity_note).toBeUndefined();
-    const row = e.tables["crm_opportunities"]![0]!;
-    expect(row["status"]).toBe("won");
-    expect(row["updated_by_name"]).toBe("Olga Office");
+    const out = (await run(handlePublicRequest, e.db, {
+      id: REQ,
+      status: "matched",
+      site_id: SITE,
+      plan_id: PLAN,
+    })) as { roof_care_plan_id: string };
+    expect(out.roof_care_plan_id).toBe(PLAN);
+    expect(e.tables["crm_opportunities"]![0]!["status"]).toBe("open");
+    expect(e.writes).toEqual([]);
     expect(e.rpcCalls.find((c) => c.fn === "public_request_handle")!.args).toMatchObject({
       p_id: REQ,
       p_status: "matched",
       p_site: SITE,
       p_plan: PLAN,
     });
+    // The page's own Won step is gone from the code.
+    expect(read("src/lib/opportunities.functions.ts")).not.toContain("winOpportunity");
+    expect(read("src/lib/public-requests.functions.ts")).not.toContain("opportunity_note");
   });
-  it("one somebody already closed, or deleted, is left as it is", async () => {
-    for (const over of [
-      { status: "lost" },
-      { status: "no_response" },
-      { deleted_at: "2026-11-23T16:00:00Z" },
-    ]) {
-      const e = env({ account_id: ACC, site_id: SITE, ...over });
-      await run(handlePublicRequest, e.db, ask);
-      const row = e.tables["crm_opportunities"]![0]!;
-      expect(row["status"], JSON.stringify(over)).toBe(over.status ?? "open");
-      expect(e.writes.filter((w) => w.table === "crm_opportunities")).toEqual([]);
-    }
+  it("the database sets it to Won when the plan becomes active, by whichever way it is paid", () => {
+    expect(sql).toContain(
+      "create trigger roof_care_plans_paid_wins after insert or update of status on public.roof_care_plans for each row execute function public.roof_care_plans_paid_wins();",
+    );
+    expect(sql).toContain(
+      "if new.status = 'active' and (tg_op = 'INSERT' or old.status is distinct from new.status) then",
+    );
+    // A fault in this step is logged and never stops a payment from being recorded.
+    expect(sql).toContain(
+      "begin perform public.roof_care_plan_wins_opportunity(new.id); exception when others then raise warning",
+    );
+    // Only the request's own opportunity, and never one somebody closed or deleted.
+    expect(sql).toContain("where q.roof_care_plan_id = p_plan and q.opportunity_id is not null");
+    expect(sql).toContain(
+      "set status = 'won', updated_by_name = 'Payment received' where o.id = r.id and o.deleted_at is null and o.status not in ('won', 'lost', 'no_response');",
+    );
+    // Its follow-up is closed with it, so nobody is reminded about a Won opportunity.
+    expect(sql).toContain(
+      "set status = 'closed', closed_at = now(), closed_reason = 'status won', closed_by_sync = true where kind = 'opportunity' and item_id = r.id and status = 'open';",
+    );
+    expect(sql).toContain(
+      "revoke all on function public.roof_care_plan_wins_opportunity(uuid) from public, anon, authenticated;",
+    );
   });
-  it("saying whose it is, with no plan, does not close anything", async () => {
-    const e = env({}, handled({ roof_care_plan_id: null }));
-    await run(handlePublicRequest, e.db, { id: REQ, status: "matched", account_id: ACC });
-    expect(e.tables["crm_opportunities"]![0]!["status"]).toBe("open");
+  it("a request pointed at a plan that is already paid is Won at once", () => {
+    expect(sql).toContain(
+      "if q.roof_care_plan_id is not null and exists ( select 1 from public.roof_care_plans p where p.id = q.roof_care_plan_id and p.status = 'active') then perform public.roof_care_plan_wins_opportunity(q.roof_care_plan_id);",
+    );
   });
-  it("the sign-up says so when the opportunity could not be set", () => {
+  it("the strip says which: signed and waiting for payment, or paid", async () => {
+    const care = {
+      kind: "care",
+      shown_price: 1740,
+      plan: "guard",
+      roof_care_plan_id: PLAN,
+    } as const;
+    const opp = { account_id: ACC, site_id: SITE };
+    expect(requestStep(care, opp, "awaiting_payment")).toBe("signed");
+    expect(requestStep(care, opp, null)).toBe("signed");
+    expect(requestStep(care, opp, "active")).toBe("paid");
+    expect(requestStepWords("signed", { kind: "care" })).toBe(
+      "The plan is signed and waits for its payment. This opportunity turns Won the day the payment is received.",
+    );
+    expect(requestStepWords("paid", { kind: "care" })).toBe(
+      "The plan is paid and has started. This opportunity was set to Won.",
+    );
+    const env = fakeSupabase({
+      profiles: people,
+      public_requests: [
+        request({ status: "matched", account_id: ACC, site_id: SITE, roof_care_plan_id: PLAN }),
+      ],
+      roof_care_plans: [{ id: PLAN, status: "awaiting_payment" }],
+    });
+    const out = (await run(getOpportunityRequest, env.db, { opportunity_id: OPP })) as {
+      plan_status: string | null;
+    };
+    expect(out.plan_status).toBe("awaiting_payment");
+    const strip = flat(read("src/components/opportunity-request-strip.tsx"));
+    expect(strip).toContain("const step = requestStep(r, opp, q.data?.plan_status);");
+    expect(strip).toContain('{(step === "signed" || step === "paid") && opp.site_id && (');
+  });
+  it("the sign-up tells the office what to do by hand if the request could not be tied", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain("if (answered.opportunity_note)");
     expect(card).toContain(
-      "Open the opportunity for request ${prefill.reference} and set it to Won.",
+      "could not be tied to it. When the plan is paid, open that request's opportunity and set it to Won.",
     );
     expect(card).not.toContain("Dismiss it on Opportunities, Public requests");
-    expect(flat(read("src/lib/public-requests.functions.ts"))).toContain(
-      "opportunity_note: `Its opportunity could not be set to Won: ${e instanceof Error ? e.message : String(e)}`,",
-    );
+    expect(card).not.toContain("answered.opportunity_note");
   });
 });

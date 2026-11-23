@@ -9,7 +9,7 @@
  * property are made by the functions that already make them (quickCreateAccount, saveSite).
  * A Roof Care request then opens the normal sign-up on the property's page with everything
  * filled in, so every sign-up rule runs and the plan waits for its payment as it does today.
- * When the plan is signed the opportunity is set to Won.
+ * The opportunity is set to Won the day that payment is received (the database does it).
  *
  * Shown to people with Customers access only: the server answers nothing to anyone else.
  */
@@ -236,7 +236,7 @@ export function OpportunityRequestStrip({
     ) : null;
   }
   const busy = existing.isPending || fresh.isPending;
-  const step = requestStep(r, opp);
+  const step = requestStep(r, opp, q.data?.plan_status);
   return (
     <section
       className="space-y-3 rounded-lg border border-amber-500/50 bg-amber-50 p-4 dark:bg-amber-950/20"
@@ -316,7 +316,7 @@ export function OpportunityRequestStrip({
           </Link>
         </Button>
       )}
-      {step === "signed" && opp.site_id && (
+      {(step === "signed" || step === "paid") && opp.site_id && (
         <Button asChild variant="outline" size="sm" data-action="request-open-plan">
           <Link to="/properties/$id" params={{ id: opp.site_id }}>
             Open the property and its plan

@@ -322,7 +322,11 @@ describe("the workflow's Complete dialog", () => {
     expect(s).toContain(
       "const planQuestionsOpen = cleaningBlocksAnyway(cleaning, FINISHED.includes(job.stage));",
     );
-    expect(s).toContain("{manager && !planQuestionsOpen && ( <AlertDialogAction");
+    // (Nov 23: the button is also held back while a checklist row of the plan's inspection has
+    // no answer; inspection-answers-nov23.test.ts.)
+    expect(s).toContain(
+      "{manager && !planQuestionsOpen && planRowsOpen.length === 0 && ( <AlertDialogAction",
+    );
     expect(s).toContain('data-line="plan-questions-required"');
     expect(s).not.toContain("{manager && ( <AlertDialogAction");
   });

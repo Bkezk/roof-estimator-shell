@@ -114,7 +114,9 @@ describe("the sign-up opened from a request", () => {
       'data: { id: prefill.request_id, status: "matched", site_id: siteId, plan_id: made.id },',
     );
     // A request that could not be marked never undoes the sign-up: the office is told.
-    expect(card).toContain("could not be marked as done");
+    // Nov 23: the words say what is left to do by hand now that the opportunity turns Won
+    // when the plan is paid.
+    expect(card).toContain("could not be tied to it. When the plan is paid, open that request");
   });
 });
 

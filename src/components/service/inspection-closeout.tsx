@@ -31,7 +31,13 @@ import { Camera, Check, CheckCircle2, Images, Loader2, RefreshCw } from "lucide-
 
 import type { ServiceJobRow } from "@/lib/service.functions";
 import type { JobPhotoRow } from "@/lib/service-field.functions";
-import { photosOnItem, unattachedTicketPhotos, type InspectionItem } from "@/lib/inspection";
+import {
+  inspectionComplete,
+  photosOnItem,
+  unattachedTicketPhotos,
+  type InspectionItem,
+} from "@/lib/inspection";
+import { isPlanInspection } from "@/lib/inspection-answers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -263,6 +269,9 @@ export function InspectionChecklistStep({
             readOnly={false}
             onChange={draft.setItem}
             jobId={job.id}
+            // A Roof Care plan's inspection not finished yet: every row needs its answer (owner,
+            // Nov 23: "3 go"). The step waits for them (closeout.tsx, inspection-answers.ts).
+            needAnswers={isPlanInspection(job) && !inspectionComplete(job.stage)}
             // Pictures on any row (Nov 20): the row's own, with the ones still going up.
             photoCount={(item) =>
               itemPhotos(photos, item.id).length + camera.controls(item.id).pending.length

@@ -30,10 +30,12 @@ moment it is sent.
      the database, and comes back if the opportunity is restored.
    - Picking the customer on the opportunity's own form and saving counts as the match too.
 5. **A Roof Care request** then shows **Open the sign-up**. It opens the normal sign-up on the
-   property, filled in with what the customer picked, exactly as before. When the plan is signed
-   the opportunity is set to **Won**, and its follow-up closes the way it does for a status set
-   by hand. An opportunity somebody already set to Lost or No response, or deleted, is left as it
-   is.
+   property, filled in with what the customer picked, exactly as before. The opportunity is set
+   to **Won** the day the plan is paid and starts, and its follow-up closes with it. An
+   opportunity somebody already set to Lost or No response, or deleted, is left as it is.
+   (For a few hours on Nov 23 this happened at sign-up. The owner chose payment day the same
+   evening: a plan signed and never paid no longer leaves a Won opportunity. The database does
+   it, migration `20261123300000`, so a check and a card both count.)
 6. **A custom quote** (no price was shown on the page) never offers the sign-up: the strip says
    to call them with a price.
 7. **Start a bid and Start a ticket are not shown** while no customer is on the opportunity.
@@ -51,6 +53,10 @@ terms, and says how they would like to pay. That is a request. The plan does not
 office opens the sign-up and signs it, and it starts the day the payment is received, as for any
 plan. The strip says "No payment was taken on the page" so nobody takes the request for a paid
 plan.
+
+Later the same evening the owner chose how such a customer pays by card: after the office signs
+the plan, the customer gets a card payment link of their own. See
+`docs/qa/roof-care-pay-link-2026-11-23.md`.
 
 ## Proof
 

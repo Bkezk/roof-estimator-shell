@@ -280,8 +280,10 @@ describe("the screen: onStep, the Next step button, nothing advances on its own"
     );
     // (Nov 19: the Checklist step's line also speaks for a Roof Care plan's cleaning questions;
     // every other step's line passes through. cleaning-ticks-nov19.test.tsx.)
+    // (Nov 23: and, first, for the checklist rows of a plan's inspection that still need an
+    // answer; inspection-answers-nov23.test.ts.)
     expect(form).toMatch(
-      /missing: cleaningStepMissing\(\s*id,\s*stepMissing\(id, stepState\),\s*checklistSaved,\s*cleaning,\s*finished,\s*\),\s*onNext: \(\) => goNext\(id\),/,
+      /missing: planRowsStepMissing\(\s*id,\s*cleaningStepMissing\(id, stepMissing\(id, stepState\), checklistSaved, cleaning, finished\),\s*planRowsOpen,\s*\),\s*onNext: \(\) => goNext\(id\),/,
     );
     expect(form).toContain("onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}");
     // Complete still only from step 7, from the REAL open step.

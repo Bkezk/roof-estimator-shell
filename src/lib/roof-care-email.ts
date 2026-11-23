@@ -46,6 +46,11 @@ export interface PlanEmailFacts {
   /** The company's name, and how to reach it ("" when not on file). */
   company: string;
   contact: string;
+  /**
+   * The customer's own card payment link (Nov 23), when the plan pays by card, still waits for
+   * its payment, and paying by card online is set up. Null or left out: no link is printed.
+   */
+  pay_link?: string | null;
 }
 
 export interface Email {
@@ -60,6 +65,7 @@ const esc = (s: string) =>
 type Block =
   | { kind: "p"; text: string }
   | { kind: "h"; text: string }
+  | { kind: "link"; text: string; url: string }
   | { kind: "ul" | "ol"; items: string[] };
 
 function render(subject: string, blocks: Block[]): Email {
@@ -69,7 +75,9 @@ function render(subject: string, blocks: Block[]): Email {
         ? b.text
         : b.kind === "h"
           ? b.text.toUpperCase()
-          : b.items.map((t, i) => (b.kind === "ol" ? `${i + 1}. ${t}` : `- ${t}`)).join("\n"),
+          : b.kind === "link"
+            ? `${b.text}: ${b.url}`
+            : b.items.map((t, i) => (b.kind === "ol" ? `${i + 1}. ${t}` : `- ${t}`)).join("\n"),
     )
     .join("\n\n");
   const html =
@@ -80,7 +88,9 @@ function render(subject: string, blocks: Block[]): Email {
           ? `<p>${esc(b.text)}</p>`
           : b.kind === "h"
             ? `<h3 style="margin:20px 0 6px;font-size:16px">${esc(b.text)}</h3>`
-            : `<${b.kind} style="margin:0;padding-left:22px">${b.items.map((t) => `<li style="margin-bottom:4px">${esc(t)}</li>`).join("")}</${b.kind}>`,
+            : b.kind === "link"
+              ? `<p><a href="${esc(b.url)}" style="display:inline-block;padding:10px 18px;background:#1f4e9c;color:#ffffff;font-weight:bold;text-decoration:none;border-radius:6px">${esc(b.text)}</a></p><p style="font-size:13px;color:#555555">Or open this address: ${esc(b.url)}</p>`
+              : `<${b.kind} style="margin:0;padding-left:22px">${b.items.map((t) => `<li style="margin-bottom:4px">${esc(t)}</li>`).join("")}</${b.kind}>`,
       )
       .join("") +
     `</div>`;
@@ -100,6 +110,47 @@ const signOff = (f: Pick<PlanEmailFacts, "company" | "contact">): Block[] => [
   },
   { kind: "p", text: `Thank you,\n${f.company}` },
 ];
+
+/** The card payment link, where there is one to give. */
+const payBlocks = (f: Pick<PlanEmailFacts, "pay_link">): Block[] =>
+  f.pay_link
+    ? [
+        { kind: "h", text: "Pay by card" },
+        {
+          kind: "p",
+          text: "You chose to pay by card. Use the button below to pay on our secure payment page. Your plan starts the day we receive your payment.",
+        },
+        { kind: "link", text: "Pay by card", url: f.pay_link },
+      ]
+    : [];
+
+export interface PayLinkFacts {
+  plan: PlanKey;
+  plan_number: number | null;
+  site: string;
+  address: string;
+  agreed_by: string;
+  /** Dollars still owed for the year. */
+  owed: number;
+  pay_link: string;
+  company: string;
+  contact: string;
+}
+
+/** The link by itself, when the office sends it again from the plan (Nov 23). */
+export function payLinkEmail(f: PayLinkFacts): Email {
+  const name = PLAN_NAMES[f.plan];
+  const blocks: Block[] = [
+    { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
+    {
+      kind: "p",
+      text: `Here is the link to pay for the ${name} plan${label(f)} at ${place(f)}: ${money0(f.owed)} for the year. It opens our secure card payment page. Your plan starts the day we receive your payment.`,
+    },
+    { kind: "link", text: "Pay by card", url: f.pay_link },
+    ...signOff(f),
+  ];
+  return render(`Pay for your ${f.company} ${planName(f.plan)} plan${label(f)}`, blocks);
+}
 
 /**
  * The agreement: the plan, the price, what it includes, and the terms that were agreed to, word
@@ -127,6 +178,7 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
         "The plan runs for twelve months from the day we receive your payment.",
       ],
     },
+    ...payBlocks(f),
     { kind: "h", text: `What ${name} includes` },
     { kind: "ul", items: everythingIncluded(f.plan, f.benefits) },
     { kind: "p", text: PLAN_FOOTNOTES.join(" ") },

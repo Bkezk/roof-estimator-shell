@@ -19,6 +19,14 @@
  * `FromInspectionNote` is the "From inspection #6012" link on a ticket created from one.
  */
 import { Fragment, useRef, useState } from "react";
+import {
+  PLAN_ROWS_GO_FIRST,
+  PLAN_ROWS_WHY,
+  ROW_NEEDS_ANSWER,
+  isPlanInspection,
+  planRowsLine,
+  rowsToAnswer,
+} from "@/lib/inspection-answers";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -175,6 +183,8 @@ function InspectionBody({
         readOnly={!canEdit}
         onChange={draft.setItem}
         jobId={job.id}
+        // A Roof Care plan's inspection not finished yet: every row needs its answer (Nov 23).
+        needAnswers={isPlanInspection(job) && !inspectionComplete(job.stage)}
         photoCount={(item) => photosOnItem(photos.data ?? [], item.id).length}
         extra={(item: InspectionItem) => (
           <ItemPhotoTools
@@ -250,10 +260,18 @@ export function ChecklistRows({
   extra,
   photoCount,
   jobId,
+  needAnswers = false,
 }: {
   items: readonly InspectionItem[];
   readOnly: boolean;
   onChange: (id: string, patch: Partial<InspectionItem>) => void;
+  /**
+   * A Roof Care plan's inspection that is not finished yet (owner, Nov 23: "3 go"): every row
+   * needs OK, Issue or N/A. A row with no answer is marked, the notice above the rows says how
+   * many are left and why, and its button goes to the first one. Off on every other ticket,
+   * where a row left blank reads as OK.
+   */
+  needAnswers?: boolean | undefined;
   extra?: ((item: InspectionItem) => React.ReactNode) | undefined;
   /** How many pictures a row has (and has going up): the number on its Pictures button. */
   photoCount?: ((item: InspectionItem) => number) | undefined;
@@ -274,6 +292,15 @@ export function ChecklistRows({
   // A row's pictures, on a row that is not an issue (Nov 20): what the person pressed, by row.
   // Not pressed yet: open when the row has pictures, closed when it has none.
   const [picsPressed, setPicsPressed] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  // The rows a plan's inspection still waits for, and the way to the first of them.
+  const rowsBox = useRef<HTMLDivElement>(null);
+  const open = needAnswers ? rowsToAnswer(items) : [];
+  const goFirst = () => {
+    const row = rowsBox.current?.querySelector<HTMLElement>("[data-row-needs-answer]");
+    if (!row) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    row.querySelector<HTMLElement>("[data-answer='ok']")?.focus({ preventScroll: true });
+  };
   if (items.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
@@ -281,46 +308,80 @@ export function ChecklistRows({
       </p>
     );
   return (
-    <ol className="space-y-1.5">
-      {items.map((item) => {
-        const flagged = isFlagged(item);
-        const ok = item.status === "ok";
-        const na = item.status === "na";
-        const closed = flagged && folded.has(item.id);
-        const pictures = photoCount ? Math.max(0, photoCount(item)) : 0;
-        const picsOpen = rowPicturesOpen({
-          flagged,
-          folded: closed,
-          pressed: picsPressed.get(item.id),
-          count: pictures,
-        });
-        // Somebody who cannot edit sees the button only where there is something to look at.
-        // An issue row that is open already shows its camera and pictures under the note, so a
-        // Pictures button there did nothing when pressed (owner, Nov 23: "this is a bit
-        // confusing, if issue is selected its already opened up"). It is drawn only where a
-        // press does something: on a row that is not an issue, and on an issue row folded shut.
-        const picsButton =
-          !!extra && (!readOnly || pictures > 0) && rowShowsPicturesButton(flagged, closed);
-        const pressPictures = () => {
-          // An issue row's pictures are in its own fold: the button opens a folded one.
-          if (flagged) {
-            if (closed) toggleFold(item.id);
-            return;
-          }
-          setPicsPressed((prev) => new Map(prev).set(item.id, !picsOpen));
-        };
-        const set = (pressed: NonNullable<InspectionItem["status"]>) => {
-          const r = pressStatus(item.status, pressed);
-          if (r.fold) toggleFold(item.id);
-          else if (r.status !== item.status) onChange(item.id, { status: r.status });
-        };
-        return (
-          <li
-            key={item.id}
-            data-row={flagged ? "issue" : (item.status ?? "clear")}
-            className={`space-y-2 rounded-md border px-2 py-1 ${flagged ? "border-red-300 bg-red-50/40 dark:border-red-900/60 dark:bg-red-950/20" : ""}`}
-          >
-            {/* A narrow phone (Nov 20; found at 320 px): the label could not get narrower than its
+    <div className="space-y-1.5" ref={rowsBox}>
+      {needAnswers && (
+        <div
+          className="space-y-1 rounded-md border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950/30"
+          data-line="plan-rows"
+          data-open={open.length}
+          role="status"
+        >
+          <p>{PLAN_ROWS_WHY}</p>
+          {open.length > 0 ? (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-medium">
+              <span data-line="plan-rows-left">{planRowsLine(open)}</span>
+              {!readOnly && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-10"
+                  data-action="plan-rows-first"
+                  onClick={goFirst}
+                >
+                  {PLAN_ROWS_GO_FIRST}
+                </Button>
+              )}
+            </p>
+          ) : (
+            <p className="font-medium" data-line="plan-rows-done">
+              Every row has an answer.
+            </p>
+          )}
+        </div>
+      )}
+      <ol className="space-y-1.5">
+        {items.map((item) => {
+          const needsAnswer = needAnswers && item.status === null;
+          const flagged = isFlagged(item);
+          const ok = item.status === "ok";
+          const na = item.status === "na";
+          const closed = flagged && folded.has(item.id);
+          const pictures = photoCount ? Math.max(0, photoCount(item)) : 0;
+          const picsOpen = rowPicturesOpen({
+            flagged,
+            folded: closed,
+            pressed: picsPressed.get(item.id),
+            count: pictures,
+          });
+          // Somebody who cannot edit sees the button only where there is something to look at.
+          // An issue row that is open already shows its camera and pictures under the note, so a
+          // Pictures button there did nothing when pressed (owner, Nov 23: "this is a bit
+          // confusing, if issue is selected its already opened up"). It is drawn only where a
+          // press does something: on a row that is not an issue, and on an issue row folded shut.
+          const picsButton =
+            !!extra && (!readOnly || pictures > 0) && rowShowsPicturesButton(flagged, closed);
+          const pressPictures = () => {
+            // An issue row's pictures are in its own fold: the button opens a folded one.
+            if (flagged) {
+              if (closed) toggleFold(item.id);
+              return;
+            }
+            setPicsPressed((prev) => new Map(prev).set(item.id, !picsOpen));
+          };
+          const set = (pressed: NonNullable<InspectionItem["status"]>) => {
+            const r = pressStatus(item.status, pressed);
+            if (r.fold) toggleFold(item.id);
+            else if (r.status !== item.status) onChange(item.id, { status: r.status });
+          };
+          return (
+            <li
+              key={item.id}
+              data-row={flagged ? "issue" : (item.status ?? "clear")}
+              data-row-needs-answer={needsAnswer ? "yes" : undefined}
+              className={`space-y-2 rounded-md border px-2 py-1 ${flagged ? "border-red-300 bg-red-50/40 dark:border-red-900/60 dark:bg-red-950/20" : needsAnswer ? "border-amber-500/70 dark:border-amber-500/60" : ""}`}
+            >
+              {/* A narrow phone (Nov 20; found at 320 px): the label could not get narrower than its
                 longest word, so the row was wider than the card and the result buttons ran about
                 42 px off the edge. Under 390 px the label may now shrink, and a long word breaks
                 after its slash ("Gutters/ downspouts"). Under 350 px the buttons also drop to a
@@ -329,156 +390,170 @@ export function ChecklistRows({
                 Later that day each row got a fourth button, Pictures: the label may now narrow
                 and break after its slash on any phone (under 640 px), and the buttons drop to
                 their own line under 390 px (it was 350), so no word is ever cut in two. */}
-            {/* Nov 23 (owner: "we should also be able to add pictures to checked marked good
+              {/* Nov 23 (owner: "we should also be able to add pictures to checked marked good
                 items"): the Pictures button was a bare camera and was missed, so it now carries
                 its word. That makes the buttons wider, so the rule is no longer a screen width:
                 the label keeps room for its words (9.5rem), and wherever the label and the
                 buttons do not fit side by side the buttons take a line of their own, to the
                 right. On the narrowest phones the buttons may fold onto two lines themselves.
                 Nothing ever runs past the card and no word is cut in two. */}
-            <div className="flex flex-wrap items-center gap-1" data-line="checklist-row">
-              <button
-                type="button"
-                className="flex min-h-10 min-w-[9.5rem] flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
-                aria-pressed={flagged}
-                aria-label={
-                  flagged
-                    ? `${item.label}: ${closed ? "open" : "fold"}`
-                    : `${item.label}: flag an issue`
-                }
-                aria-expanded={flagged ? !closed : undefined}
-                disabled={readOnly}
-                onClick={() => set("issue")}
-              >
-                {flagged ? (
-                  <Flag
-                    className="h-4 w-4 shrink-0 fill-red-600 text-red-600 dark:fill-red-400 dark:text-red-400"
-                    aria-hidden
-                  />
-                ) : ok ? (
-                  <Check
-                    className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-                    aria-hidden
-                  />
-                ) : (
-                  <span className="h-4 w-4 shrink-0" aria-hidden />
-                )}
-                <span
-                  data-line="checklist-label"
-                  className={`min-w-0 [overflow-wrap:break-word] ${na ? "text-muted-foreground line-through" : ""}`}
-                >
-                  {slashBreaks(item.label)}
-                </span>
-                {flagged &&
-                  (closed ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                  ) : (
-                    <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                  ))}
-              </button>
-              <div
-                className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-0.5"
-                role="group"
-                aria-label={`${item.label}: result`}
-              >
-                <Button
+              <div className="flex flex-wrap items-center gap-1" data-line="checklist-row">
+                <button
                   type="button"
-                  size="sm"
-                  variant="ghost"
-                  aria-pressed={ok}
-                  aria-label={`${item.label}: OK`}
-                  title="Tick OK (optional — a row with nothing flagged reads as OK)"
-                  disabled={readOnly}
-                  className={`h-[44px] w-[44px] p-0 ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60"}`}
-                  onClick={() => set("ok")}
-                >
-                  <Check className="h-4 w-4" aria-hidden />
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
+                  className="flex min-h-10 min-w-[9.5rem] flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
                   aria-pressed={flagged}
-                  aria-label={`${item.label}: issue`}
+                  aria-label={
+                    flagged
+                      ? `${item.label}: ${closed ? "open" : "fold"}`
+                      : `${item.label}: flag an issue`
+                  }
+                  aria-expanded={flagged ? !closed : undefined}
                   disabled={readOnly}
-                  className={`h-[44px] px-2.5 ${flagged ? "border-transparent bg-red-600 text-white hover:bg-red-600/90" : ""}`}
                   onClick={() => set("issue")}
                 >
-                  <Flag className="mr-1 h-3.5 w-3.5" aria-hidden /> Issue
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  aria-pressed={na}
-                  aria-label={`${item.label}: not applicable`}
-                  disabled={readOnly}
-                  className={`h-[44px] px-2 text-xs ${na ? "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500" : "text-muted-foreground"}`}
-                  onClick={() => set("na")}
+                  {flagged ? (
+                    <Flag
+                      className="h-4 w-4 shrink-0 fill-red-600 text-red-600 dark:fill-red-400 dark:text-red-400"
+                      aria-hidden
+                    />
+                  ) : ok ? (
+                    <Check
+                      className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                      aria-hidden
+                    />
+                  ) : (
+                    <span className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  <span
+                    data-line="checklist-label"
+                    className={`min-w-0 [overflow-wrap:break-word] ${na ? "text-muted-foreground line-through" : ""}`}
+                  >
+                    {slashBreaks(item.label)}
+                  </span>
+                  {flagged &&
+                    (closed ? (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    ) : (
+                      <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    ))}
+                </button>
+                <div
+                  className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-0.5"
+                  role="group"
+                  aria-label={`${item.label}: result`}
                 >
-                  N/A
-                </Button>
-                {picsButton && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-pressed={ok}
+                    aria-label={`${item.label}: OK`}
+                    title={
+                      needAnswers
+                        ? "OK: nothing wrong with this part"
+                        : "Tick OK (optional — a row with nothing flagged reads as OK)"
+                    }
+                    data-answer="ok"
+                    disabled={readOnly}
+                    className={`h-[44px] w-[44px] p-0 ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60"}`}
+                    onClick={() => set("ok")}
+                  >
+                    <Check className="h-4 w-4" aria-hidden />
+                  </Button>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    aria-label={picturesButtonLabel(item.label, pictures)}
-                    aria-expanded={picsOpen}
-                    aria-pressed={picsOpen}
-                    title={
-                      picsOpen
-                        ? "Close this part's pictures"
-                        : "Pictures for this part: the camera, or pictures already on the phone"
-                    }
-                    data-action="row-pictures"
-                    data-count={pictures}
-                    data-open={picsOpen ? "yes" : "no"}
-                    // Open: the button is filled, so it reads as the thing that is open and that
-                    // a second press closes.
-                    className={`h-[44px] min-w-[44px] gap-1 px-2 text-xs ${picsOpen ? "border-transparent bg-primary font-semibold text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : pictures > 0 ? "border-primary/50 font-semibold text-primary" : ""}`}
-                    onClick={pressPictures}
+                    aria-pressed={flagged}
+                    aria-label={`${item.label}: issue`}
+                    disabled={readOnly}
+                    className={`h-[44px] px-2.5 ${flagged ? "border-transparent bg-red-600 text-white hover:bg-red-600/90" : ""}`}
+                    onClick={() => set("issue")}
                   >
-                    <Camera className="h-4 w-4 shrink-0" aria-hidden />
-                    <span data-line="row-pictures-words">{picturesButtonWords(pictures)}</span>
+                    <Flag className="mr-1 h-3.5 w-3.5" aria-hidden /> Issue
                   </Button>
-                )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-pressed={na}
+                    aria-label={`${item.label}: not applicable`}
+                    disabled={readOnly}
+                    className={`h-[44px] px-2 text-xs ${na ? "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500" : "text-muted-foreground"}`}
+                    onClick={() => set("na")}
+                  >
+                    N/A
+                  </Button>
+                  {picsButton && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-label={picturesButtonLabel(item.label, pictures)}
+                      aria-expanded={picsOpen}
+                      aria-pressed={picsOpen}
+                      title={
+                        picsOpen
+                          ? "Close this part's pictures"
+                          : "Pictures for this part: the camera, or pictures already on the phone"
+                      }
+                      data-action="row-pictures"
+                      data-count={pictures}
+                      data-open={picsOpen ? "yes" : "no"}
+                      // Open: the button is filled, so it reads as the thing that is open and that
+                      // a second press closes.
+                      className={`h-[44px] min-w-[44px] gap-1 px-2 text-xs ${picsOpen ? "border-transparent bg-primary font-semibold text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : pictures > 0 ? "border-primary/50 font-semibold text-primary" : ""}`}
+                      onClick={pressPictures}
+                    >
+                      <Camera className="h-4 w-4 shrink-0" aria-hidden />
+                      <span data-line="row-pictures-words">{picturesButtonWords(pictures)}</span>
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-            {flagged && !closed ? (
-              <div className="space-y-2 pb-1">
-                <Input
-                  aria-label={`${item.label}: note`}
-                  className="h-10 text-base"
-                  placeholder="What and where"
-                  maxLength={ITEM_NOTE_MAX}
-                  value={item.note}
-                  disabled={readOnly}
-                  onChange={(e) => onChange(item.id, { note: e.target.value })}
-                />
-                {extra?.(item)}
-              </div>
-            ) : (
-              item.note && (
+              {flagged && !closed ? (
+                <div className="space-y-2 pb-1">
+                  <Input
+                    aria-label={`${item.label}: note`}
+                    className="h-10 text-base"
+                    placeholder="What and where"
+                    maxLength={ITEM_NOTE_MAX}
+                    value={item.note}
+                    disabled={readOnly}
+                    onChange={(e) => onChange(item.id, { note: e.target.value })}
+                  />
+                  {extra?.(item)}
+                </div>
+              ) : (
+                item.note && (
+                  <p
+                    className={`px-1 pb-1 text-sm text-muted-foreground ${closed ? "truncate" : "whitespace-pre-line"}`}
+                  >
+                    {item.note}
+                  </p>
+                )
+              )}
+              {!flagged && extra && picsOpen && (
+                // A row that is not an issue: its pictures and the two ways to add one, and no
+                // note box. Nothing here changes the row's answer.
+                <div className="pb-1" data-row-pictures={item.id}>
+                  {extra(item)}
+                </div>
+              )}
+              {needsAnswer && (
                 <p
-                  className={`px-1 pb-1 text-sm text-muted-foreground ${closed ? "truncate" : "whitespace-pre-line"}`}
+                  className="px-1 pb-1 text-xs font-medium text-amber-700 dark:text-amber-400"
+                  data-line="row-needs-answer"
                 >
-                  {item.note}
+                  {ROW_NEEDS_ANSWER}
                 </p>
-              )
-            )}
-            {!flagged && extra && picsOpen && (
-              // A row that is not an issue: its pictures and the two ways to add one, and no
-              // note box. Nothing here changes the row's answer.
-              <div className="pb-1" data-row-pictures={item.id}>
-                {extra(item)}
-              </div>
-            )}
-            {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
-          </li>
-        );
-      })}
-    </ol>
+              )}
+              {jobId && <LastTimeLine jobId={jobId} itemKey={item.id} />}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 

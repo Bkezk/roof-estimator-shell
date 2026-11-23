@@ -34,6 +34,8 @@ import {
 } from "@/lib/documents/editor-helpers";
 import {
   CONTENT_WIDTH,
+  photoGridHeading,
+  photoGridHeadingShown,
   photoGridKey,
   repairItemData,
   repairItemKey,
@@ -348,6 +350,30 @@ function PhotoGrid({ m, set }: { m: PhotoGridModule; set: Setter }) {
           <Plus className="h-3 w-3" /> Add picture
         </button>
       </div>
+      {/* The grid's own heading (Nov 23; owner: "4 go"): drawn only over pictures, as the PDF
+          prints it (pdf-layout.ts layoutPhotoGrid). With Photos off the whole module is one
+          muted line (ModuleBody), and with no picture in the grid the heading waits. */}
+      {m.heading !== undefined &&
+        (photoGridHeadingShown(m, true) || (m.images.length > 0 && m.heading.trim() === "") ? (
+          <input
+            type="text"
+            aria-label="Heading over these pictures"
+            title="The heading over these pictures. It prints only when a picture is under it."
+            placeholder="Heading over these pictures (leave blank for none)"
+            maxLength={200}
+            data-grid-heading
+            className="mb-1.5 w-full border-0 bg-transparent p-0 text-[16px] font-bold text-neutral-900 outline-none placeholder:font-normal placeholder:text-neutral-400 focus:ring-0 dark:text-neutral-900"
+            value={m.heading}
+            onChange={(e) => patch((g) => ({ ...g, heading: e.target.value }))}
+          />
+        ) : photoGridHeading(m) ? (
+          <p
+            className="mb-1 text-xs italic text-neutral-500 dark:text-neutral-500"
+            data-grid-heading-waits
+          >
+            The heading “{photoGridHeading(m)}” prints once a picture is here.
+          </p>
+        ) : null)}
       {m.images.length === 0 ? (
         <button
           type="button"

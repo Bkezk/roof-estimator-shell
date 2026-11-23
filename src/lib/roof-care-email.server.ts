@@ -14,6 +14,7 @@
  * agreement that arrives weeks late is worse than none.
  */
 import {
+  appUrl,
   emailConfigured,
   hasServiceRole,
   sendEmail,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/roof-care-email";
 import { asPayMethod, FIRST_VISIT_CHOICES, type FirstVisit } from "@/lib/roof-care-plan";
 import { asPlanKey } from "@/lib/roof-care-plan";
+import { payLinkFor } from "@/lib/roof-care-pay-link";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { plusDays } from "@/lib/working-days";
 
@@ -50,7 +52,7 @@ export interface PlanEmailResult {
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 const SELECT =
-  "id, plan, plan_number, site_id, agreed_by, signed_on, price, pay_method, first_visit, first_days, terms_version, status, pay_first, paid_on, starts_on, renews_on, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, card_paid_amount" as const;
+  "id, plan, plan_number, site_id, agreed_by, signed_on, price, pay_method, first_visit, first_days, terms_version, status, pay_first, paid_on, starts_on, renews_on, customer_email, agreement_sent_at, agreement_error, receipt_sent_at, receipt_error, card_paid_amount, pay_token" as const;
 
 /** Why email cannot go from this server at all, or null. */
 export function planEmailHeld(): string | null {
@@ -133,6 +135,10 @@ export async function dispatchPlanEmails(
     .join(" or ");
   const benefits = benefitsFromSettings(benefitsAnswer.data?.[0]?.data);
   const stamp = now.toISOString();
+  // The customer's own card payment link goes in the agreement (Nov 23) when paying by card
+  // online is set up. Without it the agreement reads as it always did.
+  const { stripeConfigured } = await import("@/lib/roof-care-checkout.server");
+  const payBase = stripeConfigured() ? appUrl() : "";
 
   for (const p of due) {
     const plan = asPlanKey(p.plan);
@@ -159,6 +165,10 @@ export async function dispatchPlanEmails(
       benefits: benefits?.[plan] ?? null,
       company: companyName,
       contact,
+      pay_link:
+        payBase && p.pay_method === "card" && p.status === "awaiting_payment" && p.pay_token
+          ? payLinkFor(payBase, p.pay_token)
+          : null,
     };
 
     if (!p.agreement_sent_at && p.status !== "ended" && p.signed_on >= since) {
@@ -172,6 +182,9 @@ export async function dispatchPlanEmails(
         out.email_errors++;
       } else if (await sendClaimed(admin, p.id, "agreement", to, mail, stamp, send)) {
         out.agreements_sent++;
+        // The plan says when the link went, so the office knows the customer has it.
+        if (facts.pay_link)
+          await admin.from("roof_care_plans").update({ pay_link_sent_at: stamp }).eq("id", p.id);
       } else out.email_errors++;
     }
 

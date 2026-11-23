@@ -11,8 +11,6 @@ import {
   CHECKOUT_NOT_SET_UP,
   CHECKOUT_NOT_WAITING,
   CHECKOUT_NOTHING_OWED,
-  checkoutAmount,
-  toCents,
 } from "@/lib/roof-care-checkout";
 
 /** Is paying by card online set up on this server? */
@@ -32,7 +30,7 @@ export const startPlanCheckout = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<{ url: string | null; reason: string | null }> => {
-    const { stripeConfigured, createCheckoutSession } =
+    const { stripeConfigured, createCheckoutSession, planOwedCents } =
       await import("@/lib/roof-care-checkout.server");
     const { appUrl, serverClient } = await import("@/lib/notify.server");
     if (!stripeConfigured()) return { url: null, reason: CHECKOUT_NOT_SET_UP };
@@ -56,31 +54,12 @@ export const startPlanCheckout = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!plan) throw new Error("That plan was not found");
     if (plan.status !== "awaiting_payment") return { url: null, reason: CHECKOUT_NOT_WAITING };
-    // The invoice decides the amount when it is final; a technician cannot read invoices, so
-    // it is read with the server's own key (the amount is the customer's price, nothing more).
-    const [{ data: inv }, { data: site }] = await Promise.all([
-      admin
-        .from("invoices")
-        .select("status, total, paid_amount")
-        .eq("roof_care_plan_id", plan.id)
-        .neq("status", "void")
-        .order("created_at", { ascending: false })
-        .limit(1),
+    // The invoice decides the amount when it is final (planOwedCents, shared with the
+    // customer's own payment link since Nov 23).
+    const [cents, { data: site }] = await Promise.all([
+      planOwedCents(admin, plan),
       admin.from("crm_sites").select("name").eq("id", plan.site_id).maybeSingle(),
     ]);
-    const first = inv?.[0];
-    const cents = toCents(
-      checkoutAmount(
-        { price: Number(plan.price) || 0, renewal_credit: Number(plan.renewal_credit) || 0 },
-        first
-          ? {
-              status: first.status,
-              total: Number(first.total) || 0,
-              paid_amount: Number(first.paid_amount) || 0,
-            }
-          : null,
-      ),
-    );
     if (cents == null) return { url: null, reason: CHECKOUT_NOTHING_OWED };
     const back = `${base}/properties/${plan.site_id}`;
     const made = await createCheckoutSession({

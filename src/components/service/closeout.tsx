@@ -213,6 +213,12 @@ import {
   type CleaningGate,
 } from "./cleaning-gate";
 import { useVisitCleaning } from "./use-visit-cleaning";
+import {
+  PLAN_ROWS_REQUIRED_NOTE,
+  planRowsGaps,
+  planRowsStepMissing,
+  planRowsWaiting,
+} from "@/lib/inspection-answers";
 import { isFlagged, issueCountText, unattachedTicketPhotos } from "@/lib/inspection";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import { pressLine, runningLabel } from "@/lib/tech-clock";
@@ -848,6 +854,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const cleaning: CleaningGate = gateOf(cleaningQ);
   // A question of the plan still open: no "Complete anyway" (cleaning-gate.ts).
   const planQuestionsOpen = cleaningBlocksAnyway(cleaning, FINISHED.includes(job.stage));
+  // Nov 23 (owner: "3 go"): on a plan's inspection every checklist row needs its answer (OK,
+  // Issue or N/A) too: the customer's Care plan report prints "Not checked" for a blank row.
+  // The rows on the screen with no answer (inspection-answers.ts); none on any other ticket.
+  const planRowsOpen = planRowsWaiting(job, insp.items, FINISHED.includes(job.stage));
 
   const input = (d: TextDraft) => ({
     id: job.id,
@@ -1026,7 +1036,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     });
     // The plan's questions at its own inspection stand beside the checklist (Nov 19).
     const plan = cleaningGaps(gate, finished);
-    return { gaps: [...base.gaps, ...plan.gaps], unread: base.unread || plan.unread };
+    // And the checklist rows a plan's inspection still waits for (Nov 23).
+    return {
+      gaps: [...base.gaps, ...planRowsGaps(planRowsOpen), ...plan.gaps],
+      unread: base.unread || plan.unread,
+    };
   };
   const judge = (g: CompleteGaps) => {
     if (g.gaps.length > 0) {
@@ -1114,6 +1128,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     recommendRepairs: insp.recommendRepairs,
     recommendNewRoof: draft.recommend_new_roof,
   };
+  // Nov 23 (owner: "3 go"): on a Roof Care plan's inspection the Checklist step also waits for
+  // every row's answer (inspection-answers.ts), so the bar stays on "Finish step 1" until then.
+  if (planRowsOpen.length > 0) stepState.checklistSaved = false;
   const open = firstOpenStep(stepState);
   // Until the reads answer every list is empty, so the strip would say Before with the rest
   // locked and then jump: the steps wait for the first answers (a failed read counts — its
@@ -1174,12 +1191,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       flushSync(() => setPicked(null));
       if (shownOpen) jumpTo(shownOpen);
     },
-    missing: cleaningStepMissing(
+    // The rows a plan's inspection still waits for come first (Nov 23), then the checklist's
+    // own line and the plan's questions as before.
+    missing: planRowsStepMissing(
       id,
-      stepMissing(id, stepState),
-      checklistSaved,
-      cleaning,
-      finished,
+      cleaningStepMissing(id, stepMissing(id, stepState), checklistSaved, cleaning, finished),
+      planRowsOpen,
     ),
     onNext: () => goNext(id),
   });
@@ -1634,6 +1651,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   {CLEANING_REQUIRED_NOTE}
                 </p>
               )}
+              {planRowsOpen.length > 0 && (
+                <p className="text-sm font-medium" data-line="plan-rows-required">
+                  {PLAN_ROWS_REQUIRED_NOTE}
+                </p>
+              )}
               <AlertDialogFooter>
                 <AlertDialogCancel className="h-12">Go back</AlertDialogCancel>
                 {unread && (
@@ -1656,7 +1678,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     could never be pressed is gone (owner, Nov 3, review item 20). */}
                 {/* Not while a question of the Roof Care plan is open (owner, Nov 20: "those
                     questions should be required"): the server and the database refuse it too. */}
-                {manager && !planQuestionsOpen && (
+                {manager && !planQuestionsOpen && planRowsOpen.length === 0 && (
                   <AlertDialogAction
                     className="h-12"
                     onClick={() => {

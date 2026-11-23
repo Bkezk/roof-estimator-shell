@@ -130,11 +130,17 @@ export function loosePhotoIds(
 }
 
 /**
- * A new Care plan report with the ticket's other pictures put in: a heading and a Photo Grid,
- * three to a line, after everything else on the last page. A template that already holds an
- * empty Photo Grid gets them there instead, under whatever the office put above it. With no
- * such pictures, or on any other document, the pages come back untouched: no heading, no gap.
- * The pictures are the ticket's own files, by reference: nothing is copied or made smaller.
+ * A new Care plan report with the ticket's other pictures put in: a Photo Grid, three to a
+ * line, with its own heading, after everything else on the last page. A template that already
+ * holds an empty Photo Grid gets them there instead, under whatever the office put above it.
+ * With no such pictures, or on any other document, the pages come back untouched: no heading,
+ * no gap. The pictures are the ticket's own files, by reference: nothing is copied or made
+ * smaller.
+ *
+ * Nov 23 (owner: "4 go"): the heading is the grid's own (PhotoGridModule.heading), not a text
+ * module before it. It was a module of its own, so with Photos switched off, or once the
+ * pictures were taken out of the grid, it printed over nothing. Now it prints only with a
+ * picture under it (pdf-layout.ts layoutPhotoGrid; the editor draws the same).
  */
 export function withOtherPictures(
   pages: readonly DocPage[],
@@ -155,20 +161,12 @@ export function withOtherPictures(
     }),
   }));
   if (placed) return filled;
-  const heading = {
-    ...newModule("body"),
-    text: {
-      type: "doc",
-      content: [
-        {
-          type: "heading",
-          attrs: { level: 2 },
-          content: [{ type: "text", text: OTHER_PICTURES_HEADING }],
-        },
-      ],
-    },
+  const grid = {
+    ...newModule("photoGrid"),
+    images,
+    columns: 3,
+    heading: OTHER_PICTURES_HEADING,
   } as DocModule;
-  const grid = { ...newModule("photoGrid"), images, columns: 3 } as DocModule;
   const last = pages.length - 1;
-  return pages.map((p, i) => (i === last ? { ...p, modules: [...p.modules, heading, grid] } : p));
+  return pages.map((p, i) => (i === last ? { ...p, modules: [...p.modules, grid] } : p));
 }

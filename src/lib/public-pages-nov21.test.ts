@@ -67,7 +67,11 @@ describe("only the two pages are public", () => {
   });
   it("the gate lets a signed-out visitor stay on them, bare, and sends every other path to the sign-in", () => {
     const gate = flat(read("src/components/auth-gate.tsx"));
-    expect(gate).toContain("const isPublicForm = isPublicFormPath(pathname);");
+    // Nov 23: and a Roof Care customer's own card payment link, a path that is exactly
+    // /pay/<token> (roof-care-pay-link-nov23.test.ts proves nothing else gets through).
+    expect(gate).toContain(
+      "const isPublicForm = isPublicFormPath(pathname) || isPublicPayPath(pathname);",
+    );
     expect(gate).toContain(
       'if (!session && !isLogin && !isReset && !isPublicForm) { navigate({ to: "/login" });',
     );

@@ -53,6 +53,7 @@ import { Route as CustomersRequestsRouteImport } from './routes/customers_.reque
 import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as ITokenRouteImport } from './routes/i.$token'
 import { Route as OpportunitiesRequestsRouteImport } from './routes/opportunities_.requests'
+import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as PropertiesIdRouteImport } from './routes/properties_.$id'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
@@ -285,6 +286,11 @@ const OpportunitiesRequestsRoute = OpportunitiesRequestsRouteImport.update({
   path: '/opportunities/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayTokenRoute = PayTokenRouteImport.update({
+  id: '/pay/$token',
+  path: '/pay/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PropertiesIdRoute = PropertiesIdRouteImport.update({
   id: '/properties_/$id',
   path: '/properties/$id',
@@ -386,6 +392,7 @@ export interface FileRoutesByFullPath {
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/opportunities/requests': typeof OpportunitiesRequestsRoute
+  '/pay/$token': typeof PayTokenRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -443,6 +450,7 @@ export interface FileRoutesByTo {
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/opportunities/requests': typeof OpportunitiesRequestsRoute
+  '/pay/$token': typeof PayTokenRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -501,6 +509,7 @@ export interface FileRoutesById {
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
   '/opportunities_/requests': typeof OpportunitiesRequestsRoute
+  '/pay/$token': typeof PayTokenRoute
   '/properties_/$id': typeof PropertiesIdRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -560,6 +569,7 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/i/$token'
     | '/opportunities/requests'
+    | '/pay/$token'
     | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
@@ -617,6 +627,7 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/i/$token'
     | '/opportunities/requests'
+    | '/pay/$token'
     | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
@@ -674,6 +685,7 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/i/$token'
     | '/opportunities_/requests'
+    | '/pay/$token'
     | '/properties_/$id'
     | '/prospect_/leads'
     | '/service/board'
@@ -732,6 +744,7 @@ export interface RootRouteChildren {
   DTokenRoute: typeof DTokenRoute
   ITokenRoute: typeof ITokenRoute
   OpportunitiesRequestsRoute: typeof OpportunitiesRequestsRoute
+  PayTokenRoute: typeof PayTokenRoute
   PropertiesIdRoute: typeof PropertiesIdRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   SetupQrRoute: typeof SetupQrRoute
@@ -1052,6 +1065,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OpportunitiesRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pay/$token': {
+      id: '/pay/$token'
+      path: '/pay/$token'
+      fullPath: '/pay/$token'
+      preLoaderRoute: typeof PayTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/properties_/$id': {
       id: '/properties_/$id'
       path: '/properties/$id'
@@ -1192,6 +1212,7 @@ const rootRouteChildren: RootRouteChildren = {
   DTokenRoute: DTokenRoute,
   ITokenRoute: ITokenRoute,
   OpportunitiesRequestsRoute: OpportunitiesRequestsRoute,
+  PayTokenRoute: PayTokenRoute,
   PropertiesIdRoute: PropertiesIdRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   SetupQrRoute: SetupQrRoute,

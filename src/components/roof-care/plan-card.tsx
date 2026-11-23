@@ -55,6 +55,8 @@ import {
 import { carePrefillNote, carePrefillWords, type CareSignUpPrefill } from "@/lib/public-requests";
 import { handlePublicRequest, publicCarePrefill } from "@/lib/public-requests.functions";
 import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
+import { SIGNED_PAY_BY_LINK } from "@/lib/roof-care-pay-link";
+import { PlanPayLinkBox } from "@/components/roof-care/pay-link";
 import { cleaningAsked, cleaningSummary, roofCareCleaningKey } from "@/lib/roof-care-cleaning";
 import { markRoofCareForecast, roofCareCleaning } from "@/lib/roof-care-cleaning.functions";
 import {
@@ -1908,6 +1910,10 @@ function AwaitingPayment({
           {CHECKOUT_BUTTON}
         </Button>
       )}
+      {/* Nov 23: the customer's own link, for one who is not at this screen (signed up through
+          the QR page, or wants to pay later from their own phone). Shown whenever the plan pays
+          by card: before card payment is set up the box says so in plain words. */}
+      {plan.pay_method === "card" && <PlanPayLinkBox planId={plan.id} />}
       {!short && !renewalOf && (
         <p className="text-muted-foreground" data-awaiting-first>
           {firstVisitWords(plan.first_visit, plan.first_days)}
@@ -2285,29 +2291,26 @@ function SignUpDialog({
           ...(sizeCheck === "smaller" && manager && sizeOk ? { size_ok: true } : {}),
         },
       });
-      // Opened from a public request: the request is done, it points at the plan it became,
-      // and its opportunity is set to Won (Nov 23). The plan is signed either way; when that
-      // last step fails the office is told what to do by hand.
+      // Opened from a public request: the request points at the plan it became, so its
+      // opportunity turns Won by itself the day the plan is paid (Nov 23). The plan is signed
+      // either way; when the pointing fails the office is told what to do by hand.
       if (prefill) {
         try {
-          const answered = await handleFn({
+          await handleFn({
             data: { id: prefill.request_id, status: "matched", site_id: siteId, plan_id: made.id },
           });
-          if (answered.opportunity_note)
-            toast.warning(
-              `The plan is signed. ${answered.opportunity_note}. Open the opportunity for request ${prefill.reference} and set it to Won.`,
-              { duration: 30_000 },
-            );
         } catch {
           toast.warning(
-            `The plan is signed, but request ${prefill.reference} could not be marked as done. Open its opportunity and set it to Won.`,
+            `The plan is signed, but request ${prefill.reference} could not be tied to it. When the plan is paid, open that request's opportunity and set it to Won.`,
             { duration: 30_000 },
           );
         }
       }
-      // The card payment page, when there is one. The plan is signed either way.
+      // The card payment page, when there is one. The plan is signed either way. Not for a
+      // plan signed from a public request (Nov 23): that customer is not at this screen, so
+      // they pay from their own link, and the office is told where it is.
       let pay: string | null = null;
-      if (payMethod === "card") {
+      if (payMethod === "card" && !prefill) {
         try {
           pay = (await checkoutFn({ data: { plan_id: made.id } })).url;
         } catch {
@@ -2323,6 +2326,13 @@ function SignUpDialog({
           duration: 20_000,
         });
         window.location.assign(pay);
+        return;
+      }
+      if (prefill && payMethod === "card") {
+        toast.success(`${planName(made.plan)} plan signed. ${SIGNED_PAY_BY_LINK}`, {
+          duration: 30_000,
+        });
+        onClose();
         return;
       }
       toast.success(

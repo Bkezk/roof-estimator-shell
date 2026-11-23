@@ -24,6 +24,7 @@ import { StalledNotice } from "@/components/stalled-sign-in";
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import { foldMenuOnArrival } from "@/lib/narrow-menu";
 import { isPublicFormPath } from "@/lib/public-forms";
+import { isPublicPayPath } from "@/lib/roof-care-pay-link";
 import { onRecoveryChange, recoveryState } from "@/lib/recovery-link";
 
 /**
@@ -147,7 +148,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // The two pages the printed QR codes open (Roof Care step 4, Nov 21; lib/public-forms.ts):
   // /care and /request. Bare like the sign-in screen, and open with or without a session.
   // Nothing else is opened by this: every other path still sends a visitor to the sign-in.
-  const isPublicForm = isPublicFormPath(pathname);
+  // Nov 23: and a Roof Care customer's own card payment link, a path that is exactly
+  // /pay/<token> (lib/roof-care-pay-link.ts). The same bare page, the same rule.
+  const isPublicForm = isPublicFormPath(pathname) || isPublicPayPath(pathname);
   const recovery = useSyncExternalStore(
     onRecoveryChange,
     () => recoveryState(window.sessionStorage),

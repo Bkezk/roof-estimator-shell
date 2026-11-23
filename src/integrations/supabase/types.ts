@@ -3868,8 +3868,10 @@ export type Database = {
           notes: string
           paid_on: string | null
           pay_first: boolean
+          pay_link_sent_at: string | null
           pay_method: string | null
           pay_note: string | null
+          pay_token: string
           plan: string
           plan_number: number | null
           price: number
@@ -3934,8 +3936,10 @@ export type Database = {
           notes?: string
           paid_on?: string | null
           pay_first?: boolean
+          pay_link_sent_at?: string | null
           pay_method?: string | null
           pay_note?: string | null
+          pay_token?: string
           plan: string
           plan_number?: number | null
           price: number
@@ -4000,8 +4004,10 @@ export type Database = {
           notes?: string
           paid_on?: string | null
           pay_first?: boolean
+          pay_link_sent_at?: string | null
           pay_method?: string | null
           pay_note?: string | null
+          pay_token?: string
           plan?: string
           plan_number?: number | null
           price?: number

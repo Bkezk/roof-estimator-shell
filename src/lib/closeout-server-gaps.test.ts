@@ -188,8 +188,10 @@ describe("the screen", () => {
     expect(src).toContain("const manager = managesTickets(profile);");
     // (Nov 20: and not while a question of the Roof Care plan is open at its own inspection,
     // "those questions should be required"; cleaning-required-nov20.test.ts.)
+    // (Nov 23: nor while a checklist row of the plan's inspection has no answer;
+    // inspection-answers-nov23.test.ts.)
     expect(src).toMatch(
-      /\{manager && !planQuestionsOpen && \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\)\}/,
+      /\{manager && !planQuestionsOpen && planRowsOpen\.length === 0 && \(\s*<AlertDialogAction[\s\S]*?Complete anyway\s*<\/AlertDialogAction>\s*\)\}/,
     );
     expect(src).not.toContain('data-action="complete-blocked"');
     expect(src).toContain("{!manager && (");

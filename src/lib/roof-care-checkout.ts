@@ -75,6 +75,12 @@ export interface CheckoutAsk {
   email: string | null;
   success_url: string;
   cancel_url: string;
+  /**
+   * "link" when the page is opened from the customer's own payment link (Nov 23), which comes
+   * back to a public page. Stripe keeps one page per plan, amount and hour for each of the two
+   * ways in, so a page made for the office is never handed to the customer or the other way.
+   */
+  via?: "link";
 }
 
 /** The form Stripe's "create a Checkout Session" takes, one payment for the year. */

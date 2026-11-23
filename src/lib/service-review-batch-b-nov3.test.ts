@@ -72,7 +72,10 @@ describe("20. the gaps dialog", () => {
   it("has no greyed-out Complete for a technician any more", () => {
     expect(closeout).not.toContain('data-action="complete-blocked"');
     // (Nov 20: Complete anyway is also held back while a Roof Care plan's question is open.)
-    expect(closeout).toMatch(/\{manager && !planQuestionsOpen && \(\s*<AlertDialogAction/);
+    // (Nov 23: and while a checklist row of a Roof Care plan's inspection has no answer.)
+    expect(closeout).toMatch(
+      /\{manager && !planQuestionsOpen && planRowsOpen\.length === 0 && \(\s*<AlertDialogAction/,
+    );
   });
 });
 

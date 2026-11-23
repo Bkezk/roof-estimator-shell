@@ -839,34 +839,6 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
   });
 
 /**
- * A Roof Care plan was signed from a public request (Nov 23): its opportunity is Won. The same
- * write and the same follow-up step as a status set by hand (setOpportunityStatus), under the
- * caller's own rights. An opportunity that is deleted, or already Won, Lost or No response, is
- * left as it is: somebody decided that.
- */
-export async function winOpportunity(ctx: Ctx, id: string): Promise<boolean> {
-  const { data: cur, error: cErr } = await ctx.supabase
-    .from("crm_opportunities")
-    .select("status, deleted_at")
-    .eq("id", id)
-    .maybeSingle();
-  if (cErr) throw new Error(cErr.message);
-  if (!cur || cur.deleted_at || OPP_CLOSING.includes(cur.status as OppStatus)) return false;
-  const p = await me(ctx);
-  const { data: row, error } = await ctx.supabase
-    .from("crm_opportunities")
-    .update({ status: "won", updated_by_name: nameOf(p) })
-    .eq("id", id)
-    .is("deleted_at", null)
-    .select("*")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!row) return false;
-  await syncOppFollowup(row, cur.status, ctx, nameOf(p));
-  return true;
-}
-
-/**
  * The Assignee box on a saved opportunity saves at change (owner, Nov 4), the way the Status
  * does: handing it to someone is an action — their follow-up timer starts and they are told
  * "assigned to you" (never the person making the change), the one before loses theirs — and
