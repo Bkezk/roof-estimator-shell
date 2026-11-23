@@ -1,17 +1,18 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { CustomersPage } from "@/components/customers-page";
+import { CustomersPage, type CustomersTab } from "@/components/customers-page";
 
 export const Route = createFileRoute("/customers")({
   head: () => ({ meta: [{ title: "Customers — JBK Portal" }] }),
   // ?id=<uuid> is a customer's old address (every customer link in the app): it redirects to the
-  // customer's own page, /customers/<uuid> (owner, Oct 14). ?tab=vendors is the Vendors tab.
+  // customer's own page, /customers/<uuid> (owner, Oct 14). ?tab=vendors is the Vendors tab and
+  // ?tab=care the Care plans tab (owner, Nov 23).
   // Access is the central gate's (pageForPath: /customers → Customers).
-  validateSearch: (s: Record<string, unknown>): { id?: string; tab?: "vendors" } => {
+  validateSearch: (s: Record<string, unknown>): { id?: string; tab?: CustomersTab } => {
     const id = s["id"];
-    const out: { id?: string; tab?: "vendors" } = {};
+    const out: { id?: string; tab?: CustomersTab } = {};
     if (typeof id === "string" && id) out.id = id;
-    if (s["tab"] === "vendors") out.tab = "vendors";
+    if (s["tab"] === "vendors" || s["tab"] === "care") out.tab = s["tab"];
     return out;
   },
   beforeLoad: ({ search }) => {

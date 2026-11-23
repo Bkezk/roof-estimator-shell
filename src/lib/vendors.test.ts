@@ -601,7 +601,11 @@ describe("the Vendors tab on the Customers page", () => {
   const route = read("src/routes/customers.tsx");
   const tab = read("src/components/crm/vendors-section.tsx");
   it("?tab=vendors on /customers; no new sidebar entry", () => {
-    expect(route).toContain('if (s["tab"] === "vendors") out.tab = "vendors";');
+    // Nov 23: the Customers page gained a third tab, Care plans (care-plan-list-nov23.test.ts),
+    // so the route reads either of the two tab words.
+    expect(route).toContain(
+      'if (s["tab"] === "vendors" || s["tab"] === "care") out.tab = s["tab"];',
+    );
     expect(route).toContain("return <CustomersPage tab={tab} />;");
     expect(page).toContain('{ tab: "vendors", title: "Vendors", icon: Truck },');
     expect(page).toMatch(

@@ -93,7 +93,10 @@ plan as running late.
 ## Decided on the evening of Nov 18
 
 - **Referral credit is just a name.** The record keeps who signed the customer up, or the name
-  typed in "who referred you". No payout, no report beyond that.
+  typed in "who referred you". No payout, no report beyond that. Nov 23: the owner asked for a
+  commission plan for reps, based on the minimum roof size and drive. Choices were put to him
+  and nothing is built or decided; the working is in the office's private note. Both names show
+  on the Customers page's Care plans tab (`docs/qa/care-plans-tab-2026-11-23.md`).
 - **The list of services is on hold.** The owner will come back to it. Until then a request for an
   additional service is typed in words.
 - **The terms.** The owner asked what the customer should agree to. A draft went back to him for

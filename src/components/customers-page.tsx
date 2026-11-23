@@ -14,10 +14,11 @@
  * back (owner, Sep 27). A new customer is offered the saved bids that look like it
  * (LinkBidsDialog), and the account keeps offering them in "Bids that look like this customer".
  *
- * Two tabs under the title: Customers (the above) and Vendors (`?tab=vendors`; owner, Oct 1:
+ * Tabs under the title: Customers (the above) and Vendors (`?tab=vendors`; owner, Oct 1:
  * "We need somewhere to add vendor info like name, address etc, then we can select them as a
  * recipient" — a tab here, not a sidebar entry: the owner wants fewer nav items). The Vendors
- * tab is vendors-section.tsx.
+ * tab is vendors-section.tsx. A third tab, Care plans (`?tab=care`; owner, Nov 23), lists the
+ * customers with a Roof Care plan: care-plans-section.tsx.
  *
  * A deleted customer still opens by id (an old `?id=` link, a ticket's customer chip): a
  * "Deleted on <date> by <who>" banner, and everything read-only — no New ticket, Edit, Delete,
@@ -57,6 +58,7 @@ import {
   Sparkles,
   Target,
   Trash2,
+  ShieldCheck,
   Truck,
   Unlink,
   Users,
@@ -140,6 +142,7 @@ import {
 import { WindowedList } from "@/components/windowed-list";
 import { mapsUrl, telHref } from "@/lib/maps-link";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
+import { CarePlansSection } from "@/components/crm/care-plans-section";
 import { VendorsSection } from "@/components/crm/vendors-section";
 import {
   AlertDialog,
@@ -195,12 +198,16 @@ const stageLabel = (s: string) =>
 /** How long the customers list is kept before a visit fetches it again. */
 export const ACCOUNTS_STALE_MS = 2 * 60_000;
 
-/** The Customers page's tabs (`?tab=`): Customers (no param) and Vendors. */
+/**
+ * The Customers page's tabs (`?tab=`): Customers (no param), Vendors, and Care plans (owner,
+ * Nov 23: "add a care plan tab that shows the customers that have a plan").
+ */
 const CUSTOMERS_TABS = [
   { tab: undefined, title: "Customers", icon: Contact },
   { tab: "vendors", title: "Vendors", icon: Truck },
+  { tab: "care", title: "Care plans", icon: ShieldCheck },
 ] as const;
-export type CustomersTab = "vendors";
+export type CustomersTab = "vendors" | "care";
 
 function CustomersTabs({ tab }: { tab?: CustomersTab | undefined }) {
   return (
@@ -236,6 +243,21 @@ export function CustomersPage({ tab }: { tab?: CustomersTab | undefined }) {
   const [adding, setAdding] = useState(false);
   // A customer just added, offered the saved bids that look like it.
   const [offerFor, setOfferFor] = useState<OfferAccount | null>(null);
+  if (tab === "care")
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <Contact className="h-6 w-6" /> Customers
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Care plans: the customers with a Roof Care plan, and where each plan stands.
+          </p>
+        </div>
+        <CustomersTabs tab={tab} />
+        <CarePlansSection />
+      </div>
+    );
   if (tab === "vendors")
     return (
       <div className="space-y-6">
