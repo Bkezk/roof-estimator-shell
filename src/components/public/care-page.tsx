@@ -50,10 +50,11 @@ import {
   careRequest,
   contactProblems,
   missingLine,
+  offerPriceWords,
+  priceSizeLine,
   quoteAsk,
   quoteHasPrices,
   sameAsk,
-  wholeDollars,
   type CareAnswers,
   type CareBuilding,
 } from "@/lib/public-pages";
@@ -215,6 +216,7 @@ export function PublicCarePage() {
   const show = (k: keyof typeof problems) => (tried ? (problems[k] ?? null) : null);
   const offerOf = (k: PublicPlanKey) =>
     priced ? quote!.plans.find((o) => o.plan === k) : undefined;
+  const sizeLine = priceSizeLine(quote, answer?.ask ?? null);
 
   return (
     <PublicSheet
@@ -396,7 +398,7 @@ export function PublicCarePage() {
                   data-plan-offer={o ? k : undefined}
                   name={o?.name ?? PLAN_NAMES[k]}
                   promise={PLAN_PITCH[k]}
-                  price={o ? wholeDollars(o.price) : null}
+                  price={o ? offerPriceWords(o) : null}
                   waiting={PRICE_AFTER_ADDRESS}
                   lines={planIncludes(k, o?.benefits ?? null)}
                   recommended={k === PLAN_RECOMMENDED ? RECOMMENDED_WORDS : null}
@@ -407,6 +409,11 @@ export function PublicCarePage() {
             })}
           </div>
           <div className="space-y-0.5 text-xs text-[var(--flyer-soft)]" data-plan-footnotes>
+            {priced && sizeLine && (
+              <p className="text-sm font-semibold text-[var(--flyer-ink)]" data-public="price-size">
+                {sizeLine}
+              </p>
+            )}
             {priced && (
               <p className="text-sm font-semibold text-[var(--flyer-ink)]">{PRICE_IS_ESTIMATE}</p>
             )}
@@ -547,7 +554,7 @@ export function PublicCarePage() {
             <section className="space-y-2" data-public="send">
               {priced && plan && (
                 <p className="text-base text-[var(--flyer-ink)]" data-public="picked">
-                  <b>{offerOf(plan)?.name}</b>: {wholeDollars(offerOf(plan)!.price)} per year, an
+                  <b>{offerOf(plan)?.name}</b>: {offerPriceWords(offerOf(plan)!)} per year, an
                   estimate until we measure your roof.
                 </p>
               )}

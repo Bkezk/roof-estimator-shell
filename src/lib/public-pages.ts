@@ -3,15 +3,17 @@
  * it can be sent, in the visitor's words, and what is sent. The pages are components/public/*;
  * the shape agreed with the server is lib/public-forms.ts. Nothing here knows a price.
  */
-import type {
-  PublicAddress,
-  PublicCareRequest,
-  PublicContact,
-  PublicPlanKey,
-  PublicQuote,
-  PublicQuoteAsk,
-  PublicServiceRequest,
-  PublicSizeRange,
+import {
+  PUBLIC_SIZE_RANGE_ENDS,
+  type PublicAddress,
+  type PublicCareRequest,
+  type PublicContact,
+  type PublicPlanKey,
+  type PublicPlanOffer,
+  type PublicQuote,
+  type PublicQuoteAsk,
+  type PublicServiceRequest,
+  type PublicSizeRange,
 } from "@/lib/public-forms";
 
 /** How to reach the company: printed on the flyer and on its website, so public already. */
@@ -261,3 +263,56 @@ export const sameAsk = (a: PublicQuoteAsk, b: PublicQuoteAsk): boolean =>
 /** "$1,234": whole dollars, as the flyer prints a price. */
 export const wholeDollars = (n: number): string =>
   `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+// ── A size range shows a range of prices (owner, Nov 23: "go with B and C") ─────────────────
+
+type Priced = Pick<PublicPlanOffer, "price"> & {
+  price_low?: number | null | undefined;
+  price_high?: number | null | undefined;
+};
+
+/**
+ * The low and the high price of a plan, when a size range was picked with no size typed and
+ * the two are not the same dollar. Null for one price: a typed size, a roof found on the map,
+ * or a range whose two ends cost the same.
+ */
+export function offerSpread(o: Priced): { low: number; high: number } | null {
+  const { price_low: low, price_high: high } = o;
+  if (low == null || high == null || !(low > 0) || !(low <= o.price) || !(high >= o.price))
+    return null;
+  return Math.round(low) === Math.round(high) ? null : { low, high };
+}
+
+/** What a plan's card shows as its price: "$1,234", or "$1,234 to $2,345" for a size range. */
+export function offerPriceWords(o: Priced): string {
+  const s = offerSpread(o);
+  return s ? `${wholeDollars(s.low)} to ${wholeDollars(s.high)}` : wholeDollars(o.price);
+}
+
+const sqftWords = (n: number) => Math.round(n).toLocaleString("en-US");
+
+/** "25,000 to 50,000 sq ft", or "under 10,000 sq ft" for the smallest range. Empty if none. */
+export function sizeRangeWords(range: string | null | undefined): string {
+  const ends = range ? (PUBLIC_SIZE_RANGE_ENDS[range as PublicSizeRange] ?? null) : null;
+  if (!ends) return "";
+  return ends.low <= 1
+    ? `under ${sqftWords(ends.high)} sq ft`
+    : `${sqftWords(ends.low)} to ${sqftWords(ends.high)} sq ft`;
+}
+
+/**
+ * Under the prices: which roof size they are for, and, when only a range was picked, how to get
+ * one price. Empty when no price is shown.
+ */
+export function priceSizeLine(q: PublicQuote | null, ask: PublicQuoteAsk | null): string {
+  if (!q || !quoteHasPrices(q) || q.sqft == null) return "";
+  if (q.sqft_source === "map")
+    return `These prices are for a roof of about ${sqftWords(q.sqft)} sq ft, the size we measured from the map at your address.`;
+  if (q.sqft_source === "typed")
+    return `These prices are for a roof of ${sqftWords(q.sqft)} sq ft, the size you typed.`;
+  const size = sizeRangeWords(ask?.size_range);
+  if (!size) return "";
+  return q.plans.some((o) => offerSpread(o))
+    ? `You picked ${size}, so each plan shows its lowest and its highest price for a roof that size. For one price, type your roof's size in step 1 and press Show my price again.`
+    : `These prices are for a roof ${size.startsWith("under") ? size : `of ${size}`}, the size you picked.`;
+}

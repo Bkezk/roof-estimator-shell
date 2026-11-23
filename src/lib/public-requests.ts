@@ -9,6 +9,7 @@
  */
 import { SETUP_QR_PATH } from "@/lib/menu-places";
 import { PUBLIC_CARE_PATH, PUBLIC_REQUEST_PATH, type PublicPlanKey } from "@/lib/public-forms";
+import { offerSpread, sizeRangeWords } from "@/lib/public-pages";
 
 /**
  * The two addresses the list of requests had (Nov 21 at /customers/requests, Nov 23 at
@@ -57,6 +58,8 @@ export interface PublicRequestRow {
     rough?: boolean;
     place?: string | null;
     custom_quote?: boolean;
+    /** The prices as the page had them. A size range adds each plan's low and high price. */
+    plans?: { plan?: string; price?: number; price_low?: number; price_high?: number }[] | null;
   } | null;
   pay_method: "check" | "card" | null;
   terms_version: string | null;
@@ -225,22 +228,89 @@ export interface CareSignUpPrefill {
   /** The yearly price the public page showed, for the office to compare. */
   shown_price: number | null;
   terms_version: string | null;
+  /**
+   * Only when they typed no size and picked a size range: the range in words, and the low and
+   * high price the page showed for their plan (null when it showed one price). The size box of
+   * the sign-up then starts blank: the middle of a range is nobody's roof.
+   */
+  picked_range?: { size: string; low: number | null; high: number | null };
+}
+
+/** Did the size come from a picked range alone: no size typed and no roof found on the map? */
+export const sizeIsRangeOnly = (r: Pick<PublicRequestRow, "sqft_source">): boolean =>
+  r.sqft_source === "range";
+
+/**
+ * The low and the high price the page showed for the plan they picked, when only a size range
+ * was picked (owner, Nov 23). Null when the page showed one price.
+ */
+export function shownRange(
+  r: Pick<PublicRequestRow, "plan" | "sqft_source" | "quote">,
+): { low: number; high: number } | null {
+  if (!sizeIsRangeOnly(r) || !r.plan) return null;
+  const o = (r.quote?.plans ?? []).find((x) => x?.plan === r.plan);
+  if (!o || typeof o.price !== "number") return null;
+  return offerSpread({ price: o.price, price_low: o.price_low, price_high: o.price_high });
+}
+
+const dollars = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+
+/**
+ * After the plan's name on a request, for the office: the price the page showed and the size it
+ * was for. ", shown $1,234 a year, for 21,000 sq ft, typed by them."
+ */
+export function careShownWords(
+  r: Pick<
+    PublicRequestRow,
+    "plan" | "sqft" | "size_range" | "sqft_source" | "shown_price" | "quote"
+  >,
+): string {
+  if (sizeIsRangeOnly(r)) {
+    const range = shownRange(r);
+    const size = sizeRangeWords(r.size_range);
+    const shown = range
+      ? `, shown ${dollars(range.low)} to ${dollars(range.high)} a year`
+      : r.shown_price != null
+        ? `, shown ${dollars(r.shown_price)} a year`
+        : "";
+    return `${shown}, for the size range they picked${size ? ` (${size})` : ""}. They typed no roof size.`;
+  }
+  const shown = r.shown_price != null ? `, shown ${dollars(r.shown_price)} a year` : "";
+  const size =
+    r.sqft != null
+      ? `, for ${Math.round(r.sqft).toLocaleString("en-US")} sq ft, ${
+          r.sqft_source === "map" ? "from the map" : "typed by them"
+        }`
+      : "";
+  return `${shown}${size}.`;
 }
 
 export function carePrefill(r: PublicRequestRow): CareSignUpPrefill | null {
   // A custom quote is a call to make, not a sign-up to open: nothing was priced or agreed to.
   if (r.kind !== "care" || !r.plan || isCustomQuoteAsk(r)) return null;
+  const rangeOnly = sizeIsRangeOnly(r);
+  const range = shownRange(r);
   return {
     request_id: r.id,
     reference: r.reference,
     plan: r.plan,
-    sqft: r.sqft,
+    // A size nobody typed or measured is not put in the box.
+    sqft: rangeOnly ? null : r.sqft,
     pay_method: r.pay_method ?? "check",
     agreed_by: (r.agreed_by ?? "").trim() || r.contact_name.trim(),
     referred_by: r.referred_by.trim(),
     customer_email: r.email.trim(),
     shown_price: r.shown_price,
     terms_version: r.terms_version,
+    ...(rangeOnly
+      ? {
+          picked_range: {
+            size: sizeRangeWords(r.size_range),
+            low: range?.low ?? null,
+            high: range?.high ?? null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -263,16 +333,25 @@ const wholeDollars = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
  * where it came from, the price the customer was shown, and whether their tick still stands.
  */
 export function carePrefillWords(p: CareSignUpPrefill, termsInUse: string): string {
+  const pr = p.picked_range;
+  const picked = pr ? ` They typed no roof size and picked ${pr.size || "a size range"}` : "";
   const shown =
-    p.shown_price != null && p.shown_price > 0
-      ? ` The page showed them ${wholeDollars(p.shown_price)} a year.`
-      : "";
+    pr && pr.low != null && pr.high != null
+      ? `${picked}, so the page showed them ${wholeDollars(pr.low)} to ${wholeDollars(pr.high)} a year.`
+      : p.shown_price != null && p.shown_price > 0
+        ? ` The page showed them ${wholeDollars(p.shown_price)} a year.${picked ? `${picked}.` : ""}`
+        : picked
+          ? `${picked}.`
+          : "";
   const terms =
     p.terms_version === termsInUse
       ? " They ticked these terms there, so the tick is already on."
       : " The terms have changed since they ticked them: read them the new ones and tick again.";
   const who = p.referred_by.trim() ? ` Referred by: ${p.referred_by.trim()}.` : "";
-  return `From the public Roof Care page, request ${p.reference}.${shown}${terms}${who} Check the roof size, press Show my price and choose when the first inspection is.`;
+  const next = pr
+    ? "The roof size box is blank: type the roof's real size, press Show my price and choose when the first inspection is."
+    : "Check the roof size, press Show my price and choose when the first inspection is.";
+  return `From the public Roof Care page, request ${p.reference}.${shown}${terms}${who} ${next}`;
 }
 
 /** The note kept on the plan, so the request and who referred them are not lost. */

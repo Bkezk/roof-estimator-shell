@@ -26,6 +26,7 @@ import { quickCreateAccount, saveSite } from "@/lib/crm.functions";
 import { shortDay } from "@/lib/followup-rules";
 import {
   CARE_REQUEST_SEARCH,
+  careShownWords,
   customQuoteWhy,
   isCustomQuoteAsk,
   matchWhyWords,
@@ -91,17 +92,7 @@ export function RequestFacts({ r }: { r: PublicRequestRow }) {
         <>
           <p>
             <span className="font-medium">{publicPlanName(r.plan)}</span>
-            {r.shown_price != null ? `, shown ${money(r.shown_price)} a year` : ""}
-            {r.sqft != null
-              ? `, for ${Math.round(r.sqft).toLocaleString("en-US")} sq ft, ${
-                  r.sqft_source === "map"
-                    ? "from the map"
-                    : r.sqft_source === "typed"
-                      ? "typed by them"
-                      : "the middle of the size range they picked"
-                }`
-              : ""}
-            .
+            <span data-request-shown>{careShownWords(r)}</span>
           </p>
           <p className="text-muted-foreground">
             Wants to pay by {r.pay_method === "card" ? "card" : "check"}. No payment was taken on

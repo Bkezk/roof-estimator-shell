@@ -29,6 +29,7 @@ import type { Client } from "@/lib/notify.server";
 import {
   PUBLIC_MIN_OPEN_MS,
   PUBLIC_NOT_READY,
+  PUBLIC_SIZE_RANGE_ENDS,
   PUBLIC_SIZE_RANGE_SQFT,
   PUBLIC_TERMS_MOVED,
   PUBLIC_TOO_MANY,
@@ -176,7 +177,16 @@ async function withinLimit(admin: Client, kind: "quote" | "request", key: string
 export function sampleQuote(ask: PublicQuoteAsk): PublicQuote {
   const custom = ask.size_range === "over_75k";
   const size = ask.sqft ?? (ask.size_range ? PUBLIC_SIZE_RANGE_SQFT[ask.size_range] : null);
-  const plans: PublicPlanOffer[] =
+  // A range picked with no size typed: a low and a high price, as the real answer gives. The
+  // smallest range has one price from end to end, as it does on the real prices.
+  const ranged = ask.sqft == null && !!ask.size_range && !custom;
+  const spread = (price: number): Partial<PublicPlanOffer> =>
+    !ranged
+      ? {}
+      : ask.size_range === "under_10k"
+        ? { price_low: price, price_high: price }
+        : { price_low: Math.round(price * 0.8), price_high: Math.round(price * 1.2) };
+  const base: PublicPlanOffer[] =
     custom || size == null
       ? []
       : [
@@ -199,6 +209,7 @@ export function sampleQuote(ask: PublicQuoteAsk): PublicQuote {
             benefits: { allowance: 1333, leak_calls: 2, storm: 1 },
           },
         ];
+  const plans: PublicPlanOffer[] = base.map((o) => ({ ...o, ...spread(o.price) }));
   return {
     found: true,
     rough: false,
@@ -222,11 +233,19 @@ function readOffers(x: unknown): PublicPlanOffer[] {
     const price = Number(r["price"]);
     if ((plan !== "watch" && plan !== "care" && plan !== "guard") || !Number.isFinite(price))
       continue;
+    // The two ends of a picked size range: kept only as a pair that sits around the price.
+    const low = r["price_low"] == null ? NaN : Number(r["price_low"]);
+    const high = r["price_high"] == null ? NaN : Number(r["price_high"]);
+    const ends =
+      Number.isFinite(low) && Number.isFinite(high) && low > 0 && low <= price && high >= price
+        ? { price_low: low, price_high: high }
+        : {};
     // Only these fields leave the server, whatever the database answered.
     out.push({
       plan,
       name: typeof r["name"] === "string" ? r["name"] : plan,
       price,
+      ...ends,
       benefits: {
         allowance: Number(b["allowance"]) || 0,
         leak_calls: Number(b["leak_calls"]) || 0,
@@ -264,6 +283,8 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
   const ranged = ask.size_range ? PUBLIC_SIZE_RANGE_SQFT[ask.size_range] : null;
   const size = over ? null : (mapSqft ?? typed ?? ranged);
   const source = size == null ? null : mapSqft != null ? "map" : typed != null ? "typed" : "range";
+  // With only a range to go on, its two ends are priced too: the page shows low to high.
+  const ends = source === "range" && ask.size_range ? PUBLIC_SIZE_RANGE_ENDS[ask.size_range] : null;
   const found = !!drive;
   const rough = drive ? placedRoughly(drive.placed_by) : false;
   const place = drive?.place ?? null;
@@ -280,6 +301,7 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
       place,
       sqft: size,
       sqft_source: source,
+      ...(ends ? { sqft_low: ends.low, sqft_high: ends.high } : {}),
     } as unknown as Json,
     p_hours: drive?.hours ?? null,
     p_miles: drive?.miles ?? null,

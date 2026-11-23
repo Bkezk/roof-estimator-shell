@@ -170,7 +170,10 @@ describe("what each plan includes, as the customer reads it", () => {
     // Nov 20: the Google Routes key is proven (Try a building said "by road, from Google"), so
     // it came off the list. The two that are still waiting stay.
     expect(agents).not.toContain("`GOOGLE_MAPS_API_KEY` in Lovable Cloud");
+    // Nov 23: email is set up and proven (an agreement and a staff notice reached the owner),
+    // so it came off the waiting list too. The page still says where its key is kept.
     expect(agents).toContain("`RESEND_API_KEY`");
+    expect(agents).not.toContain("  - Email. He set it up");
   });
 });
 

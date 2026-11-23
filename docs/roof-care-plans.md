@@ -892,6 +892,11 @@ What is behind them is in `docs/qa/public-forms-2026-11-21.md`. In short:
   yearly prices and what each plan includes, and nothing else: no cost, no profit, no drive, and
   nothing about who is already a customer. The price shown is kept, and the request must match
   it.
+- **A size range shows a range of prices** (Nov 23, the owner: "go with B and C"). A visitor
+  who picks a size range and types no size sees each plan from its price at the small end of
+  the range to its price at the large end, and the page says which size the prices are for and
+  how to get one price. The office reads the same two prices on the request, and the sign-up it
+  opens starts with a blank roof size. `docs/qa/public-quote-size-range-2026-11-23.md`.
 - **A roof with no price** (over the custom quote size, the largest size range, several
   buildings, or an address the map cannot place) is sent as a request to be called with a
   custom quote. Nothing is signed, and the office never opens a sign-up from it.

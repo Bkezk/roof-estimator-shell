@@ -49,7 +49,8 @@ call us."
   extra fields added on purpose).
 - A building's own stored size is never used: it would tell a stranger who is a customer. The
   size is the map's outline when it is sure, else what was typed, else the middle of the range
-  picked.
+  picked. Since Nov 23 a picked range is shown as a low and a high price, not the middle alone
+  (`docs/qa/public-quote-size-range-2026-11-23.md`).
 - The largest range, and a roof the price function calls a custom quote: no numbers.
 - An address the map cannot place, even by its town: no numbers.
 

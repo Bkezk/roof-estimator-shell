@@ -183,7 +183,12 @@ export function FlyerPlan({
       <span className="mt-3 block border-t-2 border-[var(--flyer-rule)] pt-2.5">
         {price != null ? (
           <span className="block" data-plan-price>
-            <span className={`${FLYER_HEAD} flyer-h2 block text-[var(--flyer-ink)]`}>{price}</span>
+            {/* A range of prices (a low and a high one) is set a size down, to stay on one line. */}
+            <span
+              className={`${FLYER_HEAD} ${price.length > 9 ? "flyer-h3" : "flyer-h2"} block text-[var(--flyer-ink)]`}
+            >
+              {price}
+            </span>
             <span className="block text-sm text-[var(--flyer-ink)]">per year</span>
           </span>
         ) : (

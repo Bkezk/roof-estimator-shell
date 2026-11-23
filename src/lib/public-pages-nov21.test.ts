@@ -381,7 +381,10 @@ describe("the pages themselves", () => {
     expect(care).toContain(
       "const offerOf = (k: PublicPlanKey) => priced ? quote!.plans.find((o) => o.plan === k) : undefined;",
     );
-    expect(care).toContain("price={o ? wholeDollars(o.price) : null}");
+    // Nov 23 (owner: "go with B and C"): a picked size range shows the plan's lowest to highest
+    // price, so the card prints the offer's words, not its one middle price
+    // (public-quote-range-nov23.test.ts).
+    expect(care).toContain("price={o ? offerPriceWords(o) : null}");
     expect(care).toContain("waiting={PRICE_AFTER_ADDRESS}");
     expect(care).toContain("disabled={!o}");
     // No figure is written into the page: every price is the server's answer.

@@ -52,6 +52,12 @@ export interface PublicPlanOffer {
   name: string;
   /** The yearly price for this building. Never a cost or a profit. */
   price: number;
+  /**
+   * Only when a size range was picked and no size typed: the plan's price at the small end of
+   * that range and at the large end. `price` is then the middle, which the page does not show.
+   */
+  price_low?: number;
+  price_high?: number;
   benefits: PublicPlanBenefits;
 }
 
@@ -151,6 +157,21 @@ export const PUBLIC_SIZE_RANGE_SQFT: Readonly<Record<PublicSizeRange, number | n
   "25k_50k": 37_500,
   "50k_75k": 62_500,
   // Over the size plans are priced for: a custom quote, never a number.
+  over_75k: null,
+};
+
+/**
+ * The two ends of each size range. A visitor who picks a range and types no size is shown each
+ * plan from its price at the small end to its price at the large end (owner, Nov 23: one price
+ * on the middle "may give them much smaller idea of what they will pay").
+ */
+export const PUBLIC_SIZE_RANGE_ENDS: Readonly<
+  Record<PublicSizeRange, { low: number; high: number } | null>
+> = {
+  under_10k: { low: 1, high: 10_000 },
+  "10k_25k": { low: 10_000, high: 25_000 },
+  "25k_50k": { low: 25_000, high: 50_000 },
+  "50k_75k": { low: 50_000, high: 75_000 },
   over_75k: null,
 };
 
