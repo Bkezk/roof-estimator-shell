@@ -73,6 +73,17 @@ export const fromAddress = () =>
   process.env["NOTIFY_FROM_EMAIL"] || "JBK Portal <onboarding@resend.dev>";
 const contactSubject = () =>
   `mailto:${process.env["NOTIFY_CONTACT_EMAIL"] || "sales@flatroofonline.com"}`;
+/**
+ * Where a reply to one of the site's emails goes (owner, Nov 23: "the email that id like to
+ * receive responses is Sales@flatroofonline.com"). The site sends from an address on jbkbid.com,
+ * which has no mailbox, so a customer who pressed Reply got their email bounced, while the Roof
+ * Care emails say "Reply to this email". Every email now names the office's own inbox as its
+ * reply address: the reply goes straight there and the conversation carries on as ordinary
+ * email. The NOTIFY_REPLY_TO secret changes the inbox without a change to the code.
+ */
+export const REPLY_TO_DEFAULT = "sales@flatroofonline.com";
+export const replyToAddress = () =>
+  (process.env["NOTIFY_REPLY_TO"] || "").trim() || REPLY_TO_DEFAULT;
 /** The app's public origin for links in emails and push (set APP_URL in Lovable Cloud). */
 export const appUrl = () => (process.env["APP_URL"] || "").replace(/\/+$/, "");
 
@@ -133,6 +144,7 @@ export async function sendEmail(input: {
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: fromAddress(),
+        reply_to: replyToAddress(),
         to: [input.to],
         subject: input.subject,
         text: input.text,

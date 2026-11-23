@@ -1206,13 +1206,15 @@ export async function emailInvoice(input: {
       error:
         "Email is not set up yet: the RESEND_API_KEY secret is missing (Lovable Cloud › Secrets)",
     };
-  const { fromAddress } = await import("@/lib/notify.server");
+  const { fromAddress, replyToAddress } = await import("@/lib/notify.server");
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: fromAddress(),
+        // The customer's reply goes to the office's inbox, not to the sending address (Nov 23).
+        reply_to: replyToAddress(),
         to: input.to,
         subject: input.subject,
         text: input.text,
