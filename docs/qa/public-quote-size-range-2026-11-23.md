@@ -97,11 +97,12 @@ largest range (no price and no line). No sideways scroll and no price cut off at
 opportunity, on the test customer's address: the strip and the sign-up read as written above,
 and the roof size box was empty. Nothing was signed.
 
-## Not seen yet
+## On the published page
 
-The real prices on the published page. The database's side is proven with them; the page's side
-was seen with sample numbers. After the next publish, pick a size range on `jbkbid.com/care` and
-look at the three cards.
+The owner published the same evening and said "it looks good". Checked on `jbkbid.com/care`
+afterwards with no sign-in, sending nothing: with 25,000 to 50,000 sq ft picked, all three cards
+show a low and a high price and the line under them names the range; with under 10,000 sq ft
+picked, each card shows one price and the line says so. No error either time.
 
 ## Clean-up, checked on the live database
 
