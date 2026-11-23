@@ -8,8 +8,10 @@ import { longDay } from "@/lib/followup-rules";
 import {
   everythingIncluded,
   PLAN_FOOTNOTES,
+  PLAN_PITCH,
   type PlanBenefitNumbers,
 } from "@/lib/roof-care-benefits";
+import { flyerEmailHtml, type EmailBlock, type EmailHead } from "@/lib/roof-care-email-look";
 import {
   firstVisitWords,
   PAY_METHOD_WORDS,
@@ -59,22 +61,22 @@ export interface PlanEmailFacts {
   pay_link?: string | null;
 }
 
+/** In the agreement's plan card and its plain-text list. */
+const RUNS_TWELVE_MONTHS = "The plan runs for twelve months from the day we receive your payment.";
+
 export interface Email {
   subject: string;
   text: string;
   html: string;
 }
 
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+type Block = EmailBlock;
 
-type Block =
-  | { kind: "p"; text: string }
-  | { kind: "h"; text: string }
-  | { kind: "link"; text: string; url: string }
-  | { kind: "ul" | "ol"; items: string[] };
-
-function render(subject: string, blocks: Block[]): Email {
+/**
+ * The email in its two copies. The plain-text one is what it always was. The HTML one wears the
+ * look of the handout (owner, Nov 23: "more visual like the handout"; roof-care-email-look.ts).
+ */
+function render(subject: string, head: EmailHead, blocks: Block[]): Email {
   const text = blocks
     .map((b) =>
       b.kind === "p"
@@ -86,21 +88,7 @@ function render(subject: string, blocks: Block[]): Email {
             : b.items.map((t, i) => (b.kind === "ol" ? `${i + 1}. ${t}` : `- ${t}`)).join("\n"),
     )
     .join("\n\n");
-  const html =
-    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;max-width:640px">` +
-    blocks
-      .map((b) =>
-        b.kind === "p"
-          ? `<p>${esc(b.text)}</p>`
-          : b.kind === "h"
-            ? `<h3 style="margin:20px 0 6px;font-size:16px">${esc(b.text)}</h3>`
-            : b.kind === "link"
-              ? `<p><a href="${esc(b.url)}" style="display:inline-block;padding:10px 18px;background:#1f4e9c;color:#ffffff;font-weight:bold;text-decoration:none;border-radius:6px">${esc(b.text)}</a></p><p style="font-size:13px;color:#555555">Or open this address: ${esc(b.url)}</p>`
-              : `<${b.kind} style="margin:0;padding-left:22px">${b.items.map((t) => `<li style="margin-bottom:4px">${esc(t)}</li>`).join("")}</${b.kind}>`,
-      )
-      .join("") +
-    `</div>`;
-  return { subject, text, html };
+  return { subject, text, html: flyerEmailHtml(head, blocks) };
 }
 
 const label = (f: Pick<PlanEmailFacts, "plan_number">) =>
@@ -110,12 +98,29 @@ const place = (f: Pick<PlanEmailFacts, "site" | "address">) =>
 const signOff = (f: Pick<PlanEmailFacts, "company" | "contact">): Block[] => [
   {
     kind: "p",
+    role: "foot",
     text: f.contact
       ? `Questions? Reply to this email or reach us at ${f.contact}.`
       : "Questions? Reply to this email.",
   },
-  { kind: "p", text: `Thank you,\n${f.company}` },
+  { kind: "p", role: "foot", text: `Thank you,\n${f.company}` },
 ];
+
+/**
+ * The notes under what a plan includes, for the plan in hand: the gutters note only where a line
+ * carries its mark, the storm note likewise, and the minor repairs note only where minor repairs
+ * are included. The sign-up shows all three under its three plans; an agreement is for one plan,
+ * and a Roof Watch customer was being told about gutters and storms it does not include.
+ */
+export function footnotesFor(included: readonly string[]): string[] {
+  return PLAN_FOOTNOTES.filter((n) =>
+    n.startsWith("*")
+      ? included.some((l) => l.includes("*"))
+      : n.startsWith("†")
+        ? included.some((l) => l.includes("†"))
+        : included.some((l) => /minor repairs/i.test(l)),
+  );
+}
 
 /** The card payment link, where there is one to give. */
 const payBlocks = (f: Pick<PlanEmailFacts, "pay_link">): Block[] =>
@@ -155,7 +160,11 @@ export function payLinkEmail(f: PayLinkFacts): Email {
     { kind: "link", text: "Pay by card", url: f.pay_link },
     ...signOff(f),
   ];
-  return render(`Pay for your ${f.company} ${planName(f.plan)} plan${label(f)}`, blocks);
+  return render(
+    `Pay for your ${f.company} ${planName(f.plan)} plan${label(f)}`,
+    { company: f.company, title: "Pay for your plan.", lead: `${name}${label(f)}` },
+    blocks,
+  );
 }
 
 /**
@@ -166,6 +175,9 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
   const terms = TERMS_BY_VERSION[f.terms_version];
   if (!terms) return null;
   const name = PLAN_NAMES[f.plan];
+  const first = firstVisitWords(f.first_visit, f.first_days);
+  const included = everythingIncluded(f.plan, f.benefits);
+  const notes = footnotesFor(included);
   const blocks: Block[] = [
     { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
     {
@@ -180,14 +192,29 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
         `Property: ${place(f)}`,
         `Price: ${money0(f.price)} for the year, paid before the plan starts`,
         ...(f.pay_method ? [`Paying by: ${PAY_METHOD_WORDS[f.pay_method].toLowerCase()}`] : []),
-        firstVisitWords(f.first_visit, f.first_days),
-        "The plan runs for twelve months from the day we receive your payment.",
+        first,
+        RUNS_TWELVE_MONTHS,
       ],
+      card: {
+        name,
+        pitch: PLAN_PITCH[f.plan],
+        big: money0(f.price),
+        under: "per year, paid before the plan starts",
+        rows: [
+          ...(f.plan_number != null
+            ? [{ label: "Plan number", value: planNumberLabel(f.plan_number) }]
+            : []),
+          { label: "Property", value: place(f) },
+          ...(f.pay_method ? [{ label: "Paying by", value: PAY_METHOD_WORDS[f.pay_method] }] : []),
+          { label: "First inspection", value: first.replace(/^First inspection: /, "") },
+          { label: "", value: RUNS_TWELVE_MONTHS },
+        ],
+      },
     },
     ...payBlocks(f),
     { kind: "h", text: `What ${name} includes` },
-    { kind: "ul", items: everythingIncluded(f.plan, f.benefits) },
-    { kind: "p", text: PLAN_FOOTNOTES.join(" ") },
+    { kind: "ul", items: included },
+    ...(notes.length ? [{ kind: "p" as const, role: "note" as const, text: notes.join(" ") }] : []),
     { kind: "h", text: "The terms you agreed to" },
     { kind: "ol", items: [...terms] },
     {
@@ -196,7 +223,15 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
     },
     ...signOff(f),
   ];
-  return render(`Your ${f.company} ${planName(f.plan)} plan agreement${label(f)}`, blocks);
+  return render(
+    `Your ${f.company} ${planName(f.plan)} plan agreement${label(f)}`,
+    {
+      company: f.company,
+      title: `Your ${name} plan.`,
+      lead: "Your copy of the agreement.",
+    },
+    blocks,
+  );
 }
 
 export interface ReceiptFacts extends PlanEmailFacts {
@@ -226,6 +261,17 @@ export function receiptEmail(f: ReceiptFacts): Email {
         ...(f.invoice_number ? [`Invoice: #${f.invoice_number}`] : []),
         `Plan: ${name}${label(f)}`,
       ],
+      card: {
+        name: "Paid",
+        big: money0(f.paid),
+        under: `received ${longDay(f.paid_on)}`,
+        rows: [
+          { label: "Plan", value: `${name}${label(f)}` },
+          { label: "Property", value: place(f) },
+          ...(f.pay_method ? [{ label: "Paid by", value: PAY_METHOD_WORDS[f.pay_method] }] : []),
+          ...(f.invoice_number ? [{ label: "Invoice", value: `#${f.invoice_number}` }] : []),
+        ],
+      },
     },
     { kind: "h", text: "Your plan year" },
     {
@@ -240,5 +286,9 @@ export function receiptEmail(f: ReceiptFacts): Email {
     },
     ...signOff(f),
   ];
-  return render(`Receipt: your ${f.company} ${planName(f.plan)} plan${label(f)}`, blocks);
+  return render(
+    `Receipt: your ${f.company} ${planName(f.plan)} plan${label(f)}`,
+    { company: f.company, title: "Payment received.", lead: "Thank you. This is your receipt." },
+    blocks,
+  );
 }
