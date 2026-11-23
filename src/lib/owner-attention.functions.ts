@@ -42,6 +42,7 @@ import {
   type AttCareRenewal,
   type AttCareUnbilled,
   type AttCareUnpaid,
+  type AttCareNoDay,
   type AttCareVisit,
 } from "@/lib/owner-attention";
 import type { PublicPlanKey } from "@/lib/public-forms";
@@ -270,6 +271,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       bidFrom: fromIds(bidsFrom),
       names,
       careVisits: care.notDone,
+      careNoDay: care.noDay,
       careUnbilled: care.unbilled,
       careUnpaid: care.unpaid,
       careRefunds: care.refunds,
@@ -382,6 +384,7 @@ async function careVisitsOfPlans(
   today: string,
 ): Promise<{
   notDone: AttCareVisit[];
+  noDay: AttCareNoDay[];
   unbilled: AttCareUnbilled[];
   unpaid: AttCareUnpaid[];
   refunds: AttCareRefund[];
@@ -422,6 +425,7 @@ async function careVisitsOfPlans(
   if (!siteIds.length)
     return {
       notDone: [],
+      noDay: [],
       unbilled: [],
       unpaid: [],
       refunds: [],
@@ -455,6 +459,7 @@ async function careVisitsOfPlans(
   const siteName = new Map(sites.map((x) => [x.id, (x.name ?? "").trim()]));
   const accountName = new Map(accounts.map((x) => [x.id, (x.name ?? "").trim()]));
   const notDone: AttCareVisit[] = [];
+  const noDay: AttCareNoDay[] = [];
   const unbilled: AttCareUnbilled[] = [];
   const titleOf = (p: { plan: unknown; site_id: string; account_id: string }) => {
     const where = [siteName.get(p.site_id), accountName.get(p.account_id)].filter(Boolean);
@@ -561,6 +566,24 @@ async function careVisitsOfPlans(
         });
     }
     for (const v of p.visits) {
+      // Its ticket is out and has no day (Nov 23): the office gives it one. A skipped or lost
+      // inspection has no ticket on the board, and a ticket already under way needs no day.
+      if (
+        v.ticket &&
+        !v.ticket.scheduled_date &&
+        (v.ticket.stage === "open" || v.ticket.stage === "scheduled") &&
+        ["ticket", "late"].includes(visitState(v, today))
+      )
+        noDay.push({
+          visit_id: v.id,
+          job_id: v.ticket.id,
+          number: v.ticket.number,
+          site_id: p.site_id,
+          title,
+          label: VISIT_LABEL[v.kind],
+          due_from: v.due_from,
+          due_by: v.due_by,
+        });
       // One carried from last plan year has its own row, with its last day; a lost one is over.
       if (v.kind === "carried") {
         const state = visitState(v, today);
@@ -602,5 +625,16 @@ async function careVisitsOfPlans(
     ).length,
     price: p.price,
   }));
-  return { notDone, unbilled, unpaid, refunds, noPayment, sizes, renewals, carried, expired };
+  return {
+    notDone,
+    noDay,
+    unbilled,
+    unpaid,
+    refunds,
+    noPayment,
+    sizes,
+    renewals,
+    carried,
+    expired,
+  };
 }

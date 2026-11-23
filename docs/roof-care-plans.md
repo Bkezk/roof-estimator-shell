@@ -798,6 +798,25 @@ Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
 - New issue 6, a technician with no name on file showing as an email address on the board: not
   an issue to him ("this isnt an bid issue").
 
+**The go-aheads on the workflow audit, Nov 23, night** (`docs/qa/roof-care-audit-go-aheads-2026-11-23.md`).
+
+- **A renewal's plan year starts the day after the old year's last day** (the owner: "start the
+  new year the day after"). The old year covers its last day, so no day is covered by both. Paid
+  ahead, the new year ends one year on from the old year's last day, so the renewal date stays
+  the same date every year. Paid late, it starts on the payment as before
+  (`roof_care_start`, migration `20261124200000`).
+- **A plan inspection's ticket with no day** is on the owner's Needs attention list from the day
+  the ticket is made (the owner: "1 go with A"). The database still makes that ticket with no
+  day when the inspection's window is a range of days: the office sets it.
+- **A set number of days is not a promise** (the owner: "we will accommodate the best we can but
+  we cannot guarantee that date"). The sign-up and the agreement say so beside that choice. The
+  terms were not changed.
+- **A plan's invoice** has its own words at Mark paid and when it is final or void, a Roof Care
+  badge in the Invoices list, and a Roof Care chip that shows the plans' invoices alone.
+  Invoicing a plan with no ticket stays as it is (the owner: "that is fine").
+- A property needs a street address to be signed up (the owner: "no change needed here they
+  need an address").
+
 ## Still to build
 
 Step 4 was built on Nov 21: see "Step 4, built Nov 21" below. What is left of it:

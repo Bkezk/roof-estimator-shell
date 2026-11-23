@@ -48,7 +48,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   AWAITING_INVOICE_TITLE,
+  invoiceKindMatches,
   invoiceListSearch,
+  isCarePlanInvoice,
+  ROOF_CARE_INVOICE_BADGE,
+  ROOF_CARE_INVOICE_CHIP_TITLE,
   type InvoiceListSearch,
   type InvoiceSearch,
 } from "@/lib/invoice-search";
@@ -155,6 +159,8 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   // opening an invoice and pressing Back, or its "← Invoices" link, lands on the same chip,
   // dates, search text and sort. The Awaiting invoice chip is ?tab=to-invoice, as before.
   const status: StatusFilter = filters.status ?? "all";
+  // The Roof Care chip (owner, Nov 23): only the invoices of Roof Care plans.
+  const kind = filters.kind;
   const from = filters.from ?? "";
   const to = filters.to ?? "";
   const sort: InvoiceSort = filters.sort
@@ -237,15 +243,18 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   // and by the day it was authorized; the header then reads "1 of 3 tickets".
   const narrowed = !!q.trim() || !!from || !!to;
   const waitingAll = toInvoiceRows(jobsQ.data?.rows ?? []);
-  const waiting = narrowed
-    ? waitingAll.filter((j) => {
-        const since = waitingSince(j);
-        return awaitingMatches(j, q, since ? toYmd(new Date(since)) : null, from, to);
-      })
-    : waitingAll;
+  // A ticket waiting for its invoice is not a plan's invoice: the Roof Care chip leaves it out.
+  const waiting = kind
+    ? []
+    : narrowed
+      ? waitingAll.filter((j) => {
+          const since = waitingSince(j);
+          return awaitingMatches(j, q, since ? toYmd(new Date(since)) : null, from, to);
+        })
+      : waitingAll;
   const waitingCount = jobsQ.data?.count ?? 0;
   // The search narrows the rows shown, and the footer sums what is shown.
-  const rows = (list.data ?? []).filter((r) => invoiceMatches(r, q));
+  const rows = (list.data ?? []).filter((r) => invoiceKindMatches(r, kind) && invoiceMatches(r, q));
   // Void invoices are not money owed; they stay out of the footer sums.
   const live = rows.filter((r) => r.status !== "void");
   const sum = (f: (r: (typeof rows)[number]) => number) => live.reduce((n, r) => n + f(r), 0);
@@ -270,7 +279,7 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
   const awaitingShown = status === "all" && waiting.length > 0;
   const awaitingOpen = isGroupOpen(openGroups, "awaiting", toInvoice);
   const now = new Date();
-  const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
+  const anyFilter = status !== "all" || !!kind || !!from || !!to || !!q.trim();
   // The ticket's Back link returns to this queue (owner, Oct 9).
   const open = (serviceJobId: string) =>
     void navigate({ to: "/service", search: { id: serviceJobId, from: "invoices" } });
@@ -356,6 +365,15 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
           >
             {r.label}
           </Link>
+          {isCarePlanInvoice(r) && (
+            <Badge
+              variant="secondary"
+              className="ml-2 align-middle text-xs"
+              data-invoice-kind="care"
+            >
+              {ROOF_CARE_INVOICE_BADGE}
+            </Badge>
+          )}
         </td>
         <td className="whitespace-nowrap px-3 py-2">{shortDay(r.invoice_date)}</td>
         <td className="px-3 py-2">
@@ -442,6 +460,16 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
               </Chip>
             );
           })}
+          {/* Beside the status chips, and worked with them (Nov 23): Draft and Roof Care
+              together show the plan invoices still to finalise. */}
+          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+          <Chip
+            active={kind === "care"}
+            title={ROOF_CARE_INVOICE_CHIP_TITLE}
+            onClick={() => patchFilters({ kind: kind === "care" ? undefined : "care" })}
+          >
+            {ROOF_CARE_INVOICE_BADGE}
+          </Chip>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground sm:max-w-sm">
@@ -571,7 +599,9 @@ function InvoiceList({ toInvoice, filters }: { toInvoice: boolean; filters: Invo
               </tbody>
             )}
             {groups.map((g) => {
-              const open = isGroupOpen(openGroups, g.status, status !== "all");
+              // Narrowed to a status, or to Roof Care (Nov 23): the rows asked for are shown,
+              // not left behind a folded heading.
+              const open = isGroupOpen(openGroups, g.status, status !== "all" || !!kind);
               const Chevron = open ? ChevronDown : ChevronRight;
               return (
                 <tbody key={g.status} data-group={g.status} data-open={open ? "" : undefined}>

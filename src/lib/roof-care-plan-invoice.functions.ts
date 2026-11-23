@@ -25,6 +25,7 @@ import {
   planName,
   planNumberLabel,
   renewalCreditSource,
+  renewalStartsOn,
   renewalCreditWords,
 } from "@/lib/roof-care-plan";
 import { accountBillTo } from "@/lib/vendors";
@@ -82,7 +83,7 @@ export function planInvoiceDescription(p: {
   plan: unknown;
   plan_number: number;
   roof_sqft: number;
-  /** For a renewal: the day this plan year was due to renew. */
+  /** For a renewal: the first day of the new plan year, the day after the old year's last. */
   renews_from?: string | null;
 }): string {
   const size = Math.round(Number(p.roof_sqft) || 0).toLocaleString("en-US");
@@ -148,7 +149,7 @@ export async function makePlanInvoice(
       .select("renews_on")
       .eq("id", plan.renewed_from)
       .maybeSingle();
-    renewsFrom = old?.renews_on ?? null;
+    renewsFrom = old?.renews_on ? renewalStartsOn(old.renews_on) : null;
   }
   // A plan is a service: no sales tax. The Tax % box on the draft is still the office's.
   const taxRate = 0;

@@ -467,7 +467,8 @@ describe("the renewal's invoice", () => {
       total: 920,
     });
     expect(String(inv["description"])).toContain("renewed for one year");
-    expect(String(inv["description"])).toContain("Jan 10, 2028");
+    // Nov 23: the new year starts the day after the old year's last day (Jan 10).
+    expect(String(inv["description"])).toContain("Jan 11, 2028");
     const lines = env.tables["invoice_lines"]!;
     expect(lines.map((l) => l["total"])).toEqual([1840, -920]);
     expect(lines[1]).toMatchObject({ source: `roof-care-renewal:${NEW}`, invoice_id: inv["id"] });
@@ -817,6 +818,8 @@ describe("the database change and the screens (pinned)", () => {
     expect(SQL).toContain("raise exception 'Only the office renews a Roof Care plan'");
     expect(SQL).toContain("A manager makes it.");
     // Paid ahead, the new year starts when the old one is over; paid late, on the payment.
+    // (As of this migration on the old year's last day; since Nov 23 the day after it,
+    // 20261124200000.)
     expect(SQL).toContain("v_start := greatest(v_paid, v_old.renews_on);");
     expect(SQL).toContain(
       "set plan_id = p_plan, kind = 'carried', carried_from = v_old.id, due_from = least(v.due_from, v_start + 60), due_by = v_start + 60",

@@ -97,7 +97,7 @@ import {
   type InvoiceTravel,
 } from "@/lib/roof-care-travel";
 import { getInvoiceTravel, setInvoiceTravel } from "@/lib/roof-care-travel.functions";
-import { planName } from "@/lib/roof-care-plan";
+import { PLAN_INVOICE_PAID_NOTE, PLAN_INVOICE_REMAKE, planName } from "@/lib/roof-care-plan";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import type { InvoiceBidRef } from "@/lib/bid-invoices";
 import { createBidInvoice, listBidInvoices } from "@/lib/bid-invoices.functions";
@@ -2575,6 +2575,12 @@ function FinalInvoice({
               This invoice is void. It stays on record under its number and is left out of the Sage
               export. To bill this ticket, open it (the title above) and choose Make the invoice.
             </>
+          ) : bid?.plan ? (
+            // A plan year is billed once (Nov 23): there is no Another invoice on its invoice.
+            <>
+              This invoice is void. It stays on record under its number and is left out of the Sage
+              export. {PLAN_INVOICE_REMAKE}
+            </>
           ) : (
             <>
               This invoice is void. It stays on record under its number and is left out of the Sage
@@ -2589,6 +2595,11 @@ function FinalInvoice({
             <>
               This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To
               change it, Void it below and make a new invoice from the ticket.
+            </>
+          ) : bid?.plan ? (
+            <>
+              This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To
+              change it, Void it below. {PLAN_INVOICE_REMAKE}
             </>
           ) : (
             <>
@@ -3218,8 +3229,11 @@ function PaidDialog(props: {
             {again ? "Edit the payment" : "Mark paid"} · invoice #{invoiceLabel(inv)}
           </DialogTitle>
           <DialogDescription>
-            {/* A trade bid's invoice has no ticket and no stage (Nov 17). */}
-            {inv.bid_id ? (
+            {/* A trade bid's invoice has no ticket and no stage (Nov 17). Nor has a Roof Care
+                plan year's (Nov 23): its payment starts the plan. */}
+            {inv.roof_care_plan_id ? (
+              PLAN_INVOICE_PAID_NOTE
+            ) : inv.bid_id ? (
               "Records the payment here (Sage stays the ledger)."
             ) : (
               <>

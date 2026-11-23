@@ -56,7 +56,10 @@ describe("the Invoices list wears the search box", () => {
   const page = read("src/components/service/invoices-page.tsx");
   it("a search input filters the rows shown, and the footer sums what is shown", () => {
     expect(page).toContain('placeholder="Search number, customer, property, PO #, Job #"');
-    expect(page).toContain("const rows = (list.data ?? []).filter((r) => invoiceMatches(r, q));");
+    // Nov 23: the Roof Care chip narrows the same rows before the search does.
+    expect(page).toContain(
+      "const rows = (list.data ?? []).filter((r) => invoiceKindMatches(r, kind) && invoiceMatches(r, q));",
+    );
   });
 });
 

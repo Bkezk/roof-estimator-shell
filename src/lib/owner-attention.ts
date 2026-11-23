@@ -90,6 +90,7 @@ export type AttentionKind =
   | "to_authorize"
   | "invoice_unpaid"
   | "care_plan_late"
+  | "care_plan_no_day"
   | "care_plan_unbilled"
   | "care_plan_unpaid"
   | "care_plan_refund"
@@ -299,6 +300,27 @@ export interface AttCareExpired {
  * An inspection carried into the renewed year because the customer kept us off the roof (owner,
  * Nov 19): owed for 60 days, then lost. Listed until it is done or lost.
  */
+/**
+ * A Roof Care plan inspection whose ticket has no day (owner, Nov 23: "1 go with A"). The
+ * database makes the ticket two weeks before the inspection's window opens, and gives it no day
+ * when the window is a range of days. Nothing told anybody to set one, so it is listed from the
+ * day the ticket is made until it has a day.
+ */
+export interface AttCareNoDay {
+  visit_id: string;
+  /** The inspection's ticket. */
+  job_id: string;
+  number: number;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** "Inspection 1" / "Inspection 2" / "Storm inspection" / the carried one's words. */
+  label: string;
+  /** The window the inspection is due in. */
+  due_from: string;
+  due_by: string;
+}
+
 export interface AttCareCarried {
   visit_id: string;
   site_id: string;
@@ -455,6 +477,8 @@ export interface AttentionIn {
   names: Readonly<Record<string, string>>;
   /** Roof Care plan inspections not yet done, of plans in force (Nov 18). */
   careVisits?: readonly AttCareVisit[];
+  /** Roof Care plan inspections whose ticket has no day (Nov 23). */
+  careNoDay?: readonly AttCareNoDay[];
   /** Roof Care plan inspections done and on no invoice (Nov 19). */
   careUnbilled?: readonly AttCareUnbilled[];
   /** Roof Care plans signed and not yet paid (Nov 19). */
@@ -606,6 +630,12 @@ export function attentionList(i: AttentionIn): AttentionList {
   const heldReviews = heldOf("invoice");
   let held = 0;
   const ticketById = new Map(i.tickets.map((t) => [t.id, t]));
+  // A plan inspection's ticket with no day has a row of its own, from the day it is made (Nov
+  // 23). One already past its last day is left to the rows that say so.
+  const careNoDay = (i.careNoDay ?? []).filter(
+    (v) => YMD.test(v.due_from) && YMD.test(v.due_by) && !(v.due_by < today),
+  );
+  const careNoDayJobs = new Set(careNoDay.map((v) => v.job_id));
 
   // ── Not started ────────────────────────────────────────────────────────────────────────────
   for (const t of i.tickets) {
@@ -634,6 +664,8 @@ export function attentionList(i: AttentionIn): AttentionList {
       });
       continue;
     }
+    // Said once: the plan inspection's own row says it has no day and nobody on it.
+    if (careNoDayJobs.has(t.id)) continue;
     const entered = dayOf(t.created_at);
     if (!entered || addDays(entered, limits.unassignedDays) > today) continue;
     const age = daysBetween(entered, today);
@@ -933,6 +965,35 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: lateBy > 14 ? "red" : "amber",
       amount: v.amount > 0 ? v.amount : null,
       href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A Roof Care plan inspection whose ticket has no day (Nov 23). Amber while its window has not
+  // opened, red once it has: the inspection can be done now and nobody has been sent.
+  for (const v of careNoDay) {
+    const t = ticketById.get(v.job_id);
+    const made = t?.created_at ? dayOf(t.created_at) : null;
+    const age = made ? Math.max(0, daysBetween(made, today)) : 0;
+    const opened = !(v.due_from > today);
+    const when =
+      v.due_from === v.due_by
+        ? `on ${shortDay(v.due_by)}`
+        : opened
+          ? `by ${shortDay(v.due_by)}`
+          : `between ${shortDay(v.due_from)} and ${shortDay(v.due_by)}`;
+    rows.push({
+      key: `care_plan_no_day:${v.visit_id}`,
+      group: "office",
+      kind: "care_plan_no_day",
+      tag: "Roof Care",
+      title: v.title,
+      why: `${v.label} is due ${when}. Ticket #${v.number} has no day${t && !t.technician_id ? " and nobody on it" : ""}. Open the ticket and set its day.`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: opened ? "red" : "amber",
+      amount: null,
+      href: `/service?id=${v.job_id}`,
     });
   }
 

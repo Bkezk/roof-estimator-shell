@@ -81,11 +81,12 @@ describe("a plan that is signed and not yet paid", () => {
     expect(firstVisitWords("now", null)).toBe(
       "First inspection: as soon as the payment is received.",
     );
+    // Nov 23 (owner: "we cannot guarantee that date"): a set number of days is not a promise.
     expect(firstVisitWords("days", 10)).toBe(
-      "First inspection: 10 days after the payment is received.",
+      "First inspection: 10 days after the payment is received. We will do our best to come on that day, but we cannot guarantee the date.",
     );
     expect(firstVisitWords("days", 1)).toBe(
-      "First inspection: 1 day after the payment is received.",
+      "First inspection: 1 day after the payment is received. We will do our best to come on that day, but we cannot guarantee the date.",
     );
     expect(firstVisitWords("window", null)).toBe(
       // Nov 20 (break test 19): the window open at the payment is used when two weeks are left.

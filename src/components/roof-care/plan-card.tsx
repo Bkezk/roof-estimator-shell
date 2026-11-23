@@ -131,6 +131,7 @@ import {
   planBadge,
   PLAN_MAKE_INVOICE,
   PLAN_NO_INVOICE,
+  FIRST_DAYS_NOT_PROMISED,
   firstDaysProblem,
   planDates,
   planEmailLines,
@@ -2548,6 +2549,11 @@ function SignUpDialog({
                       )}
                     </label>
                   ))}
+                  {first === "days" && (
+                    <p className="text-sm font-medium" data-sign-line="days-not-promised">
+                      {FIRST_DAYS_NOT_PROMISED}
+                    </p>
+                  )}
                   {first === "days" && !dates && (
                     <p className="text-xs text-destructive">Type the days, 1 to 365.</p>
                   )}

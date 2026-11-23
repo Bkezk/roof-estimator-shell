@@ -89,7 +89,10 @@ describe("the page", () => {
     expect(page).toContain(
       '<tbody key={g.status} data-group={g.status} data-open={open ? "" : undefined}>',
     );
-    expect(page).toContain('const open = isGroupOpen(openGroups, g.status, status !== "all");');
+    // Nov 23: the Roof Care chip opens the groups it narrowed, as a status chip does.
+    expect(page).toContain(
+      'const open = isGroupOpen(openGroups, g.status, status !== "all" || !!kind);',
+    );
     expect(page).toContain("onClick={() => toggleGroup(g.status)}");
     expect(page).toContain("{open && g.rows.map(renderRow)}");
     expect(page).toContain('{g.status === "void" ? "" : ` · ${money(g.total)}`}');

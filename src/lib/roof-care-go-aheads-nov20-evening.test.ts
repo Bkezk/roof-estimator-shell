@@ -314,7 +314,9 @@ describe("31. a renewal paid before the old year is over loses no day", () => {
     contact: "",
   };
   it("the new year is dated from the old year's last day (the database)", () => {
-    // 20261120730000 holds the newest roof_care_start.
+    // 20261120730000 held the newest roof_care_start that night. Since Nov 23 the new year
+    // starts the day AFTER the old year's last day (20261124200000, the owner: "start the new
+    // year the day after"); roof-care-go-aheads-nov23-night.test.ts guards that.
     const start = fnOf(
       flat(`${M}20261120730000_roof_care_merge_and_renewal_note.sql`),
       "roof_care_start",
@@ -328,17 +330,18 @@ describe("31. a renewal paid before the old year is over loses no day", () => {
     expect(start).toContain("due_by = v_start + 60");
   });
   it("the receipt says when the new year starts, and that there is no break", () => {
-    // Paid Nov 20; the old year runs to Dec 20: the new one is Dec 20, 2026 to Dec 20, 2027.
+    // Paid Nov 20; the old year runs to Dec 20: the new one is Dec 21, 2026 to Dec 20, 2027
+    // (Nov 23: it starts the day after, so Dec 20 is not covered by both years).
     const early = receiptEmail({
       ...facts,
       paid: 2468,
       paid_on: "2026-11-20",
-      starts_on: "2026-12-20",
+      starts_on: "2026-12-21",
       renews_on: "2027-12-20",
       invoice_number: null,
     });
     expect(early.text).toContain(
-      "Your new plan year starts Dec 20, 2026, the day your current plan year ends, and runs until Dec 20, 2027. You are covered without a break.",
+      "Your new plan year starts Dec 21, 2026, the day after your current plan year ends, and runs until Dec 20, 2027. You are covered without a break.",
     );
     expect(early.text).not.toContain("Your plan started");
     // Paid on its first day, or a first plan: as before.
@@ -813,7 +816,8 @@ describe("14. a first inspection cannot be pushed so far that the second falls a
     expect(start).toContain(
       "first_days = case when first_visit = 'days' then v_days else first_days end,",
     );
-    // A renewal paid early is still dated from the old year's last day.
+    // A renewal paid early is still dated from the old year's last day (as of that migration;
+    // since Nov 23 from the day after it, 20261124200000).
     expect(start).toContain("v_start := greatest(v_paid, v_old.renews_on);");
     for (const f of ["roof_care_second_fits(date, date)", "roof_care_max_first_days(date)"])
       expect(FIT).toContain(`revoke all on function public.${f} from public, anon, authenticated;`);

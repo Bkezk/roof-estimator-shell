@@ -8,6 +8,7 @@
  *   ?status=<status>     the list on one status chip (draft / final / sent / paid / void), or
  *                        "unpaid" = final + sent (the Owner view's Unpaid tile, Oct 8)
  *   ?from= ?to= ?q= ?sort=  the list's dates, search text and sort (Nov 3: Back keeps them)
+ *   ?kind=care           only the invoices of Roof Care plans (owner, Nov 23: "6 go")
  *
  * Anything else (a malformed id, an unknown tab) is dropped, so the list shows.
  */
@@ -30,10 +31,32 @@ export const INVOICE_SORT_KEYS = [
 ] as const;
 export type InvoiceSortKeyParam = (typeof INVOICE_SORT_KEYS)[number];
 
+/**
+ * What an invoice bills (owner, Nov 23). A Roof Care plan year's invoice has no ticket, so in the
+ * list it looked like any other and sat unseen in a folded group: it now carries a "Roof Care"
+ * badge, and the Roof Care chip (`?kind=care`) shows those invoices alone.
+ */
+export const INVOICE_KINDS = ["care"] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+export const ROOF_CARE_INVOICE_BADGE = "Roof Care";
+export const ROOF_CARE_INVOICE_CHIP_TITLE = "Only the invoices of Roof Care plans";
+
+/** Is this the invoice of a Roof Care plan year? */
+export const isCarePlanInvoice = (r: { roof_care_plan_id?: string | null }): boolean =>
+  !!r.roof_care_plan_id;
+
+/** Does the row pass the kind chip? No chip: every invoice does. */
+export const invoiceKindMatches = (
+  r: { roof_care_plan_id?: string | null },
+  kind: InvoiceKind | undefined,
+): boolean => (kind === "care" ? isCarePlanInvoice(r) : true);
+
 export interface InvoiceSearch {
   id?: string;
   tab?: "to-invoice";
   status?: InvoiceListStatus;
+  /** The Roof Care chip. */
+  kind?: InvoiceKind;
   /** Invoice date from / to (YYYY-MM-DD). */
   from?: string;
   to?: string;
@@ -69,6 +92,9 @@ export function invoiceSearch(s: Record<string, unknown>): InvoiceSearch {
     ...(typeof s["status"] === "string" &&
     (INVOICE_LIST_STATUSES as readonly string[]).includes(s["status"])
       ? { status: s["status"] as InvoiceListStatus }
+      : {}),
+    ...(typeof s["kind"] === "string" && (INVOICE_KINDS as readonly string[]).includes(s["kind"])
+      ? { kind: s["kind"] as InvoiceKind }
       : {}),
     ...(typeof s["from"] === "string" && YMD.test(s["from"]) ? { from: s["from"] } : {}),
     ...(typeof s["to"] === "string" && YMD.test(s["to"]) ? { to: s["to"] } : {}),

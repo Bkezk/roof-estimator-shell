@@ -548,6 +548,13 @@ export const AWAITING_PAYMENT_NOTE =
   "The plan starts the day its payment is received. No inspection is made before that.";
 export const PLAN_NO_INVOICE = "No invoice has been made for this plan yet.";
 export const PLAN_MAKE_INVOICE = "Make the invoice";
+/**
+ * On a plan year's own invoice (Nov 23). It has no ticket, so the ticket's words do not fit it:
+ * its payment starts the plan, and a voided one is made again from the plan, not from a ticket.
+ */
+export const PLAN_INVOICE_PAID_NOTE =
+  "Records the payment here (Sage stays the ledger). A payment that covers the total starts the plan year.";
+export const PLAN_INVOICE_REMAKE = `To bill the plan again, open the plan on its property and choose ${PLAN_MAKE_INVOICE}.`;
 export const PLAN_INVOICE_EXISTS = "This plan already has an invoice.";
 export const PLAN_INVOICE_NOT_AWAITING =
   "Only a plan that is waiting for its payment gets an invoice made for it.";
@@ -598,11 +605,19 @@ export function firstDaysProblem(
   return firstDaysTooFar(maxFirstDays(today));
 }
 
+/**
+ * Beside "a set number of days after your payment" (owner, Nov 23: "we will accommodate the
+ * best we can but we cannot guarantee that date"). The customer reads it on the sign-up and in
+ * their copy of the agreement.
+ */
+export const FIRST_DAYS_NOT_PROMISED =
+  "We will do our best to come on that day, but we cannot guarantee the date.";
+
 /** When the first inspection is, counted from the payment: for the plan that is waiting. */
 export function firstVisitWords(first: FirstVisit, days: number | null): string {
   if (first === "now") return "First inspection: as soon as the payment is received.";
   if (first === "days")
-    return `First inspection: ${days ?? 0} ${days === 1 ? "day" : "days"} after the payment is received.`;
+    return `First inspection: ${days ?? 0} ${days === 1 ? "day" : "days"} after the payment is received. ${FIRST_DAYS_NOT_PROMISED}`;
   return "First inspection: in the inspection window open when the payment is received, if two weeks of it are left. Otherwise in the next one.";
 }
 
@@ -864,6 +879,14 @@ export function cardBackWords(c: PlanCardBack): string {
 export const RENEWAL_OPEN_DAYS = 60;
 /** An inspection the customer kept us from stays owed this many days into the new year. */
 export const CARRY_DAYS = 60;
+
+/**
+ * The first day of a renewal's plan year when it is paid before the old year is over: the day
+ * after the old year's last day (owner, Nov 23: "start the new year the day after"). The old
+ * year covers its last day, so no day is covered by both. The database decides it
+ * (roof_care_start, 20261124200000); this is the same day for the words on the invoice.
+ */
+export const renewalStartsOn = (oldLastDay: string): string => plusDays(oldLastDay, 1);
 
 export const RENEWAL_CHOICES = ["half_off", "full"] as const;
 export type RenewalChoice = (typeof RENEWAL_CHOICES)[number];
