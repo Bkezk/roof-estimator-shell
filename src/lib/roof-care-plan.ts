@@ -690,6 +690,44 @@ export function refundStatusWords(r: PlanRefund): string {
   return `Refund of ${cents(r.due)} sent ${longDay(r.sent_on)}${r.ref ? ` (${r.ref})` : ""}.`;
 }
 export const REFUND_MARK_SENT = "Mark the refund sent";
+
+/**
+ * The property's OTHER ended plans whose refund is owed and not yet marked sent (owner, Nov 23:
+ * "go on 1"). The card showed a refund only for the property's current plan, so once a new plan
+ * was signed an older plan's refund could not be reached. Oldest first. A refund already sent,
+ * or changed to nothing, is not listed: it is done with.
+ */
+export function otherRefundsOwed<
+  T extends Pick<RoofCarePlan, "id" | "status" | "refund" | "ended_on">,
+>(plans: readonly T[], currentId: string | null): T[] {
+  return plans
+    .filter(
+      (p) =>
+        p.id !== currentId &&
+        p.status === "ended" &&
+        !!p.refund &&
+        p.refund.due > 0 &&
+        !p.refund.sent_on,
+    )
+    .sort((a, b) => (a.ended_on ?? "").localeCompare(b.ended_on ?? ""));
+}
+
+/**
+ * Which plan a refund line is for, when the card shows more than the current plan's:
+ * "Roof Care plan RC-1004, Mar 10, 2026 to Mar 10, 2027, ended Jun 2, 2026".
+ */
+export function refundPlanWords(
+  p: Pick<
+    RoofCarePlan,
+    "plan" | "plan_number" | "starts_on" | "signed_on" | "renews_on" | "ended_on"
+  >,
+): string {
+  const first = p.starts_on || p.signed_on;
+  const year = first && p.renews_on ? `, ${longDay(first)} to ${longDay(p.renews_on)}` : "";
+  const number = p.plan_number != null ? ` RC-${p.plan_number}` : "";
+  const ended = p.ended_on ? `, ended ${longDay(p.ended_on)}` : "";
+  return `${planName(p.plan)} plan${number}${year}${ended}`;
+}
 export const REFUND_BAD_AMOUNT = "Type the refund, 0 or more, and no more than was paid";
 
 // ── A manager changes a refund that is owed (owner, Nov 20: "go with ... new issue 2") ──────
@@ -839,8 +877,9 @@ export const asRenewalChoice = (v: unknown): RenewalChoice | null =>
  * to go by, kept here so it is one rule and a tested one:
  *
  *   - never more than the yearly price the customer last agreed to (`agreed`: the price of the
- *     plan year that is ending), UNLESS they were told the new price before the renewal day and
- *     the telling is on record (`told`: the price they were told, and the day);
+ *     plan year that is ending), UNLESS they were told the new price at least 30 days before
+ *     the renewal day (owner, Nov 23: "30 days is good") and the telling is on record (`told`:
+ *     the price they were told, and the day). Told 29 days before, the old price is charged;
  *   - told a price: never more than the price they were told;
  *   - a price that went down is charged as it is today.
  *
@@ -856,10 +895,26 @@ export function autoRenewCharge(
   renewsOn: string,
 ): { charge: number; held: boolean } {
   const cents = (n: number) => Math.round(n * 100) / 100;
-  const cap = told && told.on < renewsOn && told.price > agreed ? told.price : agreed;
+  const cap =
+    told && autoRenewToldInTime(told.on, renewsOn) && told.price > agreed ? told.price : agreed;
   if (now <= cap) return { charge: cents(now), held: false };
   return { charge: cents(cap), held: true };
 }
+
+/**
+ * How long before the renewal day the customer has to be told a new price for it to count
+ * (owner, Nov 23: "30 days is good").
+ */
+export const AUTO_RENEW_NOTICE_DAYS = 30;
+
+/** Was the customer told at least 30 days before the renewal day? */
+export function autoRenewToldInTime(toldOn: string, renewsOn: string): boolean {
+  return daysBetween(toldOn, renewsOn) >= AUTO_RENEW_NOTICE_DAYS;
+}
+
+/** The last day a new price can be told for this renewal to charge it. */
+export const autoRenewTellBy = (renewsOn: string): string =>
+  plusDays(renewsOn, -AUTO_RENEW_NOTICE_DAYS);
 
 /** The renewal can be made today: the plan is in the last 60 days of its year, or past it. */
 export function renewalOpen(p: Pick<RoofCarePlan, "renews_on">, today: string): boolean {

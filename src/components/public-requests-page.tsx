@@ -11,7 +11,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Inbox, Loader2, Mail, MapPin, Phone, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -20,16 +20,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { canAccess } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { quickCreateAccount, saveSite } from "@/lib/crm.functions";
 import { shortDay } from "@/lib/followup-rules";
 import { saveOpportunity } from "@/lib/opportunities.functions";
 import {
   CARE_REQUEST_SEARCH,
+  PUBLIC_REQUESTS_PATH,
   callBackDay,
   matchWhyWords,
   opportunityFromRequest,
   publicPlanName,
+  publicRequestsButtonWords,
   requestAddress,
   requestAskLine,
   customQuoteWhy,
@@ -39,6 +42,7 @@ import {
   type PublicRequestRow,
 } from "@/lib/public-requests";
 import {
+  countWaitingPublicRequests,
   handlePublicRequest,
   listPublicRequests,
   type PublicRequestListed,
@@ -48,6 +52,52 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const KEY = ["public-requests"] as const;
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+/**
+ * The way to the list from the Opportunities page (Nov 23): a button that always shows for the
+ * people who may handle requests (Customers access, as the server and the database ask), with
+ * the number waiting on it, coloured when there is one. Anyone else gets no button and no call
+ * is made for them, so nobody sees an error for a page that is not theirs.
+ */
+export function PublicRequestsButton() {
+  const { session, profile } = useAuth();
+  const may = canAccess(profile, "customers");
+  const countFn = useServerFn(countWaitingPublicRequests);
+  const q = useQuery({
+    queryKey: [...KEY, "waiting"],
+    queryFn: () => countFn(),
+    enabled: !!session && may,
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (!may) return null;
+  const waiting = q.data?.waiting ?? 0;
+  return (
+    <Button
+      asChild
+      size="lg"
+      variant="outline"
+      className={`text-base font-semibold ${
+        waiting > 0
+          ? "border-amber-500 bg-amber-400 text-black hover:bg-amber-400/90 hover:text-black dark:bg-amber-400 dark:text-black"
+          : ""
+      }`}
+    >
+      <Link
+        to={PUBLIC_REQUESTS_PATH}
+        data-action="public-requests"
+        data-waiting={waiting}
+        title={
+          waiting > 0
+            ? "Requests sent from the public pages are waiting for someone to say whose they are"
+            : "Requests sent from the Roof Care plans page and the Request service page"
+        }
+      >
+        <Inbox className="mr-2 h-5 w-5" /> {publicRequestsButtonWords(waiting)}
+      </Link>
+    </Button>
+  );
+}
 
 export function PublicRequestsPage() {
   const list = useServerFn(listPublicRequests);

@@ -6,8 +6,8 @@
  *   then every checklist item as one compact line (inspection-section.tsx ChecklistRows; owner,
  *   Oct 26: only a problem needs a status or a note). A flagged item opens to its note, its
  *   camera (a photo of role "other" on no repair, `item_key` naming the item), its thumbnails
- *   (Detach puts one back among the ticket's loose photos) and "From ticket photos" (attach
- *   loose ticket pictures to the item — inspection-item-photos.tsx); under the rows the counts
+ *   (Detach puts one back among the ticket's loose photos) and "From this inspection's other
+ *   pictures" (attach loose ticket pictures to the item — inspection-item-photos.tsx); under the rows the counts
  *   and whether the server has the answers (inspection-draft.ts: saved as you go, "Save now"
  *   when the signal dropped or nothing was flagged). No repair picker.
  *
@@ -61,8 +61,8 @@ import { errText } from "@/components/service/field-utils";
 
 /**
  * The camera button with its count, the thumbnails, and a failed shot's Retry / Discard. On a
- * checklist item (`itemKey`) the thumbnails carry Detach and the row offers "From ticket photos"
- * (inspection-item-photos.tsx); the findings roll (no item) is the plain roll.
+ * checklist item (`itemKey`) the thumbnails carry Detach and the row offers "From this
+ * inspection's other pictures" (inspection-item-photos.tsx); the findings roll (no item) is the plain roll.
  */
 function PhotoRoll({
   photos,

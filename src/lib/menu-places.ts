@@ -6,7 +6,9 @@
  * components/setup-tabs.tsx and components/settings-tabs.tsx; the menu is app-sidebar.tsx.
  *
  * Nothing moved to a new address. Setup's four service tabs are on /setup; Documents keeps
- * /admin/documents and shows Setup's heading and strip, so it is Setup's fifth tab. Users &
+ * /admin/documents and shows Setup's heading and strip, so it is Setup's fifth tab. QR pages
+ * (Nov 23; owner: "currently the QR pages are not located under the setup tab") keeps /setup/qr
+ * and shows the same heading and strip, so it is Setup's sixth tab and no longer a menu row. Users &
  * access and Reminders keep /admin/users and /admin/reminders and are the two tabs of Settings.
  * No access rule changed: the gate (access.ts pageForPath) is as it was.
  */
@@ -19,17 +21,29 @@ export const SETUP_TAB_TITLES = {
   inspection: "Inspection checklist",
   vehicles: "Vehicles & drivers",
   documents: "Documents",
+  qr: "QR pages",
 } as const;
 export type SetupStripTab = keyof typeof SETUP_TAB_TITLES;
-/** The five, in the strip's order. */
+/** The six, in the strip's order. */
 export const SETUP_STRIP_TABS = Object.keys(SETUP_TAB_TITLES) as SetupStripTab[];
 
 /** Documents' own address: Setup's fifth tab is this page. */
 export const SETUP_DOCUMENTS_PATH = "/admin/documents";
 
-/** Where a tab of the strip lives: the four service tabs on /setup, Documents on its own page. */
+/**
+ * QR pages' own address (Nov 23): the codes for the printed sheets and the settings behind the
+ * two public pages. Setup's sixth tab is this page; it is a manager's and an admin's, as every
+ * address under /setup is (access.ts pageForPath).
+ */
+export const SETUP_QR_PATH = "/setup/qr";
+
+/**
+ * Where a tab of the strip lives: the four service tabs on /setup, Documents and QR pages each
+ * on a page of its own.
+ */
 export function setupTabHref(tab: SetupStripTab): string {
   if (tab === "documents") return SETUP_DOCUMENTS_PATH;
+  if (tab === "qr") return SETUP_QR_PATH;
   return tab === "rates" ? "/setup" : `/setup?tab=${tab}`;
 }
 
@@ -37,11 +51,13 @@ export function setupTabHref(tab: SetupStripTab): string {
  * An address that names a tab which is not on /setup: `/setup?tab=documents` is Documents' own
  * page (Nov 16 audit, fix 26: it showed Service rates). Nothing for the four tabs /setup holds.
  */
-export const setupTabElsewhere = (tab: unknown): typeof SETUP_DOCUMENTS_PATH | undefined =>
-  tab === "documents" ? SETUP_DOCUMENTS_PATH : undefined;
+export const setupTabElsewhere = (
+  tab: unknown,
+): typeof SETUP_DOCUMENTS_PATH | typeof SETUP_QR_PATH | undefined =>
+  tab === "documents" ? SETUP_DOCUMENTS_PATH : tab === "qr" ? SETUP_QR_PATH : undefined;
 
-/** Which of Setup's two pages a strip is drawn on. */
-export type SetupStripPage = "setup" | "documents";
+/** Which of Setup's three pages a strip is drawn on. */
+export type SetupStripPage = "setup" | "documents" | "qr";
 
 /**
  * Does this tab have a panel on that page? Only the four service tabs, and only on /setup. A tab
@@ -49,7 +65,7 @@ export type SetupStripPage = "setup" | "documents";
  * (Nov 16 audit, fix 25).
  */
 export const setupTabHasPanel = (tab: SetupStripTab, page: SetupStripPage): boolean =>
-  page === "setup" && tab !== "documents";
+  page === "setup" && tab !== "documents" && tab !== "qr";
 
 /**
  * What a press on the strip leaves in the browser's history entry when it opens Setup's other
@@ -78,6 +94,8 @@ export function setupTabsFor(who: { money: boolean; documents: boolean }): Setup
   return [
     ...(who.money ? (["rates", "materials", "inspection", "vehicles"] as const) : []),
     ...(who.documents ? (["documents"] as const) : []),
+    // QR pages (Nov 23): the same people as the four service tabs, last on the strip.
+    ...(who.money ? (["qr"] as const) : []),
   ];
 }
 

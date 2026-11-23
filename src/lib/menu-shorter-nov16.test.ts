@@ -159,6 +159,8 @@ describe("Documents is Setup's fifth tab", () => {
       "inspection",
       "vehicles",
       "documents",
+      // Nov 23: QR pages, for the people who see the four service tabs.
+      "qr",
     ]);
     expect(setupTabsFor({ money: false, documents: true })).toEqual(["documents"]);
     expect(setupTabsFor({ money: false, documents: false })).toEqual([]);

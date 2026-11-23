@@ -796,7 +796,16 @@ describe("11. a further storm inspection is billed, the minor repairs left go to
     service_jobs: [{ id: JOB, site_id: SITE, roof_care_visit_id: STORM }],
     roof_care_visits: [{ id: STORM, kind: "storm", amount: 220, plan_id: PLAN, ...visit }],
     roof_care_plans: [
-      { id: PLAN, plan: "guard", status: "active", site_id: SITE, repair_allowance: 300 },
+      // Nov 23: a plan pays only toward work done from its first day, so the plan here has the
+      // day it was signed, as every real plan does. It had none before.
+      {
+        id: PLAN,
+        plan: "guard",
+        status: "active",
+        site_id: SITE,
+        signed_on: "2026-01-05",
+        repair_allowance: 300,
+      },
     ],
     invoices: [
       {

@@ -42,6 +42,8 @@ describe("the /setup page", () => {
       "inspection",
       "vehicles",
       "documents",
+      // Nov 23: QR pages is the sixth tab, on a page of its own.
+      "qr",
     ]);
     // Nov 16 audit fix 25: the tag ended after className (one line); it now also drops the
     // "controls a panel" claim from a tab with no panel on the page.
@@ -124,11 +126,9 @@ describe("the sidebar", () => {
     );
     expect(setupHomeFor({ money: true })).toBe("/setup");
     expect(setupHomeFor({ money: false })).toBe("/admin/documents");
-    // One item follows Setup in that group since Nov 21: the QR pages, a manager's like Setup.
-    expect(items.slice(setupAt).match(/title: "[^"]*"/g)).toEqual([
-      'title: "Setup"',
-      'title: "QR pages"',
-    ]);
+    // Nov 21 put a "QR pages" row after Setup; since Nov 23 it is a tab of Setup (owner: "the
+    // QR pages are not located under the setup tab"), so Setup is the group's last row again.
+    expect(items.slice(setupAt).match(/title: "[^"]*"/g)).toEqual(['title: "Setup"']);
   });
   it("no longer lists Service Rates, and the Admin group is admins only", () => {
     expect(nav).not.toMatch(/title: "Service Rates"/);

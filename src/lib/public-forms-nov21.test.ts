@@ -36,6 +36,7 @@ vi.mock("@/lib/notify.server", () => ({
   appUrl: () => "",
 }));
 
+import { pageForPath } from "@/lib/access";
 import { fakeSupabase } from "@/test/fake-supabase";
 import { GOOGLE_ROUTES_URL, OSRM_ROUTE_BASE, googleGate, routedDriveVia } from "@/lib/drive-route";
 import { ATTENTION_DEFAULTS, attentionList } from "@/lib/owner-attention";
@@ -1205,20 +1206,23 @@ describe("what a request becomes", () => {
 
 describe("the menu and the gate", () => {
   it("the list is a Customers page, the QR page a manager's; neither is a public address", () => {
+    // Nov 23 (owner: "the QR pages are not located under the setup tab and we need to find
+    // somewhere else for the public requests"): neither has a menu row any more. The list is
+    // at /opportunities/requests, opened by a button on Opportunities, and the QR page is a
+    // tab of Setup. Who may open each has not changed (setup-qr-and-requests-nov23.test.ts).
     const side = read("src/components/app-sidebar.tsx");
-    expect(side).toContain(
-      '{ title: "Public requests", url: PUBLIC_REQUESTS_PATH, icon: Inbox, page: "customers" },',
-    );
-    expect(side).toContain("visible: managesTickets,");
-    expect(read("src/routes/customers_.requests.tsx")).toContain(
-      'createFileRoute("/customers_/requests")',
+    expect(side).not.toContain('title: "Public requests"');
+    expect(side).not.toContain('title: "QR pages"');
+    expect(read("src/routes/opportunities_.requests.tsx")).toContain(
+      'createFileRoute("/opportunities_/requests")',
     );
     expect(read("src/routes/setup_.qr.tsx")).toContain('createFileRoute("/setup_/qr")');
-    // The public page is /request; the office's list is under /customers so one can never be
-    // taken for the other by a rule that looks at how an address starts.
+    // The public page is /request; the office's list is under /opportunities so one can never
+    // be taken for the other by a rule that looks at how an address starts.
     expect(PUBLIC_REQUESTS_PATH.startsWith(PUBLIC_REQUEST_PATH)).toBe(false);
     const gate = read("src/lib/access.ts");
     expect(gate).toContain('if (pathname.startsWith("/customers")) return "customers";');
+    expect(pageForPath(PUBLIC_REQUESTS_PATH)).toBe("customers");
     expect(gate).toContain(
       'if (pathname.startsWith("/setup") || pathname.startsWith("/admin/service-rates"))',
     );

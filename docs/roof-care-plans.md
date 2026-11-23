@@ -343,8 +343,11 @@ then said: "we need some rules so the worst case on roof guard … doesnt happen
    were told the new price before the renewal day and the telling is on record; told a price,
    never more than that price; a price that went down is charged as it is. The rule is written
    and tested as `autoRenewCharge()` in `src/lib/roof-care-plan.ts`, for the Stripe work to
-   call. When the old price is charged because nobody told them, the office has to hear it. Not
-   decided yet: how many days before the renewal the customer has to be told.
+   call. When the old price is charged because nobody told them, the office has to hear it.
+   **How early they have to be told (the owner, Nov 23): "30 days is good".** The telling
+   counts only when it was at least 30 days before the renewal day
+   (`AUTO_RENEW_NOTICE_DAYS`, `autoRenewToldInTime()`, and `autoRenewTellBy()` for the last
+   day to tell them). Told 29 days before, the old price is charged.
 3. Changing plans: an upgrade pays the difference and takes effect at once; a downgrade takes
    effect at the next plan year.
 
@@ -698,6 +701,63 @@ Later the same evening the owner added: "go with ... 14, new issue 1, new issue 
 - The Google Routes key is in and proven: Try a building on the price page says "by road, from
   Google".
 
+## Decided on Nov 23
+
+The owner, on the six new issues reported after the Nov 21 work: "for new issues go on 1,
+2(credit only applies to work done after plans starts), 3 (i think this is a non issue), 4 it
+opened when i took a picture a moment ago, 5 30 days is good, 6 this isnt an bid issue".
+Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
+
+- **1. Every ended plan with a refund owed has its own refund line.** A property keeps its
+  older plans. On the property's plan card, under the current plan, each ended plan of that
+  property whose refund is owed and not yet marked sent has a line of its own, named with the
+  plan, its number, its year and the day it ended ("Roof Care plan RC-1004, Mar 10, 2026 to
+  Mar 10, 2027, ended Jun 2, 2026"), oldest first, with the same two buttons and the same
+  rights: "Mark the refund sent", and "Change refund" for a manager or an admin. Before, only
+  the current plan's refund could be reached, so a refund owed on a plan from before a new
+  sign-up could not be marked. A refund already marked sent, or changed to nothing, is not
+  listed: the line is for money still to send. The Needs attention row for a refund owed
+  opens the property's page, where the line is. (`otherRefundsOwed()` and `refundPlanWords()`
+  in `src/lib/roof-care-plan.ts`.)
+- **2. A plan pays only toward work done from the day it starts: "credit only applies to work
+  done after plans starts".** A plan gives its minor repairs credit, and Roof Guard its leak
+  call with no travel charge, only to work whose day is on or after the first day of the
+  plan's year and on or before its last, whether the plan is in force or has ended. The
+  work's day is the day it was completed, else the day on site, else the day it is scheduled
+  for, else today. The day the invoice is made does not matter. Example: a repair done Mar 3,
+  the plan starts Mar 10, the invoice is made Mar 12: no credit and the normal trip charge.
+  Before, a plan in force also paid toward work dated before it started.
+  - **A renewal paid early.** The new year is dated from the old year's last day, so there are
+    days between the payment and the new year. Work done on those days is the OLD year's: a
+    plan that ended because it was renewed runs to its year's last day, and takes the credit
+    from what the old year has left. The new year pays from its first day. A plan that ended
+    for any other reason stops the day it ended, as before.
+  - **The plan's own inspections.** A plan inspection done a few days ahead of its year is
+    still that plan's work: a charged return trip on it, or a billed storm inspection, uses
+    the plan's minor repairs first as before.
+  - **A draft invoice** that carries credit for work now outside the rule loses it the next
+    time it is opened, saved, rebuilt or made final, and the office reads why: "This ticket's
+    work is dated outside the plan's year, before its first day or after its last. A plan
+    pays only toward work done from the day it starts to its last day." An invoice already
+    final is left as it is.
+  - One rule in two places that are tested against each other: `roof_care_plan_covers()` and
+    the invoice line rule in the database
+    (`supabase/migrations/20261123100000_roof_care_credit_from_the_first_day.sql`, applied by
+    hand on Nov 23), and `planCoversDay()` / `planForWork()` in
+    `src/lib/roof-care-allowance.ts` for the screens.
+- **5. Renewing by itself: "30 days is good".** A new price counts only when the customer was
+  told it at least 30 days before the renewal day. The rule and its words are under "Not built
+  yet, all with Stripe", number 2. Renewing by itself is still not built.
+
+**The owner's other answers of Nov 23, for the record. Nothing was built for these.**
+
+- New issue 3, a finger resting on a Tech Board ticket and then swiping can pick the ticket up:
+  "i think this is a non issue".
+- New issue 4, a fresh camera picture opening in the mark-up editor: "it opened when i took a
+  picture a moment ago". It works on his phone.
+- New issue 6, a technician with no name on file showing as an email address on the board: not
+  an issue to him ("this isnt an bid issue").
+
 ## Still to build
 
 Step 4 was built on Nov 21: see "Step 4, built Nov 21" below. What is left of it:
@@ -770,14 +830,15 @@ What is behind them is in `docs/qa/public-forms-2026-11-21.md`. In short:
   custom quote. Nothing is signed, and the office never opens a sign-up from it.
 - **Limits.** A connection: 20 price questions and 5 requests an hour. Everyone together: 400
   price questions and 60 requests a day. Over a limit the page says to wait or call.
-- **The office's list**: Customers › Public requests. Each request shows the customers who may
+- **The office's list**: Opportunities › Public requests (moved there on Nov 23; the Public
+  requests button at the top of the Opportunities page shows how many wait). Each request shows the customers who may
   be the sender (same phone, same email, a name alike, or the same street address: broad on
   purpose), and a person says which, or "New customer", or dismisses it with a reason. A
   service request becomes an opportunity for the person who matched it, due the next working
   day. A Roof Care request opens the normal sign-up on the property with what the visitor
   picked. An unanswered request is on the owner's Needs attention list, and the admins and
   managers get one notice.
-- **Setup › QR pages**: the two printable sheets with the codes (made by the site, no prices),
+- **Setup › QR pages** (a tab of Setup since Nov 23): the two printable sheets with the codes (made by the site, no prices),
   the web address inside the codes, the list of services, and the limit on Google drive lookups
   a day (200 to start; over it the free router answers and the drive tool says so).
 - **The database**: `supabase/migrations/20261121100000_public_forms.sql`, applied by hand on

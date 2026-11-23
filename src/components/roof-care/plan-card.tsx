@@ -120,6 +120,7 @@ import {
   mapRoofSizeLine,
   nextWindow,
   onePressAtATime,
+  otherRefundsOwed,
   owedWords,
   PAY_CARD_NOTE,
   PAY_METHOD_WORDS,
@@ -143,6 +144,7 @@ import {
   refundChangeProblem,
   refundChangeWords,
   refundLines,
+  refundPlanWords,
   refundStatusWords,
   CARD_BACK_MARK,
   cardBackWords,
@@ -789,6 +791,17 @@ export function RoofCareCard({
         (plan.refund.due > 0 || (plan.refund.changes?.length ?? 0) > 0) && (
           <RefundOwed siteId={siteId} plan={plan} manager={manager} />
         )}
+      {/* A refund still owed on an older plan of this property (Nov 23): each has its own line,
+          named, with the same two buttons. Before, only the current plan's could be reached. */}
+      {otherRefundsOwed(q.data, plan.id).map((p) => (
+        <RefundOwed
+          key={p.id}
+          siteId={siteId}
+          plan={p}
+          manager={manager}
+          label={refundPlanWords(p)}
+        />
+      ))}
       {/* Card money that has to go back, of any plan of this property (Nov 20). */}
       {q.data
         .flatMap((p) => p.card_back ?? [])
@@ -1575,10 +1588,13 @@ function RefundOwed({
   siteId,
   plan,
   manager,
+  label,
 }: {
   siteId: string;
   plan: RoofCarePlan;
   manager: boolean;
+  /** Which plan it is for, when it is not the property's current one. */
+  label?: string;
 }) {
   const refresh = useRefresh(siteId);
   const [ref, setRef] = useState("");
@@ -1616,7 +1632,16 @@ function RefundOwed({
   });
   const r = plan.refund!;
   return (
-    <div className="space-y-1 text-xs" data-roof-care-refund={r.sent_on ? "sent" : "owed"}>
+    <div
+      className="space-y-1 text-xs"
+      data-roof-care-refund={r.sent_on ? "sent" : "owed"}
+      data-refund-plan={plan.id}
+    >
+      {label && (
+        <p className="font-medium" data-refund-for>
+          {label}
+        </p>
+      )}
       <p
         className={
           r.sent_on ? "text-muted-foreground" : "font-medium text-amber-800 dark:text-amber-300"
@@ -2269,7 +2294,7 @@ function SignUpDialog({
           });
         } catch {
           toast.warning(
-            `The plan is signed, but request ${prefill.reference} could not be marked as done. Dismiss it on Customers, Public requests, with the reason "signed up".`,
+            `The plan is signed, but request ${prefill.reference} could not be marked as done. Dismiss it on Opportunities, Public requests, with the reason "signed up".`,
             { duration: 30_000 },
           );
         }

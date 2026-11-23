@@ -395,6 +395,11 @@ export function pageForPath(pathname: string): RoutePage | null {
   // gives Customers / Estimate users every opportunity and anyone else only their own
   // assignments (crm_opportunities_read). The sidebar lists the page for Customers / Estimate
   // (seesOpportunitiesList).
+  // Requests from the public pages (Nov 23): the list moved from /customers/requests to live
+  // with Opportunities. It is still the Customers page's, as it was at its first address: the
+  // server and the database ask for Customers access (public-requests.functions.ts).
+  if (pathname === "/opportunities/requests" || pathname.startsWith("/opportunities/requests/"))
+    return "customers";
   if (pathname.startsWith("/opportunities")) return null;
   // Documents (owner, Oct 26). Until Nov 10 every signed-in user could open the page and the
   // server's row security decided what it showed, so a technician reached a blank template

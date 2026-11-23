@@ -133,7 +133,8 @@ describe("the travel of a leak call", () => {
 });
 
 describe("the owner's four calls, with the credit behind them", () => {
-  // Each call: 300 labor, 100 materials, 150 travel. The plan: 2 calls, a credit of 1,500.
+  // Each call: 300 labor, 100 materials, 150 travel. The plan: 2 calls, a credit of 1,400 (a made-up
+  // figure; Nov 23: it was a real plan's amount, which is kept out of the repository).
   const call = [
     { kind: "travel", source: "time:t1", total: 150 },
     { kind: "labor", source: "time:t2", total: 300 },
@@ -146,7 +147,7 @@ describe("the owner's four calls, with the credit behind them", () => {
       : call;
     // The credit covers what the invoice still charges: the leak call line has come off it.
     const billable = billableBefore(withWaiver);
-    const credit = allowanceCap({ allowance: 1500, usedElsewhere: creditUsed, billable });
+    const credit = allowanceCap({ allowance: 1400, usedElsewhere: creditUsed, billable });
     return { travelFree: t.amount > 0, credit, pays: billable - credit };
   };
 
@@ -160,7 +161,7 @@ describe("the owner's four calls, with the credit behind them", () => {
   });
 
   it("call 4: the credit runs out, and the customer pays the rest", () => {
-    expect(one(2, 1350)).toEqual({ travelFree: false, credit: 150, pays: 400 });
+    expect(one(2, 1350)).toEqual({ travelFree: false, credit: 50, pays: 500 });
   });
 });
 
@@ -209,8 +210,11 @@ describe("keeping a repair invoice's plan lines in step", () => {
           plan: "guard",
           site_id: SITE,
           status: "active",
+          // Nov 23: a plan pays only toward work done from its first day, so the plan here
+          // has the day it was signed, as every real plan does. It had none before.
+          signed_on: "2026-01-05",
           free_travel_calls: over.calls ?? 2,
-          repair_allowance: 1500,
+          repair_allowance: 1400,
         },
       ],
       invoices: [

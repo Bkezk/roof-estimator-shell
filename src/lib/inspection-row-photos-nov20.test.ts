@@ -193,9 +193,13 @@ describe("the two ways to add one, as the repairs have", () => {
 describe("the row still fits a phone with its fourth button", () => {
   const src = flat("src/components/service/inspection-section.tsx");
   it("the label may narrow and break after a slash on any phone; the buttons are a thumb", () => {
-    expect(src).toContain("max-sm:min-w-0 max-sm:[overflow-wrap:anywhere]");
-    expect(src).toContain('<wbr className="sm:hidden" />');
-    expect(src).toContain('className="flex items-center gap-1 max-[389px]:flex-wrap"');
-    expect(src).toContain("h-[44px] min-w-[44px] gap-0.5 px-1.5");
+    // Nov 23: the Pictures button carries its word, so the row's rule is no longer a screen
+    // width (inspection-row-pictures-nov23.test.ts has the new one). Still true: a break after
+    // a slash, and a button a thumb can hit.
+    expect(src).toContain("/<wbr />");
+    expect(src).toContain(
+      'className="flex flex-wrap items-center gap-1" data-line="checklist-row"',
+    );
+    expect(src).toContain("h-[44px] min-w-[44px] gap-1 px-2 text-xs");
   });
 });

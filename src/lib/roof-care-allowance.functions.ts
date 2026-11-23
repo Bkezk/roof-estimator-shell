@@ -37,6 +37,7 @@ import {
   isAllowanceLine,
   allowancePlanOf,
   officeDay,
+  ownInspectionDay,
   planAllowanceNow,
   planCoversDay,
   planForWork,
@@ -144,7 +145,7 @@ export async function invoiceAllowanceOf(
 
 /** What of a plan the invoice rules read. */
 export const PLAN_OF_WORK_COLUMNS =
-  "id, plan, status, site_id, repair_allowance, free_travel_calls, starts_on, signed_on, renews_on, ended_on, refund_due, refund_sent_on, refund_worked" as const;
+  "id, plan, status, site_id, repair_allowance, free_travel_calls, starts_on, signed_on, renews_on, ended_on, ended_reason, refund_due, refund_sent_on, refund_worked" as const;
 export type PlanOfWork = Pick<
   Database["public"]["Tables"]["roof_care_plans"]["Row"],
   | "id"
@@ -157,6 +158,7 @@ export type PlanOfWork = Pick<
   | "signed_on"
   | "renews_on"
   | "ended_on"
+  | "ended_reason"
   | "refund_due"
   | "refund_sent_on"
   | "refund_worked"
@@ -186,7 +188,12 @@ export async function planOfWork(
     ownPlan ? q.eq("id", ownPlan) : q.eq("site_id", job.site_id!)
   ).in("status", ["active", "ended"]);
   if (error) throw new Error(`The property's Roof Care plan: ${error.message}`);
-  return planForWork((plans ?? []) as PlanOfWork[], workDay(job, today).day);
+  const list = (plans ?? []) as PlanOfWork[];
+  const day = workDay(job, today).day;
+  // The plan's own inspection is that plan's work, also when it was done a few days ahead of
+  // the year's first day (Nov 23): the start of the year is asked only of other work.
+  if (ownPlan) return planForWork(list, list[0] ? ownInspectionDay(list[0], day) : day);
+  return planForWork(list, day);
 }
 
 /**
@@ -210,12 +217,15 @@ export async function planLineOutside(
   if (!plan?.status) return false;
   const { data: job, error: jErr } = await sb
     .from("service_jobs")
-    .select("site_id, completed_at, on_site_at, scheduled_date")
+    .select("site_id, completed_at, on_site_at, scheduled_date, roof_care_visit_id")
     .eq("id", jobId)
     .maybeSingle();
   if (jErr) throw new Error(`The invoice's ticket: ${jErr.message}`);
   if (!job) return false;
-  return !planCoversDay(plan, workDay(job, today).day);
+  const day = workDay(job, today).day;
+  // A plan inspection's own ticket carries only that plan's lines: its day is never counted as
+  // before the plan's year (Nov 23).
+  return !planCoversDay(plan, job.roof_care_visit_id ? ownInspectionDay(plan, day) : day);
 }
 
 /** What each of these return trip lines was worked out at, by the line's source. */
@@ -378,6 +388,7 @@ export async function reworkDraftPlanLines(
     note: planLinesChangeWords(before, planLinesStand(invoice, now), {
       left: where?.left ?? null,
       billable: where?.billable ?? null,
+      outside: !where,
     }),
   };
 }

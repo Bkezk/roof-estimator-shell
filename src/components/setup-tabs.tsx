@@ -8,7 +8,7 @@
  * Who sees which tab, the names and the addresses: lib/menu-places.ts.
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { ClipboardList, Files, Package, Receipt, Settings2, Truck } from "lucide-react";
+import { ClipboardList, Files, Package, QrCode, Receipt, Settings2, Truck } from "lucide-react";
 
 import {
   SETUP_TAB_TITLES,
@@ -26,6 +26,7 @@ const ICONS = {
   inspection: ClipboardList,
   vehicles: Truck,
   documents: Files,
+  qr: QrCode,
 } as const;
 
 export function SetupHeading(props: { money: boolean; documents: boolean }) {

@@ -126,7 +126,10 @@ free router: today's limit of Google lookups is reached". Setup › QR pages sho
 
 ## The office's side
 
-**Customers › Public requests** (`/customers/requests`, Customers access).
+**Opportunities › Public requests** (`/opportunities/requests`, Customers access). Moved on Nov 23:
+it was a menu row under Customers at `/customers/requests`, which still opens and sends people
+on. It is now opened by the Public requests button at the top of the Opportunities page, which
+carries the number waiting (`docs/qa/screens-2026-11-23.md`).
 
 1. Each waiting request shows who sent it, how to reach them, the address, and what they asked
    for.
@@ -151,7 +154,8 @@ An unanswered request is on the owner's **Needs attention** list: amber, red aft
 The admins and managers get **one notice** per request, sent when it arrives and, failing that,
 by the 8:00 run.
 
-**Setup › QR pages** (`/setup/qr`, admins and managers).
+**Setup › QR pages** (`/setup/qr`, admins and managers). Since Nov 23 it is the sixth tab of
+Setup, not a menu row of its own; the address is the same.
 
 - The two sheets, one a page: the name, a line of what the page is for, the code, the address
   in letters. No prices. **Print the two sheets** and **Download as picture**.

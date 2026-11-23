@@ -39,6 +39,7 @@ import { finalizeInvoice } from "@/lib/invoices.functions";
 import {
   PLAN_LINES_LOOK_AGAIN,
   allowanceLineSource,
+  PLAN_WORK_OUTSIDE,
   planLinesChangeWords,
   planLinesMoved,
 } from "@/lib/roof-care-allowance";
@@ -81,6 +82,9 @@ function world(
     otherCalls?: string[];
     status?: string;
     stage?: string;
+    /** Nov 23: the day the plan was signed, and the day the ticket's work was completed. */
+    planFrom?: string;
+    workedOn?: string;
   } = {},
 ) {
   const credit = o.credit ?? 0;
@@ -178,6 +182,7 @@ function world(
           roof_care_visit_id: null,
           stage: o.stage ?? "authorized",
           customer_name: "Made-up Plaza",
+          completed_at: o.workedOn ? `${o.workedOn}T17:00:00Z` : null,
         },
       ],
       roof_care_plans: [
@@ -186,6 +191,9 @@ function world(
           plan: "guard",
           site_id: SITE,
           status: "active",
+          // Nov 23: a plan pays only toward work done from its first day, so the plan here
+          // has the day it was signed, as every real plan does. It had none before.
+          signed_on: o.planFrom ?? "2026-01-05",
           repair_allowance: 740,
           free_travel_calls: o.calls ?? 0,
         },
@@ -472,5 +480,40 @@ describe("the words", () => {
       travel: 60,
       total: 390,
     });
+  });
+});
+
+// Nov 23 (owner: "credit only applies to work done after plans starts"). A draft made under the
+// older rule can carry credit, or a leak call's travel, for work dated before the plan started.
+describe("Nov 23: a draft whose work is dated before the plan started", () => {
+  it("loses the credit at the next re-work, and the office reads why", async () => {
+    // The repair was done Mar 3. The plan started Mar 10. The draft holds 310 of credit.
+    const env = world({ credit: 310, planFrom: "2027-03-10", workedOn: "2027-03-03" });
+    const r = await rework(env);
+    expect(creditOf(env)).toEqual([]);
+    expect(invOf(env)).toMatchObject({ total: 760, subtotal: 760 });
+    expect(r?.note).toBe(
+      `The Roof Care plan no longer takes anything off this invoice for minor repairs. It took $310.00 before. ${PLAN_WORK_OUTSIDE} The invoice total is now $760.00. It was $450.00.`,
+    );
+  });
+  it("the leak call's travel is charged again with it: the normal trip charge", async () => {
+    const env = world({
+      credit: 310,
+      waived: 60,
+      calls: 2,
+      planFrom: "2027-03-10",
+      workedOn: "2027-03-03",
+    });
+    const r = await rework(env);
+    expect(creditOf(env)).toEqual([]);
+    expect(waivedOf(env)).toEqual([]);
+    expect(invOf(env)).toMatchObject({ total: 760 });
+    expect(r?.note).toContain("The travel on this invoice, $60.00, is charged again.");
+    expect(r?.note?.split(PLAN_WORK_OUTSIDE)).toHaveLength(2);
+  });
+  it("work done on the plan's first day keeps its credit and nothing is said", async () => {
+    const env = world({ credit: 740, planFrom: "2027-03-10", workedOn: "2027-03-10" });
+    expect(await rework(env)).toBeNull();
+    expect(creditOf(env)).toEqual([-740]);
   });
 });

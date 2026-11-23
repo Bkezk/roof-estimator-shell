@@ -220,8 +220,9 @@ describe("3. the work's date, and the plan it belongs to", () => {
     const p = py({ status: "active", ended_on: null });
     expect(planCoversDay(p, "2026-12-31")).toBe(true);
     expect(planCoversDay(p, "2027-01-01")).toBe(false);
-    // Work dated before it started is covered while the plan is in force, as it always was.
-    expect(planCoversDay(p, "2025-12-20")).toBe(true);
+    // Nov 23 (owner: "credit only applies to work done after plans starts"): work dated before
+    // the plan started is no longer covered while it is in force. This line said true before.
+    expect(planCoversDay(p, "2025-12-20")).toBe(false);
     expect(planCoversDay(py({ status: "awaiting_payment" }), "2026-06-01")).toBe(false);
   });
 

@@ -1470,7 +1470,10 @@ describe("6f. the screens: compact rows, pictures from the ticket, Property insp
     // Oct 28: the picker offers every picture not on THIS item (one photo on several items);
     // Detach removes this item's link only.
     expect(itemPhotos).toContain("const pickable = attachableTicketPhotos(photos, itemKey);");
-    expect(itemPhotos).toContain("From ticket photos");
+    // Nov 23: the button said "From ticket photos"; it now says what it offers, and is not
+    // drawn with nothing to offer (inspection-row-pictures-nov23.test.ts).
+    expect(itemPhotos).toContain("const words = otherPicturesWords(pickable.length);");
+    expect(itemPhotos).not.toContain("From ticket photos");
     expect(itemPhotos).toContain(
       "setItem.mutate({ ids: [p.id], item_key: itemKey, attach: false })",
     );

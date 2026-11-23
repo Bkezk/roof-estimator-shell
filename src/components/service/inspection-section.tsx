@@ -6,8 +6,8 @@
  * Complete). Owner, Oct 26: "not every part needs a comment or status, just ones with problems" —
  * each row is one compact line (ChecklistRows): a tap on the label or the flag marks it an
  * Issue, and only a flagged row opens up to its note and its pictures (the close-out's camera,
- * and "From ticket photos" — inspection-item-photos.tsx). A subtle check ticks a row OK by hand;
- * N/A stays a small toggle. A row with no status reads as OK. Under the rows: Property inspected
+ * and "From this inspection's other pictures" — inspection-item-photos.tsx). A subtle check
+ * ticks a row OK by hand; N/A stays a small toggle. A row with no status reads as OK. Under the rows: Property inspected
  * (a date, "Today" on the phone's own day) and Property grade (A–F), saved with the checklist
  * (InspectionDetails). The findings note is the ticket's closing notes (one notes box; the
  * Close-out fold shows it); an older inspection's own notes still show, read-only. Once the
@@ -75,6 +75,7 @@ import {
   parseInspection,
   photosOnItem,
   picturesButtonLabel,
+  picturesButtonWords,
   rowPicturesOpen,
   visibleChecklist,
   type InspectionGrade,
@@ -146,7 +147,7 @@ function InspectionBody({
   const { session } = useAuth();
   const photosFn = useServerFn(listJobPhotos);
   // The ticket's photos (the same key as the Photos fold): a flagged row shows its pictures and
-  // offers the loose ones ("From ticket photos").
+  // offers the inspection's other ones ("From this inspection's other pictures").
   const photos = useQuery({
     queryKey: fieldKeys.photos(job.id),
     queryFn: () => photosFn({ data: { id: job.id } }),
@@ -200,9 +201,9 @@ function InspectionBody({
 }
 
 /**
- * A checklist label with a place to break after each slash ("Gutters/downspouts"), on a phone
- * only (under 640 px; it was under 390 px until each row got its Pictures button, Nov 20): on a
- * computer the break is hidden and the label is one word as before.
+ * A checklist label with a place to break after each slash ("Gutters/downspouts"). On every
+ * screen since Nov 23: the labelled Pictures button left the label less room on the office's
+ * narrow column too, and a break is only taken when the label does not fit on one line.
  */
 function slashBreaks(label: string): React.ReactNode {
   const parts = label.split("/");
@@ -212,7 +213,7 @@ function slashBreaks(label: string): React.ReactNode {
       {part}
       {i < parts.length - 1 && (
         <>
-          /<wbr className="sm:hidden" />
+          /<wbr />
         </>
       )}
     </Fragment>
@@ -224,7 +225,7 @@ function slashBreaks(label: string): React.ReactNode {
  * ones with problems"). Each row is one compact line: the label (a tap flags it ↔ unflags it,
  * status "issue" ↔ null), a small Issue flag, a subtle OK check and an N/A toggle. Only a
  * flagged row opens up to its note ("What and where") and `extra` — the pictures: the close-out's
- * camera and thumbnails, the office's From ticket photos. A row with no status reads as OK; a row
+ * camera and thumbnails, the office's "From this inspection's other pictures". A row with no status reads as OK; a row
  * ticked OK (by hand, or on an older save) shows a quiet check; N/A greys the label. Both screens
  * render the checklist with this. With `jobId`, each row ends with what an earlier ticket at this
  * property found for that item ("Last time: Jun 12 — …" and its photo; owner, Oct 21,
@@ -233,8 +234,10 @@ function slashBreaks(label: string): React.ReactNode {
  * Pictures on any row (owner, Nov 20: "for the inspections we need to be able to add pictures
  * even if the section is good and has a checkmark, it needs to be available via opening the
  * camera or from camera roll just like the repairs are"). Every row ends with a Pictures button
- * (a camera, with the row's count once it has any). On a row that is not an issue it opens the
- * same `extra` an issue row has — the camera, From my photos, From ticket photos, the
+ * (since Nov 23 it says "Pictures", and "Pictures (2)" once the row has some: a bare camera was
+ * missed). On a row that is not an issue it opens the
+ * same `extra` an issue row has — the camera, From my photos, From this inspection's other
+ * pictures (only when there are some), the
  * thumbnails — and nothing else: no note is asked and the row's answer is not touched, so a good
  * row stays good. A row that already has pictures shows them without a press. `photoCount`
  * gives each row's count; without `extra` there is no button.
@@ -320,13 +323,17 @@ export function ChecklistRows({
                 Later that day each row got a fourth button, Pictures: the label may now narrow
                 and break after its slash on any phone (under 640 px), and the buttons drop to
                 their own line under 390 px (it was 350), so no word is ever cut in two. */}
-            <div
-              className="flex items-center gap-1 max-[389px]:flex-wrap"
-              data-line="checklist-row"
-            >
+            {/* Nov 23 (owner: "we should also be able to add pictures to checked marked good
+                items"): the Pictures button was a bare camera and was missed, so it now carries
+                its word. That makes the buttons wider, so the rule is no longer a screen width:
+                the label keeps room for its words (9.5rem), and wherever the label and the
+                buttons do not fit side by side the buttons take a line of their own, to the
+                right. On the narrowest phones the buttons may fold onto two lines themselves.
+                Nothing ever runs past the card and no word is cut in two. */}
+            <div className="flex flex-wrap items-center gap-1" data-line="checklist-row">
               <button
                 type="button"
-                className="flex min-h-10 flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default max-sm:min-w-0 max-[389px]:basis-auto"
+                className="flex min-h-10 min-w-[9.5rem] flex-1 items-center gap-2 rounded-md px-1 text-left font-medium disabled:cursor-default"
                 aria-pressed={flagged}
                 aria-label={
                   flagged
@@ -352,7 +359,7 @@ export function ChecklistRows({
                 )}
                 <span
                   data-line="checklist-label"
-                  className={`max-sm:min-w-0 max-sm:[overflow-wrap:anywhere] ${na ? "text-muted-foreground line-through" : ""}`}
+                  className={`min-w-0 [overflow-wrap:break-word] ${na ? "text-muted-foreground line-through" : ""}`}
                 >
                   {slashBreaks(item.label)}
                 </span>
@@ -364,7 +371,7 @@ export function ChecklistRows({
                   ))}
               </button>
               <div
-                className="flex shrink-0 items-center gap-0.5 max-[389px]:ml-auto"
+                className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-0.5"
                 role="group"
                 aria-label={`${item.label}: result`}
               >
@@ -409,17 +416,17 @@ export function ChecklistRows({
                   <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                     aria-label={picturesButtonLabel(item.label, pictures)}
                     aria-expanded={picsOpen}
                     title="Pictures for this part: the camera, or pictures already on the phone"
                     data-action="row-pictures"
                     data-count={pictures}
-                    className={`h-[44px] min-w-[44px] gap-0.5 px-1.5 ${pictures > 0 ? "text-primary" : "text-muted-foreground"}`}
+                    className={`h-[44px] min-w-[44px] gap-1 px-2 text-xs ${pictures > 0 ? "border-primary/50 font-semibold text-primary" : ""}`}
                     onClick={pressPictures}
                   >
-                    <Camera className="h-4 w-4" aria-hidden />
-                    {pictures > 0 && <span className="text-xs font-semibold">{pictures}</span>}
+                    <Camera className="h-4 w-4 shrink-0" aria-hidden />
+                    <span data-line="row-pictures-words">{picturesButtonWords(pictures)}</span>
                   </Button>
                 )}
               </div>

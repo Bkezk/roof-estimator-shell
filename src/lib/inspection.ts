@@ -313,6 +313,27 @@ export function picturesButtonLabel(label: string, count: number): string {
   return count > 0 ? `${label}: pictures (${count})` : `${label}: add pictures`;
 }
 /**
+ * The words on a checklist row's Pictures button (owner, Nov 23: "we should also be able to add
+ * pictures to checked marked good items"). The button was a bare camera and was missed, so it now
+ * says what it is: "Pictures", and "Pictures (2)" once the row has some.
+ */
+export function picturesButtonWords(count: number | null | undefined): string {
+  const n = Math.max(0, Math.floor(count ?? 0));
+  return n > 0 ? `Pictures (${n})` : "Pictures";
+}
+/**
+ * The words on the button that offers a row the pictures already on its inspection (owner, Nov
+ * 23, on an inspection with no pictures: "why is there an option to add from ticket photos when
+ * theres not an associated ticket?"). It said "From ticket photos", which read as another
+ * ticket's pictures. Null when there is nothing to offer: the button is then not drawn at all.
+ */
+export function otherPicturesWords(count: number | null | undefined): string | null {
+  const n = Math.max(0, Math.floor(count ?? 0));
+  return n > 0 ? `From this inspection's other pictures (${n})` : null;
+}
+/** The title of the picker that button opens. */
+export const OTHER_PICTURES_TITLE = "This inspection's other pictures";
+/**
  * The ticket's photos on no checklist item at all (the findings roll, "Other photos"): ticket
  * pictures — role "other", on no repair — with no link. A repair's Before / After, the signature
  * and an aerial are never counted.
@@ -321,7 +342,8 @@ export function unattachedTicketPhotos<T extends ItemPhotoLike>(photos: readonly
   return photos.filter((p) => isTicketPicture(p) && photoItemKeys(p).length === 0);
 }
 /**
- * The ticket's photos the "From ticket photos" picker offers for a checklist item (owner, Oct
+ * The ticket's photos the "From this inspection's other pictures" picker (it was "From ticket
+ * photos" until Nov 23) offers for a checklist item (owner, Oct
  * 26; Oct 28: one photo may be on several items): every ticket picture not already on THIS item
  * — the ones on another item too, marked "also on …" (alsoOnText). A repair's Before / After,
  * the signature and an aerial are not offered.

@@ -27,6 +27,7 @@ import { SetupHeading, SetupTabsList } from "@/components/setup-tabs";
 import {
   cameBySetupTab,
   SETUP_DOCUMENTS_PATH,
+  SETUP_QR_PATH,
   SETUP_STRIP_TABS,
   SETUP_TAB_PRESSED,
   SETUP_TAB_TITLES,
@@ -200,10 +201,13 @@ function SetupPage() {
               // other page does.
               v === "documents"
                 ? void router.navigate({ to: SETUP_DOCUMENTS_PATH, state: SETUP_TAB_PRESSED })
-                : void navigate({
-                    search: v === "rates" ? {} : { tab: v as SetupTab },
-                    replace: true,
-                  })
+                : v === "qr"
+                  ? // QR pages (Nov 23) is a page of its own too, and asks the same way.
+                    void router.navigate({ to: SETUP_QR_PATH, state: SETUP_TAB_PRESSED })
+                  : void navigate({
+                      search: v === "rates" ? {} : { tab: v as SetupTab },
+                      replace: true,
+                    })
             }
           >
             {/* The strip is shared with the Documents page, Setup's fifth tab (Nov 16). */}
@@ -212,7 +216,7 @@ function SetupPage() {
               documents={canDocuments}
               page="setup"
               takeFocus={arrivedByTab}
-              dot={(t) => (t === "documents" ? null : dot(t))}
+              dot={(t) => (t === "documents" || t === "qr" ? null : dot(t))}
             />
             {content("rates", <ServiceRatesSettings />)}
             {content("materials", <MaterialPricingSettings />)}

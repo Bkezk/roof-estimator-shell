@@ -247,14 +247,17 @@ describe("25. Setup's tab strip: arrow keys only move the highlight", () => {
   });
   it("on the Documents page no tab says it controls a panel", () => {
     const html = draw("documents", "documents");
-    expect(tabs(html)).toHaveLength(5);
+    // Six since Nov 23: QR pages is the sixth tab, on a page of its own like Documents.
+    expect(tabs(html)).toHaveLength(6);
     expect(html).not.toContain("aria-controls");
     expect(html).toMatch(/<button[^>]*aria-selected="true"[^>]*>(<svg.*?<\/svg>)? ?Documents/);
   });
   it("on /setup the four service tabs do, and Documents (another page) does not", () => {
     const drawn = tabs(draw("setup", "rates"));
-    expect(drawn).toHaveLength(5);
+    expect(drawn).toHaveLength(6);
     expect(drawn.filter((t) => t.includes("aria-controls="))).toHaveLength(4);
+    expect(drawn[5]).not.toContain("aria-controls");
+    expect(drawn[5]).toContain("-trigger-qr");
     expect(drawn[4]).not.toContain("aria-controls");
     expect(drawn[4]).toContain("-trigger-documents");
   });
@@ -306,7 +309,16 @@ describe("26. the Documents tab by address", () => {
     expect(setup).toContain(
       "beforeLoad: ({ search }) => { const elsewhere = setupTabElsewhere(search.tab); if (elsewhere) throw redirect({ to: elsewhere, replace: true }); },",
     );
-    expect(SETUP_STRIP_TABS).toEqual(["rates", "materials", "inspection", "vehicles", "documents"]);
+    // Nov 23: QR pages joined the strip, with an address of its own as Documents has.
+    expect(setupTabElsewhere("qr")).toBe("/setup/qr");
+    expect(SETUP_STRIP_TABS).toEqual([
+      "rates",
+      "materials",
+      "inspection",
+      "vehicles",
+      "documents",
+      "qr",
+    ]);
   });
 
   it("someone with Documents but not the money tabs goes from /setup to Documents, not home", () => {

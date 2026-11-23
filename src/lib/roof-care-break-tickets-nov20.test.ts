@@ -814,18 +814,21 @@ describe("30. wording, and the checklist on a narrow phone", () => {
   // narrow and break after its slash on any phone (under 640 px), not only under 390 px.
   it("the checklist row may narrow on a phone only, and drops its buttons a line under 390 px", () => {
     const src = flat("src/components/service/inspection-section.tsx");
-    expect(src).toContain('className="flex items-center gap-1 max-[389px]:flex-wrap"');
-    expect(src).toContain("disabled:cursor-default max-sm:min-w-0 max-[389px]:basis-auto");
-    expect(src).toContain('className="flex shrink-0 items-center gap-0.5 max-[389px]:ml-auto"');
-    expect(src).toContain("max-sm:min-w-0 max-sm:[overflow-wrap:anywhere]");
-    expect(src).toContain('<wbr className="sm:hidden" />');
-    // Every new class is behind a width: on a computer the row is as it was.
-    const row = src.slice(
-      src.indexOf('data-line="checklist-row"') - 200,
-      src.indexOf("N/A </Button>"),
+    // Nov 23: the Pictures button now carries its word ("Pictures (2)"), which no width rule
+    // could fit on one line. The row wraps by itself instead: the label keeps room for its
+    // words and the buttons take their own line, to the right, wherever both do not fit
+    // (measured at 320 to 414 px on both screens: docs/qa/screens-2026-11-23.md). The width
+    // classes pinned here until then are gone.
+    expect(src).toContain(
+      'className="flex flex-wrap items-center gap-1" data-line="checklist-row"',
     );
-    expect(row).not.toMatch(/(?<![\]:])\bmin-w-0\b/);
-    expect(row).not.toMatch(/(?<![\]:])\bflex-wrap\b/);
+    expect(src).toContain("min-w-[9.5rem] flex-1");
+    expect(src).toContain(
+      'className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-0.5"',
+    );
+    expect(src).toContain("/<wbr />");
+    expect(src).not.toContain("max-[389px]:");
+    expect(src).not.toContain("[overflow-wrap:anywhere]");
   });
 
   it("a label with a slash keeps its words and may break after the slash; others are untouched", () => {
@@ -839,7 +842,8 @@ describe("30. wording, and the checklist on a narrow phone", () => {
     const labels = [...html.matchAll(/data-line="checklist-label"[^>]*>(.*?)<\/span>/g)].map(
       (m) => m[1]!,
     );
-    expect(labels).toEqual(['Gutters/<wbr class="sm:hidden"/>downspouts', "Seams"]);
+    // Nov 23: the break is offered on every screen (it was hidden from 640 px up).
+    expect(labels).toEqual(["Gutters/<wbr/>downspouts", "Seams"]);
     expect(html.match(/data-line="checklist-row"/g)).toHaveLength(2);
   });
 });

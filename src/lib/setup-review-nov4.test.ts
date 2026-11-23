@@ -123,7 +123,8 @@ describe("1. unsaved edits survive a tab switch; leaving asks", () => {
       "const marked = useMemo(() => new Set(dirtyKeys.map(tabOfFormKey)), [dirtyKeys]);",
     );
     // Since Nov 16 the shared strip asks for each tab's dot (Documents, its own page, has none).
-    expect(page).toContain('dot={(t) => (t === "documents" ? null : dot(t))}');
+    // Nov 23: nor has QR pages, the other tab with a page of its own.
+    expect(page).toContain('dot={(t) => (t === "documents" || t === "qr" ? null : dot(t))}');
     expect(read("src/components/setup-tabs.tsx")).toContain("{props.dot?.(tab)}");
     expect(page).toContain('aria-label="unsaved changes"');
   });

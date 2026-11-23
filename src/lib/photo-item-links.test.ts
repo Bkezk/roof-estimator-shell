@@ -379,7 +379,9 @@ describe("the screens: 'also on Seams', Detach removes one link, the picker offe
       "const note = alsoOnText(otherItemLabels(p, itemKey, items ?? []));",
     );
     expect(itemPhotos.match(/data-also-on=\{p\.id\}/g)).toHaveLength(2);
-    expect(itemPhotos).toContain("a\n            picture already on another item can go here too.");
+    // Nov 23: the picker's words were rewritten with its new name ("This inspection's other
+    // pictures"); a row is called a part there.
+    expect(itemPhotos).toContain("A picture already on another part can go here too.");
     // Dark mode on the new text.
     expect(itemPhotos).toContain(
       'className="w-full truncate text-center text-[11px] text-muted-foreground dark:text-muted-foreground"',

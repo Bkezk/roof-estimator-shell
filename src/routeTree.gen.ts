@@ -52,6 +52,7 @@ import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as CustomersRequestsRouteImport } from './routes/customers_.requests'
 import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as ITokenRouteImport } from './routes/i.$token'
+import { Route as OpportunitiesRequestsRouteImport } from './routes/opportunities_.requests'
 import { Route as PropertiesIdRouteImport } from './routes/properties_.$id'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
@@ -279,6 +280,11 @@ const ITokenRoute = ITokenRouteImport.update({
   path: '/i/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OpportunitiesRequestsRoute = OpportunitiesRequestsRouteImport.update({
+  id: '/opportunities_/requests',
+  path: '/opportunities/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PropertiesIdRoute = PropertiesIdRouteImport.update({
   id: '/properties_/$id',
   path: '/properties/$id',
@@ -379,6 +385,7 @@ export interface FileRoutesByFullPath {
   '/customers/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
+  '/opportunities/requests': typeof OpportunitiesRequestsRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -435,6 +442,7 @@ export interface FileRoutesByTo {
   '/customers/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
+  '/opportunities/requests': typeof OpportunitiesRequestsRoute
   '/properties/$id': typeof PropertiesIdRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -492,6 +500,7 @@ export interface FileRoutesById {
   '/customers_/requests': typeof CustomersRequestsRoute
   '/d/$token': typeof DTokenRoute
   '/i/$token': typeof ITokenRoute
+  '/opportunities_/requests': typeof OpportunitiesRequestsRoute
   '/properties_/$id': typeof PropertiesIdRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
@@ -550,6 +559,7 @@ export interface FileRouteTypes {
     | '/customers/requests'
     | '/d/$token'
     | '/i/$token'
+    | '/opportunities/requests'
     | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
@@ -606,6 +616,7 @@ export interface FileRouteTypes {
     | '/customers/requests'
     | '/d/$token'
     | '/i/$token'
+    | '/opportunities/requests'
     | '/properties/$id'
     | '/prospect/leads'
     | '/service/board'
@@ -662,6 +673,7 @@ export interface FileRouteTypes {
     | '/customers_/requests'
     | '/d/$token'
     | '/i/$token'
+    | '/opportunities_/requests'
     | '/properties_/$id'
     | '/prospect_/leads'
     | '/service/board'
@@ -719,6 +731,7 @@ export interface RootRouteChildren {
   CustomersRequestsRoute: typeof CustomersRequestsRoute
   DTokenRoute: typeof DTokenRoute
   ITokenRoute: typeof ITokenRoute
+  OpportunitiesRequestsRoute: typeof OpportunitiesRequestsRoute
   PropertiesIdRoute: typeof PropertiesIdRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   SetupQrRoute: typeof SetupQrRoute
@@ -1032,6 +1045,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ITokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/opportunities_/requests': {
+      id: '/opportunities_/requests'
+      path: '/opportunities/requests'
+      fullPath: '/opportunities/requests'
+      preLoaderRoute: typeof OpportunitiesRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/properties_/$id': {
       id: '/properties_/$id'
       path: '/properties/$id'
@@ -1171,6 +1191,7 @@ const rootRouteChildren: RootRouteChildren = {
   CustomersRequestsRoute: CustomersRequestsRoute,
   DTokenRoute: DTokenRoute,
   ITokenRoute: ITokenRoute,
+  OpportunitiesRequestsRoute: OpportunitiesRequestsRoute,
   PropertiesIdRoute: PropertiesIdRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   SetupQrRoute: SetupQrRoute,

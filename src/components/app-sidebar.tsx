@@ -12,7 +12,6 @@ import {
   Crown,
   FileSpreadsheet,
   FileText,
-  Inbox,
   Layers,
   ListTodo,
   LogOut,
@@ -20,7 +19,6 @@ import {
   PaintRoller,
   PanelLeftClose,
   PanelLeftOpen,
-  QrCode,
   Radar,
   Ruler,
   Settings,
@@ -44,7 +42,6 @@ import {
   type AccessLike,
   type Page,
 } from "@/lib/access";
-import { PUBLIC_REQUESTS_PATH, PUBLIC_SETUP_PATH } from "@/lib/public-requests";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   isSettingsPath,
@@ -119,15 +116,10 @@ const customerItems: ServiceItem[] = [
     page: "service",
     techOnly: true,
   },
-  {
-    title: "Customers",
-    url: "/customers",
-    icon: Contact,
-    page: "customers",
-    except: [PUBLIC_REQUESTS_PATH],
-  },
-  // Nov 21: what visitors sent through the two QR pages, held for the office to match.
-  { title: "Public requests", url: PUBLIC_REQUESTS_PATH, icon: Inbox, page: "customers" },
+  // Nov 23: "Public requests" (what visitors sent through the two QR pages) was a row of its own
+  // here. It lives with Opportunities now: a button at the top of that page, and the
+  // Opportunities row is lit on its address.
+  { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   // Owner, Oct 9: the menu opens on the Tech Board; the Tickets tab is a click away. The item
   // stays lit on every /service page but My tickets.
   // Not for a technician-only user (owner, Oct 15: My tickets and Inventory are their menu).
@@ -160,17 +152,9 @@ const customerItems: ServiceItem[] = [
     page: null,
     visible: hasDocumentsAccess,
     urlFor: (p) => setupHomeFor({ money: managesTickets(p) }),
+    // Nov 23: QR pages (the codes for the printed sheets and the public pages' settings) was a
+    // row of its own. It is Setup's sixth tab, at /setup/qr, so this row is lit on it.
     alsoLit: [SETUP_DOCUMENTS_PATH],
-    except: [PUBLIC_SETUP_PATH],
-  },
-  // Nov 21: the QR codes for the printed sheets and the settings behind the public pages.
-  // A manager's, like the rest of Setup (the gate says the same: /setup is "manager").
-  {
-    title: "QR pages",
-    url: PUBLIC_SETUP_PATH,
-    icon: QrCode,
-    page: null,
-    visible: managesTickets,
   },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];

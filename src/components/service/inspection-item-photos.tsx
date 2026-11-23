@@ -12,7 +12,8 @@
  *     the item) with Delete (as everywhere) and a small Detach that removes THIS item's link only —
  *     the photo stays on its other items and on the ticket. A picture on other items too says
  *     "also on Seams" under it.
- *   - `FromTicketPhotosButton`: opens `TicketPhotoPicker`, a small dialog listing the ticket's
+ *   - `FromTicketPhotosButton` ("From this inspection's other pictures (3)"; not drawn when
+ *     there are none, Nov 23): opens `TicketPhotoPicker`, a small dialog listing the ticket's
  *     pictures not on this item yet (inspection.ts attachableTicketPhotos: role "other", no
  *     repair, not on this item — the ones on another item too, marked "also on …") as thumbnails
  *     with their marks drawn, multi-select, Attach.
@@ -28,6 +29,8 @@ import { parsePhotoMarkup } from "@/lib/photo-annotations";
 import {
   alsoOnText,
   attachableTicketPhotos,
+  OTHER_PICTURES_TITLE,
+  otherPicturesWords,
   otherItemLabels,
   photosOnItem,
 } from "@/lib/inspection";
@@ -143,19 +146,23 @@ export function TicketPhotoPicker({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>From ticket photos</DialogTitle>
+          <DialogTitle>{OTHER_PICTURES_TITLE}</DialogTitle>
           <DialogDescription>
-            Pictures on this ticket that are not on {itemLabel} yet. Pick the ones that show it — a
-            picture already on another item can go here too.
+            Pictures already on this inspection that are not on {itemLabel} yet. Pick the ones that
+            show it. A picture already on another part can go here too.
           </DialogDescription>
         </DialogHeader>
         {photos.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No pictures to add — every loose photo on this ticket is already on this item or belongs
+            No pictures to add. Every picture on this inspection is already on this part or belongs
             to a repair.
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Ticket photos">
+          <div
+            className="flex flex-wrap gap-2"
+            role="group"
+            aria-label="This inspection's other pictures"
+          >
             {photos.map((p) => {
               const note = alsoOn(p);
               return (
@@ -200,7 +207,13 @@ export function TicketPhotoPicker({
   );
 }
 
-/** The "From ticket photos" button with its picker, for one checklist item. */
+/**
+ * The "From this inspection's other pictures (3)" button with its picker, for one checklist item.
+ * Owner, Nov 23, on an inspection with no pictures at all: "why is there an option to add from
+ * ticket photos when theres not an associated ticket?" It was always drawn, greyed out with
+ * nothing to offer, and its words read as another ticket's pictures. Now it is drawn only when
+ * this inspection has a picture that is not on this row yet, and it says so.
+ */
 export function FromTicketPhotosButton({
   jobId,
   itemKey,
@@ -221,25 +234,30 @@ export function FromTicketPhotosButton({
   const [open, setOpen] = useState(false);
   const setItem = useSetPhotoItem(jobId);
   const pickable = attachableTicketPhotos(photos, itemKey);
+  const words = otherPicturesWords(pickable.length);
+  // Nothing to offer: no button. The picker stays while it is open, so the last attach can end.
+  if (!words && !open) return null;
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        // A thumb (44 px) on a phone; the office's size from 640 px up.
-        className={compact ? "h-[44px] px-3 text-sm sm:h-10" : "h-11 text-base"}
-        disabled={pickable.length === 0}
-        title={
-          pickable.length === 0
-            ? "Every picture on this ticket is already on this item or belongs to a repair"
-            : undefined
-        }
-        aria-label={`${itemLabel}: from ticket photos`}
-        onClick={() => setOpen(true)}
-      >
-        <Images className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
-        From ticket photos{pickable.length ? ` (${pickable.length})` : ""}
-      </Button>
+      {words && (
+        <Button
+          type="button"
+          variant="outline"
+          // A thumb (44 px) at least; the words may take two lines on a narrow phone.
+          className={
+            compact
+              ? "h-auto min-h-[44px] max-w-full whitespace-normal px-3 py-1 text-left text-sm sm:min-h-10"
+              : "h-auto min-h-11 max-w-full whitespace-normal py-1 text-left text-base"
+          }
+          aria-label={`${itemLabel}: ${words.charAt(0).toLowerCase()}${words.slice(1)}`}
+          data-action="other-pictures"
+          data-count={pickable.length}
+          onClick={() => setOpen(true)}
+        >
+          <Images className={compact ? "mr-1 h-4 w-4 shrink-0" : "mr-2 h-5 w-5 shrink-0"} />
+          {words}
+        </Button>
+      )}
       <TicketPhotoPicker
         open={open}
         onOpenChange={setOpen}

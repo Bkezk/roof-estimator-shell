@@ -320,7 +320,16 @@ export interface PlanLinesWhy {
   left?: number | null;
   /** What this invoice bills before the credit. */
   billable?: number | null;
+  /**
+   * No plan covers the day the ticket's work was done (Nov 23): it is dated before the plan's
+   * first day or after its last.
+   */
+  outside?: boolean;
 }
+
+/** Why a plan gives nothing: the work is not inside its year. */
+export const PLAN_WORK_OUTSIDE =
+  "This ticket's work is dated outside the plan's year, before its first day or after its last. A plan pays only toward work done from the day it starts to its last day.";
 
 /** Did the amounts move? A cent is the smallest change there is. */
 export const planLinesMoved = (before: PlanLinesStand, after: PlanLinesStand): boolean =>
@@ -355,11 +364,13 @@ export function planLinesChangeWords(
     const usedFirst = why.left != null && r2(why.left) < b;
     const billsLess = why.billable != null && r2(why.billable) < b;
     out.push(
-      usedFirst
-        ? "Another invoice of this plan used part of the minor repairs amount first."
-        : billsLess
-          ? "This invoice bills less than the plan was covering."
-          : "The plan has less left for this invoice than it had.",
+      why.outside && !(a > 0)
+        ? PLAN_WORK_OUTSIDE
+        : usedFirst
+          ? "Another invoice of this plan used part of the minor repairs amount first."
+          : billsLess
+            ? "This invoice bills less than the plan was covering."
+            : "The plan has less left for this invoice than it had.",
     );
   }
   const tb = r2(before.travel);
@@ -370,7 +381,9 @@ export function planLinesChangeWords(
     );
   else if (ta < tb && !(ta > 0))
     out.push(
-      `The travel on this invoice, ${usd(tb)}, is charged again: the plan's leak calls are used by its other invoices, or the invoice has no travel now.`,
+      why.outside
+        ? `The travel on this invoice, ${usd(tb)}, is charged again.${b > a ? "" : ` ${PLAN_WORK_OUTSIDE}`}`
+        : `The travel on this invoice, ${usd(tb)}, is charged again: the plan's leak calls are used by its other invoices, or the invoice has no travel now.`,
     );
   else if (ta !== tb)
     out.push(
@@ -443,15 +456,26 @@ export interface PlanYear {
   signed_on?: string | null | undefined;
   renews_on?: string | null | undefined;
   ended_on?: string | null | undefined;
+  /** Why it ended. "Renewed": the year was paid for again, and this year runs to its last day. */
+  ended_reason?: string | null | undefined;
 }
+
+/** A plan that ended because it was renewed: its year was not cut short. */
+export const PLAN_ENDED_RENEWED = "Renewed";
 
 /** The first day of the plan's year: the day it started; for an older plan, the day it was signed. */
 export const planFirstDay = (p: PlanYear): string | null => p.starts_on || p.signed_on || null;
 
-/** The last day of the plan's year: the day it ended when that came first, else its last day. */
+/**
+ * The last day of the plan's year: the day it ended when that came first, else its last day.
+ * A plan that ended because it was renewed runs to its year's last day whenever the renewal was
+ * paid (Nov 23): the new year is dated from that day, so the days between an early payment and
+ * the new year are still this year's, never nobody's.
+ */
 export function planLastDay(p: PlanYear): string | null {
   const year = p.renews_on || null;
   if (p.status !== "ended") return year;
+  if (p.ended_reason === PLAN_ENDED_RENEWED) return year;
   const ended = p.ended_on || null;
   if (!ended) return year;
   return year && year < ended ? year : ended;
@@ -466,30 +490,41 @@ export function planHoldsDay(p: PlanYear, day: string): boolean {
 
 /**
  * May this plan give anything to work dated `day`? A plan waiting for its payment never. A plan
- * that has ended: only work dated inside its year. A plan in force: work up to its last day
- * (work dated before it started is covered while the plan is in force, as it always was).
+ * in force or ended: only work dated from the first day of its year to the last (owner, Nov 23:
+ * "credit only applies to work done after plans starts"). Until then a plan in force also
+ * covered work dated before it started. A plan in force with no last day on record (an older
+ * one) covers from its first day on.
  */
 export function planCoversDay(p: PlanYear, day: string): boolean {
   if (p.status === "ended") return planHoldsDay(p, day);
   if (p.status !== "active") return false;
+  const first = planFirstDay(p);
+  if (!first || day < first) return false;
   const last = planLastDay(p);
   return !last || day <= last;
 }
 
 /**
  * The plan a day's work belongs to, of the plans at its property: the one whose year holds the
- * day (the one in force first, should two hold it); failing that, the plan in force when the
- * work is dated before it started. Null when no plan covers the day.
+ * day (the one in force first, should two hold it). Null when no plan covers the day: work
+ * dated before the plan started, after it ended, or in a gap between two plans.
  */
 export function planForWork<T extends PlanYear>(plans: readonly T[], day: string): T | null {
   const inForce = plans.filter((p) => p.status === "active");
   const ended = plans.filter((p) => p.status === "ended");
   return (
-    inForce.find((p) => planHoldsDay(p, day)) ??
-    ended.find((p) => planHoldsDay(p, day)) ??
-    inForce.find((p) => planCoversDay(p, day)) ??
-    null
+    inForce.find((p) => planCoversDay(p, day)) ?? ended.find((p) => planHoldsDay(p, day)) ?? null
   );
+}
+
+/**
+ * The day asked about for a plan's OWN inspection ticket (its return trips, a billed storm
+ * inspection): never before the plan's first day. An inspection done a few days ahead of a year
+ * that was renewed early is still that year's inspection.
+ */
+export function ownInspectionDay(p: PlanYear, day: string): string {
+  const first = planFirstDay(p);
+  return first && day < first ? first : day;
 }
 
 /**

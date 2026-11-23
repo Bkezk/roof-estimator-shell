@@ -269,6 +269,9 @@ describe("the inspection's invoice", () => {
         plan: "care",
         status: "active",
         site_id: SITE,
+        // Nov 23: a plan pays only toward work done from its first day, so the plan here has
+        // the day it was signed, as every real plan does. It had none before.
+        signed_on: "2026-01-05",
         repair_allowance: 300,
         ...over.plan,
       },

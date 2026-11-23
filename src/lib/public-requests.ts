@@ -3,11 +3,25 @@
  * public pages", the words of its notice, the three settings, and the addresses the QR codes
  * hold. Pure: no database, no server. The pages a visitor sees are in public-forms.ts.
  */
+import { SETUP_QR_PATH } from "@/lib/menu-places";
 import { PUBLIC_CARE_PATH, PUBLIC_REQUEST_PATH, type PublicPlanKey } from "@/lib/public-forms";
 
 export const PUBLIC_REQUESTS_TITLE = "Requests from the public pages";
-export const PUBLIC_REQUESTS_PATH = "/customers/requests";
-export const PUBLIC_SETUP_PATH = "/setup/qr";
+/**
+ * Where the list lives (Nov 23; owner: "we need to find somewhere else for the public
+ * requests"): with Opportunities, since a request is a lead. It was a menu row of its own under
+ * Customers; the old address is kept and sends people on.
+ */
+export const PUBLIC_REQUESTS_PATH = "/opportunities/requests";
+/** The list's first address (Nov 21 to Nov 23): notices already sent carry it. */
+export const PUBLIC_REQUESTS_OLD_PATH = "/customers/requests";
+/** The button on the Opportunities page: "Public requests", with the number waiting. */
+export function publicRequestsButtonWords(waiting: number | null | undefined): string {
+  const n = Math.max(0, Math.floor(waiting ?? 0));
+  return n > 0 ? `Public requests (${n})` : "Public requests";
+}
+/** The QR codes and the settings behind the public pages: Setup's "QR pages" tab. */
+export const PUBLIC_SETUP_PATH = SETUP_QR_PATH;
 
 export type PublicRequestStatus = "new" | "matched" | "dismissed";
 export type PublicRequestKind = "care" | "service";

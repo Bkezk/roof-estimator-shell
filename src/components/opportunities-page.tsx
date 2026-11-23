@@ -110,6 +110,7 @@ import {
   oppOverdueDays,
 } from "@/lib/work-counts";
 import { HoldBadge, OverdueBadge } from "@/components/overdue-badge";
+import { PublicRequestsButton } from "@/components/public-requests-page";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -410,11 +411,16 @@ function OppList({
             No response.
           </p>
         </div>
-        {canCreate && (
-          <Button size="lg" className="text-base font-semibold" onClick={newOpp}>
-            <Plus className="mr-2 h-5 w-5" /> New opportunity
-          </Button>
-        )}
+        {/* Nov 23: requests from the two public pages live here (they are leads). The button is
+            drawn only for the people who may handle them. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <PublicRequestsButton />
+          {canCreate && (
+            <Button size="lg" className="text-base font-semibold" onClick={newOpp}>
+              <Plus className="mr-2 h-5 w-5" /> New opportunity
+            </Button>
+          )}
+        </div>
       </div>
 
       <NeedsActionStrip kinds={["opportunity"]} />

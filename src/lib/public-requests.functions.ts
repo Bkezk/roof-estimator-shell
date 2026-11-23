@@ -44,6 +44,23 @@ export interface PublicRequestListed extends PublicRequestRow {
   matches: PublicMatch[];
 }
 
+/**
+ * How many requests wait for the office: the number on the Opportunities page's "Public
+ * requests" button (Nov 23). The same people as the list; nobody else is told a number.
+ */
+export const countWaitingPublicRequests = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ waiting: number }> => {
+    await office(context);
+    const { data, error } = await context.supabase
+      .from("public_requests")
+      .select("id")
+      .eq("status", "new")
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return { waiting: (data ?? []).length };
+  });
+
 /** How many handled requests the list shows under the new ones. */
 export const HANDLED_SHOWN = 40;
 
