@@ -21,9 +21,15 @@ import {
   type PayMethod,
 } from "@/lib/roof-care-plan";
 import { money0, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
+import { ROOF_CARE_TERMS_PAST } from "@/lib/roof-care-terms-history";
 
-/** The terms by the version a plan agreed to. Only versions listed here can be emailed. */
+/**
+ * The terms by the version a plan agreed to. Only versions listed here can be emailed: the set
+ * now in use, and every set that was in use before it (roof-care-terms-history.ts; owner, Nov
+ * 23: "2 go"), so a plan signed under older terms is still sent the words it agreed to.
+ */
 export const TERMS_BY_VERSION: Readonly<Record<string, readonly string[]>> = {
+  ...ROOF_CARE_TERMS_PAST,
   [ROOF_CARE_TERMS_VERSION]: ROOF_CARE_TERMS,
 };
 export const TERMS_NOT_ON_FILE =

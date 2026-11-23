@@ -73,3 +73,9 @@ screens and the database rule. Older tests that pinned the lines that moved carr
 Not tried on the screen: pressing the stage picker with a row open. A refusal there is the
 server function's, which the tests prove; a press that went through would have moved a ticket
 and told real staff.
+
+## Storm inspections stay under the rule
+
+Asked whether a plan's storm inspection should be left out, as it is for the cleaning questions,
+the owner answered on Nov 23: "keep the rule". A storm inspection also ends in a report the
+customer reads, so every row is answered there too.

@@ -1,0 +1,88 @@
+/**
+ * Every set of Roof Care terms a plan could have agreed to before the set now in use (owner,
+ * Nov 23: "2 go"). A plan keeps the version it agreed to (roof_care_plans.terms_version), and
+ * its agreement email prints that set word for word. So when the terms change, the set that
+ * was in use is kept here under its version and is never edited or removed afterwards.
+ *
+ * To change the terms: copy ROOF_CARE_TERMS as it stands into this file under the version it
+ * has, then change ROOF_CARE_TERMS and its version in roof-care-plan.ts. The test
+ * roof-care-terms-history-nov23.test.ts fails until both are done.
+ */
+export const ROOF_CARE_TERMS_PAST: Readonly<Record<string, readonly string[]>> = {
+  "2026-11-18": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is billed in two halves, one after each of the two inspections.",
+    "The plan runs for twelve months from the day it is signed.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+    "Either of us can end the plan in writing. Work already done is billed. Nothing is refunded for a visit already made.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+  "2026-11-19": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+  "2026-11-19.2": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done.",
+    "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+  "2026-11-19.3": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. A missed visit is rescheduled once at no charge.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
+    "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+  "2026-11-19.4": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm. A further storm inspection in the same plan year is billed at the price of one inspection, and what is left of the plan's minor repairs amount is used toward it first.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
+    "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+  "2026-11-20.1": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate, and what is left of the plan's minor repairs amount is used toward it first.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm. A further storm inspection in the same plan year is billed at the price of one inspection, and what is left of the plan's minor repairs amount is used toward it first.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
+    "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
+    "The plan is not a warranty and does not cover replacing the roof.",
+  ],
+};

@@ -823,6 +823,11 @@ for paying the year first (version 2026-11-19), and he agreed them the same day.
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.
 
+Every set of terms that was ever in use is kept on file under its version
+(`src/lib/roof-care-terms-history.ts`; the owner, Nov 23: "2 go"), so a plan signed under older
+terms is still emailed the words it agreed to. To change the terms, file the set in use there
+first, then give the new set a new version.
+
 The set now in use is version 2026-11-23.1 (Nov 23, at the owner's "make sure number 6 is included
 in the terms"): term 3 adds that what the plan includes applies to work done in its twelve months,
 and that work done before the plan starts is not covered. Version 2026-11-20.1 (Nov 20) had term 7
