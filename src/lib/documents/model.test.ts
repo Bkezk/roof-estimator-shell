@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CARE_PLAN_REPORT_TEMPLATE,
   defaultTemplates,
   INSPECTION_REPORT_TEMPLATE,
   missingDefaultTemplates,
@@ -358,14 +359,21 @@ describe("the Inspection report template (phase 2)", () => {
     const added = missingDefaultTemplates(existing);
     // Nov 16, Trade Bids: the Trade proposal reaches the install the same way. This read
     // [INSPECTION_REPORT_TEMPLATE] alone.
-    expect(added.map((t) => t.name)).toEqual([TRADE_PROPOSAL_TEMPLATE, INSPECTION_REPORT_TEMPLATE]);
-    expect(added.map((t) => t.isDefault)).toEqual([false, false]);
+    // Nov 23, the Care plan report: a third reaches it the same way, after the Inspection
+    // report. This read [TRADE_PROPOSAL_TEMPLATE, INSPECTION_REPORT_TEMPLATE].
+    expect(added.map((t) => t.name)).toEqual([
+      TRADE_PROPOSAL_TEMPLATE,
+      INSPECTION_REPORT_TEMPLATE,
+      CARE_PLAN_REPORT_TEMPLATE,
+    ]);
+    expect(added.map((t) => t.isDefault)).toEqual([false, false, false]);
     // Removed by the office: stays removed.
     expect(
       missingDefaultTemplates([
         ...existing,
         { kind: "ticket", name: "inspection report", deleted_at: "2026-10-27T00:00:00Z" },
         { kind: "bid", name: "trade proposal", deleted_at: "2026-11-17T00:00:00Z" },
+        { kind: "ticket", name: "care plan report", deleted_at: "2026-11-24T00:00:00Z" },
       ]),
     ).toEqual([]);
     // A fresh install: everything, the first of each kind the default.
@@ -375,6 +383,8 @@ describe("the Inspection report template (phase 2)", () => {
       ["bid", false],
       ["bid", false],
       ["ticket", true],
+      ["ticket", false],
+      // Nov 23: the Care plan report, never the default.
       ["ticket", false],
     ]);
     // Nothing missing: nothing inserted.

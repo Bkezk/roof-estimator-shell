@@ -81,7 +81,10 @@ describe("when a row's pictures show", () => {
 describe("every checklist row has a Pictures button", () => {
   const html = render();
   it("one per row, with the row's count", () => {
-    expect(html.match(/data-action="row-pictures"/g)).toHaveLength(ITEMS.length);
+    // Nov 23, later: an issue row that is open shows its camera under its note already, so the
+    // button is left off there (it did nothing when pressed). Every other row has it.
+    const openIssues = ITEMS.filter((i) => i.status === "issue").length;
+    expect(html.match(/data-action="row-pictures"/g)).toHaveLength(ITEMS.length - openIssues);
     expect(rowOf(html, "Seams")).toContain('data-count="2"');
     expect(rowOf(html, "Seams")).toContain('aria-label="Seams: pictures (2)"');
     expect(rowOf(html, "Drains/scuppers")).toContain('data-count="0"');

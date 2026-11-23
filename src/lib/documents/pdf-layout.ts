@@ -37,6 +37,7 @@ import {
   type InspectionSnapshot,
   inspectionRows,
   pricingRows,
+  repairItemFullTitle,
   repairItemTitle,
 } from "./variables";
 
@@ -1039,7 +1040,7 @@ export function layoutPhotoGrid(
  * in the schema for old documents and ignored).
  */
 export function repairListData(
-  m: Pick<RepairListModule, "rows" | "allItems">,
+  m: Pick<RepairListModule, "rows" | "allItems" | "listOnly">,
   insp: InspectionSnapshot | null | undefined,
   photos = true,
 ): { columns: Array<{ title: string; align: TextAlign }>; rows: string[][]; photoIds: string[][] } {
@@ -1051,7 +1052,9 @@ export function repairListData(
     align: "left" as TextAlign,
   }));
   // Hand-edited rows keep their place: the i-th row prints the i-th item's pictures.
-  const photoIds = rows.map((_, i) => (photos ? (built.photoIds[i] ?? []) : []));
+  // A list marked `listOnly` (the Care plan report's closing list, Nov 23) prints no pictures.
+  const show = photos && !m.listOnly;
+  const photoIds = rows.map((_, i) => (show ? (built.photoIds[i] ?? []) : []));
   return { columns, rows, photoIds };
 }
 
@@ -1161,7 +1164,7 @@ export const repairItemKey = (moduleId: string, photo: number) => `${moduleId}:p
  * prints nothing.
  */
 export function repairItemData(
-  m: Pick<RepairItemModule, "itemId" | "label" | "note">,
+  m: Pick<RepairItemModule, "itemId" | "label" | "note" | "showStatus">,
   insp: InspectionSnapshot | null | undefined,
 ): {
   /** The name as printed, with " · OK" / " · N/A" when the item is not an issue. */
@@ -1176,7 +1179,9 @@ export function repairItemData(
   if (!item) return null;
   const label = m.label ?? item.label;
   return {
-    title: repairItemTitle(label, item.status),
+    title: m.showStatus
+      ? repairItemFullTitle(label, item.status)
+      : repairItemTitle(label, item.status),
     label,
     note: m.note ?? item.note,
     status: item.status,

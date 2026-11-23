@@ -154,7 +154,9 @@ describe("a year paid by card is refunded less the card fee", () => {
     // roof-care-no-access-storm-nov19.test.ts.)
     // (Nov 20: version 2026-11-20.1. Term 7 adds that what is left of the minor repairs amount
     // goes toward a charged return trip first.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
+    // (Nov 23: version 2026-11-23.1. Term 3 adds that what the plan includes applies to work
+    // done in its twelve months, and that work done before the plan starts is not covered.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-23.1");
     expect(ROOF_CARE_TERMS[8]).toContain(
       "A year paid by card is refunded less the card processing fee on the amount refunded.",
     );

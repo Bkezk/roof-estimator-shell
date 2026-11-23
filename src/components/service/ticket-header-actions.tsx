@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CarePlanReportButton } from "@/components/documents/care-plan-report-button";
 import { DocumentsList } from "@/components/documents/documents-panel";
 import { InspectionReportButton } from "@/components/documents/inspection-report-button";
 import { NewDocumentDialog } from "@/components/documents/new-document-dialog";
@@ -81,8 +82,8 @@ export function TicketHeaderActions({
 }
 
 /**
- * "Documents · Ticket #N": the Inspection report button (an inspection ticket), the documents,
- * New document. The NewDocumentDialog sits beside this dialog, not inside it (two dialogs do not
+ * "Documents · Ticket #N": the Inspection report and Care plan report buttons (an inspection
+ * ticket; the second since Nov 23), the documents, New document. The NewDocumentDialog sits beside this dialog, not inside it (two dialogs do not
  * nest); creating one closes this dialog as the editor opens.
  */
 export function TicketDocumentsDialog({
@@ -107,13 +108,23 @@ export function TicketDocumentsDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-            {job.service_type === "inspection" && (
-              <InspectionReportButton
-                serviceJobId={job.id}
-                ticketNumber={job.number}
-                size="default"
-              />
-            )}
+            {/* Both one-tap reports of an inspection ticket, side by side; nothing on any other. */}
+            <div className="flex flex-wrap gap-2 empty:hidden" data-line="inspection-reports">
+              {job.service_type === "inspection" && (
+                <InspectionReportButton
+                  serviceJobId={job.id}
+                  ticketNumber={job.number}
+                  size="default"
+                />
+              )}
+              {job.service_type === "inspection" && (
+                <CarePlanReportButton
+                  serviceJobId={job.id}
+                  ticketNumber={job.number}
+                  size="default"
+                />
+              )}
+            </div>
             <DocumentsList serviceJobId={job.id} onNew={() => setNewOpen(true)} />
           </div>
         </DialogContent>

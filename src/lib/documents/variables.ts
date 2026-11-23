@@ -124,6 +124,18 @@ export const VARIABLE_DEFS: VariableDef[] = [
   ]),
   v("inspection.recommend", "Recommendation", "Ticket", "Repairs recommended", ["ticket"]),
   v("inspection.technician", "Inspected By", "Ticket", "Braden Keck", ["ticket"]),
+  // The Care plan report (Nov 23): whole lines that print nothing when they do not apply.
+  v("inspection.grade.line", "Property Grade Line", "Ticket", "Property Grade: B", ["ticket"]),
+  v("careplan.plan", "Roof Care Plan Inspection", "Ticket", "Roof Care plan, inspection 1 of 2", [
+    "ticket",
+  ]),
+  v(
+    "careplan.cleaning",
+    "Roof Care Plan Cleaning",
+    "Ticket",
+    "Drains and scuppers cleaned: Yes · Gutters cleaned: Yes",
+    ["ticket"],
+  ),
   // People.
   v("manager.name", "Manager Name", "Manager", "Brandon Keck"),
   v("manager.email", "Manager Email", "Manager", "brandon@flatroofonline.com"),
@@ -209,6 +221,12 @@ export interface DocumentSource {
   } | null;
   /** The inspection on an inspection ticket (phase 2), null on any other ticket. */
   inspection?: InspectionSnapshot | null;
+  /**
+   * A Roof Care plan's inspection (Nov 23, the Care plan report): whole lines, ready to print,
+   * each blank when it does not apply (documents/care-plan-report.ts carePlanLines). Null on a
+   * ticket that is not a plan's inspection. Never a price, a cost or a credit.
+   */
+  carePlan?: { plan: string; cleaning: string } | null;
   manager: { name: string; email: string; phone: string } | null;
   accountManager: { name: string; email: string; phone: string } | null;
 }
@@ -293,6 +311,14 @@ export function inspectionItems(
 export function repairItemTitle(label: string, status: InspectionItem["status"]): string {
   const st = status ?? "ok";
   return st === "issue" ? label : `${label} · ${INSPECTION_STATUS_TEXT[st]}`;
+}
+
+/**
+ * The heading where every row of the checklist is listed (the Care plan report, Nov 23): the
+ * result after every name, an issue's too, in the same words ("Seams · Issue", "Drains · OK").
+ */
+export function repairItemFullTitle(label: string, status: InspectionItem["status"]): string {
+  return `${label} · ${INSPECTION_STATUS_TEXT[status ?? "ok"]}`;
 }
 
 /** The Repair List's rows: the issues (or every item), each with its note. */
@@ -394,6 +420,12 @@ export function resolveVariables(src: DocumentSource): Record<string, string> {
         ? "Issues noted; no repairs recommended"
         : "No issues found";
     out["inspection.technician"] = i.technician;
+    // A whole line, blank when the inspection has no grade (the Care plan report, Nov 23).
+    out["inspection.grade.line"] = i.grade ? `Property Grade: ${i.grade}` : "";
+  }
+  if (src.kind === "ticket" && src.carePlan) {
+    out["careplan.plan"] = src.carePlan.plan;
+    out["careplan.cleaning"] = src.carePlan.cleaning;
   }
   if (src.manager) {
     out["manager.name"] = src.manager.name;

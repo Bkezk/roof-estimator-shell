@@ -26,6 +26,12 @@ export const TRADE_PROPOSAL_TEMPLATE = "Trade proposal";
 export const INSPECTION_REPORT_TEMPLATE = "Inspection report";
 
 /**
+ * The care plan report's template name (owner, Nov 23: "add a care plan report"): the ticket
+ * page's second one-tap button finds it by this (documents/care-plan-report.ts).
+ */
+export const CARE_PLAN_REPORT_TEMPLATE = "Care plan report";
+
+/**
  * The shipped templates a database has never had — by kind and name, deleted rows counted, so a
  * template the office removed stays removed and one added in a later phase (the Inspection
  * report, Oct 26) reaches an install that already has the others. The first of a kind with no
@@ -319,6 +325,82 @@ export function defaultTemplates(): DefaultTemplate[] {
     newModule("signature"),
   ]);
 
+  // The Care plan report (owner, Nov 23): the same cover with the customer and, on a plan's
+  // inspection, which inspection of the year it was and what was cleaned; then EVERY row of the
+  // checklist in its order, each with its result, note and pictures (the rows found OK too);
+  // then the issues again as a short list with no pictures. No price anywhere.
+  const carePlanCover = newPage([
+    newModule("letterhead"),
+    newModule("hr"),
+    body({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1, textAlign: "center" },
+          content: [{ type: "variable", attrs: { key: "property.name" } }],
+        },
+        {
+          type: "heading",
+          attrs: { level: 2, textAlign: "center" },
+          content: [{ type: "text", text: "Roof Care Plan Report" }],
+        },
+        // Blank on a ticket that is not a plan's inspection.
+        richLine([{ variable: "careplan.plan" }], { align: "center" }),
+        richLine([{ variable: "careplan.cleaning" }], { align: "center" }),
+      ],
+    }),
+    { ...newModule("fullPhoto"), heightIn: 2.2 } as DocPage["modules"][number],
+    newModule("hr"),
+    body({
+      type: "doc",
+      content: [
+        richLine(["Customer: ", { variable: "company.name" }]),
+        richLine(["Property Inspected: ", { variable: "inspection.date" }]),
+        richLine(["Inspected By: ", { variable: "inspection.technician" }]),
+        richLine(["Summary: ", { variable: "inspection.summary" }]),
+        // A whole line, blank when the inspection has no grade.
+        richLine([{ variable: "inspection.grade.line" }]),
+        { type: "paragraph" },
+        richLine([{ variable: "property.address1" }]),
+        richLine([{ variable: "property.address2" }]),
+      ],
+    }),
+  ]);
+  const carePlanChecklist = newPage([
+    body({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Checklist" }],
+        },
+      ],
+    }),
+    // Every row: split into one Checklist item each when the report is made.
+    {
+      ...newModule("repairList"),
+      allItems: true,
+      showStatus: true,
+    } as DocPage["modules"][number],
+    body({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Items needing attention" }],
+        },
+      ],
+    }),
+    // The issues again, as a table with no pictures: it is never split.
+    { ...newModule("repairList"), listOnly: true } as DocPage["modules"][number],
+    body(
+      paras([richLine(["Recommendation: ", { variable: "inspection.recommend" }], { bold: true })]),
+    ),
+  ]);
+
   return [
     {
       kind: "bid",
@@ -357,6 +439,14 @@ export function defaultTemplates(): DefaultTemplate[] {
         "Cover page with the property photo, the inspection date and grade, then the findings with their pictures, a photo page and the recommendation.",
       options: { ...DEFAULT_OPTIONS, prices: "none" },
       pages: [inspectionCover, inspectionFindings, inspectionPhotos],
+    },
+    {
+      kind: "ticket",
+      name: CARE_PLAN_REPORT_TEMPLATE,
+      description:
+        "Cover page with the property photo, the customer and the inspection, then every row of the checklist with its result, note and pictures, then the items needing attention.",
+      options: { ...DEFAULT_OPTIONS, prices: "none" },
+      pages: [carePlanCover, carePlanChecklist],
     },
   ];
 }

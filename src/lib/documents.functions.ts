@@ -27,10 +27,12 @@ import { DOCUMENTS_NEEDS, hasDocumentsAccess } from "@/lib/access";
 import { easternYmd } from "@/lib/field-day";
 import { parseInspection, withItemKeys } from "@/lib/inspection";
 import { SHARE_TOKEN_BYTES } from "@/lib/invoice-share";
+import { readVisitCleaning } from "@/lib/roof-care-cleaning.functions";
 import { parsePhotoMarkup, type PhotoMark, type Rotation } from "@/lib/photo-annotations";
 import { tradeBidNotReady, tradeBidProblems } from "@/lib/trade-bid";
 import { toBase64 } from "@/lib/webpush";
 
+import { carePlanLines } from "./documents/care-plan-report";
 import { missingDefaultTemplates } from "./documents/defaults";
 import {
   DOC_KINDS,
@@ -633,6 +635,7 @@ async function loadSource(
   let fallbackCompany: DocumentSource["company"] = null;
   let fallbackManagerName = "";
   let inspection: DocumentSource["inspection"] = null;
+  let carePlan: DocumentSource["carePlan"] = null;
 
   if (input.kind === "bid") {
     const { data: row, error } = await sb
@@ -663,7 +666,7 @@ async function loadSource(
     const { data: row, error } = await sb
       .from("service_jobs")
       .select(
-        "id, number, description, scheduled_date, created_at, service_type, account_id, site_id, created_by, po_number, site_name, site_address, contact_id, inspection, technician_id",
+        "id, number, description, scheduled_date, created_at, service_type, account_id, site_id, created_by, po_number, site_name, site_address, contact_id, inspection, technician_id, roof_care_visit_id",
       )
       .eq("id", input.serviceJobId!)
       .maybeSingle();
@@ -675,6 +678,9 @@ async function loadSource(
       .eq("service_job_id", row.id)
       .order("created_at");
     if (row.service_type === "inspection") inspection = await loadInspection(sb, row);
+    // A Roof Care plan's inspection (Nov 23): which inspection of the year, and the cleaning.
+    if (row.service_type === "inspection" && row.roof_care_visit_id)
+      carePlan = await loadCarePlan(sb, row.roof_care_visit_id);
     ticket = {
       number: String(row.number),
       description: s(row.description),
@@ -795,6 +801,7 @@ async function loadSource(
     bid,
     ticket,
     inspection,
+    carePlan,
     manager:
       personOf(manager.data, officePhone) ??
       (fallbackManagerName ? { name: fallbackManagerName, email: "", phone: officePhone } : null),
@@ -807,6 +814,27 @@ async function loadSource(
     siteId: site.data?.id ?? null,
     siteCoverPath: s(site.data?.cover_photo_path) || null,
   };
+}
+
+/**
+ * What the Care plan report's cover says of a Roof Care plan's inspection (Nov 23): which
+ * inspection of the year, and the cleaning answers, read where they are kept with the caller's
+ * own rights (roof-care-cleaning.functions.ts). Tolerant of a blank like every lookup here: an
+ * inspection that cannot be read leaves the lines out, it never stops the document.
+ */
+async function loadCarePlan(
+  sb: Client,
+  visitId: string,
+): Promise<NonNullable<DocumentSource["carePlan"]> | null> {
+  try {
+    const c = await readVisitCleaning(sb, visitId);
+    return c ? carePlanLines(c) : null;
+  } catch (e) {
+    console.warn(
+      `Documents: the plan inspection ${visitId} was not read (${e instanceof Error ? e.message : String(e)})`,
+    );
+    return null;
+  }
 }
 
 /**

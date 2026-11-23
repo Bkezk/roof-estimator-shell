@@ -1311,11 +1311,16 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // at inspection price and their repair allocation contributes to the price if they have any
 // left": term 7 charges the return trip after the first visit of a plan year we could not do
 // for want of access, and term 8 bills a storm inspection beyond the one the plan includes.
-export const ROOF_CARE_TERMS_VERSION = "2026-11-20.1";
+// Nov 23 (version 2026-11-23.1), at the owner's "make sure number 6 is included in the terms":
+// term 3 says what the plan includes applies to work done in its twelve months, and that work
+// done before the plan starts is not covered (the database's rule since 20261123100000).
+export const ROOF_CARE_TERMS_VERSION = "2026-11-23.1";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
-  "The plan runs for twelve months from the day we receive your payment.",
+  // Nov 23 (owner: "make sure number 6 is included in the terms"): what the plan includes is for
+  // work done inside its twelve months, never for work done before it started.
+  "The plan runs for twelve months from the day we receive your payment. What the plan includes applies to work done in those twelve months. Work done before the plan starts is not covered.",
   "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
   "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",

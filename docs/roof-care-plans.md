@@ -748,6 +748,19 @@ Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
 - **5. Renewing by itself: "30 days is good".** A new price counts only when the customer was
   told it at least 30 days before the renewal day. The rule and its words are under "Not built
   yet, all with Stripe", number 2. Renewing by itself is still not built.
+- **The Care plan report.** The owner, Nov 23: "we should also be able to add pictures to
+  checked marked good items since we can then use that to generate the care plan reports", and
+  then, offered a second report that starts with every row and its pictures: "1. add a care
+  plan report". Built the same day: an inspection ticket's Documents box has a second button,
+  "Care plan report", beside "Inspection report", for the same people. One press makes the
+  report and opens it in the editor, where the office can still change anything. It starts with
+  the property, the customer, the inspection's day, who did it and the grade when there is one,
+  and on a plan's inspection the plan and which inspection of the year it was ("Roof Care plan,
+  inspection 1 of 2") with the cleaning answers. Then every row of the checklist in its order,
+  each with its result, its note and its pictures, the rows found OK included. Then the issues
+  again as a short list. No price, cost or credit anywhere. Nothing is made, sent or attached
+  without the press, and the Inspection report is as it was. Record:
+  `docs/qa/care-plan-report-2026-11-23.md`.
 
 **The owner's other answers of Nov 23, for the record. Nothing was built for these.**
 
@@ -783,8 +796,10 @@ for paying the year first (version 2026-11-19), and he agreed them the same day.
 tick, and the plan keeps the date of the set that was agreed (`roof_care_plans.terms_version`).
 Change a line: change the date too.
 
-The set now in use is version 2026-11-20.1 (Nov 20): term 7 adds that what is left of the plan's
-minor repairs amount goes toward a charged return trip first. Version 2026-11-19.4 (Nov 19,
+The set now in use is version 2026-11-23.1 (Nov 23, at the owner's "make sure number 6 is included
+in the terms"): term 3 adds that what the plan includes applies to work done in its twelve months,
+and that work done before the plan starts is not covered. Version 2026-11-20.1 (Nov 20) had term 7
+add that what is left of the plan's minor repairs amount goes toward a charged return trip first. Version 2026-11-19.4 (Nov 19,
 late) had term 7 charge the return trip after the first visit of a plan year we could not do for
 want of access, and term 8 bill a storm inspection beyond the one the plan includes.
 

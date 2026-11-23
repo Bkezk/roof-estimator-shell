@@ -155,7 +155,9 @@ describe("the sign-up pop-up wears the look, and nothing else about it changed",
     expect(card).toContain("{money0(offerOf(plan)!.price)} per year");
   });
   it("not a word of the terms moved", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
+    // (Nov 23: version 2026-11-23.1. Term 3 adds that what the plan includes applies to work
+    // done in its twelve months, and that work done before the plan starts is not covered.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-23.1");
     expect(ROOF_CARE_TERMS.length).toBe(11);
   });
 });

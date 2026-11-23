@@ -542,7 +542,7 @@ export function inspectionSnapshotFrom(
  * None when the list has nothing to list (the Repair List then stays and prints "No issues found").
  */
 export function repairItemModules(
-  list: Pick<RepairListModule, "allItems" | "photoHeightIn">,
+  list: Pick<RepairListModule, "allItems" | "photoHeightIn" | "showStatus">,
   insp: InspectionSnapshot | null | undefined,
 ): RepairItemModule[] {
   return inspectionItems(insp, list.allItems).map((i) => ({
@@ -552,13 +552,16 @@ export function repairItemModules(
     label: null,
     note: null,
     ...(list.photoHeightIn !== undefined ? { photoHeightIn: list.photoHeightIn } : {}),
+    // The Care plan report (Nov 23): its rows say an issue's result too.
+    ...(list.showStatus ? { showStatus: true } : {}),
   }));
 }
 
 /**
  * Every Repair List in the pages replaced IN PLACE by its item modules (createDocument, for a
  * document made from a template on an inspection ticket with a snapshot; nothing else moves). A
- * list with nothing to list is left as it is.
+ * list with nothing to list is left as it is, and so is one marked `listOnly` (the Care plan
+ * report's closing list of issues, Nov 23, which stays a table).
  */
 export function splitRepairLists(
   pages: readonly DocPage[],
@@ -567,7 +570,7 @@ export function splitRepairLists(
   return pages.map((p) => ({
     ...p,
     modules: p.modules.flatMap((m): DocModule[] => {
-      if (m.type !== "repairList") return [m];
+      if (m.type !== "repairList" || m.listOnly) return [m];
       const items = repairItemModules(m, insp);
       return items.length ? items : [m];
     }),

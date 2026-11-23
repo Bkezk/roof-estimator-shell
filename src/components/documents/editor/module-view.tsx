@@ -746,9 +746,10 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
           value={data.label}
           onChange={(e) => patch((t) => ({ ...t, label: e.target.value }))}
         />
-        {data.status && data.status !== "issue" ? (
+        {m.showStatus || (data.status && data.status !== "issue") ? (
+          // `showStatus` (the Care plan report, Nov 23): every row says its result, an issue's too.
           <span className="shrink-0 pr-1 font-semibold" data-item-status>
-            {` · ${INSPECTION_STATUS_TEXT[data.status]}`}
+            {` · ${INSPECTION_STATUS_TEXT[data.status ?? "ok"]}`}
           </span>
         ) : null}
       </div>

@@ -107,7 +107,10 @@ describe("the Pictures button on every checklist row", () => {
     expect(picturesButtonLabel("Seams", 2)).toBe("Seams: pictures (2)");
     expect(picturesButtonLabel("Seams", 0)).toBe("Seams: add pictures");
   });
-  it("drawn: a good row, an unanswered row and an issue row each carry the labelled button", () => {
+  // Later on Nov 23 (owner: "this is a bit confusing, if issue is selected its already opened
+  // up"): an open issue row shows its camera under its note, so its own Pictures button, which
+  // did nothing when pressed, is left off. A good row and an unanswered row keep theirs.
+  it("drawn: a good row and an unanswered row carry the labelled button, an open issue row does not", () => {
     const items = [
       { id: "a", label: "Seams", status: "ok" as const, note: "" },
       { id: "b", label: "Drains/scuppers", status: null, note: "" },
@@ -125,9 +128,12 @@ describe("the Pictures button on every checklist row", () => {
     const buttons = [
       ...html.matchAll(/<button[^>]*data-action="row-pictures"[^>]*>(.*?)<\/button>/g),
     ];
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(2);
     const words = buttons.map((m) => m[1]!.replace(/<svg.*?<\/svg>/g, "").replace(/<[^>]+>/g, ""));
-    expect(words).toEqual(["Pictures (2)", "Pictures", "Pictures"]);
+    expect(words).toEqual(["Pictures (2)", "Pictures"]);
+    // The issue row still has its camera: the row's own, open under the note.
+    expect(html.split("<li")[3]).toContain("camera here");
+    expect(html.split("<li")[3]).not.toContain('data-action="row-pictures"');
     expect(buttons[0]![0]).toContain('aria-label="Seams: pictures (2)"');
     expect(buttons[1]![0]).toContain('aria-label="Drains/scuppers: add pictures"');
     // The good row stays good, shows its pictures' panel without a press, and has no note box.
@@ -159,7 +165,10 @@ describe("the Pictures button on every checklist row", () => {
     expect(button).toContain("aria-expanded={picsOpen}");
     expect(button).toContain("data-count={pictures}");
     // On every row a person may edit, whatever its answer; a reader sees it where there are some.
-    expect(src).toContain("const picsButton = !!extra && (!readOnly || pictures > 0);");
+    // Later on Nov 23: and only where a press does something (not on an open issue row).
+    expect(src.replace(/\s+/g, " ")).toContain(
+      "const picsButton = !!extra && (!readOnly || pictures > 0) && rowShowsPicturesButton(flagged, closed);",
+    );
   });
   it("the row wraps by itself: the label keeps its room, the buttons go under it to the right", () => {
     const src = flat("src/components/service/inspection-section.tsx");
@@ -199,5 +208,24 @@ describe("the Pictures button on every checklist row", () => {
     expect(rowPicturesOpen({ flagged: false, folded: false, pressed: true, count: 0 })).toBe(true);
     // Ticking good again on a good row clears the tick, as before: the pictures play no part.
     expect(pressStatus("ok", "ok")).toEqual({ status: null, fold: false });
+  });
+});
+
+describe("the Pictures button is only where a press does something (later on Nov 23)", () => {
+  it("off an open issue row, on every other row and on an issue row folded shut", async () => {
+    const { rowShowsPicturesButton } = await import("@/lib/inspection");
+    expect(rowShowsPicturesButton(true, false)).toBe(false);
+    expect(rowShowsPicturesButton(true, true)).toBe(true);
+    expect(rowShowsPicturesButton(false, false)).toBe(true);
+  });
+  it("open, it is filled and says a second press closes it", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/components/service/inspection-section.tsx"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(src).toContain("aria-pressed={picsOpen}");
+    expect(src).toContain('data-open={picsOpen ? "yes" : "no"}');
+    expect(src).toContain('? "Close this part\'s pictures"');
+    expect(src).toContain("bg-primary font-semibold text-primary-foreground");
   });
 });

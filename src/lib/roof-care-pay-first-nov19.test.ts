@@ -116,13 +116,15 @@ describe("the terms the customer agrees to", () => {
     // roof-care-no-access-storm-nov19.test.ts.)
     // (Nov 20: version 2026-11-20.1. Term 7 adds that what is left of the minor repairs amount
     // goes toward a charged return trip first.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
+    // (Nov 23: version 2026-11-23.1. Term 3 adds that what the plan includes applies to work
+    // done in its twelve months, and that work done before the plan starts is not covered.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-23.1");
     expect(ROOF_CARE_TERMS).toHaveLength(11);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
     );
     expect(ROOF_CARE_TERMS[2]).toBe(
-      "The plan runs for twelve months from the day we receive your payment.",
+      "The plan runs for twelve months from the day we receive your payment. What the plan includes applies to work done in those twelve months. Work done before the plan starts is not covered.",
     );
     // The owner: "a share for inspections not done, if we did one half is refunded", and "i like
     // the repairs coming off a refund rule, we may need to note that on the agreement".

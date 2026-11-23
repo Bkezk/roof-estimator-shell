@@ -378,6 +378,15 @@ export interface RepairListModule extends ModuleBase {
   allItems: boolean;
   /** Each row's thumbnails' height in inches (owner, Oct 28); absent or 0 = 1.6 × 1.2 in, three a line. */
   photoHeightIn?: number | undefined;
+  /**
+   * The Care plan report's two settings (Nov 23), both absent on every other list, which then
+   * prints as before. `showStatus`: the Checklist items this list is split into say an issue's
+   * result after its name too ("Seams · Issue"), since they sit among rows found OK. `listOnly`:
+   * the closing list of issues stays a table when a document is made (never split) and prints
+   * no pictures, the rows above it having printed them.
+   */
+  showStatus?: boolean | undefined;
+  listOnly?: boolean | undefined;
 }
 /**
  * ONE checklist item from the document's `__inspection` snapshot (owner, Oct 28: "the checklist
@@ -398,6 +407,8 @@ export interface RepairItemModule extends ModuleBase {
   photoHeightIn?: number | undefined;
   /** The gap under the item in inches; absent = REPAIR_ITEM_SPACE_IN. */
   spaceBelowIn?: number | undefined;
+  /** An issue's heading says " · Issue" too (the Care plan report, Nov 23); absent = as before. */
+  showStatus?: boolean | undefined;
 }
 /** The default gap under a Checklist item, in inches. */
 export const REPAIR_ITEM_SPACE_IN = 0.25;
@@ -565,6 +576,8 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       photos: z.boolean(),
       allItems: z.boolean(),
       photoHeightIn: photoHeightSchema,
+      showStatus: z.boolean().optional(),
+      listOnly: z.boolean().optional(),
     }),
     z.object({
       id: z.string(),
@@ -574,6 +587,7 @@ export const moduleSchema: z.ZodType<DocModule, z.ZodTypeDef, unknown> = z.discr
       note: z.string().nullable(),
       photoHeightIn: photoHeightSchema,
       spaceBelowIn: z.number().min(0).max(REPAIR_ITEM_SPACE_MAX_IN).optional(),
+      showStatus: z.boolean().optional(),
     }),
     z.object({
       id: z.string(),

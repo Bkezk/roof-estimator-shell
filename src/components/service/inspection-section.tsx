@@ -77,6 +77,7 @@ import {
   picturesButtonLabel,
   picturesButtonWords,
   rowPicturesOpen,
+  rowShowsPicturesButton,
   visibleChecklist,
   type InspectionGrade,
   type InspectionItem,
@@ -294,7 +295,12 @@ export function ChecklistRows({
           count: pictures,
         });
         // Somebody who cannot edit sees the button only where there is something to look at.
-        const picsButton = !!extra && (!readOnly || pictures > 0);
+        // An issue row that is open already shows its camera and pictures under the note, so a
+        // Pictures button there did nothing when pressed (owner, Nov 23: "this is a bit
+        // confusing, if issue is selected its already opened up"). It is drawn only where a
+        // press does something: on a row that is not an issue, and on an issue row folded shut.
+        const picsButton =
+          !!extra && (!readOnly || pictures > 0) && rowShowsPicturesButton(flagged, closed);
         const pressPictures = () => {
           // An issue row's pictures are in its own fold: the button opens a folded one.
           if (flagged) {
@@ -419,10 +425,18 @@ export function ChecklistRows({
                     variant="outline"
                     aria-label={picturesButtonLabel(item.label, pictures)}
                     aria-expanded={picsOpen}
-                    title="Pictures for this part: the camera, or pictures already on the phone"
+                    aria-pressed={picsOpen}
+                    title={
+                      picsOpen
+                        ? "Close this part's pictures"
+                        : "Pictures for this part: the camera, or pictures already on the phone"
+                    }
                     data-action="row-pictures"
                     data-count={pictures}
-                    className={`h-[44px] min-w-[44px] gap-1 px-2 text-xs ${pictures > 0 ? "border-primary/50 font-semibold text-primary" : ""}`}
+                    data-open={picsOpen ? "yes" : "no"}
+                    // Open: the button is filled, so it reads as the thing that is open and that
+                    // a second press closes.
+                    className={`h-[44px] min-w-[44px] gap-1 px-2 text-xs ${picsOpen ? "border-transparent bg-primary font-semibold text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : pictures > 0 ? "border-primary/50 font-semibold text-primary" : ""}`}
                     onClick={pressPictures}
                   >
                     <Camera className="h-4 w-4 shrink-0" aria-hidden />

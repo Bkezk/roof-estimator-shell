@@ -53,7 +53,9 @@ const INV = "7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f";
 
 describe("the agreement", () => {
   it("term 7 says the minor repairs go toward the return trip first", () => {
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-20.1");
+    // (Nov 23: version 2026-11-23.1. Term 3 adds that what the plan includes applies to work
+    // done in its twelve months, and that work done before the plan starts is not covered.)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-23.1");
     expect(ROOF_CARE_TERMS[6]).toBe(
       "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate, and what is left of the plan's minor repairs amount is used toward it first.",
     );

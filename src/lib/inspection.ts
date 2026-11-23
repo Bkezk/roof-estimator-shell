@@ -308,6 +308,16 @@ export function rowPicturesOpen(row: {
   return row.pressed ?? row.count > 0;
 }
 
+/**
+ * Does a checklist row draw its Pictures button? Only where a press does something (owner,
+ * Nov 23): an issue row that is open already shows its camera and pictures under its note, so
+ * the button is left off there. A row that is not an issue has it, and so does an issue row
+ * folded shut, where it opens the fold.
+ */
+export function rowShowsPicturesButton(flagged: boolean, folded: boolean): boolean {
+  return !flagged || folded;
+}
+
 /** What the Pictures button says to a screen reader: "Seams: pictures (2)". */
 export function picturesButtonLabel(label: string, count: number): string {
   return count > 0 ? `${label}: pictures (${count})` : `${label}: add pictures`;
