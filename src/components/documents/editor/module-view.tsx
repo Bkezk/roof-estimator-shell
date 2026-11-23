@@ -79,8 +79,10 @@ import {
 import { moneyText, parseMoney, priceLinesTotal } from "@/lib/documents/price-lines";
 import {
   inspectionItems,
+  fullStatusText,
   INSPECTION_STATUS_TEXT,
   pricingRows,
+  repairItemFullTitle,
   repairItemTitle,
   variableLabel,
 } from "@/lib/documents/variables";
@@ -676,7 +678,9 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
             )}
             {choices.map((i) => (
               <option key={i.id} value={i.id}>
-                {repairItemTitle(i.label, i.status)}
+                {m.showStatus
+                  ? repairItemFullTitle(i.label, i.status)
+                  : repairItemTitle(i.label, i.status)}
               </option>
             ))}
           </select>
@@ -747,9 +751,10 @@ function RepairItem({ m, set }: { m: RepairItemModule; set: Setter }) {
           onChange={(e) => patch((t) => ({ ...t, label: e.target.value }))}
         />
         {m.showStatus || (data.status && data.status !== "issue") ? (
-          // `showStatus` (the Care plan report, Nov 23): every row says its result, an issue's too.
+          // `showStatus` (the Care plan report, Nov 23): every row says its result, an issue's too,
+          // and a row nobody answered says "Not checked", as the PDF does.
           <span className="shrink-0 pr-1 font-semibold" data-item-status>
-            {` · ${INSPECTION_STATUS_TEXT[data.status ?? "ok"]}`}
+            {` · ${m.showStatus ? fullStatusText(data.status) : INSPECTION_STATUS_TEXT[data.status ?? "ok"]}`}
           </span>
         ) : null}
       </div>

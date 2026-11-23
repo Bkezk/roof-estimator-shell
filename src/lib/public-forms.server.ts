@@ -70,7 +70,7 @@ export async function dispatchPublicRequestNotices(
   const { data: rows, error } = await admin
     .from("public_requests")
     .select(
-      "id, reference, kind, created_at, status, contact_name, company, city, state, plan, services, shown_price, several_buildings",
+      "id, reference, kind, created_at, status, contact_name, company, city, state, plan, services, shown_price, several_buildings, opportunity_id",
     )
     .eq("status", "new")
     .is("told_at", null)

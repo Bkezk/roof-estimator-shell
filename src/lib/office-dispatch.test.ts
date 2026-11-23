@@ -477,6 +477,10 @@ describe("the office's New ticket / Start a ticket on the Customers and Opportun
     );
     expect(cust).not.toContain("managesTickets(profile)");
     const opp = readFileSync("src/components/opportunities-page.tsx", "utf8");
-    expect(opp).toMatch(/\{opp && !deleted && dispatchesTickets\(profile\) && \(/);
+    // Nov 23: and only once a customer is on the opportunity (a request from a public page has
+    // none until the office says whose it is).
+    expect(opp).toMatch(
+      /\{opp && !deleted && !!opp\.account_id && dispatchesTickets\(profile\) && \(/,
+    );
   });
 });

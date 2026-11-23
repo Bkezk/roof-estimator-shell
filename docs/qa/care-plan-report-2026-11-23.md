@@ -40,7 +40,8 @@ or Email as with any document. Nothing is made, sent or attached without the pre
 5. "Checklist": every row in the checklist's own order. Each is the row's name with its result
    after it in the site's own words ("Seams · OK", "Perimeter flashings · Issue",
    "Drains/scuppers · N/A"), its note, and its pictures as thumbnails, three to a line, so
-   several rows fit a page. A row never answered reads as OK, the rule since Oct 26.
+   several rows fit a page. A row never answered reads "Not checked" (see "Later the same
+   day" below; it read as OK at first).
 6. "Items needing attention": the issues again as a short table, Item and Note, with no
    pictures. "No issues found" when there are none.
 7. "Recommendation:" with the inspection's recommendation.
@@ -55,8 +56,8 @@ kept against that row whatever its result. The report prints each row's pictures
 row. The stored pictures are not touched or made smaller: the PDF carries each file as it was
 uploaded (proven below).
 
-A picture on the ticket that is on no row is not in this report. The office can add a Photo
-Grid in the editor for those.
+A picture on the ticket that is on no row goes on the last page under "Other pictures from
+this visit" (see "Later the same day" below; at first it was left out).
 
 ## How it is built
 
@@ -151,3 +152,93 @@ events, the temporary plan and its inspection, and the "Care plan report" templa
 listing the templates had added to the live site ahead of the publish (so the published code
 adds it itself). History entries of those records were removed by their ids. Ticket and plan
 numbers stand where they stood: the temporary rows took none.
+
+## Later the same day: rows not answered, and the ticket's other pictures
+
+The owner, offered both as open issues of the first build: "go with issue 1, issue 2".
+
+### 1. A row nobody answered prints "Not checked"
+
+On this report only. A technician ticks OK, marks an issue, marks N/A, or leaves a row alone.
+A row left alone reads as OK on every other document (owner, Oct 26: "not every part needs a
+comment or status, just ones with problems"). On a report that lists every row to the
+customer, "OK" would claim a check nobody recorded, so here it reads "Gutters · Not checked".
+
+- In each row's heading, in the PDF and in the editor, by the same words
+  (`fullStatusText()` in `variables.ts`).
+- In the Summary on the cover: "1 issue · 2 OK · 1 N/A · 6 not checked". The count of OK is
+  the rows ticked OK and nothing else (`carePlanSummary()`).
+- The report keeps that Summary when the office presses Refresh data.
+- The Inspection report, an ordinary Checklist item and an ordinary list of every row are as
+  they were: a row left alone reads OK, and the Summary counts it as OK.
+
+What this means on the roof: technicians are not made to answer every row. A row a technician
+looked at and left alone prints "Not checked". On a plan's inspection they tick OK on what
+they checked.
+
+### 2. The ticket's pictures that are on no row
+
+A picture taken on the inspection that sits on no row of the checklist now goes on the last
+page: the heading "Other pictures from this visit", then the pictures three to a line. With no
+such picture there is no heading and no gap. A repair's before and after pictures are not the
+inspection's and are not taken. The pictures are the ticket's own files by reference, as the
+rows' pictures are: nothing is copied or made smaller. The office can still move, resize or
+remove the grid in the editor.
+
+A template the office has given an empty Photo Grid of its own gets the pictures there, under
+whatever the office put above it, and no heading is added.
+
+### How a template that is already in an install is handled
+
+Neither change touches the shipped template. Both are done where the report is made, and they
+tell a Care plan report by what it holds: a list or a row marked `showStatus`, which only this
+report's template carries (`isCarePlanReport()` in `care-plan-report.ts`). So a "Care plan
+report" template that an install was given before today, or that the office renamed or
+edited, gets both. A report made before today shows "Not checked" on its rows the next time
+it is opened or exported; its Summary line changes when Refresh data is pressed; it does not
+gain the pictures, which are put in only when a report is made.
+
+On the live site the template had not been given yet when this was built (no row named "Care
+plan report" in the table).
+
+### Tests
+
+`src/lib/care-plan-report-not-checked-nov23.test.ts`: 19 tests. With the five changed source
+files put back to their committed versions, 17 fail and 2 pass. The 2 that pass are the ones
+that hold every other document still (an ordinary box and list read OK for a row left alone).
+On this code all 19 pass. Two pins in `care-plan-report-nov23.test.ts` moved from "Gutters ·
+OK" to "Gutters · Not checked", each with a dated note. The seven tests that hold the
+Inspection report still were not touched and pass.
+
+### Browser proof
+
+On a temporary inspection ticket, number 999902, under the test customer. Through each row's
+own buttons on a phone-sized screen: two rows ticked OK with pictures, one an issue with a
+note and a picture, one N/A, six left alone. Two more pictures were put on the ticket and on
+no row.
+
+- Care plan report pressed. In the editor: Summary "1 issue · 2 OK · 1 N/A · 6 not checked";
+  the six rows left alone read "· Not checked"; the last page ends with "Other pictures from
+  this visit" and a grid holding the two pictures.
+- Exported PDF, 3 pages, read back as text and pictures: the same Summary, the same six rows,
+  the heading and both pictures on page 3. Each of the two pictures is in the PDF at the size
+  in bytes of the file uploaded: not reduced.
+- Inspection report pressed on the same ticket: Summary "1 issue · 8 OK · 1 N/A", one box
+  named "Perimeter flashings" with its picture, its own Photo Grid empty, no "Not checked"
+  and no "Other pictures" heading anywhere.
+- No notice was sent to anyone: the count of notices was the same before and after.
+
+### Not proven
+
+- A report with many loose pictures, for how the grid breaks across pages.
+- With the document's Photos box unticked, the pictures are hidden like every picture, and the
+  heading "Other pictures from this visit" still prints over nothing. The office can delete
+  the heading in the editor.
+
+### Cleanup
+
+Removed after the proof: the two documents and their saved versions, the stored PDF, the six
+pictures and their six small copies, the temporary ticket with its history entries, and the
+"Care plan report" template row that listing the templates had added to the live site ahead
+of the publish. Counts afterwards as before: 58 tickets, 0 temporary, 45 documents, 7
+templates, 314 notices.

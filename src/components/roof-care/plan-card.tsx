@@ -2285,16 +2285,22 @@ function SignUpDialog({
           ...(sizeCheck === "smaller" && manager && sizeOk ? { size_ok: true } : {}),
         },
       });
-      // Opened from a public request: the request is done, and it points at the plan it became.
-      // The plan is signed either way; a request left open is only a row for the office to close.
+      // Opened from a public request: the request is done, it points at the plan it became,
+      // and its opportunity is set to Won (Nov 23). The plan is signed either way; when that
+      // last step fails the office is told what to do by hand.
       if (prefill) {
         try {
-          await handleFn({
+          const answered = await handleFn({
             data: { id: prefill.request_id, status: "matched", site_id: siteId, plan_id: made.id },
           });
+          if (answered.opportunity_note)
+            toast.warning(
+              `The plan is signed. ${answered.opportunity_note}. Open the opportunity for request ${prefill.reference} and set it to Won.`,
+              { duration: 30_000 },
+            );
         } catch {
           toast.warning(
-            `The plan is signed, but request ${prefill.reference} could not be marked as done. Dismiss it on Opportunities, Public requests, with the reason "signed up".`,
+            `The plan is signed, but request ${prefill.reference} could not be marked as done. Open its opportunity and set it to Won.`,
             { duration: 30_000 },
           );
         }

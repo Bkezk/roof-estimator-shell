@@ -126,10 +126,14 @@ free router: today's limit of Google lookups is reached". Setup › QR pages sho
 
 ## The office's side
 
-**Opportunities › Public requests** (`/opportunities/requests`, Customers access). Moved on Nov 23:
-it was a menu row under Customers at `/customers/requests`, which still opens and sends people
-on. It is now opened by the Public requests button at the top of the Opportunities page, which
-carries the number waiting (`docs/qa/screens-2026-11-23.md`).
+**Changed on Nov 23.** The owner chose that every request becomes an opportunity the moment it
+is sent. The list described below is gone: what it showed is now a strip on the request's own
+opportunity, and its two addresses (`/customers/requests`, `/opportunities/requests`) send
+people on to Opportunities. The steps below are kept as the record of Nov 21. What is true now
+is in `docs/qa/public-requests-opportunities-2026-11-23.md`. The settings are still at
+Setup › QR pages.
+
+As built on Nov 21, a list for people with Customers access:
 
 1. Each waiting request shows who sent it, how to reach them, the address, and what they asked
    for.

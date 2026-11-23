@@ -294,6 +294,13 @@ export const INSPECTION_STATUS_TEXT: Record<"ok" | "issue" | "na", string> = {
   na: "N/A",
 };
 
+/**
+ * What the Care plan report says of a row nobody answered (owner, Nov 23: "go with issue 1").
+ * Everywhere else such a row still reads as OK (owner, Oct 26): on a report that lists every
+ * row to the customer, "OK" would claim something nobody checked.
+ */
+export const INSPECTION_NOT_CHECKED = "Not checked";
+
 export type InspectionItem = InspectionSnapshot["items"][number];
 
 /** The items a Repair List lists: the issues, or every item when `allItems`. None without a snapshot. */
@@ -313,26 +320,35 @@ export function repairItemTitle(label: string, status: InspectionItem["status"])
   return st === "issue" ? label : `${label} · ${INSPECTION_STATUS_TEXT[st]}`;
 }
 
+/** A row's result where every row says its own: a row nobody answered is "Not checked". */
+export const fullStatusText = (status: InspectionItem["status"]): string =>
+  status ? INSPECTION_STATUS_TEXT[status] : INSPECTION_NOT_CHECKED;
+
 /**
  * The heading where every row of the checklist is listed (the Care plan report, Nov 23): the
- * result after every name, an issue's too, in the same words ("Seams · Issue", "Drains · OK").
+ * result after every name, an issue's too, in the same words ("Seams · Issue", "Drains · OK"),
+ * and "Not checked" for a row nobody answered ("Gutters · Not checked").
  */
 export function repairItemFullTitle(label: string, status: InspectionItem["status"]): string {
-  return `${label} · ${INSPECTION_STATUS_TEXT[status ?? "ok"]}`;
+  return `${label} · ${fullStatusText(status)}`;
 }
 
-/** The Repair List's rows: the issues (or every item), each with its note. */
+/**
+ * The Repair List's rows: the issues (or every item), each with its note. `notChecked` (the
+ * Care plan report's lists only): a row nobody answered reads "Not checked", not "OK".
+ */
 export function inspectionRows(
   insp: InspectionSnapshot | null,
   allItems: boolean,
+  notChecked = false,
 ): { columns: string[]; rows: string[][]; photoIds: string[][] } {
   const columns = allItems ? ["Item", "Finding", "Note"] : ["Item", "Note"];
   const items = inspectionItems(insp, allItems);
+  const finding = (st: InspectionItem["status"]) =>
+    notChecked ? fullStatusText(st) : INSPECTION_STATUS_TEXT[st ?? "ok"];
   return {
     columns,
-    rows: items.map((i) =>
-      allItems ? [i.label, INSPECTION_STATUS_TEXT[i.status ?? "ok"], i.note] : [i.label, i.note],
-    ),
+    rows: items.map((i) => (allItems ? [i.label, finding(i.status), i.note] : [i.label, i.note])),
     photoIds: items.map((i) => i.photoIds),
   };
 }

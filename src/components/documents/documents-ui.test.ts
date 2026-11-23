@@ -374,8 +374,10 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
   });
   it("the server fills __inspection for an inspection ticket, on create and on Refresh data", () => {
     const fns = read("src/lib/documents.functions.ts");
-    expect(fns).toContain(
-      'if (row.service_type === "inspection") inspection = await loadInspection(sb, row);',
+    // Nov 23: the read also hands back which pictures are the inspection's own, so the Care
+    // plan report can show the ticket's other pictures (care-plan-report-not-checked-nov23).
+    expect(fns.replace(/\s+/g, " ")).toContain(
+      'if (row.service_type === "inspection") { const read = await loadInspection(sb, row); inspection = read.inspection;',
     );
     expect(fns).toContain("inspectionSnapshotFrom(");
     expect(fns).toContain('.eq("role", "other")');
@@ -390,7 +392,11 @@ describe("phase 2: the Photo Grid, the Repair List and marked-up pictures in the
     expect(fns).toContain("missingDefaultTemplates(all ?? [])");
     // Refresh data goes through the same snapshot.
     const refresh = fns.slice(fns.indexOf("export const refreshDocumentVariables"));
-    expect(refresh).toContain("const variables = snapshot(loaded.source);");
+    // Nov 23: the same snapshot, then the Care plan report's own words over it (a no-op for
+    // every other document: carePlanVariables hands the snapshot back untouched).
+    expect(refresh.replace(/\s+/g, " ")).toContain(
+      "const variables = carePlanVariables( snapshot(loaded.source),",
+    );
   });
 });
 

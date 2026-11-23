@@ -110,7 +110,8 @@ import {
   oppOverdueDays,
 } from "@/lib/work-counts";
 import { HoldBadge, OverdueBadge } from "@/components/overdue-badge";
-import { PublicRequestsButton } from "@/components/public-requests-page";
+import { OpportunityRequestStrip } from "@/components/opportunity-request-strip";
+import { NO_CUSTOMER_YET } from "@/lib/public-requests";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -411,10 +412,9 @@ function OppList({
             No response.
           </p>
         </div>
-        {/* Nov 23: requests from the two public pages live here (they are leads). The button is
-            drawn only for the people who may handle them. */}
+        {/* Nov 23 (owner: "i like option A"): a request from a public page is an opportunity in
+            this list from the moment it is sent, so there is no separate list to open. */}
         <div className="flex flex-wrap items-center gap-2">
-          <PublicRequestsButton />
           {canCreate && (
             <Button size="lg" className="text-base font-semibold" onClick={newOpp}>
               <Plus className="mr-2 h-5 w-5" /> New opportunity
@@ -627,6 +627,16 @@ function OppListRow({
             what="Expected to close"
           />
           <HoldBadge holdUntil={o.hold_until} today={today} />
+          {/* Nov 23: made from a public page and nobody has said whose it is yet. */}
+          {!o.account_id && isOpenOppStatus(status) && (
+            <Badge
+              variant="outline"
+              className="border-amber-500 bg-amber-400 px-1.5 py-0 text-[11px] text-black dark:bg-amber-400 dark:text-black"
+              data-chip="no-customer"
+            >
+              {NO_CUSTOMER_YET}
+            </Badge>
+          )}
           {/* The linked bid's status (owner, Oct 12: the bid drives the opportunity). */}
           {o.bid_id && (
             <Badge variant="outline" className="px-1.5 py-0 text-[11px]" data-chip="bid">
@@ -917,6 +927,16 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     // The timeline too (audit, Nov 4: Save logs an expected-close move as a note, and the
     // Timeline showed it only after a reload).
     void qc.invalidateQueries({ queryKey: ["contact-log", "opportunity", id] });
+  };
+  // Nov 23: the strip on an opportunity made from a public page puts the customer on it by
+  // itself ("This is …", "New customer"). The form under it then shows that customer at once,
+  // and it is not an unsaved change: it is already saved.
+  const adoptCustomer = (c: OppCustomer) => {
+    const next = { ...draft, customer: c };
+    if (!dirty) setSavedKey(draftKey(next, !!opp));
+    setDraft(next);
+    setChangingCustomer(false);
+    if (opp) invalidate(opp.id);
   };
 
   const save = useMutation({
@@ -1334,9 +1354,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               !deleted &&
               // Owner, Oct 1: at every status. A linked bid shows instead, as a small card
               // (owner, Oct 12: its status, total, when submitted, and the one-way rule).
+              // Nov 23: not while no customer is on it (a request from a public page nobody has
+              // answered yet): a bid or a ticket for nobody is started by mistake.
               (opp.bid_id ? (
                 <BidCard opp={opp} />
-              ) : (
+              ) : !opp.account_id ? null : (
                 <Button asChild variant="outline">
                   <Link
                     to="/estimate"
@@ -1349,7 +1371,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               ))}
             {/* Owner, Oct 2: beside Start a bid, at every status, for those who create tickets
                 (the office too since Oct 9: dispatchesTickets). */}
-            {opp && !deleted && dispatchesTickets(profile) && (
+            {opp && !deleted && !!opp.account_id && dispatchesTickets(profile) && (
               <Button asChild variant="outline">
                 <Link
                   to="/service"
@@ -1447,6 +1469,16 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         )}
         {opp && <StageStrip cells={statusCells} label="Status history" />}
       </div>
+
+      {/* Nov 23: what the customer sent from a public page, and who they are. Nothing is drawn
+          for an opportunity that did not come from one. */}
+      {opp && (
+        <OpportunityRequestStrip
+          opp={{ id: opp.id, account_id: opp.account_id, site_id: opp.site_id }}
+          readOnly={readOnly}
+          onMatched={adoptCustomer}
+        />
+      )}
 
       {opp ? (
         // Owner, Oct 1 (as the ticket): on xl and up, the form on the left and a column on the

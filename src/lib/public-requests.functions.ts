@@ -1,12 +1,16 @@
 /**
- * The office's side of the public pages (Roof Care step 4): the list of requests with their
- * possible matches, the answer to each (matched to a customer, or dismissed), the three
- * settings on Setup › QR pages, and what a Roof Care request hands to the normal sign-up.
+ * The office's side of the public pages (Roof Care step 4): the request behind an opportunity
+ * with its possible matches, the answer to it (whose it is), the three settings on Setup › QR
+ * pages, and what a Roof Care request hands to the normal sign-up.
+ *
+ * Nov 23 (owner: "i like option A"): the database makes an opportunity for every request the
+ * moment it is sent, so there is no list of requests here any more. The office answers a
+ * request on its opportunity.
  *
  * Signed-in people only, with Customers access (the database says the same: public_requests'
- * read rule and the two functions). Making the customer, the property and the opportunity is
- * done by the functions that already do it (quickCreateAccount, saveSite, saveOpportunity),
- * called from the page: nothing here writes a second version of them.
+ * read rule and the two functions). Making the customer and the property is done by the
+ * functions that already do it (quickCreateAccount, saveSite), called from the page: nothing
+ * here writes a second version of them.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -39,64 +43,39 @@ async function office(ctx: Ctx) {
 const REQUEST_SELECT =
   "id, reference, kind, created_at, status, contact_name, company, phone, email, address, city, state, zip, building_name, referred_by, plan, sqft, size_range, sqft_source, shown_price, quote, pay_method, terms_version, agreed_by, several_buildings, notes, services, details, handled_at, handled_by_name, dismiss_reason, account_id, site_id, opportunity_id, roof_care_plan_id" as const;
 
-export interface PublicRequestListed extends PublicRequestRow {
-  /** Customers who may be the sender. Worked out for a request not yet handled. */
+export interface OpportunityRequest {
+  request: PublicRequestRow;
+  /** Customers who may be the sender. Worked out only while nobody has said whose it is. */
   matches: PublicMatch[];
 }
 
 /**
- * How many requests wait for the office: the number on the Opportunities page's "Public
- * requests" button (Nov 23). The same people as the list; nobody else is told a number.
+ * The request an opportunity was made from, for the strip on the opportunity. Null when the
+ * opportunity did not come from a public page, and null (never an error) for someone without
+ * Customers access: they may read the opportunity, and its description says where it came
+ * from, but what the customer typed and who they may be is the office's.
  */
-export const countWaitingPublicRequests = createServerFn({ method: "GET" })
+export const getOpportunityRequest = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ waiting: number }> => {
-    await office(context);
-    const { data, error } = await context.supabase
+  .validator((d: unknown) => z.object({ opportunity_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<OpportunityRequest | null> => {
+    const p = await readProfile(context.supabase, context.userId);
+    if (!p || !canAccess(p, "customers")) return null;
+    const sb = context.supabase;
+    const { data: rows, error } = await sb
       .from("public_requests")
-      .select("id")
-      .eq("status", "new")
-      .limit(200);
+      .select(REQUEST_SELECT)
+      .eq("opportunity_id", data.opportunity_id)
+      .order("created_at", { ascending: true })
+      .limit(1);
     if (error) throw new Error(error.message);
-    return { waiting: (data ?? []).length };
+    const r = (rows?.[0] ?? null) as unknown as PublicRequestRow | null;
+    if (!r) return null;
+    if (r.status !== "new") return { request: r, matches: [] };
+    const found = await sb.rpc("public_request_matches", { p_id: r.id });
+    if (found.error) throw new Error(`The possible matches: ${found.error.message}`);
+    return { request: r, matches: readMatches(found.data) };
   });
-
-/** How many handled requests the list shows under the new ones. */
-export const HANDLED_SHOWN = 40;
-
-export const listPublicRequests = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(
-    async ({
-      context,
-    }): Promise<{ waiting: PublicRequestListed[]; handled: PublicRequestRow[] }> => {
-      await office(context);
-      const sb = context.supabase;
-      const [fresh, done] = await Promise.all([
-        sb
-          .from("public_requests")
-          .select(REQUEST_SELECT)
-          .eq("status", "new")
-          .order("created_at", { ascending: false })
-          .limit(200),
-        sb
-          .from("public_requests")
-          .select(REQUEST_SELECT)
-          .neq("status", "new")
-          .order("handled_at", { ascending: false })
-          .limit(HANDLED_SHOWN),
-      ]);
-      if (fresh.error) throw new Error(fresh.error.message);
-      if (done.error) throw new Error(done.error.message);
-      const waiting: PublicRequestListed[] = [];
-      for (const r of (fresh.data ?? []) as unknown as PublicRequestRow[]) {
-        const { data, error } = await sb.rpc("public_request_matches", { p_id: r.id });
-        if (error) throw new Error(`The possible matches: ${error.message}`);
-        waiting.push({ ...r, matches: readMatches(data) });
-      }
-      return { waiting, handled: (done.data ?? []) as unknown as PublicRequestRow[] };
-    },
-  );
 
 const handleInput = z.object({
   id: z.string().uuid(),
@@ -108,11 +87,17 @@ const handleInput = z.object({
   reason: z.string().trim().max(500).nullable().optional(),
 });
 
-/** The office's answer to a request. The database checks who, and what is allowed. */
+/**
+ * The office's answer to a request. The database checks who, and what is allowed, and puts the
+ * customer and the property on the request's opportunity. When the answer names the Roof Care
+ * plan the request became, its opportunity is set to Won here, the way a status set by hand is
+ * (the follow-up closes). A plan that is signed stands even if that last step fails: the
+ * answer then says so in `opportunity_note` and the page tells the office.
+ */
 export const handlePublicRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => handleInput.parse(d))
-  .handler(async ({ data, context }): Promise<PublicRequestRow> => {
+  .handler(async ({ data, context }): Promise<PublicRequestRow & { opportunity_note?: string }> => {
     await office(context);
     const { data: row, error } = await context.supabase.rpc("public_request_handle", {
       p_id: data.id,
@@ -124,7 +109,19 @@ export const handlePublicRequest = createServerFn({ method: "POST" })
       ...(data.reason ? { p_reason: data.reason } : {}),
     });
     if (error) throw new Error(error.message);
-    return row as unknown as PublicRequestRow;
+    const out = row as unknown as PublicRequestRow;
+    if (data.plan_id && out.opportunity_id) {
+      try {
+        const { winOpportunity } = await import("@/lib/opportunities.functions");
+        await winOpportunity(context, out.opportunity_id);
+      } catch (e) {
+        return {
+          ...out,
+          opportunity_note: `Its opportunity could not be set to Won: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    }
+    return out;
   });
 
 /**

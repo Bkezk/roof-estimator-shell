@@ -1,25 +1,29 @@
 /**
- * The office's side of the two public pages (Roof Care step 4): the list "Requests from the
- * public pages", the words of its notice, the three settings, and the addresses the QR codes
- * hold. Pure: no database, no server. The pages a visitor sees are in public-forms.ts.
+ * The office's side of the two public pages (Roof Care step 4): what a request is, the words of
+ * its notice, the three settings, and the addresses the QR codes hold. Pure: no database, no
+ * server. The pages a visitor sees are in public-forms.ts.
+ *
+ * Nov 23 (owner: "i like option A"): a request becomes an opportunity the moment it is sent
+ * (the database's public_request_submit). There is no list of requests any more: the office
+ * says whose a request is on its opportunity, where a strip shows what the customer sent.
  */
 import { SETUP_QR_PATH } from "@/lib/menu-places";
 import { PUBLIC_CARE_PATH, PUBLIC_REQUEST_PATH, type PublicPlanKey } from "@/lib/public-forms";
 
-export const PUBLIC_REQUESTS_TITLE = "Requests from the public pages";
 /**
- * Where the list lives (Nov 23; owner: "we need to find somewhere else for the public
- * requests"): with Opportunities, since a request is a lead. It was a menu row of its own under
- * Customers; the old address is kept and sends people on.
+ * The two addresses the list of requests had (Nov 21 at /customers/requests, Nov 23 at
+ * /opportunities/requests). Notices already sent carry them, so both send people on to
+ * Opportunities, where every request now is.
  */
 export const PUBLIC_REQUESTS_PATH = "/opportunities/requests";
-/** The list's first address (Nov 21 to Nov 23): notices already sent carry it. */
 export const PUBLIC_REQUESTS_OLD_PATH = "/customers/requests";
-/** The button on the Opportunities page: "Public requests", with the number waiting. */
-export function publicRequestsButtonWords(waiting: number | null | undefined): string {
-  const n = Math.max(0, Math.floor(waiting ?? 0));
-  return n > 0 ? `Public requests (${n})` : "Public requests";
-}
+/** The source written on an opportunity made from a public page (public_request_submit). */
+export const QR_LEAD_SOURCE = "QR page";
+/** Where a request is answered: its own opportunity, or the list when it has none. */
+export const requestOpportunityPath = (opportunityId: string | null | undefined): string =>
+  opportunityId ? `/opportunities?id=${opportunityId}` : "/opportunities";
+/** The badge on an opportunity nobody has put a customer on yet. */
+export const NO_CUSTOMER_YET = "No customer yet";
 /** The QR codes and the settings behind the public pages: Setup's "QR pages" tab. */
 export const PUBLIC_SETUP_PATH = SETUP_QR_PATH;
 
@@ -183,7 +187,11 @@ export function publicRequestNotice(
   r: Pick<
     PublicRequestRow,
     "reference" | "kind" | "contact_name" | "company" | "city" | "state" | "plan" | "services"
-  > & { several_buildings?: boolean; shown_price?: number | null },
+  > & {
+    several_buildings?: boolean;
+    shown_price?: number | null;
+    opportunity_id?: string | null;
+  },
 ): { kind: string; title: string; body: string; url: string } {
   const where = [r.city.trim(), r.state.trim()].filter(Boolean).join(", ");
   // A notice read without the price (an older caller) is worded as the plan, as before.
@@ -198,8 +206,8 @@ export function publicRequestNotice(
       r.kind === "care"
         ? `Roof Care request from the public page: ${requestFrom(r)}`
         : `Service request from the public page: ${requestFrom(r)}`,
-    body: `${r.contact_name.trim()}${where ? ` in ${where}` : ""} asked for ${ask}. Reference ${r.reference}. Open Requests from the public pages to match it to a customer.`,
-    url: PUBLIC_REQUESTS_PATH,
+    body: `${r.contact_name.trim()}${where ? ` in ${where}` : ""} asked for ${ask}. Reference ${r.reference}. It is in Opportunities with nobody on it: open it to say whose it is.`,
+    url: requestOpportunityPath(r.opportunity_id),
   };
 }
 
@@ -271,26 +279,6 @@ export function carePrefillWords(p: CareSignUpPrefill, termsInUse: string): stri
 export function carePrefillNote(p: CareSignUpPrefill): string {
   const who = p.referred_by.trim();
   return `From the public Roof Care page, request ${p.reference}.${who ? ` Referred by: ${who}.` : ""}`;
-}
-
-/** What a service request becomes: the opportunity's title and description. */
-export function opportunityFromRequest(r: PublicRequestRow): {
-  title: string;
-  description: string;
-  referred_by: string;
-} {
-  const lines = [
-    `From the public Request service page (${r.reference}).`,
-    `Services asked for: ${r.services.join(", ") || "none ticked"}.`,
-    r.details.trim() ? `What they wrote: ${r.details.trim()}` : "",
-    `Contact: ${[r.contact_name.trim(), r.phone.trim(), r.email.trim()].filter(Boolean).join(", ")}.`,
-    `Building: ${[r.building_name.trim(), requestAddress(r)].filter(Boolean).join(", ")}.`,
-  ].filter(Boolean);
-  return {
-    title: `${requestFrom(r)}: ${r.services[0] ?? "service request"}`.slice(0, 160),
-    description: lines.join("\n"),
-    referred_by: r.referred_by.trim(),
-  };
 }
 
 // ── The three settings (Setup › QR pages) ────────────────────────────────────────────────────
@@ -409,9 +397,51 @@ export function qrSheets(base: string): QrSheet[] {
 export const qrAddressIsBorrowed = (base: string): boolean =>
   /(^|\.)lovable\.app$/i.test(base.replace(/^https?:\/\//, "").replace(/[:/].*$/, ""));
 
-/** The day an opportunity made from a request is due: tomorrow, so someone calls back soon. */
-export function callBackDay(now: Date = new Date()): string {
-  const d = new Date(now);
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// ── The strip on a request's opportunity (Nov 23) ───────────────────────────────────────────
+
+/** What the strip is called, by the kind of request. */
+export function requestStripTitle(r: Pick<PublicRequestRow, "kind" | "shown_price">): string {
+  if (isCustomQuoteAsk(r)) return "Sent from the Roof Care plans page: a custom quote";
+  return r.kind === "care"
+    ? "Sent from the Roof Care plans page"
+    : "Sent from the Request service page";
+}
+
+/**
+ * Where a request stands, for the strip: whose it is has not been said ("who"), a Roof Care
+ * sign-up is ready to open ("sign_up"), a custom quote is to be called with a price ("quote"),
+ * the plan is signed ("signed"), a Roof Care request whose opportunity has a customer but no
+ * property yet ("property"), or nothing more is asked of anyone ("done").
+ */
+export type RequestStep = "who" | "property" | "sign_up" | "quote" | "signed" | "done";
+export function requestStep(
+  r: Pick<PublicRequestRow, "kind" | "shown_price" | "plan" | "roof_care_plan_id">,
+  opp: { account_id: string | null; site_id: string | null },
+): RequestStep {
+  if (r.roof_care_plan_id) return "signed";
+  if (!opp.account_id) return "who";
+  if (r.kind !== "care") return "done";
+  if (isCustomQuoteAsk(r)) return "quote";
+  if (!r.plan) return "done";
+  return opp.site_id ? "sign_up" : "property";
+}
+
+/** What the strip tells the office to do next. */
+export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "kind">): string {
+  switch (step) {
+    case "who":
+      return "Say whose this is. Nothing else on this opportunity is saved until it has a customer.";
+    case "property":
+      return "Pick the property on this opportunity and save it. The sign-up opens from there.";
+    case "sign_up":
+      return "The customer picked a plan and ticked the terms on the page. Open the sign-up: it is filled in with what they picked, and the plan starts when the payment is received.";
+    case "quote":
+      return "No price was shown on the page, so nothing was signed. Call them with a price.";
+    case "signed":
+      return "The plan is signed. This opportunity was set to Won.";
+    case "done":
+      return r.kind === "care"
+        ? "The customer is on this opportunity."
+        : "The customer is on this opportunity. Call them, then start a ticket or a bid from here.";
+  }
 }

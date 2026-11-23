@@ -1040,11 +1040,12 @@ export function layoutPhotoGrid(
  * in the schema for old documents and ignored).
  */
 export function repairListData(
-  m: Pick<RepairListModule, "rows" | "allItems" | "listOnly">,
+  m: Pick<RepairListModule, "rows" | "allItems" | "listOnly" | "showStatus">,
   insp: InspectionSnapshot | null | undefined,
   photos = true,
 ): { columns: Array<{ title: string; align: TextAlign }>; rows: string[][]; photoIds: string[][] } {
-  const built = inspectionRows(insp ?? null, m.allItems);
+  // The Care plan report's list of every row (`showStatus`): unanswered rows read "Not checked".
+  const built = inspectionRows(insp ?? null, m.allItems, !!m.showStatus);
   const rows = m.rows ?? built.rows;
   const n = Math.max(built.columns.length, ...rows.map((r) => r.length));
   const columns = Array.from({ length: n }, (_, i) => ({

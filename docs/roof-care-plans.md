@@ -761,6 +761,13 @@ Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
   again as a short list. No price, cost or credit anywhere. Nothing is made, sent or attached
   without the press, and the Inspection report is as it was. Record:
   `docs/qa/care-plan-report-2026-11-23.md`.
+  Two more the same evening, at the owner's "go with issue 1, issue 2". A row nobody answered
+  prints "Not checked" on this report, and its Summary counts those rows apart ("1 issue · 2 OK
+  · 1 N/A · 6 not checked"). Everywhere else such a row still reads as OK, the Oct 26 rule. And
+  the ticket's pictures that are on no row go on the last page under "Other pictures from this
+  visit"; with none there is no heading. Technicians are not made to answer every row (owner,
+  Oct 26), so a row a technician looked at and left blank prints "Not checked": on a plan's
+  inspection they tick OK on what they checked.
 
 **The owner's other answers of Nov 23, for the record. Nothing was built for these.**
 
@@ -777,8 +784,8 @@ Step 4 was built on Nov 21: see "Step 4, built Nov 21" below. What is left of it
 
 1. ~~The two public pages.~~ Built, Nov 21: `/care` and `/request`.
 2. ~~The printable sheets.~~ Built, Nov 21: Setup › QR pages.
-3. ~~The office's list of sign-ups waiting to be matched.~~ Built, Nov 21: Customers › Public
-   requests.
+3. ~~The office's list of sign-ups waiting to be matched.~~ Built, Nov 21, as a list of its
+   own. Replaced on Nov 23: every request becomes an opportunity at once and is answered there.
 4. ~~Renewal.~~ Done, Nov 19: see "Renewal, built Nov 19" under paying up front.
 5. ~~The terms on the sign-up.~~ Done, Nov 18.
 6. ~~The tick boxes of services.~~ Built, Nov 21, from a list the office edits on Setup › QR
@@ -845,14 +852,21 @@ What is behind them is in `docs/qa/public-forms-2026-11-21.md`. In short:
   custom quote. Nothing is signed, and the office never opens a sign-up from it.
 - **Limits.** A connection: 20 price questions and 5 requests an hour. Everyone together: 400
   price questions and 60 requests a day. Over a limit the page says to wait or call.
-- **The office's list**: Opportunities › Public requests (moved there on Nov 23; the Public
-  requests button at the top of the Opportunities page shows how many wait). Each request shows the customers who may
-  be the sender (same phone, same email, a name alike, or the same street address: broad on
-  purpose), and a person says which, or "New customer", or dismisses it with a reason. A
-  service request becomes an opportunity for the person who matched it, due the next working
-  day. A Roof Care request opens the normal sign-up on the property with what the visitor
-  picked. An unanswered request is on the owner's Needs attention list, and the admins and
-  managers get one notice.
+- **The office's side** (Nov 23, the owner: "i like option A"): every request becomes an
+  opportunity the moment it is sent, in the normal Opportunities list. There is no separate
+  list of requests any more; its two old addresses send people on to Opportunities. The
+  opportunity has the plan or the services in its title, the source "QR page", who referred
+  them, the price the page showed as its value, tomorrow as its date, no customer and nobody
+  assigned, so the "nobody on it" alert covers it. On the opportunity a strip shows what the
+  customer sent and the customers who may be the sender (same phone, same email, a name alike,
+  or the same street address: broad on purpose). A person says which, or "New customer". The
+  site never picks by itself. A request that is not real is answered by deleting its
+  opportunity. A Roof Care request then shows "Open the sign-up", which opens the normal
+  sign-up on the property with what the visitor picked; when the plan is signed the
+  opportunity is set to Won. No payment is taken on the public page: the plan starts when the
+  office receives the payment, as for any plan. An unanswered request is on the owner's Needs
+  attention list, and the admins and managers get one notice that opens the opportunity.
+  Record: `docs/qa/public-requests-opportunities-2026-11-23.md`.
 - **Setup › QR pages** (a tab of Setup since Nov 23): the two printable sheets with the codes (made by the site, no prices),
   the web address inside the codes, the list of services, and the limit on Google drive lookups
   a day (200 to start; over it the free router answers and the drive tool says so).

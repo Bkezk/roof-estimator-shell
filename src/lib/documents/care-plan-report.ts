@@ -19,7 +19,8 @@ import { planName, type VisitKind } from "@/lib/roof-care-plan";
 
 import { CARE_PLAN_REPORT_TEMPLATE } from "./defaults";
 import { INSPECTION_REPORT_OPTIONS } from "./inspection-report";
-import type { DocOptions } from "./model";
+import { type DocModule, type DocOptions, type DocPage, newModule } from "./model";
+import { INSPECTION_NOT_CHECKED, type InspectionSnapshot } from "./variables";
 
 /**
  * What a care plan report is generated with: the Inspection report's own choices (pictures and
@@ -62,4 +63,112 @@ export function carePlanLines(
       .map((k) => `${CLEANING_LABEL[k]}: ${cleaningAnswerWords(c[k], c.note)}`)
       .join(" · "),
   };
+}
+
+// ── Nov 23, later: rows nobody answered, and the ticket's other pictures ─────────────────────
+
+/**
+ * Is this document (or template) a Care plan report? Told by what it holds, not by its name: a
+ * list or a row marked `showStatus`, the mark only this report's template carries. So a
+ * template seeded before today, renamed or edited by the office still counts, and a report
+ * whose rows the office removed no longer does.
+ */
+export function isCarePlanReport(pages: readonly DocPage[] | null | undefined): boolean {
+  return (pages ?? []).some((p) =>
+    p.modules.some((m) => (m.type === "repairList" || m.type === "repairItem") && !!m.showStatus),
+  );
+}
+
+/**
+ * The Care plan report's Summary (owner, Nov 23: "go with issue 1"): the rows nobody answered
+ * are counted apart, never as OK. "1 issue · 3 OK · 1 N/A · 5 not checked".
+ */
+export function carePlanSummary(insp: Pick<InspectionSnapshot, "items">): string {
+  const count = (st: InspectionSnapshot["items"][number]["status"]) =>
+    insp.items.filter((x) => x.status === st).length;
+  const issues = count("issue");
+  const ok = count("ok");
+  const na = count("na");
+  const blank = count(null);
+  return [
+    issues ? `${issues} ${issues === 1 ? "issue" : "issues"}` : null,
+    ok ? `${ok} OK` : null,
+    na ? `${na} N/A` : null,
+    blank ? `${blank} ${INSPECTION_NOT_CHECKED.toLowerCase()}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * The variables a Care plan report stores: everyone's, with the Summary counted this report's
+ * way. Any other document's variables come back untouched (the same object).
+ */
+export function carePlanVariables(
+  vars: Record<string, string>,
+  pages: readonly DocPage[] | null | undefined,
+  insp: InspectionSnapshot | null | undefined,
+): Record<string, string> {
+  if (!insp || !isCarePlanReport(pages)) return vars;
+  return { ...vars, "inspection.summary": carePlanSummary(insp) };
+}
+
+/** The heading over the ticket's pictures that are on no row of the checklist. */
+export const OTHER_PICTURES_HEADING = "Other pictures from this visit";
+
+/**
+ * The ticket's pictures that are on no row the report lists (owner, Nov 23: "go with issue
+ * 2"), in the order they were taken. `ticketPhotoIds` are the inspection's own pictures (not a
+ * repair's before and after).
+ */
+export function loosePhotoIds(
+  insp: Pick<InspectionSnapshot, "items"> | null | undefined,
+  ticketPhotoIds: readonly string[],
+): string[] {
+  const onRow = new Set((insp?.items ?? []).flatMap((i) => i.photoIds));
+  return [...new Set(ticketPhotoIds)].filter((id) => !onRow.has(id));
+}
+
+/**
+ * A new Care plan report with the ticket's other pictures put in: a heading and a Photo Grid,
+ * three to a line, after everything else on the last page. A template that already holds an
+ * empty Photo Grid gets them there instead, under whatever the office put above it. With no
+ * such pictures, or on any other document, the pages come back untouched: no heading, no gap.
+ * The pictures are the ticket's own files, by reference: nothing is copied or made smaller.
+ */
+export function withOtherPictures(
+  pages: readonly DocPage[],
+  photoIds: readonly string[],
+): DocPage[] {
+  if (!photoIds.length || !pages.length || !isCarePlanReport(pages)) return [...pages];
+  const images = photoIds.map((photoId) => ({
+    image: { kind: "ticketPhoto" as const, photoId, marks: true },
+    caption: "",
+  }));
+  let placed = false;
+  const filled = pages.map((p) => ({
+    ...p,
+    modules: p.modules.map((m): DocModule => {
+      if (placed || m.type !== "photoGrid" || m.images.length) return m;
+      placed = true;
+      return { ...m, images };
+    }),
+  }));
+  if (placed) return filled;
+  const heading = {
+    ...newModule("body"),
+    text: {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: OTHER_PICTURES_HEADING }],
+        },
+      ],
+    },
+  } as DocModule;
+  const grid = { ...newModule("photoGrid"), images, columns: 3 } as DocModule;
+  const last = pages.length - 1;
+  return pages.map((p, i) => (i === last ? { ...p, modules: [...p.modules, heading, grid] } : p));
 }

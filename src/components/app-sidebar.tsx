@@ -117,8 +117,8 @@ const customerItems: ServiceItem[] = [
     techOnly: true,
   },
   // Nov 23: "Public requests" (what visitors sent through the two QR pages) was a row of its own
-  // here. It lives with Opportunities now: a button at the top of that page, and the
-  // Opportunities row is lit on its address.
+  // here. Every request is an opportunity from the moment it is sent now, so it is found in
+  // the Opportunities list like any other.
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   // Owner, Oct 9: the menu opens on the Tech Board; the Tickets tab is a click away. The item
   // stays lit on every /service page but My tickets.

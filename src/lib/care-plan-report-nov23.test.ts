@@ -348,11 +348,12 @@ describe("the Care plan report made on a ticket", () => {
       "Drains · OK",
       "Seams · Issue",
       "Skylights · N/A",
-      // Never answered reads as OK (owner, Oct 26).
-      "Gutters · OK",
+      // Never answered: "Not checked" on this report (owner, Nov 23, "go with issue 1"). It
+      // read "Gutters · OK" until then, by the Oct 26 rule every other document still follows.
+      "Gutters · Not checked",
     ]);
     expect(repairItemFullTitle("Seams", "issue")).toBe("Seams · Issue");
-    expect(repairItemFullTitle("Gutters", null)).toBe("Gutters · OK");
+    expect(repairItemFullTitle("Gutters", null)).toBe("Gutters · Not checked");
   });
   it("prints each row's note and pictures, the pictures of rows found OK included", () => {
     const laid = layoutModules(body, ctx());
@@ -364,7 +365,8 @@ describe("the Care plan report made on a ticket", () => {
       "Seams · Issue",
       "Open lap by unit 3",
       "Skylights · N/A",
-      "Gutters · OK",
+      // "Gutters · OK" until the owner's "go with issue 1" (Nov 23).
+      "Gutters · Not checked",
       "Items needing attention",
       "Recommendation: [inspection.recommend]",
     ]);

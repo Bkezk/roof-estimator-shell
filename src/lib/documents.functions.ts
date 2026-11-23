@@ -32,7 +32,12 @@ import { parsePhotoMarkup, type PhotoMark, type Rotation } from "@/lib/photo-ann
 import { tradeBidNotReady, tradeBidProblems } from "@/lib/trade-bid";
 import { toBase64 } from "@/lib/webpush";
 
-import { carePlanLines } from "./documents/care-plan-report";
+import {
+  carePlanLines,
+  carePlanVariables,
+  loosePhotoIds,
+  withOtherPictures,
+} from "./documents/care-plan-report";
 import { missingDefaultTemplates } from "./documents/defaults";
 import {
   DOC_KINDS,
@@ -601,6 +606,8 @@ interface LoadedSource {
   /** The record's property and its cover photo (phase 2), when it has them. */
   siteId: string | null;
   siteCoverPath: string | null;
+  /** An inspection ticket's own pictures (not a repair's), oldest first; none on anything else. */
+  inspectionPhotoIds: string[];
 }
 
 const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -636,6 +643,7 @@ async function loadSource(
   let fallbackManagerName = "";
   let inspection: DocumentSource["inspection"] = null;
   let carePlan: DocumentSource["carePlan"] = null;
+  let inspectionPhotoIds: string[] = [];
 
   if (input.kind === "bid") {
     const { data: row, error } = await sb
@@ -677,7 +685,11 @@ async function loadSource(
       .select("po_number")
       .eq("service_job_id", row.id)
       .order("created_at");
-    if (row.service_type === "inspection") inspection = await loadInspection(sb, row);
+    if (row.service_type === "inspection") {
+      const read = await loadInspection(sb, row);
+      inspection = read.inspection;
+      inspectionPhotoIds = read.photoIds;
+    }
     // A Roof Care plan's inspection (Nov 23): which inspection of the year, and the cleaning.
     if (row.service_type === "inspection" && row.roof_care_visit_id)
       carePlan = await loadCarePlan(sb, row.roof_care_visit_id);
@@ -813,6 +825,7 @@ async function loadSource(
     accountId,
     siteId: site.data?.id ?? null,
     siteCoverPath: s(site.data?.cover_photo_path) || null,
+    inspectionPhotoIds,
   };
 }
 
@@ -846,7 +859,7 @@ async function loadCarePlan(
 async function loadInspection(
   sb: Client,
   row: { id: string; inspection: unknown; technician_id: string | null },
-): Promise<NonNullable<DocumentSource["inspection"]>> {
+): Promise<{ inspection: NonNullable<DocumentSource["inspection"]>; photoIds: string[] }> {
   const [checklist, photos, tech] = await Promise.all([
     sb.from("inspection_checklist_items").select("id, label, sort").order("sort").order("label"),
     sb
@@ -860,12 +873,16 @@ async function loadInspection(
       ? sb.from("profiles").select("full_name, email").eq("id", row.technician_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
-  return inspectionSnapshotFrom(
-    parseInspection(row.inspection),
-    checklist.data ?? [],
-    await withPhotoLinks(sb, photos.data ?? []),
-    displayName(tech.data),
-  );
+  return {
+    inspection: inspectionSnapshotFrom(
+      parseInspection(row.inspection),
+      checklist.data ?? [],
+      await withPhotoLinks(sb, photos.data ?? []),
+      displayName(tech.data),
+    ),
+    // Every picture of the inspection itself, for the Care plan report's "other pictures".
+    photoIds: (photos.data ?? []).map((p) => p.id),
+  };
 }
 
 /** Photo rows with `item_keys` — every checklist item each is on (service_job_photo_items), earliest link first. */
@@ -967,8 +984,15 @@ export const createDocument = createServerFn({ method: "POST" })
     // From a template on an inspection ticket with a snapshot (owner, Oct 28: "default to split
     // items"): every Repair List becomes one Checklist item per flagged item, in its place.
     const inspection = loaded.source.kind === "ticket" ? loaded.source.inspection : null;
-    const pages = templatePages && inspection ? splitRepairLists(generated, inspection) : generated;
-    const variables = snapshot(loaded.source);
+    const split = templatePages && inspection ? splitRepairLists(generated, inspection) : generated;
+    // The Care plan report (Nov 23, "go with issue 1, issue 2"), told by what the template holds
+    // so one seeded before today works too: the ticket's pictures that are on no row go in a
+    // grid on the last page, and the Summary counts the rows nobody answered apart.
+    const pages = withOtherPictures(
+      split,
+      inspection ? loosePhotoIds(inspection, loaded.inspectionPhotoIds) : [],
+    );
+    const variables = carePlanVariables(snapshot(loaded.source), pages, inspection);
     const { data: row, error } = await sb
       .from("documents")
       .insert({
@@ -1306,7 +1330,13 @@ export const refreshDocumentVariables = createServerFn({ method: "POST" })
         serviceJobId: row.service_job_id,
         documentTitle: row.title,
       });
-      const variables = snapshot(loaded.source);
+      // A Care plan report keeps its own Summary through a refresh (rows not answered apart).
+      const kept = pagesSchema.safeParse(row.pages);
+      const variables = carePlanVariables(
+        snapshot(loaded.source),
+        kept.success ? kept.data : null,
+        loaded.source.kind === "ticket" ? loaded.source.inspection : null,
+      );
       const { data: written, error } = await sb
         .from("documents")
         .update({

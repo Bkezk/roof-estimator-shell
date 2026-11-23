@@ -64,7 +64,6 @@ import {
 import { connectionKey, dispatchPublicRequestNotices } from "@/lib/public-forms.server";
 import {
   PUBLIC_REQUESTS_PATH,
-  callBackDay,
   carePrefill,
   cleanQrAddress,
   customQuoteWhy,
@@ -73,8 +72,8 @@ import {
   requestAskLine,
   cleanServices,
   matchWhyWords,
-  opportunityFromRequest,
   publicRequestNotice,
+  requestStep,
   qrAddressIsBorrowed,
   qrSheets,
   readMatches,
@@ -83,8 +82,8 @@ import {
 import {
   PUBLIC_REQUESTS_NEED,
   PUBLIC_SETTINGS_NEED,
+  getOpportunityRequest,
   handlePublicRequest,
-  listPublicRequests,
   publicCarePrefill,
   savePublicFormSettings,
 } from "@/lib/public-requests.functions";
@@ -631,8 +630,10 @@ describe("the office is told about a request, once", () => {
     expect(told[0]![1]).toEqual({
       kind: "public_request",
       title: "Service request from the public page: Smith Widgets",
-      body: "Pat Smith in London, KY asked for Roof inspection, Storm damage. Reference R-4010. Open Requests from the public pages to match it to a customer.",
-      url: PUBLIC_REQUESTS_PATH,
+      // Nov 23 (owner: "i like option A"): every request is an opportunity, and the notice
+      // opens it. This row is an older one with no opportunity, so it opens the list.
+      body: "Pat Smith in London, KY asked for Roof inspection, Storm damage. Reference R-4010. It is in Opportunities with nobody on it: open it to say whose it is.",
+      url: "/opportunities",
     });
     expect(env.tables["public_requests"]![0]!["told_at"]).toBe("2026-11-21T15:01:00.000Z");
     const second = await dispatchPublicRequestNotices(env.db as never);
@@ -978,12 +979,15 @@ describe("the office's list of requests", () => {
       email: "t@x",
     },
   ];
-  it("shows what is waiting with its possible matches, for someone with Customers access only", async () => {
+  // Nov 23 (owner: "i like option A"): there is no list of requests any more. The request is
+  // read from its opportunity, with its possible matches while nobody has said whose it is.
+  it("shows a request on its opportunity with its possible matches, for someone with Customers access only", async () => {
+    const opportunity_id = "7c6a3c1e-1111-4222-8333-444455556666";
     const env = fakeSupabase(
       {
         profiles: people,
         public_requests: [
-          full(),
+          full({ opportunity_id }),
           full({
             id: "0b6a3c1e-1111-4222-8333-444455557777",
             reference: "R-4009",
@@ -1006,12 +1010,12 @@ describe("the office's list of requests", () => {
         },
       },
     );
-    const out = (await run(listPublicRequests, env.db, undefined)) as {
-      waiting: { reference: string; matches: unknown[] }[];
-      handled: { reference: string }[];
+    const out = (await run(getOpportunityRequest, env.db, { opportunity_id })) as {
+      request: { reference: string };
+      matches: unknown[];
     };
-    expect(out.waiting.map((r) => r.reference)).toEqual(["R-4010"]);
-    expect(out.waiting[0]!.matches).toEqual([
+    expect(out.request.reference).toBe("R-4010");
+    expect(out.matches).toEqual([
       {
         account_id: "acc-1",
         account_name: "Smith Widgets LLC",
@@ -1023,10 +1027,15 @@ describe("the office's list of requests", () => {
         email: null,
       },
     ]);
-    expect(out.handled.map((r) => r.reference)).toEqual(["R-4009"]);
-    await expect(run(listPublicRequests, env.db, undefined, "u3")).rejects.toThrow(
-      PUBLIC_REQUESTS_NEED,
-    );
+    // An opportunity that did not come from a public page has no request behind it.
+    expect(
+      await run(getOpportunityRequest, env.db, {
+        opportunity_id: "8c6a3c1e-1111-4222-8333-444455556666",
+      }),
+    ).toBeNull();
+    // Someone without Customers access may read the opportunity, but is told nothing of what
+    // the customer typed or who they may be: nothing, not an error on a page that is theirs.
+    expect(await run(getOpportunityRequest, env.db, { opportunity_id }, "u3")).toBeNull();
     expect(env.writes).toEqual([]);
   });
   it("the answer goes through the database's own function, which checks who and what", async () => {
@@ -1071,9 +1080,11 @@ describe("the office's list of requests", () => {
       expect(SQL).toContain(words);
   });
   it("a match is only offered: the page makes the customer with the functions that already do", () => {
-    const page = read("src/components/public-requests-page.tsx");
+    // Nov 23 (owner: "i like option A"): the list's page is gone. The same two buttons are on
+    // the strip of the request's opportunity, and the opportunity itself is the database's.
+    const page = read("src/components/opportunity-request-strip.tsx");
     expect(page).toContain('import { quickCreateAccount, saveSite } from "@/lib/crm.functions";');
-    expect(page).toContain('import { saveOpportunity } from "@/lib/opportunities.functions";');
+    expect(page).not.toContain("saveOpportunity");
     expect(page).toContain("This is {m.account_name}");
     expect(page).toContain("New customer");
     // Nothing is matched by the site on its own: every path starts at a press.
@@ -1129,27 +1140,16 @@ describe("what a request becomes", () => {
       await run(publicCarePrefill, env.db, { id, site_id: "9b6a3c1e-1111-4222-8333-444455556666" }),
     ).toBeNull();
   });
-  it("a service request becomes an opportunity with the services, their words and who referred them", () => {
-    const o = opportunityFromRequest(
-      full({
-        kind: "service",
-        plan: null,
-        services: ["Roof inspection", "Storm damage"],
-        details: "It drips.",
-      }),
-    );
-    expect(o.title).toBe("Smith Widgets: Roof inspection");
-    expect(o.referred_by).toBe("Tom Tech");
-    expect(o.description).toBe(
-      [
-        "From the public Request service page (R-4010).",
-        "Services asked for: Roof inspection, Storm damage.",
-        "What they wrote: It drips.",
-        "Contact: Pat Smith, 606-555-0142, pat@example.com.",
-        "Building: Main plant, 120 Mill St, London, KY 40741.",
-      ].join("\n"),
-    );
-    expect(callBackDay(new Date(2026, 10, 30, 9))).toBe("2026-12-01");
+  it("the opportunity is made by the database when the request is sent, not by a page", () => {
+    // Nov 23: opportunityFromRequest and callBackDay did this from the list's page after a
+    // match. The database's public_request_submit does it now, in the same step as the request
+    // (public-requests-opportunities-nov23.test.ts pins its words).
+    const lib = read("src/lib/public-requests.ts");
+    expect(lib).not.toContain("export function opportunityFromRequest");
+    expect(lib).not.toContain("export function callBackDay");
+    expect(
+      read("supabase/migrations/20261123200000_public_requests_become_opportunities.sql"),
+    ).toContain("insert into public.crm_opportunities (");
   });
   it("an unanswered request is on the Needs attention list: amber, red after two days", () => {
     const base = {
@@ -1184,18 +1184,26 @@ describe("what a request becomes", () => {
           ask: "Roof inspection",
           kind: "service",
           sent_on: "2026-11-21",
+          opportunity_id: "7c6a3c1e-1111-4222-8333-444455556666",
         },
       ],
     });
     const rows = list.rows.filter((r) => r.kind === "public_request");
     expect(rows.map((r) => [r.key, r.tone, r.age, r.tag, r.href])).toEqual(
       expect.arrayContaining([
-        ["public_request:r1", "amber", 1, "Roof Care request", PUBLIC_REQUESTS_PATH],
-        ["public_request:r2", "red", 4, "Service request", PUBLIC_REQUESTS_PATH],
+        // Nov 23: the row opens the request's own opportunity; an older one, the list.
+        ["public_request:r1", "amber", 1, "Roof Care request", "/opportunities"],
+        [
+          "public_request:r2",
+          "red",
+          4,
+          "Service request",
+          "/opportunities?id=7c6a3c1e-1111-4222-8333-444455556666",
+        ],
       ]),
     );
     expect(rows.find((r) => r.key === "public_request:r1")!.why).toBe(
-      "Sent from the public Roof Care plans page, asking for Roof Care. Nobody has answered it. Open Requests from the public pages, say whose it is, and call them. Reference R-4010.",
+      "Sent from the public Roof Care plans page, asking for Roof Care. Nobody has answered it. Open its opportunity, say whose it is, and call them. Reference R-4010.",
     );
     expect(attentionList(base).rows.some((r) => r.kind === "public_request")).toBe(false);
     expect(flat(read("src/lib/owner-attention.functions.ts"))).toContain(
@@ -1205,11 +1213,13 @@ describe("what a request becomes", () => {
 });
 
 describe("the menu and the gate", () => {
-  it("the list is a Customers page, the QR page a manager's; neither is a public address", () => {
+  it("the old list's address sends people on, the QR page is a manager's; neither is a public address", () => {
     // Nov 23 (owner: "the QR pages are not located under the setup tab and we need to find
-    // somewhere else for the public requests"): neither has a menu row any more. The list is
-    // at /opportunities/requests, opened by a button on Opportunities, and the QR page is a
-    // tab of Setup. Who may open each has not changed (setup-qr-and-requests-nov23.test.ts).
+    // somewhere else for the public requests"): neither has a menu row any more, and the QR
+    // page is a tab of Setup. Later that day (owner: "i like option A") every request became
+    // an opportunity, so the list's address only sends people on to Opportunities, which
+    // every signed-in person may open; what the customer typed is still shown to Customers
+    // access only (getOpportunityRequest, above).
     const side = read("src/components/app-sidebar.tsx");
     expect(side).not.toContain('title: "Public requests"');
     expect(side).not.toContain('title: "QR pages"');
@@ -1222,7 +1232,10 @@ describe("the menu and the gate", () => {
     expect(PUBLIC_REQUESTS_PATH.startsWith(PUBLIC_REQUEST_PATH)).toBe(false);
     const gate = read("src/lib/access.ts");
     expect(gate).toContain('if (pathname.startsWith("/customers")) return "customers";');
-    expect(pageForPath(PUBLIC_REQUESTS_PATH)).toBe("customers");
+    expect(pageForPath(PUBLIC_REQUESTS_PATH)).toBeNull();
+    expect(read("src/routes/opportunities_.requests.tsx")).toContain(
+      'throw redirect({ to: "/opportunities", replace: true });',
+    );
     expect(gate).toContain(
       'if (pathname.startsWith("/setup") || pathname.startsWith("/admin/service-rates"))',
     );
@@ -1332,11 +1345,17 @@ describe("a custom quote sent from the public page is a call to make, not a sign
   it("the sign-up is never opened from it: there is no price and no agreement to carry over", async () => {
     expect(carePrefill(full({ shown_price: null }))).toBeNull();
     expect(carePrefill(full({ plan: null, shown_price: null }))).toBeNull();
-    const page = read("src/components/public-requests-page.tsx").replace(/\s+/g, " ");
+    // Nov 23: on the strip of the request's opportunity. The sign-up button is drawn for the
+    // "sign_up" step alone, which a request with no price never reaches (requestStep).
+    const page = read("src/components/opportunity-request-strip.tsx").replace(/\s+/g, " ");
     expect(page).toContain("Asked for a custom quote.");
-    expect(page).toContain(
-      'if (isCustomQuoteAsk(r)) { toast.success("Matched. Call them with a price: nothing was signed on the page."); void nav({ to: "/properties/$id", params: { id: x.siteId } }); } else if (r.kind === "care") {',
-    );
+    expect(page).toContain('{step === "sign_up" && !readOnly && opp.site_id && (');
+    expect(
+      requestStep(
+        { kind: "care", shown_price: null, plan: "care", roof_care_plan_id: null },
+        { account_id: "a", site_id: "s" },
+      ),
+    ).toBe("quote");
     // The Needs attention read and the notice both carry the price, so both can tell.
     expect(read("src/lib/owner-attention.functions.ts")).toContain(
       "several_buildings, shown_price",

@@ -65,7 +65,7 @@ import {
   SIZE_CONFIRM_LABEL,
   SIZE_UNCHECKED_WORDS,
 } from "@/lib/roof-care-plan";
-import { PUBLIC_REQUESTS_PATH } from "@/lib/public-requests";
+import { requestOpportunityPath } from "@/lib/public-requests";
 import { TYPE_LABELS, type ServiceType } from "@/lib/service.functions";
 import { CARE_PLAN_BILL_LABEL } from "@/lib/ticket-stage";
 import { isFinishedStage } from "@/lib/ticket-stages";
@@ -338,6 +338,8 @@ export interface AttPublicRequest {
   kind: "care" | "service";
   /** The day it came in. */
   sent_on: string | null;
+  /** The opportunity it became (Nov 23), where it is answered. */
+  opportunity_id?: string | null;
 }
 
 export interface AttCareCardBack {
@@ -1073,8 +1075,9 @@ export function attentionList(i: AttentionIn): AttentionList {
     });
   }
 
-  // A request from a public page (Nov 21) that nobody has matched to a customer or dismissed. A
-  // person is waiting to hear back: amber from the first day, red after two.
+  // A request from a public page (Nov 21) that nobody has said whose it is. A person is waiting
+  // to hear back: amber from the first day, red after two. Since Nov 23 it is an opportunity
+  // from the start, and the row opens that opportunity.
   for (const v of i.publicRequests ?? []) {
     const age = v.sent_on && YMD.test(v.sent_on) ? Math.max(0, daysBetween(v.sent_on, today)) : 0;
     rows.push({
@@ -1088,13 +1091,13 @@ export function attentionList(i: AttentionIn): AttentionList {
             ? "Custom quote request"
             : "Roof Care request",
       title: v.from,
-      why: `Sent from the public ${v.kind === "care" ? "Roof Care plans" : "Request service"} page, asking for ${v.ask}. Nobody has answered it. Open Requests from the public pages, say whose it is, and call them. Reference ${v.reference}.`,
+      why: `Sent from the public ${v.kind === "care" ? "Roof Care plans" : "Request service"} page, asking for ${v.ask}. Nobody has answered it. Open its opportunity, say whose it is, and call them. Reference ${v.reference}.`,
       ...office,
       age,
       ageText: days(age),
       tone: age > 2 ? "red" : "amber",
       amount: null,
-      href: PUBLIC_REQUESTS_PATH,
+      href: requestOpportunityPath(v.opportunity_id),
     });
   }
 

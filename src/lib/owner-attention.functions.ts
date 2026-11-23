@@ -304,7 +304,7 @@ export async function publicRequestsWaiting(sb: Sb): Promise<AttPublicRequest[]>
       sb
         .from("public_requests")
         .select(
-          "id, reference, kind, created_at, contact_name, company, plan, services, several_buildings, shown_price",
+          "id, reference, kind, created_at, contact_name, company, plan, services, several_buildings, shown_price, opportunity_id",
         )
         .eq("status", "new")
         .order("id")
@@ -327,6 +327,7 @@ export async function publicRequestsWaiting(sb: Sb): Promise<AttPublicRequest[]>
     }),
     kind: r.kind === "care" ? "care" : "service",
     sent_on: localYmd(new Date(r.created_at), TASK_TZ),
+    opportunity_id: r.opportunity_id,
   }));
 }
 
