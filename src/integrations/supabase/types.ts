@@ -1870,6 +1870,24 @@ export type Database = {
           },
         ]
       }
+      google_route_uses: {
+        Row: {
+          day: string
+          held: number
+          used: number
+        }
+        Insert: {
+          day: string
+          held?: number
+          used?: number
+        }
+        Update: {
+          day?: string
+          held?: number
+          used?: number
+        }
+        Relationships: []
+      }
       high_wind_upcharges: {
         Row: {
           adhered_per_sqft: number
@@ -1921,6 +1939,98 @@ export type Database = {
         }
         Relationships: []
       }
+      inventory_count_lines: {
+        Row: {
+          count_id: string
+          counted: number
+          expected: number
+          id: number
+          movement_id: number | null
+          price_col: string
+          row_label: string
+          screen_id: string
+          unit: string
+        }
+        Insert: {
+          count_id: string
+          counted: number
+          expected: number
+          id?: never
+          movement_id?: number | null
+          price_col: string
+          row_label: string
+          screen_id: string
+          unit: string
+        }
+        Update: {
+          count_id?: string
+          counted?: number
+          expected?: number
+          id?: never
+          movement_id?: number | null
+          price_col?: string
+          row_label?: string
+          screen_id?: string
+          unit?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_count_lines_count_id_fkey"
+            columns: ["count_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_counts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_lines_movement_id_fkey"
+            columns: ["movement_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_movements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_counts: {
+        Row: {
+          counted_on: string
+          created_at: string
+          created_by: string | null
+          created_by_name: string | null
+          id: string
+          location_id: string
+          note: string | null
+          opening: boolean
+        }
+        Insert: {
+          counted_on?: string
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          id?: string
+          location_id: string
+          note?: string | null
+          opening?: boolean
+        }
+        Update: {
+          counted_on?: string
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          id?: string
+          location_id?: string
+          note?: string | null
+          opening?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_counts_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_locations: {
         Row: {
           active: boolean
@@ -1945,10 +2055,46 @@ export type Database = {
         }
         Relationships: []
       }
+      inventory_movement_costs: {
+        Row: {
+          movement_id: number
+          set_at: string
+          set_by: string | null
+          set_by_name: string | null
+          source: string
+          unit_cost: number
+        }
+        Insert: {
+          movement_id: number
+          set_at?: string
+          set_by?: string | null
+          set_by_name?: string | null
+          source?: string
+          unit_cost: number
+        }
+        Update: {
+          movement_id?: number
+          set_at?: string
+          set_by?: string | null
+          set_by_name?: string | null
+          source?: string
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_movement_costs_movement_id_fkey"
+            columns: ["movement_id"]
+            isOneToOne: true
+            referencedRelation: "inventory_movements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_movements: {
         Row: {
           bid_id: string | null
           bid_name: string | null
+          count_id: string | null
           counted_note: string | null
           created_at: string
           created_by: string | null
@@ -1970,6 +2116,7 @@ export type Database = {
         Insert: {
           bid_id?: string | null
           bid_name?: string | null
+          count_id?: string | null
           counted_note?: string | null
           created_at?: string
           created_by?: string | null
@@ -1991,6 +2138,7 @@ export type Database = {
         Update: {
           bid_id?: string | null
           bid_name?: string | null
+          count_id?: string | null
           counted_note?: string | null
           created_at?: string
           created_by?: string | null
@@ -2015,6 +2163,13 @@ export type Database = {
             columns: ["bid_id"]
             isOneToOne: false
             referencedRelation: "bids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_count_id_fkey"
+            columns: ["count_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_counts"
             referencedColumns: ["id"]
           },
           {
@@ -2201,7 +2356,7 @@ export type Database = {
           sent_at?: string | null
           sent_by_name?: string | null
           sent_to?: Json | null
-          service_job_id: string | null
+          service_job_id?: string | null
           share_created_at?: string | null
           share_last_viewed_at?: string | null
           share_token?: string | null
@@ -2274,6 +2429,20 @@ export type Database = {
             columns: ["bill_to_vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_care_allowance_plan_id_fkey"
+            columns: ["care_allowance_plan_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_roof_care_plan_id_fkey"
+            columns: ["roof_care_plan_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
             referencedColumns: ["id"]
           },
           {
@@ -2920,6 +3089,38 @@ export type Database = {
           },
         ]
       }
+      office_reference_notes: {
+        Row: {
+          body: string
+          key: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          body: string
+          key: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          body?: string
+          key?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "office_reference_notes_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       price_import_changes: {
         Row: {
           id: number
@@ -3176,6 +3377,27 @@ export type Database = {
           },
         ]
       }
+      public_form_hits: {
+        Row: {
+          bucket: string
+          key: string
+          kind: string
+          n: number
+        }
+        Insert: {
+          bucket: string
+          key: string
+          kind: string
+          n?: number
+        }
+        Update: {
+          bucket?: string
+          key?: string
+          kind?: string
+          n?: number
+        }
+        Relationships: []
+      }
       public_form_settings: {
         Row: {
           google_daily_cap: number
@@ -3214,6 +3436,57 @@ export type Database = {
           },
         ]
       }
+      public_quotes: {
+        Row: {
+          address: string
+          city: string
+          created_at: string
+          custom_quote: boolean
+          found: boolean
+          from_key: string | null
+          place: string | null
+          plans: Json
+          rough: boolean
+          sqft: number | null
+          sqft_source: string | null
+          state: string
+          token: string
+          zip: string
+        }
+        Insert: {
+          address: string
+          city?: string
+          created_at?: string
+          custom_quote?: boolean
+          found: boolean
+          from_key?: string | null
+          place?: string | null
+          plans?: Json
+          rough?: boolean
+          sqft?: number | null
+          sqft_source?: string | null
+          state?: string
+          token?: string
+          zip?: string
+        }
+        Update: {
+          address?: string
+          city?: string
+          created_at?: string
+          custom_quote?: boolean
+          found?: boolean
+          from_key?: string | null
+          place?: string | null
+          plans?: Json
+          rough?: boolean
+          sqft?: number | null
+          sqft_source?: string | null
+          state?: string
+          token?: string
+          zip?: string
+        }
+        Relationships: []
+      }
       public_requests: {
         Row: {
           account_id: string | null
@@ -3242,8 +3515,8 @@ export type Database = {
           reference: string
           referred_by: string
           roof_care_plan_id: string | null
-          several_buildings: boolean
           services: string[]
+          several_buildings: boolean
           shown_price: number | null
           site_id: string | null
           size_range: string | null
@@ -3282,8 +3555,8 @@ export type Database = {
           reference: string
           referred_by?: string
           roof_care_plan_id?: string | null
-          several_buildings?: boolean
           services?: string[]
+          several_buildings?: boolean
           shown_price?: number | null
           site_id?: string | null
           size_range?: string | null
@@ -3322,8 +3595,8 @@ export type Database = {
           reference?: string
           referred_by?: string
           roof_care_plan_id?: string | null
-          several_buildings?: boolean
           services?: string[]
+          several_buildings?: boolean
           shown_price?: number | null
           site_id?: string | null
           size_range?: string | null
@@ -4042,7 +4315,43 @@ export type Database = {
           travel_price?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_plans_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "crm_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_plans_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_plans_renewed_from_fkey"
+            columns: ["renewed_from"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_plans_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "crm_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_plans_sold_by_fkey"
+            columns: ["sold_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roof_care_settings: {
         Row: {
@@ -4066,7 +4375,15 @@ export type Database = {
           updated_by?: string | null
           updated_by_name?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roof_care_ticket_notices: {
         Row: {
@@ -4084,7 +4401,15 @@ export type Database = {
           claimed_at?: string
           service_job_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_ticket_notices_service_job_id_fkey"
+            columns: ["service_job_id"]
+            isOneToOne: true
+            referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roof_care_ticket_told: {
         Row: {
@@ -4102,7 +4427,22 @@ export type Database = {
           service_job_id?: string
           told_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_ticket_told_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_ticket_told_service_job_id_fkey"
+            columns: ["service_job_id"]
+            isOneToOne: false
+            referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roof_care_visits: {
         Row: {
@@ -4139,7 +4479,7 @@ export type Database = {
           cleaning_note?: string | null
           created_at?: string
           customer_asked?: boolean
-          drains_cleaned: boolean | null
+          drains_cleaned?: boolean | null
           due_by: string
           due_from: string
           first_due_by: string
@@ -4180,7 +4520,22 @@ export type Database = {
           skipped_by_name?: string | null
           skipped_on?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "roof_care_visits_carried_from_fkey"
+            columns: ["carried_from"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roof_care_visits_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roofs: {
         Row: {
@@ -4336,6 +4691,13 @@ export type Database = {
             columns: ["service_job_id"]
             isOneToOne: true
             referencedRelation: "service_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_job_office_notes_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -4854,6 +5216,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "property_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_jobs_roof_care_visit_id_fkey"
+            columns: ["roof_care_visit_id"]
+            isOneToOne: false
+            referencedRelation: "roof_care_visits"
             referencedColumns: ["id"]
           },
           {
@@ -6238,11 +6607,11 @@ export type Database = {
         Args: { landmark: string; place_type: string }
         Returns: string
       }
-      county_code_site_count: { Args: { p_id: string }; Returns: number }
       contact_log_set_tech_visible: {
         Args: { p_id: number; p_on: boolean }
         Returns: boolean
       }
+      county_code_site_count: { Args: { p_id: string }; Returns: number }
       crm_last_dispatch_at: { Args: never; Returns: string }
       crm_untouched: {
         Args: never
@@ -6341,6 +6710,21 @@ export type Database = {
           updated_at: string
         }[]
       }
+      inventory_move_into_count: {
+        Args: { p_at: string; p_day: string; p_ids: number[] }
+        Returns: undefined
+      }
+      inventory_save_count: {
+        Args: {
+          p_before?: number[]
+          p_counted_on: string
+          p_lines: Json
+          p_location: string
+          p_note: string
+          p_opening: boolean
+        }
+        Returns: string
+      }
       invoice_share_viewed: { Args: { p_token: string }; Returns: undefined }
       is_admin: { Args: never; Returns: boolean }
       is_manager: { Args: never; Returns: boolean }
@@ -6414,6 +6798,15 @@ export type Database = {
         Returns: number
       }
       prospect_user_ids: { Args: never; Returns: string[] }
+      public_care_quote: {
+        Args: { p: Json; p_hours: number; p_key: string; p_miles: number }
+        Returns: Json
+      }
+      public_form_norm: { Args: { p: string }; Returns: string }
+      public_form_take: {
+        Args: { p_key: string; p_kind: string }
+        Returns: boolean
+      }
       public_request_handle: {
         Args: {
           p_account?: string
@@ -6424,9 +6817,58 @@ export type Database = {
           p_site?: string
           p_status: string
         }
-        Returns: Database["public"]["Tables"]["public_requests"]["Row"]
+        Returns: {
+          account_id: string | null
+          address: string
+          agreed_by: string | null
+          building_name: string
+          city: string
+          company: string
+          contact_name: string
+          created_at: string
+          details: string
+          dismiss_reason: string | null
+          email: string
+          from_key: string | null
+          handled_at: string | null
+          handled_by: string | null
+          handled_by_name: string | null
+          id: string
+          kind: string
+          notes: string
+          opportunity_id: string | null
+          pay_method: string | null
+          phone: string
+          plan: string | null
+          quote: Json | null
+          reference: string
+          referred_by: string
+          roof_care_plan_id: string | null
+          services: string[]
+          several_buildings: boolean
+          shown_price: number | null
+          site_id: string | null
+          size_range: string | null
+          sqft: number | null
+          sqft_source: string | null
+          state: string
+          status: string
+          terms_version: string | null
+          told_at: string | null
+          zip: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "public_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       public_request_matches: { Args: { p_id: string }; Returns: Json }
+      public_request_submit: {
+        Args: { p: Json; p_key: string }
+        Returns: string
+      }
       public_service_choices: { Args: never; Returns: string[] }
       push_subscription_claim: {
         Args: {
@@ -6488,6 +6930,7 @@ export type Database = {
         Returns: number
       }
       roof_care_confirm_size: { Args: { p_plan: string }; Returns: undefined }
+      roof_care_credit_cover: { Args: { p_invoice: string }; Returns: number }
       roof_care_end: {
         Args: { p_plan: string; p_reason: string }
         Returns: undefined
@@ -6496,6 +6939,7 @@ export type Database = {
         Args: { p_plan: string; p_reason: string; p_refund?: number }
         Returns: Json
       }
+      roof_care_expire: { Args: never; Returns: number }
       roof_care_field_cleaning: { Args: { p_visit: string }; Returns: Json }
       roof_care_field_no_access: { Args: { p_job: string }; Returns: Json }
       roof_care_field_plans: { Args: { p_sites: string[] }; Returns: Json }
@@ -6503,16 +6947,67 @@ export type Database = {
         Args: { p_plan: string; p_sent?: boolean }
         Returns: undefined
       }
+      roof_care_lapse_carried: { Args: never; Returns: number }
       roof_care_make_tickets: { Args: { p_plan?: string }; Returns: string[] }
       roof_care_mark_offered: { Args: { p_job: string }; Returns: undefined }
+      roof_care_max_first_days: { Args: { p_day: string }; Returns: number }
       roof_care_no_access: {
         Args: { p_job: string; p_note: string }
         Returns: Json
       }
+      roof_care_no_access_free: { Args: never; Returns: number }
       roof_care_no_access_preview: { Args: { p_job: string }; Returns: Json }
       roof_care_no_access_remove: { Args: { p_id: string }; Returns: undefined }
+      roof_care_no_access_rework: { Args: { p_plan: string }; Returns: Json }
+      roof_care_no_access_state: { Args: { p_job: string }; Returns: Json }
       roof_care_no_access_take_off: { Args: { p_id: string }; Returns: Json }
+      roof_care_owed: {
+        Args: { p_plan: string }
+        Returns: {
+          added_by_name: string | null
+          amount: number
+          carried_from: string | null
+          cleaning_at: string | null
+          cleaning_by_name: string | null
+          cleaning_note: string | null
+          created_at: string
+          customer_asked: boolean
+          drains_cleaned: boolean | null
+          due_by: string
+          due_from: string
+          first_due_by: string
+          gutters_cleaned: boolean | null
+          id: string
+          kind: string
+          lost_on: string | null
+          plan_id: string
+          push_reason: string | null
+          pushed_at: string | null
+          pushed_by_name: string | null
+          skip_reason: string | null
+          skipped_by_name: string | null
+          skipped_on: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "roof_care_visits"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      roof_care_plan_covers: {
+        Args: { p_day: string; p_plan: string }
+        Returns: boolean
+      }
+      roof_care_plan_hold_words: {
+        Args: { p_account: string; p_site: string }
+        Returns: string
+      }
       roof_care_plan_seen: { Args: { p_plan: string }; Returns: boolean }
+      roof_care_plan_wins_opportunity: {
+        Args: { p_plan: string }
+        Returns: number
+      }
       roof_care_price: {
         Args: { p_hours?: number; p_miles?: number; p_sqft: number }
         Returns: Json
@@ -6527,10 +7022,12 @@ export type Database = {
         Returns: Json
       }
       roof_care_refund: { Args: { p_plan: string }; Returns: Json }
+      roof_care_refund_restep: { Args: { p_plan: string }; Returns: undefined }
       roof_care_refund_sent: {
         Args: { p_on: string; p_plan: string; p_ref: string }
         Returns: undefined
       }
+      roof_care_refund_worked: { Args: { p_plan: string }; Returns: Json }
       roof_care_remove_storm: { Args: { p_visit: string }; Returns: Json }
       roof_care_renew: {
         Args: {
@@ -6543,6 +7040,10 @@ export type Database = {
         Returns: string
       }
       roof_care_renewal_offer: { Args: { p_plan: string }; Returns: Json }
+      roof_care_second_fits: {
+        Args: { p_first: string; p_last: string }
+        Returns: boolean
+      }
       roof_care_set_cleaning: {
         Args: {
           p_drains?: boolean
@@ -6592,11 +7093,17 @@ export type Database = {
         }
         Returns: string
       }
+      roof_care_site_seen: { Args: { p_site: string }; Returns: boolean }
       roof_care_skip_visit: {
         Args: { p_reason: string; p_visit: string }
         Returns: Json
       }
+      roof_care_start: {
+        Args: { p_paid: string; p_plan: string }
+        Returns: undefined
+      }
       roof_care_storm_offer: { Args: { p_plan: string }; Returns: Json }
+      roof_care_storm_state: { Args: { p_plan: string }; Returns: Json }
       roof_care_ticket_announce_claim: {
         Args: { p_ids?: string[] }
         Returns: {
@@ -6630,6 +7137,15 @@ export type Database = {
         Args: { p_jobs: string[]; p_people: string[] }
         Returns: number
       }
+      roof_care_trip_charge: { Args: { p_plan: string }; Returns: number }
+      roof_care_windows: {
+        Args: { p_from: string }
+        Returns: {
+          w_from: string
+          w_to: string
+        }[]
+      }
+      roof_care_work_day: { Args: { p_job: string }; Returns: string }
       save_checklist_items: { Args: { p_items: Json }; Returns: undefined }
       save_contact_with_sites: {
         Args: { p_contact: Json; p_site_ids?: string[] }
@@ -6804,11 +7320,11 @@ export type Database = {
       }
       ticket_open_for_tech: { Args: { job: string }; Returns: boolean }
       ticket_opportunity: { Args: { p_job: string }; Returns: Json }
+      trade_bid_number: { Args: { p_bid: string }; Returns: number }
       trim_address_points: {
         Args: { p_county: string; p_keep_m?: number; p_limit?: number }
         Returns: number
       }
-      trade_bid_number: { Args: { p_bid: string }; Returns: number }
       unassigned_limits: { Args: never; Returns: Json }
       unassigned_overdue_days: { Args: never; Returns: number }
       undo_opportunity_from_bid: { Args: { p_bid: string }; Returns: Json }
