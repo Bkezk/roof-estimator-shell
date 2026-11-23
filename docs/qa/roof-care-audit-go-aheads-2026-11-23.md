@@ -65,10 +65,15 @@ Code: `src/lib/invoice-search.ts`, `src/components/service/invoices-page.tsx`.
 
 ## The new one: a set number of days is not a promise
 
-When the customer picks "A set number of days after your payment", the sign-up says, under the
-choice: "We will do our best to come on that day, but we cannot guarantee the date." The same
-sentence follows that line in their copy of the agreement, and on the plan for the office. The
-other two choices do not show it.
+Under the choice "A set number of days after your payment" the sign-up says: "We will do our best
+to come on that day, but we cannot guarantee the date." The same sentence follows that line in
+their copy of the agreement, and on the plan for the office, when that choice was the one picked.
+
+Changed later the same night. The sentence first showed only once that choice was picked, and the
+owner, looking at the pop-up with nothing picked: "i dont see the note here". It is now always
+there, under the choice, in grey, and turns bold when the choice is picked. Seen on the test
+server at a computer's width and a phone's, before a choice, with another choice picked, and
+with this one picked. The test that pins it fails on the code before the change.
 
 The terms were not changed. If the owner wants this in the terms too, that is a new terms
 version.

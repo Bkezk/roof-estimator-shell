@@ -305,11 +305,14 @@ describe("9. a set number of days after the payment is not a promise", () => {
     expect(firstVisitWords("window", null)).not.toContain("guarantee");
   });
 
-  it("the customer reads them on the sign-up as soon as that choice is picked", () => {
+  it("the customer reads them on the sign-up, under that choice, before picking anything", () => {
+    // The owner, the same night: "i dont see the note here". It showed only once the choice
+    // was picked. It is now always under "A set number of days", and bolder once picked.
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
     expect(card).toContain(
-      '{first === "days" && ( <p className="text-sm font-medium" data-sign-line="days-not-promised"> {FIRST_DAYS_NOT_PROMISED} </p> )}',
+      '{c === "days" && ( <p className={`pl-6 text-sm ${first === "days" ? "font-medium" : "text-muted-foreground"}`} data-sign-line="days-not-promised" > {FIRST_DAYS_NOT_PROMISED} </p> )}',
     );
+    expect(card).not.toContain('{first === "days" && ( <p className="text-sm font-medium"');
   });
 
   it("and in their copy of the agreement", () => {

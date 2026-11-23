@@ -2520,40 +2520,47 @@ function SignUpDialog({
                 <fieldset className="space-y-2">
                   <legend className="sr-only">Your first inspection</legend>
                   {(["now", "days", "window"] as const).map((c) => (
-                    <label key={c} className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="radio"
-                        name="rc-first"
-                        checked={first === c}
-                        onChange={() => setFirst(c)}
-                        data-first={c}
-                      />
-                      <span>{FIRST_WORDS[c]}</span>
+                    <div key={c} className="space-y-0.5">
+                      <label className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="radio"
+                          name="rc-first"
+                          checked={first === c}
+                          onChange={() => setFirst(c)}
+                          data-first={c}
+                        />
+                        <span>{FIRST_WORDS[c]}</span>
+                        {c === "days" && (
+                          <>
+                            <Input
+                              aria-label="Days after your payment for the first inspection"
+                              inputMode="numeric"
+                              className="h-8 w-20"
+                              value={days}
+                              onChange={(e) => {
+                                setDays(e.target.value);
+                                setFirst("days");
+                              }}
+                            />
+                            <span>days</span>
+                          </>
+                        )}
+                        {c === "window" && (
+                          <span className="text-muted-foreground">({windowWords(w)})</span>
+                        )}
+                      </label>
+                      {/* Always under the choice (owner, Nov 23: "i dont see the note here"): the
+                          customer reads it before picking, not only after. */}
                       {c === "days" && (
-                        <>
-                          <Input
-                            aria-label="Days after your payment for the first inspection"
-                            inputMode="numeric"
-                            className="h-8 w-20"
-                            value={days}
-                            onChange={(e) => {
-                              setDays(e.target.value);
-                              setFirst("days");
-                            }}
-                          />
-                          <span>days</span>
-                        </>
+                        <p
+                          className={`pl-6 text-sm ${first === "days" ? "font-medium" : "text-muted-foreground"}`}
+                          data-sign-line="days-not-promised"
+                        >
+                          {FIRST_DAYS_NOT_PROMISED}
+                        </p>
                       )}
-                      {c === "window" && (
-                        <span className="text-muted-foreground">({windowWords(w)})</span>
-                      )}
-                    </label>
+                    </div>
                   ))}
-                  {first === "days" && (
-                    <p className="text-sm font-medium" data-sign-line="days-not-promised">
-                      {FIRST_DAYS_NOT_PROMISED}
-                    </p>
-                  )}
                   {first === "days" && !dates && (
                     <p className="text-xs text-destructive">Type the days, 1 to 365.</p>
                   )}

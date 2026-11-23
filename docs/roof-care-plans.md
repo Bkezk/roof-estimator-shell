@@ -809,7 +809,8 @@ Record: `docs/qa/roof-care-nov23-2026-11-23.md`.
   the ticket is made (the owner: "1 go with A"). The database still makes that ticket with no
   day when the inspection's window is a range of days: the office sets it.
 - **A set number of days is not a promise** (the owner: "we will accommodate the best we can but
-  we cannot guarantee that date"). The sign-up and the agreement say so beside that choice. The
+  we cannot guarantee that date"). The sign-up says so under that choice at all times, picked
+  or not, and the agreement says so when it was picked. The
   terms were not changed.
 - **A plan's invoice** has its own words at Mark paid and when it is final or void, a Roof Care
   badge in the Invoices list, and a Roof Care chip that shows the plans' invoices alone.

@@ -76,5 +76,11 @@ Not seen yet: the new look in a real inbox. It reaches customers after the next 
 - The first agreement landed in the owner's spam folder. The domain was bought that day and had
   never sent an email, so it has no reputation yet. Its records check out.
 - The phone number at the foot of the emails is the one saved under Estimate Pricing › General.
-  The owner says it is wrong. The public pages and the document samples carry a different one.
-  Waiting for the owner to say which is right.
+  The owner said it was wrong and, later that night, gave the right one: the number the public
+  pages already carried. Estimate Pricing › General was set to it at his word. No code changed.
+- At his asking ("its published so go ahead and resend") a second test plan was signed on the
+  live site with him as the recipient, at 20:24 UTC. The agreement went out with no error. The
+  plan, its draft invoice and their history rows were then removed, and the plan number counter
+  was put back. Not known yet: that it arrived, and how the new look reads in his inbox.
+- He said "the test notification worked". The database shows that notice's email handed to the
+  email service at 20:08 UTC with no error.
