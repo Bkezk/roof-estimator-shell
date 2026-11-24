@@ -411,6 +411,10 @@ const sign = (body: string, t: number, secret = SECRET) =>
   `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${body}`, "utf8").digest("hex")}`;
 const paidEvent = () => ({
   type: "checkout.session.completed",
+  // Nov 24 (public pages audit): every message from Stripe says which side it is from, and the
+  // route takes one only from the side of the site's own key. These tests use a test key, so
+  // the event is a test one (roof-care-stripe-checks-nov24.test.ts).
+  livemode: false,
   data: {
     object: {
       id: "cs_1",
