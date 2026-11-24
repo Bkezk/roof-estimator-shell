@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
+import type { PlanWaitingForPayment } from "@/lib/roof-care-pay-notice";
 import type { CareTicketToAnnounce } from "@/lib/roof-care-ticket-announce";
 
 // Generated RPC metadata omits SQL nullability and selects the oldest overload.
@@ -65,6 +66,16 @@ type RpcContracts = {
   set_my_notify_off: {
     Args: { p_off: string[] };
     Returns: string[];
+  };
+  // 20261124960000_roof_care_pay_notice.sql (owner, Nov 24: a plan that is signed and not paid).
+  // The plans to tell now, each stamped as told in the same statement. The server's alone.
+  roof_care_pay_notice_claim: {
+    Args: { p_plan?: string | null; p_days?: number | null };
+    Returns: PlanWaitingForPayment[];
+  };
+  roof_care_pay_notice_release: {
+    Args: { p_plan: string; p_was: string | null };
+    Returns: undefined;
   };
 };
 type RpcDatabase = Omit<Database, "public"> & {

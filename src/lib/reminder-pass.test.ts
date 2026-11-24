@@ -135,6 +135,8 @@ vi.mock("@/lib/roof-care-notify.server", () => ({
     plans_skipped: 0,
     plans_errors: 0,
   }),
+  // Nov 24: and the pass for a plan that is signed and not paid.
+  dispatchPlanPayNotices: async () => ({ plans_notified: 0, plans_errors: 0 }),
 }));
 // Nov 19, later: and the pass that emails a Roof Care customer their agreement and receipt.
 vi.mock("@/lib/roof-care-email.server", () => ({

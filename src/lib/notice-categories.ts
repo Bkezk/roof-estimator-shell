@@ -86,6 +86,7 @@ export const KIND_CATEGORIES: Readonly<Record<string, NoticeCategory>> = {
   public_request: "opportunities",
   plan_expired: "opportunities",
   plan_card_paid: "opportunities",
+  plan_needs_payment: "opportunities",
   care_no_access: "service",
 };
 

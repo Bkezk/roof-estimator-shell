@@ -193,6 +193,7 @@ describe("the helpers the sender and the inbox reads use", () => {
       "public_request",
       "plan_expired",
       "plan_card_paid",
+      "plan_needs_payment", // Nov 24: a plan that is signed and not paid
     ]);
     expect(urlPrefixOfCategory("leads")).toBeNull();
     expect(urlPrefixOfCategory("storms")).toBeNull();
@@ -250,6 +251,7 @@ describe("the helpers the sender and the inbox reads use", () => {
         "public_request",
         "plan_expired",
         "plan_card_paid",
+        "plan_needs_payment",
       ],
       urlPrefixes: ["/opportunities"],
     });

@@ -14,8 +14,11 @@
  * 13 and 18): a plan that ran out on a weekend is told on Monday. A plan that expired more than
  * two weeks ago is not told at all: it would be old news.
  */
+import { databaseRpc } from "@/lib/database-rpc";
 import { shortDay } from "@/lib/followup-rules";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
+import { exceptActor } from "@/lib/own-notices.server";
+import { PLAN_PAY_REMIND_DAYS, planNeedsPaymentNotice } from "@/lib/roof-care-pay-notice";
 import { planName } from "@/lib/roof-care-plan";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { isWeekend, morningReached, plusDays } from "@/lib/working-days";
@@ -135,4 +138,80 @@ export async function dispatchPlanExpiredNotices(
     }
   }
   return out;
+}
+
+// ── Signed and not paid (owner, Nov 24; roof-care-pay-notice.ts) ────────────────────────────
+
+export interface PlanPayNoticeResult {
+  plans_notified: number;
+  plans_errors: number;
+}
+
+/**
+ * Tell the admins and the managers about plans that wait for their payment.
+ *
+ * With `planId`: that plan's first notice, at once (the sign-up just happened; the person who
+ * signed it is told only with "My own changes" on). Without: the morning pass, which sends what
+ * a sign-up could not, and the reminder every PLAN_PAY_REMIND_DAYS days. The pass sends nothing
+ * before 8:00 on the office's clock, nor on a Saturday or Sunday, as every reminder does.
+ *
+ * The database claims each plan before anything is sent (roof_care_pay_notice_claim), so two
+ * passes at once send one notice between them. A send that fails puts the stamp back.
+ */
+export async function dispatchPlanPayNotices(
+  sb: Client,
+  opts: { planId?: string; actorId?: string | null; now?: Date } = {},
+): Promise<PlanPayNoticeResult> {
+  const out: PlanPayNoticeResult = { plans_notified: 0, plans_errors: 0 };
+  const now = opts.now ?? new Date();
+  if (!opts.planId && (!morningReached(now) || isWeekend(localYmd(now, TASK_TZ)))) return out;
+  const admin = await serverClient(sb);
+  const { data: plans, error } = await databaseRpc(admin)("roof_care_pay_notice_claim", {
+    p_plan: opts.planId ?? null,
+    p_days: PLAN_PAY_REMIND_DAYS,
+  });
+  if (error) throw new Error(error.message);
+  if (!plans?.length) return out;
+  const release = async (p: { plan_id: string; was: string | null }) => {
+    const { error: rErr } = await databaseRpc(admin)("roof_care_pay_notice_release", {
+      p_plan: p.plan_id,
+      p_was: p.was,
+    });
+    if (rErr)
+      console.error(`Plan not paid notice: plan ${p.plan_id} was not put back —`, rErr.message);
+  };
+  const { data: people, error: pErr } = await admin
+    .from("profiles")
+    .select("id, role")
+    .in("role", ["admin", "manager"]);
+  if (pErr) {
+    for (const p of plans) await release(p);
+    throw new Error(pErr.message);
+  }
+  const everyone = (people ?? []).map((p) => p.id);
+  for (const p of plans) {
+    try {
+      const to = p.first ? await exceptActor(everyone, opts.actorId, admin) : everyone;
+      if (to.length) await notify(to, planNeedsPaymentNotice(p), admin);
+      out.plans_notified++;
+    } catch (e) {
+      out.plans_errors++;
+      console.error(`Plan not paid notice: plan ${p.plan_id} —`, errText(e));
+      await release(p);
+    }
+  }
+  return out;
+}
+
+/** The first notice of one plan, right after its sign-up. Never throws: the sign-up stands. */
+export async function tellPlanSignedNotPaid(
+  sb: Client,
+  planId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    await dispatchPlanPayNotices(sb, { planId, actorId });
+  } catch (e) {
+    console.error(`Plan not paid notice: plan ${planId} —`, errText(e));
+  }
 }

@@ -766,6 +766,10 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     // The agreement, to the customer, now: they are standing there. What cannot go now (email
     // not set up, no service key on this server) goes with the scheduled run.
     if (email) await sendPlanEmailsNow(sb, planId);
+    // Nov 24 (owner: "will they get an notification when there is a sign up but no payement?
+    // they should"): the admins and the managers, now. It is told again every two days while
+    // it waits (roof-care-pay-notice.ts).
+    await tellSignedNotPaid(sb, planId, context.userId);
     const made = (await plansOfSites(sb, [site.id], { money, field: !readsPlanTables(p) })).find(
       (x) => x.id === planId,
     );
@@ -773,6 +777,16 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
       throw new Error("The plan was saved, but it could not be read back. Reload the page.");
     return made;
   });
+
+/** "Signed, not paid" to the admins and the managers. Never throws: the sign-up stands. */
+async function tellSignedNotPaid(sb: Sb, planId: string, actorId: string): Promise<void> {
+  try {
+    const { tellPlanSignedNotPaid } = await import("@/lib/roof-care-notify.server");
+    await tellPlanSignedNotPaid(sb, planId, actorId);
+  } catch (e) {
+    console.error("Plan not paid notice: plan", planId, "—", e instanceof Error ? e.message : e);
+  }
+}
 
 /** The agreement and the receipt of one plan, sent at once when they can be. Never throws. */
 async function sendPlanEmailsNow(sb: Sb, planId: string): Promise<void> {
@@ -1199,6 +1213,8 @@ export const renewRoofCarePlan = createServerFn({ method: "POST" })
           // Said on the plan: "No invoice has been made for this plan yet."
         }
       }
+      // Nov 24: a renewal that waits for its payment is told like a sign-up.
+      await tellSignedNotPaid(sb, planId, context.userId);
       return { plan_id: planId, invoice_id: invoiceId, started: false };
     },
   );

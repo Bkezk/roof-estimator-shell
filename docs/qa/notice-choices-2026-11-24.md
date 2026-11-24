@@ -93,9 +93,10 @@ notifications for a new opportunity i dont see that on there. go on 1, 2 ... 3 g
 - Not proven: a real new opportunity's notice. Making one would have sent a notice to every
   admin and manager. The tests prove who is told and with what words.
 
-Still open with the owner: he asked whether the plan tick "should be needs payment". Today a
-signed plan that is not paid shows on the Owner page's Needs attention list and sends no notice.
-A notice for it was suggested to him, not built.
+The owner then asked for a notice when a plan is signed and not paid, with a reminder after two
+days. It was built the same evening and sits under the Roof Care plan tick:
+`docs/qa/roof-care-pay-notice-2026-11-24.md`. That record also holds the proof of the new
+opportunity notice with one fake opportunity, made at his word and removed.
 
 ## Not proven
 

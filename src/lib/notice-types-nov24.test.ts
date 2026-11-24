@@ -438,6 +438,23 @@ const SENT: Sent[] = [
     expect: "opportunities_care_plan",
     pin: 'PLAN_EXPIRED_KIND = "plan_expired"',
   },
+  // Nov 24 (owner: "will they get an notification when there is a sign up but no payement?").
+  {
+    from: "src/lib/roof-care-pay-notice.ts",
+    kind: "plan_needs_payment",
+    url: "/properties/p1",
+    title: "Roof Care plan signed, not paid: Acme",
+    expect: "opportunities_care_plan",
+    pin: 'PLAN_NEEDS_PAYMENT_KIND = "plan_needs_payment"',
+  },
+  {
+    from: "src/lib/roof-care-pay-notice.ts",
+    kind: "plan_needs_payment",
+    url: "/properties/p1",
+    title: "Roof Care plan still not paid: Acme",
+    expect: "opportunities_care_plan",
+    pin: 'PLAN_NEEDS_PAYMENT_KIND = "plan_needs_payment"',
+  },
   {
     from: "src/lib/roof-care-no-access.functions.ts",
     kind: "care_no_access",

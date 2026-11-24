@@ -869,6 +869,15 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
     } catch (e) {
       console.error("Roof Care plan expired notice dispatch failed", e);
     }
+    // "A Roof Care plan is signed and not paid" (owner, Nov 24), the same way.
+    try {
+      if (hasServiceRole()) {
+        const { dispatchPlanPayNotices } = await import("@/lib/roof-care-notify.server");
+        out.failed += (await dispatchPlanPayNotices(await adminClient())).plans_errors;
+      }
+    } catch (e) {
+      console.error("Roof Care plan not paid notice dispatch failed", e);
+    }
     return out;
   });
 

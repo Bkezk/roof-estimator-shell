@@ -243,8 +243,8 @@ export const NOTICE_TYPES: readonly NoticeType[] = [
     key: "opportunities_care_plan",
     category: "opportunities",
     label: "Roof Care plan",
-    help: "A plan was paid by card, a card payment has to be sent back, or a plan expired.",
-    match: [{ kinds: ["plan_card_paid", "plan_expired"] }],
+    help: "A plan is signed and not paid, was paid by card, has a card payment to send back, or expired.",
+    match: [{ kinds: ["plan_needs_payment", "plan_card_paid", "plan_expired"] }],
   },
   // ---- Bid notices ----------------------------------------------------------------------------
   {

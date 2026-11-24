@@ -98,6 +98,20 @@ async function run(request: Request): Promise<Response> {
     plans = { error: errText(e) };
   }
 
+  // "A Roof Care plan is signed and not paid" (owner, Nov 24): what a sign-up could not send,
+  // and the reminder every two days while a plan still waits.
+  let planPay: Record<string, number> | { error: string };
+  try {
+    const { dispatchPlanPayNotices } = await import("@/lib/roof-care-notify.server");
+    const p = await dispatchPlanPayNotices(supabaseAdmin);
+    sendsFailed += p.plans_errors;
+    planPay = { ...p };
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the Roof Care plan not paid pass failed", e);
+    planPay = { error: errText(e) };
+  }
+
   // A Roof Care customer's agreement and receipt (roof-care-email.server.ts; owner, Nov 19):
   // whatever was not sent where it was made. Held, and said so, while email is not set up.
   let planEmails: Record<string, number | string | null> | { error: string };
@@ -165,6 +179,7 @@ async function run(request: Request): Promise<Response> {
       tasks,
       bids,
       plans,
+      plan_pay: planPay,
       plan_emails: planEmails,
       plan_tickets: planTickets,
       public_requests: publicRequests,
