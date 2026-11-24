@@ -25,6 +25,7 @@ import {
   defaultTemplates,
   INSPECTION_REPORT_TEMPLATE,
   missingDefaultTemplates,
+  REPORT_DAY_NOTE,
 } from "@/lib/documents/defaults";
 import { imageRefs } from "@/lib/documents/document-pdf.server";
 import {
@@ -132,8 +133,26 @@ describe("the Inspection report is what it was before the Care plan report", () 
     const print = createHash("sha256")
       .update(JSON.stringify({ o: t.options, d: t.description, p: noIds(t.pages) }))
       .digest("hex");
-    // Worked out on the code as it stood before this report (Nov 23, commit 771fbad).
-    expect(print).toBe("58bfbeadb8a54fd4b599a710c13a95151d6befa1e855d7afcff08f359dbe67b1");
+    // Worked out on the code as it stood before this report (Nov 23, commit 771fbad):
+    // 58bfbead…dbe67b1. Nov 24 (owner: "add the line to the inspection report too but dont make
+    // it stand out too much"): one line in italics was added under the recommendation, and
+    // nothing else moved. With that paragraph taken off again the fingerprint is the old one.
+    expect(print).toBe("fa4eb799d0b118de9a0147dab78cdd2ea90b0883bbe3c7ed2986f35382524d64");
+    const without = JSON.parse(JSON.stringify(noIds(t.pages))) as {
+      modules: { type: string; text?: { content: unknown[] } }[];
+    }[];
+    const last = without[2]!.modules[1]!.text!.content;
+    expect(last).toHaveLength(2);
+    expect(last[1]).toEqual({
+      type: "paragraph",
+      content: [{ type: "text", text: REPORT_DAY_NOTE, marks: [{ type: "italic" }] }],
+    });
+    last.pop();
+    expect(
+      createHash("sha256")
+        .update(JSON.stringify({ o: t.options, d: t.description, p: without }))
+        .digest("hex"),
+    ).toBe("58bfbeadb8a54fd4b599a710c13a95151d6befa1e855d7afcff08f359dbe67b1");
     const lists = modulesOf(t.pages).filter((m) => m.type === "repairList") as RepairListModule[];
     expect(lists).toHaveLength(1);
     expect(lists[0]).toMatchObject({ rows: null, photos: true, allItems: false });
@@ -262,8 +281,9 @@ describe("the Care plan report's template", () => {
     expect((body[1] as RepairListModule).listOnly).toBeUndefined();
     expect(richToText((body[2] as { text: RichDoc }).text)).toBe("Items needing attention");
     expect(body[3]).toMatchObject({ allItems: false, listOnly: true, rows: null });
+    // Nov 24: and under it, in italics, the line that says what a report is.
     expect(richToText((body[4] as { text: RichDoc }).text, {}, (k) => k)).toBe(
-      "Recommendation: [inspection.recommend]",
+      `Recommendation: [inspection.recommend]\n${REPORT_DAY_NOTE}`,
     );
   });
   it("carries nothing about money: no price module, no price or cost variable", () => {
@@ -369,6 +389,8 @@ describe("the Care plan report made on a ticket", () => {
       "Gutters · Not checked",
       "Items needing attention",
       "Recommendation: [inspection.recommend]",
+      // Nov 24: the last line of the report.
+      REPORT_DAY_NOTE,
     ]);
     // One line of thumbnails under each row that has pictures: two OK rows and the issue.
     expect(laid.filter((p) => p.kind === "columns")).toHaveLength(3);

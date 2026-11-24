@@ -344,8 +344,10 @@ describe("the Inspection report template (phase 2)", () => {
     expect(richToText((findings!.modules[0] as { text: RichDoc }).text)).toBe("Findings");
     expect(photos!.modules.map((m) => m.type)).toEqual(["photoGrid", "body", "signature"]);
     expect((photos!.modules[0] as PhotoGridModule).columns).toBe(3);
+    // Nov 24 (owner: "add the line to the inspection report too but dont make it stand out too
+    // much"): one line in italics under the recommendation.
     expect(richToText((photos!.modules[1] as { text: RichDoc }).text, {}, variableLabel)).toBe(
-      "Recommendation: [Recommendation]",
+      "Recommendation: [Recommendation]\nThis report shows what we could see on the day of the visit.",
     );
     // The template stores no picture; the cover is filled on create (server-pure placeCoverImage).
     expect((cover!.modules[3] as FullPhotoModule).image).toBeNull();

@@ -29,7 +29,8 @@ const EVERY_VERSION: readonly [string, string][] = [
   ["2026-11-19.3", mark(ROOF_CARE_TERMS_PAST["2026-11-19.3"] ?? [])],
   ["2026-11-19.4", mark(ROOF_CARE_TERMS_PAST["2026-11-19.4"] ?? [])],
   ["2026-11-20.1", mark(ROOF_CARE_TERMS_PAST["2026-11-20.1"] ?? [])],
-  ["2026-11-23.1", "733b0dca9d3ea3f0"],
+  ["2026-11-23.1", mark(ROOF_CARE_TERMS_PAST["2026-11-23.1"] ?? [])],
+  ["2026-11-24.1", "4696c80dfb0d5de4"],
 ];
 
 const facts = (terms_version: string): PlanEmailFacts => ({
@@ -54,6 +55,19 @@ describe("every set of terms that was in use is kept", () => {
     const last = EVERY_VERSION[EVERY_VERSION.length - 1]!;
     // Changed words under the same version would rewrite what earlier customers agreed to.
     expect([ROOF_CARE_TERMS_VERSION, mark(ROOF_CARE_TERMS)]).toEqual(last);
+  });
+  it("the Nov 23 set was filed word for word when the Nov 24 set took its place", () => {
+    // Its fingerprint as this test knew it while it was the set in use.
+    expect(mark(ROOF_CARE_TERMS_PAST["2026-11-23.1"] ?? [])).toBe("733b0dca9d3ea3f0");
+    // Nov 24 (owner: "the shorter version looks fine"): the last term alone changed.
+    const before = ROOF_CARE_TERMS_PAST["2026-11-23.1"]!;
+    expect(ROOF_CARE_TERMS.slice(0, -1)).toEqual(before.slice(0, -1));
+    expect(before[before.length - 1]).toBe(
+      "The plan is not a warranty and does not cover replacing the roof.",
+    );
+    expect(ROOF_CARE_TERMS[ROOF_CARE_TERMS.length - 1]).toBe(
+      "The plan is not a warranty or insurance and does not cover replacing the roof. An inspection is a visual check on the day of the visit and cannot find every problem. We are not responsible for leaks or for damage from a leak or from a condition we did not find.",
+    );
   });
   it("each earlier version is on file, with words, and none has been dropped", () => {
     const past = EVERY_VERSION.slice(0, -1).map(([v]) => v);

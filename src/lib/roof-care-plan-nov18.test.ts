@@ -1301,13 +1301,16 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
     // goes toward a charged return trip first.)
     // (Nov 23: version 2026-11-23.1. Term 3 adds that what the plan includes applies to work
     // done in its twelve months, and that work done before the plan starts is not covered.)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-23.1");
+    // (Nov 24: version 2026-11-24.1. The last term says what an inspection is and that we are
+    // not responsible for a leak or for a condition we did not find; owner: "the shorter
+    // version looks fine".)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-24.1");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
     );
     expect(ROOF_CARE_TERMS[10]).toBe(
-      "The plan is not a warranty and does not cover replacing the roof.",
+      "The plan is not a warranty or insurance and does not cover replacing the roof. An inspection is a visual check on the day of the visit and cannot find every problem. We are not responsible for leaks or for damage from a leak or from a condition we did not find.",
     );
   });
   it("no plan is started without the tick", async () => {

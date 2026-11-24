@@ -68,6 +68,18 @@ const paras = (...lines: Array<string | RichDoc["content"]>): RichDoc => ({
 
 const body = (text: RichDoc) => ({ ...newModule("body"), text }) as DocPage["modules"][number];
 
+/**
+ * The last line of both inspection reports (owner, Nov 24: "add the line to the inspection
+ * report too but dont make it stand out too much"). It goes with the plan's last term: a report
+ * shows the day of the visit, not every condition of the roof. In italics, under the
+ * recommendation, at the body's own size: the report text has no smaller size to give it.
+ */
+export const REPORT_DAY_NOTE = "This report shows what we could see on the day of the visit.";
+const reportDayNote = (): NonNullable<RichDoc["content"]>[number] => ({
+  type: "paragraph",
+  content: [{ type: "text", text: REPORT_DAY_NOTE, marks: [{ type: "italic" }] }],
+});
+
 export function defaultTemplates(): DefaultTemplate[] {
   const proposalCover = newPage([
     newModule("letterhead"),
@@ -320,7 +332,10 @@ export function defaultTemplates(): DefaultTemplate[] {
   const inspectionPhotos = newPage([
     { ...newModule("photoGrid"), columns: 3 } as DocPage["modules"][number],
     body(
-      paras([richLine(["Recommendation: ", { variable: "inspection.recommend" }], { bold: true })]),
+      paras(
+        [richLine(["Recommendation: ", { variable: "inspection.recommend" }], { bold: true })],
+        [reportDayNote()],
+      ),
     ),
     newModule("signature"),
   ]);
@@ -397,7 +412,10 @@ export function defaultTemplates(): DefaultTemplate[] {
     // The issues again, as a table with no pictures: it is never split.
     { ...newModule("repairList"), listOnly: true } as DocPage["modules"][number],
     body(
-      paras([richLine(["Recommendation: ", { variable: "inspection.recommend" }], { bold: true })]),
+      paras(
+        [richLine(["Recommendation: ", { variable: "inspection.recommend" }], { bold: true })],
+        [reportDayNote()],
+      ),
     ),
   ]);
 

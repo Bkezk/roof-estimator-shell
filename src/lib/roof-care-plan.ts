@@ -1337,7 +1337,9 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // Nov 23 (version 2026-11-23.1), at the owner's "make sure number 6 is included in the terms":
 // term 3 says what the plan includes applies to work done in its twelve months, and that work
 // done before the plan starts is not covered (the database's rule since 20261123100000).
-export const ROOF_CARE_TERMS_VERSION = "2026-11-23.1";
+// Nov 24 (version 2026-11-24.1), at the owner's word: the last term says what an inspection is
+// and that we are not responsible for a leak or for a condition we did not find.
+export const ROOF_CARE_TERMS_VERSION = "2026-11-24.1";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
@@ -1351,7 +1353,9 @@ export const ROOF_CARE_TERMS: readonly string[] = [
   "A storm inspection, where the plan includes one, is done when you ask for it after a storm. A further storm inspection in the same plan year is billed at the price of one inspection, and what is left of the plan's minor repairs amount is used toward it first.",
   "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
   "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
-  "The plan is not a warranty and does not cover replacing the roof.",
+  // Nov 24 (owner: "we likely need to add a disclaimer ... were not responsible essentially if we
+  // miss something and they have a leak"; of the two drafts, "the shorter version looks fine").
+  "The plan is not a warranty or insurance and does not cover replacing the roof. An inspection is a visual check on the day of the visit and cannot find every problem. We are not responsible for leaks or for damage from a leak or from a condition we did not find.",
 ];
 export const TERMS_NOT_AGREED = "The customer has to agree to the plan's terms";
 
