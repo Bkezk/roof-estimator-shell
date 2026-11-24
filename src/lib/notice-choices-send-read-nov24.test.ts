@@ -202,14 +202,9 @@ describe("notify() leaves out a person who unticked that notice type", () => {
       { kind: "mention", title: "Sam mentioned you", url: T },
       { kind: "task", title: "New task", url: "/my-work" },
       { kind: "test", title: "Test notification", url: "/account" },
-      {
-        kind: "public_request",
-        title: "Service request from the public page: Acme",
-        url: "/opportunities?id=o1",
-      },
-      { kind: "plan_expired", title: "Guard plan expired: Acme", url: "/properties/p1" },
-      { kind: "care_no_access", title: "No access for a Guard inspection: Acme", url: T },
-      { kind: "plan_card_paid", title: "Card payment to send back: Acme", url: "/properties/p1" },
+      // Nov 24, later the same day: a request from the public pages and the Roof Care plan
+      // notices are under a switch now, each with a tick (the owner: "wouldnt those both be
+      // under opportunities?"), so they are no longer in this list.
     ]) {
       const e = sendEnv();
       expect(await notify(EVERYONE, msg, e.db as Client), msg.kind).toBe(4);
@@ -322,6 +317,11 @@ const ROWS: Row[] = [
   nrow("untouched", O, "No contact logged: New roof"),
   nrow("opportunity_unassigned", O, "Nobody on New roof"),
   nrow("opportunity_watch", O, "Opened: New roof"),
+  // Nov 24, later the same day: the four ticks the owner added.
+  nrow("opportunity_new", O, "Opened: Another roof"),
+  nrow("public_request", O, "Service request from the public page: Acme"),
+  nrow("plan_expired", "/properties/p1", "Guard plan expired: Acme"),
+  nrow("care_no_access", T, "No access for a Guard inspection: Acme"),
   nrow("bid_due", "/estimate?bid=b1", "Bid due tomorrow: Acme"),
   nrow("bid_overdue", "/trade-bids?bid=b2", "Bid past due: Gutters"),
   nrow("bid_reminder", "/estimate?bid=b1", "Bid reminder: Acme"),
@@ -664,7 +664,7 @@ describe("getNotifyOff and setNotifyOff", () => {
       await expect(async () => e.call(setNotifyOff, { off })).rejects.toThrow();
     await expect(async () => e.call(setNotifyOff, {})).rejects.toThrow();
     await expect(async () =>
-      e.call(setNotifyOff, { off: Array.from({ length: 25 }, () => "service_opened") }),
+      e.call(setNotifyOff, { off: Array.from({ length: 29 }, () => "service_opened") }),
     ).rejects.toThrow();
     expect(e.rpcCalls).toEqual([]);
     expect(e.tables["profiles"]!.find((p) => p["id"] === ME)!["notify_off"]).toEqual([

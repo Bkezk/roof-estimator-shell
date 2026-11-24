@@ -253,7 +253,9 @@ describe("the shared helpers", () => {
     expect(kindLabel("opportunity_unassigned")).toBe("Nobody on it");
     expect(kindLabel("opportunity_watch")).toBe("Opportunity update");
     expect(kindLabel("bid_watch")).toBe("Bid update");
-    expect(new Set(Object.values(KIND_LABELS)).size).toBe(19);
+    // Nov 24 (owner: "we also need notifications for a new opportunity").
+    expect(kindLabel("opportunity_new")).toBe("New opportunity");
+    expect(new Set(Object.values(KIND_LABELS)).size).toBe(20);
   });
   it("chips: one per label present, in the owner's order, carrying the raw kinds", () => {
     expect(

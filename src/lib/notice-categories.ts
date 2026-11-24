@@ -77,6 +77,16 @@ export const KIND_CATEGORIES: Readonly<Record<string, NoticeCategory>> = {
   opportunity_unassigned: "opportunities",
   opportunity_watch: "opportunities",
   bid_watch: "bids",
+  // Nov 24 (owner: "wouldnt those both be under opportunities?", then "go on 1, 2 ... 3 go"):
+  // a new opportunity, a request from the public pages and the Roof Care plan's expiry and card
+  // payment are opportunity notices; no access at a plan inspection is a service notice. Until
+  // then these were under no switch. Everyone had both switches on the day this shipped, so
+  // nobody stopped getting them.
+  opportunity_new: "opportunities",
+  public_request: "opportunities",
+  plan_expired: "opportunities",
+  plan_card_paid: "opportunities",
+  care_no_access: "service",
 };
 
 /**

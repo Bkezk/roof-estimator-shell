@@ -467,6 +467,10 @@ export function RemindersSettings() {
                 type="opportunity"
                 help="The date is the expected close. Won, Lost or No response ends its reminders; so does taking the assignee off."
               >
+                <Line label={LINE_LABELS.opened} who={picker("opportunity", "opened")}>
+                  Once, when someone opens a new opportunity. A request from the public pages has
+                  its own notice.
+                </Line>
                 <Line label="Due date">
                   The expected close. With none, {field("opportunity_close_days")} calendar days
                   after it is entered.
@@ -490,7 +494,8 @@ export function RemindersSettings() {
                   Overview.
                 </Line>
                 <Line label={LINE_LABELS.steps} who={picker("opportunity", "steps")}>
-                  Once when it is opened, assigned, changes status or is deleted.
+                  Once when it is assigned, changes status or is deleted. The people here are told
+                  of a new one too.
                 </Line>
               </TypeCard>
 

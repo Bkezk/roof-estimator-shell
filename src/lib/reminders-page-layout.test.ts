@@ -56,7 +56,9 @@ describe("Reminders page layout", () => {
       "review",
       "steps",
     ]);
+    // Nov 24 (owner: "we also need notifications for a new opportunity"): its own line, first.
     expect(lines("opportunity")).toEqual([
+      "opened",
       "coming_up",
       "past_due",
       "not_started",
@@ -119,7 +121,16 @@ describe("Reminders page layout", () => {
     expect(flat).toContain(
       "Once when it is opened, scheduled, reassigned, moved, authorized, invoiced, closed or deleted.",
     );
-    expect(flat).toContain("Once when it is opened, assigned, changes status or is deleted.");
+    // Nov 24: a new opportunity has its own line, so Each step no longer says "opened".
+    expect(flat).toContain(
+      "Once, when someone opens a new opportunity. A request from the public pages has its own notice.",
+    );
+    expect(flat).toContain(
+      "Once when it is assigned, changes status or is deleted. The people here are told of a new one too.",
+    );
+    expect(src).toContain(
+      '<Line label={LINE_LABELS.opened} who={picker("opportunity", "opened")}>',
+    );
     expect(flat).toContain("Once when it is started, changes status or is deleted.");
     // Tasks are not a card; the page says so, and where a person turns a notice off.
     expect(flat).toContain(

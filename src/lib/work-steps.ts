@@ -9,6 +9,13 @@
  * notice per change. Pure: the words. The sending is work-steps.server.ts.
  */
 export const OPPORTUNITY_WATCH_KIND = "opportunity_watch";
+/**
+ * A new opportunity (owner, Nov 24: "we also need notifications for a new opportunity"): a
+ * kind of its own, so a person can keep it and turn the other steps off. It goes to the people
+ * on the opportunities' "New opportunity" line on Admin › Reminders (every admin and manager
+ * until someone changes it) and to anyone on the "Each step" line.
+ */
+export const OPPORTUNITY_NEW_KIND = "opportunity_new";
 export const BID_WATCH_KIND = "bid_watch";
 
 export interface StepNotice {
@@ -78,6 +85,20 @@ export function opportunityStepNotice(input: {
       body: `${who} took the person off it. Nobody is assigned now.`,
     };
   return null;
+}
+
+/**
+ * A request a technician took down on site (roof-care-plan.functions.ts requestAdditionalService)
+ * makes an opportunity in the database, titled the way request_additional_service titles it.
+ * Nov 24 (owner: "we also need notifications for a new opportunity"): it is a new opportunity
+ * like any other, and until then it told nobody.
+ */
+export function onSiteRequestNotice(input: { services: string; who: string }): StepNotice {
+  const title = `Additional service: ${input.services.trim().replace(/\s+/g, " ")}`.slice(0, 200);
+  return {
+    title: `Opened: ${title}`,
+    body: `${input.who} took this request down on site. Nobody is assigned yet.`,
+  };
 }
 
 /** The notice for one change to a bid, or null when it is not a step. */

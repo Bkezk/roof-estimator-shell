@@ -16,7 +16,11 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { OPPORTUNITY_WATCH_KIND, opportunityStepNotice } from "@/lib/work-steps";
+import {
+  OPPORTUNITY_NEW_KIND,
+  OPPORTUNITY_WATCH_KIND,
+  opportunityStepNotice,
+} from "@/lib/work-steps";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
@@ -608,10 +612,8 @@ async function syncOppFollowup(
   // it, to the people on the opportunities' line on Admin › Reminders. Nobody is on it until
   // someone picks people there. Never fails the save.
   const { tellStep } = await import("@/lib/work-steps.server");
-  await tellStep({
-    key: "opportunity.steps",
-    kind: OPPORTUNITY_WATCH_KIND,
-    notice: (nameOf) =>
+  const step = {
+    notice: (nameOf: (id: string | null | undefined) => string | null) =>
       opportunityStepNotice({
         title: row.title,
         status: row.status,
@@ -624,6 +626,18 @@ async function syncOppFollowup(
     url: `/opportunities?id=${row.id}`,
     actorId: ctx.userId,
     sb: ctx.supabase,
+  };
+  // Nov 24 (owner: "we also need notifications for a new opportunity"): a new one tells the
+  // people on the "New opportunity" line (every admin and manager until someone changes it),
+  // under a kind of its own. Anyone on the "Each step" line hears it too, once.
+  const told = created
+    ? await tellStep({ ...step, key: "opportunity.opened", kind: OPPORTUNITY_NEW_KIND })
+    : [];
+  await tellStep({
+    ...step,
+    key: "opportunity.steps",
+    kind: created ? OPPORTUNITY_NEW_KIND : OPPORTUNITY_WATCH_KIND,
+    skip: told,
   });
   return synced;
 }

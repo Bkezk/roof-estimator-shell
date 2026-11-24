@@ -82,6 +82,7 @@ import { PLAN_KEYS } from "@/lib/roof-care-price";
 import { isTripLine, tripLineSource } from "@/lib/roof-care-no-access";
 import { readStormOffer, type StormOffer } from "@/lib/roof-care-storm";
 import { isTravelWaiverLine, travelLineSource } from "@/lib/roof-care-travel";
+import { OPPORTUNITY_NEW_KIND, onSiteRequestNotice } from "@/lib/work-steps";
 import { driveTo, officeOrigin, type RoofCareDrive } from "@/lib/roof-care.functions";
 import { aerialForAddress } from "@/lib/service-aerial.functions";
 
@@ -1221,12 +1222,25 @@ export const requestAdditionalService = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<{ id: string }> => {
-    await signedIn(context);
+    const p = await signedIn(context);
     const { data: id, error } = await context.supabase.rpc("request_additional_service", {
       p_site: data.site_id,
       p_services: data.services,
       p_details: data.details ?? "",
     });
     if (error) throw new Error(error.message);
+    // Nov 24 (owner: "we also need notifications for a new opportunity"): this made an
+    // opportunity and told nobody. The people on the "New opportunity" line on Admin ›
+    // Reminders are told now, and anyone on "Each step", once. Never fails the request.
+    const { tellStep } = await import("@/lib/work-steps.server");
+    const step = {
+      kind: OPPORTUNITY_NEW_KIND,
+      notice: onSiteRequestNotice({ services: data.services, who: nameOf(p) ?? "Someone" }),
+      url: `/opportunities?id=${id}`,
+      actorId: context.userId,
+      sb: context.supabase,
+    };
+    const told = await tellStep({ ...step, key: "opportunity.opened" });
+    await tellStep({ ...step, key: "opportunity.steps", skip: told });
     return { id };
   });

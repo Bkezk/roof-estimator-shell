@@ -46,6 +46,8 @@ export const ALERT_LINE_NAMES = [
   "nobody",
   "review",
   "steps",
+  // Nov 24 (owner: "we also need notifications for a new opportunity"): a line of its own.
+  "opened",
 ] as const;
 export type AlertLine = (typeof ALERT_LINE_NAMES)[number];
 /** Every line there is, as "<type>.<line>": the key its list of people is saved under. */
@@ -61,6 +63,7 @@ export const ALERT_KEYS = [
   "opportunity.not_started",
   "opportunity.nobody",
   "opportunity.steps",
+  "opportunity.opened",
   "bid.coming_up",
   "bid.past_due",
   "bid.steps",
@@ -72,7 +75,7 @@ export const alertKey = (type: AlertType, line: AlertLine): AlertKey =>
 /** The lines each type's card has, in the order shown. A bid always has a person: no "nobody". */
 export const ALERT_LINES: Readonly<Record<AlertType, readonly AlertLine[]>> = {
   ticket: ["coming_up", "past_due", "not_started", "nobody", "review", "steps"],
-  opportunity: ["coming_up", "past_due", "not_started", "nobody", "steps"],
+  opportunity: ["opened", "coming_up", "past_due", "not_started", "nobody", "steps"],
   bid: ["coming_up", "past_due", "steps"],
 };
 
@@ -88,6 +91,7 @@ export const LINE_LABELS: Readonly<Record<AlertLine, string>> = {
   nobody: "Nobody on it",
   review: "Done, waiting",
   steps: "Each step",
+  opened: "New opportunity",
 };
 
 /** The note every card carries (owner: "skip working days and make a note that shows that"). */
@@ -108,7 +112,8 @@ export const WHO_MAX = 60;
  * the person on the work already hears their own part of each step ("Assigned to you", "moved to
  * Friday"), so the step line is for the people watching.
  */
-export const lineHasAssignee = (line: AlertLine): boolean => line !== "nobody" && line !== "steps";
+export const lineHasAssignee = (line: AlertLine): boolean =>
+  line !== "nobody" && line !== "steps" && line !== "opened";
 
 /** What "the person it is assigned to" is called on each line. */
 export function assigneeLabel(type: AlertType, line: AlertLine): string {
@@ -167,6 +172,9 @@ export function defaultWho(legacy: LegacyEscalation | null | undefined): AlertWh
     "opportunity.not_started": clean(escalation, "not_started"),
     "opportunity.nobody": [...office],
     "opportunity.steps": [],
+    // Nov 24 (owner: "we also need notifications for a new opportunity"): on from the start,
+    // to every admin and manager, as a new ticket is.
+    "opportunity.opened": [...office],
     "bid.coming_up": [WHO_ASSIGNEE],
     "bid.past_due": [WHO_ASSIGNEE],
     "bid.steps": [],

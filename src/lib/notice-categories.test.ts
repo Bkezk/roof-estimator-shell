@@ -182,10 +182,17 @@ describe("the helpers the sender and the inbox reads use", () => {
       "date_moved",
       "ticket_watch", // Nov 17: every ticket step, to the admins and the managers
       "ticket_unassigned", // Nov 18: a ticket with nobody on it
+      "care_no_access", // Nov 24: no access at a Roof Care plan inspection
     ]);
+    // Nov 24 (owner: "wouldnt those both be under opportunities?", "3 go"): a new
+    // opportunity, a request from the public pages and the Roof Care plan's payment and expiry.
     expect(kindsOfCategory("opportunities")).toEqual([
       "opportunity_unassigned",
       "opportunity_watch",
+      "opportunity_new",
+      "public_request",
+      "plan_expired",
+      "plan_card_paid",
     ]);
     expect(urlPrefixOfCategory("leads")).toBeNull();
     expect(urlPrefixOfCategory("storms")).toBeNull();
@@ -236,7 +243,14 @@ describe("the helpers the sender and the inbox reads use", () => {
   it("noticeExclusions: the kind list and the url prefixes of what is off", () => {
     expect(noticeExclusions([])).toEqual({ kinds: [], urlPrefixes: [] });
     expect(noticeExclusions(["opportunities"])).toEqual({
-      kinds: ["opportunity_unassigned", "opportunity_watch"],
+      kinds: [
+        "opportunity_unassigned",
+        "opportunity_watch",
+        "opportunity_new",
+        "public_request",
+        "plan_expired",
+        "plan_card_paid",
+      ],
       urlPrefixes: ["/opportunities"],
     });
     expect(noticeExclusions(["leads"])).toEqual({
@@ -253,6 +267,7 @@ describe("the helpers the sender and the inbox reads use", () => {
         "date_moved",
         "ticket_watch",
         "ticket_unassigned",
+        "care_no_access",
         "bid_due",
         "bid_overdue",
         "bid_reminder",

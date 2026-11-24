@@ -22,9 +22,9 @@
  * "Opened: Ticket #12 …", "Closed: Ticket #12 …"). Two notices a row cannot tell apart are
  * one tick. A notice of a switch that fits no type here follows the switch alone.
  *
- * Under no switch, so always sent, as before: tasks, mentions, the Account page's test, a
- * request from the public pages (public_request) and the Roof Care plan notices (plan_expired,
- * care_no_access, plan_card_paid).
+ * Under no switch, so always sent, as before: tasks, mentions and the Account page's test.
+ * (Until Nov 24 a request from the public pages and the Roof Care plan notices were too: the
+ * owner put them under the Opportunity and Service switches, each with a tick of its own.)
  *
  * Pure: it imports only notice-categories.ts. Shared by the sender, the inbox reads, the
  * Account page and the tests.
@@ -179,6 +179,14 @@ export const NOTICE_TYPES: readonly NoticeType[] = [
     help: "A ticket was deleted.",
     match: [step("Deleted: %")],
   },
+  // Nov 24, the owner's addition ("3 go").
+  {
+    key: "service_care_no_access",
+    category: "service",
+    label: "Roof Care: no access",
+    help: "A technician could not get on the roof for a plan inspection.",
+    match: [{ kinds: ["care_no_access"] }],
+  },
   // ---- Opportunity notices --------------------------------------------------------------------
   {
     key: "opportunities_assigned_me",
@@ -212,8 +220,31 @@ export const NOTICE_TYPES: readonly NoticeType[] = [
     key: "opportunities_steps",
     category: "opportunities",
     label: "Each step",
-    help: "An opportunity was opened, given to someone, changed status or was deleted.",
+    help: "An opportunity was given to someone, changed status or was deleted.",
     match: [{ kinds: ["opportunity_watch"] }],
+  },
+  // Nov 24, the owner's additions. Added at the end of the switch's list so the keys above
+  // keep their order.
+  {
+    key: "opportunities_new",
+    category: "opportunities",
+    label: "New opportunity",
+    help: "Someone opened a new opportunity.",
+    match: [{ kinds: ["opportunity_new"] }],
+  },
+  {
+    key: "opportunities_public_request",
+    category: "opportunities",
+    label: "New QR page request",
+    help: "A customer sent the Roof Care or Request service form from a QR code.",
+    match: [{ kinds: ["public_request"] }],
+  },
+  {
+    key: "opportunities_care_plan",
+    category: "opportunities",
+    label: "Roof Care plan",
+    help: "A plan was paid by card, a card payment has to be sent back, or a plan expired.",
+    match: [{ kinds: ["plan_card_paid", "plan_expired"] }],
   },
   // ---- Bid notices ----------------------------------------------------------------------------
   {

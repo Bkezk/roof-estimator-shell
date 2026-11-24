@@ -29,29 +29,32 @@ export async function tellStep(input: {
   /** People this same change already tells another way (a ticket's technician). */
   skip?: readonly string[];
   sb: Client;
-}): Promise<void> {
-  if (!input.notice) return;
+}): Promise<string[]> {
+  if (!input.notice) return [];
   let title = "";
   try {
     const admin = await serverClient(input.sb);
     const ctx = await loadAlertContext(admin);
     const left = new Set(input.skip ?? []);
     const listed = recipientsFor(ctx, input.key, null).filter((id) => !left.has(id));
-    if (!listed.length) return;
+    if (!listed.length) return [];
     const notice =
       typeof input.notice === "function" ? input.notice((id) => personName(ctx, id)) : input.notice;
-    if (!notice) return;
+    if (!notice) return listed;
     title = notice.title;
     const ids = await exceptActor(listed, input.actorId, admin);
-    if (!ids.length) return;
+    if (!ids.length) return listed;
     await notify(
       ids,
       { kind: input.kind, title: notice.title, body: notice.body, url: input.url },
       admin,
     );
+    // Who is on this line: a second line told about the same change leaves them out.
+    return listed;
   } catch (e) {
     console.error(
       `tellStep: the ${input.key} notice${title ? ` "${title}"` : ""} was not sent: ${e instanceof Error ? e.message : String(e)}`,
     );
+    return [];
   }
 }

@@ -67,7 +67,9 @@ const flatSql = (p: string) =>
 const labelsOf = (c: NoticeCategory) => typesOfCategory(c).map((t) => `${t.key} = ${t.label}`);
 
 describe("the ticks under each switch", () => {
-  it("Service notices: the life of a ticket, fifteen ticks", () => {
+  // Nov 24 (owner: "we also need notifications for a new opportunity ... go on 1, 2 ... 3 go"):
+  // a tick for no access at a Roof Care plan inspection, at the end of the list.
+  it("Service notices: the life of a ticket, sixteen ticks", () => {
     expect(labelsOf("service")).toEqual([
       "service_opened = Opened",
       "service_assigned_me = Assigned to me",
@@ -84,16 +86,22 @@ describe("the ticks under each switch", () => {
       "service_closed = Closed",
       "service_moved_back = Reopened or moved back",
       "service_deleted = Deleted",
+      "service_care_no_access = Roof Care: no access",
     ]);
   });
 
-  it("Opportunity notices: five ticks", () => {
+  // Nov 24 (owner: "we also need notifications for a new opportunity ... go on 1, 2 ... 3 go"):
+  // a new opportunity, a request from the QR pages and the Roof Care plan each get a tick.
+  it("Opportunity notices: eight ticks", () => {
     expect(labelsOf("opportunities")).toEqual([
       "opportunities_assigned_me = Assigned to me",
       "opportunities_follow_up = Follow-up due",
       "opportunities_not_started = Not started",
       "opportunities_nobody = Nobody on it",
       "opportunities_steps = Each step",
+      "opportunities_new = New opportunity",
+      "opportunities_public_request = New QR page request",
+      "opportunities_care_plan = Roof Care plan",
     ]);
   });
 
@@ -112,9 +120,9 @@ describe("the ticks under each switch", () => {
     expect(CATEGORIES_WITH_CHOICES).toEqual(["opportunities", "service", "bids"]);
   });
 
-  it("every key is its own, plain, and starts with its switch; twenty-four in all", () => {
-    expect(NOTICE_TYPE_KEYS).toHaveLength(24);
-    expect(new Set(NOTICE_TYPE_KEYS).size).toBe(24);
+  it("every key is its own, plain, and starts with its switch; twenty-eight in all", () => {
+    expect(NOTICE_TYPE_KEYS).toHaveLength(28);
+    expect(new Set(NOTICE_TYPE_KEYS).size).toBe(28);
     for (const t of NOTICE_TYPES) {
       expect(t.key).toMatch(/^[a-z][a-z0-9_]{2,39}$/);
       expect(t.key.startsWith(`${t.category}_`)).toBe(true);
@@ -411,14 +419,23 @@ const SENT: Sent[] = [
     kind: "public_request",
     url: O,
     title: "Service request from the public page: Acme",
-    expect: "always",
+    // Nov 24: under the Opportunity switch now, with a tick of its own (it was always sent).
+    expect: "opportunities_public_request",
+  },
+  {
+    from: "src/lib/opportunities.functions.ts",
+    kind: "opportunity_new",
+    url: O,
+    title: "Opened: Acme reroof",
+    expect: "opportunities_new",
+    pin: "kind: OPPORTUNITY_NEW_KIND",
   },
   {
     from: "src/lib/roof-care-notify.server.ts",
     kind: "plan_expired",
     url: "/properties/p1",
     title: "Guard plan expired: Acme",
-    expect: "always",
+    expect: "opportunities_care_plan",
     pin: 'PLAN_EXPIRED_KIND = "plan_expired"',
   },
   {
@@ -426,21 +443,21 @@ const SENT: Sent[] = [
     kind: "care_no_access",
     url: T,
     title: "No access for a Guard inspection: Acme",
-    expect: "always",
+    expect: "service_care_no_access",
   },
   {
     from: "src/lib/roof-care-checkout.ts",
     kind: "plan_card_paid",
     url: "/properties/p1",
     title: "Card payment to send back: Acme",
-    expect: "always",
+    expect: "opportunities_care_plan",
   },
   {
     from: "src/routes/api.stripe.webhook.ts",
     kind: "plan_card_paid",
     url: "/properties/p1",
     title: "A card payment could not be recorded: Acme",
-    expect: "always",
+    expect: "opportunities_care_plan",
   },
 ];
 
@@ -703,7 +720,9 @@ describe("takesNotice: the switch is on AND the type is not off", () => {
     }
   });
 
-  it("what is under no switch always goes: tasks, mentions, the test, public requests, Roof Care plan notices", () => {
+  // Nov 24: a request from the public pages and the Roof Care plan notices left this list the
+  // day the owner put them under a switch ("wouldnt those both be under opportunities?").
+  it("what is under no switch always goes: tasks, mentions and the test", () => {
     const hermit = {
       notify_leads: false,
       notify_opportunities: false,
@@ -719,11 +738,6 @@ describe("takesNotice: the switch is on AND the type is not off", () => {
       "task_overdue",
       "mention",
       "test",
-      "public_request",
-      "plan_expired",
-      "care_no_access",
-      "plan_card_paid",
-      "plan_card_paid",
     ]);
     for (const s of always) expect(takesNotice(hermit, s), s.kind).toBe(true);
   });
@@ -923,18 +937,18 @@ describe("noticeFilters: what the inbox reads leave out", () => {
 describe("the words", () => {
   it("the button, and the line beside it", () => {
     expect(NOTICE_CHOICES_BUTTON).toBe("Choose which");
-    expect(noticeChoicesLine("service", [])).toBe("All 15 on");
-    expect(noticeChoicesLine("opportunities", [])).toBe("All 5 on");
+    expect(noticeChoicesLine("service", [])).toBe("All 16 on");
+    expect(noticeChoicesLine("opportunities", [])).toBe("All 8 on");
     expect(noticeChoicesLine("bids", [])).toBe("All 4 on");
     expect(noticeChoicesLine("service", ["service_scheduled", "service_deleted"])).toBe(
-      "2 of 15 off",
+      "2 of 16 off",
     );
     // Another switch's ticks, and keys nobody knows, are not counted here.
     expect(noticeChoicesLine("bids", ["service_scheduled", "bids_steps", "junk"])).toBe(
       "1 of 4 off",
     );
-    expect(offCountOf("service", [...NOTICE_TYPE_KEYS])).toBe(15);
-    expect(noticeChoicesLine("service", [...NOTICE_TYPE_KEYS])).toBe("15 of 15 off");
+    expect(offCountOf("service", [...NOTICE_TYPE_KEYS])).toBe(16);
+    expect(noticeChoicesLine("service", [...NOTICE_TYPE_KEYS])).toBe("16 of 16 off");
   });
 
   it("while the switch itself is off", () => {
@@ -985,6 +999,13 @@ describe("the words", () => {
 /* ---- 5. the migration ---------------------------------------------------------------------- */
 
 const MIGRATION = "supabase/migrations/20261124700000_notice_fine_choices.sql";
+/** The four ticks added later on Nov 24 (20261124950000_notice_more_ticks.sql). */
+const MORE_TICKS = [
+  "service_care_no_access",
+  "opportunities_new",
+  "opportunities_public_request",
+  "opportunities_care_plan",
+];
 const OCT13 = "supabase/migrations/20261013170000_notice_categories.sql";
 
 describe(`migration ${MIGRATION}`, () => {
@@ -1009,7 +1030,20 @@ describe(`migration ${MIGRATION}`, () => {
       /^create or replace function public\.notice_fine_keys\(\) returns text\[\] language sql stable set search_path = public as \$\$ select array\[/,
     );
     const keys = [...fn.matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]);
-    expect(keys).toEqual(NOTICE_TYPE_KEYS);
+    // Nov 24, later the same day: four ticks were added, and the list was replaced whole by
+    // 20261124950000_notice_more_ticks.sql. The first file holds the first twenty-four.
+    const first = NOTICE_TYPE_KEYS.filter((k) => !MORE_TICKS.includes(k));
+    expect(keys).toEqual(first);
+    const later = flatSql("supabase/migrations/20261124950000_notice_more_ticks.sql");
+    const laterKeys = [
+      ...fnFrom(later, "create or replace function public.notice_fine_keys()").matchAll(
+        /'([a-z0-9_]+)'/g,
+      ),
+    ].map((m) => m[1]);
+    expect(laterKeys).toEqual(NOTICE_TYPE_KEYS);
+    expect(later).toContain(
+      "revoke all on function public.notice_fine_keys() from public, anon, authenticated;",
+    );
     expect(sql).toContain(
       "revoke all on function public.notice_fine_keys() from public, anon, authenticated;",
     );

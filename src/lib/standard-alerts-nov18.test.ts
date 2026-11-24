@@ -250,7 +250,9 @@ describe("the rules: the same lines for every kind of work", () => {
   it("each type's lines, in the order its card shows them", () => {
     expect(ALERT_LINES).toEqual({
       ticket: ["coming_up", "past_due", "not_started", "nobody", "review", "steps"],
-      opportunity: ["coming_up", "past_due", "not_started", "nobody", "steps"],
+      // Nov 24 (owner: "we also need notifications for a new opportunity"): a line of
+      // its own, first on the card, told to every admin and manager until someone changes it.
+      opportunity: ["opened", "coming_up", "past_due", "not_started", "nobody", "steps"],
       bid: ["coming_up", "past_due", "steps"],
     });
     // Every line of every card has a key, and there are no others.
@@ -258,7 +260,7 @@ describe("the rules: the same lines for every kind of work", () => {
       ALERT_LINES[t].map((l) => alertKey(t, l)),
     );
     expect([...fromCards].sort()).toEqual([...ALERT_KEYS].sort());
-    expect(ALERT_KEYS).toHaveLength(14);
+    expect(ALERT_KEYS).toHaveLength(15);
     expect(TYPE_TITLES).toEqual({
       ticket: "Service tickets",
       opportunity: "Opportunities",
@@ -271,6 +273,7 @@ describe("the rules: the same lines for every kind of work", () => {
       nobody: "Nobody on it",
       review: "Done, waiting",
       steps: "Each step",
+      opened: "New opportunity",
     });
   });
   it("the note says working days, in plain words", () => {
@@ -1374,7 +1377,9 @@ describe("Each step: opportunities and bids, off until someone picks people", ()
       rpc: (name) =>
         name === "notify_recipients" ? { data: null, error: { message: "boom" } } : undefined,
     });
-    await expect(step("bid.steps", client)).resolves.toBeUndefined();
+    // Nov 24: tellStep answers who is on the line (nobody, when it could not be sent), so a
+    // second line told about the same change can leave them out.
+    await expect(step("bid.steps", client)).resolves.toEqual([]);
     expect(errorLog).toHaveBeenCalledWith(
       'tellStep: the bid.steps notice "Won: Gym reroof" was not sent: boom',
     );
@@ -1388,12 +1393,17 @@ describe("Each step: opportunities and bids, off until someone picks people", ()
         actorId: TECH,
         sb: connect({}, { broken: "crm_settings" }),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual([]);
   });
   it("the saves call it: opportunities on open, status, person and delete; bids on start, status and delete", () => {
     const opps = flat(read("src/lib/opportunities.functions.ts"));
+    // Nov 24: a new opportunity goes to the "New opportunity" line first, under a kind of its
+    // own, and the "Each step" line leaves out whoever that told.
     expect(opps).toContain(
-      'await tellStep({ key: "opportunity.steps", kind: OPPORTUNITY_WATCH_KIND, notice: (nameOf) => opportunityStepNotice({',
+      '? await tellStep({ ...step, key: "opportunity.opened", kind: OPPORTUNITY_NEW_KIND })',
+    );
+    expect(opps).toContain(
+      'await tellStep({ ...step, key: "opportunity.steps", kind: created ? OPPORTUNITY_NEW_KIND : OPPORTUNITY_WATCH_KIND, skip: told, });',
     );
     expect(opps).toContain(
       "const synced = await syncOppFollowup(row, oldStatus, context, nameOf(p), !id);",

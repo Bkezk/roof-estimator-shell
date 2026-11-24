@@ -40,7 +40,7 @@ describe("NoticeChoices", () => {
     expect(button).toContain('type="button"');
     // A thumb-sized button on a phone.
     expect(button).toContain("min-h-[44px]");
-    expect(text(html).slice(0, 2)).toEqual(["Choose which", "All 15 on"]);
+    expect(text(html).slice(0, 2)).toEqual(["Choose which", "All 16 on"]);
     const list = tags(html, "div").find((d) => d.includes("data-choices-list"))!;
     expect(list).toContain("hidden");
     expect(list).toContain('role="group"');
@@ -51,10 +51,10 @@ describe("NoticeChoices", () => {
   });
 
   it("the line says how many are off, for this switch only", () => {
-    expect(text(render({ off: ["service_scheduled", "service_deleted"] }))[1]).toBe("2 of 15 off");
-    expect(text(render({ off: ["bids_steps", "junk"] }))[1]).toBe("All 15 on");
+    expect(text(render({ off: ["service_scheduled", "service_deleted"] }))[1]).toBe("2 of 16 off");
+    expect(text(render({ off: ["bids_steps", "junk"] }))[1]).toBe("All 16 on");
     expect(text(render({ category: "bids", off: ["bids_steps", "junk"] }))[1]).toBe("1 of 4 off");
-    expect(text(render({ category: "opportunities" }))[1]).toBe("All 5 on");
+    expect(text(render({ category: "opportunities" }))[1]).toBe("All 8 on");
   });
 
   it("opened: one tick per notice type, each a whole row at least 44 px tall, all on by default", () => {
@@ -62,7 +62,8 @@ describe("NoticeChoices", () => {
     expect(tags(html, "button")[0]).toContain('aria-expanded="true"');
     expect(tags(html, "div").find((d) => d.includes("data-choices-list"))).not.toContain("hidden");
     const rows = tags(html, "label");
-    expect(rows).toHaveLength(15);
+    // Nov 24, later the same day: a sixteenth tick, no access at a Roof Care plan inspection.
+    expect(rows).toHaveLength(16);
     for (const row of rows) {
       // In px, never rem: this site's rem is 13 px (styles.css), so min-h-11 measured 36 px
       // in the browser, and a row with two lines of words came to 42.
@@ -74,7 +75,7 @@ describe("NoticeChoices", () => {
       typesOfCategory("service").map((t) => t.key),
     );
     const ticks = boxes(html);
-    expect(ticks).toHaveLength(15);
+    expect(ticks).toHaveLength(16);
     for (const b of ticks) {
       expect(b).toContain('aria-checked="true"');
       expect(b).not.toContain(LOCKED);
@@ -97,7 +98,7 @@ describe("NoticeChoices", () => {
     );
     expect(state["service_scheduled"]).toBe("false");
     expect(state["service_closed"]).toBe("false");
-    expect(Object.values(state).filter((v) => v === "true")).toHaveLength(13);
+    expect(Object.values(state).filter((v) => v === "true")).toHaveLength(14);
   });
 
   it("while the switch itself is off: grey, locked, and the ticks kept as they were", () => {
@@ -111,7 +112,7 @@ describe("NoticeChoices", () => {
     for (const row of tags(html, "label")) expect(row).toContain("cursor-not-allowed");
     // Kept: still one unticked, fourteen ticked, and the line still counts it.
     expect(ticks.filter((b) => b.includes('aria-checked="false"'))).toHaveLength(1);
-    expect(text(html)[1]).toBe("1 of 15 off");
+    expect(text(html)[1]).toBe("1 of 16 off");
     // With the switch on there is no such line and nothing is grey.
     const on = render({ defaultOpen: true });
     expect(on).not.toContain("data-choices-paused");

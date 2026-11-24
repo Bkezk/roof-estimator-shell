@@ -222,6 +222,7 @@ export const KIND_LABELS: Readonly<Record<string, string>> = {
   ticket_unassigned: "Nobody on it",
   opportunity_unassigned: "Nobody on it",
   opportunity_watch: "Opportunity update",
+  opportunity_new: "New opportunity",
   bid_watch: "Bid update",
   ticket_authorized: "Ready to invoice",
   ready_to_invoice: "Ready to invoice",

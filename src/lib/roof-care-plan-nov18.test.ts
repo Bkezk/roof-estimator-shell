@@ -36,6 +36,11 @@ vi.mock("@/lib/roof-care.functions", () => ({
   officeOrigin: async () => ({ line: "1 Office Rd, London, KY", state: "KY" }),
   driveTo: (...a: unknown[]) => drive(...a),
 }));
+// Nov 24: a request taken on site tells the "New opportunity" line (work-steps.server.ts).
+const told = vi.fn<(a: Record<string, unknown>) => Promise<string[]>>(async () => []);
+vi.mock("@/lib/work-steps.server", () => ({
+  tellStep: (a: Record<string, unknown>) => told(a),
+}));
 const announced = vi.fn<(...a: unknown[]) => Promise<void>>(async () => {});
 const moved = vi.fn<(...a: unknown[]) => Promise<void>>(async () => {});
 vi.mock("@/lib/service.functions", () => ({
@@ -1014,6 +1019,53 @@ describe("another service asked for on site", () => {
       },
     ]);
     expect(env.writes).toEqual([]);
+  });
+  // Nov 24 (owner: "we also need notifications for a new opportunity"): it made an opportunity
+  // and nobody was told. Fails on the code of that morning: tellStep was never called.
+  it("tells the New opportunity line, then Each step without the same people twice", async () => {
+    told.mockReset();
+    told.mockResolvedValueOnce(["u-admin", "u-manager"]).mockResolvedValueOnce([]);
+    const env = world(
+      {},
+      { request_additional_service: () => "99999999-9999-4999-8999-999999999999" },
+    );
+    await call<{ id: string }>(requestAdditionalService, env, {
+      site_id: SITE,
+      services: "  Gutter   cleaning ",
+      details: "",
+    });
+    const notice = {
+      title: "Opened: Additional service: Gutter cleaning",
+      body: "Ann Admin took this request down on site. Nobody is assigned yet.",
+    };
+    const url = "/opportunities?id=99999999-9999-4999-8999-999999999999";
+    expect(told.mock.calls.map(([a]) => ({ ...a, sb: undefined }))).toEqual([
+      { key: "opportunity.opened", kind: "opportunity_new", notice, url, actorId: ADMIN },
+      {
+        key: "opportunity.steps",
+        kind: "opportunity_new",
+        notice,
+        url,
+        actorId: ADMIN,
+        skip: ["u-admin", "u-manager"],
+      },
+    ]);
+  });
+  it("a refused request tells nobody", async () => {
+    told.mockReset();
+    const env = world(
+      {},
+      {
+        request_additional_service: () => {
+          throw new Error("You can take a request at a property you have a ticket at");
+        },
+      },
+    );
+    await expect(
+      (async () =>
+        call(requestAdditionalService, env, { site_id: SITE, services: "Gutter cleaning" }))(),
+    ).rejects.toThrow();
+    expect(told).not.toHaveBeenCalled();
   });
   it("blank words are refused before the database is asked", async () => {
     const env = world({}, { request_additional_service: () => "x" });
