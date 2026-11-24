@@ -27,6 +27,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { csvSafeCell } from "@/lib/csv-safe";
 import { csvMoney, csvNumber, pctLabel, pdfMoney } from "@/lib/invoice-format";
 import { invoiceLabel } from "@/lib/invoice-numbering";
 import { pdfLineRows, propertyLines } from "@/lib/invoice-pdf-rows";
@@ -1232,11 +1233,16 @@ export async function emailInvoice(input: {
   }
 }
 
-/** One CSV for the bookkeeper: a header row per invoice and a line row per line. */
+/**
+ * One CSV for the bookkeeper: a header row per invoice and a line row per line.
+ * Nov 24: a cell of words that starts like a formula gets one single quote in front, and an
+ * amount is left as it is (csv-safe.ts). A cell holding a carriage return is quoted too, so the
+ * row stays one row.
+ */
 export function sageCsv(bundles: { invoice: InvoiceRow; lines: InvoiceLineRow[] }[]): string {
   const esc = (v: unknown) => {
-    const s = v == null ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    const s = csvSafeCell(v == null ? "" : String(v));
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const rows: string[][] = [
     [

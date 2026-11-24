@@ -4,6 +4,7 @@
  * in from the same computed result the Bid-total panel shows, so the export can't disagree with
  * the live estimate.
  */
+import { csvSafeCell } from "@/lib/csv-safe";
 
 export interface ReviewData {
   bidName: string;
@@ -110,8 +111,15 @@ export function buildReviewRows(d: ReviewData): string[][] {
   return rows;
 }
 
-/** RFC-4180-style CSV: quote fields containing commas, quotes or newlines; CRLF line ends. */
+/**
+ * RFC-4180-style CSV: quote fields containing commas, quotes or newlines; CRLF line ends.
+ * Nov 24: a cell of words that starts like a formula gets one single quote in front first, and
+ * a plain number is left as it is (csv-safe.ts).
+ */
 export function toCsv(rows: string[][]): string {
-  const field = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const field = (cell: string) => {
+    const v = csvSafeCell(cell);
+    return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  };
   return rows.map((r) => r.map(field).join(",")).join("\r\n") + "\r\n";
 }
