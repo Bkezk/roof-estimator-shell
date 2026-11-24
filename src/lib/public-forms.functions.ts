@@ -35,6 +35,7 @@ import {
   PUBLIC_BUSY,
   PUBLIC_MIN_OPEN_MS,
   PUBLIC_NEED_WHAT,
+  PUBLIC_CHECK_FORM,
   PUBLIC_NOT_READY,
   PUBLIC_SIZE_RANGE_ENDS,
   PUBLIC_SIZE_RANGE_SQFT,
@@ -139,9 +140,7 @@ function parsePlain<T>(schema: z.ZodType<T>, d: unknown): T {
   if (r.success) return r.data;
   const first = r.error.issues[0];
   const custom = first && !/^(Invalid|Expected|Required|Too|String|Number)/i.test(first.message);
-  throw new Error(
-    custom && first ? first.message : "Check the form: one of the boxes is not filled in right.",
-  );
+  throw new Error(custom && first ? first.message : PUBLIC_CHECK_FORM);
 }
 
 /** A phone number with its area code, or an email address. */

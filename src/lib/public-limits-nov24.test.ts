@@ -132,9 +132,14 @@ describe("1. A limit is said in the right words", () => {
     expect(publicLimitLine("The price changed after it was shown.")).toBeNull();
     const care = flat(read("src/components/public/care-page.tsx"));
     const request = flat(read("src/components/public/request-page.tsx"));
-    expect(care).toContain("setAskError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);");
-    expect(care).toContain("setSendError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);");
-    expect(request).toContain("setSendError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);");
+    // Nov 24, later (owner: "yes on 5"): the pages show the server's own reason too, through
+    // publicSayLine, which asks publicLimitLine first (public-refusal-lines-nov24.test.ts).
+    expect(care).toContain("setAskError(publicSayLine(errWords(e)) ?? SEND_FAILED_LINE);");
+    expect(care).toContain("setSendError(publicSayLine(errWords(e)) ?? SEND_FAILED_LINE);");
+    expect(request).toContain("setSendError(publicSayLine(errWords(e)) ?? SEND_FAILED_LINE);");
+    expect(flat(read("src/lib/public-forms.ts"))).toContain(
+      "publicLimitLine(words) ?? publicRefusalLine(words);",
+    );
   });
   it("the database: higher day limits, a day limit for one connection, counted in one step", () => {
     const sql = flat(read("supabase/migrations/20261124900000_public_limits_and_email_count.sql"));

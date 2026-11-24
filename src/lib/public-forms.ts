@@ -188,6 +188,8 @@ export const PUBLIC_NOT_READY = "This page is not available just now. Please cal
 /** Said for anything that went wrong on our side: never a database's own words. */
 export const PUBLIC_TRY_AGAIN =
   "That did not go through. Please try again in a minute, or call us.";
+/** Said when what arrived is not a form the server can read (a box of the wrong kind). */
+export const PUBLIC_CHECK_FORM = "Check the form: one of the boxes is not filled in right.";
 /** The terms on the page are not the set in use any more. */
 export const PUBLIC_TERMS_MOVED =
   "The plan's terms were updated. Reload the page, read them again, then send.";
@@ -209,6 +211,70 @@ export const PUBLIC_LIMIT_LINES: readonly string[] = [
 /** The limit sentence inside a failure's words, or null when it is some other failure. */
 export const publicLimitLine = (words: string): string | null =>
   PUBLIC_LIMIT_LINES.find((l) => words.includes(l)) ?? null;
+
+// ── Nov 24 (owner: "yes on 5"): the server's own reason, shown to the visitor ───────────────
+//
+// When the server turns a form down it has an exact reason: "Type the state as two letters,
+// like KY.", "The price changed after it was shown...". The pages used to show one general
+// line for all of them. They now show the reason itself, but only a sentence on this list:
+// the plain sentences the database's two public functions raise for a visitor (public_care_quote
+// and public_request_submit; a test reads them out of the migration and fails when one is
+// missing here), and the server's own three. Anything else (a fault of ours, a database's
+// technical words) still gets the general line.
+
+/** The button on the Roof Care page the price sentences send the visitor back to. */
+export const PUBLIC_PRICE_BUTTON = "Show my price";
+
+/** The sentences a visitor is shown as they are. */
+export const PUBLIC_REFUSAL_LINES: readonly string[] = [
+  // The building and its roof (the price question and both forms).
+  "Type the building's street address, city, state and zip.",
+  "Type the state as two letters, like KY.",
+  "Type the building's five digit zip code.",
+  "The roof size did not come through. Please try again.",
+  "Type the roof's size in square feet: a number above 0.",
+  "The plan prices are not set up yet. Please call us.",
+  // Who is asking.
+  "The form did not come through. Please try again.",
+  "Type your name.",
+  "One of the boxes holds more than it can take. Shorten it and send again.",
+  "Type a phone number with its area code, or an email address, so we can reach you.",
+  "The email address does not look right. Check it, or leave it blank and give a phone number.",
+  // The Roof Care sign-up.
+  "The prices on the page are no longer current. Press Show my prices again, then send.",
+  "The address changed after the prices were shown. Press Show my prices again, then send.",
+  "The price changed after it was shown. Press Show my prices again, then send.",
+  "Pick one of the three plans.",
+  "Say how you would like to pay: by check or by card.",
+  "Tick the box to agree to the plan's terms.",
+  "The plan's terms did not come through. Reload the page and try again.",
+  "Type your full name where it asks who agrees to the terms.",
+  // The Request service form.
+  "One of the services ticked is not on our list any more. Reload the page and try again.",
+  "Tick a service, or tell us what is going on.",
+  // The server's own.
+  PUBLIC_TERMS_MOVED,
+  PUBLIC_NOT_READY,
+  PUBLIC_CHECK_FORM,
+];
+
+/**
+ * The server's reason inside a failure's words, or null when it is not one a visitor is shown.
+ * The longest sentence that fits wins. The database says "Show my prices"; the button reads
+ * "Show my price", so the sentence is shown with the button's own name.
+ */
+export function publicRefusalLine(words: string): string | null {
+  const hit = PUBLIC_REFUSAL_LINES.filter((l) => words.includes(l)).sort(
+    (a, b) => b.length - a.length,
+  )[0];
+  return hit
+    ? hit.replace("Press Show my prices again", `Press ${PUBLIC_PRICE_BUTTON} again`)
+    : null;
+}
+
+/** What a page says after a failure when the server gave a reason: a limit, or the reason. */
+export const publicSayLine = (words: string): string | null =>
+  publicLimitLine(words) ?? publicRefusalLine(words);
 
 /** The day's limits for everyone together (public_form_take2 in the database). */
 export const PUBLIC_DAY_LIMITS = { quote: 2000, request: 300 } as const;

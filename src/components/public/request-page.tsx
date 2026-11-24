@@ -19,7 +19,7 @@ import {
   RobotTrap,
 } from "@/components/public/fields";
 import { FlyerStepHead } from "@/components/roof-care/flyer-look";
-import { publicLimitLine } from "@/lib/public-forms";
+import { publicSayLine } from "@/lib/public-forms";
 import {
   PUBLIC_COMPANY,
   REQUEST_PAGE_LEAD,
@@ -112,7 +112,7 @@ export function PublicRequestPage() {
       setSent(r.reference);
       window.scrollTo({ top: 0 });
     } catch (e) {
-      setSendError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);
+      setSendError(publicSayLine(errWords(e)) ?? SEND_FAILED_LINE);
     } finally {
       busy.current = false;
       setSending(false);

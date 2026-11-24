@@ -20,6 +20,7 @@ vi.mock("@/lib/notify.server", () => ({
 import { NOTICE_TYPES, takesNotice } from "@/lib/notice-types";
 import { noticeCategory } from "@/lib/notice-categories";
 import {
+  PLAN_CARD_WAIT_MINUTES,
   PLAN_NEEDS_PAYMENT_KIND,
   PLAN_PAY_REMIND_DAYS,
   planNeedsPaymentNotice,
@@ -96,7 +97,11 @@ describe("the words", () => {
   it("a card plan, a renewal, and a plan with no names on it", () => {
     const card = planNeedsPaymentNotice(waiting({ pay_method: "card", plan: "guard" }));
     expect(card.title).toBe("Roof Guard plan signed, not paid: Unit 2 (Made Up Storage Co)");
-    expect(card.body).toContain("Signed up by Tom Tech. Paying by card. The plan starts");
+    // A card plan is told only once the card screen was left with no payment (the same night:
+    // "only drop that if they actually pay by card not if they open the menu then leave").
+    expect(card.body).toBe(
+      "Signed up by Tom Tech. Paying by card, and no card payment has come through. The plan starts when it is paid. Open the property to send the payment link or record the payment.",
+    );
     const renewal = planNeedsPaymentNotice(waiting({ renewal: true, plan: "watch" }));
     expect(renewal.title).toBe("Roof Watch plan renewed, not paid: Unit 2 (Made Up Storage Co)");
     expect(renewal.body).toContain("Renewed by Tom Tech. Paying by check.");
@@ -138,7 +143,10 @@ describe("at the sign-up", () => {
     });
     expect(out).toEqual({ plans_notified: 1, plans_errors: 0 });
     expect(env.rpcCalls).toEqual([
-      { fn: "roof_care_pay_notice_claim", args: { p_plan: PLAN, p_days: 2 } },
+      {
+        fn: "roof_care_pay_notice_claim",
+        args: { p_plan: PLAN, p_days: 2, p_reminders: false, p_card_wait: 30 },
+      },
     ]);
     expect(sent).toHaveBeenCalledTimes(1);
     expect(sent.mock.calls[0]![0]).toEqual([ADMIN, MANAGER]);
@@ -176,19 +184,20 @@ describe("the reminder every two days", () => {
     expect(out).toEqual({ plans_notified: 1, plans_errors: 0 });
     expect(env.rpcCalls[0]).toEqual({
       fn: "roof_care_pay_notice_claim",
-      args: { p_plan: null, p_days: 2 },
+      args: { p_plan: null, p_days: 2, p_reminders: true, p_card_wait: 30 },
     });
     expect(sent.mock.calls[0]![0]).toEqual([ADMIN, MANAGER]);
     expect(sent.mock.calls[0]![1]).toMatchObject({
       title: "Roof Care plan still not paid: Unit 2 (Made Up Storage Co)",
     });
   });
-  it("not before 8:00 in the office and not on a weekend: nothing is claimed", async () => {
-    const env = world([waiting({ first: false, days_waiting: 2 })]);
-    // Monday 6:30 in the office, then Saturday 10:00.
+  it("not before 8:00 in the office and not on a weekend: the database is told to hold them", async () => {
+    const env = world([]);
+    // Monday 6:30 in the office, then Saturday 10:00, then Monday 10:00.
     await dispatchPlanPayNotices(env.db, { now: new Date("2027-12-20T11:30:00Z") });
     await dispatchPlanPayNotices(env.db, { now: new Date("2027-12-18T15:00:00Z") });
-    expect(env.rpcCalls).toEqual([]);
+    await dispatchPlanPayNotices(env.db, { now: MONDAY });
+    expect(env.rpcCalls.map((c) => c.args["p_reminders"])).toEqual([false, false, true]);
     expect(sent).not.toHaveBeenCalled();
   });
   it("a send that fails puts the plan back as it was, and the others still go", async () => {
@@ -206,6 +215,58 @@ describe("the reminder every two days", () => {
     ]);
     expect(sent).toHaveBeenCalledTimes(2);
     log.mockRestore();
+  });
+});
+
+describe("a plan paid by card", () => {
+  // The owner, the same night: "if someone pays by card we just need the notification they paid
+  // by card", then "only drop that if they actually pay by card not if they open the menu then
+  // leave".
+  const sql = flat("supabase/migrations/20261124970000_roof_care_pay_notice_card.sql");
+  it("is not told at its sign-up: the database hands nothing back, so nothing is sent", async () => {
+    const env = world([]);
+    const out = await dispatchPlanPayNotices(env.db, { planId: PLAN, actorId: TECH, now: MONDAY });
+    expect(out).toEqual({ plans_notified: 0, plans_errors: 0 });
+    expect(sent).not.toHaveBeenCalled();
+    // The rule itself is the database's: never told, by card, and asked for by its sign-up.
+    expect(sql).toContain(
+      "(p.pay_notified_at is null and (p.pay_method is distinct from 'card' or (p_plan is null and p.created_at <= now() - make_interval(mins => greatest(coalesce(p_card_wait, 30), 1)))))",
+    );
+  });
+  it("is told half an hour later when no payment came, at any hour, as the sign-up's notice", async () => {
+    expect(PLAN_CARD_WAIT_MINUTES).toBe(30);
+    const env = world([waiting({ pay_method: "card" })]);
+    // Saturday 21:00 in the office: the reminders are held, this is not one.
+    const out = await dispatchPlanPayNotices(env.db, { now: new Date("2027-12-19T02:00:00Z") });
+    expect(out).toEqual({ plans_notified: 1, plans_errors: 0 });
+    expect(env.rpcCalls[0]!.args).toEqual({
+      p_plan: null,
+      p_days: 2,
+      p_reminders: false,
+      p_card_wait: 30,
+    });
+    expect(sent.mock.calls[0]![0]).toEqual([ADMIN, MANAGER]);
+    expect(sent.mock.calls[0]![1]).toMatchObject({
+      title: "Roof Care plan signed, not paid: Unit 2 (Made Up Storage Co)",
+      body: expect.stringContaining("Paying by card, and no card payment has come through."),
+    });
+  });
+  it("a plan that was paid is not waiting, so it is never claimed", () => {
+    expect(sql).toContain("where p.status = 'awaiting_payment'");
+  });
+  it("the reminder is claimed only when the server says it is the morning of a working day", () => {
+    expect(sql).toContain(
+      "or (p_plan is null and coalesce(p_reminders, false) and p.pay_notified_at is not null and greatest(p.pay_notified_at, coalesce(p.pay_link_sent_at, p.pay_notified_at)) <= now() - make_interval(days => greatest(coalesce(p_days, 2), 1)))",
+    );
+  });
+  it("the older function is dropped, so a call cannot fit two; the server alone may call the new one", () => {
+    expect(sql).toContain(
+      "drop function if exists public.roof_care_pay_notice_claim(uuid, integer);",
+    );
+    const fn = "roof_care_pay_notice_claim(uuid, integer, boolean, integer)";
+    expect(sql).toContain(`revoke all on function public.${fn} from public, anon, authenticated;`);
+    expect(sql).toContain(`grant execute on function public.${fn} to service_role;`);
+    expect(sql).not.toMatch(/\b(delete from|truncate|drop table|insert into|alter table)\b/i);
   });
 });
 
@@ -269,9 +330,8 @@ describe("the database change", () => {
     expect(sql).toContain("for update of p skip locked");
     expect(sql).toContain("update public.roof_care_plans p set pay_notified_at = now() from due");
   });
-  it("a sign-up's call tells a plan only the first time; the pass waits the days out", () => {
-    expect(sql).toContain("p.pay_notified_at is null or (p_plan is null and greatest(");
-    // Sending the payment link again starts the days over.
+  it("sending the payment link again starts the days over", () => {
+    // The rule was rewritten the same night for card plans: its tests are above.
     expect(sql).toContain(
       "greatest(p.pay_notified_at, coalesce(p.pay_link_sent_at, p.pay_notified_at)) <= now() - make_interval(days => greatest(coalesce(p_days, 2), 1))",
     );

@@ -9,6 +9,13 @@
  * PLAN_PAY_REMIND_DAYS days while it is still waiting. Sending the payment link again starts
  * the days over. A plan that is paid or ended is never told.
  *
+ * A plan paid by card is held back at its sign-up (owner, the same night: "if someone pays by
+ * card we just need the notification they paid by card", and "only drop that if they actually
+ * pay by card not if they open the menu then leave"). The customer is at the card screen. When
+ * the payment comes through the plan starts and "paid by card" is the only notice. When none
+ * has come PLAN_CARD_WAIT_MINUTES after the sign-up, the next pass sends the notice of the
+ * sign-up, at any hour, and the reminders follow as for any other plan.
+ *
  * Pure: the words. The sending is roof-care-notify.server.ts; the database's side is
  * 20261124960000_roof_care_pay_notice.sql.
  */
@@ -18,6 +25,8 @@ import { planName } from "@/lib/roof-care-plan";
 export const PLAN_NEEDS_PAYMENT_KIND = "plan_needs_payment";
 /** A waiting plan is told again after this many days with no movement. */
 export const PLAN_PAY_REMIND_DAYS = 2;
+/** A card plan's "signed, not paid" waits this long for the card payment to come through. */
+export const PLAN_CARD_WAIT_MINUTES = 30;
 
 /** One plan to tell, as roof_care_pay_notice_claim hands it back. */
 export interface PlanWaitingForPayment {
@@ -58,10 +67,13 @@ export function planNeedsPaymentNotice(p: PlanWaitingForPayment) {
   if (p.first) {
     const who = (p.sold_by_name ?? "").trim();
     const did = p.renewal ? "Renewed" : "Signed up";
+    // A card plan is told only after the card screen was left without a payment.
+    const paying =
+      p.pay_method === "card" ? " Paying by card, and no card payment has come through." : how;
     return {
       kind: PLAN_NEEDS_PAYMENT_KIND,
       title: `${name} plan ${p.renewal ? "renewed" : "signed"}, not paid: ${place(p)}`,
-      body: `${did}${who ? ` by ${who}` : ""}.${how} The plan starts when it is paid. Open the property to send the payment link or record the payment.`,
+      body: `${did}${who ? ` by ${who}` : ""}.${paying} The plan starts when it is paid. Open the property to send the payment link or record the payment.`,
       url,
     };
   }

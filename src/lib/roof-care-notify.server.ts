@@ -18,7 +18,11 @@ import { databaseRpc } from "@/lib/database-rpc";
 import { shortDay } from "@/lib/followup-rules";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { exceptActor } from "@/lib/own-notices.server";
-import { PLAN_PAY_REMIND_DAYS, planNeedsPaymentNotice } from "@/lib/roof-care-pay-notice";
+import {
+  PLAN_CARD_WAIT_MINUTES,
+  PLAN_PAY_REMIND_DAYS,
+  planNeedsPaymentNotice,
+} from "@/lib/roof-care-pay-notice";
 import { planName } from "@/lib/roof-care-plan";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
 import { isWeekend, morningReached, plusDays } from "@/lib/working-days";
@@ -151,9 +155,12 @@ export interface PlanPayNoticeResult {
  * Tell the admins and the managers about plans that wait for their payment.
  *
  * With `planId`: that plan's first notice, at once (the sign-up just happened; the person who
- * signed it is told only with "My own changes" on). Without: the morning pass, which sends what
- * a sign-up could not, and the reminder every PLAN_PAY_REMIND_DAYS days. The pass sends nothing
- * before 8:00 on the office's clock, nor on a Saturday or Sunday, as every reminder does.
+ * signed it is told only with "My own changes" on). A card plan is not told here: the database
+ * holds it back while the customer is at the card screen. Without `planId`: the pass. At any
+ * hour it sends the notice of a sign-up that has not gone out, a card plan's once
+ * PLAN_CARD_WAIT_MINUTES have gone by with no payment. The reminder every
+ * PLAN_PAY_REMIND_DAYS days goes only from 8:00 on the office's clock on a working day, as
+ * every reminder does.
  *
  * The database claims each plan before anything is sent (roof_care_pay_notice_claim), so two
  * passes at once send one notice between them. A send that fails puts the stamp back.
@@ -164,11 +171,13 @@ export async function dispatchPlanPayNotices(
 ): Promise<PlanPayNoticeResult> {
   const out: PlanPayNoticeResult = { plans_notified: 0, plans_errors: 0 };
   const now = opts.now ?? new Date();
-  if (!opts.planId && (!morningReached(now) || isWeekend(localYmd(now, TASK_TZ)))) return out;
+  const reminders = !opts.planId && morningReached(now) && !isWeekend(localYmd(now, TASK_TZ));
   const admin = await serverClient(sb);
   const { data: plans, error } = await databaseRpc(admin)("roof_care_pay_notice_claim", {
     p_plan: opts.planId ?? null,
     p_days: PLAN_PAY_REMIND_DAYS,
+    p_reminders: reminders,
+    p_card_wait: PLAN_CARD_WAIT_MINUTES,
   });
   if (error) throw new Error(error.message);
   if (!plans?.length) return out;

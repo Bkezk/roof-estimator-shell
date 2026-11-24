@@ -70,7 +70,13 @@ type RpcContracts = {
   // 20261124960000_roof_care_pay_notice.sql (owner, Nov 24: a plan that is signed and not paid).
   // The plans to tell now, each stamped as told in the same statement. The server's alone.
   roof_care_pay_notice_claim: {
-    Args: { p_plan?: string | null; p_days?: number | null };
+    Args: {
+      p_plan?: string | null;
+      p_days?: number | null;
+      // 20261124970000: the reminders go only with the morning run; a card plan waits first.
+      p_reminders?: boolean | null;
+      p_card_wait?: number | null;
+    };
     Returns: PlanWaitingForPayment[];
   };
   roof_care_pay_notice_release: {
