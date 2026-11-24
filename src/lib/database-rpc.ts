@@ -52,6 +52,20 @@ type RpcContracts = {
     Args: { p_ids?: string[] | null };
     Returns: CareTicketToAnnounce[];
   };
+  // 20261124700000_notice_fine_choices.sql (owner, Nov 24: which notices, one by one;
+  // notice-types.ts). The recipients read hands back each person's off list next to their
+  // switches: absent until that migration is applied, and then nothing is off.
+  notify_recipients: {
+    Args: Functions["notify_recipients"]["Args"];
+    Returns: (Functions["notify_recipients"]["Returns"][number] & {
+      notify_off?: string[] | null;
+    })[];
+  };
+  // The save of a person's own off list: the list goes in whole and comes back as kept.
+  set_my_notify_off: {
+    Args: { p_off: string[] };
+    Returns: string[];
+  };
 };
 type RpcDatabase = Omit<Database, "public"> & {
   public: Omit<Database["public"], "Functions"> & {
@@ -72,4 +86,24 @@ export function databaseRpc(client: SupabaseClient<Database>) {
  */
 export function buildingsSearchTable(client: SupabaseClient<Database>) {
   return client.from("buildings_search" as "buildings");
+}
+
+type Tables = Database["public"]["Tables"];
+type Profiles = Tables["profiles"];
+type NoticeChoicesDatabase = Omit<Database, "public"> & {
+  public: Omit<Database["public"], "Tables"> & {
+    Tables: Omit<Tables, "profiles"> & {
+      profiles: Omit<Profiles, "Row"> & { Row: Profiles["Row"] & { notify_off: string[] } };
+    };
+  };
+};
+
+/**
+ * `profiles.notify_off` (20261124700000_notice_fine_choices.sql): the notice types a person
+ * turned off, which the generated types do not list yet. The same table, client and row rules;
+ * only the one column is added to what a select may name. Until the migration is applied a
+ * select that names it comes back as an error, which every caller reads as "nothing is off".
+ */
+export function profilesWithNotifyOff(client: SupabaseClient<Database>) {
+  return (client as unknown as SupabaseClient<NoticeChoicesDatabase>).from("profiles");
 }

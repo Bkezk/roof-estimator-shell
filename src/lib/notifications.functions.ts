@@ -16,12 +16,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import {
-  SHARED_KINDS,
-  noticeExclusions,
-  offCategories,
-  type NoticeCategory,
-} from "@/lib/notice-categories";
+import { profilesWithNotifyOff } from "@/lib/database-rpc";
+import { SHARED_KINDS } from "@/lib/notice-categories";
+import { noticeFilters, noticeRuleFilter, type NoticePrefs } from "@/lib/notice-types";
 
 export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
@@ -54,38 +51,55 @@ export type ListMyNotificationsArgs = z.infer<typeof listSchema>;
 type Db = SupabaseClient<Database>;
 
 /**
- * The notice categories the caller turned off (Account › Notifications › Which notices you get;
- * notice-categories.ts): their own profiles row, which RLS shows them. A row that cannot be read
- * — the migration not applied yet — turns nothing off.
+ * What the caller turned off (Account › Notifications › Which notices you get): the five
+ * switches (notice-categories.ts) and, under a switch that is on, single notice types (owner,
+ * Nov 24; notice-types.ts). Their own profiles row, which RLS shows them. The off list is a
+ * column the database has only once 20261124700000_notice_fine_choices.sql is applied: until
+ * then the read that names it fails and the five switches are read alone, as before. A row that
+ * cannot be read at all turns nothing off.
  */
-async function myOffCategories(sb: Db, userId: string): Promise<NoticeCategory[]> {
+async function myNoticePrefs(sb: Db, userId: string): Promise<NoticePrefs> {
+  const withOff = await profilesWithNotifyOff(sb)
+    .select(
+      "notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms, notify_off",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+  if (!withOff.error) return withOff.data ?? {};
   const { data } = await sb
     .from("profiles")
     .select("notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms")
     .eq("id", userId)
     .maybeSingle();
-  return data ? offCategories(data) : [];
+  return data ?? {};
 }
 
 /** PostgREST's list form for `in`: the kinds are plain identifiers, nothing to quote. */
 const inList = (xs: readonly string[]) => `(${xs.join(",")})`;
 
 /**
- * Leave out the rows of the caller's off categories, in SQL (the list is paged and the count a
- * head request, so not in the server function): `kind not in (…)` for the kind-only kinds of
- * those categories, and for each off category with a link prefix "kind not in (the shared kinds)
- * or url is null or url not like 'prefix%'" — a shared-kind row (assigned, followup, reminder,
- * untouched) is dropped only when its link opens there. Older rows from before the switch was
- * turned off go with it, so the bell clears at once; turning it back on shows them again.
+ * Leave out the rows the caller does not want, in SQL (the list is paged and the count a head
+ * request, so not in the server function). The rule is notice-types.ts' takesNotice, as
+ * noticeFilters spells it for the database:
+ *   - `kind not in (…)` for the kinds of the off switches and of the off notice types that are
+ *     a kind of their own;
+ *   - for each off switch with a link prefix "kind not in (the shared kinds) or url is null or
+ *     url not like 'prefix%'": a shared-kind row (assigned, followup, reminder, untouched) is
+ *     dropped only when its link opens there;
+ *   - for each off notice type told by its link or by how its title starts, one more or() that
+ *     keeps every row but those (noticeRuleFilter).
+ * Older rows from before the switch or the tick was turned off go with it, so the bell clears at
+ * once; turning it back on shows them again.
  */
 function excludeOff<Q extends { not(c: string, op: string, v: string): Q; or(f: string): Q }>(
   q: Q,
-  off: readonly NoticeCategory[],
+  prefs: NoticePrefs,
 ): Q {
-  const ex = noticeExclusions(off);
+  const ex = noticeFilters(prefs);
   if (ex.kinds.length) q = q.not("kind", "in", inList(ex.kinds));
   for (const prefix of ex.urlPrefixes)
     q = q.or(`kind.not.in.${inList(SHARED_KINDS)},url.is.null,url.not.like.${prefix}%`);
+  for (const rule of ex.rules) q = q.or(noticeRuleFilter(rule));
   return q;
 }
 
@@ -100,7 +114,7 @@ export const listMyNotifications = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<NotificationRow[]> => {
     const sb: Db = context.supabase;
     const limit = data.limit ?? NOTIFICATIONS_PAGE;
-    const off = await myOffCategories(sb, context.userId);
+    const off = await myNoticePrefs(sb, context.userId);
     const base = () => {
       let q = sb
         .from("notifications")
@@ -164,13 +178,14 @@ export const markAllNotificationsRead = createServerFn({ method: "POST" })
 
 /**
  * The real unread count (the old bell counted within its latest 30 rows): a head request, less
- * the rows of the categories the caller turned off (the same exclusion as the list).
+ * the rows of the switches and the notice types the caller turned off (the same exclusion as
+ * the list).
  */
 export const unreadNotificationCount = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<number> => {
     const sb: Db = context.supabase;
-    const off = await myOffCategories(sb, context.userId);
+    const off = await myNoticePrefs(sb, context.userId);
     const { error, count } = await excludeOff(
       sb
         .from("notifications")

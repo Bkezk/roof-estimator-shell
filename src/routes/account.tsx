@@ -8,9 +8,11 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-store";
 import {
+  getNotifyOff,
   getNotifyOwn,
   getNotifyPrefs,
   sendTestNotification,
+  setNotifyOff,
   setNotifyOwn,
   setNotifyPrefs,
   type NotifyPrefs,
@@ -21,6 +23,7 @@ import {
   NOTICE_CATEGORY_HELP,
   NOTICE_CATEGORY_LABELS,
 } from "@/lib/notice-categories";
+import { noticeChoiceFailure, withNoticeChoice } from "@/lib/notice-types";
 import { OWN_NOTICES_HELP, OWN_NOTICES_LABEL } from "@/lib/own-notices";
 import {
   IOS_INSTALL_HINT,
@@ -40,6 +43,7 @@ import {
   saveTopGap,
   stepTopGap,
 } from "@/lib/top-gap";
+import { NoticeChoices } from "@/components/notice-choices";
 import { NOTIFICATIONS_QUERY_KEY } from "@/components/notifications-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -224,6 +228,8 @@ function TopBarSpacingCard() {
 
 const PREFS_KEY = ["notify-prefs"] as const;
 const OWN_KEY = ["notify-own"] as const;
+const OFF_KEY = ["notify-off"] as const;
+type OffList = { notify_off: string[] };
 type Prefs = NotifyPrefs & { devices: number };
 /** One or several switches at a time (the page saves the one that was flipped). */
 type PrefsPatch = Partial<NotifyPrefs>;
@@ -262,6 +268,35 @@ function NotificationsCard() {
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: OWN_KEY }),
   });
+
+  // "Choose which" (owner, Nov 24; notice-types.ts): the notice types this person turned off
+  // under their switches. Its own small read and save, like "My own changes". A tick saves at
+  // once, like a switch; one that could not be saved goes back and says so.
+  const getOffFn = useServerFn(getNotifyOff);
+  const setOffFn = useServerFn(setNotifyOff);
+  const offList = useQuery({ queryKey: OFF_KEY, queryFn: () => getOffFn(), enabled: !!session });
+  const saveOff = useMutation({
+    mutationFn: (off: string[]) => setOffFn({ data: { off } }),
+    onMutate: async (off) => {
+      // A read still on its way must not put an older list over this press.
+      await qc.cancelQueries({ queryKey: OFF_KEY });
+      const before = qc.getQueryData<OffList>(OFF_KEY);
+      qc.setQueryData<OffList>(OFF_KEY, { notify_off: off });
+      return { before };
+    },
+    onError: (e, _off, ctx) => {
+      if (ctx?.before) qc.setQueryData(OFF_KEY, ctx.before);
+      // One of two plain lines, never the browser's own words ("Failed to fetch").
+      toast.error(noticeChoiceFailure(e));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: OFF_KEY });
+      // What the bell shows and counts follows the ticks at once, as it follows the switches.
+      void qc.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+    },
+  });
+  const pressChoice = (key: string, on: boolean) =>
+    saveOff.mutate(withNoticeChoice(qc.getQueryData<OffList>(OFF_KEY)?.notify_off ?? [], key, on));
 
   const save = useMutation({
     mutationFn: (patch: PrefsPatch) => setFn({ data: patch }),
@@ -419,20 +454,31 @@ function NotificationsCard() {
               {NOTICE_CATEGORIES.map((category) => {
                 const column = NOTICE_CATEGORY_COLUMNS[category];
                 return (
-                  <div key={category} className="flex items-center justify-between gap-4">
-                    <div>
-                      <Label htmlFor={`notify-${category}`}>
-                        {NOTICE_CATEGORY_LABELS[category]}
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        {NOTICE_CATEGORY_HELP[category]}
-                      </p>
+                  <div key={category} data-notice-category={category}>
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <Label htmlFor={`notify-${category}`}>
+                          {NOTICE_CATEGORY_LABELS[category]}
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          {NOTICE_CATEGORY_HELP[category]}
+                        </p>
+                      </div>
+                      <Switch
+                        id={`notify-${category}`}
+                        checked={p?.[column] ?? false}
+                        disabled={!p}
+                        onCheckedChange={(v) => save.mutate({ [column]: v })}
+                      />
                     </div>
-                    <Switch
-                      id={`notify-${category}`}
-                      checked={p?.[column] ?? false}
-                      disabled={!p}
-                      onCheckedChange={(v) => save.mutate({ [column]: v })}
+                    {/* Owner, Nov 24 ("Option A"): one tick per notice under the switch. Nothing
+                        for a switch with one notice (leads, storms). */}
+                    <NoticeChoices
+                      category={category}
+                      switchOn={p?.[column] ?? false}
+                      off={offList.data?.notify_off ?? []}
+                      ready={!!p && !!offList.data}
+                      onChange={pressChoice}
                     />
                   </div>
                 );

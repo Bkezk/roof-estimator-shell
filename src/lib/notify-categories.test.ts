@@ -323,12 +323,20 @@ describe("notify() skips a recipient whose switch for the notice's category is o
       src.indexOf("export async function notify("),
       src.indexOf("export type FollowupRow"),
     );
-    expect(src).toContain('import { noticeCategory, wantsNotice } from "@/lib/notice-categories";');
-    expect(fn).toContain("const category = noticeCategory(msg.kind, msg.url ?? null);");
-    expect(fn).toContain(
-      "const people = (everyone ?? []).filter((p) => wantsNotice(p, category));",
-    );
-    expect(fn.indexOf("wantsNotice(p, category)")).toBeLessThan(fn.indexOf("const inserts ="));
+    // Nov 24 (owner: "Option A"): the sender asks one rule, takesNotice (notice-types.ts), which
+    // is the category rule this test pinned (noticeCategory then wantsNotice, still inside it)
+    // AND "this notice type is not in the person's off list". It was:
+    //   import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
+    //   const category = noticeCategory(msg.kind, msg.url ?? null);
+    //   const people = (everyone ?? []).filter((p) => wantsNotice(p, category));
+    // Every send above still passes unchanged: with no off list the two rules are the same.
+    expect(src).toContain('import { takesNotice } from "@/lib/notice-types";');
+    expect(src).not.toContain("wantsNotice(p, category)");
+    expect(fn).toContain("const people = (everyone ?? []).filter((p) => takesNotice(p, msg));");
+    expect(fn.indexOf("takesNotice(p, msg)")).toBeLessThan(fn.indexOf("const inserts ="));
+    const rule = read("src/lib/notice-types.ts");
+    expect(rule).toContain("const category = noticeCategory(notice.kind, notice.url ?? null);");
+    expect(rule).toContain("if (!wantsNotice(prefs, category)) return false;");
     expect(fn).toContain("const ids = people.map((p) => p.id);");
     expect(fn).toContain('.in("user_id", ids)');
   });
@@ -461,10 +469,16 @@ describe("listMyNotifications and unreadNotificationCount leave out the caller's
       return src.slice(start, src.indexOf("\n  });\n", start));
     };
     for (const name of ["listMyNotifications", "unreadNotificationCount"]) {
-      expect(fn(name)).toContain("const off = await myOffCategories(sb, context.userId);");
+      // Nov 24 (owner: "Option A"): the read is myNoticePrefs, the five flags AND the person's
+      // off list of notice types; it was `const off = await myOffCategories(sb, context.userId);`.
+      expect(fn(name)).toContain("const off = await myNoticePrefs(sb, context.userId);");
       expect(fn(name)).toContain("excludeOff(");
     }
-    // The caller's own row, the five columns.
+    // The caller's own row, the five columns. Nov 24 (owner: "Option A"): this read is now the
+    // fallback for a database that does not have notify_off yet; the first try names it too.
+    expect(flat(src)).toContain(
+      '.select( "notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms, notify_off", ) .eq("id", userId) .maybeSingle();',
+    );
     expect(flat(src)).toContain(
       '.from("profiles") .select("notify_leads, notify_opportunities, notify_service, notify_bids, notify_storms") .eq("id", userId) .maybeSingle();',
     );

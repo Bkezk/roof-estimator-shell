@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { databaseRpc } from "@/lib/database-rpc";
+import { databaseRpc, profilesWithNotifyOff } from "@/lib/database-rpc";
 import { canAccess, seesEveryone } from "@/lib/access";
 import { BID_DUE_NOTICE_DAYS_MAX, BID_OVERDUE_EVERY_DAYS_MAX } from "@/lib/bid-status";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
@@ -26,6 +26,13 @@ import {
   isMissingRpc,
 } from "@/lib/followup-holds";
 import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
+import {
+  NOTICE_CHOICES_NOT_READY,
+  NOTICE_CHOICES_NOT_SAVED,
+  NOTICE_TYPE_KEYS,
+  cleanNotifyOff,
+  isNoticeTypeKey,
+} from "@/lib/notice-types";
 import { ATTENTION_DAYS_MAX } from "@/lib/owner-attention";
 import { localHm } from "@/lib/tasks";
 import { TICKET_BEFORE_EVERY_DAYS_MAX, TICKET_DUE_NOTICE_DAYS_MAX } from "@/lib/ticket-reminders";
@@ -466,6 +473,60 @@ export const setNotifyOwn = createServerFn({ method: "POST" })
     });
     if (error || saved !== data.on) throw new Error(PREFS_NOT_SAVED);
     return { notify_own: saved };
+  });
+
+/**
+ * "Choose which" (notice-types.ts; owner, Nov 24: "Option A on notifications plz"): the notice
+ * types the signed-in user turned off under their switches. Their own profiles row. Kept apart
+ * from the prefs above, like "My own changes": the column is new
+ * (20261124700000_notice_fine_choices.sql), and until that migration is applied the read fails,
+ * which is "nothing is off", so the page loads and the five switches work either way.
+ */
+export const getNotifyOff = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ notify_off: string[] }> => {
+    try {
+      const { data, error } = await profilesWithNotifyOff(context.supabase)
+        .select("notify_off")
+        .eq("id", context.userId)
+        .maybeSingle();
+      if (error) return { notify_off: [] };
+      return { notify_off: cleanNotifyOff(data?.notify_off) };
+    } catch {
+      return { notify_off: [] };
+    }
+  });
+
+/**
+ * Save the whole off list through set_my_notify_off (the caller's own row, keyed on auth.uid();
+ * only admins may update profiles). The keys are checked here against the list this site knows
+ * and again by the database against its own, so nothing else can be stored. The function hands
+ * back the list as kept; anything but the list asked for is an error, so a save that did
+ * nothing can never pass as one. Before the migration is applied the function is not there,
+ * and a notice type added to the site before the database's list has it is refused there
+ * (SQLSTATE 22023): both are said plainly as "not yet", and nothing is changed.
+ */
+export const setNotifyOff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        off: z
+          .array(z.string().refine(isNoticeTypeKey, "Not a notice type"))
+          .max(NOTICE_TYPE_KEYS.length),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ notify_off: string[] }> => {
+    const asked = cleanNotifyOff(data.off);
+    const { data: saved, error } = await databaseRpc(context.supabase)("set_my_notify_off", {
+      p_off: asked,
+    });
+    if (isMissingRpc(error) || error?.code === "22023") throw new Error(NOTICE_CHOICES_NOT_READY);
+    const kept = cleanNotifyOff(saved);
+    if (error || !Array.isArray(saved) || kept.join() !== asked.join())
+      throw new Error(NOTICE_CHOICES_NOT_SAVED);
+    return { notify_off: kept };
   });
 
 /** The public VAPID key the browser needs to subscribe (generated on first call). */
