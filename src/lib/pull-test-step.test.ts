@@ -27,6 +27,10 @@ describe("the pull test arrows step by 25", () => {
   it("the number field passes step to the input and still accepts any typed number", () => {
     const src = read("src/components/ui/number-field.tsx");
     expect(src).toContain('step={props.step ?? "1"}');
-    expect(src).toContain("const n = Number(t);");
+    // Nov 24 (owner: metals price editable on the bid): what the typed text means moved, as it
+    // was, into numberFieldTyped (lib/number-field-view.ts) so an emptied box can be told from
+    // a typed 0; the field still takes any typed number through it.
+    expect(src).toContain("const typed = numberFieldTyped(raw, min, props.max);");
+    expect(read("src/lib/number-field-view.ts")).toContain("const n = Number(t);");
   });
 });

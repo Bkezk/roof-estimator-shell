@@ -8,7 +8,8 @@ import { Printer, ArrowLeft } from "lucide-react";
 
 import { getEngineAdminData } from "@/lib/engine.functions";
 import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
-import { buildEstimateInputs, NON_DL_LS2_CATEGORIES } from "@/lib/engine/bid-builder";
+import { NON_DL_LS2_CATEGORIES } from "@/lib/engine/bid-builder";
+import { buildEstimateInputsWithMetalsPrices } from "@/lib/metals-price-override";
 import { adminForBid, withFamilyAccessories } from "@/lib/accessory-families";
 import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { computeEstimate } from "@/lib/engine/estimate";
@@ -115,7 +116,14 @@ function ProposalPage() {
     const run = runEstimateWithChartPerDiem(
       bidInput,
       saved,
-      (b) => buildEstimateInputs(b, adminForBid(cd.admin!, b.roofSystem)),
+      // With the metals prices typed on the bid, as the estimator prices it (owner, Nov 24;
+      // lib/metals-price-override.ts), so the proposal price cannot drift from the bid's.
+      (b) =>
+        buildEstimateInputsWithMetalsPrices(
+          b,
+          adminForBid(cd.admin!, b.roofSystem),
+          saved.metalsTypedPrices,
+        ),
       (b) => computeEstimate(b.inputs),
     );
     const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial, slipSheetMaterial } =
