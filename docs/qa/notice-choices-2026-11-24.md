@@ -61,6 +61,42 @@ owner's call and was put to him.
   fresh load read "All 15 on". The database then showed nobody with anything off.
 - Every row of a list is at least 44 px tall on a phone.
 
+## Later the same day: a notice for a new opportunity, and four more ticks
+
+The owner was asked whether the public pages' requests and the Roof Care plan notices should
+have ticks. He said: "wouldnt those both be under opportunities?", then "we also need
+notifications for a new opportunity i dont see that on there. go on 1, 2 ... 3 go".
+
+- **New opportunity** is a notice of its own now. It has a line on Admin › Reminders, first on
+  the Opportunities card: every admin and every manager until someone changes it. Anyone on the
+  "Each step" line hears it too, once. Before this, a new opportunity told only the people on
+  "Each step", and nobody is on that line until someone picks people.
+- **A request a technician takes down on site** (the Additional Services button) made an
+  opportunity and told nobody. It tells the same line now.
+- **Four more ticks.** Under Opportunity notices: New opportunity, New QR page request, Roof
+  Care plan (paid by card, a card payment that has to be sent back, or expired). Under Service
+  notices: Roof Care: no access. The lists now read 16, 8 and 4.
+- These four used to be under no switch, so they were always sent. They follow their switch
+  now. Nobody had the Opportunity or Service switch off when this shipped. The "Always sent"
+  section above is true for tasks, mentions and the test notice only.
+- Database: `supabase/migrations/20261124950000_notice_more_ticks.sql`, applied on the live
+  database: `notice_fine_keys()` knows 28 keys and matches the file by fingerprint. In a trial
+  that was rolled back, the four new keys saved for the test login and a made-up key was
+  refused.
+- Checks: lint 0 errors (16 warnings), types clean, 676 test files and 10,355 tests pass, the
+  build completes.
+- In a browser on the test server with the test login and the real database, at phone width:
+  the lists read "All 16 on", "All 8 on", "All 4 on"; New opportunity was unticked and the line
+  read "1 of 8 off", still after a fresh load; ticked again it read "All 8 on". Admin ›
+  Reminders showed the line "New opportunity" with "Every admin, Every manager". The database
+  then showed nobody with anything off.
+- Not proven: a real new opportunity's notice. Making one would have sent a notice to every
+  admin and manager. The tests prove who is told and with what words.
+
+Still open with the owner: he asked whether the plan tick "should be needs payment". Today a
+signed plan that is not paid shows on the Owner page's Needs attention list and sends no notice.
+A notice for it was suggested to him, not built.
+
 ## Not proven
 
 A tick stopping a real notice on the published site: that needs the publish and a real ticket
