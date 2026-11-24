@@ -17,6 +17,7 @@ import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { lockIosFocusZoom, watchIosPinned } from "@/lib/ios-viewport";
+import { hasOwnSharePreview } from "@/lib/public-share";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import { ThemeProvider } from "@/lib/theme-context";
 
@@ -82,7 +83,7 @@ function ErrorComponent({ error, reset }: { error: unknown; reset: () => void })
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
+  head: ({ matches }) => ({
     meta: [
       { charSet: "utf-8" },
       // interactive-widget: the keyboard shrinks the layout (Chrome / Android) so a bottom sheet
@@ -96,7 +97,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         name: "description",
         content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
-      { name: "author", content: "Lovable" },
+      // A public page says its own card (lib/public-share.ts): its tags replace the ones here
+      // of the same name, and the two builder credits, which it cannot replace, are left off.
+      ...(hasOwnSharePreview(matches) ? [] : [{ name: "author", content: "Lovable" }]),
       { property: "og:title", content: "JBK Portal" },
       {
         property: "og:description",
@@ -104,7 +107,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      ...(hasOwnSharePreview(matches) ? [] : [{ name: "twitter:site", content: "@Lovable" }]),
       // Installable web app (public/manifest.webmanifest); iOS reads the apple-* tags instead.
       { name: "theme-color", content: "#1b4a8a" },
       { name: "apple-mobile-web-app-capable", content: "yes" },

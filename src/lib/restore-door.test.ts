@@ -193,11 +193,16 @@ const post = (
 beforeEach(() => resetFirstAdminGuard());
 
 describe("/api/restore — who gets in", () => {
-  it("403 'Restores are off' while RESTORE_SECRET is unset or short, 403 'Wrong restore password' otherwise, 405 for GET — nothing touched", async () => {
+  // Nov 24 (public pages audit): the caller used to be told "Restores are off: RESTORE_SECRET is
+  // not set …" (or "… must be at least 24 characters") for an unset or short secret, and "Wrong
+  // restore password" otherwise. Now every one of them is the same 403 "Restore refused", and
+  // which it was is in the server log only (secret-doors-nov24.test.ts).
+  it("the same 403 'Restore refused' while RESTORE_SECRET is unset, short or not the one sent, 405 for GET — nothing touched", async () => {
     const { deps, rpcs, lines } = fakeDeps();
     const off = await restoreRequest(post({ op: "identify" }), { ...ENV, secret: undefined }, deps);
     expect(off.status).toBe(403);
-    expect(((await off.json()) as { error: string }).error).toBe(
+    expect(await off.json()).toEqual({ ok: false, error: "Restore refused" });
+    expect(lines[0]).toContain(
       "Restores are off: RESTORE_SECRET is not set in Lovable Cloud › Secrets",
     );
     const short = await restoreRequest(
@@ -206,11 +211,12 @@ describe("/api/restore — who gets in", () => {
       deps,
     );
     expect(short.status).toBe(403);
-    expect(await short.text()).toContain("Restores are off");
+    expect(await short.json()).toEqual({ ok: false, error: "Restore refused" });
+    expect(lines[1]).toContain("Restores are off: RESTORE_SECRET is shorter than 24 characters");
     for (const auth of ["Bearer nope", null, `Bearer ${SECRET}x`, `Basic ${SECRET}`]) {
       const r = await restoreRequest(post({ op: "identify" }, auth), ENV, deps);
       expect(r.status, String(auth)).toBe(403);
-      expect(((await r.json()) as { error: string }).error).toBe("Wrong restore password");
+      expect(await r.json()).toEqual({ ok: false, error: "Restore refused" });
     }
     const get = new Request("https://portal.example/api/restore", {
       method: "GET",
@@ -656,8 +662,11 @@ describe("the route and the shared sources", () => {
     expect(src).not.toMatch(/process\.env\["BACKUP_SECRET"\]/);
     expect(src).toContain("bearerMatches");
     expect(src).toMatch(/import \{[^}]*bearerMatches[^}]*\} from "@\/lib\/backup-export\.server"/);
-    expect(src).toContain("fail(403, SECRET_OFF)");
-    expect(src).toContain("fail(403, WRONG)");
+    // Nov 24 (public pages audit): these were fail(403, SECRET_OFF) and fail(403, WRONG), two
+    // answers a caller could tell apart. Now every refusal of the password is the same one.
+    expect(src.split("fail(403, REFUSED)").length - 1).toBe(3);
+    expect(src).not.toContain("fail(403, SECRET_OFF)");
+    expect(src).not.toContain("fail(403, WRONG)");
     expect(src).toContain("fail(503, NO_KEY)");
     expect(src).toContain("fail(412, NOT_PROJECT)");
     expect(src).not.toMatch(/\.delete\(|\.remove\(|method:\s*"DELETE"|\.truncate/);

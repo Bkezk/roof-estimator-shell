@@ -9,6 +9,7 @@
  * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
  * helpers only label the drawing.
  */
+import { csvSafeText } from "@/lib/csv-safe";
 import { edgeLengths, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 import {
   COUNT_ROLE_LABELS,
@@ -1012,10 +1013,13 @@ export function withoutDrainPicks(attrs: CountAttrs): CountAttrs {
 
 export const countRoleLabel = (r: CountRole): string => COUNT_ROLE_LABELS[r];
 
-/** Quote one CSV cell. */
+/**
+ * Quote one CSV cell. Nov 24: a number is written as a number; words that start like a formula
+ * get one single quote in front first (lib/csv-safe.ts).
+ */
 export function csvCell(v: string | number | null | undefined): string {
   if (v === null || v === undefined) return "";
-  const s = typeof v === "number" ? String(Math.round(v * 100) / 100) : v;
+  const s = typeof v === "number" ? String(Math.round(v * 100) / 100) : csvSafeText(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 export const csvLine = (cells: Array<string | number | null | undefined>): string =>

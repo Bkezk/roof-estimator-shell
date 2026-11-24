@@ -15,8 +15,14 @@ import {
   checkoutForm,
 } from "@/lib/roof-care-checkout";
 
-export const stripeConfigured = () =>
-  !!process.env["STRIPE_SECRET_KEY"] && !!process.env["STRIPE_WEBHOOK_SECRET"];
+/**
+ * The two secrets as they are used (Nov 24): with any space or line end that came along when
+ * the value was pasted taken off. "" when one is not set, or is only spaces.
+ */
+export const stripeSecretKey = () => (process.env["STRIPE_SECRET_KEY"] ?? "").trim();
+export const stripeWebhookSecret = () => (process.env["STRIPE_WEBHOOK_SECRET"] ?? "").trim();
+
+export const stripeConfigured = () => !!stripeSecretKey() && !!stripeWebhookSecret();
 
 /**
  * What a plan waiting for its payment still owes, in cents, or null when nothing is payable.
@@ -57,7 +63,7 @@ export async function createCheckoutSession(
   ask: CheckoutAsk,
   fetcher: typeof fetch = fetch,
 ): Promise<{ id: string; url: string }> {
-  const key = process.env["STRIPE_SECRET_KEY"];
+  const key = stripeSecretKey();
   if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
   const res = await fetcher("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",

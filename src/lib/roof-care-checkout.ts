@@ -167,6 +167,68 @@ export function paidPlanEvent(event: unknown): PaidEvent | null {
   return { plan_id: planId, amount: Math.round(cents) / 100, ref, email };
 }
 
+/**
+ * Test and live are kept apart (Nov 24, the public pages audit). Stripe has two sides, test
+ * and live, each with its own keys, and every message it sends says which side it is from
+ * (`livemode`). A payment notice counts only when it is from the same side as the site's own
+ * key: a live key takes live notices only, a test key takes test notices only. A notice from
+ * the other side records nothing; the server log and the admins are told.
+ */
+export type StripeMode = "live" | "test";
+
+/** Which side a Stripe key is from, read from how it starts. Null when it cannot be told. */
+export function stripeKeyMode(key: string | null | undefined): StripeMode | null {
+  const m = /^(?:sk|rk)_(live|test)_/.exec((key ?? "").trim());
+  return m ? (m[1] as StripeMode) : null;
+}
+
+/** Which side an event says it is from. Null when it does not say. */
+export function eventMode(event: unknown): StripeMode | null {
+  const live = ((event ?? {}) as Record<string, unknown>)["livemode"];
+  return live === true ? "live" : live === false ? "test" : null;
+}
+
+/** True only when the event says its side and it is the key's own. */
+export function eventModeFits(event: unknown, keyMode: StripeMode | null): boolean {
+  return keyMode !== null && eventMode(event) === keyMode;
+}
+
+/** What Stripe is answered when a notice is from the other side. */
+export const CARD_MODE_REFUSED =
+  "Refused: this notice and the site's Stripe key are not both test or both live. Nothing was recorded.";
+
+const modeWord = (m: StripeMode | null) => (m === "live" ? "live" : m === "test" ? "test" : "");
+
+/** The one line the server log gets. */
+export function cardModeLogLine(event: StripeMode | null, key: StripeMode | null): string {
+  const notice = event ? `a ${modeWord(event)} payment notice` : "a payment notice with no mode";
+  const site = key
+    ? `the site's Stripe key is a ${modeWord(key)} key`
+    : "the site's Stripe key does not start like a test or a live key";
+  return `refused ${notice}: ${site}.`;
+}
+
+/** What the admins and managers are told. */
+export function cardModeNotice(a: {
+  site_id: string | null;
+  site: string | null;
+  event: StripeMode | null;
+  key: StripeMode | null;
+  ref: string;
+}) {
+  const place = (a.site ?? "").trim() || "a property";
+  const sent = a.event ? `a ${modeWord(a.event)} payment notice` : "a payment notice";
+  const set = a.key
+    ? `the site is set up with a ${modeWord(a.key)} Stripe key`
+    : "the site's Stripe key is not a test key or a live key";
+  return {
+    kind: "plan_card_paid",
+    title: `A card payment notice was refused: ${place}`,
+    body: `Stripe sent ${sent}, but ${set}. Nothing was recorded and the plan is not changed. Reference ${a.ref}. In Lovable Cloud › Secrets, the Stripe key and the Stripe webhook secret must both come from the same side of Stripe: both test, or both live.`,
+    url: a.site_id ? `/properties/${a.site_id}` : null,
+  };
+}
+
 /** "Paid by card online Nov 19, 2026 ($1,234.00, ref pi_…)." */
 export function cardPaidWords(c: {
   on: string;

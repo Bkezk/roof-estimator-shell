@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { authenticateCron } from "./cron-auth";
 
@@ -35,9 +35,20 @@ describe("authenticateCron", () => {
     expect(await authenticateCron(req("owner-secret-value"))).toBeNull();
     expect((await authenticateCron(req("other")))?.status).toBe(401);
   });
-  it("answers 500 when nothing is configured (Lovable's own rule)", async () => {
+  // Nov 24 (public pages audit): this was a 500 ("Server configuration error", Lovable's own
+  // rule), a different answer from a wrong secret's. Now it is the same plain 401, and the
+  // reason goes to the server log (secret-doors-nov24.test.ts).
+  it("answers the same 401 when nothing is configured, and says why in the server log", async () => {
     delete process.env["CRON_SECRET"];
     delete process.env["LOVABLE_CRON_SECRET"];
-    expect((await authenticateCron(req("x")))?.status).toBe(500);
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
+      logged.push(a.map(String).join(" "));
+    });
+    const res = await authenticateCron(req("x"));
+    spy.mockRestore();
+    expect(res?.status).toBe(401);
+    expect(await res?.text()).toBe("Unauthorized");
+    expect(logged.join("\n")).toContain("No usable CRON_SECRET or LOVABLE_CRON_SECRET is set");
   });
 });

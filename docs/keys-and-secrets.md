@@ -21,10 +21,19 @@ it is published.
 | `SAM_GOV_API_KEY`                     | sam.gov, sign in, Account Details, Public API Key (`docs/sam-gov-federal-leads.md`).                                       | Federal roofing leads on the Leads page.                                                                                       | Lovable Cloud › Secrets | Not checked this session.                           |
 | `PLANROOM_EMAIL`, `PLANROOM_PASSWORD` | A free login, not a key: registered on the State of KY planroom and on Lynn Imaging's planroom (`docs/planroom-login.md`). | Reading each open roof job's contacts and plan holders for the Leads page.                                                     | Lovable Cloud › Secrets | Not checked this session.                           |
 
+The two Stripe values must come from the same side of Stripe: both from test mode, or both from
+live mode (Nov 24, 2026). The site takes a "card was paid" message only from the side its key is
+from. One from the other side records nothing, and the admins and managers are told.
+
 ## 2. Passwords the owner made up himself
 
 These come from no outside service. Each is a long password the owner chose. Where one is kept in
 more than one place, every copy must be the same.
+
+Each has a shortest length (Nov 24, 2026): `CRON_SECRET` at least 16 characters, `BACKUP_SECRET`
+and `RESTORE_SECRET` at least 24. A shorter one is treated as not set: every caller is refused
+until it is made longer, and the site's own log in Lovable says why. A caller without the right
+password gets the same plain refusal whether the password is missing, too short or wrong.
 
 | Name             | What it guards                                                                 | Kept in                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |

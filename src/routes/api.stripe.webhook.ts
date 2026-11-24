@@ -8,7 +8,8 @@
  *   400  the signature is missing, wrong or too old, or the body is not Stripe's
  *   200  everything else, said in the body: recorded, nothing to do, or refused with why.
  *        A refusal of the payment itself is a 200 so Stripe does not send it again for days;
- *        the admins are told instead.
+ *        the admins are told instead. The same for a notice from the other side of Stripe
+ *        (a test notice while the site's key is live, or the other way round; Nov 24).
  *   500  the database could not be reached: Stripe sends it again.
  *
  * Nov 20 (break test, number 26). Every payment is kept as its own row by the database
@@ -20,14 +21,24 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { cardPaidNotice, paidPlanEvent, type CardPaymentRow } from "@/lib/roof-care-checkout";
+import {
+  CARD_MODE_REFUSED,
+  cardModeLogLine,
+  cardModeNotice,
+  cardPaidNotice,
+  eventMode,
+  eventModeFits,
+  paidPlanEvent,
+  stripeKeyMode,
+  type CardPaymentRow,
+} from "@/lib/roof-care-checkout";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** A checkout event is a few kilobytes. Anything far larger is not one. */
 const MAX_BODY = 256 * 1024;
 
 async function run(request: Request): Promise<Response> {
-  const { stripeConfigured, verifyStripeSignature } =
+  const { stripeConfigured, stripeSecretKey, stripeWebhookSecret, verifyStripeSignature } =
     await import("@/lib/roof-care-checkout.server");
   const notifyMod = await import("@/lib/notify.server");
   if (!stripeConfigured() || !notifyMod.hasServiceRole())
@@ -35,13 +46,7 @@ async function run(request: Request): Promise<Response> {
   const raw = await request.text();
   if (raw.length > MAX_BODY)
     return Response.json({ ok: false, error: "Too large" }, { status: 400 });
-  if (
-    !verifyStripeSignature(
-      raw,
-      request.headers.get("stripe-signature"),
-      process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
-    )
-  )
+  if (!verifyStripeSignature(raw, request.headers.get("stripe-signature"), stripeWebhookSecret()))
     return Response.json({ ok: false, error: "Bad signature" }, { status: 400 });
   let event: unknown;
   try {
@@ -52,6 +57,17 @@ async function run(request: Request): Promise<Response> {
   const paid = paidPlanEvent(event);
   if (!paid) return Response.json({ ok: true, handled: false });
 
+  // Nov 24: a notice counts only when it is from the same side of Stripe, test or live, as the
+  // site's own key (roof-care-checkout.ts). One from the other side records nothing. Said once
+  // in the server log here, and to the admins below once the property is known.
+  const keyMode = stripeKeyMode(stripeSecretKey());
+  const wrongMode = !eventModeFits(event, keyMode);
+  const refusedMode = () => Response.json({ ok: false, handled: true, error: CARD_MODE_REFUSED });
+  if (wrongMode)
+    console.error(
+      `Stripe webhook: ${cardModeLogLine(eventMode(event), keyMode)} Plan ${paid.plan_id}, reference ${paid.ref}. Nothing was recorded.`,
+    );
+
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: plan, error: pErr } = await supabaseAdmin
     .from("roof_care_plans")
@@ -59,7 +75,10 @@ async function run(request: Request): Promise<Response> {
     .eq("id", paid.plan_id)
     .maybeSingle();
   if (pErr) return Response.json({ ok: false, error: pErr.message }, { status: 500 });
-  if (!plan) return Response.json({ ok: true, handled: false, reason: "No such plan" });
+  if (!plan)
+    return wrongMode
+      ? refusedMode()
+      : Response.json({ ok: true, handled: false, reason: "No such plan" });
 
   const admins = async () => {
     const { data } = await supabaseAdmin
@@ -73,6 +92,26 @@ async function run(request: Request): Promise<Response> {
     .select("name")
     .eq("id", plan.site_id)
     .maybeSingle();
+
+  if (wrongMode) {
+    // Told, not retried, like any other payment the site refuses.
+    try {
+      await notifyMod.notify(
+        await admins(),
+        cardModeNotice({
+          site_id: plan.site_id,
+          site: site?.name ?? null,
+          event: eventMode(event),
+          key: keyMode,
+          ref: paid.ref,
+        }),
+        supabaseAdmin,
+      );
+    } catch (e) {
+      console.error("Stripe webhook: could not tell the admins —", errText(e));
+    }
+    return refusedMode();
+  }
 
   // A plan that waits with no invoice (signed by a technician, who cannot make one): its invoice
   // is made now, so the payment marks it paid. Best effort: without it the plan still starts.

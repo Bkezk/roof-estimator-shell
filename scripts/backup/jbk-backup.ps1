@@ -127,8 +127,8 @@ try {
   $null = New-Item -ItemType Directory -Path $dbDir
   # The table list: what the portal describes (?what=tables: every table with whether it has an
   # id column, plus the column types, saved as schema.json), or the config's Tables when given.
-  # A wrong password stops here with "401 (Unauthorized)"; a missing BACKUP_SECRET in Lovable
-  # with "500" and the reason in the body.
+  # A refused password stops here with "401 (Unauthorized)": the same answer whether it is
+  # wrong, missing in Lovable or too short there. The portal's own log says which.
   $desc = Invoke-RestMethod -Method Get -Uri "${door}?what=tables" -Headers $headers
   $defs = $desc.schema
   $idTables = @{}
