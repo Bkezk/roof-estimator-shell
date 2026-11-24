@@ -278,6 +278,83 @@ export const planPayLink = createServerFn({ method: "GET" })
     };
   });
 
+/**
+ * "We measured your roof", to the customer on the plan, after a manager corrected its size
+ * (Nov 24). It holds the new price and, for a card plan with online payment set up, the payment
+ * link: the plan is then marked as sent its link. Refused in plain words, never half done.
+ */
+export async function emailSizeCorrected(
+  context: Ctx,
+  planId: string,
+  change: { from_sqft: number; to_sqft: number; from_price: number; to_price: number },
+): Promise<{ to: string; with_link: boolean }> {
+  const { admin, plan } = await seenPlan(context, planId);
+  const key = asPlanKey(plan.plan);
+  if (!key) throw new Error("That plan was not found");
+  if (plan.status !== "awaiting_payment") throw new Error(CHECKOUT_NOT_WAITING);
+  const to = (plan.customer_email ?? "").trim();
+  if (!to) throw new Error(PAY_LINK_NO_EMAIL);
+  const [{ planEmailHeld }, { planOwedCents }, { sendEmail }, { sizeCorrectedEmail }] =
+    await Promise.all([
+      import("@/lib/roof-care-email.server"),
+      import("@/lib/roof-care-checkout.server"),
+      import("@/lib/notify.server"),
+      import("@/lib/roof-care-email"),
+    ]);
+  const held = planEmailHeld();
+  if (held) throw new Error(held);
+  const cents = await planOwedCents(admin, plan);
+  if (cents == null) throw new Error("Nothing is owed for this plan year");
+  // The link goes with it only for a card plan, and only when the link could be given at all.
+  const { reason, base } = await linkHeld(plan);
+  const link = plan.pay_method === "card" && !reason ? payLinkFor(base, plan.pay_token) : null;
+  const [{ data: site }, { data: company }] = await Promise.all([
+    admin
+      .from("crm_sites")
+      .select("name, address1, city, state, zip")
+      .eq("id", plan.site_id)
+      .maybeSingle(),
+    admin.from("company_settings").select("company_name, phone, email").limit(1),
+  ]);
+  const co = company?.[0];
+  const mail = sizeCorrectedEmail({
+    plan: key,
+    plan_number: plan.plan_number,
+    site: (site?.name ?? "").trim(),
+    address: [site?.address1, site?.city, [site?.state, site?.zip].filter(Boolean).join(" ")]
+      .map((x) => (x ?? "").trim())
+      .filter(Boolean)
+      .join(", "),
+    agreed_by: plan.agreed_by ?? "",
+    from_sqft: change.from_sqft,
+    to_sqft: change.to_sqft,
+    from_price: change.from_price,
+    to_price: change.to_price,
+    owed: cents / 100,
+    pay_method: plan.pay_method === "card" || plan.pay_method === "check" ? plan.pay_method : null,
+    pay_link: link,
+    company: (co?.company_name ?? "").trim() || "JBK Commercial Roofing",
+    contact: [co?.phone, co?.email]
+      .map((x) => (x ?? "").trim())
+      .filter(Boolean)
+      .join(" or "),
+  });
+  const r = await sendEmail({
+    to,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+    kind: "customer",
+  });
+  if (!r.ok) throw new Error(`The email did not go: ${r.error}`);
+  if (link)
+    await admin
+      .from("roof_care_plans")
+      .update({ pay_link_sent_at: new Date().toISOString() })
+      .eq("id", plan.id);
+  return { to, with_link: !!link };
+}
+
 /** Email the plan's card payment link to the customer on the plan. Refused in plain words. */
 export const emailPlanPayLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

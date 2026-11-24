@@ -862,6 +862,27 @@ add that what is left of the plan's minor repairs amount goes toward a charged r
 late) had term 7 charge the return trip after the first visit of a plan year we could not do for
 want of access, and term 8 bill a storm inspection beyond the one the plan includes.
 
+Version 2026-11-24.1 (Nov 24) changed the last term: an inspection is a visual check on the day,
+and we are not responsible for a leak or a condition we did not find
+(`docs/qa/roof-care-disclaimer-2026-11-24.md`). The set now in use is version 2026-11-24.2 (Nov
+24, late): term 4 no longer says the price is corrected "once", because a size can be corrected
+more than once and each correction is recorded (`docs/qa/roof-care-correct-size-2026-11-24.md`).
+
+## Correcting a roof size (Nov 24)
+
+The owner: "1. yes but then build the rest. 2. send it but can it be combined with the new price
+payment? 3. more than once but recorded and remove that line".
+
+- A manager or an admin presses **Correct the roof size** beside the size on a plan. The window
+  shows the new price before anything is saved. The rule is the database function
+  `roof_care_correct_size`.
+- A plan that waits for its payment takes the new size and the new price. Its unpaid invoice is
+  made again. A payment already on that invoice stops the correction.
+- One email, "We measured your roof", tells the customer the new price. For a card plan it holds
+  the Pay by card button, so the new price and the payment request are one email.
+- Every correction is kept on the plan (`size_changes`) and listed under the size.
+- The record is `docs/qa/roof-care-correct-size-2026-11-24.md`.
+
 ## Open
 
 1. **The list of services** for the request form. The owner has not settled it (Nov 18: the

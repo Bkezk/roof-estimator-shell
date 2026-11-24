@@ -134,6 +134,16 @@ import {
   PLAN_BRIEF_HINT,
   PLAN_PAID_TOAST,
   PLAN_WAITING_RELOAD_MS,
+  SIZE_CORRECT_LABEL,
+  SIZE_CORRECT_LEAD_PAID,
+  SIZE_CORRECT_LEAD_WAITING,
+  SIZE_CORRECT_SAVE,
+  SIZE_CORRECT_SHOW,
+  SIZE_NEEDED,
+  sizeChangeWords,
+  sizeCorrectEmailLabel,
+  sizeOfferWords,
+  sizeSavedWords,
   anyPlanWaits,
   plansJustPaid,
   PLAN_NO_INVOICE,
@@ -211,6 +221,8 @@ import {
   addRoofCareStorm,
   closeOutRoofCarePlan,
   confirmRoofCareSize,
+  correctRoofCareSize,
+  roofCareSizeOffer,
   endRoofCarePlan,
   listRoofCarePlans,
   markRoofCareRefundSent,
@@ -230,6 +242,7 @@ import {
   signUpRoofCare,
   skipRoofCareVisit,
   type RoofCareOffer,
+  type SizeOffer,
 } from "@/lib/roof-care-plan.functions";
 import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
 import { NoAccessBox } from "./no-access";
@@ -1564,29 +1577,217 @@ function PlanSizeLine({
     },
     onError: (e) => toast.error(`Could not confirm it: ${errText(e)}`, { duration: 20_000 }),
   });
-  const words = planSizeWords(plan);
-  if (!words) return null;
+  const { profile } = useAuth();
+  const [correcting, setCorrecting] = useState(false);
+  // A size the map agreed with at the sign-up has no words of its own: the size is still said.
+  const words =
+    planSizeWords(plan) || `Roof size ${Math.round(plan.roof_sqft).toLocaleString("en-US")} sq ft.`;
   const unchecked = !!plan.size?.unchecked;
+  // A wrong size is corrected by a manager or an admin (owner, Nov 24), any number of times,
+  // while the plan waits for its payment or is in force. Each correction is listed under it.
+  const canCorrect = manager && (plan.status === "awaiting_payment" || plan.status === "active");
+  const changes = plan.size?.changes ?? [];
   return (
-    <p
-      className={`flex flex-wrap items-center gap-2 text-xs ${unchecked ? "font-medium text-amber-800 dark:text-amber-300" : "text-muted-foreground"}`}
-      data-roof-care-size={unchecked ? "unchecked" : "confirmed"}
-    >
-      <span>{words}</span>
-      {manager && unchecked && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={confirm.isPending}
-          onClick={() => confirm.mutate()}
-          data-action="roof-care-size-confirm"
+    <div className="space-y-1">
+      <p
+        className={`flex flex-wrap items-center gap-2 text-xs ${unchecked ? "font-medium text-amber-800 dark:text-amber-300" : "text-muted-foreground"}`}
+        data-roof-care-size={unchecked ? "unchecked" : "confirmed"}
+      >
+        <span>{words}</span>
+        {manager && unchecked && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={confirm.isPending}
+            onClick={() => confirm.mutate()}
+            data-action="roof-care-size-confirm"
+          >
+            {SIZE_CONFIRM_LABEL}
+          </Button>
+        )}
+        {canCorrect && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-foreground"
+            onClick={() => setCorrecting(true)}
+            data-action="roof-care-size-correct"
+          >
+            {SIZE_CORRECT_LABEL}
+          </Button>
+        )}
+      </p>
+      {changes.length > 0 && (
+        <ul
+          className="space-y-0.5 text-xs text-muted-foreground"
+          data-size-changes={changes.length}
         >
-          {SIZE_CONFIRM_LABEL}
-        </Button>
+          {changes.map((c, i) => (
+            <li key={`${c.on}-${i}`}>{sizeChangeWords(c, seesInvoices(profile))}</li>
+          ))}
+        </ul>
       )}
-    </p>
+      {correcting && (
+        <CorrectSizeDialog siteId={siteId} plan={plan} onClose={() => setCorrecting(false)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The box that corrects a plan's roof size (owner, Nov 24). The measured size is typed, the new
+ * price is shown, and nothing changes until Save. A plan that waits for its payment is priced
+ * again; a plan in force keeps the price it was paid at. Saving can email the customer the new
+ * price, with the payment link for a card plan.
+ */
+function CorrectSizeDialog({
+  siteId,
+  plan,
+  onClose,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh(siteId);
+  const offerFn = useServerFn(roofCareSizeOffer);
+  const saveFn = useServerFn(correctRoofCareSize);
+  const waiting = plan.status === "awaiting_payment";
+  const card = plan.pay_method === "card";
+  const to = plan.email?.to ?? null;
+  // Number boxes start blank.
+  const [text, setText] = useState("");
+  const [note, setNote] = useState("");
+  const [emailIt, setEmailIt] = useState(waiting && !!to);
+  const [offer, setOffer] = useState<SizeOffer | null>(null);
+  const sqft = wholeNumber(text);
+  const sizeBad = text.trim() !== "" && !(sqft != null && sqft > 0);
+  // The price shown is for one size: another size typed after it has to be shown again.
+  const shown = offer && sqft != null && offer.to_sqft === sqft ? offer : null;
+  const show = useMutation({
+    mutationFn: () => offerFn({ data: { plan_id: plan.id, sqft: sqft! } }),
+    onSuccess: setOffer,
+    onError: (e) => toast.error(errText(e), { duration: 20_000 }),
+  });
+  const save = useMutation({
+    mutationFn: () =>
+      saveFn({
+        data: {
+          plan_id: plan.id,
+          sqft: sqft!,
+          shown_price: shown!.to_price,
+          ...(note.trim() ? { note: note.trim() } : {}),
+          ...(waiting && emailIt && to ? { email: true } : {}),
+        },
+      }),
+    onSuccess: (r) => {
+      refresh();
+      if (r.email_reason || (r.change.repriced && !r.invoice_made))
+        toast.warning(sizeSavedWords(r), { duration: 30_000 });
+      else toast.success(sizeSavedWords(r), { duration: 15_000 });
+      onClose();
+    },
+    onError: (e) => {
+      toast.error(`The size was not saved: ${errText(e)}`, { duration: 20_000 });
+      // The price moved since it was shown: it is read again before another press.
+      setOffer(null);
+    },
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && !save.isPending && onClose()}>
+      <DialogContent className="max-w-md" data-roof-care-size-dialog={waiting ? "waiting" : "paid"}>
+        <DialogHeader>
+          <DialogTitle>{SIZE_CORRECT_LABEL}</DialogTitle>
+          <DialogDescription>
+            {waiting ? SIZE_CORRECT_LEAD_WAITING : SIZE_CORRECT_LEAD_PAID}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground" data-size-now>
+            On the plan now: {Math.round(plan.roof_sqft).toLocaleString("en-US")} sq ft,{" "}
+            {money0(plan.price)} a year.
+            {plan.size?.map_sqft != null
+              ? ` The map showed about ${(Math.round(plan.size.map_sqft / 100) * 100).toLocaleString("en-US")} sq ft.`
+              : " The map has no size for this roof."}
+          </p>
+          <div className="space-y-1">
+            <Label htmlFor="correct-size">The measured roof size, in square feet</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id="correct-size"
+                inputMode="numeric"
+                className="h-9 w-40"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                data-size-box
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!(sqft != null && sqft > 0) || show.isPending}
+                onClick={() => show.mutate()}
+                data-action="roof-care-size-show"
+              >
+                {show.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                {SIZE_CORRECT_SHOW}
+              </Button>
+            </div>
+            {sizeBad && <p className="text-xs text-destructive">{SIZE_NEEDED}</p>}
+          </div>
+          {shown && (
+            <p className="rounded-md border bg-muted/40 p-2 font-medium" data-size-offer>
+              {sizeOfferWords(shown)}
+            </p>
+          )}
+          <div className="space-y-1">
+            <Label htmlFor="correct-note">A note for the record (optional)</Label>
+            <Textarea
+              id="correct-note"
+              rows={2}
+              maxLength={500}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="How it was measured"
+            />
+          </div>
+          {waiting &&
+            (to ? (
+              <label className="flex items-start gap-2 text-sm" data-size-email={emailIt}>
+                <Checkbox
+                  className="mt-0.5"
+                  checked={emailIt}
+                  onCheckedChange={(v) => setEmailIt(v === true)}
+                />
+                <span>
+                  {sizeCorrectEmailLabel(card)} ({to})
+                </span>
+              </label>
+            ) : (
+              <p className="text-xs text-muted-foreground" data-size-email="none">
+                This plan has no email address, so the customer is not told by email.
+              </p>
+            ))}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" disabled={save.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!shown || save.isPending}
+            onClick={() => save.mutate()}
+            data-action="roof-care-size-save"
+          >
+            {save.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            {SIZE_CORRECT_SAVE}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2035,13 +2236,7 @@ function AwaitingPayment({
       key: "size",
       title: sizeWaits ? STEP_SIZE : STEP_SIZE_DONE,
       done: !sizeWaits,
-      body: planSizeWords(plan) ? (
-        <PlanSizeLine siteId={siteId} plan={plan} manager={manager} />
-      ) : (
-        <p className="text-muted-foreground" data-roof-care-size="checked">
-          Roof size {Math.round(plan.roof_sqft).toLocaleString("en-US")} sq ft.
-        </p>
-      ),
+      body: <PlanSizeLine siteId={siteId} plan={plan} manager={manager} />,
     });
   steps.push({
     key: "pay",

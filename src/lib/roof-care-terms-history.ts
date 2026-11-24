@@ -98,4 +98,17 @@ export const ROOF_CARE_TERMS_PAST: Readonly<Record<string, readonly string[]>> =
     "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
     "The plan is not a warranty and does not cover replacing the roof.",
   ],
+  "2026-11-24.1": [
+    "Your plan includes the services listed for it on the Roof Care Plans sheet.",
+    "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
+    "The plan runs for twelve months from the day we receive your payment. What the plan includes applies to work done in those twelve months. Work done before the plan starts is not covered.",
+    "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
+    "Repairs beyond what the plan includes are quoted to you first and billed separately.",
+    "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate, and what is left of the plan's minor repairs amount is used toward it first.",
+    "A storm inspection, where the plan includes one, is done when you ask for it after a storm. A further storm inspection in the same plan year is billed at the price of one inspection, and what is left of the plan's minor repairs amount is used toward it first.",
+    "Either of us can end the plan in writing. We refund the share for inspections not yet done, less any minor repairs the plan has already covered and any leak call travel we did not charge. A storm inspection counts as an inspection done. A year paid by card is refunded less the card processing fee on the amount refunded.",
+    "The plan ends after its twelve months unless it is renewed. If an inspection was not done by then because we could not get there, the price of one inspection is taken off the renewal. If it was not done because we were not given access, it can still be done in the first 60 days of the new plan year.",
+    "The plan is not a warranty or insurance and does not cover replacing the roof. An inspection is a visual check on the day of the visit and cannot find every problem. We are not responsible for leaks or for damage from a leak or from a condition we did not find.",
+  ],
 };

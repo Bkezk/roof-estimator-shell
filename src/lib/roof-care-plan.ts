@@ -285,7 +285,70 @@ export interface PlanSize {
   /** What the map showed when the plan was signed; null when it showed nothing. */
   map_sqft: number | null;
   confirmed: { on: string; by_name: string } | null;
+  /** Every time a manager corrected the size, oldest first (Nov 24). Absent on an older read. */
+  changes?: PlanSizeChange[];
 }
+
+/**
+ * One correction of a plan's roof size (owner, Nov 24: "more than once but recorded"). The
+ * database writes it (roof_care_correct_size) and nothing edits it afterwards.
+ */
+export interface PlanSizeChange {
+  /** The day, as YYYY-MM-DD. */
+  on: string;
+  by_name: string;
+  from_sqft: number;
+  to_sqft: number;
+  from_price: number;
+  /** The plan's price after it. A plan in force keeps the price it was paid at. */
+  to_price: number;
+  /** What a year costs at the corrected size, by the prices of that day. */
+  would_be: number;
+  /** True for a plan that was waiting for its payment: its price followed the size. */
+  repriced: boolean;
+  note: string | null;
+}
+
+/** The database's record of one correction, read strictly: null for anything odd. */
+export function readSizeChange(x: unknown): PlanSizeChange | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const n = (v: unknown) => {
+    const v2 = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+    return typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+  };
+  const from_sqft = n(o["from_sqft"]);
+  const to_sqft = n(o["to_sqft"]);
+  const from_price = n(o["from_price"]);
+  const to_price = n(o["to_price"]);
+  const would_be = n(o["would_be"]);
+  const on = typeof o["on"] === "string" ? o["on"].slice(0, 10) : "";
+  if (
+    from_sqft == null ||
+    to_sqft == null ||
+    from_price == null ||
+    to_price == null ||
+    would_be == null ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(on)
+  )
+    return null;
+  const note = typeof o["note"] === "string" ? o["note"].trim() : "";
+  return {
+    on,
+    by_name: typeof o["by_name"] === "string" ? o["by_name"].trim() : "",
+    from_sqft,
+    to_sqft,
+    from_price,
+    to_price,
+    would_be,
+    repriced: o["repriced"] === true,
+    note: note || null,
+  };
+}
+
+/** A plan's corrections as the database keeps them: a list, with anything unreadable left out. */
+export const readSizeChanges = (x: unknown): PlanSizeChange[] =>
+  (Array.isArray(x) ? x : []).map(readSizeChange).filter((c): c is PlanSizeChange => c !== null);
 
 /** Where the agreement and the receipt go, and whether they went. */
 export interface PlanEmail {
@@ -1379,14 +1442,18 @@ export const CARE_PLAN_COVERED = "Included in the Roof Care plan";
 // done before the plan starts is not covered (the database's rule since 20261123100000).
 // Nov 24 (version 2026-11-24.1), at the owner's word: the last term says what an inspection is
 // and that we are not responsible for a leak or for a condition we did not find.
-export const ROOF_CARE_TERMS_VERSION = "2026-11-24.1";
+// Nov 24, later (version 2026-11-24.2): the fourth term no longer says "once". A manager may
+// correct a plan's roof size more than once, and each correction is kept on the plan.
+export const ROOF_CARE_TERMS_VERSION = "2026-11-24.2";
 export const ROOF_CARE_TERMS: readonly string[] = [
   "Your plan includes the services listed for it on the Roof Care Plans sheet.",
   "The yearly price is paid in full before the plan starts. We send one invoice for the year.",
   // Nov 23 (owner: "make sure number 6 is included in the terms"): what the plan includes is for
   // work done inside its twelve months, never for work done before it started.
   "The plan runs for twelve months from the day we receive your payment. What the plan includes applies to work done in those twelve months. Work done before the plan starts is not covered.",
-  "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+  // Nov 24 (owner, of how many times a size may be corrected: "more than once but recorded and
+  // remove that line"; asked which, he chose to drop only the word "once").
+  "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected.",
   "Minor repairs included in the plan are valued at our standard rates. An unused amount does not carry over to the next year.",
   "Repairs beyond what the plan includes are quoted to you first and billed separately.",
   "You give us access to the roof on the agreed day. The first visit in a plan year that we cannot do because we could not get on the roof is rescheduled at no charge. After that, the return trip is charged at our trip rate, and what is left of the plan's minor repairs amount is used toward it first.",
@@ -1545,6 +1612,82 @@ export const SIZE_UNCHECKED_STAFF_NOTE =
 export const SIZE_CONFIRM_LABEL = "Confirm the roof size";
 /** A size of 0 or below: the database's own words. */
 export const SIZE_NEEDED = "Type the roof's size in square feet: a number above 0";
+
+// ── Correcting a plan's roof size (owner, Nov 24) ───────────────────────────────────────────
+
+export const SIZE_CORRECT_LABEL = "Correct the roof size";
+export const SIZE_CORRECT_SHOW = "Show the new price";
+export const SIZE_CORRECT_SAVE = "Save the new size";
+export const SIZE_CORRECT_MANAGERS = "Only a manager or an admin corrects a plan's roof size";
+/** The size typed is the one the plan has: said at "Show the new price", in the database's own words. */
+export const SIZE_CORRECT_SAME =
+  "That is the size the plan already has. To say it is right, press Confirm the roof size.";
+export const SIZE_CORRECT_LEAD_WAITING =
+  "Type the size you measured. The plan's price follows it, and its invoice is made again at the new price. Nothing changes until you press Save.";
+export const SIZE_CORRECT_LEAD_PAID =
+  "Type the size you measured. This plan year is already paid, so its price stays as it was paid: nothing is billed and nothing is refunded here. The renewal is priced on the corrected size.";
+/** The tick that sends the customer the new price, with the payment link for a card plan. */
+export const sizeCorrectEmailLabel = (card: boolean): string =>
+  card
+    ? "Email the customer the new price, with the payment link"
+    : "Email the customer the new price";
+
+const dollars0 = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+/** "$214 more a year", "$90 less a year" or "the same price". */
+export function priceDifferenceWords(from: number, to: number): string {
+  const d = Math.round(to) - Math.round(from);
+  if (d === 0) return "the same price";
+  return `${dollars0(Math.abs(d))} ${d > 0 ? "more" : "less"} a year`;
+}
+
+/** What the box says once the new price is read, before anything is saved. */
+export function sizeOfferWords(o: {
+  from_sqft: number;
+  to_sqft: number;
+  from_price: number;
+  to_price: number;
+  repriced: boolean;
+}): string {
+  const sizes = `${sqftWords(o.from_sqft)} sq ft to ${sqftWords(o.to_sqft)} sq ft`;
+  return o.repriced
+    ? `From ${sizes}. The price goes from ${dollars0(o.from_price)} to ${dollars0(o.to_price)} a year: ${priceDifferenceWords(o.from_price, o.to_price)}.`
+    : `From ${sizes}. This plan year stays at the ${dollars0(o.from_price)} it was paid at. At the corrected size a year is ${dollars0(o.to_price)}: ${priceDifferenceWords(o.from_price, o.to_price)}.`;
+}
+
+/** What is said once a corrected size is saved: what changed, and what did not happen. */
+export function sizeSavedWords(r: {
+  change: PlanSizeChange;
+  invoice_made: boolean;
+  emailed_to: string | null;
+  email_reason: string | null;
+}): string {
+  const c = r.change;
+  const price = c.repriced
+    ? ` The plan is now ${dollars0(c.to_price)} a year.`
+    : " This plan year's price is unchanged.";
+  const invoice =
+    c.repriced && !r.invoice_made
+      ? " Its invoice was not made again: press Make the invoice on the plan."
+      : "";
+  const email = r.emailed_to
+    ? ` ${r.emailed_to} was emailed the new price.`
+    : r.email_reason
+      ? ` The customer was not emailed: ${r.email_reason}`
+      : "";
+  return `Roof size corrected to ${sqftWords(c.to_sqft)} sq ft.${price}${invoice}${email}`;
+}
+
+/** One correction as the plan's record says it. `money`: for someone who sees prices. */
+export function sizeChangeWords(c: PlanSizeChange, money: boolean): string {
+  const head = `Roof size corrected from ${sqftWords(c.from_sqft)} to ${sqftWords(c.to_sqft)} sq ft by ${c.by_name || "a manager"} on ${longDay(c.on)}.`;
+  const price = !money
+    ? ""
+    : c.repriced
+      ? ` The price went from ${dollars0(c.from_price)} to ${dollars0(c.to_price)} a year.`
+      : ` The plan year was already paid, so its price stayed ${dollars0(c.from_price)}. At that size a year was ${dollars0(c.would_be)}.`;
+  return `${head}${price}${c.note ? ` Note: ${c.note}` : ""}`;
+}
 
 /** "Roof size 20,000 sq ft: typed by hand, not checked against the map." and who confirmed. */
 export function planSizeWords(p: Pick<RoofCarePlan, "roof_sqft" | "size">): string {

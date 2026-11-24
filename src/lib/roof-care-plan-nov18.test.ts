@@ -1305,7 +1305,8 @@ describe("the terms (owner, Nov 18: “i like all 10 you came up with”)", () =
     // (Nov 24: version 2026-11-24.1. The last term says what an inspection is and that we are
     // not responsible for a leak or for a condition we did not find; owner: "the shorter
     // version looks fine".)
-    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-24.1");
+    // (Nov 24, later: version 2026-11-24.2. The fourth term no longer says "once".)
+    expect(ROOF_CARE_TERMS_VERSION).toBe("2026-11-24.2");
     expect(ROOF_CARE_TERMS.join(" ")).not.toMatch(/\$\s?\d/);
     expect(ROOF_CARE_TERMS[1]).toBe(
       "The yearly price is paid in full before the plan starts. We send one invoice for the year.",

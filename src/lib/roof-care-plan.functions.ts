@@ -24,6 +24,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { isFieldOnly, managesTickets, seesInvoices } from "@/lib/access";
 import { chunkIds } from "@/lib/chunk-ids";
+import { databaseRpc } from "@/lib/database-rpc";
 import { readProfile } from "@/lib/profile-cache.server";
 import { allowanceLineSource, allowancePlanOf } from "@/lib/roof-care-allowance";
 import {
@@ -47,6 +48,10 @@ import {
   priceChangedLine,
   readFieldPlans,
   readPriceAnswer,
+  readSizeChange,
+  readSizeChanges,
+  SIZE_CORRECT_MANAGERS,
+  SIZE_CORRECT_SAME,
   readRefundChanges,
   readsPlanTables,
   readRefundWorked,
@@ -72,6 +77,7 @@ import {
   type PriceEstimate,
   type RefundWorked,
   type RenewalOffer,
+  type PlanSizeChange,
   type RoofCarePlan,
   type ShownPrice,
   type VisitKind,
@@ -419,6 +425,29 @@ export async function plansOfSites(
     .order("signed_on", { ascending: false });
   if (error) throw new Error(error.message);
   if (!plans?.length) return [];
+  // Every correction of a plan's roof size (Nov 24). Its column is newer than the generated
+  // types, so it is read on its own; a read that fails leaves the list out and nothing else.
+  const changes = new Map<string, PlanSizeChange[]>();
+  {
+    const loose = sb as unknown as {
+      from: (t: string) => {
+        select: (c: string) => {
+          in: (
+            c: string,
+            v: string[],
+          ) => Promise<{ data: { id: string; size_changes: unknown }[] | null; error: unknown }>;
+        };
+      };
+    };
+    const { data: rows } = await loose
+      .from("roof_care_plans")
+      .select("id, size_changes")
+      .in(
+        "id",
+        plans.map((p) => p.id),
+      );
+    for (const r of rows ?? []) changes.set(r.id, readSizeChanges(r.size_changes));
+  }
   const { data: visits, error: vErr } = await sb
     .from("roof_care_visits")
     .select(VISIT_SELECT)
@@ -616,6 +645,7 @@ export async function plansOfSites(
         confirmed: p.size_confirmed_on
           ? { on: p.size_confirmed_on, by_name: (p.size_confirmed_by_name ?? "").trim() }
           : null,
+        changes: changes.get(p.id) ?? [],
       },
     });
   }
@@ -1066,6 +1096,140 @@ export const confirmRoofCareSize = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ── Correcting a plan's roof size (owner, Nov 24) ───────────────────────────────────────────
+
+/** What a corrected size would do, before anything is saved. */
+export interface SizeOffer {
+  from_sqft: number;
+  to_sqft: number;
+  from_price: number;
+  /** A year at the corrected size, by today's prices. */
+  to_price: number;
+  /** True for a plan that waits for its payment: its price follows the size. */
+  repriced: boolean;
+}
+
+/** A manager's or an admin's, said in plain words before the database says it. */
+async function sizeManager(ctx: Ctx) {
+  const p = await signedIn(ctx);
+  if (!managesTickets(p)) throw new Error(SIZE_CORRECT_MANAGERS);
+  return p;
+}
+
+/** The price a plan would have at another roof size: the drive it was signed at, today's prices. */
+export const roofCareSizeOffer = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ plan_id: z.string().uuid(), sqft: sqftInput }).parse(d))
+  .handler(async ({ data, context }): Promise<SizeOffer> => {
+    await sizeManager(context);
+    const sb = context.supabase;
+    if (!(data.sqft > 0)) throw new Error(SIZE_NEEDED);
+    const { data: plan, error } = await sb
+      .from("roof_care_plans")
+      .select("id, plan, status, roof_sqft, price, drive_hours, drive_miles")
+      .eq("id", data.plan_id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const key = plan ? asPlanKey(plan.plan) : null;
+    if (!plan || !key) throw new Error("That plan was not found");
+    if (plan.status !== "awaiting_payment" && plan.status !== "active")
+      throw new Error("This plan has ended, so its roof size is not changed");
+    // Said here, before a price is shown that Save would then refuse.
+    if (Number(plan.roof_sqft) === data.sqft) throw new Error(SIZE_CORRECT_SAME);
+    const { data: priced, error: pErr } = await sb.rpc("roof_care_price", {
+      p_sqft: data.sqft,
+      p_hours: Number(plan.drive_hours),
+      p_miles: Number(plan.drive_miles),
+    });
+    if (pErr) throw new Error(pErr.message);
+    const answer = readPriceAnswer(priced);
+    if (!answer.ready)
+      throw new Error("The Roof Care plan prices are not set up yet. Ask an admin.");
+    if (answer.custom_quote)
+      throw new Error(
+        "A roof this size gets a custom quote, so the plan cannot be priced at it here. End the plan and quote it by hand.",
+      );
+    const now = answer.plans.find((o) => o.plan === key);
+    if (!now) throw new Error("The price for this plan could not be worked out. Ask an admin.");
+    return {
+      from_sqft: Number(plan.roof_sqft),
+      to_sqft: data.sqft,
+      from_price: Number(plan.price),
+      to_price: now.price,
+      repriced: plan.status === "awaiting_payment",
+    };
+  });
+
+/** What saving a corrected size answers. */
+export interface SizeCorrected {
+  change: PlanSizeChange;
+  /** A plan that waits for its payment: whether its invoice was made again at the new price. */
+  invoice_made: boolean;
+  /** The address the customer was emailed at, or null. */
+  emailed_to: string | null;
+  /** Why the email did not go, when it was asked for and did not. */
+  email_reason: string | null;
+}
+
+/**
+ * Save a corrected roof size. The database does the whole of it in one step (the size, the
+ * price of a plan that waits, the record of the change, the old unpaid invoice gone). Then the
+ * new invoice is made, and the customer is emailed the new price when the manager ticked so,
+ * with the payment link for a card plan (owner: "can it be combined with the new price
+ * payment?"). A failure after the database's step never undoes it: the answer says what did
+ * not happen.
+ */
+export const correctRoofCareSize = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        sqft: sqftInput,
+        shown_price: z.number().finite().positive(),
+        note: z.string().trim().max(500).optional(),
+        email: z.boolean().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<SizeCorrected> => {
+    const p = await sizeManager(context);
+    const sb = context.supabase;
+    if (!(data.sqft > 0)) throw new Error(SIZE_NEEDED);
+    const { data: answer, error } = await databaseRpc(sb)("roof_care_correct_size", {
+      p_plan: data.plan_id,
+      p_sqft: data.sqft,
+      p_shown_price: data.shown_price,
+      p_note: data.note ?? null,
+    });
+    if (error) throw new Error(error.message);
+    const change = readSizeChange(answer);
+    if (!change)
+      throw new Error("The size was saved, but the answer could not be read. Reload the page.");
+    let invoice_made = false;
+    if (change.repriced && seesInvoices(p)) {
+      try {
+        const { makePlanInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
+        await makePlanInvoice(sb, data.plan_id, { id: context.userId, name: nameOf(p) });
+        invoice_made = true;
+      } catch (e) {
+        // Said on the plan: "No invoice has been made for this plan yet."
+        console.error("Corrected size: plan", data.plan_id, "has no new invoice —", e);
+      }
+    }
+    let emailed_to: string | null = null;
+    let email_reason: string | null = null;
+    if (data.email && change.repriced) {
+      try {
+        const { emailSizeCorrected } = await import("@/lib/roof-care-pay-link.functions");
+        emailed_to = (await emailSizeCorrected(context, data.plan_id, change)).to;
+      } catch (e) {
+        email_reason = e instanceof Error ? e.message : String(e);
+      }
+    }
+    return { change, invoice_made, emailed_to, email_reason };
   });
 
 export const endRoofCarePlan = createServerFn({ method: "POST" })

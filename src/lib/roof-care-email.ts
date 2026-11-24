@@ -169,6 +169,75 @@ export function payLinkEmail(f: PayLinkFacts): Email {
   );
 }
 
+export interface SizeCorrectedFacts {
+  plan: PlanKey;
+  plan_number: number | null;
+  site: string;
+  address: string;
+  agreed_by: string;
+  from_sqft: number;
+  to_sqft: number;
+  from_price: number;
+  to_price: number;
+  /** Dollars now owed for the year. */
+  owed: number;
+  pay_method: PayMethod | null;
+  /** The customer's card payment link, for a card plan when paying online is set up. */
+  pay_link: string | null;
+  company: string;
+  contact: string;
+}
+
+const sqft = (n: number) => Math.round(n).toLocaleString("en-US");
+
+/**
+ * "We measured your roof": the new size and the new price of a plan that waits for its payment,
+ * and with it the request to pay (owner, Nov 24: "send it but can it be combined with the new
+ * price payment?"). One email, sent only when a manager ticks so on saving the corrected size.
+ * A card plan gets its Pay by card button here: the size is the office's own by now.
+ */
+export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
+  const name = PLAN_NAMES[f.plan];
+  const same = Math.round(f.from_price) === Math.round(f.to_price);
+  const blocks: Block[] = [
+    { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
+    {
+      kind: "p",
+      text: `We measured the roof at ${place(f)}. It is ${sqft(f.to_sqft)} sq ft. Your ${name} plan${label(f)} was signed at ${sqft(f.from_sqft)} sq ft.`,
+    },
+    {
+      kind: "p",
+      text: same
+        ? `The yearly price of your plan stays ${money0(f.to_price)}.`
+        : `The yearly price of your plan is now ${money0(f.to_price)}. It was ${money0(f.from_price)}. As your agreement says, the price is an estimate until we measure the roof.`,
+    },
+    ...(f.pay_link
+      ? [
+          { kind: "h" as const, text: "Pay by card" },
+          {
+            kind: "p" as const,
+            text: `Use the button below to pay ${money0(f.owed)} for the year on our secure payment page. Your plan starts the day we receive your payment.`,
+          },
+          { kind: "link" as const, text: "Pay by card", url: f.pay_link },
+        ]
+      : [
+          {
+            kind: "p" as const,
+            text:
+              f.pay_method === "check"
+                ? `We will send you the invoice for ${money0(f.owed)}. Your plan starts the day we receive your payment.`
+                : `${money0(f.owed)} is due for the year. Your plan starts the day we receive your payment.`,
+          },
+        ]),
+    ...signOff(f),
+  ];
+  return render(
+    `We measured your roof: your ${f.company} ${planName(f.plan)} plan${label(f)}`,
+    { company: f.company, title: "We measured your roof.", lead: `${name}${label(f)}` },
+    blocks,
+  );
+}
+
 /**
  * What the plan includes and the terms that were agreed to, word for word: in the agreement,
  * and since Nov 24 in the receipt too (owner, of the receipt: it "didnt show what the roof plan

@@ -83,6 +83,17 @@ type RpcContracts = {
     Args: { p_plan: string; p_was: string | null };
     Returns: undefined;
   };
+  // 20261124980000: a manager corrects a plan's roof size. The answer is the record of the
+  // change, read strictly by readSizeChange.
+  roof_care_correct_size: {
+    Args: {
+      p_plan: string;
+      p_sqft: number;
+      p_shown_price?: number | null;
+      p_note?: string | null;
+    };
+    Returns: unknown;
+  };
 };
 type RpcDatabase = Omit<Database, "public"> & {
   public: Omit<Database["public"], "Functions"> & {

@@ -30,7 +30,8 @@ const EVERY_VERSION: readonly [string, string][] = [
   ["2026-11-19.4", mark(ROOF_CARE_TERMS_PAST["2026-11-19.4"] ?? [])],
   ["2026-11-20.1", mark(ROOF_CARE_TERMS_PAST["2026-11-20.1"] ?? [])],
   ["2026-11-23.1", mark(ROOF_CARE_TERMS_PAST["2026-11-23.1"] ?? [])],
-  ["2026-11-24.1", "4696c80dfb0d5de4"],
+  ["2026-11-24.1", mark(ROOF_CARE_TERMS_PAST["2026-11-24.1"] ?? [])],
+  ["2026-11-24.2", "f1d3af5d6c50850d"],
 ];
 
 const facts = (terms_version: string): PlanEmailFacts => ({
@@ -61,12 +62,29 @@ describe("every set of terms that was in use is kept", () => {
     expect(mark(ROOF_CARE_TERMS_PAST["2026-11-23.1"] ?? [])).toBe("733b0dca9d3ea3f0");
     // Nov 24 (owner: "the shorter version looks fine"): the last term alone changed.
     const before = ROOF_CARE_TERMS_PAST["2026-11-23.1"]!;
-    expect(ROOF_CARE_TERMS.slice(0, -1)).toEqual(before.slice(0, -1));
+    expect(ROOF_CARE_TERMS_PAST["2026-11-24.1"]!.slice(0, -1)).toEqual(before.slice(0, -1));
     expect(before[before.length - 1]).toBe(
       "The plan is not a warranty and does not cover replacing the roof.",
     );
     expect(ROOF_CARE_TERMS[ROOF_CARE_TERMS.length - 1]).toBe(
       "The plan is not a warranty or insurance and does not cover replacing the roof. An inspection is a visual check on the day of the visit and cannot find every problem. We are not responsible for leaks or for damage from a leak or from a condition we did not find.",
+    );
+  });
+  it("the first Nov 24 set was filed word for word when the word once was dropped", () => {
+    // Its fingerprint as this test knew it while it was the set in use.
+    const before = ROOF_CARE_TERMS_PAST["2026-11-24.1"]!;
+    expect(mark(before)).toBe("4696c80dfb0d5de4");
+    // Nov 24, later (owner: "more than once but recorded and remove that line"; asked which
+    // line, he chose to drop only the word "once"): the fourth term alone changed.
+    expect(ROOF_CARE_TERMS).toHaveLength(before.length);
+    ROOF_CARE_TERMS.forEach((line, i) => {
+      if (i !== 3) expect(line).toBe(before[i]);
+    });
+    expect(before[3]).toBe(
+      "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected once.",
+    );
+    expect(ROOF_CARE_TERMS[3]).toBe(
+      "The price is an estimate until we measure the roof. If the roof's size is different, the price is corrected.",
     );
   });
   it("each earlier version is on file, with words, and none has been dropped", () => {

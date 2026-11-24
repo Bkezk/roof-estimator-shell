@@ -33,7 +33,7 @@ export const REQUEST_PAGE_LEAD =
   "Tell us about the building and what is going on. We will call you back to set up a visit.";
 /** Under the prices: they are worked from the map until someone has measured the roof. */
 export const PRICE_IS_ESTIMATE =
-  "These prices are an estimate until we measure your roof. If the roof's size is different, the price is corrected once, before you pay.";
+  "These prices are an estimate until we measure your roof. If the roof's size is different, the price is corrected before you pay.";
 export const NOBODY_CHARGED =
   "Nobody is charged on this page. Our office sends the invoice for the year and gets in touch about payment.";
 export const SEVERAL_BUILDINGS_LINE = `Several buildings get multi-building pricing. Send this for one of them and we will call you about the rest, or call us at ${PUBLIC_COMPANY.phone}.`;
