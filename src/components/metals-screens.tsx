@@ -9,6 +9,11 @@
  * rows in the legacy lvSummary grid (Category | Item | Qty/LF | Cost/Quote |
  * Hours PerUnit/LF | Hours | Labor Cost; hours at 2 dp, hours-per-unit at 3 dp —
  * display rounding only).
+ *
+ * Nov 24 (owner: "the metals price box is editable and it just stays on that bid"): the
+ * Cost/Quote amount of a row is a box. A typed amount is the row's whole amount on this bid
+ * only (lib/metals-price-override.ts); the row is marked "Your price" with "Use the list price"
+ * beside it, and an emptied box goes back to the list price too.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -20,9 +25,16 @@ import {
   type GutterEntryState,
   type MetalsRefData,
   type MetalsRefRow,
-  type MetalsResult,
   type MetalsState,
 } from "@/lib/engine/metals";
+import {
+  MAX_METALS_TYPED_PRICE,
+  clearMetalsTypedPrice,
+  pruneMetalsTypedPrices,
+  setMetalsTypedPrice,
+  type MetalsTypedPrice,
+  type PricedMetalsResult,
+} from "@/lib/metals-price-override";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -103,10 +115,112 @@ interface MetalsScreensProps {
   refData: MetalsRefData | undefined;
   state: MetalsState;
   onChange: (next: MetalsState) => void;
-  result: MetalsResult | undefined;
+  /** The engine's summary with the bid's typed prices on it. */
+  result: PricedMetalsResult | undefined;
+  /** The prices typed on this bid, and what to do when one is typed, cleared or dropped. */
+  prices: readonly MetalsTypedPrice[];
+  onPricesChange: (next: MetalsTypedPrice[]) => void;
 }
 
-export function MetalsScreens({ refData, state, onChange, result }: MetalsScreensProps) {
+/** Above the list: how a price is changed, and that it goes no further than this bid. */
+export const METALS_PRICE_HINT =
+  "Tap a Cost/Quote amount to type your own price. It stays on this bid only.";
+/** Beside an amount that was typed on this bid. */
+export const METALS_PRICE_MARK = "Your price";
+/** The one-tap way back to the worked price. */
+export const METALS_PRICE_BACK = "Use the list price";
+
+/** The Cost/Quote cell: no side padding of its own, the box carries it. */
+const PRICE_CELL = "px-0 text-right tabular-nums";
+/** As wide as the column is, without making the column any wider. */
+const FILL = "w-0 min-w-full";
+
+/**
+ * One row's Cost/Quote amount: the amount as a box to tap, a number box while it is being
+ * typed. Typing sets the row's price on this bid (0 is a price of $0); emptying the box, or
+ * "Use the list price", goes back to the worked price.
+ */
+function PriceBox(props: {
+  item: string;
+  amount: number;
+  listAmount: number;
+  typed: boolean;
+  onAmount: (v: number) => void;
+  onListPrice: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  // The column stays as wide as it was with a plain amount (the page is already wider than a
+  // phone here): the cell's side padding moved inside the box (PRICE_CELL), and what sits under
+  // or in place of the amount takes the column's width instead of setting it (FILL). On a phone
+  // the box is 44 px tall for a thumb and its letters a size up: over 16 px, where an iPhone
+  // does not zoom the page on a tap.
+  return (
+    // A double tap in here is typing, not "open this row's entry screen".
+    <div
+      className="flex flex-col items-stretch gap-1"
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target instanceof HTMLElement) e.target.blur();
+      }}
+    >
+      {editing ? (
+        <div className={FILL}>
+          <NumberField
+            autoFocus
+            value={Math.round(props.amount * 100) / 100}
+            onChange={props.onAmount}
+            onBlank={props.onListPrice}
+            onBlur={() => setEditing(false)}
+            blankZero={false}
+            max={MAX_METALS_TYPED_PRICE}
+            step="0.01"
+            inputMode="decimal"
+            label={`Price of ${props.item}, in dollars`}
+            className="h-9 w-full min-w-0 bg-green-50 px-1.5 text-right tabular-nums max-md:h-[44px] max-md:text-lg dark:bg-green-950"
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="h-9 w-full whitespace-nowrap rounded-md border border-input bg-green-50 px-1.5 text-right tabular-nums shadow-sm hover:bg-green-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-md:h-[44px] dark:bg-green-950 dark:hover:bg-green-900"
+          title="Tap to type your own price for this bid"
+          aria-label={`Price of ${props.item}: ${usd(props.amount)}. Tap to change it on this bid.`}
+          data-metals-price={props.typed ? "typed" : "list"}
+          onClick={() => setEditing(true)}
+        >
+          {usd(props.amount)}
+        </button>
+      )}
+      {props.typed && (
+        <div
+          className={`${FILL} flex flex-col items-end gap-0.5 text-right text-xs`}
+          data-metals-price-typed
+        >
+          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+            {METALS_PRICE_MARK}
+          </span>
+          <button
+            type="button"
+            className="py-1 text-right text-muted-foreground underline underline-offset-2 hover:text-foreground max-md:py-2"
+            data-action="metals-list-price"
+            onClick={props.onListPrice}
+          >
+            {METALS_PRICE_BACK} ({usd(props.listAmount)})
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MetalsScreens({
+  refData,
+  state,
+  onChange,
+  result,
+  prices,
+  onPricesChange,
+}: MetalsScreensProps) {
   const [openTile, setOpenTile] = useState<TileId | null>(null);
   // The summary row being edited: its dialog opens on that gutter style/size, downspout size
   // or scupper option instead of the first one.
@@ -115,6 +229,18 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
     if (!tile) return;
     setFocus(src);
     setOpenTile(tile);
+  };
+  // A typed price belongs to its line: once the line is off the bid the price goes with it, so
+  // the same item added again starts at the list price. Checked when a line is removed and when
+  // an entry screen is closed (not while a quantity is being retyped in it).
+  const dropGonePrices = (after: MetalsState, removedKey?: string) => {
+    const list = removedKey ? clearMetalsTypedPrice(prices, removedKey) : prices;
+    const kept = pruneMetalsTypedPrices(list, after);
+    if (kept.length !== prices.length) onPricesChange(kept);
+  };
+  const closeTile = () => {
+    setOpenTile(null);
+    dropGonePrices(state);
   };
 
   if (!refData) {
@@ -157,80 +283,103 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
           (dLabor[5]).
         </p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Category</TableHead>
-              <TableHead>Item</TableHead>
-              <TableHead className="text-right">Qty/LF</TableHead>
-              <TableHead className="text-right">Cost/Quote</TableHead>
-              <TableHead className="text-right">Hours PerUnit/LF</TableHead>
-              <TableHead className="text-right">Hours</TableHead>
-              <TableHead className="text-right">Labor Cost</TableHead>
-              <TableHead className="w-[130px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {lines.map((ln, i) => {
-              const tile = (Object.keys(CATEGORY_BY_TILE) as TileId[]).find(
-                (t) => CATEGORY_BY_TILE[t] === ln.category,
-              );
-              return (
-                <TableRow
-                  key={i}
-                  className="cursor-pointer"
-                  onDoubleClick={() => openFor(tile, ln.source)}
-                >
-                  <TableCell className="text-muted-foreground">
-                    {i === 0 || lines[i - 1]!.category !== ln.category ? ln.category : ""}
-                  </TableCell>
-                  <TableCell>{ln.item}</TableCell>
-                  <TableCell className="text-right tabular-nums">{ln.qtyOrLf}</TableCell>
-                  <TableCell className="text-right tabular-nums">{usd(ln.materialCost)}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {ln.hoursPerUnit.toFixed(3)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{ln.hours.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{usd(ln.laborCost)}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => openFor(tile, ln.source)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs text-destructive"
-                        title="Remove this item from the bid"
-                        onClick={() => onChange(removeMetalsLine(state, ln.source))}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            <TableRow className="font-medium">
-              <TableCell colSpan={3}>Totals</TableCell>
-              <TableCell className="text-right tabular-nums">{usd(totals.material)}</TableCell>
-              <TableCell />
-              <TableCell className="text-right tabular-nums">{totals.hours.toFixed(2)}</TableCell>
-              <TableCell className="text-right tabular-nums">{usd(totals.labor)}</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableBody>
-        </Table>
+        <>
+          {/* Narrow on a phone, so it is read without sliding the page sideways. */}
+          <p className="text-xs text-muted-foreground max-md:max-w-[24rem]" data-metals-price-hint>
+            {METALS_PRICE_HINT}
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Category</TableHead>
+                <TableHead>Item</TableHead>
+                <TableHead className="text-right">Qty/LF</TableHead>
+                <TableHead className="text-right">Cost/Quote</TableHead>
+                <TableHead className="text-right">Hours PerUnit/LF</TableHead>
+                <TableHead className="text-right">Hours</TableHead>
+                <TableHead className="text-right">Labor Cost</TableHead>
+                <TableHead className="w-[130px]" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.map((ln, i) => {
+                const tile = (Object.keys(CATEGORY_BY_TILE) as TileId[]).find(
+                  (t) => CATEGORY_BY_TILE[t] === ln.category,
+                );
+                return (
+                  <TableRow
+                    key={i}
+                    className="cursor-pointer"
+                    onDoubleClick={() => openFor(tile, ln.source)}
+                  >
+                    <TableCell className="text-muted-foreground">
+                      {i === 0 || lines[i - 1]!.category !== ln.category ? ln.category : ""}
+                    </TableCell>
+                    <TableCell>{ln.item}</TableCell>
+                    <TableCell className="text-right tabular-nums">{ln.qtyOrLf}</TableCell>
+                    <TableCell className={PRICE_CELL}>
+                      <PriceBox
+                        item={ln.item}
+                        amount={ln.materialCost}
+                        listAmount={ln.listMaterialCost}
+                        typed={ln.priceTyped}
+                        onAmount={(v) =>
+                          onPricesChange(setMetalsTypedPrice(prices, ln.priceKey, v))
+                        }
+                        onListPrice={() =>
+                          onPricesChange(clearMetalsTypedPrice(prices, ln.priceKey))
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {ln.hoursPerUnit.toFixed(3)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{ln.hours.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{usd(ln.laborCost)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => openFor(tile, ln.source)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-destructive"
+                          title="Remove this item from the bid"
+                          onClick={() => {
+                            const next = removeMetalsLine(state, ln.source);
+                            onChange(next);
+                            dropGonePrices(next, ln.priceKey);
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow className="font-medium">
+                <TableCell colSpan={3}>Totals</TableCell>
+                <TableCell className="text-right tabular-nums">{usd(totals.material)}</TableCell>
+                <TableCell />
+                <TableCell className="text-right tabular-nums">{totals.hours.toFixed(2)}</TableCell>
+                <TableCell className="text-right tabular-nums">{usd(totals.labor)}</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableBody>
+          </Table>
+        </>
       )}
 
       <GuttersDialog
         open={openTile === "gutters"}
-        onClose={() => setOpenTile(null)}
+        onClose={closeTile}
         refData={refData}
         state={state}
         onChange={onChange}
@@ -238,7 +387,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
       />
       <DownspoutsDialog
         open={openTile === "downspouts"}
-        onClose={() => setOpenTile(null)}
+        onClose={closeTile}
         refData={refData}
         state={state}
         onChange={onChange}
@@ -246,14 +395,14 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
       />
       <PitchPansDialog
         open={openTile === "pitchPans"}
-        onClose={() => setOpenTile(null)}
+        onClose={closeTile}
         refData={refData}
         state={state}
         onChange={onChange}
       />
       <CollectionBoxesDialog
         open={openTile === "collectionBoxes"}
-        onClose={() => setOpenTile(null)}
+        onClose={closeTile}
         refData={refData}
         state={state}
         onChange={onChange}

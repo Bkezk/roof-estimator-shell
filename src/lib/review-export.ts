@@ -5,6 +5,7 @@
  * the live estimate.
  */
 import { csvSafeCell } from "@/lib/csv-safe";
+import { metalsMaterialLabel } from "@/lib/metals-price-override";
 
 export interface ReviewData {
   bidName: string;
@@ -14,6 +15,11 @@ export interface ReviewData {
   parapetMaterial: number;
   curbMaterial: number;
   metalsMaterial: number;
+  /**
+   * How many metals lines carry a price typed on this bid (Nov 24; lib/metals-price-override.ts).
+   * The row says so, and stays when the typed prices bring the amount to 0.
+   */
+  metalsTypedPrices?: number;
   adhesiveMaterial: number;
   accessoryMaterial: number;
   underlaymentMaterial: number;
@@ -66,7 +72,9 @@ export function buildReviewRows(d: ReviewData): string[][] {
   push(P, "Membrane material", n2(d.membraneMaterial));
   opt(P, "Parapet material", d.parapetMaterial);
   opt(P, "Curb material", d.curbMaterial);
-  opt(P, "Metals material", d.metalsMaterial);
+  const typedMetals = d.metalsTypedPrices ?? 0;
+  if (typedMetals > 0) push(P, metalsMaterialLabel(typedMetals), n2(d.metalsMaterial));
+  else opt(P, "Metals material", d.metalsMaterial);
   opt(P, "Adhesive material", d.adhesiveMaterial);
   opt(P, "Accessories", d.accessoryMaterial);
   opt(P, "Insulation & underlayment", d.underlaymentMaterial);

@@ -40,6 +40,7 @@ import type {
 import { sectionLayers } from "@/lib/engine/bid-builder";
 import type { MetalsState } from "@/lib/engine/metals";
 import { emptyMetalsState, normalizeMetalsState } from "@/lib/engine/metals";
+import { readMetalsTypedPrices } from "@/lib/metals-price-override";
 import type { NonDlGroup, NonDlState } from "@/lib/engine/nondl";
 import { NON_DL_GROUPS, emptyNonDlState, normalizeNonDlState } from "@/lib/engine/nondl";
 import type { SavedBidState } from "@/lib/proposal-bid";
@@ -57,6 +58,12 @@ export interface CombineInfo {
   sources: Array<{ id: string; name: string; client: string; estimator: string }>;
   /** Non-DL items combined although their unit cost / labor disagreed (legacy CompareNDLItems). */
   conflicts: string[];
+  /**
+   * Source bids that carried metals prices typed on them (Nov 24; lib/metals-price-override.ts).
+   * They are not carried: the combiner prices every item at the current defaults. Named so the
+   * estimator knows to type them again. Absent = no source had one.
+   */
+  metalsPricesNotCarried?: Array<{ name: string; count: number }>;
 }
 
 export interface CombineResult {
@@ -420,6 +427,15 @@ export function combineSavedBids(
     })),
     conflicts,
   };
+  // A metals price typed on a source bid is a whole-line amount for that bid's own quantity: it
+  // is not carried into the combined bid (like an underlayment price quote), and it is said.
+  const typedMetals = sources
+    .map((s) => ({
+      name: s.name,
+      count: readMetalsTypedPrices(s.saved.metalsTypedPrices).length,
+    }))
+    .filter((s) => s.count > 0);
+  if (typedMetals.length) info.metalsPricesNotCarried = typedMetals;
 
   const {
     adminSnapshot: _a,
@@ -470,6 +486,14 @@ export function combineWarningLines(info: CombineInfo): string[] {
         )
         .join("; "),
   ];
+  const typedMetals = info.metalsPricesNotCarried ?? [];
+  if (typedMetals.length)
+    lines.push(
+      "Metals prices typed on a bid were not carried over. This bid uses the list prices. Typed on: " +
+        typedMetals
+          .map((s) => `“${s.name}” (${s.count} ${s.count === 1 ? "price" : "prices"})`)
+          .join("; "),
+    );
   return lines;
 }
 

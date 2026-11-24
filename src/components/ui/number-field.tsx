@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
-import { numberFieldView } from "@/lib/number-field-view";
+import { numberFieldTyped, numberFieldView } from "@/lib/number-field-view";
 
 /**
  * Numeric input backed by a number value. While the field is focused it keeps its own text so
@@ -30,6 +30,14 @@ export function NumberField(props: {
   onBlur?: (() => void) | undefined;
   /** Focus (and select) on mount — a freshly added row's first box. */
   autoFocus?: boolean | undefined;
+  /**
+   * An emptied box means "no value of my own", not 0 (Nov 24, a metals price typed on a bid:
+   * emptying the box goes back to the list price, typing 0 is a price of $0). When given, an
+   * emptied box calls this instead of onChange(0).
+   */
+  onBlank?: (() => void) | undefined;
+  /** What the box is, for a screen reader, where no label sits beside it. */
+  label?: string | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
   const min = props.min ?? 0;
@@ -48,6 +56,7 @@ export function NumberField(props: {
       disabled={props.disabled ?? false}
       placeholder={view.placeholder}
       title={props.title}
+      aria-label={props.label}
       className={`${props.invalid ? "border-destructive " : ""}${props.className ?? ""}`}
       value={display}
       onFocus={(e) => {
@@ -57,15 +66,14 @@ export function NumberField(props: {
       onChange={(e) => {
         const raw = e.target.value;
         setText(raw);
-        const t = raw.trim();
-        if (t === "" || t === "-" || t === "." || t === "-.") {
-          props.onChange(Math.max(min, 0));
+        const typed = numberFieldTyped(raw, min, props.max);
+        if (typed === null) return;
+        if (typed === "blank") {
+          if (props.onBlank) props.onBlank();
+          else props.onChange(Math.max(min, 0));
           return;
         }
-        const n = Number(t);
-        if (!Number.isFinite(n)) return;
-        const clamped = props.max !== undefined ? Math.min(props.max, n) : n;
-        props.onChange(Math.max(min, clamped));
+        props.onChange(typed);
       }}
       onBlur={() => {
         setText(null);

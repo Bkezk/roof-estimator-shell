@@ -21,6 +21,7 @@ import type {
 import type { MarkupMode } from "@/lib/engine/money";
 import type { AccessoriesState } from "@/lib/engine/accessories";
 import type { MetalsState } from "@/lib/engine/metals";
+import type { MetalsTypedPrice } from "@/lib/metals-price-override";
 import type { NonDlState } from "@/lib/engine/nondl";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
@@ -160,6 +161,11 @@ export interface SavedBidState {
    * bid-dismissed-notices.ts): a notice whose numbers change is a new notice and shows again.
    */
   dismissedNotices?: string[];
+  /**
+   * Metals prices typed on this bid (owner, Nov 24; lib/metals-price-override.ts): the whole
+   * Cost/Quote amount of a line of the Metals screen, kept on the bid only. Absent = none typed.
+   */
+  metalsTypedPrices?: MetalsTypedPrice[];
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
   /** Per-bid setup / inspection time adjustments % (legacy per-item overrides). */

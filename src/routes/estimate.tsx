@@ -56,7 +56,6 @@ import { AuditHistory } from "@/components/audit-history";
 import { BidCustomerContact } from "@/components/bid-customer-contact";
 import { withLightTheme } from "@/lib/theme";
 import {
-  buildEstimateInputs,
   type BidInput,
   type BidSectionInput,
   type AccessoryLine,
@@ -128,7 +127,7 @@ import {
   type SanityWarning,
 } from "@/lib/bid-sanity";
 import { BidNoticeList } from "@/components/bid-notice-list";
-import { readDismissedNotices, splitNotices } from "@/lib/bid-dismissed-notices";
+import { readDismissedNotices, restoreNotices, splitNotices } from "@/lib/bid-dismissed-notices";
 import {
   BID_DRAFT_DELAY_MS,
   BID_DRAFT_VERSION,
@@ -226,6 +225,15 @@ import {
   type AccessoriesState,
 } from "@/lib/engine/accessories";
 import { emptyMetalsState, normalizeMetalsState, type MetalsState } from "@/lib/engine/metals";
+import {
+  buildEstimateInputsWithMetalsPrices,
+  markMetalsZeroAtUpdate,
+  metalsMaterialLabel,
+  metalsTypedCount,
+  metalsZeroNotices,
+  readMetalsTypedPrices,
+  type MetalsTypedPrice,
+} from "@/lib/metals-price-override";
 import {
   BUILDING_TYPES,
   MAX_WIND_OPTIONS,
@@ -655,6 +663,9 @@ function EstimatePage() {
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [metals, setMetals] = useState<MetalLine[]>([]);
   const [metalsCalc, setMetalsCalc] = useState<MetalsState>(() => emptyMetalsState());
+  // Metals prices typed on this bid (owner, Nov 24; lib/metals-price-override.ts): kept on the
+  // bid only, applied around the engine, never replaced by "Update pricing & labor".
+  const [metalsTypedPrices, setMetalsTypedPrices] = useState<MetalsTypedPrice[]>([]);
   const [nonDlCalc, setNonDlCalc] = useState<NonDlState>(() => emptyNonDlState());
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
   const [curbs, setCurbs] = useState<CurbInput[]>([]);
@@ -1251,6 +1262,7 @@ function EstimatePage() {
     setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
     setMetals(Array.isArray(d.metals) ? d.metals : []);
     setMetalsCalc(normalizeMetalsState(d.metalsCalc));
+    setMetalsTypedPrices(readMetalsTypedPrices(d.metalsTypedPrices));
     setNonDlCalc(normalizeNonDlState(d.nonDlCalc));
     setParapets(Array.isArray(d.parapets) ? d.parapets : []);
     setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
@@ -2082,7 +2094,16 @@ function EstimatePage() {
         chainFix.changes,
       );
     }
+    // A metals price typed on this bid is not replaced (owner, Nov 24). One that is $0 at this
+    // moment is flagged and says so in the bid's yellow notices from here on, until it is
+    // dismissed or the price is no longer 0 (lib/metals-price-override.ts). A notice dismissed
+    // after an earlier update shows again: this is a new update.
+    const zeroNow = markMetalsZeroAtUpdate(metalsTypedPrices);
+    const zeroNotes = metalsZeroNotices(result?.metalsScreen, zeroNow);
+    setMetalsTypedPrices(zeroNow);
+    if (zeroNotes.length) setDismissedNotices((prev) => restoreNotices(prev, zeroNotes));
     toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);
+    for (const note of zeroNotes) toast.warning(note, { duration: 15_000 });
     if (milFix)
       warnMilChanges("The updated pricing does not offer every mil this bid had:", milFix.changes);
   };
@@ -2148,6 +2169,8 @@ function EstimatePage() {
     ...(takeoffInfo ? { takeoffInfo } : {}),
     ...(importInfo ? { importInfo } : {}),
     ...(dismissedNotices.length ? { dismissedNotices } : {}),
+    // Only when a price was typed, so a bid without one saves exactly what it saved before.
+    ...(metalsTypedPrices.length ? { metalsTypedPrices } : {}),
     // LAST on purpose (Nov 10): "Save anyway" sends the list a render before `saved` carries it,
     // and the save's baseline adds it the same way (bid-sanity.ts savedWithAcknowledged), so the
     // two read alike and the bid is not left "Unsaved changes" by its own save.
@@ -2729,7 +2752,10 @@ function EstimatePage() {
       saved,
       // A Duro-Tech TPO bid prices the DL accessories with the Duro-Tech ref (vents and pipe
       // stacks replaced, the TPO corners / boots / sealants beside the Duro-Last ones).
-      (b) => buildEstimateInputs(b, adminForBid(admin, b.roofSystem)),
+      // With the metals prices typed on this bid (lib/metals-price-override.ts): the engine
+      // itself works every total from the changed metals material.
+      (b) =>
+        buildEstimateInputsWithMetalsPrices(b, adminForBid(admin, b.roofSystem), metalsTypedPrices),
       (b) => computeEstimate(b.inputs),
     );
     const build = run.build;
@@ -2770,7 +2796,9 @@ function EstimatePage() {
         const { adjustLaborPct: _sectionAdjust, ...base } = rs;
         return computeSectionInstallHours(base, inputs.admin, inputs.formulasVersion, 0);
       }),
-      warnings,
+      // The engine's notices, then one for each metals price that was 0 at the last "Update
+      // pricing & labor" and still is (owner, Nov 24): same list, same triangle, same dismiss.
+      warnings: [...warnings, ...metalsZeroNotices(build.metalsScreen, metalsTypedPrices)],
       parapetMaterial,
       metalsMaterial,
       adhesiveMaterial,
@@ -2797,7 +2825,7 @@ function EstimatePage() {
       arpMaterial: build.breakdown.arpMaterial,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [admin, JSON.stringify(bid)]);
+  }, [admin, JSON.stringify(bid), JSON.stringify(metalsTypedPrices)]);
   // The adhesives this bid uses with no price (lib/adhesive-price-gaps.ts): a red line on the
   // Bid total card (owner, Oct 30).
   const adhesiveGaps = adhesivePriceGaps(result?.adhesiveWholeUnits, admin?.adhesivePrices);
@@ -3354,6 +3382,7 @@ function EstimatePage() {
       parapetMaterial: result.parapetMaterial,
       curbMaterial: result.curbMaterial,
       metalsMaterial: result.metalsMaterial,
+      metalsTypedPrices: metalsTypedCount(result.metalsScreen),
       adhesiveMaterial: result.adhesiveMaterial,
       accessoryMaterial: accessoryTotal,
       underlaymentMaterial: d[6] ?? 0,
@@ -6249,6 +6278,8 @@ function EstimatePage() {
                 state={metalsCalc}
                 onChange={setMetalsCalc}
                 result={result?.metalsScreen}
+                prices={metalsTypedPrices}
+                onPricesChange={setMetalsTypedPrices}
               />
             </CardContent>
           </Card>
@@ -7786,8 +7817,13 @@ function EstimatePage() {
                   {result.curbMaterial > 0 && (
                     <Row label="Curb material" v={money(result.curbMaterial)} />
                   )}
-                  {result.metalsMaterial > 0 && (
-                    <Row label="Metals material" v={money(result.metalsMaterial)} />
+                  {/* Nov 24 (owner: metals price editable on the bid): the row says when its
+                      amount holds prices typed on this bid, and stays when they bring it to $0. */}
+                  {(result.metalsMaterial > 0 || metalsTypedCount(result.metalsScreen) > 0) && (
+                    <Row
+                      label={metalsMaterialLabel(metalsTypedCount(result.metalsScreen))}
+                      v={money(result.metalsMaterial)}
+                    />
                   )}
                   {result.adhesiveMaterial > 0 && (
                     <Row label="Adhesive material" v={money(result.adhesiveMaterial)} />

@@ -78,7 +78,12 @@ describe("the family results feed the engine input and the review", () => {
     );
     expect(estimate).toMatch(/const familyResults = useMemo\(\s*\(\) =>\s*computeFamilyResults\(/);
     // The DL group prices with the ref for the bid's roof system (Duro-Tech TPO → the merge).
-    expect(estimate).toContain("(b) => buildEstimateInputs(b, adminForBid(admin, b.roofSystem)),");
+    // Nov 24 (owner: metals price editable on the bid): the builder is reached through
+    // buildEstimateInputsWithMetalsPrices (lib/metals-price-override.ts), which calls
+    // buildEstimateInputs itself; the ref for the bid's roof system is passed as before.
+    expect(estimate.replace(/\s+/g, " ")).toContain(
+      "(b) => buildEstimateInputsWithMetalsPrices(b, adminForBid(admin, b.roofSystem), metalsTypedPrices),",
+    );
     // The review's accessory totals read the composed lines, not the old flat state alone.
     expect(estimate).toContain(
       "const accessoryTotal = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);",
@@ -96,8 +101,10 @@ describe("the family results feed the engine input and the review", () => {
     expect(proposal).toContain(
       "const bidInput = withFamilyAccessories(buildBidInput(saved, cd.warranty), saved, cd.admin);",
     );
-    expect(proposal).toContain(
-      "(b) => buildEstimateInputs(b, adminForBid(cd.admin!, b.roofSystem)),",
+    // Nov 24 (owner: metals price editable on the bid): the proposal prices through the same
+    // wrapper as the estimator, with the prices typed on the bid.
+    expect(proposal.replace(/\s+/g, " ")).toContain(
+      "(b) => buildEstimateInputsWithMetalsPrices( b, adminForBid(cd.admin!, b.roofSystem), saved.metalsTypedPrices, ),",
     );
     expect(proposal).toContain(
       "bidInput.accessories.reduce((s, a) => s + a.price * a.quantity, 0)",
