@@ -41,18 +41,34 @@ const openapi = {
 const headersOf = (c: Call) => new Headers(c.init.headers);
 
 describe("/api/backup — who gets in", () => {
-  it("answers 500 while BACKUP_SECRET is unset or too short, never serving", async () => {
+  // Nov 24 (public pages audit): these two were a 500 whose words named the secret and said it
+  // was not set, or too short. Now a caller gets the same plain 401 a wrong password gets, and
+  // the reason goes to the server log only (secret-doors-nov24.test.ts).
+  it("answers the same 401 while BACKUP_SECRET is unset or too short, never serving, and says why in the server log only", async () => {
     const { f, calls } = fakeFetch(() => Response.json(openapi));
-    const unset = await backupRequest(GET("what=tables"), { ...ENV, secret: undefined }, f);
-    expect(unset.status).toBe(500);
-    expect(await unset.text()).toContain("BACKUP_SECRET is not set");
+    const quiet = () => {};
+    const warned: string[] = [];
+    const warn = (l: string) => warned.push(l);
+    const unset = await backupRequest(
+      GET("what=tables"),
+      { ...ENV, secret: undefined },
+      f,
+      quiet,
+      warn,
+    );
+    expect(unset.status).toBe(401);
+    expect(await unset.text()).toBe("Unauthorized");
+    expect(warned[0]).toContain("BACKUP_SECRET is not set");
     const short = await backupRequest(
       GET("what=tables", "Bearer short"),
       { ...ENV, secret: "short" },
       f,
+      quiet,
+      warn,
     );
-    expect(short.status).toBe(500);
-    expect(await short.text()).toContain(`at least ${MIN_SECRET_LENGTH} characters`);
+    expect(short.status).toBe(401);
+    expect(await short.text()).toBe("Unauthorized");
+    expect(warned[1]).toContain(`shorter than ${MIN_SECRET_LENGTH} characters`);
     expect(calls).toHaveLength(0);
   });
   it("refuses a wrong or missing password (401) and anything but GET (405), touching nothing", async () => {

@@ -15,11 +15,22 @@
  * two secrets above exactly as before.
  *
  * Comparison is constant-time on SHA-256 digests, like the generated check. Returns null when
- * the caller is allowed, else the response to send (401, or 500 when nothing is configured).
+ * the caller is allowed, else the response to send.
+ *
+ * Nov 24 (the public pages audit). A caller without the right secret gets one answer, a plain
+ * 401 "Unauthorized", whether a secret is missing on this server, too short, or just not the
+ * one sent. Which of those it was is written to the server log and never to the caller. A
+ * CRON_SECRET shorter than MIN_CRON_SECRET_LENGTH characters is treated as not set. (The GitHub
+ * jobs call with `curl -f`, which fails on any 4xx or 5xx, so they fail as before.)
  */
 import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
 
 import { type TimerCheck, timerTokenOf } from "./cron-timer";
+
+/** A CRON_SECRET shorter than this is treated as not set. */
+export const MIN_CRON_SECRET_LENGTH = 16;
+
+const refused = () => new Response("Unauthorized", { status: 401 });
 
 export async function authenticateCron(
   request: Request,
@@ -38,7 +49,13 @@ export async function authenticateCron(
       }
     }
   }
-  const own = process.env["CRON_SECRET"]?.trim();
+  const typed = process.env["CRON_SECRET"]?.trim();
+  // A secret under the shortest length is treated as not set at all.
+  const own = typed && typed.length >= MIN_CRON_SECRET_LENGTH ? typed : undefined;
+  if (typed && !own)
+    console.error(
+      `Cron: CRON_SECRET is shorter than ${MIN_CRON_SECRET_LENGTH} characters, so it is treated as not set. Set a longer one in Lovable Cloud › Secrets and in the GitHub repository's Actions secrets.`,
+    );
   if (own) {
     const match = /^Bearer ([^\s,]+)$/.exec(request.headers.get("authorization") ?? "");
     const token = match?.[1];
@@ -47,10 +64,17 @@ export async function authenticateCron(
       const digest = (v: string) => createHash("sha256").update(v, "utf8").digest();
       if (timingSafeEqual(digest(token), digest(own))) return null;
     }
-    // Not the owner's secret: Lovable's own may still match. Without a Lovable secret the
-    // generated check answers 500 ("Server configuration error"); the owner's secret being
-    // set means the server IS configured, so that case is a plain 401 here.
-    if (!process.env["LOVABLE_CRON_SECRET"]) return new Response("Unauthorized", { status: 401 });
+  }
+  // Not the owner's secret: Lovable's own may still match. Without a Lovable secret the
+  // generated check would answer 500 ("Server configuration error"), which is a different
+  // answer from a wrong secret's. So that case is the same plain 401 here, and when no usable
+  // secret is set at all the reason goes to the server log.
+  if (!process.env["LOVABLE_CRON_SECRET"]) {
+    if (!own)
+      console.error(
+        "Cron: refused. No usable CRON_SECRET or LOVABLE_CRON_SECRET is set on this server (Lovable Cloud › Secrets), so no scheduled run can start.",
+      );
+    return refused();
   }
   return authenticateCronRequest(request);
 }

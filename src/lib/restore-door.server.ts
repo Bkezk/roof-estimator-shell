@@ -5,7 +5,9 @@
  *
  * The door opens to RESTORE_SECRET alone — its own password, never BACKUP_SECRET (a backup
  * password only reads; this one writes) — set by the owner in Lovable Cloud › Secrets and in the
- * script's config as RestoreSecret. Unset or wrong: 403 and nothing happens. The writing itself
+ * script's config as RestoreSecret. Unset, too short or wrong: 403 and nothing happens, with the
+ * same words to the caller each time (Nov 24, the public pages audit); which of the three it was
+ * is written to the server log only. The writing itself
  * is done by three SECURITY DEFINER functions the door calls with the service role
  * (supabase/migrations/20261013100000_restore_door.sql): restore_rows() maps each backup row onto
  * the live table (columns the table lost are ignored, new ones take their default), inserts
@@ -90,9 +92,12 @@ export interface RestoreDeps {
   log: (line: string) => void;
 }
 
-const SECRET_OFF = "Restores are off: RESTORE_SECRET is not set in Lovable Cloud › Secrets";
-const SECRET_SHORT = `Restores are off: RESTORE_SECRET must be at least ${MIN_SECRET_LENGTH} characters`;
-const WRONG = "Wrong restore password";
+/** The one answer to a caller without the right password, whatever the reason. */
+const REFUSED = "Restore refused";
+/** The reasons, for the server log only. */
+const SECRET_OFF =
+  "Restores are off: RESTORE_SECRET is not set in Lovable Cloud › Secrets. Every call is refused until it is.";
+const SECRET_SHORT = `Restores are off: RESTORE_SECRET is shorter than ${MIN_SECRET_LENGTH} characters. Every call is refused until it is longer.`;
 const NO_KEY = "SUPABASE_SERVICE_ROLE_KEY: the server key is not set";
 const NOT_PROJECT = "That is not the project you named";
 
@@ -213,18 +218,20 @@ export async function restoreRequest(
     "unknown";
   const log = deps?.log ?? ((line: string) => console.log(line));
 
-  // 1. The password. Off (unset / short) and wrong are both 403; nothing upstream is touched.
+  // 1. The password. Off (unset / short) and wrong are all the same 403 with the same words;
+  //    nothing upstream is touched. Why it is off goes to the server log as an error.
+  const warn = deps?.log ?? ((line: string) => console.error(line));
   if (!env.secret) {
-    log(`[restore] refused 403 ${who} (RESTORE_SECRET unset)`);
-    return fail(403, SECRET_OFF);
+    warn(`[restore] refused 403 ${who}. ${SECRET_OFF}`);
+    return fail(403, REFUSED);
   }
   if (env.secret.length < MIN_SECRET_LENGTH) {
-    log(`[restore] refused 403 ${who} (RESTORE_SECRET too short)`);
-    return fail(403, SECRET_SHORT);
+    warn(`[restore] refused 403 ${who}. ${SECRET_SHORT}`);
+    return fail(403, REFUSED);
   }
   if (!(await bearerMatches(request, env.secret))) {
     log(`[restore] refused 403 ${who} (wrong password)`);
-    return fail(403, WRONG);
+    return fail(403, REFUSED);
   }
   // 2. The server key (the way api.cron.reminders.ts checks hasServiceRole()).
   if (!env.url || !env.key) {

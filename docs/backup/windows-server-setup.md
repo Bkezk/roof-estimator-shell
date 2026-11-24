@@ -128,9 +128,11 @@ have two slots; the third run replaces the older one. Delete the `_incoming-…`
 hand when you are done looking (it is the only thing the script does not tidy).
 
 If anything fails, `backup.log` says what, and `LAST-BACKUP-FAILED.txt` appears. The two most
-common: a wrong password ("401 (Unauthorized)": the config and Lovable Secrets disagree, or the
-portal was not republished after adding the secret; "500" with "BACKUP_SECRET is not set": the
-secret is missing in Lovable) and a `DestinationRoot` that does not exist yet.
+common: a refused password ("401 (Unauthorized)") and a `DestinationRoot` that does not exist
+yet. The portal gives that one answer whether the config and Lovable Secrets disagree, the
+portal was not republished after adding the secret, the secret is missing in Lovable, or it is
+shorter than 24 characters (since Nov 24, 2026; before that a missing secret was a "500"). When
+the secret is missing or too short, the portal's own log in Lovable says so.
 
 ## Step 5 — Lock the folders down
 
@@ -210,10 +212,12 @@ mode deletes.
 3. On the server, add it to `C:\JBK\backup\jbk-backup.config.json`:
    `"RestoreSecret": "that password"`. The restore script reads the backup's config.
 
-Without the secret the door answers "Restores are off: RESTORE_SECRET is not set in Lovable
-Cloud › Secrets" and nothing can be written through it. You may leave it unset between restores
-and set it only when you need one; a wrong password is "Wrong restore password", logged by the
-portal with the caller's address.
+Without the secret nothing can be written through the door. You may leave it unset between
+restores and set it only when you need one. A caller without the right password is answered
+"Restore refused", the same words whether the secret is unset, shorter than 24 characters, or
+not the one sent (since Nov 24, 2026). The portal's own log in Lovable says which it was
+("Restores are off: RESTORE_SECRET is not set …", or "wrong password"), with the caller's
+address.
 
 ### Secrets are not in the backup
 

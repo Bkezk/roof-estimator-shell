@@ -42,25 +42,33 @@ export const backupEnvFromProcess = (): BackupEnv => ({
 /** Shorter than this and the password is too easy to guess: refuse to serve at all. */
 export const MIN_SECRET_LENGTH = 24;
 
-/** null when the caller holds the backup password, else the response to send. */
-export async function authorizeBackup(request: Request, secret?: string): Promise<Response | null> {
+/**
+ * null when the caller holds the backup password, else the response to send.
+ *
+ * Nov 24 (the public pages audit). A caller without the right password gets one answer, a plain
+ * 401 "Unauthorized", whether the password is missing on this server, too short, or just not
+ * the one sent. Which of those it was goes to the server log (`warn`) and never to the caller.
+ */
+export async function authorizeBackup(
+  request: Request,
+  secret?: string,
+  warn: (line: string) => void = (line) => console.error(line),
+): Promise<Response | null> {
+  const refused = () => new Response("Unauthorized", { status: 401 });
   if (!secret) {
-    return Response.json(
-      { ok: false, error: "BACKUP_SECRET is not set on this server (Lovable Cloud › Secrets)" },
-      { status: 500 },
+    warn(
+      "[backup] BACKUP_SECRET is not set on this server (Lovable Cloud › Secrets): every call is refused until it is",
     );
+    return refused();
   }
   if (secret.length < MIN_SECRET_LENGTH) {
-    return Response.json(
-      {
-        ok: false,
-        error: `BACKUP_SECRET must be at least ${MIN_SECRET_LENGTH} characters; the backup is refused until it is`,
-      },
-      { status: 500 },
+    warn(
+      `[backup] BACKUP_SECRET is shorter than ${MIN_SECRET_LENGTH} characters: every call is refused until it is longer`,
     );
+    return refused();
   }
   if (await bearerMatches(request, secret)) return null;
-  return new Response("Unauthorized", { status: 401 });
+  return refused();
 }
 
 /**
@@ -105,9 +113,10 @@ export async function backupRequest(
   env: BackupEnv = backupEnvFromProcess(),
   fetchImpl: typeof fetch = fetch,
   log: (line: string) => void = (line) => console.log(line),
+  warn: (line: string) => void = (line) => console.error(line),
 ): Promise<Response> {
   if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
-  const denied = await authorizeBackup(request, env.secret);
+  const denied = await authorizeBackup(request, env.secret, warn);
   const q = new URL(request.url).searchParams;
   const what = q.get("what") ?? "";
   const who =

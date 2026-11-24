@@ -30,6 +30,11 @@ from. One from the other side records nothing, and the admins and managers are t
 These come from no outside service. Each is a long password the owner chose. Where one is kept in
 more than one place, every copy must be the same.
 
+Each has a shortest length (Nov 24, 2026): `CRON_SECRET` at least 16 characters, `BACKUP_SECRET`
+and `RESTORE_SECRET` at least 24. A shorter one is treated as not set: every caller is refused
+until it is made longer, and the site's own log in Lovable says why. A caller without the right
+password gets the same plain refusal whether the password is missing, too short or wrong.
+
 | Name             | What it guards                                                                 | Kept in                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
 | `CRON_SECRET`    | The timed runs started from GitHub: only a caller that knows it may start one. | Two places, which must match: Lovable Cloud › Secrets, and the GitHub repository's Actions secrets. |
