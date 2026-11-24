@@ -13,20 +13,28 @@
  *
  * Shown to people with Customers access only: the server answers nothing to anyone else.
  */
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Loader2, Mail, MapPin, Phone, QrCode, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
+import { RoofCareCard } from "@/components/roof-care/plan-card";
 import { Button } from "@/components/ui/button";
 import { canAccess } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { quickCreateAccount, saveSite } from "@/lib/crm.functions";
 import { shortDay } from "@/lib/followup-rules";
 import {
+  CARE_OPEN_SIGN_UP,
   CARE_REQUEST_SEARCH,
+  CARE_START_AT_MATCH,
+  CARE_START_BUTTON,
+  CARE_STARTED_WORDS,
+  carePrefill,
   careShownWords,
+  careStartsItself,
   customQuoteWhy,
   emailLink,
   isCustomQuoteAsk,
@@ -41,6 +49,8 @@ import {
   type PublicRequestRow,
 } from "@/lib/public-requests";
 import { getOpportunityRequest, handlePublicRequest } from "@/lib/public-requests.functions";
+import { ROOF_CARE_TERMS_VERSION } from "@/lib/roof-care-plan";
+import { startPlanFromRequest } from "@/lib/roof-care-plan.functions";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const money = (n: number) =>
@@ -177,6 +187,35 @@ export function OpportunityRequestStrip({
   });
   const r = q.data?.request ?? null;
   const matches = q.data?.matches ?? [];
+  // Nov 24 (owner: the sign-up window "pops up ... again, it should just ask us to confirm the
+  // roof size, then send the payment link"). When the customer typed a roof size and ticked
+  // the terms in use, the plan is started from what they sent, with no window. `startWhy`: why
+  // a try did not go, said beside the button that opens the window.
+  const auto = careStartsItself(r ? carePrefill(r) : null, ROOF_CARE_TERMS_VERSION);
+  const startFn = useServerFn(startPlanFromRequest);
+  const [startWhy, setStartWhy] = useState<string | null>(null);
+  const start = useMutation({
+    mutationFn: (siteId: string) => {
+      if (!r) throw new Error("The request was not read. Reload the page and try again.");
+      return startFn({ data: { request_id: r.id, site_id: siteId } });
+    },
+    onSuccess: (made) => {
+      setStartWhy(null);
+      void qc.invalidateQueries({ queryKey: opportunityRequestKey(opp.id) });
+      void qc.invalidateQueries({ queryKey: ["roof-care-plans"] });
+      void qc.invalidateQueries({ queryKey: ["owner-attention"] });
+      if (made.tied) toast.success(CARE_STARTED_WORDS, { duration: 20_000 });
+      else
+        toast.warning(
+          "The plan is made, but this request could not be tied to it. When the plan is paid, set this opportunity to Won.",
+          { duration: 30_000 },
+        );
+    },
+    onError: (e) => {
+      setStartWhy(errText(e));
+      toast.error(`The plan was not started: ${errText(e)}`, { duration: 20_000 });
+    },
+  });
 
   /** The customer is known (or just made): the property, then the answer to the request. */
   const finish = async (
@@ -207,6 +246,8 @@ export function OpportunityRequestStrip({
     void qc.invalidateQueries({ queryKey: opportunityRequestKey(opp.id) });
     void qc.invalidateQueries({ queryKey: ["owner-attention"] });
     toast.success(`${c.label} is on this opportunity now.`);
+    // Whose it is was the only thing the office had to say: the plan they picked is started.
+    if (c.site_id && auto.ok) start.mutate(c.site_id);
   };
   const fail = (e: unknown) =>
     toast.error(`That did not go through: ${errText(e)}`, { duration: 15_000 });
@@ -270,6 +311,11 @@ export function OpportunityRequestStrip({
       <p className="text-sm font-medium" data-request-next>
         {requestStepWords(step, r)}
       </p>
+      {step === "who" && !readOnly && auto.ok && (
+        <p className="text-sm text-muted-foreground" data-request-start-at-match>
+          {CARE_START_AT_MATCH}
+        </p>
+      )}
       {step === "who" && !readOnly && (
         <div className="space-y-2 rounded-lg border bg-background p-3" data-request-matches>
           <p className="text-sm font-medium">
@@ -319,15 +365,46 @@ export function OpportunityRequestStrip({
         </div>
       )}
       {step === "sign_up" && !readOnly && opp.site_id && (
-        <Button asChild data-action="request-open-sign-up">
-          <Link
-            to="/properties/$id"
-            params={{ id: opp.site_id }}
-            search={{ [CARE_REQUEST_SEARCH]: r.id } as never}
-          >
-            Open the sign-up
-          </Link>
-        </Button>
+        <div className="space-y-2" data-request-start={auto.ok && !startWhy ? "itself" : "window"}>
+          {!auto.ok || startWhy ? (
+            <p className="text-sm text-muted-foreground" data-request-start-why>
+              {startWhy ?? (auto.ok ? "" : auto.why)}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {auto.ok && !startWhy && (
+              <Button
+                disabled={start.isPending}
+                onClick={() => start.mutate(opp.site_id!)}
+                data-action="request-start-plan"
+              >
+                {start.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {CARE_START_BUTTON}
+              </Button>
+            )}
+            {/* The window is still there: to change what they picked, or when the plan cannot
+                be started by itself. */}
+            <Button
+              asChild
+              variant={auto.ok && !startWhy ? "ghost" : "default"}
+              size={auto.ok && !startWhy ? "sm" : "default"}
+              data-action="request-open-sign-up"
+            >
+              <Link
+                to="/properties/$id"
+                params={{ id: opp.site_id }}
+                search={{ [CARE_REQUEST_SEARCH]: r.id } as never}
+              >
+                {auto.ok && !startWhy ? "Change something first" : CARE_OPEN_SIGN_UP}
+              </Link>
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* The plan's own steps, here (Nov 24): confirm the roof size, send the payment link.
+          The page looks for the payment by itself and this opportunity then shows Won. */}
+      {step === "signed" && opp.site_id && (
+        <RoofCareCard siteId={opp.site_id} brief className="bg-background" />
       )}
       {(step === "signed" || step === "paid") && opp.site_id && (
         <Button asChild variant="outline" size="sm" data-action="request-open-plan">

@@ -108,14 +108,19 @@ type ServiceItem = {
   /** Other path prefixes the row is lit on. */
   alsoLit?: string[];
 };
+/**
+ * My tickets: the signed-in technician's own day. It sits right under Work Overview, above the
+ * groups (owner, Nov 24: "on the nav bar can we move my tickets to below work overview"). For a
+ * technician with no office role it is the first row of the menu, as it was.
+ */
+const myTicketsItem: ServiceItem = {
+  title: "My tickets",
+  url: "/service/today",
+  icon: CalendarCheck,
+  page: "service",
+  techOnly: true,
+};
 const customerItems: ServiceItem[] = [
-  {
-    title: "My tickets",
-    url: "/service/today",
-    icon: CalendarCheck,
-    page: "service",
-    techOnly: true,
-  },
   // Nov 23: "Public requests" (what visitors sent through the two QR pages) was a row of its own
   // here. Every request is an opportunity from the moment it is sent now, so it is found in
   // the Opportunities list like any other.
@@ -454,6 +459,8 @@ export function AppSidebar() {
         </SidebarMenuItem>
       ));
 
+  const customerRows = renderItems(customerItems);
+
   // The five Estimate Pricing pages, each with its own caret and sub-list as before.
   const pricingRows = (
     <>
@@ -591,28 +598,37 @@ export function AppSidebar() {
         {/* Work Overview (owner, Sep 30): the landing page — their own tickets, tasks and
             follow-ups in one list and calendar. Not for a technician-only user (owner, Oct 15):
             My tickets is their page, and the Service board is the office's. */}
-        {profile && !isTech && (
-          <SidebarGroup>
+        {profile && (!isTech || (!!profile.technician && can("service"))) && (
+          <SidebarGroup data-nav="top">
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isActive("/my-work")} tooltip="Work Overview">
-                  <Link to="/my-work">
-                    <ListTodo className="h-4 w-4" />
-                    {!collapsed && <span>Work Overview</span>}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {!isTech && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/my-work")}
+                    tooltip="Work Overview"
+                  >
+                    <Link to="/my-work">
+                      <ListTodo className="h-4 w-4" />
+                      {!collapsed && <span>Work Overview</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+              {/* Nov 24: My tickets right under Work Overview. */}
+              {renderItems([myTicketsItem])}
             </SidebarMenu>
           </SidebarGroup>
         )}
 
-        {profile && (
+        {/* Nothing under the heading (a technician, now that My tickets sits above): no heading. */}
+        {profile && customerRows.length > 0 && (
           <NavGroup
             label={can("customers") ? "Customers" : "Service"}
             id="customers"
             iconMode={collapsed}
           >
-            <SidebarMenu>{renderItems(customerItems)}</SidebarMenu>
+            <SidebarMenu>{customerRows}</SidebarMenu>
           </NavGroup>
         )}
 

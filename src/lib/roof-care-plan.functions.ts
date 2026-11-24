@@ -77,6 +77,7 @@ import {
   type VisitKind,
   type VisitTicket,
 } from "@/lib/roof-care-plan";
+import { CARE_START_FIRST_VISIT, carePrefillNote, careStartsItself } from "@/lib/public-requests";
 import { NOT_PLACED_LINE, placedRoughly } from "@/lib/roof-care-locate";
 import { PLAN_KEYS } from "@/lib/roof-care-price";
 import { isTripLine, tripLineSource } from "@/lib/roof-care-no-access";
@@ -692,7 +693,14 @@ export async function ticketIdsOfPlan(sb: Sb, planId: string): Promise<string[]>
 export const signUpRoofCare = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => signUpInput.parse(d))
-  .handler(async ({ data, context }): Promise<RoofCarePlan> => {
+  .handler(({ data, context }): Promise<RoofCarePlan> => signUpPlan(context, data));
+
+/**
+ * The sign-up itself: every rule of it, for the sign-up window and for a plan started straight
+ * from a public request (startPlanFromRequest). One place, so the two cannot drift apart.
+ */
+async function signUpPlan(context: Ctx, data: z.infer<typeof signUpInput>): Promise<RoofCarePlan> {
+  {
     const p = await signedIn(context);
     const sb = context.supabase;
     const site = await siteOf(sb, data.site_id);
@@ -776,7 +784,85 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
     if (!made)
       throw new Error("The plan was saved, but it could not be read back. Reload the page.");
     return made;
+  }
+}
+
+/** What starting a plan from a request answers. */
+export interface StartedFromRequest {
+  plan: RoofCarePlan;
+  /** False when the plan is signed and the request could not be pointed at it. */
+  tied: boolean;
+}
+
+/**
+ * Start the plan a customer picked on the public Roof Care page, with no sign-up window (owner,
+ * Nov 24: "it should just ask us to confirm the roof size, then send the payment link and once
+ * paid the opp should flip to won"). The customer already picked the plan, typed the size, said
+ * how they pay and ticked the terms, so the office is asked nothing again.
+ *
+ * Every rule of the sign-up still runs (signUpPlan): the price is read fresh, the size is
+ * checked against the map, one plan to a property. The first inspection is the usual choice,
+ * the inspection window. What cannot be started this way (no size typed, older terms) is
+ * refused in plain words, and the sign-up window is still there for it.
+ */
+export const startPlanFromRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ request_id: z.string().uuid(), site_id: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<StartedFromRequest> => {
+    await signedIn(context);
+    const sb = context.supabase;
+    const { readCarePrefill, handleRequest } = await import("@/lib/public-requests.functions");
+    const prefill = await readCarePrefill(context, data.request_id, data.site_id);
+    const can = careStartsItself(prefill, ROOF_CARE_TERMS_VERSION);
+    if (!can.ok) throw new Error(can.why);
+    const ask = prefill!;
+    // The price today, for the size they typed: the plan is saved at it or not at all.
+    const site = await siteOf(sb, data.site_id);
+    const drive = await siteDrive(sb, site);
+    if (!drive) throw new Error(NOT_PLACED_LINE);
+    const { data: priced, error: pErr } = await sb.rpc("roof_care_price", {
+      p_sqft: ask.sqft!,
+      p_hours: drive.hours,
+      p_miles: drive.miles,
+    });
+    if (pErr) throw new Error(pErr.message);
+    const answer = readPriceAnswer(priced);
+    const now = answer.ready ? answer.plans.find((o) => o.plan === ask.plan) : undefined;
+    if (!now) throw new Error(CARE_START_NO_PRICE);
+    const plan = await signUpPlan(context, {
+      site_id: data.site_id,
+      plan: ask.plan,
+      sqft: ask.sqft!,
+      first: CARE_START_FIRST_VISIT,
+      pay_method: ask.pay_method,
+      agreed_by: ask.agreed_by,
+      notes: carePrefillNote(ask),
+      email: looksLikeEmail(ask.customer_email) ? ask.customer_email : "",
+      terms_agreed: true,
+      shown_price: now.price,
+    });
+    // The request points at the plan it became, so its opportunity turns Won by itself the day
+    // the plan is paid (Nov 23). The plan is signed either way.
+    let tied = true;
+    try {
+      await handleRequest(context, {
+        id: data.request_id,
+        status: "matched",
+        site_id: data.site_id,
+        plan_id: plan.id,
+      });
+    } catch (e) {
+      tied = false;
+      console.error("Plan from a request: request", data.request_id, "was not tied —", e);
+    }
+    return { plan, tied };
   });
+
+/** A roof the page priced, but the office's prices have no plain price for today. */
+export const CARE_START_NO_PRICE =
+  "This roof has no plain price today, so the plan was not started. Open the sign-up to see why.";
 
 /** "Signed, not paid" to the admins and the managers. Never throws: the sign-up stands. */
 async function tellSignedNotPaid(sb: Sb, planId: string, actorId: string): Promise<void> {

@@ -295,7 +295,9 @@ describe("the strip on the opportunity", () => {
       "Say whose this is. Nothing else on this opportunity is saved until it has a customer.",
     );
     expect(requestStepWords("sign_up", { kind: "care" })).toBe(
-      "The customer picked a plan and ticked the terms on the page. Open the sign-up: it is filled in with what they picked, and the plan starts when the payment is received.",
+      // Nov 24 (owner): the plan is started from what they picked, with no sign-up window
+      // (roof-care-request-starts-plan-nov24.test.ts).
+      "The customer picked a plan and ticked the terms on the page. Start the plan: it is made from what they picked. Then confirm the roof size and send the payment link. It starts when the payment is received.",
     );
     expect(requestStepWords("quote", { kind: "care" })).toBe(
       "No price was shown on the page, so nothing was signed. Call them with a price.",
@@ -368,7 +370,10 @@ describe("the strip on the opportunity", () => {
     expect(strip).not.toContain("useEffect");
     // A Roof Care request opens the normal sign-up, filled in from the request.
     expect(strip).toContain("search={{ [CARE_REQUEST_SEARCH]: r.id } as never}");
-    expect(strip).toContain("Open the sign-up");
+    // Nov 24: it is the second choice now, for a request that cannot start by itself.
+    expect(strip).toContain(
+      '{auto.ok && !startWhy ? "Change something first" : CARE_OPEN_SIGN_UP}',
+    );
     // The office is told plainly that the page took no money.
     expect(strip).toContain("No payment was taken on");
   });
@@ -452,7 +457,7 @@ describe("the opportunity is Won the day the plan is paid, not the day it is sig
     expect(requestStep(care, opp, null)).toBe("signed");
     expect(requestStep(care, opp, "active")).toBe("paid");
     expect(requestStepWords("signed", { kind: "care" })).toBe(
-      "The plan is signed and waits for its payment. This opportunity turns Won the day the payment is received.",
+      "The plan is signed and waits for its payment. Work down the steps below. This opportunity turns Won the day the payment is received.",
     );
     expect(requestStepWords("paid", { kind: "care" })).toBe(
       "The plan is paid and has started. This opportunity was set to Won.",

@@ -115,20 +115,26 @@ const handleInput = z.object({
 export const handlePublicRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => handleInput.parse(d))
-  .handler(async ({ data, context }): Promise<PublicRequestRow> => {
-    await office(context);
-    const { data: row, error } = await context.supabase.rpc("public_request_handle", {
-      p_id: data.id,
-      p_status: data.status,
-      ...(data.account_id ? { p_account: data.account_id } : {}),
-      ...(data.site_id ? { p_site: data.site_id } : {}),
-      ...(data.opportunity_id ? { p_opportunity: data.opportunity_id } : {}),
-      ...(data.plan_id ? { p_plan: data.plan_id } : {}),
-      ...(data.reason ? { p_reason: data.reason } : {}),
-    });
-    if (error) throw new Error(error.message);
-    return row as unknown as PublicRequestRow;
+  .handler(({ data, context }): Promise<PublicRequestRow> => handleRequest(context, data));
+
+/** The same, for a server function that has already been handed the request (Nov 24). */
+export async function handleRequest(
+  context: Ctx,
+  data: z.infer<typeof handleInput>,
+): Promise<PublicRequestRow> {
+  await office(context);
+  const { data: row, error } = await context.supabase.rpc("public_request_handle", {
+    p_id: data.id,
+    p_status: data.status,
+    ...(data.account_id ? { p_account: data.account_id } : {}),
+    ...(data.site_id ? { p_site: data.site_id } : {}),
+    ...(data.opportunity_id ? { p_opportunity: data.opportunity_id } : {}),
+    ...(data.plan_id ? { p_plan: data.plan_id } : {}),
+    ...(data.reason ? { p_reason: data.reason } : {}),
   });
+  if (error) throw new Error(error.message);
+  return row as unknown as PublicRequestRow;
+}
 
 /**
  * What a Roof Care request hands to the sign-up on its property's page: the plan picked, the
@@ -140,19 +146,28 @@ export const publicCarePrefill = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), site_id: z.string().uuid().optional() }).parse(d),
   )
-  .handler(async ({ data, context }): Promise<CareSignUpPrefill | null> => {
-    await office(context);
-    const { data: row, error } = await context.supabase
-      .from("public_requests")
-      .select(REQUEST_SELECT)
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    const r = row as unknown as PublicRequestRow | null;
-    if (!r || r.status === "dismissed") return null;
-    if (data.site_id && r.site_id && r.site_id !== data.site_id) return null;
-    return carePrefill(r);
-  });
+  .handler(({ data, context }): Promise<CareSignUpPrefill | null> =>
+    readCarePrefill(context, data.id, data.site_id),
+  );
+
+/** The same reading, for a server function that starts the plan from the request (Nov 24). */
+export async function readCarePrefill(
+  context: Ctx,
+  id: string,
+  siteId?: string,
+): Promise<CareSignUpPrefill | null> {
+  await office(context);
+  const { data: row, error } = await context.supabase
+    .from("public_requests")
+    .select(REQUEST_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const r = row as unknown as PublicRequestRow | null;
+  if (!r || r.status === "dismissed") return null;
+  if (siteId && r.site_id && r.site_id !== siteId) return null;
+  return carePrefill(r);
+}
 
 export interface PublicFormSettingsRead extends PublicFormSettings {
   /** The site's own address, which the codes hold while no other is saved. */

@@ -30,9 +30,13 @@ describe("homeFor", () => {
 describe("the sidebar", () => {
   const src = readFileSync("src/components/app-sidebar.tsx", "utf8");
   it("Work Overview is not shown to a technician-only user", () => {
-    expect(src).toContain("{profile && !isTech && (");
-    expect(src.indexOf("{profile && !isTech && (")).toBeLessThan(
-      src.indexOf('tooltip="Work Overview"'),
+    // Nov 24: My tickets sits in the same top group, right under it, so the group shows for a
+    // technician too; Work Overview itself is still the office's.
+    const top = src.slice(src.indexOf('<SidebarGroup data-nav="top">'));
+    expect(top.indexOf("{!isTech && (")).toBeGreaterThan(0);
+    expect(top.indexOf("{!isTech && (")).toBeLessThan(top.indexOf('tooltip="Work Overview"'));
+    expect(top.indexOf('tooltip="Work Overview"')).toBeLessThan(
+      top.indexOf("{renderItems([myTicketsItem])}"),
     );
   });
   it("the Service item is the office's; My tickets and Inventory stay", () => {

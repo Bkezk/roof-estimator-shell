@@ -348,6 +348,40 @@ export function carePrefill(r: PublicRequestRow): CareSignUpPrefill | null {
   };
 }
 
+/**
+ * Can the plan be started straight from what the customer sent, with no sign-up window (owner,
+ * Nov 24: the window "pops up the sign up window again, it should just ask us to confirm the
+ * roof size, then send the payment link")? Yes when they typed a roof size and ticked the terms
+ * now in use: everything the sign-up asks is then already answered. `why`: the plain reason
+ * when not, said beside the sign-up button.
+ */
+export function careStartsItself(
+  p: CareSignUpPrefill | null,
+  termsInUse: string,
+): { ok: true } | { ok: false; why: string } {
+  if (!p) return { ok: false, why: CARE_START_NOT_A_PLAN };
+  if (p.picked_range || !(p.sqft != null && p.sqft > 0))
+    return { ok: false, why: CARE_START_NO_SIZE };
+  if (p.terms_version !== termsInUse) return { ok: false, why: CARE_START_OLD_TERMS };
+  return { ok: true };
+}
+export const CARE_START_NOT_A_PLAN = "This request did not pick a plan.";
+export const CARE_START_NO_SIZE =
+  "They typed no roof size, so the price is not known yet. Open the sign-up and type the roof's size.";
+export const CARE_START_OLD_TERMS =
+  "The terms have changed since they ticked them. Open the sign-up, read them the new terms and tick again.";
+/** The button that starts the plan from the request, and the one that opens the window. */
+export const CARE_START_BUTTON = "Start the plan";
+export const CARE_OPEN_SIGN_UP = "Open the sign-up";
+/** Said once the plan is made from the request. */
+export const CARE_STARTED_WORDS =
+  "The plan is made from what they picked, and their agreement is emailed. Confirm the roof size, then send the payment link.";
+/** Said before the office says whose it is, so the press holds no surprise. */
+export const CARE_START_AT_MATCH =
+  "The plan they picked is started as soon as you say whose this is, and their agreement is emailed to them.";
+/** The first inspection of a plan started from a request: the usual choice. */
+export const CARE_START_FIRST_VISIT = "window" as const;
+
 /** The search word the property page reads to open the sign-up prefilled from a request. */
 export const CARE_REQUEST_SEARCH = "care_request";
 
@@ -550,11 +584,11 @@ export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "k
     case "property":
       return "Pick the property on this opportunity and save it. The sign-up opens from there.";
     case "sign_up":
-      return "The customer picked a plan and ticked the terms on the page. Open the sign-up: it is filled in with what they picked, and the plan starts when the payment is received.";
+      return "The customer picked a plan and ticked the terms on the page. Start the plan: it is made from what they picked. Then confirm the roof size and send the payment link. It starts when the payment is received.";
     case "quote":
       return "No price was shown on the page, so nothing was signed. Call them with a price.";
     case "signed":
-      return "The plan is signed and waits for its payment. This opportunity turns Won the day the payment is received.";
+      return "The plan is signed and waits for its payment. Work down the steps below. This opportunity turns Won the day the payment is received.";
     case "paid":
       return "The plan is paid and has started. This opportunity was set to Won.";
     case "done":

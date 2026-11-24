@@ -132,6 +132,10 @@ import {
   planBadge,
   PLAN_MAKE_INVOICE,
   PLAN_BRIEF_HINT,
+  PLAN_PAID_TOAST,
+  PLAN_WAITING_RELOAD_MS,
+  anyPlanWaits,
+  plansJustPaid,
   PLAN_NO_INVOICE,
   STEP_PAY,
   STEP_PAY_CARD,
@@ -256,6 +260,9 @@ function usePlans(siteId: string | null | undefined) {
     queryFn: () => listFn({ data: { site_ids: [siteId!] } }),
     enabled: !!session && !!siteId,
     staleTime: STALE_MS,
+    // While a plan waits for its payment the page looks for it by itself (Nov 24): the payment
+    // comes from the customer's own phone. Not while the tab is in the background.
+    refetchInterval: (query) => (anyPlanWaits(query.state.data) ? PLAN_WAITING_RELOAD_MS : false),
   });
 }
 
@@ -746,6 +753,7 @@ export function RoofCareCard({
 }) {
   const { profile } = useAuth();
   const q = usePlans(siteId);
+  const qc = useQueryClient();
   const [push, setPush] = useState<PlanVisit | null>(null);
   const [ending, setEnding] = useState(false);
   // The renewal (Nov 19): the Renew box, and ending a renewal that is waiting.
@@ -797,6 +805,18 @@ export function RoofCareCard({
     },
     onError: (e) => toast.error(`Could not take it off: ${errText(e)}`, { duration: 20_000 }),
   });
+  // The moment a plan that was waiting is found in force (Nov 24): said once, and everything
+  // else on the page is read again, so the opportunity shows Won and the invoice shows paid
+  // with no reload by hand.
+  const seen = useRef<RoofCarePlan[] | null>(null);
+  useEffect(() => {
+    const now = q.data ?? null;
+    const paid = plansJustPaid(seen.current, now);
+    seen.current = now;
+    if (!paid.length) return;
+    toast.success(PLAN_PAID_TOAST, { id: `roof-care-paid-${paid[0]}`, duration: 15_000 });
+    void qc.invalidateQueries();
+  }, [q.data, qc]);
   if (!siteId || !profile) return null;
   if (q.error)
     return (

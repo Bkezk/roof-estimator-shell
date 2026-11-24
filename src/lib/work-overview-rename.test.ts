@@ -36,7 +36,10 @@ describe('no "My Work" left where people see it', () => {
 describe("Work Overview, at the same address", () => {
   it("the sidebar entry", () => {
     const s = read("src/components/app-sidebar.tsx");
-    expect(s).toContain('isActive={isActive("/my-work")} tooltip="Work Overview"');
+    // Nov 24: the row moved one level in (My tickets shares its group), so the line wraps.
+    expect(s.replace(/\s+/g, " ")).toContain(
+      'isActive={isActive("/my-work")} tooltip="Work Overview"',
+    );
     expect(s).toContain('<Link to="/my-work">');
     expect(s).toContain("{!collapsed && <span>Work Overview</span>}");
   });

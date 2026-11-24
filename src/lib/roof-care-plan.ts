@@ -561,6 +561,28 @@ export const STEP_START_CARD =
   "A card payment is recorded by itself, and the plan starts that minute. Nothing has to be marked.";
 export const STEP_START_CHECK =
   "When the check arrives, open the invoice and press Mark paid. The plan starts that day and its inspections are made.";
+/**
+ * A plan that waits for its payment is read again this often while its page is open (owner,
+ * Nov 24: "once i paid for the plan on the card via the email that the office sent i had to
+ * manually refresh the customer page with the property to get it applied"). The payment comes
+ * from the customer's own phone, so the office's page has to look for it by itself.
+ */
+export const PLAN_WAITING_RELOAD_MS = 10_000;
+/** Whether any of a property's plans waits for its payment: only then is it read again. */
+export const anyPlanWaits = (
+  plans: readonly Pick<RoofCarePlan, "status">[] | null | undefined,
+): boolean => !!plans?.some((p) => p.status === "awaiting_payment");
+/** The plans that were waiting at the last read and are in force at this one: just paid. */
+export function plansJustPaid(
+  before: readonly Pick<RoofCarePlan, "id" | "status">[] | null | undefined,
+  now: readonly Pick<RoofCarePlan, "id" | "status">[] | null | undefined,
+): string[] {
+  const waited = new Set(
+    (before ?? []).filter((p) => p.status === "awaiting_payment").map((p) => p.id),
+  );
+  return (now ?? []).filter((p) => p.status === "active" && waited.has(p.id)).map((p) => p.id);
+}
+export const PLAN_PAID_TOAST = "The payment is in. The plan has started.";
 /** On the property, where the plan is shown in short (owner, Nov 24). */
 export const PLAN_BRIEF_HINT =
   "Care Plan opens the inspections, what the plan includes and its details.";
