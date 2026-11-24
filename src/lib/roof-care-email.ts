@@ -184,9 +184,37 @@ export interface SizeCorrectedFacts {
   pay_method: PayMethod | null;
   /** The customer's card payment link, for a card plan when paying online is set up. */
   pay_link: string | null;
+  /**
+   * A plan year already paid (Nov 24, "then build the rest"): the difference to settle, in
+   * dollars. Above 0 it is billed on an invoice of its own, below 0 it is sent back. Absent
+   * for a plan that waits for its payment.
+   */
+  settle?: number;
   company: string;
   contact: string;
 }
+
+/** What is said of the money when the plan year was already paid. */
+function settleBlocks(settle: number): Block[] {
+  if (settle > 0)
+    return [
+      {
+        kind: "p",
+        text: `Your plan year is already paid. We will send you an invoice for the difference of ${money2(settle)}.`,
+      },
+    ];
+  if (settle < 0)
+    return [
+      {
+        kind: "p",
+        text: `Your plan year is already paid. We are sending ${money2(-settle)} back to you.`,
+      },
+    ];
+  return [{ kind: "p", text: "Your plan year is already paid, and nothing more is owed." }];
+}
+
+const money2 = (n: number) =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const sqft = (n: number) => Math.round(n).toLocaleString("en-US");
 
@@ -211,24 +239,26 @@ export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
         ? `The yearly price of your plan stays ${money0(f.to_price)}.`
         : `The yearly price of your plan is now ${money0(f.to_price)}. It was ${money0(f.from_price)}. As your agreement says, the price is an estimate until we measure the roof.`,
     },
-    ...(f.pay_link
-      ? [
-          { kind: "h" as const, text: "Pay by card" },
-          {
-            kind: "p" as const,
-            text: `Use the button below to pay ${money0(f.owed)} for the year on our secure payment page. Your plan starts the day we receive your payment.`,
-          },
-          { kind: "link" as const, text: "Pay by card", url: f.pay_link },
-        ]
-      : [
-          {
-            kind: "p" as const,
-            text:
-              f.pay_method === "check"
-                ? `We will send you the invoice for ${money0(f.owed)}. Your plan starts the day we receive your payment.`
-                : `${money0(f.owed)} is due for the year. Your plan starts the day we receive your payment.`,
-          },
-        ]),
+    ...(f.settle != null
+      ? settleBlocks(f.settle)
+      : f.pay_link
+        ? [
+            { kind: "h" as const, text: "Pay by card" },
+            {
+              kind: "p" as const,
+              text: `Use the button below to pay ${money0(f.owed)} for the year on our secure payment page. Your plan starts the day we receive your payment.`,
+            },
+            { kind: "link" as const, text: "Pay by card", url: f.pay_link },
+          ]
+        : [
+            {
+              kind: "p" as const,
+              text:
+                f.pay_method === "check"
+                  ? `We will send you the invoice for ${money0(f.owed)}. Your plan starts the day we receive your payment.`
+                  : `${money0(f.owed)} is due for the year. Your plan starts the day we receive your payment.`,
+            },
+          ]),
     ...signOff(f),
   ];
   return render(

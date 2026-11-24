@@ -881,6 +881,10 @@ payment? 3. more than once but recorded and remove that line".
 - One email, "We measured your roof", tells the customer the new price. For a card plan it holds
   the Pay by card button, so the new price and the payment request are one email.
 - Every correction is kept on the plan (`size_changes`) and listed under the size.
+- A plan already paid takes the new price too. A bigger roof is billed the difference on a
+  draft invoice of its own (`invoices.plan_part = 'size'`). A smaller roof is owed the
+  difference back, and the office records the refund once it is sent. The refund worked when a
+  plan ends counts both.
 - The record is `docs/qa/roof-care-correct-size-2026-11-24.md`.
 
 ## Open

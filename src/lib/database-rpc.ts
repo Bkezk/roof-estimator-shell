@@ -94,6 +94,12 @@ type RpcContracts = {
     };
     Returns: unknown;
   };
+  // 20261124990000: the refund for a roof found smaller after the plan was paid was sent. The
+  // database works the amount; the answer is the record it kept.
+  roof_care_size_refund_sent: {
+    Args: { p_plan: string; p_on: string; p_ref?: string | null };
+    Returns: unknown;
+  };
 };
 type RpcDatabase = Omit<Database, "public"> & {
   public: Omit<Database["public"], "Functions"> & {

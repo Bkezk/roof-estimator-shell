@@ -287,6 +287,56 @@ export interface PlanSize {
   confirmed: { on: string; by_name: string } | null;
   /** Every time a manager corrected the size, oldest first (Nov 24). Absent on an older read. */
   changes?: PlanSizeChange[];
+  /** What a correction after the plan was paid left to settle. Absent when none ever was. */
+  balance?: PlanSizeBalance;
+}
+
+/** A refund sent for a smaller roof (roof_care_size_refund_sent). */
+export interface SizeRefund {
+  amount: number;
+  /** The day, as YYYY-MM-DD. */
+  on: string;
+  ref: string | null;
+  by_name: string;
+}
+
+/**
+ * A paid plan whose roof size was corrected (owner, Nov 24: "then build the rest"). The plan
+ * takes the price of the right size, and the difference is settled: a bigger roof on an invoice
+ * of its own, a smaller roof by a refund the office sends and records.
+ */
+export interface PlanSizeBalance {
+  /** Above 0: the customer owes it. Below 0: it is owed back. 0: settled. */
+  owed: number;
+  /** The open invoice for a difference owed to us, once it is made. */
+  invoice: { id: string; number: string; status: string } | null;
+  refunds: SizeRefund[];
+}
+
+/** price - what the payments cover so far (roof_care_plans.size_paid_price), to the cent. */
+export function sizeOwed(price: number, paidPrice: number | null | undefined): number {
+  if (paidPrice == null || !Number.isFinite(paidPrice)) return 0;
+  return Math.round((price - paidPrice) * 100) / 100;
+}
+
+/** The refunds the database keeps, with anything unreadable left out. */
+export function readSizeRefunds(x: unknown): SizeRefund[] {
+  const out: SizeRefund[] = [];
+  for (const e of Array.isArray(x) ? x : []) {
+    if (!e || typeof e !== "object") continue;
+    const o = e as Record<string, unknown>;
+    const amount = Number(o["amount"]);
+    const on = typeof o["on"] === "string" ? o["on"].slice(0, 10) : "";
+    if (!Number.isFinite(amount) || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(on)) continue;
+    const ref = typeof o["ref"] === "string" ? o["ref"].trim() : "";
+    out.push({
+      amount,
+      on,
+      ref: ref || null,
+      by_name: typeof o["by_name"] === "string" ? o["by_name"].trim() : "",
+    });
+  }
+  return out;
 }
 
 /**
@@ -304,9 +354,13 @@ export interface PlanSizeChange {
   to_price: number;
   /** What a year costs at the corrected size, by the prices of that day. */
   would_be: number;
-  /** True for a plan that was waiting for its payment: its price followed the size. */
+  /** True when the plan's price followed the size. False only on a record from Nov 24's first step, when a paid plan kept its price. */
   repriced: boolean;
   note: string | null;
+  /** True when the plan was already paid, so the difference had to be settled. */
+  paid?: boolean;
+  /** For a paid plan: what the correction left owed. Above 0 to us, below 0 back to the customer. */
+  owed?: number;
 }
 
 /** The database's record of one correction, read strictly: null for anything odd. */
@@ -343,6 +397,7 @@ export function readSizeChange(x: unknown): PlanSizeChange | null {
     would_be,
     repriced: o["repriced"] === true,
     note: note || null,
+    ...(o["paid"] === true ? { paid: true, owed: n(o["owed"]) ?? 0 } : {}),
   };
 }
 
@@ -1625,7 +1680,11 @@ export const SIZE_CORRECT_SAME =
 export const SIZE_CORRECT_LEAD_WAITING =
   "Type the size you measured. The plan's price follows it, and its invoice is made again at the new price. Nothing changes until you press Save.";
 export const SIZE_CORRECT_LEAD_PAID =
-  "Type the size you measured. This plan year is already paid, so its price stays as it was paid: nothing is billed and nothing is refunded here. The renewal is priced on the corrected size.";
+  "Type the size you measured. This plan year is already paid. A bigger roof is billed the difference on an invoice of its own. A smaller roof is owed the difference back. Nothing changes until you press Save.";
+export const SIZE_REFUND_RECORD = "Record the refund";
+export const SIZE_INVOICE_MAKE = "Make the invoice for the difference";
+export const SIZE_REFUND_LEAD =
+  "Send the customer the amount by check or back to their card, then record it here: the day it was sent and its check number or reference.";
 /** The tick that sends the customer the new price, with the payment link for a card plan. */
 export const sizeCorrectEmailLabel = (card: boolean): string =>
   card
@@ -1633,6 +1692,8 @@ export const sizeCorrectEmailLabel = (card: boolean): string =>
     : "Email the customer the new price";
 
 const dollars0 = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+const dollars2 = (n: number) =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** "$214 more a year", "$90 less a year" or "the same price". */
 export function priceDifferenceWords(from: number, to: number): string {
@@ -1648,8 +1709,21 @@ export function sizeOfferWords(o: {
   from_price: number;
   to_price: number;
   repriced: boolean;
+  /** A plan already paid: what saving would leave owed (above 0 to us, below 0 back). */
+  paid?: boolean;
+  owed?: number;
 }): string {
   const sizes = `${sqftWords(o.from_sqft)} sq ft to ${sqftWords(o.to_sqft)} sq ft`;
+  if (o.paid) {
+    const owed = o.owed ?? 0;
+    const settle =
+      owed > 0
+        ? `The plan year is already paid, so an invoice for the ${dollars2(owed)} difference is made as a draft.`
+        : owed < 0
+          ? `The plan year is already paid, so ${dollars2(-owed)} is owed back to the customer.`
+          : "Nothing more is owed either way.";
+    return `From ${sizes}. The price goes from ${dollars0(o.from_price)} to ${dollars0(o.to_price)} a year. ${settle}`;
+  }
   return o.repriced
     ? `From ${sizes}. The price goes from ${dollars0(o.from_price)} to ${dollars0(o.to_price)} a year: ${priceDifferenceWords(o.from_price, o.to_price)}.`
     : `From ${sizes}. This plan year stays at the ${dollars0(o.from_price)} it was paid at. At the corrected size a year is ${dollars0(o.to_price)}: ${priceDifferenceWords(o.from_price, o.to_price)}.`;
@@ -1666,8 +1740,16 @@ export function sizeSavedWords(r: {
   const price = c.repriced
     ? ` The plan is now ${dollars0(c.to_price)} a year.`
     : " This plan year's price is unchanged.";
-  const invoice =
-    c.repriced && !r.invoice_made
+  const owed = c.paid ? (c.owed ?? 0) : 0;
+  const invoice = c.paid
+    ? owed > 0
+      ? r.invoice_made
+        ? ` An invoice for the ${dollars2(owed)} difference was made as a draft: finalise it and send it.`
+        : ` The invoice for the ${dollars2(owed)} difference was not made: press ${SIZE_INVOICE_MAKE} on the plan.`
+      : owed < 0
+        ? ` ${dollars2(-owed)} is owed back to the customer: send it, then press ${SIZE_REFUND_RECORD} on the plan.`
+        : ""
+    : c.repriced && !r.invoice_made
       ? " Its invoice was not made again: press Make the invoice on the plan."
       : "";
   const email = r.emailed_to
@@ -1681,13 +1763,38 @@ export function sizeSavedWords(r: {
 /** One correction as the plan's record says it. `money`: for someone who sees prices. */
 export function sizeChangeWords(c: PlanSizeChange, money: boolean): string {
   const head = `Roof size corrected from ${sqftWords(c.from_sqft)} to ${sqftWords(c.to_sqft)} sq ft by ${c.by_name || "a manager"} on ${longDay(c.on)}.`;
+  const owed = c.paid ? (c.owed ?? 0) : 0;
+  const settled = !c.paid
+    ? ""
+    : owed > 0
+      ? ` The plan year was already paid: ${dollars2(owed)} more was billed.`
+      : owed < 0
+        ? ` The plan year was already paid: ${dollars2(-owed)} was owed back.`
+        : "";
   const price = !money
     ? ""
     : c.repriced
-      ? ` The price went from ${dollars0(c.from_price)} to ${dollars0(c.to_price)} a year.`
+      ? ` The price went from ${dollars0(c.from_price)} to ${dollars0(c.to_price)} a year.${settled}`
       : ` The plan year was already paid, so its price stayed ${dollars0(c.from_price)}. At that size a year was ${dollars0(c.would_be)}.`;
   return `${head}${price}${c.note ? ` Note: ${c.note}` : ""}`;
 }
+
+/** What a corrected size on a paid plan still leaves to settle, for someone who sees prices. */
+export function sizeBalanceWords(b: PlanSizeBalance): string {
+  if (b.owed > 0) {
+    const inv = b.invoice
+      ? `Invoice #${b.invoice.number} for it is ${b.invoice.status === "draft" ? "a draft: finalise it and send it" : "sent and not paid yet"}.`
+      : "The invoice for it is not made yet.";
+    return `The corrected roof size costs ${dollars2(b.owed)} more this plan year. ${inv}`;
+  }
+  if (b.owed < 0)
+    return `The corrected roof size costs ${dollars2(-b.owed)} less this plan year. That is owed back to the customer.`;
+  return "";
+}
+
+/** "$120.00 sent back for the smaller roof on Nov 24, 2026 by Dana (check 123)." */
+export const sizeRefundWords = (r: SizeRefund): string =>
+  `${dollars2(r.amount)} sent back for the smaller roof on ${longDay(r.on)} by ${r.by_name || "a manager"}${r.ref ? ` (${r.ref})` : ""}.`;
 
 /** "Roof size 20,000 sq ft: typed by hand, not checked against the map." and who confirmed. */
 export function planSizeWords(p: Pick<RoofCarePlan, "roof_sqft" | "size">): string {

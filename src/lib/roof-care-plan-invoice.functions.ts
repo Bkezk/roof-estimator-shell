@@ -196,6 +196,165 @@ export async function makePlanInvoice(
   return { id: made.id, made: true };
 }
 
+/** "RC-1001-S1": the plan's number, then which size invoice of the plan it is. */
+export const sizeInvoiceNumber = (planNumber: number, nth: number): string =>
+  planNumberLabel(planNumber) + "-S" + String(Math.max(1, Math.round(nth)));
+
+/** What a size invoice says it is for. */
+export function sizeInvoiceDescription(p: {
+  plan: unknown;
+  plan_number: number;
+  from_sqft: number | null;
+  to_sqft: number;
+}): string {
+  const n = (v: number) => Math.round(Number(v) || 0).toLocaleString("en-US");
+  const what = planName(p.plan) + " plan " + planNumberLabel(p.plan_number);
+  const sizes =
+    p.from_sqft != null && p.from_sqft > 0
+      ? "from about " + n(p.from_sqft) + " to about " + n(p.to_sqft) + " sq ft"
+      : "to about " + n(p.to_sqft) + " sq ft";
+  return (
+    what +
+    ": the roof was measured and its size corrected " +
+    sizes +
+    ". This invoice is the difference in the plan's price for this plan year."
+  );
+}
+
+/** The one line of a size invoice. A service, as the plan is: not taxed. */
+export function sizeInvoiceLine(planId: string, amount: number) {
+  const total = Math.round(Math.max(0, Number(amount) || 0) * 100) / 100;
+  return {
+    sort: 1,
+    kind: "other",
+    description: SIZE_INVOICE_LINE,
+    qty: 1,
+    unit: "ea",
+    rate: total,
+    total,
+    cost_rate: 0,
+    cost_total: 0,
+    on_date: null,
+    source: SIZE_LINE_SOURCE + planId,
+    taxable: false,
+    show_on_invoice: true,
+  };
+}
+
+export const SIZE_INVOICE_LINE = "Roof Care plan: price difference for the measured roof size";
+export const SIZE_LINE_SOURCE = "roof-care-size:";
+export const SIZE_INVOICE_NOTHING_OWED =
+  "Nothing is owed for this plan's roof size, so there is no invoice to make.";
+
+/**
+ * The invoice for a roof found bigger after the plan was paid (owner, Nov 24: "then build the
+ * rest"). It is the plan's, marked as its size invoice (invoices.plan_part), so the plan year's
+ * own invoice stays the one the plan runs on. A draft for exactly what is owed
+ * (price - size_paid_price), read from the plan and never from the caller. One open at a time:
+ * the database keeps that, and an open one is the answer when it is there.
+ */
+export async function makeSizeInvoice(
+  sb: Sb,
+  planId: string,
+  who: { id: string; name: string | null },
+  from_sqft: number | null = null,
+): Promise<{ id: string; made: boolean }> {
+  // The settled price and the marker are newer than the generated types: read and written loose.
+  const loose = sb as unknown as {
+    from: (t: string) => {
+      select: (c: string) => {
+        eq: (
+          c: string,
+          v: string,
+        ) => Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;
+      };
+    };
+  };
+  const { data: rows, error } = await loose
+    .from("roof_care_plans")
+    .select("id, plan, status, plan_number, price, size_paid_price, roof_sqft, account_id, site_id")
+    .eq("id", planId);
+  if (error) throw new Error(error.message);
+  const plan = rows?.[0];
+  if (!plan) throw new Error("That plan was not found");
+  const number = Number(plan["plan_number"]);
+  const paidPrice = plan["size_paid_price"] == null ? null : Number(plan["size_paid_price"]);
+  const owed = paidPrice == null ? 0 : Math.round((Number(plan["price"]) - paidPrice) * 100) / 100;
+  if (plan["status"] !== "active" || !Number.isFinite(number) || !(owed > 0))
+    throw new Error(SIZE_INVOICE_NOTHING_OWED);
+
+  const { data: mine, error: mErr } = await loose
+    .from("invoices")
+    .select("id, status, plan_part")
+    .eq("roof_care_plan_id", planId);
+  if (mErr) throw new Error(mErr.message);
+  const sizeOnes = (mine ?? []).filter((i) => i["plan_part"] === "size");
+  const open = sizeOnes.find((i) => i["status"] === "draft" || i["status"] === "final");
+  if (open) return { id: String(open["id"]), made: false };
+
+  const [{ data: account, error: aErr }, { data: site, error: sErr }] = await Promise.all([
+    sb.from("crm_accounts").select("*").eq("id", String(plan["account_id"])).maybeSingle(),
+    sb.from("crm_sites").select("*").eq("id", String(plan["site_id"])).maybeSingle(),
+  ]);
+  if (aErr) throw new Error(aErr.message);
+  if (sErr) throw new Error(sErr.message);
+  const { loadSettings, totals } = await import("@/lib/invoices.server");
+  const { siteAddressLine } = await import("@/lib/crm.functions");
+  const settings = await loadSettings(sb);
+  const lines = [sizeInvoiceLine(planId, owed)];
+  const taxRate = 0;
+  const row = {
+    roof_care_plan_id: planId,
+    plan_part: "size",
+    service_job_id: null,
+    bid_id: null,
+    number: null,
+    display_number: sizeInvoiceNumber(number, sizeOnes.length + 1),
+    status: "draft",
+    bill_to: accountBillTo(account, null) as unknown as Json,
+    bill_to_vendor_id: null,
+    property: { name: site?.name ?? "", address: siteAddressLine(site) } as unknown as Json,
+    description: sizeInvoiceDescription({
+      plan: plan["plan"],
+      plan_number: number,
+      from_sqft,
+      to_sqft: Number(plan["roof_sqft"]),
+    }),
+    payment_terms: settings.payment_terms,
+    tax_rate: taxRate,
+    ...totals(lines, taxRate),
+    created_by: who.id,
+    updated_by_name: who.name,
+  };
+  const { data: made, error: insErr } = await sb
+    .from("invoices")
+    .insert(row as never)
+    .select("id")
+    .single();
+  if (insErr || !made) throw new Error(insErr?.message ?? "The invoice was not created");
+  const { error: lErr } = await sb
+    .from("invoice_lines")
+    .insert(lines.map((l) => ({ ...l, invoice_id: made.id })));
+  if (lErr) {
+    await sb.from("invoices").delete().eq("id", made.id);
+    throw new Error(lErr.message);
+  }
+  return { id: made.id, made: true };
+}
+
+/** The office makes the size invoice from the plan, when it was not made at the correction. */
+export const createRoofCareSizeInvoice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ id: string; made: boolean }> => {
+    const { nameOf, office } = await import("@/lib/invoices.functions");
+    const p = await office(context);
+    return makeSizeInvoice(context.supabase, data.plan_id, {
+      id: context.userId,
+      name: nameOf(p),
+    });
+  });
+
 export const createRoofCarePlanInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))

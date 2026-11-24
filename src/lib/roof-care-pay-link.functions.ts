@@ -286,12 +286,23 @@ export const planPayLink = createServerFn({ method: "GET" })
 export async function emailSizeCorrected(
   context: Ctx,
   planId: string,
-  change: { from_sqft: number; to_sqft: number; from_price: number; to_price: number },
+  change: {
+    from_sqft: number;
+    to_sqft: number;
+    from_price: number;
+    to_price: number;
+    /** A plan year already paid: the difference the correction left to settle. */
+    paid?: boolean;
+    owed?: number;
+  },
 ): Promise<{ to: string; with_link: boolean }> {
   const { admin, plan } = await seenPlan(context, planId);
   const key = asPlanKey(plan.plan);
   if (!key) throw new Error("That plan was not found");
-  if (plan.status !== "awaiting_payment") throw new Error(CHECKOUT_NOT_WAITING);
+  // A plan year already paid is told the difference: no payment link, the invoice or the
+  // refund follows from the office.
+  const settled = change.paid === true && plan.status === "active";
+  if (!settled && plan.status !== "awaiting_payment") throw new Error(CHECKOUT_NOT_WAITING);
   const to = (plan.customer_email ?? "").trim();
   if (!to) throw new Error(PAY_LINK_NO_EMAIL);
   const [{ planEmailHeld }, { planOwedCents }, { sendEmail }, { sizeCorrectedEmail }] =
@@ -303,10 +314,10 @@ export async function emailSizeCorrected(
     ]);
   const held = planEmailHeld();
   if (held) throw new Error(held);
-  const cents = await planOwedCents(admin, plan);
+  const cents = settled ? 0 : await planOwedCents(admin, plan);
   if (cents == null) throw new Error("Nothing is owed for this plan year");
   // The link goes with it only for a card plan, and only when the link could be given at all.
-  const { reason, base } = await linkHeld(plan);
+  const { reason, base } = settled ? { reason: "paid", base: "" } : await linkHeld(plan);
   const link = plan.pay_method === "card" && !reason ? payLinkFor(base, plan.pay_token) : null;
   const [{ data: site }, { data: company }] = await Promise.all([
     admin
@@ -333,6 +344,7 @@ export async function emailSizeCorrected(
     owed: cents / 100,
     pay_method: plan.pay_method === "card" || plan.pay_method === "check" ? plan.pay_method : null,
     pay_link: link,
+    ...(settled ? { settle: change.owed ?? 0 } : {}),
     company: (co?.company_name ?? "").trim() || "JBK Commercial Roofing",
     contact: [co?.phone, co?.email]
       .map((x) => (x ?? "").trim())

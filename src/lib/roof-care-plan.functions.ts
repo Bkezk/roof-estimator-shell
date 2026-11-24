@@ -51,6 +51,10 @@ import {
   readSizeChange,
   readSizeChanges,
   SIZE_CORRECT_MANAGERS,
+  sizeOwed,
+  readSizeRefunds,
+  type PlanSizeBalance,
+  type SizeRefund,
   SIZE_CORRECT_SAME,
   readRefundChanges,
   readsPlanTables,
@@ -273,6 +277,80 @@ const TICKET_SELECT =
 // One owed from last plan year leads: it is the one with the clock on it.
 const ORDER: Record<VisitKind, number> = { carried: -1, visit1: 0, visit2: 1, storm: 2 };
 
+/** An invoice made for a roof size corrected after the plan was paid. */
+export interface SizeInvoice {
+  id: string;
+  number: string;
+  status: string;
+}
+
+/**
+ * The invoices of size differences (invoices.plan_part = 'size'), by plan, void ones left out.
+ * The column is newer than the generated types, so the read is loose; a read that fails is no
+ * invoices, and nothing else is held up by it.
+ */
+export async function sizeInvoicesOf(
+  sb: Sb,
+  planIds: readonly string[],
+): Promise<Map<string, SizeInvoice[]>> {
+  const out = new Map<string, SizeInvoice[]>();
+  if (!planIds.length) return out;
+  try {
+    const loose = sb as unknown as {
+      from: (t: string) => {
+        select: (c: string) => {
+          in: (
+            c: string,
+            v: string[],
+          ) => Promise<{
+            data:
+              | {
+                  id: string;
+                  roof_care_plan_id: string | null;
+                  display_number: string | null;
+                  status: string;
+                  plan_part?: string | null;
+                }[]
+              | null;
+          }>;
+        };
+      };
+    };
+    for (const chunk of chunkIds([...planIds])) {
+      const { data } = await loose
+        .from("invoices")
+        .select("id, roof_care_plan_id, display_number, status, plan_part")
+        .in("roof_care_plan_id", chunk);
+      for (const i of data ?? []) {
+        if (i.plan_part !== "size" || !i.roof_care_plan_id || i.status === "void") continue;
+        const list = out.get(i.roof_care_plan_id) ?? [];
+        list.push({ id: i.id, number: i.display_number ?? "", status: i.status });
+        out.set(i.roof_care_plan_id, list);
+      }
+    }
+  } catch {
+    return new Map();
+  }
+  return out;
+}
+
+/** The `balance` of a plan's size block: absent when no paid plan's size was ever corrected. */
+function sizeBalanceOf(
+  price: number,
+  s: { paidPrice: number | null; refunds: SizeRefund[] } | undefined,
+  invoices: SizeInvoice[] | undefined,
+): { balance?: PlanSizeBalance } {
+  if (!s || (s.paidPrice == null && !s.refunds.length)) return {};
+  const open = (invoices ?? []).find((i) => i.status === "draft" || i.status === "final");
+  return {
+    balance: {
+      owed: sizeOwed(price, s.paidPrice),
+      invoice: open ?? null,
+      refunds: s.refunds,
+    },
+  };
+}
+
 /**
  * What the plans' own lines on invoices say (Nov 19): which inspections have their share of the
  * plan on a live invoice, and what each plan's minor repairs allowance has taken. A void invoice
@@ -339,7 +417,10 @@ async function planMoney(
     else list.push({ invoice_id: l.invoice_id, number, amount });
     uses.set(planId, list);
   }
-  // Each plan's own invoice for the year (Nov 19): the newest that is not void.
+  // Each plan's own invoice for the year (Nov 19): the newest that is not void. Not the
+  // invoice of a roof size corrected after payment (Nov 24), which is the plan's too.
+  const sizes = await sizeInvoicesOf(sb, planIds);
+  const sizeIds = new Set([...sizes.values()].flat().map((i) => i.id));
   const own = new Map<string, PlanInvoiceRef>();
   for (const chunk of chunkIds([...planIds])) {
     const { data, error } = await sb
@@ -350,7 +431,7 @@ async function planMoney(
       .order("created_at", { ascending: false });
     if (error) throw new Error(`The plans' invoices: ${error.message}`);
     for (const i of data ?? []) {
-      if (!i.roof_care_plan_id || own.has(i.roof_care_plan_id)) continue;
+      if (!i.roof_care_plan_id || own.has(i.roof_care_plan_id) || sizeIds.has(i.id)) continue;
       own.set(i.roof_care_plan_id, {
         id: i.id,
         number: i.display_number ?? "",
@@ -360,7 +441,7 @@ async function planMoney(
       });
     }
   }
-  return { billed, uses, own, calls, trips };
+  return { billed, uses, own, calls, trips, sizes };
 }
 
 /**
@@ -428,6 +509,7 @@ export async function plansOfSites(
   // Every correction of a plan's roof size (Nov 24). Its column is newer than the generated
   // types, so it is read on its own; a read that fails leaves the list out and nothing else.
   const changes = new Map<string, PlanSizeChange[]>();
+  const settled = new Map<string, { paidPrice: number | null; refunds: SizeRefund[] }>();
   {
     const loose = sb as unknown as {
       from: (t: string) => {
@@ -435,18 +517,35 @@ export async function plansOfSites(
           in: (
             c: string,
             v: string[],
-          ) => Promise<{ data: { id: string; size_changes: unknown }[] | null; error: unknown }>;
+          ) => Promise<{
+            data:
+              | {
+                  id: string;
+                  size_changes: unknown;
+                  size_paid_price?: unknown;
+                  size_refunds?: unknown;
+                }[]
+              | null;
+            error: unknown;
+          }>;
         };
       };
     };
     const { data: rows } = await loose
       .from("roof_care_plans")
-      .select("id, size_changes")
+      .select("id, size_changes, size_paid_price, size_refunds")
       .in(
         "id",
         plans.map((p) => p.id),
       );
-    for (const r of rows ?? []) changes.set(r.id, readSizeChanges(r.size_changes));
+    for (const r of rows ?? []) {
+      changes.set(r.id, readSizeChanges(r.size_changes));
+      const paid = r.size_paid_price == null ? null : Number(r.size_paid_price);
+      settled.set(r.id, {
+        paidPrice: paid != null && Number.isFinite(paid) ? paid : null,
+        refunds: readSizeRefunds(r.size_refunds),
+      });
+    }
   }
   const { data: visits, error: vErr } = await sb
     .from("roof_care_visits")
@@ -646,6 +745,7 @@ export async function plansOfSites(
           ? { on: p.size_confirmed_on, by_name: (p.size_confirmed_by_name ?? "").trim() }
           : null,
         changes: changes.get(p.id) ?? [],
+        ...sizeBalanceOf(Number(p.price) || 0, settled.get(p.id), money?.sizes.get(p.id)),
       },
     });
   }
@@ -1109,6 +1209,10 @@ export interface SizeOffer {
   to_price: number;
   /** True for a plan that waits for its payment: its price follows the size. */
   repriced: boolean;
+  /** True for a plan year already paid: its price follows too, and the difference is settled. */
+  paid: boolean;
+  /** For a paid plan: what saving would leave owed. Above 0 to us, below 0 back. */
+  owed: number;
 }
 
 /** A manager's or an admin's, said in plain words before the database says it. */
@@ -1153,14 +1257,38 @@ export const roofCareSizeOffer = createServerFn({ method: "GET" })
       );
     const now = answer.plans.find((o) => o.plan === key);
     if (!now) throw new Error("The price for this plan could not be worked out. Ask an admin.");
+    const paid = plan.status === "active";
+    // What the payments cover so far: the price, unless an earlier correction is not settled.
+    const covered = paid ? ((await sizePaidPrice(sb, plan.id)) ?? Number(plan.price)) : 0;
     return {
       from_sqft: Number(plan.roof_sqft),
       to_sqft: data.sqft,
       from_price: Number(plan.price),
       to_price: now.price,
-      repriced: plan.status === "awaiting_payment",
+      repriced: !paid,
+      paid,
+      owed: paid ? Math.round((now.price - covered) * 100) / 100 : 0,
     };
   });
+
+/** roof_care_plans.size_paid_price, read loose (newer than the generated types): null when unset. */
+async function sizePaidPrice(sb: Sb, planId: string): Promise<number | null> {
+  try {
+    const loose = sb as unknown as {
+      from: (t: string) => {
+        select: (c: string) => {
+          eq: (c: string, v: string) => Promise<{ data: { size_paid_price?: unknown }[] | null }>;
+        };
+      };
+    };
+    const { data } = await loose.from("roof_care_plans").select("size_paid_price").eq("id", planId);
+    const v = data?.[0]?.size_paid_price;
+    const n = v == null ? null : Number(v);
+    return n != null && Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
 
 /** What saving a corrected size answers. */
 export interface SizeCorrected {
@@ -1209,10 +1337,23 @@ export const correctRoofCareSize = createServerFn({ method: "POST" })
     if (!change)
       throw new Error("The size was saved, but the answer could not be read. Reload the page.");
     let invoice_made = false;
-    if (change.repriced && seesInvoices(p)) {
+    const who = { id: context.userId, name: nameOf(p) };
+    if (change.paid) {
+      // A plan year already paid: a bigger roof is billed the difference on its own invoice.
+      if ((change.owed ?? 0) > 0 && seesInvoices(p)) {
+        try {
+          const { makeSizeInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
+          await makeSizeInvoice(sb, data.plan_id, who, change.from_sqft);
+          invoice_made = true;
+        } catch (e) {
+          // Said on the plan, with a button to make it.
+          console.error("Corrected size: plan", data.plan_id, "has no size invoice —", e);
+        }
+      }
+    } else if (change.repriced && seesInvoices(p)) {
       try {
         const { makePlanInvoice } = await import("@/lib/roof-care-plan-invoice.functions");
-        await makePlanInvoice(sb, data.plan_id, { id: context.userId, name: nameOf(p) });
+        await makePlanInvoice(sb, data.plan_id, who);
         invoice_made = true;
       } catch (e) {
         // Said on the plan: "No invoice has been made for this plan yet."
@@ -1230,6 +1371,32 @@ export const correctRoofCareSize = createServerFn({ method: "POST" })
       }
     }
     return { change, invoice_made, emailed_to, email_reason };
+  });
+
+/**
+ * The refund for a smaller roof was sent (Nov 24). The database works what is owed, keeps the
+ * day and the reference, and settles the plan (roof_care_size_refund_sent): no amount is typed.
+ */
+export const recordRoofCareSizeRefund = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        ref: z.string().trim().max(80).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ amount: number }> => {
+    await sizeManager(context);
+    const { data: entry, error } = await databaseRpc(context.supabase)(
+      "roof_care_size_refund_sent",
+      { p_plan: data.plan_id, p_on: data.on, p_ref: data.ref ?? null },
+    );
+    if (error) throw new Error(error.message);
+    const amount = Number((entry as { amount?: unknown } | null)?.amount);
+    return { amount: Number.isFinite(amount) ? amount : 0 };
   });
 
 export const endRoofCarePlan = createServerFn({ method: "POST" })

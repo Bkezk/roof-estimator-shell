@@ -141,6 +141,12 @@ import {
   SIZE_CORRECT_SHOW,
   SIZE_NEEDED,
   sizeChangeWords,
+  sizeBalanceWords,
+  sizeRefundWords,
+  SIZE_INVOICE_MAKE,
+  SIZE_REFUND_LEAD,
+  SIZE_REFUND_RECORD,
+  type PlanSizeBalance,
   sizeCorrectEmailLabel,
   sizeOfferWords,
   sizeSavedWords,
@@ -226,6 +232,7 @@ import {
   endRoofCarePlan,
   listRoofCarePlans,
   markRoofCareRefundSent,
+  recordRoofCareSizeRefund,
   changeRoofCareRefund,
   markRoofCareCardSentBack,
   pushBackRoofCareVisit,
@@ -244,7 +251,10 @@ import {
   type RoofCareOffer,
   type SizeOffer,
 } from "@/lib/roof-care-plan.functions";
-import { createRoofCarePlanInvoice } from "@/lib/roof-care-plan-invoice.functions";
+import {
+  createRoofCarePlanInvoice,
+  createRoofCareSizeInvoice,
+} from "@/lib/roof-care-plan-invoice.functions";
 import { NoAccessBox } from "./no-access";
 import { money0, PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-price";
 
@@ -882,7 +892,9 @@ export function RoofCareCard({
     </p>
   ) : null;
   // What still needs somebody stays in sight; what is settled goes under Plan details.
-  const sizeWaits = !!active?.size?.unchecked;
+  // A size not confirmed, or a difference from a corrected size not settled yet (Nov 24):
+  // both wait for somebody, so the size line is shown and not folded into the details.
+  const sizeWaits = !!active?.size?.unchecked || (active?.size?.balance?.owed ?? 0) !== 0;
   const cardInvoiceOpen = !!active?.invoice && active.invoice.status !== "paid";
   const emailWaits =
     !!active?.email &&
@@ -1630,9 +1642,123 @@ function PlanSizeLine({
           ))}
         </ul>
       )}
+      {seesInvoices(profile) && plan.size?.balance && (
+        <SizeBalance siteId={siteId} plan={plan} balance={plan.size.balance} manager={manager} />
+      )}
       {correcting && (
         <CorrectSizeDialog siteId={siteId} plan={plan} onClose={() => setCorrecting(false)} />
       )}
+    </div>
+  );
+}
+
+/**
+ * What a size corrected after the plan was paid leaves to settle (owner, Nov 24: "then build
+ * the rest"). A bigger roof: the invoice for the difference, or the button that makes it. A
+ * smaller roof: the refund owed, recorded once it is sent. Never folded away while it waits.
+ */
+function SizeBalance({
+  siteId,
+  plan,
+  balance,
+  manager,
+}: {
+  siteId: string;
+  plan: RoofCarePlan;
+  balance: PlanSizeBalance;
+  manager: boolean;
+}) {
+  const refresh = useRefresh(siteId);
+  const [ref, setRef] = useState("");
+  const makeFn = useServerFn(createRoofCareSizeInvoice);
+  const make = useMutation({
+    mutationFn: () => makeFn({ data: { plan_id: plan.id } }),
+    onSuccess: () => {
+      refresh();
+      toast.success("The invoice for the difference is made as a draft");
+    },
+    onError: (e) => toast.error(`Could not make the invoice: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const sentFn = useServerFn(recordRoofCareSizeRefund);
+  const sent = useMutation({
+    mutationFn: () =>
+      sentFn({
+        data: { plan_id: plan.id, on: easternYmd(), ...(ref.trim() ? { ref: ref.trim() } : {}) },
+      }),
+    onSuccess: () => {
+      refresh();
+      toast.success("Refund recorded");
+    },
+    onError: (e) => toast.error(`Could not record the refund: ${errText(e)}`, { duration: 20_000 }),
+  });
+  const words = sizeBalanceWords(balance);
+  if (!words && !balance.refunds.length) return null;
+  return (
+    <div
+      className="space-y-1 text-xs"
+      data-size-balance={balance.owed > 0 ? "owed" : balance.owed < 0 ? "refund" : "settled"}
+    >
+      {words && (
+        <p className="flex flex-wrap items-center gap-2 font-medium text-amber-800 dark:text-amber-300">
+          <span>{words}</span>
+          {balance.owed > 0 && balance.invoice && (
+            <Link
+              to="/service/invoices"
+              search={{ id: balance.invoice.id }}
+              className="underline underline-offset-2"
+              data-action="roof-care-size-invoice-open"
+            >
+              Open invoice #{balance.invoice.number}
+            </Link>
+          )}
+          {balance.owed > 0 && !balance.invoice && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={make.isPending}
+              onClick={() => make.mutate()}
+              data-action="roof-care-size-invoice-make"
+            >
+              {make.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              {SIZE_INVOICE_MAKE}
+            </Button>
+          )}
+        </p>
+      )}
+      {balance.owed < 0 && manager && (
+        <div className="space-y-1">
+          <p className="text-muted-foreground">{SIZE_REFUND_LEAD}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              aria-label="Check number or reference for the refund"
+              placeholder="Check number or reference"
+              className="h-7 w-52 text-xs"
+              maxLength={80}
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={sent.isPending}
+              onClick={() => sent.mutate()}
+              data-action="roof-care-size-refund-sent"
+            >
+              {sent.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+              {SIZE_REFUND_RECORD}
+            </Button>
+          </div>
+        </div>
+      )}
+      {balance.refunds.map((r, i) => (
+        <p key={`${r.on}-${i}`} className="text-muted-foreground" data-size-refund>
+          {sizeRefundWords(r)}
+        </p>
+      ))}
     </div>
   );
 }
@@ -1661,7 +1787,8 @@ function CorrectSizeDialog({
   // Number boxes start blank.
   const [text, setText] = useState("");
   const [note, setNote] = useState("");
-  const [emailIt, setEmailIt] = useState(waiting && !!to);
+  // A plan year already paid is told too: the difference, with no payment link.
+  const [emailIt, setEmailIt] = useState(!!to);
   const [offer, setOffer] = useState<SizeOffer | null>(null);
   const sqft = wholeNumber(text);
   const sizeBad = text.trim() !== "" && !(sqft != null && sqft > 0);
@@ -1680,12 +1807,16 @@ function CorrectSizeDialog({
           sqft: sqft!,
           shown_price: shown!.to_price,
           ...(note.trim() ? { note: note.trim() } : {}),
-          ...(waiting && emailIt && to ? { email: true } : {}),
+          ...(emailIt && to ? { email: true } : {}),
         },
       }),
     onSuccess: (r) => {
       refresh();
-      if (r.email_reason || (r.change.repriced && !r.invoice_made))
+      // Something is left for the office: an email that did not go, an invoice not made, or
+      // a refund to send.
+      const owed = r.change.paid ? (r.change.owed ?? 0) : 0;
+      const invoiceMissing = r.change.paid ? owed > 0 && !r.invoice_made : !r.invoice_made;
+      if (r.email_reason || invoiceMissing || owed < 0)
         toast.warning(sizeSavedWords(r), { duration: 30_000 });
       else toast.success(sizeSavedWords(r), { duration: 15_000 });
       onClose();
@@ -1754,23 +1885,22 @@ function CorrectSizeDialog({
               placeholder="How it was measured"
             />
           </div>
-          {waiting &&
-            (to ? (
-              <label className="flex items-start gap-2 text-sm" data-size-email={emailIt}>
-                <Checkbox
-                  className="mt-0.5"
-                  checked={emailIt}
-                  onCheckedChange={(v) => setEmailIt(v === true)}
-                />
-                <span>
-                  {sizeCorrectEmailLabel(card)} ({to})
-                </span>
-              </label>
-            ) : (
-              <p className="text-xs text-muted-foreground" data-size-email="none">
-                This plan has no email address, so the customer is not told by email.
-              </p>
-            ))}
+          {to ? (
+            <label className="flex items-start gap-2 text-sm" data-size-email={emailIt}>
+              <Checkbox
+                className="mt-0.5"
+                checked={emailIt}
+                onCheckedChange={(v) => setEmailIt(v === true)}
+              />
+              <span>
+                {sizeCorrectEmailLabel(waiting && card)} ({to})
+              </span>
+            </label>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-size-email="none">
+              This plan has no email address, so the customer is not told by email.
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={save.isPending} onClick={onClose}>

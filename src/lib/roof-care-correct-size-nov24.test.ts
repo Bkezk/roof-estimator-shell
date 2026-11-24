@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sent: { to: string; subject: string; text: string; html?: string }[] = [];
 const invoices: string[] = [];
+const sizeInvoices: { planId: string; from: number | null }[] = [];
 const cfg = { stripe: true, invoiceFails: false, sendOk: true };
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
@@ -42,6 +43,11 @@ vi.mock("@/lib/roof-care-plan-invoice.functions", () => ({
     invoices.push(planId);
     return { id: "inv-new", made: true };
   },
+  makeSizeInvoice: async (_sb: unknown, planId: string, _who: unknown, from: number | null) => {
+    if (cfg.invoiceFails) throw new Error("the invoice was not made");
+    sizeInvoices.push({ planId, from });
+    return { id: "inv-size", made: true };
+  },
 }));
 vi.mock("@/lib/roof-care.functions", () => ({
   officeOrigin: async () => ({ line: "1 Office Rd, London, KY", state: "KY" }),
@@ -59,6 +65,8 @@ import {
   SIZE_CORRECT_LABEL,
   SIZE_CORRECT_MANAGERS,
   SIZE_CORRECT_SAME,
+  SIZE_INVOICE_MAKE,
+  SIZE_REFUND_RECORD,
   priceDifferenceWords,
   readSizeChange,
   readSizeChanges,
@@ -71,6 +79,7 @@ import {
 import {
   correctRoofCareSize,
   roofCareSizeOffer,
+  recordRoofCareSizeRefund,
   type SizeCorrected,
   type SizeOffer,
 } from "@/lib/roof-care-plan.functions";
@@ -266,6 +275,7 @@ const call = <T>(fn: unknown, env: Env, data: unknown, userId = ADMIN) =>
 beforeEach(() => {
   sent.length = 0;
   invoices.length = 0;
+  sizeInvoices.length = 0;
   cfg.stripe = true;
   cfg.invoiceFails = false;
   cfg.sendOk = true;
@@ -282,16 +292,30 @@ describe("showing the new price", () => {
       from_price: 410,
       to_price: 470,
       repriced: true,
+      // Nov 24, the paid plans' step: a plan that waits owes nothing apart from its price.
+      paid: false,
+      owed: 0,
     });
     const price = env.rpcCalls.find((c) => c.fn === "roof_care_price")!;
     expect(price.args).toEqual({ p_sqft: 26000, p_hours: 1, p_miles: 50 });
     expect(env.writes).toEqual([]);
   });
-  it("a plan in force is told its price will stay", async () => {
+  // Until the paid plans' step (Nov 24, "then build the rest") a plan in force was told its
+  // price would stay. It now takes the price of the right size, and the difference is said.
+  it("a plan in force is told the difference it will owe or be owed", async () => {
     const env = world({ status: "active" });
     const o = await call<SizeOffer>(roofCareSizeOffer, env, { plan_id: PLAN, sqft: 26000 });
-    expect(o.repriced).toBe(false);
-    expect(o.to_price).toBe(470);
+    expect(o).toMatchObject({ paid: true, repriced: false, to_price: 470, owed: 60 });
+    // An earlier correction not settled yet: owed from what the payments cover, not the price.
+    const open = world({ status: "active", size_paid_price: 400 });
+    expect(
+      (await call<SizeOffer>(roofCareSizeOffer, open, { plan_id: PLAN, sqft: 26000 })).owed,
+    ).toBe(70);
+    // A smaller roof: owed back.
+    const less = world({ status: "active", price: 500 });
+    expect(
+      (await call<SizeOffer>(roofCareSizeOffer, less, { plan_id: PLAN, sqft: 26000 })).owed,
+    ).toBe(-30);
   });
   it("the size the plan already has is said before any price is shown, in the database's words", async () => {
     const env = world();
@@ -317,8 +341,8 @@ describe("showing the new price", () => {
   });
 });
 
+const ASK = { plan_id: PLAN, sqft: 26000, shown_price: 470 };
 describe("saving a corrected size", () => {
-  const ASK = { plan_id: PLAN, sqft: 26000, shown_price: 470 };
   it("hands the database the size, the price shown and the note, and makes the invoice again", async () => {
     const env = world();
     const out = await call<SizeCorrected>(correctRoofCareSize, env, { ...ASK, note: "tape" });
@@ -360,7 +384,9 @@ describe("saving a corrected size", () => {
     expect(out.email_reason).toBe("The email did not go: the mail company said no");
     expect(env.tables["roof_care_plans"]![0]!["pay_link_sent_at"]).toBeNull();
   });
-  it("a plan in force: no invoice is made and nobody is emailed, whatever was ticked", async () => {
+  // The database no longer writes this record (a paid plan that kept its price, the first
+  // step of Nov 24): one that was written then is still read as it was.
+  it("a record of the first step, a paid plan that kept its price: nothing made, nobody emailed", async () => {
     const env = world(
       { status: "active" },
       { roof_care_correct_size: () => answer({ repriced: false, to_price: 410 }) },
@@ -388,6 +414,76 @@ describe("saving a corrected size", () => {
       "A payment is already recorded on this plan's invoice.",
     );
     expect(invoices).toEqual([]);
+  });
+});
+
+describe("a plan year already paid", () => {
+  const paidAnswer = (over: Record<string, unknown> = {}) =>
+    answer({ paid: true, owed: 60, ...over });
+  it("a bigger roof: the difference goes on an invoice of its own, not the plan year's", async () => {
+    const env = world(
+      { status: "active", pay_method: "check" },
+      { roof_care_correct_size: () => paidAnswer() },
+    );
+    const out = await call<SizeCorrected>(correctRoofCareSize, env, ASK);
+    expect(out.change).toMatchObject({ paid: true, owed: 60, repriced: true });
+    expect(sizeInvoices).toEqual([{ planId: PLAN, from: 20000 }]);
+    expect(invoices).toEqual([]);
+    expect(out.invoice_made).toBe(true);
+    expect(sent).toEqual([]);
+    expect(sizeSavedWords(out)).toContain(
+      "An invoice for the $60.00 difference was made as a draft",
+    );
+  });
+  it("ticked: one email with the difference and no payment link, even for a card plan", async () => {
+    const env = world({ status: "active" }, { roof_care_correct_size: () => paidAnswer() });
+    const out = await call<SizeCorrected>(correctRoofCareSize, env, { ...ASK, email: true });
+    expect(out.emailed_to).toBe("pat@example.com");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain(
+      "Your plan year is already paid. We will send you an invoice for the difference of $60.00.",
+    );
+    expect(sent[0]!.text).not.toContain("Pay by card");
+    expect(sent[0]!.text).not.toContain("/pay/");
+    expect(env.tables["roof_care_plans"]![0]!["pay_link_sent_at"]).toBeNull();
+  });
+  it("a smaller roof: no invoice, the customer is told what comes back", async () => {
+    const env = world(
+      { status: "active" },
+      { roof_care_correct_size: () => paidAnswer({ owed: -30, to_price: 380 }) },
+    );
+    const out = await call<SizeCorrected>(correctRoofCareSize, env, { ...ASK, email: true });
+    expect(sizeInvoices).toEqual([]);
+    expect(invoices).toEqual([]);
+    expect(out.invoice_made).toBe(false);
+    expect(sent[0]!.text).toContain("We are sending $30.00 back to you.");
+    expect(sizeSavedWords(out)).toContain("$30.00 is owed back to the customer");
+    expect(sizeSavedWords(out)).toContain(SIZE_REFUND_RECORD);
+  });
+  it("the size stands when the invoice is not made, and the office is told how to make it", async () => {
+    cfg.invoiceFails = true;
+    const env = world({ status: "active" }, { roof_care_correct_size: () => paidAnswer() });
+    const out = await call<SizeCorrected>(correctRoofCareSize, env, ASK);
+    expect(out.invoice_made).toBe(false);
+    expect(sizeSavedWords(out)).toContain("was not made: press " + SIZE_INVOICE_MAKE);
+  });
+  it("the refund is recorded by a manager or an admin; the database works the amount", async () => {
+    const env = world(
+      { status: "active" },
+      { roof_care_size_refund_sent: () => ({ amount: 30, on: "2026-11-24", ref: "check 9" }) },
+    );
+    await expect(
+      call(recordRoofCareSizeRefund, env, { plan_id: PLAN, on: "2026-11-24" }, OFFICE),
+    ).rejects.toThrow(SIZE_CORRECT_MANAGERS);
+    const out = await call<{ amount: number }>(recordRoofCareSizeRefund, env, {
+      plan_id: PLAN,
+      on: "2026-11-24",
+      ref: "check 9",
+    });
+    expect(out).toEqual({ amount: 30 });
+    const sentCall = env.rpcCalls.find((c) => c.fn === "roof_care_size_refund_sent")!;
+    // No amount is handed over: what is owed is the database's to work.
+    expect(sentCall.args).toEqual({ p_plan: PLAN, p_on: "2026-11-24", p_ref: "check 9" });
   });
 });
 
