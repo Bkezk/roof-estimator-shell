@@ -20,14 +20,16 @@
  * Nov 24 (the public pages audit). A caller without the right secret gets one answer, a plain
  * 401 "Unauthorized", whether a secret is missing on this server, too short, or just not the
  * one sent. Which of those it was is written to the server log and never to the caller. A
- * CRON_SECRET shorter than MIN_CRON_SECRET_LENGTH characters is treated as not set. (The GitHub
- * jobs call with `curl -f`, which fails on any 4xx or 5xx, so they fail as before.)
+ * CRON_SECRET shorter than MIN_CRON_SECRET_LENGTH characters still works, and the server log
+ * says it should be made longer: refusing it would stop the scheduled jobs the day this is
+ * published, and its length cannot be seen from here. (The GitHub jobs call with `curl -f`,
+ * which fails on any 4xx or 5xx, so a refusal fails them as before.)
  */
 import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
 
 import { type TimerCheck, timerTokenOf } from "./cron-timer";
 
-/** A CRON_SECRET shorter than this is treated as not set. */
+/** A CRON_SECRET shorter than this is called out in the server log. It still works. */
 export const MIN_CRON_SECRET_LENGTH = 16;
 
 const refused = () => new Response("Unauthorized", { status: 401 });
@@ -50,11 +52,12 @@ export async function authenticateCron(
     }
   }
   const typed = process.env["CRON_SECRET"]?.trim();
-  // A secret under the shortest length is treated as not set at all.
-  const own = typed && typed.length >= MIN_CRON_SECRET_LENGTH ? typed : undefined;
-  if (typed && !own)
+  const own = typed || undefined;
+  // A short secret is easier to guess. It is said in the log, never to the caller, and the
+  // secret still works: the owner makes it longer in both places when he reads this.
+  if (own && own.length < MIN_CRON_SECRET_LENGTH)
     console.error(
-      `Cron: CRON_SECRET is shorter than ${MIN_CRON_SECRET_LENGTH} characters, so it is treated as not set. Set a longer one in Lovable Cloud › Secrets and in the GitHub repository's Actions secrets.`,
+      `Cron: CRON_SECRET is shorter than ${MIN_CRON_SECRET_LENGTH} characters. It still works, but a short password is easier to guess: set a longer one in Lovable Cloud › Secrets and in the GitHub repository's Actions secrets.`,
     );
   if (own) {
     const match = /^Bearer ([^\s,]+)$/.exec(request.headers.get("authorization") ?? "");

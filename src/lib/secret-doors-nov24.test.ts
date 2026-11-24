@@ -100,31 +100,36 @@ describe("the scheduled runs (/api/cron/*)", () => {
     ]);
   });
 
-  it("a CRON_SECRET shorter than 16 characters is treated as not set: even the caller who knows it is refused", async () => {
+  it("a CRON_SECRET shorter than 16 characters still works, and the server log says to make it longer", async () => {
+    // The length of the live secret cannot be seen from the code, and refusing a short one
+    // would stop the scheduled jobs the day this is published. So it is said, not enforced.
     expect(MIN_CRON_SECRET_LENGTH).toBe(16);
     const fifteen = "abcdefghijklmno";
     expect(fifteen).toHaveLength(15);
     process.env["CRON_SECRET"] = fifteen;
-    expect((await authenticateCron(cron(fifteen)))?.status).toBe(401);
+    expect(await authenticateCron(cron(fifteen))).toBeNull();
     expect(logged[0]).toBe(
-      "Cron: CRON_SECRET is shorter than 16 characters, so it is treated as not set. Set a longer one in Lovable Cloud › Secrets and in the GitHub repository's Actions secrets.",
+      "Cron: CRON_SECRET is shorter than 16 characters. It still works, but a short password is easier to guess: set a longer one in Lovable Cloud › Secrets and in the GitHub repository's Actions secrets.",
     );
     // Never the secret itself in the log.
     expect(logged.join("\n")).not.toContain(fifteen);
-    // One character more and it is a secret.
+    // A wrong one is refused as any other.
+    expect((await authenticateCron(cron("abcdefghijklmnX")))?.status).toBe(401);
+    // One character more and nothing is said.
+    logged.length = 0;
     const sixteen = `${fifteen}p`;
     process.env["CRON_SECRET"] = sixteen;
     expect(await authenticateCron(cron(sixteen))).toBeNull();
-    // A space or a line end from a paste does not count towards the length.
-    process.env["CRON_SECRET"] = `  ${fifteen}\n`;
-    expect((await authenticateCron(cron(fifteen)))?.status).toBe(401);
+    expect(logged).toEqual([]);
   });
 
   it("a short CRON_SECRET does not close the door to Lovable's own scheduling", async () => {
     process.env["CRON_SECRET"] = "short";
     process.env["LOVABLE_CRON_SECRET"] = "lovable-made-up-value";
     expect(await authenticateCron(cron("lovable-made-up-value"))).toBeNull();
-    expect((await authenticateCron(cron("short")))?.status).toBe(401);
+    // The short one still works (it is said in the log, not enforced), and a wrong one does not.
+    expect(await authenticateCron(cron("short"))).toBeNull();
+    expect((await authenticateCron(cron("shorter")))?.status).toBe(401);
   });
 
   it("the right secret still opens it, and nothing is logged", async () => {

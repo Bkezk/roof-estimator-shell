@@ -30,10 +30,11 @@ from. One from the other side records nothing, and the admins and managers are t
 These come from no outside service. Each is a long password the owner chose. Where one is kept in
 more than one place, every copy must be the same.
 
-Each has a shortest length (Nov 24, 2026): `CRON_SECRET` at least 16 characters, `BACKUP_SECRET`
-and `RESTORE_SECRET` at least 24. A shorter one is treated as not set: every caller is refused
-until it is made longer, and the site's own log in Lovable says why. A caller without the right
-password gets the same plain refusal whether the password is missing, too short or wrong.
+`BACKUP_SECRET` and `RESTORE_SECRET` must be at least 24 characters. A shorter one is treated as
+not set: every caller is refused until it is made longer, and the site's own log in Lovable says
+why. `CRON_SECRET` should be at least 16 characters: a shorter one still works, and the site's
+log says to make it longer (Nov 24, 2026). A caller without the right password gets the same
+plain refusal whether the password is missing, too short or wrong.
 
 | Name             | What it guards                                                                 | Kept in                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
