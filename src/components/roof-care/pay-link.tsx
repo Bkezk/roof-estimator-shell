@@ -4,7 +4,9 @@
  * gives the office that plan's own link, to copy into a text or to email to the customer on
  * the plan. The customer opens it and pays by card; the payment starts the plan.
  *
- * Nothing is sent by itself from here: a person presses Copy or Email.
+ * Nothing is sent by itself from here: a person presses Copy or Email. Since Nov 24 it is the
+ * only way the link reaches a customer: the agreement email no longer holds it, so the office
+ * sends the payment request after it is sure of the roof size.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +21,7 @@ import {
   PAY_LINK_BUTTON,
   PAY_LINK_COPIED,
   PAY_LINK_COPY,
+  PAY_LINK_NOT_SENT,
   PAY_LINK_NOTE,
   payLinkSentWords,
 } from "@/lib/roof-care-pay-link";
@@ -128,9 +131,13 @@ export function PlanPayLinkBox({ planId }: { planId: string }) {
                   Email it to {l.to}
                 </Button>
               )}
-              {payLinkSentWords(l, longDay) && (
+              {payLinkSentWords(l, longDay) ? (
                 <p className="text-muted-foreground" data-pay-link-sent>
                   {payLinkSentWords(l, longDay)}
+                </p>
+              ) : (
+                <p className="font-medium text-amber-800 dark:text-amber-300" data-pay-link-unsent>
+                  {PAY_LINK_NOT_SENT}
                 </p>
               )}
             </>

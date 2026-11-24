@@ -378,15 +378,17 @@ describe("the link in the customer's email", () => {
     contact: "888-555-0100",
   };
   const link = `https://portal.example.com/pay/${TOKEN}`;
-  it("the agreement carries it when there is one, and reads as before when there is none", () => {
-    const withLink = agreementEmail({ ...facts, pay_link: link })!;
-    expect(withLink.text).toContain("PAY BY CARD");
-    expect(withLink.text).toContain(`Pay by card: ${link}`);
-    expect(withLink.html).toContain(`<a href="${link}"`);
+  // Nov 24 (owner): "the pay by card button isnt appropriate" in the agreement. It holds no
+  // link any more; the office sends it by itself from the plan.
+  it("the agreement never carries it", () => {
+    const waiting = agreementEmail({ ...facts, awaits_card: true })!;
+    expect(waiting.text).not.toContain("PAY BY CARD");
+    expect(waiting.text).not.toContain("/pay/");
+    expect(waiting.html).not.toContain("/pay/");
     const without = agreementEmail(facts)!;
     expect(without.text).not.toContain("PAY BY CARD");
     expect(without.html).not.toContain("/pay/");
-    expect(agreementEmail({ ...facts, pay_link: null })!.text).toBe(without.text);
+    expect(agreementEmail({ ...facts, awaits_card: false })!.text).toBe(without.text);
   });
   it("the link sent again by itself says the plan, the property and the amount", () => {
     const mail = payLinkEmail({
@@ -406,15 +408,10 @@ describe("the link in the customer's email", () => {
     );
     expect(mail.text).toContain(`Pay by card: ${link}`);
   });
-  it("the scheduled send puts the link in a card plan's agreement only when card payment is set up", () => {
+  it("the scheduled send puts no link in an agreement, and does not mark the link as sent", () => {
     const server = flat(read("src/lib/roof-care-email.server.ts"));
-    expect(server).toContain('const payBase = stripeConfigured() ? appUrl() : "";');
-    expect(server).toContain(
-      'payBase && p.pay_method === "card" && p.status === "awaiting_payment" && p.pay_token ? payLinkFor(payBase, p.pay_token) : null,',
-    );
-    expect(server).toContain(
-      'if (facts.pay_link) await admin.from("roof_care_plans").update({ pay_link_sent_at: stamp }).eq("id", p.id);',
-    );
+    expect(server).not.toContain("payLinkFor");
+    expect(server).not.toContain("pay_link_sent_at: stamp");
   });
 });
 
@@ -519,8 +516,9 @@ describe("a plan signed from a public request, paying by card", () => {
     expect(card).toContain(
       'if (prefill && payMethod === "card") { toast.success(`${planName(made.plan)} plan signed. ${SIGNED_PAY_BY_LINK}`, {',
     );
+    // Nov 24: the agreement no longer holds the link, so the office is told to send it.
     expect(SIGNED_PAY_BY_LINK).toBe(
-      "The customer pays from their own card payment link. It is in the agreement emailed to them, and under Card payment link on the plan to copy or send again. The plan starts when the payment is received.",
+      "The customer has not been sent a payment link. Check the roof size, then send it from Card payment link on the plan. The plan starts when the payment is received.",
     );
   });
 });

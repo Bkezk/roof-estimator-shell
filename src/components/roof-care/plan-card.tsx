@@ -8,7 +8,7 @@
  * the roof). The rules are the database's; the forms say what will happen before it is pressed
  * (lib/roof-care-plan.ts).
  */
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -85,6 +85,7 @@ import {
   SIGN_UP_TITLE,
   signUpMissing,
   signUpMissingLine,
+  tallyShare,
 } from "@/lib/roof-care-benefits";
 import { NOT_PLACED_LINE } from "@/lib/roof-care-locate";
 import { NO_ACCESS_REMOVE, noAccessLine, noAccessTakeOffWords } from "@/lib/roof-care-no-access";
@@ -322,6 +323,9 @@ export function RoofCareBadge({ plan, today }: { plan: RoofCarePlan; today: stri
   );
 }
 
+/** The fold on a plan in force that holds its record. */
+export const PLAN_DETAILS_LABEL = "Plan details: signed, paid, roof size, emails";
+
 const STATE_WORDS = {
   done: "Done",
   late: "Late",
@@ -371,100 +375,109 @@ function VisitRow({
     (state === "done" || visit.drains_cleaned != null || visit.gutters_cleaned != null);
   return (
     <li
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+      className="rounded-md border bg-background px-2.5 py-1.5 text-xs"
       data-roof-care-visit={visit.kind}
       data-visit-state={state}
     >
-      <span className="font-medium">{VISIT_LABEL[visit.kind]}</span>
-      <span className="text-muted-foreground" data-visit-skipped={state === "skipped"}>
-        {state === "skipped"
-          ? skippedWords(visit)
-          : visit.lost_on
-            ? lostWords(visit.lost_on)
-            : visit.kind === "carried"
-              ? `Do it by ${longDay(visit.due_by)}, or it is lost`
-              : dueWords(visit)}
-      </span>
-      <Badge
-        variant={state === "late" || state === "lost" ? "destructive" : "secondary"}
-        className={state === "done" ? "bg-emerald-600 text-white hover:bg-emerald-600" : ""}
-      >
-        {STATE_WORDS[state]}
-      </Badge>
-      {/* A ticket that is with somebody else is named, not linked: the reader cannot open it. */}
-      {visit.ticket &&
-        (visit.ticket.mine === false ? (
-          <span className="text-muted-foreground" data-visit-ticket="other">
-            Ticket #{visit.ticket.number}
-          </span>
-        ) : (
-          <Link
-            to="/service"
-            search={{ id: visit.ticket.id }}
-            className="underline underline-offset-2"
+      {/* Owner, Nov 24: "very visually unappealing and difficult to read". What the inspection
+          is and where it stands on the left, what can be done about it on the right. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="font-medium">{VISIT_LABEL[visit.kind]}</span>
+          <Badge
+            variant={state === "late" || state === "lost" ? "destructive" : "secondary"}
+            className={state === "done" ? "bg-emerald-600 text-white hover:bg-emerald-600" : ""}
           >
-            Ticket #{visit.ticket.number}
-          </Link>
-        ))}
-      {showMoney && visit.amount > 0 && (
-        <span className="text-muted-foreground">bills {money0(visit.amount)}</span>
-      )}
-      {/* Done and signed off, with its share of the plan on no invoice (Nov 19). */}
-      {showMoney && visitUnbilled(visit) && (
-        <Badge variant="destructive" data-visit-unbilled>
-          {VISIT_UNBILLED_WORDS}
-        </Badge>
-      )}
-      {(visit.push_reason || (visit.kind !== "carried" && visit.due_by !== visit.first_due_by)) && (
-        <span className="text-muted-foreground" data-visit-pushed={visit.customer_asked}>
-          pushed back{visit.push_reason ? `: ${visit.push_reason}` : ""}
-        </span>
-      )}
-      {office && visit.kind === "carried" && state !== "done" && state !== "lost" && (
-        <span className="text-muted-foreground">{CARRIED_NO_PUSH}</span>
-      )}
-      {office && state !== "done" && state !== "skipped" && visit.kind !== "carried" && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          onClick={() => onPush(visit)}
-          data-action="roof-care-push"
-        >
-          <CalendarClock className="mr-1 h-3.5 w-3.5" /> Push back
-        </Button>
-      )}
-      {/* An inspection we will not do (Nov 20): a manager's, never by deleting its ticket. */}
-      {onSkip && visit.kind !== "storm" && !["done", "skipped", "lost"].includes(state) && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-muted-foreground"
-          onClick={() => onSkip(visit)}
-          data-action="roof-care-skip"
-        >
-          {SKIP_LABEL}
-        </Button>
-      )}
-      {/* A storm inspection added by mistake (Nov 20): a manager's. */}
-      {onStormOff && visit.kind === "storm" && state !== "done" && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-muted-foreground"
-          onClick={() => onStormOff(visit)}
-          data-action="roof-care-storm-off"
-        >
-          {STORM_REMOVE_LABEL}
-        </Button>
-      )}
+            {STATE_WORDS[state]}
+          </Badge>
+          <span className="text-muted-foreground" data-visit-skipped={state === "skipped"}>
+            {state === "skipped"
+              ? skippedWords(visit)
+              : visit.lost_on
+                ? lostWords(visit.lost_on)
+                : visit.kind === "carried"
+                  ? `Do it by ${longDay(visit.due_by)}, or it is lost`
+                  : dueWords(visit)}
+          </span>
+          {/* A ticket that is with somebody else is named, not linked: the reader cannot open it. */}
+          {visit.ticket &&
+            (visit.ticket.mine === false ? (
+              <span className="text-muted-foreground" data-visit-ticket="other">
+                Ticket #{visit.ticket.number}
+              </span>
+            ) : (
+              <Link
+                to="/service"
+                search={{ id: visit.ticket.id }}
+                className="underline underline-offset-2"
+              >
+                Ticket #{visit.ticket.number}
+              </Link>
+            ))}
+          {showMoney && visit.amount > 0 && (
+            <span className="text-muted-foreground">bills {money0(visit.amount)}</span>
+          )}
+          {/* Done and signed off, with its share of the plan on no invoice (Nov 19). */}
+          {showMoney && visitUnbilled(visit) && (
+            <Badge variant="destructive" data-visit-unbilled>
+              {VISIT_UNBILLED_WORDS}
+            </Badge>
+          )}
+          {(visit.push_reason ||
+            (visit.kind !== "carried" && visit.due_by !== visit.first_due_by)) && (
+            <span className="text-muted-foreground" data-visit-pushed={visit.customer_asked}>
+              pushed back{visit.push_reason ? `: ${visit.push_reason}` : ""}
+            </span>
+          )}
+          {office && visit.kind === "carried" && state !== "done" && state !== "lost" && (
+            <span className="text-muted-foreground">{CARRIED_NO_PUSH}</span>
+          )}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-1" data-visit-actions>
+          {office && state !== "done" && state !== "skipped" && visit.kind !== "carried" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => onPush(visit)}
+              data-action="roof-care-push"
+            >
+              <CalendarClock className="mr-1 h-3.5 w-3.5" /> Push back
+            </Button>
+          )}
+          {/* An inspection we will not do (Nov 20): a manager's, never by deleting its ticket. */}
+          {onSkip && visit.kind !== "storm" && !["done", "skipped", "lost"].includes(state) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground"
+              onClick={() => onSkip(visit)}
+              data-action="roof-care-skip"
+            >
+              {SKIP_LABEL}
+            </Button>
+          )}
+          {/* A storm inspection added by mistake (Nov 20): a manager's. */}
+          {onStormOff && visit.kind === "storm" && state !== "done" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground"
+              onClick={() => onStormOff(visit)}
+              data-action="roof-care-storm-off"
+            >
+              {STORM_REMOVE_LABEL}
+            </Button>
+          )}
+        </div>
+      </div>
       {showCleaning && (
-        <span className="basis-full text-muted-foreground" data-visit-cleaning>
+        <p className="mt-1 text-muted-foreground" data-visit-cleaning>
           {cleaning.join(". ")}.
-        </span>
+        </p>
       )}
     </li>
   );
@@ -783,12 +796,55 @@ export function RoofCareCard({
   const office = !isFieldOnly(profile);
   const manager = managesTickets(profile);
   const mine = active && visitId ? (active.visits.find((v) => v.id === visitId) ?? null) : null;
+  // Owner, Nov 24: "a bit messy once you have a care plan", then "very visually unappealing and
+  // difficult to read". The whole plan sits in one box of its own, with what needs doing in
+  // sight and the record of it (who signed, how it was paid, the emails) folded under Plan
+  // details. In the Care Plan pop-up the pop-up is the box.
+  const framed = !short && !includesOpen;
+  // The record of the plan in force: one sentence, as before.
+  const signedLine = active ? (
+    <p className="text-xs text-muted-foreground" data-roof-care-signed>
+      {/* A renewed year says so; who first agreed and who signed them up stay with it. */}
+      {active.renewed_from
+        ? `Renewed ${longDay(active.signed_on)}. First agreed by ${active.agreed_by}`
+        : `Signed ${longDay(active.signed_on)} by ${active.agreed_by}`}
+      {active.sold_by_name ? `, signed up by ${active.sold_by_name}` : ""}.
+      {/* A renewal paid ahead has not started yet: its year begins when the old one ends. */}
+      {active.pay_first && active.starts_on
+        ? active.starts_on > today
+          ? ` Paid. The plan year starts ${longDay(active.starts_on)}.`
+          : ` Paid, and started ${longDay(active.starts_on)}.`
+        : ""}
+    </p>
+  ) : null;
+  // What still needs somebody stays in sight; what is settled goes under Plan details.
+  const sizeWaits = !!active?.size?.unchecked;
+  const cardInvoiceOpen = !!active?.invoice && active.invoice.status !== "paid";
+  const emailWaits =
+    !!active?.email &&
+    (!active.email.to || !active.email.agreement_sent_at || !active.email.receipt_sent_at);
   return (
     <div
-      className={`space-y-1.5 ${className}`}
+      className={`${framed ? "space-y-2.5 rounded-lg border bg-muted/20 p-3" : "space-y-1.5"} ${className}`}
       data-roof-care={active ? active.plan : waiting ? "awaiting" : expired ? "expired" : "none"}
+      data-roof-care-framed={framed}
     >
-      {plan && <RoofCareBadge plan={plan} today={today} />}
+      {/* The top line: the plan and how far along it is, and for a plan in force when it
+          renews and what it costs a year. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        {plan && <RoofCareBadge plan={plan} today={today} />}
+        {active && (
+          <p className="text-xs text-muted-foreground" data-roof-care-renews>
+            Renews <span className="font-medium text-foreground">{longDay(active.renews_on)}</span>
+            {office && (
+              <>
+                {" · "}
+                <span className="font-medium text-foreground">{money0(active.price)}</span> a year
+              </>
+            )}
+          </p>
+        )}
+      </div>
       {plan.status === "ended" &&
         plan.refund &&
         (plan.refund.due > 0 || (plan.refund.changes?.length ?? 0) > 0) && (
@@ -903,64 +959,24 @@ export function RoofCareCard({
       )}
       {active && (
         <>
-          <p className="text-xs text-muted-foreground">
-            {/* A renewed year says so; who first agreed and who signed them up stay with it. */}
-            {active.renewed_from
-              ? `Renewed ${longDay(active.signed_on)}. First agreed by ${active.agreed_by}`
-              : `Signed ${longDay(active.signed_on)} by ${active.agreed_by}`}
-            {active.sold_by_name ? `, signed up by ${active.sold_by_name}` : ""}.
-            {/* A renewal paid ahead has not started yet: its year begins when the old one ends. */}
-            {active.pay_first && active.starts_on
-              ? active.starts_on > today
-                ? ` Paid. The plan year starts ${longDay(active.starts_on)}.`
-                : ` Paid, and started ${longDay(active.starts_on)}.`
-              : ""}{" "}
-            Renews {longDay(active.renews_on)}.{office && ` ${money0(active.price)} a year.`}
-            {active.price_estimated && " The price is an estimate until the address is confirmed."}
-          </p>
-          {!short && office && <PlanSizeLine siteId={siteId} plan={active} manager={manager} />}
-          {/* A card payment taken online (Nov 19, night). */}
-          {!short && office && active.card_paid && (
-            <p className="text-xs" data-roof-care-card-paid>
-              {cardPaidWords(active.card_paid)}
-              {active.invoice && active.invoice.status !== "paid"
-                ? ` ${CARD_PAID_INVOICE_OPEN}`
-                : ""}
+          {/* On a ticket the one sentence stays in sight; on the property it is folded. */}
+          {short && signedLine}
+          {active.price_estimated && (
+            <p className="text-xs text-amber-800 dark:text-amber-300" data-roof-care-estimate>
+              The price is an estimate until the address is confirmed.
             </p>
           )}
-          {/* What the plan includes and what it has given so far (owner, Nov 19). */}
-          {!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}
-          {!short && office && active.pay_first && active.email && (
-            <PlanEmailLine siteId={siteId} plan={active} paid />
+          {!short && office && sizeWaits && (
+            <PlanSizeLine siteId={siteId} plan={active} manager={manager} />
           )}
-          {/* Which invoices used the minor repairs, for those who see invoices. The tally
-              above says how much is used and left. */}
-          {!short && active.repair_allowance > 0 && active.allowance_used !== null && (
-            <div className="space-y-0.5 text-xs" data-roof-care-allowance>
-              {active.allowance_uses.length > 0 && (
-                <p className="text-muted-foreground" data-allowance-uses>
-                  Minor repairs used on{" "}
-                  {active.allowance_uses.map((u, n) => (
-                    <span key={u.invoice_id}>
-                      {n > 0 && ", "}
-                      <Link
-                        to="/service/invoices"
-                        search={{ id: u.invoice_id }}
-                        className="underline underline-offset-2"
-                      >
-                        invoice #{u.number}
-                      </Link>{" "}
-                      ({allowanceMoney(u.amount)})
-                    </span>
-                  ))}
-                  .
-                </p>
-              )}
-              <p className="text-muted-foreground">
-                A repair invoice at this property uses the plan by itself while any is left. Untick
-                it on the invoice when the repair is not a minor one.
-              </p>
-            </div>
+          {/* A card payment taken online whose invoice is still open: said in sight. */}
+          {!short && office && active.card_paid && cardInvoiceOpen && (
+            <p className="text-xs" data-roof-care-card-paid>
+              {cardPaidWords(active.card_paid)} {CARD_PAID_INVOICE_OPEN}
+            </p>
+          )}
+          {!short && office && active.pay_first && active.email && emailWaits && (
+            <PlanEmailLine siteId={siteId} plan={active} paid />
           )}
           {runsLate(active) && (
             <p className="text-xs text-amber-700 dark:text-amber-400" data-roof-care-late>
@@ -1007,7 +1023,7 @@ export function RoofCareCard({
             />
           )}
           {(!short || mine) && (
-            <ul className="space-y-1">
+            <ul className="space-y-1.5">
               {(short && mine ? [mine] : active.visits).map((v) => (
                 <VisitRow
                   key={v.id}
@@ -1068,8 +1084,68 @@ export function RoofCareCard({
               ))}
             </ul>
           )}
+          {/* What the plan includes and what it has given so far (owner, Nov 19). */}
+          {!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}
+          {/* The record of the plan (Nov 24): who signed, how it was paid, the roof size, where
+              the emails went and which invoices used the minor repairs. Folded: it is read
+              now and then, and nothing in it waits for anybody. */}
+          {!short && (
+            <details
+              className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+              data-roof-care-details
+            >
+              <summary className="cursor-pointer font-medium">{PLAN_DETAILS_LABEL}</summary>
+              <div className="mt-1.5 space-y-1.5">
+                {signedLine}
+                {office && !sizeWaits && (
+                  <PlanSizeLine siteId={siteId} plan={active} manager={manager} />
+                )}
+                {/* A card payment taken online (Nov 19, night). */}
+                {office && active.card_paid && !cardInvoiceOpen && (
+                  <p className="text-xs" data-roof-care-card-paid>
+                    {cardPaidWords(active.card_paid)}
+                  </p>
+                )}
+                {office && active.pay_first && active.email && !emailWaits && (
+                  <PlanEmailLine siteId={siteId} plan={active} paid />
+                )}
+                {/* Which invoices used the minor repairs, for those who see invoices. The tally
+                    above says how much is used and left. */}
+                {!short && active.repair_allowance > 0 && active.allowance_used !== null && (
+                  <div className="space-y-0.5 text-xs" data-roof-care-allowance>
+                    {active.allowance_uses.length > 0 && (
+                      <p className="text-muted-foreground" data-allowance-uses>
+                        Minor repairs used on{" "}
+                        {active.allowance_uses.map((u, n) => (
+                          <span key={u.invoice_id}>
+                            {n > 0 && ", "}
+                            <Link
+                              to="/service/invoices"
+                              search={{ id: u.invoice_id }}
+                              className="underline underline-offset-2"
+                            >
+                              invoice #{u.number}
+                            </Link>{" "}
+                            ({allowanceMoney(u.amount)})
+                          </span>
+                        ))}
+                        .
+                      </p>
+                    )}
+                    <p className="text-muted-foreground">
+                      A repair invoice at this property uses the plan by itself while any is left.
+                      Untick it on the invoice when the repair is not a minor one.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
           {!short && office && (
-            <div className="flex flex-wrap gap-1.5">
+            <div
+              className={`flex flex-wrap items-center gap-1.5 ${framed ? "border-t pt-2" : ""}`}
+              data-roof-care-actions
+            >
               {/* Roof Guard's yearly budget forecast (Nov 19, night): marked when it is sent. */}
               {active.plan === "guard" && (
                 <Button
@@ -1105,7 +1181,7 @@ export function RoofCareCard({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-7 text-xs text-muted-foreground"
+                  className="ml-auto h-7 text-xs text-muted-foreground"
                   onClick={() => setEnding(true)}
                   data-action="roof-care-end"
                 >
@@ -1487,21 +1563,38 @@ function PlanIncludes({ plan, open }: { plan: RoofCarePlan; open: boolean }) {
 function PlanBenefits({ plan, today, open }: { plan: RoofCarePlan; today: string; open: boolean }) {
   const rows = benefitsUsed(plan, today, plan.storm_included ?? 0);
   return (
-    <div className="space-y-1.5" data-roof-care-benefits>
-      <PlanIncludes plan={plan} open={open} />
-      <div className="rounded-md border px-2.5 py-1.5 text-xs">
+    <div className="space-y-2" data-roof-care-benefits>
+      {/* Owner, Nov 24: one small tile for each thing the plan gives, with a bar for how much
+          of it is used, in place of a list of lines. */}
+      <div className="text-xs">
         <p className="font-medium">Used this plan year</p>
-        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          {rows.map((r) => (
-            <Fragment key={r.key}>
-              <dt className="text-muted-foreground">{r.label}</dt>
-              <dd className="font-medium" data-benefit={r.key}>
-                {r.words}
-              </dd>
-            </Fragment>
-          ))}
+        <dl className="mt-1 grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+          {rows.map((r) => {
+            const share = tallyShare(r.used, r.of);
+            return (
+              <div key={r.key} className="rounded-md border bg-background px-2.5 py-1.5">
+                <dt className="text-muted-foreground">{r.label}</dt>
+                <dd className="font-medium" data-benefit={r.key}>
+                  {r.words}
+                </dd>
+                {share !== null && (
+                  <div
+                    className="mt-1 h-1 overflow-hidden rounded-full bg-muted"
+                    aria-hidden
+                    data-benefit-bar={share}
+                  >
+                    <div
+                      className="h-full rounded-full bg-emerald-600"
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </dl>
       </div>
+      <PlanIncludes plan={plan} open={open} />
     </div>
   );
 }

@@ -55,10 +55,10 @@ export interface PlanEmailFacts {
   company: string;
   contact: string;
   /**
-   * The customer's own card payment link (Nov 23), when the plan pays by card, still waits for
-   * its payment, and paying by card online is set up. Null or left out: no link is printed.
+   * The plan pays by card online and still waits for its payment. The agreement then says the
+   * payment link comes in an email of its own. It never holds the link: see AWAITS_CARD_WORDS.
    */
-  pay_link?: string | null;
+  awaits_card?: boolean;
 }
 
 /** In the agreement's plan card and its plain-text list. */
@@ -122,18 +122,20 @@ export function footnotesFor(included: readonly string[]): string[] {
   );
 }
 
-/** The card payment link, where there is one to give. */
-const payBlocks = (f: Pick<PlanEmailFacts, "pay_link">): Block[] =>
-  f.pay_link
-    ? [
-        { kind: "h", text: "Pay by card" },
-        {
-          kind: "p",
-          text: "You chose to pay by card. Use the button below to pay on our secure payment page. Your plan starts the day we receive your payment.",
-        },
-        { kind: "link", text: "Pay by card", url: f.pay_link },
-      ]
-    : [];
+/**
+ * What the agreement says to a customer who pays by card and has not paid yet (owner, Nov 24:
+ * "i got this email prompting me to pay by card even though stripe opened and i paid by card
+ * then", and "the office needs to review and then send the payment request after theyre sure of
+ * the roof size so even then the pay by card button isnt appropriate").
+ *
+ * So the agreement holds no payment link and no button. The link goes out only when a person in
+ * the office presses Email under Card payment link on the plan (payLinkEmail).
+ */
+export const AWAITS_CARD_WORDS =
+  "You chose to pay by card. If you have not paid yet, we will email you a secure payment link after we review your sign-up. Your plan starts the day we receive your payment.";
+
+const payBlocks = (f: Pick<PlanEmailFacts, "awaits_card">): Block[] =>
+  f.awaits_card ? [{ kind: "p", text: AWAITS_CARD_WORDS }] : [];
 
 export interface PayLinkFacts {
   plan: PlanKey;
@@ -148,7 +150,7 @@ export interface PayLinkFacts {
   contact: string;
 }
 
-/** The link by itself, when the office sends it again from the plan (Nov 23). */
+/** The payment request: the link by itself, sent when the office presses Email on the plan. */
 export function payLinkEmail(f: PayLinkFacts): Email {
   const name = PLAN_NAMES[f.plan];
   const blocks: Block[] = [

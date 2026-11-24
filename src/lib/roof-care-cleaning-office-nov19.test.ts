@@ -86,9 +86,8 @@ describe("where the office sees it", () => {
     expect(card).toContain(
       '(state === "done" || visit.drains_cleaned != null || visit.gutters_cleaned != null);',
     );
-    expect(card).toContain(
-      '<span className="basis-full text-muted-foreground" data-visit-cleaning>',
-    );
+    // Nov 24: the inspection is a row of its own now, and this is its second line.
+    expect(card).toContain('<p className="mt-1 text-muted-foreground" data-visit-cleaning>');
     expect(card).toContain("plan={active.plan}");
     const f = flat("src/lib/roof-care-plan.functions.ts");
     expect(f).toContain('cleaning_note, cleaning_by_name, cleaning_at" as const;');

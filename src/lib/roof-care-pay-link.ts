@@ -140,4 +140,8 @@ export function payLinkSentWords(
  * not at the screen, so no card page is opened here.
  */
 export const SIGNED_PAY_BY_LINK =
-  "The customer pays from their own card payment link. It is in the agreement emailed to them, and under Card payment link on the plan to copy or send again. The plan starts when the payment is received.";
+  "The customer has not been sent a payment link. Check the roof size, then send it from Card payment link on the plan. The plan starts when the payment is received.";
+
+/** In the office's box, while the link has never been emailed (owner, Nov 24). */
+export const PAY_LINK_NOT_SENT =
+  "Not emailed to the customer yet. The agreement does not hold this link: send it when the roof size is right.";

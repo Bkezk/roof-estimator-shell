@@ -239,6 +239,16 @@ export interface BenefitUse {
 }
 
 /**
+ * How much of one benefit is used, as a whole percent for the bar on its tile (owner, Nov 24:
+ * the plan card "very visually unappealing and difficult to read"). Null when the reader may not
+ * see what is used, or the plan includes none: the tile then has no bar.
+ */
+export function tallyShare(used: number | null, of: number): number | null {
+  if (used == null || !Number.isFinite(used) || !Number.isFinite(of) || of <= 0) return null;
+  return Math.round((Math.min(Math.max(used, 0), of) / of) * 100);
+}
+
+/**
  * The plan year's tally: the two inspections, the minor repairs, the leak calls with no trip
  * charge and the storm inspections. Only what the plan includes is listed. The repairs and the
  * leak calls are counted from invoices, so they are null for a reader who does not see invoices.

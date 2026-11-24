@@ -110,11 +110,13 @@ describe("the agreement looks like the handout", () => {
     expect(m.text).toContain("Questions? Reply to this email or reach us at 555-0100.");
   });
 
-  it("a card plan's payment button sits in the same look", () => {
-    const c = agreementEmail({ ...guard, pay_method: "card", pay_link: "https://x.test/pay/abc" })!;
-    expect(c.html).toContain('<a href="https://x.test/pay/abc"');
-    expect(c.html).toContain(">Pay by card</a>");
-    expect(c.html).toContain("Or open this address: https://x.test/pay/abc");
+  // Nov 24 (owner): the agreement holds no payment button any more. The office sends the link
+  // by itself after its review: src/lib/roof-care-agreement-no-pay-button-nov24.test.ts.
+  it("a card plan's agreement has no payment button", () => {
+    const c = agreementEmail({ ...guard, pay_method: "card", awaits_card: true })!;
+    expect(c.html).not.toContain("/pay/");
+    expect(c.html).not.toContain(">Pay by card</a>");
+    expect(c.html).toContain("we will email you a secure payment link after we review");
   });
 });
 

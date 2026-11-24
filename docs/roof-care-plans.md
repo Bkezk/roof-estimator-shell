@@ -488,10 +488,11 @@ Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-
   the site's address, `/pay/`, and a long random token that belongs to that plan. The page it
   opens needs no sign-in. It shows the plan's name, the property's name, the amount and one
   button, which opens the card payment page; the payment starts the plan as any card payment
-  does. A link that is over, or made up, says to call. The link is in the agreement email of a
-  plan that pays by card, and the office can copy it or email it again from the plan (Card
-  payment link). A plan signed from a public request with Card does not open the card page on
-  the office's screen. Off until Stripe is set up; emailing it also needs Email set up.
+  does. A link that is over, or made up, says to call. Since Nov 24 the link is not in the
+  agreement email (the owner: "the office needs to review and then send the payment request
+  after theyre sure of the roof size"): the office copies it or emails it from the plan (Card
+  payment link), and the box says "not emailed yet" until somebody has. A plan signed from a
+  public request with Card does not open the card page on the office's screen. Off until Stripe is set up; emailing it also needs Email set up.
   Record: `docs/qa/roof-care-pay-link-2026-11-23.md`.
 - The cleaning at each inspection and the budget forecast: `src/lib/roof-care-cleaning.ts`.
   The questions are required (the owner, Nov 20: "those questions should be required"): no
