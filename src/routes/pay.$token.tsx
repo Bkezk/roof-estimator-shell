@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PublicPayPage } from "@/components/public/pay-page";
+import { publicShareMeta } from "@/lib/public-share";
 
 // A Roof Care customer's own card payment link (Nov 23): a public page, no sign-in
 // (components/auth-gate.tsx lets a path that is exactly /pay/<token> through). The token is a
@@ -9,6 +10,12 @@ export const Route = createFileRoute("/pay/$token")({
   head: () => ({
     meta: [
       { title: "Pay for your Roof Care plan | JBK Commercial Roofing" },
+      // What a forwarded link shows: a plain card with the company's name, and never this
+      // page's address, which holds the token (no `path`; lib/public-share.ts).
+      ...publicShareMeta({
+        title: "Pay for your Roof Care plan | JBK Commercial Roofing",
+        description: "The payment page for your Roof Care plan from JBK Commercial Roofing.",
+      }),
       // Reached from an email to one customer, never from a search.
       { name: "robots", content: "noindex, nofollow" },
       // The address holds the token: it is never sent on to another site as where one came from.
