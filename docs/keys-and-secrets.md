@@ -25,6 +25,21 @@ The two Stripe values must come from the same side of Stripe: both from test mod
 live mode (Nov 24, 2026). The site takes a "card was paid" message only from the side its key is
 from. One from the other side records nothing, and the admins and managers are told.
 
+How the two Stripe values are made (Nov 24, 2026, checked against Stripe's own pages that day):
+
+- `STRIPE_SECRET_KEY` is best a restricted key, not the full secret key: Stripe recommends it.
+  It needs one permission, Checkout Sessions: Write. The site only ever opens a payment page
+  with it. A restricted key starts with `rk_`; the site takes either kind.
+- The webhook is made in Stripe under Workbench, Webhooks, "Create an event destination", for
+  "Your account", with Snapshot events (the site does not read Thin events), sent to the
+  endpoint above. Three events: `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`. The
+  third is for a payment from a bank account that does not go through.
+- Bank payments (ACH) are turned on or off in the Stripe account's payment method settings, by
+  the owner. No key and no code changes with it.
+- Stripe Tax is not used: a Roof Care plan is billed as a service with no sales tax. It is not
+  turned on until the owner's accountant says a plan is taxable.
+
 ## 2. Passwords the owner made up himself
 
 These come from no outside service. Each is a long password the owner chose. Where one is kept in
@@ -77,17 +92,17 @@ Nobody types these, and nobody needs to look them up.
 
 Who holds each login is the owner's to keep, outside the repository.
 
-| Account                            | What it holds                                                                                |
-| ---------------------------------- | -------------------------------------------------------------------------------------------- |
-| Lovable                            | The site, its database, its secrets, and the domain `jbkbid.com` with its DNS records.       |
-| Resend                             | Sending email from `jbkbid.com`. Its four DNS records were added in Lovable on Nov 23, 2026. |
-| Google Cloud                       | The Routes API key and its billing.                                                          |
-| GitHub                             | The code, its Actions secrets, and the nightly jobs.                                         |
-| Stripe                             | Not opened yet.                                                                              |
-| sam.gov                            | The federal leads key.                                                                       |
-| The two planrooms                  | The login in part 1.                                                                         |
-| The company's email provider       | The office inboxes on `flatroofonline.com`, the sales inbox that replies go to among them.   |
-| The `flatroofonline.com` registrar | That domain's DNS. The owner had no login for it in November 2026.                           |
+| Account                            | What it holds                                                                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Lovable                            | The site, its database, its secrets, and the domain `jbkbid.com` with its DNS records.                                |
+| Resend                             | Sending email from `jbkbid.com`. Its four DNS records were added in Lovable on Nov 23, 2026.                          |
+| Google Cloud                       | The Routes API key and its billing.                                                                                   |
+| GitHub                             | The code, its Actions secrets, and the nightly jobs.                                                                  |
+| Stripe                             | The owner is opening an account in the company's name (Nov 24, 2026), apart from his other business's. Sandbox first. |
+| sam.gov                            | The federal leads key.                                                                                                |
+| The two planrooms                  | The login in part 1.                                                                                                  |
+| The company's email provider       | The office inboxes on `flatroofonline.com`, the sales inbox that replies go to among them.                            |
+| The `flatroofonline.com` registrar | That domain's DNS. The owner had no login for it in November 2026.                                                    |
 
 ## 7. Used with no key at all
 

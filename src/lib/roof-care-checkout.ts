@@ -132,6 +132,8 @@ export interface PaidEvent {
   amount: number;
   ref: string;
   email: string | null;
+  /** Paid from a bank account: it cleared some days after the checkout (Nov 24). */
+  bank: boolean;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -164,7 +166,58 @@ export function paidPlanEvent(event: unknown): PaidEvent | null {
       ? (o["customer_email"] as string)
       : (((o["customer_details"] as Record<string, unknown> | undefined)?.["email"] as
           string | undefined) ?? null);
-  return { plan_id: planId, amount: Math.round(cents) / 100, ref, email };
+  return {
+    plan_id: planId,
+    amount: Math.round(cents) / 100,
+    ref,
+    email,
+    // A payment that succeeds later than its checkout came from a bank account (ACH).
+    bank: e["type"] === "checkout.session.async_payment_succeeded",
+  };
+}
+
+// ── A payment from a bank account (owner, Nov 24: "handle the rest of the solutions") ────────
+//
+// With bank payments (ACH) turned on in Stripe, a customer can pay from a bank account on the
+// same payment page. It costs far less than a card, and it is slow: the checkout is finished at
+// once, but the money takes up to four business days to clear, and it can fail. Stripe says so
+// in three steps: the checkout completed and not yet paid, then paid (above), or failed.
+
+/** The two steps of a bank payment that are not "paid". */
+export type BankStep = "started" | "failed";
+export interface BankEvent {
+  step: BankStep;
+  plan_id: string;
+  /** Dollars. */
+  amount: number;
+  ref: string;
+}
+
+/**
+ * A Roof Care checkout paid from a bank account that has not cleared (`started`) or did not go
+ * through (`failed`), or null for anything else.
+ */
+export function bankPlanEvent(event: unknown): BankEvent | null {
+  const e = (event ?? {}) as Record<string, unknown>;
+  const o = ((e["data"] as Record<string, unknown> | undefined)?.["object"] ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const step: BankStep | null =
+    e["type"] === "checkout.session.async_payment_failed"
+      ? "failed"
+      : e["type"] === "checkout.session.completed" && o["payment_status"] === "unpaid"
+        ? "started"
+        : null;
+  if (!step) return null;
+  if (String(o["currency"] ?? "").toLowerCase() !== "usd") return null;
+  const meta = (o["metadata"] ?? {}) as Record<string, unknown>;
+  if (meta["kind"] !== "roof_care_plan") return null;
+  const planId = String(meta["plan_id"] ?? "");
+  const cents = Number(o["amount_total"]);
+  const ref = String(o["payment_intent"] ?? o["id"] ?? "");
+  if (!UUID.test(planId) || !Number.isFinite(cents) || cents <= 0 || !ref) return null;
+  return { step, plan_id: planId, amount: Math.round(cents) / 100, ref };
 }
 
 /**
@@ -264,6 +317,32 @@ export interface CardPaymentRow {
 const usd = (n: number) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** What the office is told at the two steps of a bank payment that are not "paid". */
+export function bankPaymentNotice(a: {
+  plan: unknown;
+  site_id: string;
+  site: string | null;
+  step: BankStep;
+  amount: number;
+  ref: string;
+}) {
+  const place = (a.site ?? "").trim() || "a property";
+  const url = `/properties/${a.site_id}`;
+  if (a.step === "failed")
+    return {
+      kind: "plan_card_paid",
+      title: `Bank payment failed: ${place}`,
+      body: `The customer's bank payment of ${usd(a.amount)} for the ${planName(a.plan)} plan did not go through, so the plan has not started. Reach out to the customer: the payment link on the plan still works, or take a check. Reference ${a.ref}.`,
+      url,
+    };
+  return {
+    kind: "plan_card_paid",
+    title: `Bank payment started: ${place}`,
+    body: `The customer paid ${usd(a.amount)} for the ${planName(a.plan)} plan from a bank account online. A bank payment takes up to 4 business days to clear. The plan starts when it clears, and you will be told then. Nothing to do until it does.`,
+    url,
+  };
+}
+
 /** What the office is told when a card payment comes in. */
 export function cardPaidNotice(a: {
   plan: unknown;
@@ -272,6 +351,8 @@ export function cardPaidNotice(a: {
   result: string;
   /** The payment as it was kept; absent on an older read. */
   payment?: CardPaymentRow | null;
+  /** It came from a bank account and has cleared (Nov 24). */
+  bank?: boolean;
 }) {
   const place = (a.site ?? "").trim() || "a property";
   const pay = a.payment ?? null;
@@ -295,15 +376,19 @@ export function cardPaidNotice(a: {
     pay && pay.over >= 0.01
       ? ` The card was charged ${usd(pay.amount)}, which is ${usd(pay.over)} more than the ${usd(pay.owed ?? 0)} owed. Send the ${usd(pay.over)} back to the customer. Reference ${pay.ref}.`
       : "";
+  // A bank payment that cleared is the same news, in its own words.
+  const how = a.bank ? "from a bank account online" : "by card online";
   const body =
     a.result === "invoice_paid"
-      ? `The customer paid the year by card online. Its invoice is marked paid and the plan has started.${over}`
+      ? `The customer paid the year ${how}. Its invoice is marked paid and the plan has started.${over}`
       : a.result === "started"
-        ? `The customer paid the year by card online and the plan has started. Its invoice still has to be put right and marked paid, so the books match.${over}`
-        : "A card payment came in online.";
+        ? `The customer paid the year ${how} and the plan has started. Its invoice still has to be put right and marked paid, so the books match.${over}`
+        : a.bank
+          ? "A bank payment came in online."
+          : "A card payment came in online.";
   return {
     kind: "plan_card_paid",
-    title: `${planName(a.plan)} plan paid by card: ${place}`,
+    title: `${planName(a.plan)} plan paid by ${a.bank ? "bank payment" : "card"}: ${place}`,
     body,
     url,
   };

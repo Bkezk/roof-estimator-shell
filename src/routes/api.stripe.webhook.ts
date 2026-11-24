@@ -21,7 +21,10 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
+import { databaseRpc } from "@/lib/database-rpc";
 import {
+  bankPaymentNotice,
+  bankPlanEvent,
   CARD_MODE_REFUSED,
   cardModeLogLine,
   cardModeNotice,
@@ -55,7 +58,11 @@ async function run(request: Request): Promise<Response> {
     return Response.json({ ok: false, error: "Not JSON" }, { status: 400 });
   }
   const paid = paidPlanEvent(event);
-  if (!paid) return Response.json({ ok: true, handled: false });
+  // Nov 24: a payment from a bank account says two more things before or instead of "paid":
+  // it was started and has not cleared, or it did not go through.
+  const bank = paid ? null : bankPlanEvent(event);
+  const about = paid ?? bank;
+  if (!about) return Response.json({ ok: true, handled: false });
 
   // Nov 24: a notice counts only when it is from the same side of Stripe, test or live, as the
   // site's own key (roof-care-checkout.ts). One from the other side records nothing. Said once
@@ -65,14 +72,14 @@ async function run(request: Request): Promise<Response> {
   const refusedMode = () => Response.json({ ok: false, handled: true, error: CARD_MODE_REFUSED });
   if (wrongMode)
     console.error(
-      `Stripe webhook: ${cardModeLogLine(eventMode(event), keyMode)} Plan ${paid.plan_id}, reference ${paid.ref}. Nothing was recorded.`,
+      `Stripe webhook: ${cardModeLogLine(eventMode(event), keyMode)} Plan ${about.plan_id}, reference ${about.ref}. Nothing was recorded.`,
     );
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: plan, error: pErr } = await supabaseAdmin
     .from("roof_care_plans")
     .select("id, plan, site_id, customer_email, status, sold_by")
-    .eq("id", paid.plan_id)
+    .eq("id", about.plan_id)
     .maybeSingle();
   if (pErr) return Response.json({ ok: false, error: pErr.message }, { status: 500 });
   if (!plan)
@@ -103,7 +110,7 @@ async function run(request: Request): Promise<Response> {
           site: site?.name ?? null,
           event: eventMode(event),
           key: keyMode,
-          ref: paid.ref,
+          ref: about.ref,
         }),
         supabaseAdmin,
       );
@@ -112,6 +119,37 @@ async function run(request: Request): Promise<Response> {
     }
     return refusedMode();
   }
+
+  // A bank payment that has not cleared, or did not go through: nothing is recorded as paid.
+  // The admins and the managers are told. Started: the plan is marked as told just now, so the
+  // "signed, not paid" notice does not follow half an hour later while the money is on its way.
+  if (bank) {
+    try {
+      if (bank.step === "started" && plan.status === "awaiting_payment") {
+        const { error: sErr } = await databaseRpc(supabaseAdmin)("roof_care_pay_notice_release", {
+          p_plan: plan.id,
+          p_was: new Date().toISOString(),
+        });
+        if (sErr) console.error("Stripe webhook: the plan was not marked as told —", sErr.message);
+      }
+      await notifyMod.notify(
+        await admins(),
+        bankPaymentNotice({
+          plan: plan.plan,
+          site_id: plan.site_id,
+          site: site?.name ?? null,
+          step: bank.step,
+          amount: bank.amount,
+          ref: bank.ref,
+        }),
+        supabaseAdmin,
+      );
+    } catch (e) {
+      console.error("Stripe webhook: could not tell the admins —", errText(e));
+    }
+    return Response.json({ ok: true, handled: true, result: `bank_${bank.step}` });
+  }
+  if (!paid) return Response.json({ ok: true, handled: false });
 
   // A plan that waits with no invoice (signed by a technician, who cannot make one): its invoice
   // is made now, so the payment marks it paid. Best effort: without it the plan still starts.
@@ -186,6 +224,7 @@ async function run(request: Request): Promise<Response> {
           site: site?.name ?? null,
           result: String(result),
           payment,
+          bank: paid.bank,
         }),
         supabaseAdmin,
       );

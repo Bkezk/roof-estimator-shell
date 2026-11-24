@@ -520,6 +520,8 @@ describe("the signed message from Stripe", () => {
       amount: 1840,
       ref: "pi_1",
       email: "pat@example.com",
+      // Nov 24: a card payment, not one from a bank account that cleared later.
+      bank: false,
     });
     expect(paidPlanEvent(paidEvent({ payment_status: "unpaid" }))).toBeNull();
     expect(paidPlanEvent(paidEvent({ currency: "cad" }))).toBeNull();
