@@ -160,13 +160,17 @@ describe("the link's address", () => {
     expect(payTokenFromPath(`/pay/${TOKEN}`)).toBe(TOKEN);
     expect(payTokenFromPath(`/pay/${TOKEN}/`)).toBe(TOKEN);
     expect(payTokenFromPath(`/pay/${TOKEN.toUpperCase()}`)).toBe(TOKEN);
+    // Nov 24 (the public pages audit): a link that lost a letter ("/pay/1", a token with a
+    // letter too many) opens the payment page too, which says the link is not active. It used
+    // to land the customer on the office's sign-in. Only a token that is whole reads a plan.
+    for (const broken of ["/pay/1", "/pay/R-4010", `/pay/${TOKEN}x`]) {
+      expect(isPublicPayPath(broken), broken).toBe(true);
+      expect(payTokenFromPath(broken), broken).toBeNull();
+    }
     for (const bad of [
       "/pay",
       "/pay/",
-      "/pay/1",
-      "/pay/R-4010",
       `/pay/${TOKEN}/more`,
-      `/pay/${TOKEN}x`,
       `/payments/${TOKEN}`,
       `/service/pay/${TOKEN}`,
       "/service",

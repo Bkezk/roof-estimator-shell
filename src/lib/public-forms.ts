@@ -75,6 +75,11 @@ export interface PublicQuote {
   sqft_source: "map" | "typed" | "range" | null;
   /** True for a roof over the custom quote size, or several buildings: "call us", no prices. */
   custom_quote: boolean;
+  /**
+   * True when the building is further than the plans are priced for (Nov 24): a custom quote
+   * too, said in its own words, so the visitor can still send their details.
+   */
+  far?: boolean;
   /** The three plans with their prices; empty when not found or a custom quote. */
   plans: PublicPlanOffer[];
   /** Opaque. Sent back with the request so the price shown is the price the office sees. */
@@ -186,6 +191,49 @@ export const PUBLIC_TRY_AGAIN =
 /** The terms on the page are not the set in use any more. */
 export const PUBLIC_TERMS_MOVED =
   "The plan's terms were updated. Reload the page, read them again, then send.";
+
+// ── Nov 24 (the public pages audit; owner: "Go") ─────────────────────────────────────────────
+
+/** The service request needs one of the two: a box ticked, or a few words. */
+export const PUBLIC_NEED_WHAT = "Tick a service, or tell us what is going on.";
+/** How a request with no box ticked is filed for the office. */
+export const PUBLIC_OTHER_SERVICE = "Other";
+
+/**
+ * An email address a link can be made from: letters, digits and . _ % + ' - before the @, a
+ * host name after it. Nothing that could add to the link (no ?, &, =, / or space).
+ */
+export const PUBLIC_EMAIL_PATTERN = /^[A-Za-z0-9._%+'-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$/;
+export const publicEmailOk = (s: string): boolean => PUBLIC_EMAIL_PATTERN.test(s.trim());
+
+/** A character nobody sees: a control character, or one of the two Unicode line separators. */
+const unseen = (code: number): boolean =>
+  code < 32 || code === 127 || code === 0x2028 || code === 0x2029;
+const without = (s: string, keep: (code: number) => boolean): string => {
+  let out = "";
+  for (const ch of s) {
+    const code = ch.charCodeAt(0);
+    out += unseen(code) && !keep(code) ? " " : ch;
+  }
+  return out;
+};
+
+/**
+ * A one-line box as it is kept: no line break, tab or other unseen character, single spaces.
+ * A name with a line break in it would otherwise land in a title and in an email's subject.
+ */
+export const oneLine = (s: string): string =>
+  without(s, () => false)
+    .replace(/ {2,}/g, " ")
+    .trim();
+/** A box of several lines as it is kept: its line breaks stay, other unseen characters go. */
+export const manyLines = (s: string): string =>
+  without(s, (code) => code === 10 || code === 13 || code === 9).trim();
+
+/** Five digits, or nine with the dash: what the price and the request are tied to. */
+export const publicZipOk = (s: string): boolean => /^\d{5}(-\d{4})?$/.test(s.trim());
+/** Two letters, as on an envelope. */
+export const publicStateOk = (s: string): boolean => /^[A-Za-z]{2}$/.test(s.trim());
 
 /**
  * True on the local test server only, where the site has no server key: the public functions

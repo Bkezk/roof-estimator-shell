@@ -488,7 +488,11 @@ describe("a Roof Care request", () => {
       expect(out.reference).toMatch(/^R-\d{3}$/);
       expect(SQL).toContain("create sequence if not exists public.public_request_ref_seq");
       expect(SQL).toMatch(/public_request_ref_seq[^;]*start (with )?4001/);
-      expect(calls).toEqual([]);
+      // Nov 24 (the public pages audit): nothing of the form is kept or asked about, as
+      // before. The one call now made counts the dropped form by day, so the office can see
+      // whether a real person's browser ever fills the hidden box.
+      expect(calls.map((c) => c.fn)).toEqual(["public_form_dropped"]);
+      expect(Object.keys(calls[0]!.args ?? {})).toEqual(["p_key"]);
       expect(tellCalls).toEqual([]);
     }
     expect(looksLikeRobot({ website: "", open_ms: PUBLIC_MIN_OPEN_MS })).toBe(false);
@@ -556,14 +560,22 @@ describe("a service request, and the list of services", () => {
       services: ["Roof inspection"],
       details: "It drips by the dock door.",
     });
+    // Nov 24 (the public pages audit; owner: "Go"): no box ticked is fine when a few words
+    // say what is going on. It was refused with "Tick at least one service." although the
+    // page let it through, so the visitor read "try again" for ever. Neither is still refused.
+    const words = deps();
+    expect(await sendService({ ...SERVICE, services: [] }, words.deps)).toEqual({
+      reference: "R-4321",
+    });
+    expect(words.calls[1]!.args!["p"]).toMatchObject({ kind: "service", services: [] });
     const none = deps();
-    await expect(sendService({ ...SERVICE, services: [] }, none.deps)).rejects.toThrow(
-      "Tick at least one service.",
-    );
+    await expect(
+      sendService({ ...SERVICE, services: [], details: "  " }, none.deps),
+    ).rejects.toThrow("Tick a service, or tell us what is going on.");
     expect(none.calls).toEqual([]);
     const robot = deps();
     expect((await sendService({ ...SERVICE, website: "x" }, robot.deps)).reference).toMatch(/^R-/);
-    expect(robot.calls).toEqual([]);
+    expect(robot.calls.map((c) => c.fn)).toEqual(["public_form_dropped"]);
   });
   it("the services are the office's list, read through the server", async () => {
     const { deps: d } = deps();

@@ -28,8 +28,10 @@ import {
   CARE_REQUEST_SEARCH,
   careShownWords,
   customQuoteWhy,
+  emailLink,
   isCustomQuoteAsk,
   matchWhyWords,
+  phoneLink,
   publicPlanName,
   requestAddress,
   requestStep,
@@ -55,16 +57,36 @@ export function RequestFacts({ r }: { r: PublicRequestRow }) {
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="font-medium">{r.contact_name}</span>
         {r.company && <span>{r.company}</span>}
-        {r.phone && (
-          <a className="inline-flex items-center gap-1 underline" href={`tel:${r.phone}`}>
-            <Phone className="h-3.5 w-3.5" /> {r.phone}
-          </a>
-        )}
-        {r.email && (
-          <a className="inline-flex items-center gap-1 underline" href={`mailto:${r.email}`}>
-            <Mail className="h-3.5 w-3.5" /> {r.email}
-          </a>
-        )}
+        {/* Nov 24: a link is made only from a plain number or a plain address (phoneLink,
+            emailLink). Anything else a visitor typed shows as text, with no link behind it. */}
+        {r.phone &&
+          (phoneLink(r.phone) ? (
+            <a
+              className="inline-flex items-center gap-1 underline"
+              href={phoneLink(r.phone)!}
+              data-request-phone
+            >
+              <Phone className="h-3.5 w-3.5" /> {r.phone}
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1" data-request-phone>
+              <Phone className="h-3.5 w-3.5" /> {r.phone}
+            </span>
+          ))}
+        {r.email &&
+          (emailLink(r.email) ? (
+            <a
+              className="inline-flex items-center gap-1 underline"
+              href={emailLink(r.email)!}
+              data-request-email
+            >
+              <Mail className="h-3.5 w-3.5" /> {r.email}
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1" data-request-email>
+              <Mail className="h-3.5 w-3.5" /> {r.email}
+            </span>
+          ))}
       </p>
       <p className="flex items-start gap-1">
         <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />

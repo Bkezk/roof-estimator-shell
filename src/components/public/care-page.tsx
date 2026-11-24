@@ -45,6 +45,11 @@ import {
   SEND_FAILED_LINE,
   SEVERAL_BUILDINGS_LINE,
   WHAT_HAPPENS_NEXT,
+  FAR_QUOTE_LINE,
+  adoptBuilding,
+  adoptCareRest,
+  adoptContact,
+  adoptTrap,
   buildingProblems,
   careMissing,
   careRequest,
@@ -55,8 +60,10 @@ import {
   quoteAsk,
   quoteHasPrices,
   sameAsk,
+  typedBoxes,
   type CareAnswers,
   type CareBuilding,
+  type CareRest,
 } from "@/lib/public-pages";
 import {
   AGREE_WORDS,
@@ -112,6 +119,30 @@ export function PublicCarePage() {
   const [sent, setSent] = useState<string | null>(null);
   const busy = useRef(false);
   const plansRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const rest: CareRest = {
+    pay_method: payMethod,
+    referred_by: referredBy,
+    notes,
+    agreed,
+    agreed_by: agreedBy,
+  };
+  const setRest = (r: CareRest) => {
+    if (r.pay_method !== payMethod) setPayMethod(r.pay_method);
+    if (r.referred_by !== referredBy) setReferredBy(r.referred_by);
+    if (r.notes !== notes) setNotes(r.notes);
+    if (r.agreed !== agreed) setAgreed(r.agreed);
+    if (r.agreed_by !== agreedBy) setAgreedBy(r.agreed_by);
+  };
+  // Nov 24: what was typed while the page was still loading is in the boxes, and the page did
+  // not know it ("Type the street address." under an address that was there). Read once the
+  // script is ready, and again at every press of a button (showPrice and send, below).
+  useEffect(() => {
+    const boxes = typedBoxes(formRef.current);
+    setBuilding((x) => adoptBuilding(x, boxes));
+    setContact((x) => adoptContact(x, boxes));
+    setWebsite((x) => adoptTrap(x, boxes));
+  }, []);
 
   const problems = buildingProblems(building);
   // The prices belong to the building they were asked for: change the building and they go.
@@ -126,11 +157,15 @@ export function PublicCarePage() {
 
   async function showPrice() {
     setTried(true);
-    if (Object.keys(problems).length > 0 || busy.current) return;
+    // The boxes themselves are what is asked about: a browser can fill them in without telling
+    // the page, and a visitor can type before the page is ready.
+    const now = adoptBuilding(building, typedBoxes(formRef.current));
+    if (now !== building) setBuilding(now);
+    if (Object.keys(buildingProblems(now)).length > 0 || busy.current) return;
     busy.current = true;
     setAsking(true);
     setAskError(null);
-    const ask = quoteAsk(building);
+    const ask = quoteAsk(now);
     try {
       const q = await api.quote({ data: ask });
       setAnswer({ ask, quote: q });
@@ -165,9 +200,27 @@ export function PublicCarePage() {
   async function send() {
     setTriedSend(true);
     setTried(true);
-    const data = careRequest(answers, {
+    // As at Show my price: the boxes themselves are what is sent.
+    const boxes = typedBoxes(formRef.current);
+    const nowBuilding = adoptBuilding(building, boxes);
+    if (nowBuilding !== building) setBuilding(nowBuilding);
+    const nowContact = adoptContact(contact, boxes);
+    if (nowContact !== contact) setContact(nowContact);
+    const nowRest = adoptCareRest(rest, boxes);
+    if (nowRest !== rest) setRest(nowRest);
+    const trap = adoptTrap(website, boxes);
+    if (trap !== website) setWebsite(trap);
+    const nowAnswers: CareAnswers = {
+      building: nowBuilding,
+      // The prices belong to the building they were asked for.
+      quote: answer && sameAsk(answer.ask, quoteAsk(nowBuilding)) ? answer.quote : null,
+      plan,
+      contact: nowContact,
+      ...nowRest,
+    };
+    const data = careRequest(nowAnswers, {
       terms_version: ROOF_CARE_TERMS_VERSION,
-      website,
+      website: trap,
       open_ms: Date.now() - opened.current,
     });
     // The second of two presses in the same instant is dropped: one request, one answer.
@@ -226,6 +279,7 @@ export function PublicCarePage() {
       data-public-page="care"
     >
       <form
+        ref={formRef}
         className="space-y-9"
         noValidate
         onSubmit={(e) => {
@@ -376,8 +430,11 @@ export function PublicCarePage() {
             </p>
           )}
           {quote?.found && quote.custom_quote && (
-            <p className="text-base font-medium text-[var(--flyer-ink)]" data-public="custom">
-              {CUSTOM_QUOTE_LINE}
+            <p
+              className="text-base font-medium text-[var(--flyer-ink)]"
+              data-public={quote.far ? "far" : "custom"}
+            >
+              {quote.far ? FAR_QUOTE_LINE : CUSTOM_QUOTE_LINE}
             </p>
           )}
           {quote?.found && quote.rough && (

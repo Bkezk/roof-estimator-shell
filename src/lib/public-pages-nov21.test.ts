@@ -401,7 +401,8 @@ describe("the pages themselves", () => {
     for (const k of [
       "{NOBODY_CHARGED}",
       "{PRICE_IS_ESTIMATE}",
-      "{CUSTOM_QUOTE_LINE}",
+      // Nov 24: a building outside the usual area has its own words beside the custom quote's.
+      "{quote.far ? FAR_QUOTE_LINE : CUSTOM_QUOTE_LINE}",
       "{NOT_FOUND_LINE}",
       "{SEVERAL_BUILDINGS_LINE}",
       "WHAT_HAPPENS_NEXT.map",

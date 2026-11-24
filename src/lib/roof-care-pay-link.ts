@@ -30,8 +30,20 @@ export function payTokenFromPath(pathname: string): string | null {
   return cleanPayToken(pathname.slice(PUBLIC_PAY_PREFIX.length).replace(/\/+$/, ""));
 }
 
-/** Is this a payment link's page? Only then may it open without a sign-in. */
-export const isPublicPayPath = (pathname: string): boolean => payTokenFromPath(pathname) !== null;
+/**
+ * Is this a payment link's page? Only then may it open without a sign-in.
+ *
+ * Nov 24 (the public pages audit): any address of the shape /pay/<one piece>, whether or not
+ * the piece is a whole token. A customer whose link lost a letter on the way (a wrapped line in
+ * an email, a bad paste) used to land on the office's sign-in screen. They now get the payment
+ * page, which says the link is not active and gives the office's number. Nothing more is opened
+ * by this: the page shows a plan only for a token that is one plan's own.
+ */
+export function isPublicPayPath(pathname: string): boolean {
+  if (!pathname.startsWith(PUBLIC_PAY_PREFIX)) return false;
+  const rest = pathname.slice(PUBLIC_PAY_PREFIX.length).replace(/\/+$/, "");
+  return rest.length > 0 && !rest.includes("/");
+}
 
 /** The link a customer is sent. */
 export const payLinkFor = (base: string, token: string): string =>

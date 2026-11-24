@@ -5,6 +5,8 @@
  */
 import {
   PUBLIC_SIZE_RANGE_ENDS,
+  PUBLIC_SIZE_RANGES,
+  publicEmailOk,
   type PublicAddress,
   type PublicCareRequest,
   type PublicContact,
@@ -36,6 +38,8 @@ export const NOBODY_CHARGED =
   "Nobody is charged on this page. Our office sends the invoice for the year and gets in touch about payment.";
 export const SEVERAL_BUILDINGS_LINE = `Several buildings get multi-building pricing. Send this for one of them and we will call you about the rest, or call us at ${PUBLIC_COMPANY.phone}.`;
 export const CUSTOM_QUOTE_LINE = `A roof this size gets a custom quote. Send us your details below and we will call you with a price, or call us at ${PUBLIC_COMPANY.phone}.`;
+/** Nov 24: a building further than the plans are priced for. Its details can still be sent. */
+export const FAR_QUOTE_LINE = `This building is outside our usual service area, so we cannot show a price here. Send us your details below and we will call you, or call us at ${PUBLIC_COMPANY.phone}.`;
 export const NOT_FOUND_LINE = `We could not find that address on the map, so we cannot show a price here. Check the street, city, state and zip, or call us at ${PUBLIC_COMPANY.phone}.`;
 export const SEND_FAILED_LINE = `That did not go through. Nothing you typed is lost: try again, or call us at ${PUBLIC_COMPANY.phone}.`;
 export const WHAT_HAPPENS_NEXT: readonly string[] = [
@@ -48,7 +52,8 @@ const has = (s: string | null | undefined) => (s ?? "").trim().length > 0;
 /** Ten digits make a phone number, however they are typed. */
 export const phoneDigits = (s: string) => s.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
 export const phoneOk = (s: string) => phoneDigits(s).length === 10;
-export const emailOk = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
+// Nov 24: the same rule the server keeps (public-forms.ts), so the page says so first.
+export const emailOk = (s: string) => publicEmailOk(s);
 export const zipOk = (s: string) => /^\d{5}(-\d{4})?$/.test(s.trim());
 /** Two letters, as it is written on an envelope. */
 export const stateOk = (s: string) => /^[A-Za-z]{2}$/.test(s.trim());
@@ -200,7 +205,14 @@ export function careRequest(
     agreed_by: (priced ? a.agreed_by : a.contact.contact_name).trim(),
     referred_by: a.referred_by.trim(),
     several_buildings: a.building.several_buildings,
-    notes: [priced ? "" : "Custom quote asked for: no price was shown.", a.notes.trim()]
+    notes: [
+      priced
+        ? ""
+        : a.quote.far
+          ? "Outside the usual service area: no price was shown."
+          : "Custom quote asked for: no price was shown.",
+      a.notes.trim(),
+    ]
       .filter(Boolean)
       .join(" "),
     website: extra.website,
@@ -316,3 +328,125 @@ export function priceSizeLine(q: PublicQuote | null, ask: PublicQuoteAsk | null)
     ? `You picked ${size}, so each plan shows its lowest and its highest price for a roof that size. For one price, type your roof's size in step 1 and press Show my price again.`
     : `These prices are for a roof ${size.startsWith("under") ? size : `of ${size}`}, the size you picked.`;
 }
+
+// ── What is in the boxes, read from the page itself (Nov 24, the public pages audit) ─────────
+//
+// On a slow phone the form is on the screen seconds before the page's script is ready. What a
+// visitor typed in that time stayed in the boxes, but the page did not know it and answered
+// "Type the street address." The pages now read the boxes themselves: once when the script is
+// ready, and again at every press of a button. The same covers a browser that fills a form in
+// by itself without telling the page.
+
+/** One box as the browser holds it. */
+export interface BoxLike {
+  id: string;
+  type?: string | null;
+  value: string;
+  checked?: boolean;
+}
+/** Every box of a form by its id: what is typed in it, or whether it is ticked. */
+export type TypedBoxes = Readonly<Record<string, string | boolean>>;
+
+export function typedBoxes(
+  form: { querySelectorAll(selector: string): ArrayLike<BoxLike> } | null | undefined,
+): TypedBoxes {
+  const out: Record<string, string | boolean> = {};
+  if (!form) return out;
+  for (const el of Array.from(form.querySelectorAll("input, textarea"))) {
+    if (!el.id) continue;
+    out[el.id] = el.type === "checkbox" || el.type === "radio" ? el.checked === true : el.value;
+  }
+  return out;
+}
+
+const typedIn = (b: TypedBoxes, id: string, now: string): string => {
+  const v = b[id];
+  return typeof v === "string" ? v : now;
+};
+const tickedIn = (b: TypedBoxes, id: string, now: boolean): boolean => {
+  const v = b[id];
+  return typeof v === "boolean" ? v : now;
+};
+const sameFields = <T extends object>(a: T, b: T): boolean =>
+  (Object.keys(b) as (keyof T)[]).every((k) => a[k] === b[k]);
+
+/** The address boxes as the page holds them; the same object when nothing differs. */
+function adoptAddress<T extends PublicAddress & { building_name: string }>(now: T, b: TypedBoxes) {
+  return {
+    address: typedIn(b, "address", now.address),
+    city: typedIn(b, "city", now.city),
+    state: typedIn(b, "state", now.state),
+    zip: typedIn(b, "zip", now.zip),
+    building_name: typedIn(b, "building_name", now.building_name),
+  };
+}
+
+/** Step 1 of the Roof Care page with what is really in its boxes. */
+export function adoptBuilding(now: CareBuilding, b: TypedBoxes): CareBuilding {
+  let range = now.size_range;
+  for (const r of PUBLIC_SIZE_RANGES) if (b[`size-${r.key}`] === true) range = r.key;
+  const next: CareBuilding = {
+    ...adoptAddress(now, b),
+    sqft: typedIn(b, "sqft", now.sqft),
+    size_range: range,
+    several_buildings: tickedIn(b, "several_buildings", now.several_buildings),
+  };
+  return sameFields(now, next) ? now : next;
+}
+
+/** "About you" with what is really in its boxes. */
+export function adoptContact(now: PublicContact, b: TypedBoxes): PublicContact {
+  const next: PublicContact = {
+    contact_name: typedIn(b, "contact_name", now.contact_name),
+    company: typedIn(b, "company", now.company),
+    phone: typedIn(b, "phone", now.phone),
+    email: typedIn(b, "email", now.email),
+  };
+  return sameFields(now, next) ? now : next;
+}
+
+/** The rest of the Roof Care page: how to pay, the notes, the agreement. */
+export interface CareRest {
+  pay_method: "check" | "card" | null;
+  referred_by: string;
+  notes: string;
+  agreed: boolean;
+  agreed_by: string;
+}
+export function adoptCareRest(now: CareRest, b: TypedBoxes): CareRest {
+  const next: CareRest = {
+    pay_method:
+      b["pay-check"] === true ? "check" : b["pay-card"] === true ? "card" : now.pay_method,
+    referred_by: typedIn(b, "referred_by", now.referred_by),
+    notes: typedIn(b, "notes", now.notes),
+    agreed: tickedIn(b, "agreed", now.agreed),
+    agreed_by: typedIn(b, "agreed_by", now.agreed_by),
+  };
+  return sameFields(now, next) ? now : next;
+}
+
+/** The Request service page with what is really in its boxes. */
+export function adoptService(
+  now: ServiceAnswers,
+  b: TypedBoxes,
+  choices: readonly string[],
+): ServiceAnswers {
+  const contact = adoptContact(now.contact, b);
+  const ticked = choices.filter((s, i) => tickedIn(b, `service-${i}`, now.services.includes(s)));
+  // What is ticked and not on the list now (the list could not be read again) is kept as it is.
+  const services = [...ticked, ...now.services.filter((s) => !choices.includes(s))];
+  const sameServices =
+    services.length === now.services.length && services.every((s) => now.services.includes(s));
+  const next: ServiceAnswers = {
+    ...adoptAddress(now, b),
+    services: sameServices ? now.services : services,
+    details: typedIn(b, "details", now.details),
+    contact,
+    referred_by: typedIn(b, "referred_by", now.referred_by),
+  };
+  return sameFields(now, next) ? now : next;
+}
+
+/** The id of the box no person fills in (components/public/fields.tsx RobotTrap). */
+export const ROBOT_TRAP_ID = "jbk-leave-blank";
+export const adoptTrap = (now: string, b: TypedBoxes): string => typedIn(b, ROBOT_TRAP_ID, now);

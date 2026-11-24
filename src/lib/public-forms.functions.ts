@@ -27,7 +27,13 @@ import { z } from "zod";
 import type { Json } from "@/integrations/supabase/types";
 import type { Client } from "@/lib/notify.server";
 import {
+  manyLines,
+  oneLine,
+  publicEmailOk,
+  publicStateOk,
+  publicZipOk,
   PUBLIC_MIN_OPEN_MS,
+  PUBLIC_NEED_WHAT,
   PUBLIC_NOT_READY,
   PUBLIC_SIZE_RANGE_ENDS,
   PUBLIC_SIZE_RANGE_SQFT,
@@ -45,13 +51,33 @@ import { placedRoughly } from "@/lib/roof-care-locate";
 import { mapRoofSize, ROOF_CARE_TERMS_VERSION } from "@/lib/roof-care-plan";
 import type { RoofCareDrive } from "@/lib/roof-care.functions";
 
-const short = (max: number) => z.string().trim().max(max);
+// Nov 24 (the public pages audit): every one-line box is kept as one line, with no line break,
+// tab or other unseen character in it (public-forms.ts oneLine).
+const short = (max: number) => z.string().trim().max(max).transform(oneLine);
+const long = (max: number) => z.string().trim().max(max).transform(manyLines);
 
+export const PUBLIC_NEED_STATE = "Type the state as two letters, like KY.";
+export const PUBLIC_NEED_ZIP = "Type the building's five digit zip code.";
+export const PUBLIC_EMAIL_WRONG =
+  "The email address does not look right. Check it, or leave it blank and give a phone number.";
+
+// Nov 24: the city, the state and the zip are asked for here too, not only on the page. A
+// price belongs to one building: its street, its city, its state and its zip.
 const addressShape = {
-  address: z.string().trim().min(3, "Type the building's street address.").max(200),
-  city: short(120).default(""),
-  state: short(40).default(""),
-  zip: short(12).default(""),
+  address: z
+    .string()
+    .trim()
+    .min(3, "Type the building's street address.")
+    .max(200)
+    .transform(oneLine),
+  city: z.string().trim().min(1, "Type the building's city.").max(120).transform(oneLine),
+  state: z
+    .string()
+    .trim()
+    .max(40)
+    .refine(publicStateOk, PUBLIC_NEED_STATE)
+    .transform((s) => s.toUpperCase()),
+  zip: z.string().trim().max(12).refine(publicZipOk, PUBLIC_NEED_ZIP),
 };
 const sizeRange = z.enum(["under_10k", "10k_25k", "25k_50k", "50k_75k", "over_75k"]);
 const sqft = z.number().finite().positive().max(100_000_000);
@@ -63,7 +89,7 @@ export const quoteAskSchema = z.object({
 });
 
 const contactShape = {
-  contact_name: z.string().trim().min(2, "Type your name.").max(120),
+  contact_name: z.string().trim().min(2, "Type your name.").max(120).transform(oneLine),
   company: short(160).default(""),
   phone: short(40).default(""),
   email: short(200).default(""),
@@ -85,16 +111,23 @@ export const careRequestSchema = z.object({
   pay_method: z.enum(["check", "card"]),
   agreed: z.boolean().refine((v) => v === true, "Tick the box to agree to the plan's terms."),
   terms_version: short(40),
-  agreed_by: z.string().trim().min(2, "Type your full name to agree to the terms.").max(120),
+  agreed_by: z
+    .string()
+    .trim()
+    .min(2, "Type your full name to agree to the terms.")
+    .max(120)
+    .transform(oneLine),
   several_buildings: z.boolean().default(false),
-  notes: short(2000).default(""),
+  notes: long(2000).default(""),
 });
 
 export const serviceRequestSchema = z.object({
   ...addressShape,
   ...contactShape,
-  services: z.array(short(80)).min(1, "Tick at least one service.").max(40),
-  details: short(2000).default(""),
+  // Nov 24: no box ticked is fine when a few words say what is going on. The page always let
+  // that through, and the server refused it, so the visitor was told "try again" for ever.
+  services: z.array(short(80)).max(40).default([]),
+  details: long(2000).default(""),
 });
 
 /** The first problem as one plain sentence; never a list of what a program expected. */
@@ -111,7 +144,7 @@ function parsePlain<T>(schema: z.ZodType<T>, d: unknown): T {
 /** A phone number with its area code, or an email address. */
 export function reachable(phone: string, email: string): boolean {
   const digits = phone.replace(/\D/g, "");
-  return (digits.length >= 10 && digits.length <= 15) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  return (digits.length >= 10 && digits.length <= 15) || publicEmailOk(email);
 }
 export const PUBLIC_NEED_CONTACT =
   "Type a phone number with its area code, or an email address, so we can reach you.";
@@ -162,6 +195,21 @@ function plainRefusal(error: { message: string; code?: string }): Error {
   if (error.code === "22023" || error.code === "P0001") return new Error(error.message);
   console.error("Public form: the database refused —", error.code ?? "", error.message);
   return new Error(PUBLIC_TRY_AGAIN);
+}
+
+/**
+ * A form dropped as a robot's is counted (Nov 24), so the office can see whether it ever
+ * happens: a browser that fills the hidden box by itself would drop a real person's request.
+ * Best effort: the answer to the sender is the same whether or not the count was kept.
+ */
+async function countDropped(deps: PublicDeps): Promise<void> {
+  if (!deps.admin) return;
+  try {
+    const { error } = await rpcOf(deps.admin)("public_form_dropped", { p_key: deps.key });
+    if (error) console.error("Public form: a dropped form was not counted —", error.message);
+  } catch (e) {
+    console.error("Public form: a dropped form was not counted —", e);
+  }
 }
 
 async function withinLimit(admin: Client, kind: "quote" | "request", key: string) {
@@ -310,7 +358,10 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
   const o = (data ?? {}) as Record<string, unknown>;
   const token = typeof o["quote_token"] === "string" ? o["quote_token"] : "";
   if (!token) throw new Error(PUBLIC_TRY_AGAIN);
-  const custom = over || o["custom_quote"] === true;
+  // Nov 24: a building further than the plans are priced for is a custom quote too, said in
+  // its own words. It used to come back as a refusal written for the office.
+  const far = found && o["far"] === true;
+  const custom = over || far || o["custom_quote"] === true;
   return {
     found,
     rough,
@@ -318,6 +369,7 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
     sqft: size,
     sqft_source: source,
     custom_quote: custom,
+    ...(far ? { far: true } : {}),
     plans: custom || !found ? [] : readOffers(o["plans"]),
     quote_token: token,
   };
@@ -326,8 +378,12 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
 /** "Sign me up for this plan": checked, kept for the office, and the office told. */
 export async function sendCare(dataIn: unknown, deps: PublicDeps): Promise<PublicSent> {
   const d = parsePlain(careRequestSchema, dataIn) as PublicCareRequest;
-  if (looksLikeRobot(d)) return pretendSent();
+  if (looksLikeRobot(d)) {
+    await countDropped(deps);
+    return pretendSent();
+  }
   if (!reachable(d.phone, d.email)) throw new Error(PUBLIC_NEED_CONTACT);
+  if (d.email && !publicEmailOk(d.email)) throw new Error(PUBLIC_EMAIL_WRONG);
   if (d.terms_version !== ROOF_CARE_TERMS_VERSION) throw new Error(PUBLIC_TERMS_MOVED);
   if (!deps.admin) {
     if (deps.sample) return { reference: "R-0000", sample: true };
@@ -350,8 +406,13 @@ export async function sendCare(dataIn: unknown, deps: PublicDeps): Promise<Publi
 /** "My roof needs this": checked, kept for the office, and the office told. */
 export async function sendService(dataIn: unknown, deps: PublicDeps): Promise<PublicSent> {
   const d = parsePlain(serviceRequestSchema, dataIn) as PublicServiceRequest;
-  if (looksLikeRobot(d)) return pretendSent();
+  if (looksLikeRobot(d)) {
+    await countDropped(deps);
+    return pretendSent();
+  }
+  if (d.services.length === 0 && !d.details) throw new Error(PUBLIC_NEED_WHAT);
   if (!reachable(d.phone, d.email)) throw new Error(PUBLIC_NEED_CONTACT);
+  if (d.email && !publicEmailOk(d.email)) throw new Error(PUBLIC_EMAIL_WRONG);
   if (!deps.admin) {
     if (deps.sample) return { reference: "R-0000", sample: true };
     throw new Error(PUBLIC_NOT_READY);

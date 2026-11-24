@@ -26,10 +26,13 @@ import {
   REQUEST_PAGE_TITLE,
   SEND_FAILED_LINE,
   addressProblems,
+  adoptService,
+  adoptTrap,
   contactProblems,
   missingLine,
   serviceMissing,
   serviceRequest,
+  typedBoxes,
   type ServiceAnswers,
 } from "@/lib/public-pages";
 
@@ -69,6 +72,14 @@ export function PublicRequestPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
   const busy = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Nov 24: what was typed while the page was still loading is in the boxes, and the page did
+  // not know it. Read once the script is ready (and again at the press of Send, below).
+  useEffect(() => {
+    const boxes = typedBoxes(formRef.current);
+    setA((x) => adoptService(x, boxes, []));
+    setWebsite((x) => adoptTrap(x, boxes));
+  }, []);
 
   const missing = serviceMissing(a, choices);
   const addr = tried ? addressProblems(a) : {};
@@ -80,7 +91,16 @@ export function PublicRequestPage() {
 
   async function send() {
     setTried(true);
-    const data = serviceRequest(a, choices, { website, open_ms: Date.now() - opened.current });
+    // The boxes themselves are what is sent: a browser can fill them in without telling the page.
+    const boxes = typedBoxes(formRef.current);
+    const now = adoptService(a, boxes, choices);
+    if (now !== a) setA(now);
+    const trap = adoptTrap(website, boxes);
+    if (trap !== website) setWebsite(trap);
+    const data = serviceRequest(now, choices, {
+      website: trap,
+      open_ms: Date.now() - opened.current,
+    });
     // The second of two presses in the same instant is dropped: one request, one answer.
     if (!data || busy.current) return;
     busy.current = true;
@@ -122,7 +142,7 @@ export function PublicRequestPage() {
       footTitle="Need us right away?"
       data-public-page="request"
     >
-      <form className="space-y-9" noValidate onSubmit={(e) => e.preventDefault()}>
+      <form ref={formRef} className="space-y-9" noValidate onSubmit={(e) => e.preventDefault()}>
         <RobotTrap value={website} onChange={setWebsite} />
 
         <section className="space-y-4" data-public-step={1}>

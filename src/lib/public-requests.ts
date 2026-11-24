@@ -8,7 +8,12 @@
  * says whose a request is on its opportunity, where a strip shows what the customer sent.
  */
 import { SETUP_QR_PATH } from "@/lib/menu-places";
-import { PUBLIC_CARE_PATH, PUBLIC_REQUEST_PATH, type PublicPlanKey } from "@/lib/public-forms";
+import {
+  PUBLIC_CARE_PATH,
+  PUBLIC_REQUEST_PATH,
+  publicEmailOk,
+  type PublicPlanKey,
+} from "@/lib/public-forms";
 import { offerSpread, sizeRangeWords } from "@/lib/public-pages";
 
 /**
@@ -58,6 +63,8 @@ export interface PublicRequestRow {
     rough?: boolean;
     place?: string | null;
     custom_quote?: boolean;
+    /** Nov 24: the building is further than the plans are priced for. */
+    far?: boolean;
     /** The prices as the page had them. A size range adds each plan's low and high price. */
     plans?: { plan?: string; price?: number; price_low?: number; price_high?: number }[] | null;
   } | null;
@@ -161,9 +168,34 @@ export const isCustomQuoteAsk = (r: Pick<PublicRequestRow, "kind" | "shown_price
 /** Why no price was shown, in a few words; "" when the request does not say. */
 export function customQuoteWhy(r: Pick<PublicRequestRow, "several_buildings" | "quote">): string {
   if (r.several_buildings) return "they have several buildings";
+  if (r.quote?.far) return "the building is outside the usual service area";
   if (r.quote?.custom_quote) return "the roof is over the size the plans are priced for";
   if (r.quote?.found === false) return "the address was not found on the map";
   return "";
+}
+
+/** A service request with no box ticked (Nov 24): filed as Other, its words say the rest. */
+export const REQUEST_OTHER_ASK = "Other (see what they wrote)";
+
+/**
+ * The link behind a phone number a visitor typed (Nov 24): digits only, with a leading + kept.
+ * Null when there are too few digits to be a number, and the number then shows as plain text.
+ * Whatever else was typed (commas, letters, an "ext") stays out of the link.
+ */
+export function phoneLink(phone: string): string | null {
+  const t = phone.trim();
+  const digits = t.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return null;
+  return `tel:${t.startsWith("+") ? "+" : ""}${digits}`;
+}
+
+/**
+ * The link behind an email address a visitor typed (Nov 24): only for an address that is
+ * nothing but an address (public-forms.ts PUBLIC_EMAIL_PATTERN). Anything else shows as text.
+ */
+export function emailLink(email: string): string | null {
+  const t = email.trim();
+  return publicEmailOk(t) ? `mailto:${t}` : null;
 }
 
 /** What the request asks for, in a line: reads after "asked for". */
@@ -176,7 +208,8 @@ export function requestAsk(
       return `a custom quote for ${r.plan ? PLAN_NAMES[r.plan] : "a Roof Care plan"}${several}`;
     return `${publicPlanName(r.plan)}${several}`;
   }
-  return r.services.length ? r.services.join(", ") : "Service";
+  // Nov 24: a request sent with no box ticked says what is wanted in its own words.
+  return r.services.length ? r.services.join(", ") : REQUEST_OTHER_ASK;
 }
 
 /** The same line starting a sentence or standing alone: "A custom quote for a Roof Care plan". */
