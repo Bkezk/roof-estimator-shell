@@ -386,7 +386,9 @@ describe("the plan on the property's page while it waits", () => {
   });
 
   it("lets a manager end it, and says its unpaid invoice goes with it", () => {
-    expect(card).toContain("{!short && manager && (");
+    // Nov 24: End plan is in the Care Plan pop-up, where the whole plan is. The property
+    // shows the plan in short.
+    expect(card).toContain("{full && manager && (");
     expect(card).toContain(
       "The plan was never paid, so it never started. Its unpaid invoice is removed with it.",
     );

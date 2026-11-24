@@ -1127,7 +1127,7 @@ describe("10. the yearly minor repairs: how it is made sure of", () => {
       "{!short && active.repair_allowance > 0 && active.allowance_used !== null && (",
     );
     expect(card).toContain(
-      "{!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}",
+      "{full && <PlanBenefits plan={active} today={today} open={includesOpen} />}",
     );
     expect(card).not.toContain("allowanceStatusWords({");
   });

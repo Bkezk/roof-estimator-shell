@@ -227,7 +227,8 @@ describe("one plan to a property, and what it has given", () => {
     // The pop-up: what the plan includes, open, and the tally.
     expect(card).toContain("<RoofCareCard siteId={siteId} visitId={visitId} includesOpen />");
     expect(card).toContain(
-      "{!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}",
+      // Nov 24: `full` is the Care Plan pop-up. The property shows the plan in short.
+      "{full && <PlanBenefits plan={active} today={today} open={includesOpen} />}",
     );
     expect(card).toContain(
       '<summary className="cursor-pointer font-medium">What {planName(plan.plan)} includes</summary>',
@@ -235,7 +236,7 @@ describe("one plan to a property, and what it has given", () => {
     expect(card).toContain('<p className="font-medium">Used this plan year</p>');
     // A plan that waits for its payment says what it includes too.
     expect(card).toContain(
-      "{!short && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}",
+      "{full && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}",
     );
   });
   it("the tally: inspections, minor repairs, leak calls and the storm inspection", () => {

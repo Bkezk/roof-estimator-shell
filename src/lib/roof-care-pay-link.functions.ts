@@ -26,6 +26,7 @@ import {
 import {
   cleanPayToken,
   PAY_CLOSED,
+  PAY_HELD_SIZE,
   PAY_LINK_NO_EMAIL,
   PAY_OFFLINE,
   PAY_SAMPLE_START,
@@ -222,7 +223,7 @@ export const publicPayStart = createServerFn({ method: "POST" })
 type Ctx = { supabase: Client; userId: string };
 
 const OFFICE_SELECT =
-  "id, plan, plan_number, site_id, status, price, renewal_credit, customer_email, pay_method, pay_token, pay_link_sent_at, agreed_by" as const;
+  "id, plan, plan_number, site_id, status, price, renewal_credit, customer_email, pay_method, pay_token, pay_link_sent_at, agreed_by, size_unchecked" as const;
 
 /** The plan, for someone the database says may see it. Read with the server's own key. */
 async function seenPlan(ctx: Ctx, planId: string) {
@@ -244,11 +245,16 @@ async function seenPlan(ctx: Ctx, planId: string) {
 }
 
 /** Why there is no link to give for this plan just now, or null. */
-async function linkHeld(status: string): Promise<{ reason: string | null; base: string }> {
+async function linkHeld(plan: {
+  status: string;
+  size_unchecked?: boolean | null;
+}): Promise<{ reason: string | null; base: string }> {
   const { stripeConfigured } = await import("@/lib/roof-care-checkout.server");
   const { appUrl } = await import("@/lib/notify.server");
   const base = appUrl();
-  if (status !== "awaiting_payment") return { reason: CHECKOUT_NOT_WAITING, base };
+  if (plan.status !== "awaiting_payment") return { reason: CHECKOUT_NOT_WAITING, base };
+  // Nov 24 (owner): no payment is asked for until the roof size is confirmed.
+  if (plan.size_unchecked === true) return { reason: PAY_HELD_SIZE, base };
   if (!stripeConfigured()) return { reason: CHECKOUT_NOT_SET_UP, base };
   if (!base) return { reason: CHECKOUT_NO_SITE_ADDRESS, base };
   return { reason: null, base };
@@ -260,7 +266,7 @@ export const planPayLink = createServerFn({ method: "GET" })
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<PlanPayLink> => {
     const { plan } = await seenPlan(context, data.plan_id);
-    const { reason, base } = await linkHeld(plan.status);
+    const { reason, base } = await linkHeld(plan);
     const to = (plan.customer_email ?? "").trim() || null;
     const { planEmailHeld } = await import("@/lib/roof-care-email.server");
     return {
@@ -278,7 +284,7 @@ export const emailPlanPayLink = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<{ to: string; sent_at: string }> => {
     const { admin, plan } = await seenPlan(context, data.plan_id);
-    const { reason, base } = await linkHeld(plan.status);
+    const { reason, base } = await linkHeld(plan);
     if (reason) throw new Error(reason);
     const key = asPlanKey(plan.plan);
     if (!key) throw new Error("That plan was not found");

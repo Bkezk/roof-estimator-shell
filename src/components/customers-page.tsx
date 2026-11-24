@@ -1924,7 +1924,7 @@ function SitesSection({
                 {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
                 <SiteWarranties siteId={s.id} />
                 {/* Owner, Nov 18: the property's Roof Care plan and how many inspections are done. */}
-                <RoofCareCard siteId={s.id} className="mt-2" />
+                <RoofCareCard siteId={s.id} brief className="mt-2" />
                 {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
                 <PropertySites propertyId={s.id} />
                 {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}

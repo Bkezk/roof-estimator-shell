@@ -170,6 +170,33 @@ export function payLinkEmail(f: PayLinkFacts): Email {
 }
 
 /**
+ * What the plan includes and the terms that were agreed to, word for word: in the agreement,
+ * and since Nov 24 in the receipt too (owner, of the receipt: it "didnt show what the roof plan
+ * included or the terms. like the other confirmation did"). `terms`: the set the plan agreed
+ * to, or undefined when it is not on file here: the terms are then left out.
+ */
+function planBlocks(f: PlanEmailFacts, terms: readonly string[] | undefined): Block[] {
+  const name = PLAN_NAMES[f.plan];
+  const included = everythingIncluded(f.plan, f.benefits);
+  const notes = footnotesFor(included);
+  return [
+    { kind: "h", text: `What ${name} includes` },
+    { kind: "ul", items: included },
+    ...(notes.length ? [{ kind: "p" as const, role: "note" as const, text: notes.join(" ") }] : []),
+    ...(terms
+      ? [
+          { kind: "h" as const, text: "The terms you agreed to" },
+          { kind: "ol" as const, items: [...terms] },
+          {
+            kind: "p" as const,
+            text: `Agreed by ${f.agreed_by.trim()} on ${longDay(f.signed_on)}. Terms version ${f.terms_version}.`,
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
  * The agreement: the plan, the price, what it includes, and the terms that were agreed to, word
  * for word. Null when the plan agreed to a set of terms that is not on file here.
  */
@@ -178,8 +205,6 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
   if (!terms) return null;
   const name = PLAN_NAMES[f.plan];
   const first = firstVisitWords(f.first_visit, f.first_days);
-  const included = everythingIncluded(f.plan, f.benefits);
-  const notes = footnotesFor(included);
   const blocks: Block[] = [
     { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
     {
@@ -214,15 +239,7 @@ export function agreementEmail(f: PlanEmailFacts): Email | null {
       },
     },
     ...payBlocks(f),
-    { kind: "h", text: `What ${name} includes` },
-    { kind: "ul", items: included },
-    ...(notes.length ? [{ kind: "p" as const, role: "note" as const, text: notes.join(" ") }] : []),
-    { kind: "h", text: "The terms you agreed to" },
-    { kind: "ol", items: [...terms] },
-    {
-      kind: "p",
-      text: `Agreed by ${f.agreed_by.trim()} on ${longDay(f.signed_on)}. Terms version ${f.terms_version}.`,
-    },
+    ...planBlocks(f, terms),
     ...signOff(f),
   ];
   return render(
@@ -286,6 +303,9 @@ export function receiptEmail(f: ReceiptFacts): Email {
           ? `Your new plan year starts ${longDay(f.starts_on)}, the day after your current plan year ends, and runs until ${longDay(f.renews_on)}. You are covered without a break. We will be in touch to set the day of each inspection.`
           : `Your plan started ${longDay(f.starts_on)} and runs until ${longDay(f.renews_on)}. We will be in touch to set the day of each inspection.`,
     },
+    // Nov 24: the receipt is the email a customer keeps, so it says what the plan includes and
+    // the terms too, as the agreement does.
+    ...planBlocks(f, TERMS_BY_VERSION[f.terms_version]),
     ...signOff(f),
   ];
   return render(

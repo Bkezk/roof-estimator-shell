@@ -14,6 +14,7 @@ import { FLYER_HEAD } from "@/components/roof-care/flyer-look";
 import { longDay } from "@/lib/followup-rules";
 import { PUBLIC_TRY_AGAIN } from "@/lib/public-forms";
 import {
+  PAID_LOOKS_MS,
   PAY_BUTTON,
   PAY_CLOSED,
   PAY_JUST_PAID,
@@ -40,6 +41,12 @@ export function PublicPayPage({ token }: { token: string }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const tries = useRef(0);
+  // Back from the card page (owner, Nov 24: it "does stay on this page for longer than id like
+  // after payment"): the thanks are said at once, before anything is read, and the first looks
+  // for the payment come sooner. Set after the first paint, so the server's page and the
+  // browser's agree.
+  const [back, setBack] = useState(false);
+  useEffect(() => setBack(cameBackPaid()), []);
 
   useEffect(() => {
     let live = true;
@@ -51,10 +58,10 @@ export function PublicPayPage({ token }: { token: string }) {
           setFacts(f);
           setProblem(null);
           // Back from the card page: the payment company tells us a moment later. Look again a
-          // few times, a few seconds apart, then leave the "being confirmed" words standing.
-          if (cameBackPaid() && f.state === "pay" && tries.current < 6) {
+          // few times, soon at first, then leave the "being confirmed" words standing.
+          if (cameBackPaid() && f.state === "pay" && tries.current < PAID_LOOKS_MS.length) {
+            timer = setTimeout(load, PAID_LOOKS_MS[tries.current]);
             tries.current += 1;
-            timer = setTimeout(load, 4000);
           }
         })
         .catch((e) => {
@@ -89,9 +96,18 @@ export function PublicPayPage({ token }: { token: string }) {
       data-public-page="pay"
       data-pay-state={facts?.state ?? (problem ? "problem" : "loading")}
     >
-      {!facts && !problem && (
+      {!facts && !problem && !back && (
         <p className="flex items-center gap-2 text-base text-[var(--flyer-ink)]" role="status">
           <Loader2 className="h-5 w-5 animate-spin" /> One moment…
+        </p>
+      )}
+      {!facts && !problem && back && (
+        <p
+          className="flex items-center gap-2 text-base font-semibold text-[var(--flyer-ink)]"
+          role="status"
+          data-pay="confirming-first"
+        >
+          <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> {PAY_JUST_PAID}
         </p>
       )}
       {facts?.sample && <PublicSampleLine />}

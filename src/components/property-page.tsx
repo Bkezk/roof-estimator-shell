@@ -233,7 +233,7 @@ function PropertyDetailPane({
             {/* The roof warranties (M5) and the named sites inside the property (Oct 6). */}
             <SiteWarranties siteId={s.id} />
             {/* Owner, Nov 18: the property's Roof Care plan. */}
-            {!deleted && <RoofCareCard siteId={s.id} />}
+            {!deleted && <RoofCareCard siteId={s.id} brief />}
             <PropertySites propertyId={s.id} />
             {/* Phase 2 of the documents (Oct 26): the cover photo a document's cover page prints. */}
             <SiteCoverPhoto site={s} canEdit={!deleted} large />

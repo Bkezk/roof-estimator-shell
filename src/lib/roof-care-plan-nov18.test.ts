@@ -1166,10 +1166,11 @@ describe("where it shows", () => {
   const card = read("src/components/roof-care/plan-card.tsx");
   it("the plan itself: under each property on the customer, and on the property", () => {
     expect(read("src/components/customers-page.tsx")).toContain(
-      '<RoofCareCard siteId={s.id} className="mt-2" />',
+      // Nov 24 (owner): in short there. The Care Plan button opens the whole plan.
+      '<RoofCareCard siteId={s.id} brief className="mt-2" />',
     );
     expect(read("src/components/property-page.tsx")).toContain(
-      "{!deleted && <RoofCareCard siteId={s.id} />}",
+      "{!deleted && <RoofCareCard siteId={s.id} brief />}",
     );
     // A property that never had a plan shows nothing there.
     expect(card).toContain("if (!plan) return null;");

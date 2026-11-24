@@ -8,7 +8,7 @@
  * the roof). The rules are the database's; the forms say what will happen before it is pressed
  * (lib/roof-care-plan.ts).
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -55,7 +55,7 @@ import {
 import { carePrefillNote, carePrefillWords, type CareSignUpPrefill } from "@/lib/public-requests";
 import { handlePublicRequest, publicCarePrefill } from "@/lib/public-requests.functions";
 import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
-import { SIGNED_PAY_BY_LINK } from "@/lib/roof-care-pay-link";
+import { PAY_HELD_SIZE, SIGNED_PAY_BY_LINK, SIGNED_SIZE_FIRST } from "@/lib/roof-care-pay-link";
 import { PlanPayLinkBox } from "@/components/roof-care/pay-link";
 import { cleaningAsked, cleaningSummary, roofCareCleaningKey } from "@/lib/roof-care-cleaning";
 import { markRoofCareForecast, roofCareCleaning } from "@/lib/roof-care-cleaning.functions";
@@ -131,7 +131,16 @@ import {
   payWords,
   planBadge,
   PLAN_MAKE_INVOICE,
+  PLAN_BRIEF_HINT,
   PLAN_NO_INVOICE,
+  STEP_PAY,
+  STEP_PAY_CARD,
+  STEP_PAY_CHECK,
+  STEP_SIZE,
+  STEP_SIZE_DONE,
+  STEP_START,
+  STEP_START_CARD,
+  STEP_START_CHECK,
   FIRST_DAYS_NOT_PROMISED,
   firstDaysProblem,
   planDates,
@@ -224,6 +233,13 @@ import { money0, PLAN_KEYS, PLAN_NAMES, type PlanKey } from "@/lib/roof-care-pri
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const STALE_MS = 60_000;
+
+/**
+ * Opened on a ticket (owner, Nov 24): the technician is on the roof and can measure it, so the
+ * card page opens there though the roof size is not confirmed yet. Anywhere else no payment is
+ * asked for until a manager or an admin has confirmed the size.
+ */
+const OnTicket = createContext(false);
 
 /** A whole number out of a box; null for a blank or anything that is not one. */
 function wholeNumber(text: string): number | null {
@@ -322,6 +338,9 @@ export function RoofCareBadge({ plan, today }: { plan: RoofCarePlan; today: stri
     </span>
   );
 }
+
+/** The fold on a plan that waits for its payment. */
+export const WAITING_DETAILS_LABEL = "Plan details: the agreement email";
 
 /** The fold on a plan in force that holds its record. */
 export const PLAN_DETAILS_LABEL = "Plan details: signed, paid, roof size, emails";
@@ -627,17 +646,20 @@ export function RoofCareButtons({
       >
         <Plus className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {ADDITIONAL_SERVICES_LABEL}
       </Button>
-      {open === "plan" &&
-        (active || waiting || lapsed ? (
-          <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
-        ) : (
-          <SignUpDialog
-            siteId={siteId}
-            today={today}
-            prefill={careRequest ? (prefill.data ?? null) : null}
-            onClose={() => setOpen(null)}
-          />
-        ))}
+      {/* On a ticket (Nov 24): the plan and the sign-up know it, for the card page. */}
+      <OnTicket.Provider value={!!jobId}>
+        {open === "plan" &&
+          (active || waiting || lapsed ? (
+            <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
+          ) : (
+            <SignUpDialog
+              siteId={siteId}
+              today={today}
+              prefill={careRequest ? (prefill.data ?? null) : null}
+              onClose={() => setOpen(null)}
+            />
+          ))}
+      </OnTicket.Provider>
       {open === "service" && <ServiceRequestDialog siteId={siteId} onClose={() => setOpen(null)} />}
       {/* Was the plan offered on this ticket? Only where there is one to offer. */}
       {showsOffered && q.data && !active && !waiting && !lapsed && offered.data && (
@@ -705,12 +727,19 @@ export function RoofCareCard({
   siteId,
   visitId,
   short = false,
+  brief = false,
   includesOpen = false,
   className = "",
 }: {
   siteId: string | null | undefined;
   visitId?: string | null;
   short?: boolean;
+  /**
+   * On a property and on the customer page (owner, Nov 24: "does the plan need to show on the
+   * property like that if the info is all available by clicking the care plan button?"): the
+   * plan, when it renews, and only what waits for somebody. The Care Plan button opens the rest.
+   */
+  brief?: boolean;
   /** The Care Plan pop-up: what the plan includes is open, not folded. */
   includesOpen?: boolean;
   className?: string;
@@ -801,6 +830,8 @@ export function RoofCareCard({
   // sight and the record of it (who signed, how it was paid, the emails) folded under Plan
   // details. In the Care Plan pop-up the pop-up is the box.
   const framed = !short && !includesOpen;
+  // Everything: the inspections, the tally, the folds and the buttons. The Care Plan pop-up.
+  const full = !short && !brief;
   // The record of the plan in force: one sentence, as before.
   const signedLine = active ? (
     <p className="text-xs text-muted-foreground" data-roof-care-signed>
@@ -947,6 +978,7 @@ export function RoofCareCard({
           office={office}
           manager={manager}
           short={short}
+          brief={brief}
           includesOpen={includesOpen}
           {...(waitingRenews ? { renewalOf: waitingRenews } : {})}
           onEnd={() => setEnding(true)}
@@ -1018,13 +1050,14 @@ export function RoofCareCard({
               office={office}
               manager={manager}
               short={short}
+              brief={brief}
               renewalOf={active}
               onEnd={() => setEndingRenewal(true)}
             />
           )}
-          {(!short || mine) && (
+          {(full || mine) && (
             <ul className="space-y-1.5">
-              {(short && mine ? [mine] : active.visits).map((v) => (
+              {(!full && mine ? [mine] : active.visits).map((v) => (
                 <VisitRow
                   key={v.id}
                   visit={v}
@@ -1033,14 +1066,14 @@ export function RoofCareCard({
                   showMoney={office}
                   plan={active.plan}
                   onPush={setPush}
-                  {...(manager && !short ? { onSkip: setSkipping, onStormOff: setStormOff } : {})}
+                  {...(manager && full ? { onSkip: setSkipping, onStormOff: setStormOff } : {})}
                 />
               ))}
             </ul>
           )}
           {/* The times we could not get on the roof this plan year (Nov 19, late): which were
               charged, and whether each charge is on an invoice. The office's. */}
-          {!short && office && (active.no_access ?? []).length > 0 && (
+          {full && office && (active.no_access ?? []).length > 0 && (
             <ul className="space-y-1 text-xs" data-roof-care-no-access>
               {(active.no_access ?? []).map((n) => (
                 <li
@@ -1085,11 +1118,11 @@ export function RoofCareCard({
             </ul>
           )}
           {/* What the plan includes and what it has given so far (owner, Nov 19). */}
-          {!short && <PlanBenefits plan={active} today={today} open={includesOpen} />}
+          {full && <PlanBenefits plan={active} today={today} open={includesOpen} />}
           {/* The record of the plan (Nov 24): who signed, how it was paid, the roof size, where
               the emails went and which invoices used the minor repairs. Folded: it is read
               now and then, and nothing in it waits for anybody. */}
-          {!short && (
+          {full && (
             <details
               className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
               data-roof-care-details
@@ -1141,7 +1174,7 @@ export function RoofCareCard({
               </div>
             </details>
           )}
-          {!short && office && (
+          {full && office && (
             <div
               className={`flex flex-wrap items-center gap-1.5 ${framed ? "border-t pt-2" : ""}`}
               data-roof-care-actions
@@ -1191,6 +1224,11 @@ export function RoofCareCard({
             </div>
           )}
         </>
+      )}
+      {brief && (active || waiting) && (
+        <p className="text-xs text-muted-foreground" data-roof-care-brief>
+          {PLAN_BRIEF_HINT}
+        </p>
       )}
       {storming && active && (
         <StormDialog siteId={siteId} plan={active} onClose={() => setStorming(false)} />
@@ -1915,6 +1953,7 @@ function AwaitingPayment({
   office,
   manager,
   short,
+  brief = false,
   includesOpen = false,
   renewalOf,
   onEnd,
@@ -1924,6 +1963,8 @@ function AwaitingPayment({
   office: boolean;
   manager: boolean;
   short: boolean;
+  /** On a property: the steps, and nothing folded under them. */
+  brief?: boolean;
   /** The Care Plan pop-up: what the plan includes is open. */
   includesOpen?: boolean;
   /** The plan year this one renews, when it is a renewal shown under it. */
@@ -1948,8 +1989,12 @@ function AwaitingPayment({
   // Paying by card online, when it is set up: the page to hand or send to the customer.
   const cardOnline = useCheckoutReady(plan.pay_method === "card");
   const checkoutFn = useServerFn(startPlanCheckout);
+  // On a ticket the technician can measure the roof, so the card page opens there though the
+  // size is not confirmed. Anywhere else no payment is asked for until it is (owner, Nov 24).
+  const onSite = useContext(OnTicket);
   const checkout = useMutation({
-    mutationFn: () => checkoutFn({ data: { plan_id: plan.id } }),
+    mutationFn: () =>
+      checkoutFn({ data: { plan_id: plan.id, ...(onSite ? { on_site: true } : {}) } }),
     onSuccess: (r) => {
       if (r.url) window.location.assign(r.url);
       else toast.error(r.reason ?? "The card payment page could not be made", { duration: 20_000 });
@@ -1957,10 +2002,123 @@ function AwaitingPayment({
     onError: (e) =>
       toast.error(`Could not open the card payment page: ${errText(e)}`, { duration: 20_000 }),
   });
+  const full = !short && !brief;
+  const sizeWaits = !!plan.size?.unchecked;
+  const held = sizeWaits && !onSite;
+  const card = plan.pay_method === "card";
+  // The agreement that has not gone, or has nowhere to go, stays in sight.
+  const emailWaits = !!plan.email && (!plan.email.to || !plan.email.agreement_sent_at);
+  // What is left to do, in order. Each is one step; a step that is done is ticked.
+  const steps: { key: string; title: string; done?: boolean; body: ReactNode }[] = [];
+  if (office && !short)
+    steps.push({
+      key: "size",
+      title: sizeWaits ? STEP_SIZE : STEP_SIZE_DONE,
+      done: !sizeWaits,
+      body: planSizeWords(plan) ? (
+        <PlanSizeLine siteId={siteId} plan={plan} manager={manager} />
+      ) : (
+        <p className="text-muted-foreground" data-roof-care-size="checked">
+          Roof size {Math.round(plan.roof_sqft).toLocaleString("en-US")} sq ft.
+        </p>
+      ),
+    });
+  steps.push({
+    key: "pay",
+    title: card ? STEP_PAY_CARD : plan.pay_method === "check" ? STEP_PAY_CHECK : STEP_PAY,
+    body: (
+      <>
+        {plan.pay_method && (
+          <p data-awaiting-pay={plan.pay_method}>
+            {payWords(plan.pay_method, plan.pay_note)}
+            {card && !cardOnline ? ` ${PAY_CARD_NOTE}` : ""}
+          </p>
+        )}
+        {/* No payment is asked for until the roof size is confirmed (owner, Nov 24). */}
+        {card && held && (
+          <p className="font-medium text-amber-800 dark:text-amber-300" data-awaiting-held>
+            {PAY_HELD_SIZE}
+          </p>
+        )}
+        {card && !held && (
+          <div className="flex flex-wrap items-start gap-1.5">
+            {cardOnline && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                disabled={checkout.isPending}
+                onClick={() => checkout.mutate()}
+                data-action="roof-care-checkout"
+              >
+                {checkout.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                {CHECKOUT_BUTTON}
+              </Button>
+            )}
+            {/* Nov 23: the customer's own link, for one who is not at this screen (signed up
+                through the QR page, or wants to pay later from their own phone). Shown whenever
+                the plan pays by card: before card payment is set up the box says so. */}
+            <PlanPayLinkBox planId={plan.id} />
+          </div>
+        )}
+        {money &&
+          (inv ? (
+            <p data-awaiting-invoice={inv.status}>
+              <Link
+                to="/service/invoices"
+                search={{ id: inv.id }}
+                className="font-medium underline underline-offset-2"
+              >
+                Invoice #{inv.number}
+              </Link>{" "}
+              {inv.status === "draft"
+                ? "is a draft. Finalise it and send it to the customer."
+                : inv.paid_amount > 0
+                  ? `has ${money0(inv.paid_amount)} paid of ${money0(inv.total)}. ${renewalOf ? "The new plan year" : "The plan"} starts when it is paid in full.`
+                  : "is waiting to be paid. Mark it paid when the payment arrives."}
+            </p>
+          ) : (
+            <p className="flex flex-wrap items-center gap-2" data-awaiting-invoice="none">
+              <span>{PLAN_NO_INVOICE}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={make.isPending}
+                onClick={() => make.mutate()}
+                data-action="roof-care-make-invoice"
+              >
+                {make.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                {PLAN_MAKE_INVOICE}
+              </Button>
+            </p>
+          ))}
+      </>
+    ),
+  });
+  steps.push({
+    key: "start",
+    title: STEP_START,
+    body: (
+      <>
+        {money && plan.pay_method && (
+          <p data-awaiting-record={plan.pay_method}>{card ? STEP_START_CARD : STEP_START_CHECK}</p>
+        )}
+        {!short && !renewalOf && (
+          <p className="text-muted-foreground" data-awaiting-first>
+            {firstVisitWords(plan.first_visit, plan.first_days)}
+          </p>
+        )}
+      </>
+    ),
+  });
   return (
     <div
-      className={`space-y-1 text-xs ${renewalOf ? "rounded-md border p-2" : ""}`}
+      className={`space-y-2 text-xs ${renewalOf ? "rounded-md border p-2" : ""}`}
       data-roof-care-awaiting={renewalOf ? "renewal" : "new"}
+      data-awaiting-size-held={held}
     >
       <p className="font-medium text-amber-800 dark:text-amber-300">
         {renewalOf
@@ -1984,82 +2142,55 @@ function AwaitingPayment({
           {decided}
         </p>
       )}
-      {plan.pay_method && (
-        <p className="font-medium" data-awaiting-pay={plan.pay_method}>
-          {payWords(plan.pay_method, plan.pay_note)}
-          {plan.pay_method === "card" && !cardOnline ? ` ${PAY_CARD_NOTE}` : ""}
-        </p>
-      )}
-      {plan.pay_method === "card" && cardOnline && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs"
-          disabled={checkout.isPending}
-          onClick={() => checkout.mutate()}
-          data-action="roof-care-checkout"
-        >
-          {checkout.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-          {CHECKOUT_BUTTON}
-        </Button>
-      )}
-      {/* Nov 23: the customer's own link, for one who is not at this screen (signed up through
-          the QR page, or wants to pay later from their own phone). Shown whenever the plan pays
-          by card: before card payment is set up the box says so in plain words. */}
-      {plan.pay_method === "card" && <PlanPayLinkBox planId={plan.id} />}
-      {!short && !renewalOf && (
-        <p className="text-muted-foreground" data-awaiting-first>
-          {firstVisitWords(plan.first_visit, plan.first_days)}
-        </p>
-      )}
-      {!short && office && <PlanSizeLine siteId={siteId} plan={plan} manager={manager} />}
-      {!short && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}
-      {!short && office && plan.email && <PlanEmailLine siteId={siteId} plan={plan} paid={false} />}
-      {money &&
-        (inv ? (
-          <p data-awaiting-invoice={inv.status}>
-            <Link
-              to="/service/invoices"
-              search={{ id: inv.id }}
-              className="font-medium underline underline-offset-2"
+      <ol className="space-y-1.5" data-awaiting-steps={steps.length}>
+        {steps.map((st, i) => (
+          <li
+            key={st.key}
+            className="flex gap-2 rounded-md border bg-background px-2.5 py-1.5"
+            data-awaiting-step={st.key}
+            data-step-done={!!st.done}
+          >
+            <span
+              aria-hidden
+              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${st.done ? "bg-emerald-600 text-white" : "border border-amber-600/60 text-amber-800 dark:text-amber-300"}`}
             >
-              Invoice #{inv.number}
-            </Link>{" "}
-            {inv.status === "draft"
-              ? "is a draft. Finalise it and send it to the customer."
-              : inv.paid_amount > 0
-                ? `has ${money0(inv.paid_amount)} paid of ${money0(inv.total)}. ${renewalOf ? "The new plan year" : "The plan"} starts when it is paid in full.`
-                : "is waiting to be paid. Mark it paid when the payment arrives."}
-          </p>
-        ) : (
-          <p className="flex flex-wrap items-center gap-2" data-awaiting-invoice="none">
-            <span>{PLAN_NO_INVOICE}</span>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              disabled={make.isPending}
-              onClick={() => make.mutate()}
-              data-action="roof-care-make-invoice"
-            >
-              {make.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-              {PLAN_MAKE_INVOICE}
-            </Button>
-          </p>
+              {st.done ? <Check className="h-3 w-3" /> : i + 1}
+            </span>
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="font-medium">{st.title}</p>
+              {st.body}
+            </div>
+          </li>
         ))}
-      {!short && manager && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs text-muted-foreground"
-          onClick={onEnd}
-          data-action={renewalOf ? "roof-care-end-renewal" : "roof-care-end"}
+      </ol>
+      {!short && office && plan.email && emailWaits && (
+        <PlanEmailLine siteId={siteId} plan={plan} paid={false} />
+      )}
+      {full && !renewalOf && <PlanIncludes plan={plan} open={includesOpen} />}
+      {full && office && plan.email && !emailWaits && (
+        <details
+          className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+          data-roof-care-details
         >
-          {renewalOf ? "Cancel the renewal" : "End plan"}
-        </Button>
+          <summary className="cursor-pointer font-medium">{WAITING_DETAILS_LABEL}</summary>
+          <div className="mt-1.5">
+            <PlanEmailLine siteId={siteId} plan={plan} paid={false} />
+          </div>
+        </details>
+      )}
+      {full && manager && (
+        <div className="flex border-t pt-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 text-xs text-muted-foreground"
+            onClick={onEnd}
+            data-action={renewalOf ? "roof-care-end-renewal" : "roof-care-end"}
+          >
+            {renewalOf ? "Cancel the renewal" : "End plan"}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -2279,6 +2410,7 @@ function SignUpDialog({
 }) {
   const { profile } = useAuth();
   const refresh = useRefresh(siteId);
+  const onSite = useContext(OnTicket);
   const [sqft, setSqft] = useState(() =>
     prefill?.sqft != null && prefill.sqft > 0 ? String(Math.round(prefill.sqft)) : "",
   );
@@ -2403,18 +2535,32 @@ function SignUpDialog({
       // The card payment page, when there is one. The plan is signed either way. Not for a
       // plan signed from a public request (Nov 23): that customer is not at this screen, so
       // they pay from their own link, and the office is told where it is.
+      // Nov 24 (owner): "ideally we arent requesting payment or taking payment until the roof
+      // size is confirmed. the only reason we take card payment when care plan is selceted on a
+      // ticket workflow is the tech can measure the roof there." So the card page opens on a
+      // ticket, or when the map checked the size; else the plan waits for a manager.
       let pay: string | null = null;
-      if (payMethod === "card" && !prefill) {
+      const sizeFirst = payMethod === "card" && !prefill && !onSite && !!made.size?.unchecked;
+      if (payMethod === "card" && !prefill && !sizeFirst) {
         try {
-          pay = (await checkoutFn({ data: { plan_id: made.id } })).url;
+          pay = (
+            await checkoutFn({ data: { plan_id: made.id, ...(onSite ? { on_site: true } : {}) } })
+          ).url;
         } catch {
           pay = null;
         }
       }
-      return { made, pay };
+      return { made, pay, sizeFirst };
     },
-    onSuccess: ({ made, pay }) => {
+    onSuccess: ({ made, pay, sizeFirst }) => {
       refresh();
+      if (sizeFirst) {
+        toast.success(`${planName(made.plan)} plan signed. ${SIGNED_SIZE_FIRST}`, {
+          duration: 30_000,
+        });
+        onClose();
+        return;
+      }
       if (pay) {
         toast.success(`${planName(made.plan)} plan signed. Opening the card payment page.`, {
           duration: 20_000,

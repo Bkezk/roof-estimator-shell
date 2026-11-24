@@ -12,6 +12,7 @@ import {
   CHECKOUT_NOT_WAITING,
   CHECKOUT_NOTHING_OWED,
 } from "@/lib/roof-care-checkout";
+import { PAY_HELD_SIZE } from "@/lib/roof-care-pay-link";
 
 /** Is paying by card online set up on this server? */
 export const roofCareCheckoutReady = createServerFn({ method: "GET" })
@@ -28,7 +29,16 @@ export const roofCareCheckoutReady = createServerFn({ method: "GET" })
  */
 export const startPlanCheckout = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) =>
+    z
+      .object({
+        plan_id: z.string().uuid(),
+        // Opened on a ticket: the technician is on the roof and can measure it (owner, Nov 24),
+        // so the card page opens though the roof size is not confirmed yet.
+        on_site: z.boolean().optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<{ url: string | null; reason: string | null }> => {
     const { stripeConfigured, createCheckoutSession, planOwedCents } =
       await import("@/lib/roof-care-checkout.server");
@@ -48,12 +58,16 @@ export const startPlanCheckout = createServerFn({ method: "POST" })
     const admin = await serverClient(context.supabase);
     const { data: plan, error } = await admin
       .from("roof_care_plans")
-      .select("id, plan, plan_number, site_id, status, price, renewal_credit, customer_email")
+      .select(
+        "id, plan, plan_number, site_id, status, price, renewal_credit, customer_email, size_unchecked",
+      )
       .eq("id", data.plan_id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!plan) throw new Error("That plan was not found");
     if (plan.status !== "awaiting_payment") return { url: null, reason: CHECKOUT_NOT_WAITING };
+    // No payment is taken until the roof size is confirmed (owner, Nov 24), except on a ticket.
+    if (plan.size_unchecked === true && !data.on_site) return { url: null, reason: PAY_HELD_SIZE };
     // The invoice decides the amount when it is final (planOwedCents, shared with the
     // customer's own payment link since Nov 23).
     const [cents, { data: site }] = await Promise.all([

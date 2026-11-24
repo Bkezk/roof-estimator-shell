@@ -546,6 +546,24 @@ export const isPlanInvoiceNumber = (display: string | null | undefined): boolean
 export const AWAITING_PAYMENT_WORDS = "Awaiting payment";
 export const AWAITING_PAYMENT_NOTE =
   "The plan starts the day its payment is received. No inspection is made before that.";
+/**
+ * A plan that waits for its payment is shown as what is left to do, in order (owner, Nov 24:
+ * "the non paid plan probably needs a rework as well its a bit messy", and "how do you confirm
+ * payment was recieved if theyve sent a check or something").
+ */
+export const STEP_SIZE = "Confirm the roof size";
+export const STEP_SIZE_DONE = "Roof size";
+export const STEP_PAY_CARD = "Ask for the card payment";
+export const STEP_PAY_CHECK = "Send the invoice";
+export const STEP_PAY = "Ask for the payment";
+export const STEP_START = "Record the payment";
+export const STEP_START_CARD =
+  "A card payment is recorded by itself, and the plan starts that minute. Nothing has to be marked.";
+export const STEP_START_CHECK =
+  "When the check arrives, open the invoice and press Mark paid. The plan starts that day and its inspections are made.";
+/** On the property, where the plan is shown in short (owner, Nov 24). */
+export const PLAN_BRIEF_HINT =
+  "Care Plan opens the inspections, what the plan includes and its details.";
 export const PLAN_NO_INVOICE = "No invoice has been made for this plan yet.";
 export const PLAN_MAKE_INVOICE = "Make the invoice";
 /**

@@ -200,6 +200,7 @@ describe("the plan card's new layout (owner, Nov 24: 'very visually unappealing 
   });
   it("the plan sits in a box of its own, with renews and price on the top line", () => {
     expect(card).toContain("const framed = !short && !includesOpen;");
+    expect(card).toContain("const full = !short && !brief;");
     expect(card).toContain("data-roof-care-framed={framed}");
     expect(card).toContain("data-roof-care-renews");
   });

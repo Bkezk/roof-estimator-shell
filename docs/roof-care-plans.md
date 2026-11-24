@@ -492,7 +492,10 @@ Built the same night, at the owner's "go" (`docs/qa/roof-care-go-aheads-2026-11-
   agreement email (the owner: "the office needs to review and then send the payment request
   after theyre sure of the roof size"): the office copies it or emails it from the plan (Card
   payment link), and the box says "not emailed yet" until somebody has. A plan signed from a
-  public request with Card does not open the card page on the office's screen. Off until Stripe is set up; emailing it also needs Email set up.
+  public request with Card does not open the card page on the office's screen. Since the
+  same night no payment is asked for while a plan's roof size is not confirmed: no link, no
+  email of it and no card page, except on a ticket, where the technician can measure the roof
+  (`docs/qa/roof-care-size-before-payment-2026-11-24.md`). Off until Stripe is set up; emailing it also needs Email set up.
   Record: `docs/qa/roof-care-pay-link-2026-11-23.md`.
 - The cleaning at each inspection and the budget forecast: `src/lib/roof-care-cleaning.ts`.
   The questions are required (the owner, Nov 20: "those questions should be required"): no

@@ -600,7 +600,8 @@ describe("20. skip an inspection; its ticket is not deleted", () => {
       '{onSkip && visit.kind !== "storm" && !["done", "skipped", "lost"].includes(state) && (',
     );
     expect(CARD).toContain(
-      "{...(manager && !short ? { onSkip: setSkipping, onStormOff: setStormOff } : {})}",
+      // Nov 24: `full` is the Care Plan pop-up, where the inspections are listed.
+      "{...(manager && full ? { onSkip: setSkipping, onStormOff: setStormOff } : {})}",
     );
   });
 });

@@ -501,7 +501,9 @@ describe("the office's Card payment link box", () => {
   });
   it("is drawn on a plan that waits for a card payment; nothing is sent without a press", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain('{plan.pay_method === "card" && <PlanPayLinkBox planId={plan.id} />}');
+    // Nov 24: held while the roof size is not confirmed, except on a ticket.
+    expect(card).toContain("{card && !held && (");
+    expect(card).toContain("<PlanPayLinkBox planId={plan.id} />");
     const box = flat(read("src/components/roof-care/pay-link.tsx"));
     expect(box).toContain("enabled: open,");
     expect(box).toContain("onClick={() => email.mutate()}");
@@ -512,7 +514,7 @@ describe("the office's Card payment link box", () => {
 describe("a plan signed from a public request, paying by card", () => {
   it("does not open the card page on the office's screen: the customer is not there", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));
-    expect(card).toContain('if (payMethod === "card" && !prefill) {');
+    expect(card).toContain('if (payMethod === "card" && !prefill && !sizeFirst) {');
     expect(card).toContain(
       'if (prefill && payMethod === "card") { toast.success(`${planName(made.plan)} plan signed. ${SIGNED_PAY_BY_LINK}`, {',
     );

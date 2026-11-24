@@ -95,6 +95,8 @@ export const PAY_OFFLINE =
 export const PAY_THANKS_TITLE = "Thank you. We have your payment.";
 export const PAY_JUST_PAID =
   "Thank you. Your payment is being confirmed. This page will say so in a moment, and your receipt is on its way by email.";
+/** How long after each look for the payment the next one is made, back from the card page. */
+export const PAID_LOOKS_MS = [1500, 2000, 3000, 4000, 4000, 4000, 4000, 4000] as const;
 export const PAY_SAMPLE_START = "Test server: this is a sample page, and nothing can be paid here.";
 
 /** Under the thanks: when the plan year runs to. `day` words a date. */
@@ -141,6 +143,20 @@ export function payLinkSentWords(
  */
 export const SIGNED_PAY_BY_LINK =
   "The customer has not been sent a payment link. Check the roof size, then send it from Card payment link on the plan. The plan starts when the payment is received.";
+
+/**
+ * No payment is asked for until the roof size is confirmed (owner, Nov 24: "ideally we arent
+ * requesting payment or taking payment until the roof size is confirmed", and of holding the
+ * link until then: "yes thats a good idea"). The plan's price follows its size, so a size typed
+ * by hand with nothing from the map to check it is looked at by a manager or an admin first.
+ * The one exception is a sign-up on a ticket: the technician is on the roof and can measure it.
+ */
+export const PAY_HELD_SIZE =
+  "The roof size is not confirmed yet, so no payment is asked for. A manager or an admin confirms it on the plan first.";
+
+/** What the sign-up says when a card plan is signed off a ticket with its size not confirmed. */
+export const SIGNED_SIZE_FIRST =
+  "No payment was asked for: the roof size is not confirmed yet. A manager or an admin confirms it on the plan, then sends the payment link.";
 
 /** In the office's box, while the link has never been emailed (owner, Nov 24). */
 export const PAY_LINK_NOT_SENT =
