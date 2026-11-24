@@ -9,8 +9,13 @@
  */
 import { createHmac } from "node:crypto";
 
-import { notify, hasServiceRole, type Client } from "@/lib/notify.server";
-import { publicRequestNotice, type PublicRequestRow } from "@/lib/public-requests";
+import { adminIds, notify, hasServiceRole, type Client } from "@/lib/notify.server";
+import type { PublicLimitAlert } from "@/lib/public-forms";
+import {
+  publicLimitNotice,
+  publicRequestNotice,
+  type PublicRequestRow,
+} from "@/lib/public-requests";
 
 /**
  * The key one connection's requests are counted under: a keyed hash of where the request came
@@ -116,4 +121,14 @@ export async function dispatchPublicRequestNotices(
     }
   }
   return out;
+}
+
+/**
+ * Tell the admins that a day's limit of the public pages is nearly reached, or reached (Nov
+ * 24). The count says so once for each (public_form_take2), so this is called once for each.
+ * To the bell and the phone, never by email.
+ */
+export async function tellPublicLimit(admin: Client, alert: PublicLimitAlert): Promise<number> {
+  const to = await adminIds(admin);
+  return to.length ? notify(to, publicLimitNotice(alert), admin) : 0;
 }

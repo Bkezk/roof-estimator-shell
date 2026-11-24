@@ -29,7 +29,7 @@ import {
 import { FlyerPlan, FlyerStepHead } from "@/components/roof-care/flyer-look";
 import {
   PUBLIC_SIZE_RANGES,
-  PUBLIC_TOO_MANY,
+  publicLimitLine,
   type PublicPlanKey,
   type PublicQuote,
   type PublicQuoteAsk,
@@ -175,8 +175,7 @@ export function PublicCarePage() {
         50,
       );
     } catch (e) {
-      const words = errWords(e);
-      setAskError(words.includes(PUBLIC_TOO_MANY) ? PUBLIC_TOO_MANY : SEND_FAILED_LINE);
+      setAskError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);
     } finally {
       busy.current = false;
       setAsking(false);
@@ -234,8 +233,7 @@ export function PublicCarePage() {
       setSent(r.reference);
       window.scrollTo({ top: 0 });
     } catch (e) {
-      const words = errWords(e);
-      setSendError(words.includes(PUBLIC_TOO_MANY) ? PUBLIC_TOO_MANY : SEND_FAILED_LINE);
+      setSendError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);
     } finally {
       busy.current = false;
       setSending(false);

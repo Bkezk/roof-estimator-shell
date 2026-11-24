@@ -12,6 +12,7 @@ import {
   PUBLIC_CARE_PATH,
   PUBLIC_REQUEST_PATH,
   publicEmailOk,
+  type PublicLimitAlert,
   type PublicPlanKey,
 } from "@/lib/public-forms";
 import { offerSpread, sizeRangeWords } from "@/lib/public-pages";
@@ -562,3 +563,106 @@ export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "k
         : "The customer is on this opportunity. Call them, then start a ticket or a bid from here.";
   }
 }
+
+// ── The day's limits of the public pages, as the office reads them (Nov 24) ─────────────────
+
+const count = (n: number) => Math.round(n).toLocaleString("en-US");
+
+/** The notice the admins get when a day's limit is nearly reached, or reached. */
+export function publicLimitNotice(a: PublicLimitAlert): {
+  kind: string;
+  title: string;
+  body: string;
+  url: string;
+} {
+  const what = a.kind === "quote" ? "price questions" : "requests";
+  const page = a.kind === "quote" ? "The Roof Care page" : "The public pages";
+  const where = "The count is in Setup, QR pages.";
+  return a.level === "near"
+    ? {
+        kind: "public_limit",
+        title: `${page}: ${count(a.used)} of today's ${count(a.cap)} ${what} are used`,
+        body: `If it reaches ${count(a.cap)}, visitors are asked to call the office until midnight. ${where}`,
+        url: PUBLIC_SETUP_PATH,
+      }
+    : {
+        kind: "public_limit",
+        title: `${page} ${a.kind === "quote" ? "has" : "have"} reached today's limit of ${count(a.cap)} ${what}`,
+        body: `Visitors are now asked to call the office until midnight. ${where}`,
+        url: PUBLIC_SETUP_PATH,
+      };
+}
+
+/** What the office sees of the public pages' counts and the day's emails (public_form_usage). */
+export interface PublicUsage {
+  quote: { used: number; cap: number };
+  request: { used: number; cap: number };
+  /** The last thirty days, newest first. */
+  days: { day: string; quote: number; request: number; dropped: number }[];
+  email: { used: number; held: number; cap: number; hold: number };
+}
+
+const whole = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+};
+
+/** public_form_usage()'s answer, read strictly. Null when it is not one. */
+export function readUsage(x: unknown): PublicUsage | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const pair = (v: unknown) => {
+    const p = (v ?? {}) as Record<string, unknown>;
+    return { used: whole(p["used"]), cap: whole(p["cap"]) };
+  };
+  const e = (o["email"] ?? {}) as Record<string, unknown>;
+  const days = Array.isArray(o["days"]) ? o["days"] : [];
+  return {
+    quote: pair(o["quote"]),
+    request: pair(o["request"]),
+    days: days
+      .map((d) => (d ?? {}) as Record<string, unknown>)
+      .filter((d) => typeof d["day"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d["day"] as string))
+      .map((d) => ({
+        day: d["day"] as string,
+        quote: whole(d["quote"]),
+        request: whole(d["request"]),
+        dropped: whole(d["dropped"]),
+      }))
+      .slice(0, 31),
+    email: {
+      used: whole(e["used"]),
+      held: whole(e["held"]),
+      cap: whole(e["cap"]),
+      hold: whole(e["hold"]),
+    },
+  };
+}
+
+/** "37 of 2,000", and how full that is: "ok", "near" from four fifths, "full" at the limit. */
+export function usageLine(
+  used: number,
+  cap: number,
+): { words: string; level: "ok" | "near" | "full" } {
+  const level =
+    cap > 0 && used >= cap ? "full" : cap > 0 && used >= Math.ceil(cap * 0.8) ? "near" : "ok";
+  return { words: `${count(used)} of ${count(cap)}`, level };
+}
+
+/** The line under the email count on Setup, QR pages. */
+export function emailUsageWords(e: PublicUsage["email"]): string {
+  if (e.cap <= 0)
+    return `${count(e.used)} sent in the last 24 hours. No daily limit is set, so nothing waits.`;
+  const held =
+    e.held > 0
+      ? ` ${count(e.held)} staff notice email${e.held === 1 ? "" : "s"} waited: each notice is in the bell.`
+      : "";
+  return `${count(e.used)} of ${count(e.cap)} sent in the last 24 hours. From ${count(e.hold)}, emails to staff about notices wait, so the rest is kept for customers.${held}`;
+}
+
+/** Above today's counts on Setup, QR pages. */
+export const USAGE_NOTE =
+  "How much of today's limits the two public pages have used. The limits stop one visitor, or a flood, from tying up the pages. An admin gets a notice at four fifths of a limit and again when it is reached. A day runs midnight to midnight.";
+/** Above the email limit on Setup, QR pages. */
+export const EMAIL_CAP_NOTE =
+  "How many emails the email plan allows in 24 hours: 100 on the free plan. Type 0 if the plan has no daily limit. From four fifths of it, emails to staff about notices wait so customers' agreements, receipts and invoices still go, and an admin gets a notice.";

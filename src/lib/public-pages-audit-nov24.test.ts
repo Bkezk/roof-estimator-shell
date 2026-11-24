@@ -79,7 +79,7 @@ type RpcCall = { fn: string; args: Record<string, unknown> | undefined };
 function deps(answers: Record<string, (a: Record<string, unknown> | undefined) => unknown> = {}) {
   const calls: RpcCall[] = [];
   const all: Record<string, (a: Record<string, unknown> | undefined) => unknown> = {
-    public_form_take: () => true,
+    public_form_take2: () => ({ ok: true }),
     public_form_dropped: () => null,
     public_care_quote: () => ({ quote_token: "tok-1", custom_quote: false, plans: [] }),
     public_request_submit: () => "R-4321",
@@ -153,7 +153,7 @@ describe("1. Request service: words alone are a request", () => {
   it("is sent on with no box ticked, and is refused only when there is neither", async () => {
     const ok = deps();
     expect(await sendService(SERVICE, ok.deps)).toEqual({ reference: "R-4321" });
-    expect(ok.calls.map((c) => c.fn)).toEqual(["public_form_take", "public_request_submit"]);
+    expect(ok.calls.map((c) => c.fn)).toEqual(["public_form_take2", "public_request_submit"]);
     expect(ok.calls[1]!.args!["p"]).toMatchObject({ kind: "service", services: [] });
     const none = deps();
     await expect(sendService({ ...SERVICE, details: "" }, none.deps)).rejects.toThrow(

@@ -263,7 +263,14 @@ async function sendClaimed(
   if (!won?.length) return true;
   let failure: string | null = null;
   try {
-    const r = await send({ to, subject: mail.subject, text: mail.text, html: mail.html });
+    const r = await send({
+      to,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      // Nov 24: an email to a customer, which goes before the staff notices in the day's count.
+      kind: "customer",
+    });
     if (!r.ok) failure = r.error;
   } catch (e) {
     failure = errText(e);

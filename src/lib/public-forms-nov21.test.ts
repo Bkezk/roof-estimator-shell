@@ -260,7 +260,9 @@ const PLANS_FROM_DB = [
 ];
 function deps(over: Partial<PublicDeps> & { answers?: Parameters<typeof door>[0] } = {}) {
   const d = door({
-    public_form_take: () => true,
+    // Nov 24 (owner: "Go on 4s suggestions"): the count is asked through public_form_take2,
+    // which answers which limit was met. The older yes/no door stays for the payment link.
+    public_form_take2: () => ({ ok: true }),
     public_care_quote: () => ({ quote_token: "tok-1", custom_quote: false, plans: PLANS_FROM_DB }),
     public_request_submit: () => "R-4321",
     public_service_choices: () => ["Roof inspection", "Storm damage"],
@@ -319,7 +321,7 @@ describe("the three prices for a building", () => {
     for (const never of ["list", "travel", "cost", "secret", "hours", "miles", "3.4", "171.2"])
       expect(text).not.toContain(never);
     // The drive goes to the database to work the price out, and the limit is asked first.
-    expect(calls.map((c) => c.fn)).toEqual(["public_form_take", "public_care_quote"]);
+    expect(calls.map((c) => c.fn)).toEqual(["public_form_take2", "public_care_quote"]);
     expect(calls[0]!.args).toEqual({ p_kind: "quote", p_key: "k".repeat(40) });
     expect(calls[1]!.args).toMatchObject({ p_hours: 3.4, p_miles: 171.2 });
   });
@@ -369,9 +371,11 @@ describe("the three prices for a building", () => {
     });
   });
   it("a connection over its limit is told to wait, and nothing more is asked", async () => {
-    const { deps: d, calls } = deps({ answers: { public_form_take: () => false } });
+    const { deps: d, calls } = deps({
+      answers: { public_form_take2: () => ({ ok: false, why: "one" }) },
+    });
     await expect(quoteFor({ ...ASK, sqft: 21000 }, d)).rejects.toThrow(PUBLIC_TOO_MANY);
-    expect(calls.map((c) => c.fn)).toEqual(["public_form_take"]);
+    expect(calls.map((c) => c.fn)).toEqual(["public_form_take2"]);
   });
   it("the database's own plain sentence is passed on; any other fault is never shown", async () => {
     const plain = deps({
@@ -467,7 +471,7 @@ describe("a Roof Care request", () => {
   it("is checked, counted, kept by the database, and the office told", async () => {
     const { deps: d, calls, tellCalls } = deps();
     expect(await sendCare(CARE, d)).toEqual({ reference: "R-4321" });
-    expect(calls.map((c) => c.fn)).toEqual(["public_form_take", "public_request_submit"]);
+    expect(calls.map((c) => c.fn)).toEqual(["public_form_take2", "public_request_submit"]);
     expect(calls[0]!.args).toEqual({ p_kind: "request", p_key: "k".repeat(40) });
     const sent = calls[1]!.args!["p"] as Record<string, unknown>;
     expect(sent).toMatchObject({ kind: "care", plan: "care", shown_price: 2090, agreed: true });
@@ -522,9 +526,9 @@ describe("a Roof Care request", () => {
     expect(reachable("555-0142", "pat@example")).toBe(false);
   });
   it("over the limit: told to wait, nothing kept; the office not being told does not lose the request", async () => {
-    const over = deps({ answers: { public_form_take: () => false } });
+    const over = deps({ answers: { public_form_take2: () => ({ ok: false, why: "one" }) } });
     await expect(sendCare(CARE, over.deps)).rejects.toThrow(PUBLIC_TOO_MANY);
-    expect(over.calls.map((c) => c.fn)).toEqual(["public_form_take"]);
+    expect(over.calls.map((c) => c.fn)).toEqual(["public_form_take2"]);
     const err = console.error;
     console.error = () => {};
     const untold = deps({
@@ -1381,7 +1385,7 @@ describe("the words a page looks for when a connection is over its limit", () =>
     expect(PUBLIC_TOO_MANY).toBe(
       "Too many requests from this connection. Please wait a few minutes, or call us.",
     );
-    const over = deps({ answers: { public_form_take: () => false } });
+    const over = deps({ answers: { public_form_take2: () => ({ ok: false, why: "one" }) } });
     const asked = await quoteFor({ ...ASK, sqft: 21000 }, over.deps).catch((e: Error) => e.message);
     expect(asked).toBe(PUBLIC_TOO_MANY);
     expect(await sendCare(CARE, over.deps).catch((e: Error) => e.message)).toBe(PUBLIC_TOO_MANY);

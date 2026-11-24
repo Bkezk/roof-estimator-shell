@@ -32,6 +32,7 @@ import {
   publicEmailOk,
   publicStateOk,
   publicZipOk,
+  PUBLIC_BUSY,
   PUBLIC_MIN_OPEN_MS,
   PUBLIC_NEED_WHAT,
   PUBLIC_NOT_READY,
@@ -39,8 +40,10 @@ import {
   PUBLIC_SIZE_RANGE_SQFT,
   PUBLIC_TERMS_MOVED,
   PUBLIC_TOO_MANY,
+  PUBLIC_TOO_MANY_TODAY,
   PUBLIC_TRY_AGAIN,
   type PublicCareRequest,
+  type PublicLimitAlert,
   type PublicPlanOffer,
   type PublicQuote,
   type PublicQuoteAsk,
@@ -176,6 +179,8 @@ export interface PublicDeps {
   mapSize: (admin: Client, a: PublicQuoteAsk) => Promise<number | null>;
   /** Tells the office about requests nobody was told of. Best effort. */
   tell: (admin: Client) => Promise<unknown>;
+  /** Tells the office a day's limit is nearly reached, or reached. Best effort. */
+  limitAlert?: (admin: Client, alert: PublicLimitAlert) => Promise<unknown>;
 }
 
 type Rpc = (
@@ -212,13 +217,40 @@ async function countDropped(deps: PublicDeps): Promise<void> {
   }
 }
 
-async function withinLimit(admin: Client, kind: "quote" | "request", key: string) {
-  const { data, error } = await rpcOf(admin)("public_form_take", { p_kind: kind, p_key: key });
+/**
+ * Counts this call against the limits and refuses it in the visitor's words when one is met
+ * (Nov 24; public_form_take2). The count answers which limit it was: this connection's hour,
+ * this connection's day, or the day's count for everyone. When this call is the one that takes
+ * the day's count past four fifths, or to its end, the office is told, once.
+ */
+async function withinLimit(deps: PublicDeps & { admin: Client }, kind: "quote" | "request") {
+  const { data, error } = await rpcOf(deps.admin)("public_form_take2", {
+    p_kind: kind,
+    p_key: deps.key,
+  });
   if (error) {
     console.error("Public form: the limit could not be read —", error.message);
     throw new Error(PUBLIC_TRY_AGAIN);
   }
-  if (data !== true) throw new Error(PUBLIC_TOO_MANY);
+  const o = (data ?? {}) as Record<string, unknown>;
+  if (o["ok"] !== true) {
+    const why = o["why"];
+    throw new Error(
+      why === "all" ? PUBLIC_BUSY : why === "one_day" ? PUBLIC_TOO_MANY_TODAY : PUBLIC_TOO_MANY,
+    );
+  }
+  const level = o["alert"];
+  if ((level === "near" || level === "reached") && deps.limitAlert) {
+    const alert: PublicLimitAlert = {
+      kind,
+      level,
+      used: Number(o["used"]) || 0,
+      cap: Number(o["cap"]) || 0,
+    };
+    await deps
+      .limitAlert(deps.admin, alert)
+      .catch((e) => console.error("Public form: the office was not told of the limit —", e));
+  }
 }
 
 /** Made-up numbers for the local test server. They match no real price. */
@@ -312,7 +344,7 @@ export async function quoteFor(askIn: unknown, deps: PublicDeps): Promise<Public
     throw new Error(PUBLIC_NOT_READY);
   }
   const admin = deps.admin;
-  await withinLimit(admin, "quote", deps.key);
+  await withinLimit({ ...deps, admin }, "quote");
 
   let drive: RoofCareDrive | null;
   let mapSqft: number | null;
@@ -389,7 +421,7 @@ export async function sendCare(dataIn: unknown, deps: PublicDeps): Promise<Publi
     if (deps.sample) return { reference: "R-0000", sample: true };
     throw new Error(PUBLIC_NOT_READY);
   }
-  await withinLimit(deps.admin, "request", deps.key);
+  await withinLimit({ ...deps, admin: deps.admin }, "request");
   const { website: _w, open_ms: _o, ...kept } = d;
   const { data, error } = await rpcOf(deps.admin)("public_request_submit", {
     p_key: deps.key,
@@ -417,7 +449,7 @@ export async function sendService(dataIn: unknown, deps: PublicDeps): Promise<Pu
     if (deps.sample) return { reference: "R-0000", sample: true };
     throw new Error(PUBLIC_NOT_READY);
   }
-  await withinLimit(deps.admin, "request", deps.key);
+  await withinLimit({ ...deps, admin: deps.admin }, "request");
   const { website: _w, open_ms: _o, ...kept } = d;
   const { data, error } = await rpcOf(deps.admin)("public_request_submit", {
     p_key: deps.key,
@@ -483,6 +515,7 @@ async function realDeps(): Promise<PublicDeps> {
       }
     },
     tell: (admin) => server.dispatchPublicRequestNotices(admin),
+    limitAlert: (admin, alert) => server.tellPublicLimit(admin, alert),
   };
 }
 

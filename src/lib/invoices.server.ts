@@ -1207,9 +1207,10 @@ export async function emailInvoice(input: {
       error:
         "Email is not set up yet: the RESEND_API_KEY secret is missing (Lovable Cloud › Secrets)",
     };
-  const { fromAddress, replyToAddress } = await import("@/lib/notify.server");
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
+  const { fromAddress, replyToAddress, countedEmail } = await import("@/lib/notify.server");
+  // Nov 24: counted with the day's emails, as one to a customer (those go before staff notices).
+  return countedEmail("customer", () =>
+    fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1221,16 +1222,8 @@ export async function emailInvoice(input: {
         text: input.text,
         attachments: [{ filename: input.fileName, content: toBase64(input.pdf) }],
       }),
-    });
-    if (!res.ok)
-      return {
-        ok: false,
-        error: `Resend ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`,
-      };
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+    }),
+  );
 }
 
 /**

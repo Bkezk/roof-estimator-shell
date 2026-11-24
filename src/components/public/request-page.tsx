@@ -19,7 +19,7 @@ import {
   RobotTrap,
 } from "@/components/public/fields";
 import { FlyerStepHead } from "@/components/roof-care/flyer-look";
-import { PUBLIC_TOO_MANY } from "@/lib/public-forms";
+import { publicLimitLine } from "@/lib/public-forms";
 import {
   PUBLIC_COMPANY,
   REQUEST_PAGE_LEAD,
@@ -112,7 +112,7 @@ export function PublicRequestPage() {
       setSent(r.reference);
       window.scrollTo({ top: 0 });
     } catch (e) {
-      setSendError(errWords(e).includes(PUBLIC_TOO_MANY) ? PUBLIC_TOO_MANY : SEND_FAILED_LINE);
+      setSendError(publicLimitLine(errWords(e)) ?? SEND_FAILED_LINE);
     } finally {
       busy.current = false;
       setSending(false);

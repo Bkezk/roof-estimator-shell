@@ -28,6 +28,7 @@ import {
 } from "@/lib/alert-who.server";
 import { shortDay } from "@/lib/followup-rules";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
+import { SETUP_QR_PATH } from "@/lib/menu-places";
 import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
 import { notificationPath } from "@/lib/notification-link";
 import {
@@ -125,11 +126,128 @@ async function emailSignature(admin: Client): Promise<string> {
   }
 }
 
+// ── The day's email count (owner, Nov 24: "Go on 4s suggestions") ──────────────────────────
+//
+// The email service lets a plan send only so many emails in 24 hours (100 on the free plan).
+// The site keeps its own count (email_take / email_seen in the database). From four fifths of
+// the limit, emails to staff about notices wait, so the rest is kept for customers: agreements,
+// receipts, invoices, payment links. A notice that is not emailed is still in the bell and on
+// the phone. The admins are told once at four fifths, and once when the service refuses.
+
+/** Who an email is for: one of us (a notice), or a customer. */
+export type EmailKind = "staff" | "customer";
+
+/** Said on a staff notice that was not emailed because the day's count is nearly used. */
+export const EMAIL_HELD =
+  "Not emailed: most of today's email limit is used, so emails to staff wait and the rest is kept for customers. The notice is in the bell.";
+/** Said when the email service itself refuses because the day's limit is reached. */
+export const EMAIL_DAY_FULL =
+  "Not sent: the email service's limit for the day is reached. It can be sent again tomorrow.";
+
+/** Notices that go to the bell and the phone only, never by email: they are about a limit. */
+export const BELL_ONLY_KINDS: ReadonlySet<string> = new Set(["email_limit", "public_limit"]);
+
+/** The notice the admins get about the day's email count. Pure. */
+export function emailLimitNotice(level: "near" | "full", used: number, cap: number): Outgoing {
+  const where = "The count is in Setup, QR pages.";
+  return level === "near"
+    ? {
+        kind: "email_limit",
+        title: `Email: ${used} of today's ${cap} are used`,
+        body: `From now on, emails to staff about notices wait, so the rest is kept for customers. Every notice is still in the bell and on your phone. ${where}`,
+        url: SETUP_QR_PATH,
+      }
+    : {
+        kind: "email_limit",
+        title: "Email has reached today's limit",
+        body: `The email service refused an email because the day's limit of ${cap} is reached. Emails start again as the count drops over the next 24 hours. ${where}`,
+        url: SETUP_QR_PATH,
+      };
+}
+
+type LooseRpc = (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message: string } | null }>;
+const looseRpc =
+  (c: Client): LooseRpc =>
+  (fn, args) =>
+    (c as unknown as { rpc: LooseRpc }).rpc(fn, args);
+
+/** Every admin: who is told about a limit. */
+export async function adminIds(admin: Client): Promise<string[]> {
+  const { data } = await admin.from("profiles").select("id").eq("role", "admin");
+  return (data ?? []).map((p) => p.id);
+}
+
+async function tellEmailLimit(admin: Client, level: "near" | "full", used: number, cap: number) {
+  try {
+    const to = await adminIds(admin);
+    if (to.length) await notify(to, emailLimitNotice(level, used, cap), admin);
+  } catch (e) {
+    console.error("Email limit: the admins were not told —", e);
+  }
+}
+
+/**
+ * One email through the email service, counted. `post` makes the call. Without the server's
+ * own key (the preview, the tests) nothing is counted and the email simply goes. A count that
+ * cannot be read never stops an email.
+ */
+export async function countedEmail(
+  kind: EmailKind,
+  post: () => Promise<Response>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const admin = await adminOrNull();
+  if (admin) {
+    try {
+      const { data, error } = await looseRpc(admin)("email_take", { p_kind: kind });
+      if (error) console.error("Email count: not read —", error.message);
+      const o = (data ?? {}) as Record<string, unknown>;
+      if (!error && o["send"] === false) return { ok: false, error: EMAIL_HELD };
+      if (!error && o["alert"] === "near")
+        await tellEmailLimit(admin, "near", Number(o["used"]) || 0, Number(o["cap"]) || 0);
+    } catch (e) {
+      console.error("Email count: not read —", e);
+    }
+  }
+  try {
+    const res = await post();
+    const body = res.ok ? "" : await res.text().catch(() => "");
+    const dayFull = res.status === 429 && /daily_quota/i.test(body);
+    if (admin) {
+      // The service's own count for the day, when it gives one (free plans do).
+      const said = res.headers.get("x-resend-daily-quota");
+      const used = said != null && /^\d+$/.test(said.trim()) ? Number(said.trim()) : null;
+      if (used != null || dayFull) {
+        try {
+          const { data } = await looseRpc(admin)("email_seen", {
+            p_used: used,
+            p_refused: dayFull,
+          });
+          const o = (data ?? {}) as Record<string, unknown>;
+          if (o["alert"] === "full")
+            await tellEmailLimit(admin, "full", used ?? 0, Number(o["cap"]) || 0);
+        } catch (e) {
+          console.error("Email count: the service's answer was not kept —", e);
+        }
+      }
+    }
+    if (dayFull) return { ok: false, error: EMAIL_DAY_FULL };
+    if (!res.ok) return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function sendEmail(input: {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  /** Who it is for (Nov 24). A notice to one of us unless said: those wait first. */
+  kind?: EmailKind;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = process.env["RESEND_API_KEY"];
   if (!key)
@@ -138,8 +256,8 @@ export async function sendEmail(input: {
       error:
         "Email is not set up yet: the RESEND_API_KEY secret is missing (Lovable Cloud › Secrets)",
     };
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
+  return countedEmail(input.kind ?? "staff", () =>
+    fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -150,15 +268,8 @@ export async function sendEmail(input: {
         text: input.text,
         ...(input.html ? { html: input.html } : {}),
       }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+    }),
+  );
 }
 
 /** The VAPID pair, generated on first use and kept in app_secrets. */
@@ -290,7 +401,8 @@ export async function notify(userIds: string[], sent: Outgoing, sb: Client): Pro
     const p = people.find((x) => x.id === row.user_id);
     if (!p) continue;
     const patch: Database["public"]["Tables"]["notifications"]["Update"] = {};
-    if (p.notify_email) {
+    // A notice about a limit goes to the bell and the phone only (BELL_ONLY_KINDS).
+    if (p.notify_email && !BELL_ONLY_KINDS.has(msg.kind)) {
       if (emailProblem) patch.email_error = emailProblem;
       else {
         const text = emailText(msg, link, signature);

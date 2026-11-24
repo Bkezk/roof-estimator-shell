@@ -192,6 +192,35 @@ export const PUBLIC_TRY_AGAIN =
 export const PUBLIC_TERMS_MOVED =
   "The plan's terms were updated. Reload the page, read them again, then send.";
 
+// ── Nov 24 (owner: "Go on 4s suggestions"): the limits, in the visitor's words ───────────────
+
+/** One connection has reached its limit for the day. */
+export const PUBLIC_TOO_MANY_TODAY =
+  "Too many requests from this connection today. Please call us at 606-523-9000.";
+/** Everyone together has reached the day's limit: nothing the visitor did. */
+export const PUBLIC_BUSY =
+  "We are getting a lot of requests right now, so this page is resting until tomorrow. Please call us at 606-523-9000.";
+/** The three sentences about a limit that a page shows as they are. */
+export const PUBLIC_LIMIT_LINES: readonly string[] = [
+  PUBLIC_TOO_MANY,
+  PUBLIC_TOO_MANY_TODAY,
+  PUBLIC_BUSY,
+];
+/** The limit sentence inside a failure's words, or null when it is some other failure. */
+export const publicLimitLine = (words: string): string | null =>
+  PUBLIC_LIMIT_LINES.find((l) => words.includes(l)) ?? null;
+
+/** The day's limits for everyone together (public_form_take2 in the database). */
+export const PUBLIC_DAY_LIMITS = { quote: 2000, request: 300 } as const;
+
+/** What the count answered when a limit was passed or met: told to the office once. */
+export interface PublicLimitAlert {
+  kind: "quote" | "request";
+  level: "near" | "reached";
+  used: number;
+  cap: number;
+}
+
 // ── Nov 24 (the public pages audit; owner: "Go") ─────────────────────────────────────────────
 
 /** The service request needs one of the two: a box ticked, or a few words. */

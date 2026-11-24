@@ -54,7 +54,8 @@ function deps(plans: unknown[], over: Partial<PublicDeps> = {}) {
   const admin = {
     rpc: async (fn: string, args?: Record<string, unknown>) => {
       calls.push({ fn, args });
-      if (fn === "public_form_take") return { data: true, error: null };
+      // Nov 24: the count is asked through public_form_take2 now.
+      if (fn === "public_form_take2") return { data: { ok: true }, error: null };
       if (fn === "public_care_quote")
         return { data: { quote_token: "tok-9", custom_quote: false, plans }, error: null };
       return { data: null, error: { message: "no such function", code: "42883" } };

@@ -17,14 +17,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  EMAIL_CAP_NOTE,
   GOOGLE_CAP_NOTE,
   QR_ADDRESS_OWN_SITE,
   QR_ADDRESS_WARNING,
   SERVICES_STARTER_NOTE,
+  USAGE_NOTE,
   cleanQrAddress,
   cleanServices,
+  emailUsageWords,
   qrAddressIsBorrowed,
   qrSheets,
+  usageLine,
   type QrSheet,
 } from "@/lib/public-requests";
 import {
@@ -89,16 +93,47 @@ export function PublicFormsSetup() {
   return <Loaded s={q.data} />;
 }
 
+/** Today's date in the office's time, as the counts are filed. */
+const todayYmd = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+
+/** One count beside its limit: amber from four fifths, red at the limit. */
+function UsageRow({ name, used, cap }: { name: string; used: number; cap: number }) {
+  const u = usageLine(used, cap);
+  return (
+    <li
+      data-usage={name}
+      data-usage-level={u.level}
+      className={
+        u.level === "full"
+          ? "font-medium text-destructive"
+          : u.level === "near"
+            ? "font-medium text-amber-700 dark:text-amber-400"
+            : ""
+      }
+    >
+      {name}: <b>{u.words}</b>
+      {u.level === "full"
+        ? ". The limit is reached: visitors are asked to call until midnight."
+        : u.level === "near"
+          ? ". Close to the day's limit."
+          : ""}
+    </li>
+  );
+}
+
 function Loaded({ s }: { s: PublicFormSettingsRead }) {
   const qc = useQueryClient();
   const save = useServerFn(savePublicFormSettings);
   const [services, setServices] = useState<string[]>(s.services);
   const [address, setAddress] = useState(s.qr_base_url ?? "");
   const [cap, setCap] = useState(String(s.google_daily_cap));
+  const [emailCap, setEmailCap] = useState(String(s.email_daily_cap));
   useEffect(() => {
     setServices(s.services);
     setAddress(s.qr_base_url ?? "");
     setCap(String(s.google_daily_cap));
+    setEmailCap(String(s.email_daily_cap));
   }, [s]);
 
   const cleanedServices = cleanServices(services);
@@ -106,20 +141,32 @@ function Loaded({ s }: { s: PublicFormSettingsRead }) {
   const capNumber = /^\d+$/.test(cap.trim()) ? Number(cap.trim()) : null;
   const capProblem =
     capNumber == null || capNumber > 100_000 ? "Type a whole number from 0 to 100,000." : null;
+  const emailCapNumber = /^\d+$/.test(emailCap.trim()) ? Number(emailCap.trim()) : null;
+  const emailCapProblem =
+    emailCapNumber == null || emailCapNumber > 1_000_000
+      ? "Type a whole number from 0 to 1,000,000."
+      : null;
+  const emailCapChanged = emailCap.trim() !== String(s.email_daily_cap);
   const dirty =
     JSON.stringify(services) !== JSON.stringify(s.services) ||
     address.trim() !== (s.qr_base_url ?? "") ||
-    cap.trim() !== String(s.google_daily_cap);
+    cap.trim() !== String(s.google_daily_cap) ||
+    emailCapChanged;
   const problem = !cleanedServices.ok
     ? cleanedServices.problem
     : !cleanedAddress.ok
       ? cleanedAddress.problem
-      : capProblem;
+      : (capProblem ?? emailCapProblem);
 
   const saving = useMutation({
     mutationFn: () =>
       save({
-        data: { services, qr_base_url: address, google_daily_cap: capNumber ?? 0 },
+        data: {
+          services,
+          qr_base_url: address,
+          google_daily_cap: capNumber ?? 0,
+          ...(emailCapChanged && emailCapNumber != null ? { email_daily_cap: emailCapNumber } : {}),
+        },
       }),
     onSuccess: (next) => {
       qc.setQueryData(KEY, next);
@@ -322,6 +369,92 @@ function Loaded({ s }: { s: PublicFormSettingsRead }) {
               ? `, and ${s.google.held} answered by the free router because the limit was reached.`
               : "."}
           </p>
+        </CardContent>
+      </Card>
+
+      {/* Nov 24 (owner: "Go on 4s suggestions"): today's counts beside their limits. */}
+      <Card data-public-usage>
+        <CardHeader>
+          <CardTitle className="text-base">Today on the public pages</CardTitle>
+          <CardDescription>{USAGE_NOTE}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          {s.usage ? (
+            <>
+              <ul className="space-y-1">
+                <UsageRow name="Quotes shown" used={s.usage.quote.used} cap={s.usage.quote.cap} />
+                <UsageRow
+                  name="Requests sent"
+                  used={s.usage.request.used}
+                  cap={s.usage.request.cap}
+                />
+                <li data-usage="dropped">
+                  Forms dropped as a robot's:{" "}
+                  <b>{s.usage.days[0]?.day === todayYmd() ? s.usage.days[0].dropped : 0}</b>
+                </li>
+              </ul>
+              <details>
+                <summary className="cursor-pointer text-muted-foreground">The last 30 days</summary>
+                {s.usage.days.length === 0 ? (
+                  <p className="mt-2 text-muted-foreground">Nothing counted yet.</p>
+                ) : (
+                  <table className="mt-2 w-full max-w-md text-left" data-usage-days>
+                    <thead>
+                      <tr className="text-muted-foreground">
+                        <th className="py-1 font-medium">Day</th>
+                        <th className="py-1 text-right font-medium">Quotes shown</th>
+                        <th className="py-1 text-right font-medium">Requests</th>
+                        <th className="py-1 text-right font-medium">Dropped</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {s.usage.days.map((d) => (
+                        <tr key={d.day} className="border-t">
+                          <td className="py-1">{d.day}</td>
+                          <td className="py-1 text-right">{d.quote.toLocaleString("en-US")}</td>
+                          <td className="py-1 text-right">{d.request.toLocaleString("en-US")}</td>
+                          <td className="py-1 text-right">{d.dropped.toLocaleString("en-US")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </details>
+            </>
+          ) : (
+            <p className="text-muted-foreground">The counts could not be read just now.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card data-email-usage>
+        <CardHeader>
+          <CardTitle className="text-base">Emails a day</CardTitle>
+          <CardDescription>{EMAIL_CAP_NOTE}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <Label htmlFor="email-cap">The most in 24 hours on the email plan</Label>
+          <Input
+            id="email-cap"
+            className="w-32"
+            inputMode="numeric"
+            value={emailCap}
+            disabled={!s.can_edit}
+            onChange={(e) => setEmailCap(e.target.value)}
+          />
+          {emailCapProblem && <p className="text-destructive">{emailCapProblem}</p>}
+          {s.usage && (
+            <p
+              className={
+                usageLine(s.usage.email.used, s.usage.email.cap).level === "ok"
+                  ? "text-muted-foreground"
+                  : "font-medium text-amber-700 dark:text-amber-400"
+              }
+              data-email-today
+            >
+              {emailUsageWords(s.usage.email)}
+            </p>
+          )}
         </CardContent>
       </Card>
 

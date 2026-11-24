@@ -23,10 +23,12 @@ import {
   cleanQrAddress,
   cleanServices,
   readMatches,
+  readUsage,
   type CareSignUpPrefill,
   type PublicFormSettings,
   type PublicMatch,
   type PublicRequestRow,
+  type PublicUsage,
 } from "@/lib/public-requests";
 
 export const PUBLIC_REQUESTS_NEED = "Requests from the public pages need Customers access";
@@ -159,6 +161,10 @@ export interface PublicFormSettingsRead extends PublicFormSettings {
   can_edit: boolean;
   /** Today's Google drive lookups: used, the limit, and how many went to the free router. */
   google: { used: number; cap: number; held: number };
+  /** Today's counts of the public pages and the day's emails; null when they could not be read. */
+  usage: PublicUsage | null;
+  /** The day's email limit on the email plan (0: none). */
+  email_daily_cap: number;
 }
 
 async function ownUrl(): Promise<string> {
@@ -175,17 +181,28 @@ async function ownUrl(): Promise<string> {
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+/** A database function the generated types do not list yet. */
+type LooseRpc = (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message: string } | null }>;
+
 async function readSettings(ctx: Ctx, canEdit: boolean): Promise<PublicFormSettingsRead> {
   const sb = ctx.supabase;
-  const [{ data, error }, today] = await Promise.all([
+  const [{ data, error }, today, counts] = await Promise.all([
     sb
       .from("public_form_settings")
       .select("services, qr_base_url, google_daily_cap, updated_at, updated_by_name")
       .eq("id", 1)
       .maybeSingle(),
     sb.rpc("google_route_today"),
+    // Nov 24: today's counts beside their limits, and the day's emails. A read that fails
+    // leaves the box out; the settings still show.
+    (sb as unknown as { rpc: LooseRpc }).rpc("public_form_usage"),
   ]);
   if (error) throw new Error(error.message);
+  if (counts.error) console.error("QR pages: the counts were not read —", counts.error.message);
+  const usage = counts.error ? null : readUsage(counts.data);
   const g = (today.data ?? {}) as Record<string, unknown>;
   const cap = data?.google_daily_cap ?? 200;
   return {
@@ -197,6 +214,8 @@ async function readSettings(ctx: Ctx, canEdit: boolean): Promise<PublicFormSetti
     own_url: await ownUrl(),
     can_edit: canEdit,
     google: { used: num(g["used"]), cap: num(g["cap"]) || cap, held: num(g["held"]) },
+    usage,
+    email_daily_cap: usage ? usage.email.cap : 100,
   };
 }
 
@@ -211,6 +230,8 @@ const settingsInput = z.object({
   services: z.array(z.string().max(200)).max(60),
   qr_base_url: z.string().max(300),
   google_daily_cap: z.number().int().min(0).max(100_000),
+  /** The day's email limit on the email plan; 0 for a plan with none. Left out = unchanged. */
+  email_daily_cap: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 export const savePublicFormSettings = createServerFn({ method: "POST" })
@@ -238,5 +259,12 @@ export const savePublicFormSettings = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!saved?.length)
       throw new Error("The settings were not saved. Reload the page and try again.");
+    if (data.email_daily_cap != null) {
+      const set = await (context.supabase as unknown as { rpc: LooseRpc }).rpc(
+        "email_daily_cap_set",
+        { p_cap: data.email_daily_cap },
+      );
+      if (set.error) throw new Error(`The email limit was not saved: ${set.error.message}`);
+    }
     return readSettings(context, true);
   });

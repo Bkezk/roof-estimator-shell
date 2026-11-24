@@ -321,7 +321,13 @@ export const emailPlanPayLink = createServerFn({ method: "POST" })
         .filter(Boolean)
         .join(" or "),
     });
-    const r = await sendEmail({ to, subject: mail.subject, text: mail.text, html: mail.html });
+    const r = await sendEmail({
+      to,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      kind: "customer",
+    });
     if (!r.ok) throw new Error(`The email did not go: ${r.error}`);
     const sent_at = new Date().toISOString();
     await admin.from("roof_care_plans").update({ pay_link_sent_at: sent_at }).eq("id", plan.id);

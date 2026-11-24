@@ -170,9 +170,10 @@ describe("notify() skips a recipient whose switch for the notice's category is o
     expect(emailed()).toEqual([emailOf(ESTIMATOR), emailOf(OFFICE)].sort());
     expect(pushed()).toEqual([endpointOf(ESTIMATOR), endpointOf(OFFICE)].sort());
     // The device stamps (push_subscription_mark, Nov 13) follow each push; the one read is this.
-    expect(e.rpcCalls.filter((c) => c.fn !== "push_subscription_mark")).toEqual([
-      { fn: "notify_recipients", args: { ids: [TECH, ESTIMATOR, OFFICE] } },
-    ]);
+    // Nov 24: and the day's email count (email_take, before each email) beside them.
+    expect(
+      e.rpcCalls.filter((c) => c.fn !== "push_subscription_mark" && c.fn !== "email_take"),
+    ).toEqual([{ fn: "notify_recipients", args: { ids: [TECH, ESTIMATOR, OFFICE] } }]);
   });
 
   it("a bid notice: the same technician gets it; the estimator with bids off does not", async () => {
