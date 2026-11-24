@@ -175,11 +175,16 @@ const orPart = (part: string): ((r: Row) => boolean) => {
   const col = m[1]!;
   const neg = m[2] !== undefined;
   const op = m[3]!;
-  const value = m[4]!;
+  // Nov 24: a value in double quotes is the text between them, as PostgREST reads it
+  // (`title.not.like."Opened: %"`, notice-types.ts noticeRuleFilter).
+  const quoted = /^"((?:[^"\\]|\\.)*)"$/s.exec(m[4]!);
+  const value = quoted ? quoted[1]!.replace(/\\"/g, '"') : m[4]!;
   let p: (r: Row) => boolean;
   if (op === "is" && value === "null") p = (r) => (r[col] ?? null) === null;
   else if (op === "ilike" || op === "like") {
-    const re = likeToRegExp(value);
+    // LIKE minds capitals, ILIKE does not (Nov 24: until then both ignored them here).
+    const any = likeToRegExp(value);
+    const re = op === "like" ? new RegExp(any.source, "s") : any;
     p = (r) => re.test(String(r[col] ?? ""));
   } else if (op === "in") {
     const vs = inListValues(value);

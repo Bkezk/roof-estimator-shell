@@ -28,7 +28,8 @@ import {
 } from "@/lib/alert-who.server";
 import { shortDay } from "@/lib/followup-rules";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
-import { noticeCategory, wantsNotice } from "@/lib/notice-categories";
+import { databaseRpc } from "@/lib/database-rpc";
+import { takesNotice } from "@/lib/notice-types";
 import { notificationPath } from "@/lib/notification-link";
 import {
   dayMorning,
@@ -233,6 +234,11 @@ export const emailText = (msg: Outgoing, link: string, signature: string) =>
  * no push — so people who do not deal with those things do not see them. A notice with no
  * category (tasks, mentions, the test) reaches everyone asked. Lead notices are narrowed at the
  * source as well (leads.server.ts, lead_notice_user_ids); notify_leads is honoured here too.
+ *
+ * Owner, Nov 24 ("Option A"): under a switch that is on, a person can turn single notice types
+ * off (Account › Choose which; notice-types.ts). One of those is left out entirely too. The
+ * rule is takesNotice, the same one the inbox reads follow: this only ever leaves people out,
+ * it never adds one. Before the migration is applied nobody has an off list, so nothing changes.
  */
 export async function notify(userIds: string[], sent: Outgoing, sb: Client): Promise<number> {
   const requested = [...new Set(userIds.filter(Boolean))];
@@ -243,12 +249,13 @@ export async function notify(userIds: string[], sent: Outgoing, sb: Client): Pro
   // warning to managers with it.
   const msg: Outgoing = { ...sent, url: notificationPath(sent.url) };
   const admin = await serverClient(sb);
-  // Recipients' channels and category switches: a SECURITY DEFINER read (profiles RLS hides
-  // other users' rows).
-  const { data: everyone, error } = await admin.rpc("notify_recipients", { ids: requested });
+  // Recipients' channels, category switches and the notice types each turned off: a SECURITY
+  // DEFINER read (profiles RLS hides other users' rows).
+  const { data: everyone, error } = await databaseRpc(admin)("notify_recipients", {
+    ids: requested,
+  });
   if (error) throw new Error(error.message);
-  const category = noticeCategory(msg.kind, msg.url ?? null);
-  const people = (everyone ?? []).filter((p) => wantsNotice(p, category));
+  const people = (everyone ?? []).filter((p) => takesNotice(p, msg));
   const ids = people.map((p) => p.id);
   const inserts = people.map((p) => ({
     user_id: p.id,
