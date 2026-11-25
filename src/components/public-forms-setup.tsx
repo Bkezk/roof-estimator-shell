@@ -1,10 +1,11 @@
 /**
- * Setup › QR pages (Roof Care step 4): the two QR codes for the printed sheets, and the three
+ * Setup › QR pages (Roof Care step 4): the printed sheet with its two QR codes, and the three
  * settings behind the public pages: the services on the request form, the web address the
  * codes hold, and the day's limit of Google lookups.
  *
- * The codes are made here, by the site (lib/qr.ts): nothing is fetched from anywhere. A sheet
- * never shows a price (owner, Nov 18).
+ * The sheet is the designed leave-behind, front and back (owner, Nov 25, 2026:
+ * components/leave-behind-sheet.tsx, lib/leave-behind.ts). The codes are made here, by the site
+ * (lib/qr.ts): nothing is fetched from anywhere. The sheet never shows a price (owner, Nov 18).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LeaveBehind } from "@/components/leave-behind-sheet";
+import {
+  SHEET_NO_PRICE_NOTE,
+  SHEET_PRINT_BUTTON,
+  SHEET_PRINT_NOTE,
+  sheetServicesLeftOut,
+} from "@/lib/leave-behind";
 import {
   EMAIL_CAP_NOTE,
   GOOGLE_CAP_NOTE,
@@ -36,24 +44,11 @@ import {
   savePublicFormSettings,
   type PublicFormSettingsRead,
 } from "@/lib/public-requests.functions";
-import { qrPixels, qrSvg } from "@/lib/qr";
+import { qrPixels } from "@/lib/qr";
+import { roofCareBenefits } from "@/lib/roof-care-plan.functions";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const KEY = ["public-form-settings"] as const;
-
-/** Only the sheets print: the rest of the page, and the menu, stay off the paper. */
-const PRINT_CSS = `
-@media print {
-  body * { visibility: hidden !important; }
-  [data-qr-print], [data-qr-print] * { visibility: visible !important; }
-  [data-qr-print] { position: absolute; left: 0; top: 0; width: 100%; }
-  [data-qr-sheet] { break-after: page; page-break-after: always; height: 100vh; display: flex;
-    flex-direction: column; align-items: center; justify-content: center; text-align: center;
-    border: 0 !important; }
-  [data-qr-sheet]:last-child { break-after: auto; page-break-after: auto; }
-  [data-qr-sheet] [data-qr-code] { width: 5in !important; height: 5in !important; }
-  [data-qr-no-print] { display: none !important; }
-}`;
 
 /** The code as a picture file, drawn here: 24 pixels to a cell is sharp at any printed size. */
 function downloadPng(sheet: QrSheet) {
@@ -123,6 +118,15 @@ function UsageRow({ name, used, cap }: { name: string; used: number; cap: number
 }
 
 function Loaded({ s }: { s: PublicFormSettingsRead }) {
+  // What each plan includes today, for the printed sheet. Not read: the sheet says it without
+  // the numbers, as the public page does.
+  const readBenefits = useServerFn(roofCareBenefits);
+  const benefits = useQuery({
+    queryKey: ["roof-care-benefits"],
+    queryFn: () => readBenefits(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
   const qc = useQueryClient();
   const save = useServerFn(savePublicFormSettings);
   const [services, setServices] = useState<string[]>(s.services);
@@ -179,16 +183,16 @@ function Loaded({ s }: { s: PublicFormSettingsRead }) {
   const base = s.qr_base_url ?? s.own_url;
   const sheets = useMemo(() => (base ? qrSheets(base) : []), [base]);
   const borrowed = !s.qr_base_url || qrAddressIsBorrowed(base);
+  const servicesLeftOut = sheetServicesLeftOut(s.services);
 
   return (
     <div className="space-y-6" data-public-forms-setup>
-      <style>{PRINT_CSS}</style>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">The QR codes</CardTitle>
           <CardDescription>
-            One sheet for each public page. No prices are printed: the price shows on the
-            customer&apos;s phone once they type their address.
+            One sheet of paper, printed on both sides: the Roof Care plans on the front and the
+            additional services on the back, each with its code. {SHEET_NO_PRICE_NOTE}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -212,38 +216,41 @@ function Loaded({ s }: { s: PublicFormSettingsRead }) {
             </p>
           ) : (
             <>
-              <div className="grid gap-4 sm:grid-cols-2" data-qr-print>
+              {/* Owner, Nov 25: the sheet in his flyer's look, both sides, as it will print
+                  (components/leave-behind-sheet.tsx). Its plans, services and codes are the
+                  saved ones, so the next print is always the current one. */}
+              <LeaveBehind
+                careUrl={sheets.find((x) => x.key === "care")?.url ?? ""}
+                requestUrl={sheets.find((x) => x.key === "request")?.url ?? ""}
+                numbers={benefits.data ?? null}
+                services={s.services}
+              />
+              {servicesLeftOut && (
+                <p className="text-amber-700 dark:text-amber-300" data-sheet-left-out>
+                  {servicesLeftOut}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button data-action="qr-print" onClick={() => window.print()}>
+                  <Printer className="mr-1 h-4 w-4" /> {SHEET_PRINT_BUTTON}
+                </Button>
                 {sheets.map((sheet) => (
-                  <div
+                  <Button
                     key={sheet.key}
-                    className="space-y-2 rounded-xl border p-4 text-center"
-                    data-qr-sheet={sheet.key}
+                    size="sm"
+                    variant="outline"
+                    data-action="qr-download"
+                    data-qr-url={sheet.url}
+                    title={`The code by itself, as a picture: ${sheet.url}`}
+                    onClick={() => downloadPng(sheet)}
                   >
-                    <p className="text-xl font-bold tracking-tight">{sheet.title}</p>
-                    <div
-                      className="mx-auto h-56 w-56"
-                      data-qr-code
-                      data-qr-url={sheet.url}
-                      // The picture is made here from the address alone: lib/qr.ts qrSvg.
-                      dangerouslySetInnerHTML={{ __html: qrSvg(sheet.url, sheet.title) }}
-                    />
-                    <p>{sheet.line}</p>
-                    <p className="break-all text-xs text-muted-foreground">{sheet.url}</p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-qr-no-print
-                      data-action="qr-download"
-                      onClick={() => downloadPng(sheet)}
-                    >
-                      <Download className="mr-1 h-4 w-4" /> Download as picture
-                    </Button>
-                  </div>
+                    <Download className="mr-1 h-4 w-4" /> {sheet.title} code
+                  </Button>
                 ))}
               </div>
-              <Button data-action="qr-print" onClick={() => window.print()}>
-                <Printer className="mr-1 h-4 w-4" /> Print the two sheets
-              </Button>
+              <p className="text-xs text-muted-foreground" data-sheet-print-note>
+                {SHEET_PRINT_NOTE}
+              </p>
             </>
           )}
         </CardContent>

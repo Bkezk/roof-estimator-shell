@@ -164,6 +164,8 @@ Setup, not a menu row of its own; the address is the same.
 
 - The two sheets, one a page: the name, a line of what the page is for, the code, the address
   in letters. No prices. **Print the two sheets** and **Download as picture**.
+  (Nov 25, 2026: the two plain sheets became the designed sheet, front and back:
+  `docs/qa/leave-behind-in-setup-2026-11-25.md`.)
 - **The web address inside the codes.** `https://` and the name only. Blank means the site's
   own, and then the page warns not to print: that address is borrowed and can change, and a
   printed code is permanent.

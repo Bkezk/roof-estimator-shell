@@ -814,12 +814,15 @@ describe("the QR codes are made by the site and hold exactly the saved address",
     for (const s of qrSheets("https://portal.example.com")) {
       expect(`${s.title} ${s.line}`).not.toMatch(/\$|\d/);
     }
+    // Nov 25, 2026: the two plain sheets became the designed sheet, front and back
+    // (components/leave-behind-sheet.tsx; leave-behind-nov25.test.ts proves no price is on
+    // it). The page still says so beside it, and still only the sheet reaches the printer.
     const page = read("src/components/public-forms-setup.tsx");
-    expect(page).toContain("No prices are printed");
-    expect(page).not.toMatch(/price\b[^.]*\{/i);
-    // Only the sheets print, one to a page, and the buttons stay off the paper.
-    expect(page).toContain("[data-qr-sheet] { break-after: page;");
-    expect(page).toContain("[data-qr-no-print] { display: none !important; }");
+    expect(page).toContain("{SHEET_NO_PRICE_NOTE}");
+    expect(read("src/lib/leave-behind.ts")).toContain("No price is printed");
+    expect(read("src/components/leave-behind-sheet.tsx")).toContain(
+      "body > *:not(#${LEAVE_BEHIND_PRINT_ID}) { display: none !important; }",
+    );
   });
 });
 
