@@ -151,12 +151,20 @@ The owner, Nov 25: "go on 1, 2". On a temporary paid plan of our own:
   invoice for the difference".
 - The temporary property, plan, both invoices, the stored PDF and six history lines were removed.
 
+### The two emails, Nov 25
+
+The owner, Nov 25: "3. go", and "site is published". From the published site, on two temporary
+plans of our own that carried his own address:
+
+- An unpaid card plan: the window's tick read "Email the customer the new price, with the
+  payment link". Saving sent the email, marked the plan as sent its link, and made the draft
+  invoice at the new price. The payment page behind the link showed the plan at the new price
+  with its Pay by card button. Nothing was paid.
+- A paid plan: the tick read "Email the customer the new price". Saving sent the email and made
+  the draft invoice for the difference.
+- Both temporary plans, their properties, three invoices and seven history lines were removed.
+  The Pay by card button in his copy of the first email leads to a plan that is gone.
+
 ## 8. Not proven yet
 
-- The "We measured your roof" email in a real inbox. No real email is sent without the owner's
-  asking.
-- The Pay by card button of that email on the published site.
-- The email of a paid plan in a real inbox.
-- On Nov 25 the published site was still on the code from before this work: it had no "Correct
-  the roof size" button. A real email can only be sent from the published site, so the email
-  the owner asked for waits for a publish.
+- Whether the two emails arrived and read well: the owner has them and has not said yet.

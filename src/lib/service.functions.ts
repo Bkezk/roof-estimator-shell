@@ -47,7 +47,7 @@ import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import type { SyncResult } from "@/lib/followups.server";
 import type { OpportunityMove } from "@/lib/opportunities.functions";
-import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
+import { customerTakenOffProblem, siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
@@ -593,7 +593,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       const { data: cur, error: cErr } = await sb
         .from("service_jobs")
         .select(
-          "number, technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible, roof_care_visit_id, site_id, account_id",
+          "number, technician_id, stage, scheduled_date, service_type, invoice_id, notes_tech_visible, roof_care_visit_id, site_id, account_id, customer_name",
         )
         .eq("id", id)
         .maybeSingle();
@@ -609,6 +609,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Owner, Oct 6: a technician cannot change a ticket once it is Authorized, Invoiced or
       // Closed (RLS service_jobs_update says the same, 20261006190000); the office still may.
       if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);
+      // A linked ticket keeps a customer (Nov 25, ticket 6069): changed to another, never just
+      // taken off. The form says the same before the save is sent (ticket-form.ts).
+      const takenOff = customerTakenOffProblem(cur, patch);
+      if (takenOff) throw new Error(takenOff);
       // Audit, Nov 16 (fix 1): to or from Inspection is a manager's once the ticket is Authorized
       // or has an invoice (ticket-stage.ts typeChangeProblem; trigger service_jobs_type_rule).
       const typeProblem = typeChangeProblem(p, cur, fields.service_type);

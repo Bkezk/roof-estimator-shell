@@ -154,7 +154,13 @@ import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
 import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
-import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
+import {
+  autoSiteId,
+  customerTakenOffProblem,
+  keepCustomerLabel,
+  siteProblem,
+  TICKET_STAGE_HINT,
+} from "@/lib/ticket-form";
 import type { ServiceSearch, StageFilter, TicketFrom, TypeValue } from "@/lib/service-search";
 import { localYmd } from "@/lib/tasks";
 import { SERVICE_OPEN_WORK, ticketOverdueDays } from "@/lib/work-counts";
@@ -1821,6 +1827,15 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         toast.error("Pick or add the customer first");
         return;
       }
+      // "Change" was pressed and nobody was picked (Nov 25, ticket 6069): the ticket would lose
+      // its customer and its property. Not saved; the link under the box puts the customer back.
+      const takenOff = job
+        ? customerTakenOffProblem(job, { account_id: draft.customer?.account_id ?? null })
+        : null;
+      if (takenOff) {
+        toast.error(takenOff, { duration: 15_000 });
+        return;
+      }
       if (siteMessage) {
         toast.error(siteMessage);
         return;
@@ -2091,6 +2106,32 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           {job?.customer_name && !job.account_id && (
             <p className="text-xs text-muted-foreground">
               Not linked to a customer profile: “{job.customer_name}”. Pick or add one to link it.
+            </p>
+          )}
+          {/* The ticket's own customer was taken off with "Change" and none is picked yet
+              (Nov 25): one press puts it back, with its property, contact and site. */}
+          {job?.account_id && !ro && (
+            <p className="text-xs text-muted-foreground">
+              Pick the new customer above, or{" "}
+              <button
+                type="button"
+                className="font-medium text-foreground underline underline-offset-2"
+                onClick={() => {
+                  setChangingCustomer(false);
+                  const back = draftFrom(job);
+                  setDraft((d) => ({
+                    ...d,
+                    customer: back.customer,
+                    hit: null,
+                    contact_id: back.contact_id,
+                    location_id: back.location_id,
+                  }));
+                }}
+                data-action="ticket-keep-customer"
+              >
+                {keepCustomerLabel(job.customer_name)}
+              </button>
+              .
             </p>
           )}
         </>

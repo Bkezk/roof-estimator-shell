@@ -28,3 +28,33 @@ export function siteProblem(input: {
 export function autoSiteId(sites: readonly { id: string }[]): string | null {
   return sites.length === 1 ? sites[0]!.id : null;
 }
+
+/**
+ * A ticket that is linked to a customer stays linked (owner, Nov 25: "go with solution A").
+ * The customer can be changed to another one, never just taken off. On Nov 25 the form let
+ * ticket 6069 be saved after "Change" was pressed and nobody picked: the ticket lost its
+ * customer and its property and kept only the old name as text. The form refuses that save
+ * and offers the customer back; saveServiceJob refuses it too, in the same words.
+ *
+ * A ticket from before customer profiles, with a typed name and no customer, is as it was.
+ */
+export const customerTakenOffMessage = (name: string | null | undefined): string => {
+  const who = (name ?? "").trim();
+  return who
+    ? "Pick a customer before saving. " +
+        who +
+        " was taken off this ticket and no other customer was picked, so nothing was saved."
+    : "Pick a customer before saving. The customer was taken off this ticket and no other was picked, so nothing was saved.";
+};
+
+/** The problem with a save that would leave a linked ticket with no customer, or null. */
+export function customerTakenOffProblem(
+  saved: { account_id: string | null | undefined; customer_name?: string | null },
+  next: { account_id: string | null | undefined },
+): string | null {
+  return saved.account_id && !next.account_id ? customerTakenOffMessage(saved.customer_name) : null;
+}
+
+/** The link under the empty search box that puts the ticket's own customer back. */
+export const keepCustomerLabel = (name: string | null | undefined): string =>
+  "Keep " + ((name ?? "").trim() || "the customer it has");
