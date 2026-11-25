@@ -12,14 +12,14 @@ it is published.
 
 ## 1. Keys from an outside service
 
-| Name                                  | Comes from                                                                                                                 | What the site uses it for                                                                                                      | Kept in                 | State on Nov 23, 2026                               |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | --------------------------------------------------- |
-| `RESEND_API_KEY`                      | resend.com, API keys, Create API key. Permission: Sending access. Domain: `jbkbid.com`.                                    | Every email the site sends: staff notices and reminders, Roof Care agreements, receipts and payment links, invoices.           | Lovable Cloud › Secrets | Set. The live site reports "Email configured: Yes". |
-| `GOOGLE_MAPS_API_KEY`                 | Google Cloud Console, APIs & Services, Credentials. The key is for the **Routes API**.                                     | Drive time by road for Roof Care prices and the public quote page. Without it, or over its daily limit, a free router answers. | Lovable Cloud › Secrets | Set and proven Nov 20.                              |
-| `STRIPE_SECRET_KEY`                   | Stripe Dashboard, Developers, API keys. Test mode first.                                                                   | Opening the card payment page for a Roof Care plan.                                                                            | Lovable Cloud › Secrets | Not set. Waiting on the owner.                      |
-| `STRIPE_WEBHOOK_SECRET`               | Stripe Dashboard, Developers, Webhooks, the endpoint `https://jbkbid.com/api/stripe/webhook`, its Signing secret.          | Proving that a "card was paid" message really came from Stripe.                                                                | Lovable Cloud › Secrets | Not set. Waiting on the owner.                      |
-| `SAM_GOV_API_KEY`                     | sam.gov, sign in, Account Details, Public API Key (`docs/sam-gov-federal-leads.md`).                                       | Federal roofing leads on the Leads page.                                                                                       | Lovable Cloud › Secrets | Not checked this session.                           |
-| `PLANROOM_EMAIL`, `PLANROOM_PASSWORD` | A free login, not a key: registered on the State of KY planroom and on Lynn Imaging's planroom (`docs/planroom-login.md`). | Reading each open roof job's contacts and plan holders for the Leads page.                                                     | Lovable Cloud › Secrets | Not checked this session.                           |
+| Name                                  | Comes from                                                                                                                 | What the site uses it for                                                                                                      | Kept in                 | State on Nov 23, 2026                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `RESEND_API_KEY`                      | resend.com, API keys, Create API key. Permission: Sending access. Domain: `jbkbid.com`.                                    | Every email the site sends: staff notices and reminders, Roof Care agreements, receipts and payment links, invoices.           | Lovable Cloud › Secrets | Set. The live site reports "Email configured: Yes".                                                          |
+| `GOOGLE_MAPS_API_KEY`                 | Google Cloud Console, APIs & Services, Credentials. The key is for the **Routes API**.                                     | Drive time by road for Roof Care prices and the public quote page. Without it, or over its daily limit, a free router answers. | Lovable Cloud › Secrets | Set and proven Nov 20.                                                                                       |
+| `STRIPE_SECRET_KEY`                   | Stripe Dashboard, Developers, API keys. Test mode first.                                                                   | Opening the card payment page for a Roof Care plan.                                                                            | Lovable Cloud › Secrets | Set by the owner Nov 24, 2026, from test mode, and proven by two test payments. The live values wait on him. |
+| `STRIPE_WEBHOOK_SECRET`               | Stripe Dashboard, Developers, Webhooks, the endpoint `https://jbkbid.com/api/stripe/webhook`, its Signing secret.          | Proving that a "card was paid" message really came from Stripe.                                                                | Lovable Cloud › Secrets | Set by the owner Nov 24, 2026, from test mode, and proven by two test payments. The live values wait on him. |
+| `SAM_GOV_API_KEY`                     | sam.gov, sign in, Account Details, Public API Key (`docs/sam-gov-federal-leads.md`).                                       | Federal roofing leads on the Leads page.                                                                                       | Lovable Cloud › Secrets | Not checked this session.                                                                                    |
+| `PLANROOM_EMAIL`, `PLANROOM_PASSWORD` | A free login, not a key: registered on the State of KY planroom and on Lynn Imaging's planroom (`docs/planroom-login.md`). | Reading each open roof job's contacts and plan holders for the Leads page.                                                     | Lovable Cloud › Secrets | Not checked this session.                                                                                    |
 
 The two Stripe values must come from the same side of Stripe: both from test mode, or both from
 live mode (Nov 24, 2026). The site takes a "card was paid" message only from the side its key is
@@ -28,15 +28,17 @@ from. One from the other side records nothing, and the admins and managers are t
 How the two Stripe values are made (Nov 24, 2026, checked against Stripe's own pages that day):
 
 - `STRIPE_SECRET_KEY` is best a restricted key, not the full secret key: Stripe recommends it.
-  It needs one permission, Checkout Sessions: Write. The site only ever opens a payment page
-  with it. A restricted key starts with `rk_`; the site takes either kind.
+  It needs one permission, Checkout Sessions: Write. The site opens a payment page with it
+  and, since Nov 26, 2026, closes one and reads whether one is still open. All three are
+  Checkout Sessions. A restricted key starts with `rk_`; the site takes either kind.
 - The webhook is made in Stripe under Workbench, Webhooks, "Create an event destination", for
   "Your account", with Snapshot events (the site does not read Thin events), sent to the
   endpoint above. Three events: `checkout.session.completed`,
   `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`. The
   third is for a payment from a bank account that does not go through.
 - Bank payments (ACH) are turned on or off in the Stripe account's payment method settings, by
-  the owner. No key and no code changes with it.
+  the owner. No key changes with it. Since Nov 26, 2026 the site follows a bank payment on the
+  plan and records it as "Bank payment". No new secret and no new webhook event were added.
 - Stripe Tax is not used: a Roof Care plan is billed as a service with no sales tax. It is not
   turned on until the owner's accountant says a plan is taxable.
 
