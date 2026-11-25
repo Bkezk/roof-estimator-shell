@@ -186,3 +186,13 @@ is an unlikely edge case at this point. we can also refund if we have to and red
 ## 8. Not proven yet
 
 - The softer words in a real inbox: the two emails he read were sent before the change.
+
+## The four versions, sent Nov 25
+
+The owner, Nov 25, after the softer words were published: "send me the versions of the softer roof
+size email". Two temporary plans in his own name were made, one not yet paid and one paid, and
+each was corrected twice on the published site with the email tick on: once to a bigger roof and
+once to a smaller one. That is the four versions: not paid and price up, not paid and price down,
+paid and more owed, paid and money back. The site said each was emailed. The two temporary plans,
+their properties, invoices and history were then removed; his own test plans were not touched.
+The Pay by card buttons in those test emails lead nowhere now, as the plans are gone.

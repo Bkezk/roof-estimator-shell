@@ -47,4 +47,6 @@ suggestion, and answered: "go on the calendar question solution".
 ## Left with the owner
 
 - Publishing. Until then the live calendar is as it was.
-- Whether the number should instead always show, at the cost of the customer's letters.
+- Asked whether the number should always show instead, he said the same day: "ticket number
+  doesnt have to show". It stays as built. He published that day, and the published calendar was
+  read: every chip is drawn by the new rule and none is a bare number.
