@@ -1637,6 +1637,13 @@ export function mapRoofSize(
   return { sqft: Math.round(area / 100) * 100, sure: !/^found by name/i.test((note ?? "").trim()) };
 }
 
+/**
+ * The sign-up, when the map has no size to offer (owner, Nov 25: "just saying you cant find it
+ * should be sufficent"). One plain sentence, whatever the cause: no outline at the address, an
+ * address the map cannot read, or a map that did not answer in time.
+ */
+export const MAP_ROOF_NOT_FOUND =
+  "The map could not find a roof size for this address. Type the roof's size in the box.";
 export const MAP_ROOF_USE = "Use this size";
 export const MAP_ROOF_MORE = "If the property has more than one roof, add them together.";
 

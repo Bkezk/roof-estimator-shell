@@ -468,7 +468,10 @@ describe('"Update pricing & labor" does not replace a typed price', () => {
   });
   it("the estimator's update writes the flags back and keeps the amounts", () => {
     const src = flat("src/routes/estimate.tsx");
-    expect(src).toContain("const zeroNow = markMetalsZeroAtUpdate(metalsTypedPrices);");
+    // Nov 25: only an update with Material Pricing ticked flags (markMetalsAfterUpdate).
+    expect(src).toContain(
+      "const zeroNow = markMetalsAfterUpdate(metalsTypedPrices, o.materialPricing);",
+    );
     expect(src).toContain("setMetalsTypedPrices(zeroNow);");
     // Nothing in the update empties the list.
     expect(src).not.toContain("setMetalsTypedPrices([])");

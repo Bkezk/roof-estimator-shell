@@ -296,6 +296,20 @@ export function markMetalsZeroAtUpdate(typed: readonly MetalsTypedPrice[]): Meta
   );
 }
 
+/**
+ * Which update counts (owner, Nov 25: "the whole reason we add the note is to remind them to
+ * check the price since previously it was set to 0 then updated"). Only an update that had
+ * "Update Material Pricing & Unit Labor" ticked is a price update. One with only the labor
+ * template or the formulas ticked changes no price: the typed prices and their flags are left
+ * exactly as they were, and nothing new is said.
+ */
+export function markMetalsAfterUpdate(
+  typed: readonly MetalsTypedPrice[],
+  pricesUpdated: boolean,
+): MetalsTypedPrice[] {
+  return pricesUpdated ? markMetalsZeroAtUpdate(typed) : [...typed];
+}
+
 /** The yellow notice of one line. */
 export const metalsZeroNotice = (item: string): string =>
   `You set the price of ${item} to $0 before the last price update.`;

@@ -227,7 +227,7 @@ import {
 import { emptyMetalsState, normalizeMetalsState, type MetalsState } from "@/lib/engine/metals";
 import {
   buildEstimateInputsWithMetalsPrices,
-  markMetalsZeroAtUpdate,
+  markMetalsAfterUpdate,
   metalsMaterialLabel,
   metalsTypedCount,
   metalsZeroNotices,
@@ -2098,8 +2098,10 @@ function EstimatePage() {
     // moment is flagged and says so in the bid's yellow notices from here on, until it is
     // dismissed or the price is no longer 0 (lib/metals-price-override.ts). A notice dismissed
     // after an earlier update shows again: this is a new update.
-    const zeroNow = markMetalsZeroAtUpdate(metalsTypedPrices);
-    const zeroNotes = metalsZeroNotices(result?.metalsScreen, zeroNow);
+    // Only an update with Material Pricing ticked is a price update (owner, Nov 25): one with
+    // only the labor template or the formulas ticked flags nothing and says nothing.
+    const zeroNow = markMetalsAfterUpdate(metalsTypedPrices, o.materialPricing);
+    const zeroNotes = o.materialPricing ? metalsZeroNotices(result?.metalsScreen, zeroNow) : [];
     setMetalsTypedPrices(zeroNow);
     if (zeroNotes.length) setDismissedNotices((prev) => restoreNotices(prev, zeroNotes));
     toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);

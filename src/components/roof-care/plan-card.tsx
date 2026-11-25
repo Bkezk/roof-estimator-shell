@@ -119,6 +119,7 @@ import {
   isExpired,
   lostWords,
   MAP_ROOF_MORE,
+  MAP_ROOF_NOT_FOUND,
   MAP_ROOF_USE,
   mapRoofSizeLine,
   nextWindow,
@@ -3001,6 +3002,13 @@ function SignUpDialog({
                 >
                   {MAP_ROOF_USE}
                 </Button>
+              </p>
+            )}
+            {/* Owner, Nov 25: when the map has nothing to offer, say so in one plain line. Only
+                once the look-up has finished: nothing is said while it is still looking. */}
+            {!mapSize.data && (mapSize.isSuccess || mapSize.isError) && (
+              <p className="text-muted-foreground" data-sign-line="map-not-found">
+                {MAP_ROOF_NOT_FOUND}
               </p>
             )}
             {price.error && (

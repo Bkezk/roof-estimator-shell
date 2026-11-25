@@ -64,3 +64,6 @@ publish is the proof.
 Any OK of the "Update pricing & labor" box counts as the price update for the $0 note, whichever
 boxes are ticked in it. Counting only an update with Material Pricing ticked is a one line
 change.
+
+**Settled Nov 25.** Only an update with Material Pricing ticked counts:
+`docs/qa/map-not-found-and-zero-note-2026-11-25.md`.
