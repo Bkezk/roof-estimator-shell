@@ -54,6 +54,9 @@ type JobRow = {
   invoice_id?: string | null | undefined;
   inspection?: unknown;
   recommend_new_roof?: boolean | undefined;
+  /** What the ticket was made from (Nov 25; job-steps.ts): its opportunity waits on it. */
+  from_opportunity_id?: string | null | undefined;
+  from_job_id?: string | null | undefined;
 };
 
 const ticketTitle = (j: JobRow) =>
@@ -188,6 +191,22 @@ export async function afterTicketStage(
         },
         admin,
       );
+  }
+  // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that was waiting on this
+  // ticket, and now waits on nothing, is handed back to its person with two working days.
+  if (becameDone) {
+    const { afterStepDone } = await import("@/lib/job-steps.server");
+    const { ticketStepLabel } = await import("@/lib/job-steps");
+    await afterStepDone(
+      admin,
+      {
+        kind: "ticket",
+        label: ticketStepLabel({ number: row.number, service_type: row.service_type ?? "" }),
+        from_opportunity_id: row.from_opportunity_id ?? null,
+        from_job_id: row.from_job_id ?? null,
+      },
+      actor,
+    );
   }
   // An authorized inspection is complete: nothing to invoice, so nobody is told — unless it is
   // being billed (it has an invoice; audit, Nov 16, fix 8): then the office is told as for any

@@ -100,7 +100,8 @@ describe("where the tag shows", () => {
 
   it("each opportunity row and the open opportunity's header, by the list's own day", () => {
     // The row passes its hold too (owner, Oct 13: a snoozed opportunity is not overdue).
-    expect(opps).toContain("days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}");
+    // Nov 25: isOppQuiet is the hold OR a step it waits on (job-steps.ts).
+    expect(opps).toContain("days={oppOverdueDays({ ...o, status }, today, isOppQuiet(o, today))}");
     expect(opps).toMatch(/<OppListRow[\s\S]*?today=\{today\}/);
     expect(count(opps, "oppOverdueDays(")).toBe(2);
     expect(opps).toMatch(/data-line="tags"[\s\S]{0,80}<OverdueBadge/);

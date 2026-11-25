@@ -430,13 +430,15 @@ export const saveBid = createServerFn({ method: "POST" })
       // to be linked to one).
       if (asBidStatus(bid.status) !== "draft" && (statusChanged || bid.opportunity_id))
         await syncOpportunityFromBid(context, bid.id);
-      if (statusChanged)
+      if (statusChanged) {
         await tellBidStep(
           context,
           bid,
           { prevStatus: cur?.status ?? null },
           payload.updated_by_name,
         );
+        await bidLeftDraft(context, bid.id, cur?.status ?? null, payload.updated_by_name ?? null);
+      }
       return bid;
     }
     const status = data.status ?? "draft";
@@ -694,6 +696,45 @@ export const listBidFolders = createServerFn({ method: "GET" })
   });
 
 /**
+ * One job, one row (owner, Nov 25; job-steps.ts): a draft bid is a step its opportunity waits
+ * on. The moment it is no longer a draft, an opportunity that now waits on nothing is handed
+ * back to its person with two working days. Won and Lost close the opportunity, so nobody is
+ * told then. Best effort: the bid is saved either way.
+ */
+async function bidLeftDraft(
+  context: Parameters<typeof syncOpportunityFromBid>[0],
+  bidId: string,
+  prevStatus: string | null,
+  actorName: string | null,
+) {
+  if (asBidStatus(prevStatus) !== "draft") return;
+  try {
+    const { data: b } = await context.supabase
+      .from("bids")
+      .select("name, status, opportunity_id, from_job_id")
+      .eq("id", bidId)
+      .maybeSingle();
+    if (!b || asBidStatus(b.status) === "draft") return;
+    const [{ afterStepDone }, { bidStepLabel }] = await Promise.all([
+      import("@/lib/job-steps.server"),
+      import("@/lib/job-steps"),
+    ]);
+    await afterStepDone(
+      context.supabase,
+      {
+        kind: "bid",
+        label: bidStepLabel(b),
+        from_opportunity_id: b.opportunity_id,
+        from_job_id: b.from_job_id,
+      },
+      { id: context.userId, name: actorName },
+    );
+  } catch (e) {
+    console.error("A bid that left Draft:", e instanceof Error ? e.message : e);
+  }
+}
+
+/**
  * Change a bid's status from the list (Bids page dropdown); stamps who and when like a save, the
  * status stamps (bidStatusStamps), the won day (wonOnColumns: the day the list asked for when
  * marking Won, else the stored one, else today; cleared otherwise), and then drives the linked
@@ -766,6 +807,7 @@ export const setBidStatus = createServerFn({ method: "POST" })
     if (asBidStatus(cur.status) !== data.status) {
       await syncOpportunityFromBid(context, bid.id);
       await tellBidStep(context, bid, { prevStatus: cur.status }, bid.updated_by_name);
+      await bidLeftDraft(context, bid.id, cur.status, bid.updated_by_name);
     }
     const back =
       data.undo && data.status === "draft" ? await undoOpportunityFromBid(context, bid.id) : null;

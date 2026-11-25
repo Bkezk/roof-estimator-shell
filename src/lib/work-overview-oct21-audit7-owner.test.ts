@@ -404,7 +404,8 @@ describe("G. label lookups read ids in chunks of 100", () => {
   it("source: both label blocks go through readInChunks; no whole-list .in('id', …) is left", () => {
     const mine = read("src/lib/my-work.functions.ts");
     expect(mine).toContain('from "@/lib/chunk-ids"');
-    expect(mine.match(/readInChunks\(/g)).toHaveLength(3);
+    // Nov 25: two more, for the tickets' notes (the opportunity's title, what else is open here).
+    expect(mine.match(/readInChunks\(/g)).toHaveLength(5);
     expect(mine).not.toMatch(/\.in\("id", (buildingIds|accountIds|oppIds)\)/);
     const owner = read("src/lib/owner-view.functions.ts");
     expect(owner).toContain('from "@/lib/chunk-ids"');

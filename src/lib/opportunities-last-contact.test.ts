@@ -189,7 +189,8 @@ describe("the list row (src/components/opportunities-page.tsx)", () => {
     expect(line).toContain('"No contact yet"');
   });
   it("and the next reminder on an open one with a timer, not while on hold", () => {
-    expect(line).toContain("isOpenOppStatus(status) && o.next_remind_at && !isOppHeld(o, today)");
+    // Nov 25: nor while it waits on a step (isOppQuiet; no reminder goes out then).
+    expect(line).toContain("isOpenOppStatus(status) && o.next_remind_at && !isOppQuiet(o, today)");
     expect(line).toContain("` · Next reminder ${dayShort(o.next_remind_at)}`");
     expect(page).toContain("const NOTE_CUT = 90;");
   });

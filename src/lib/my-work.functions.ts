@@ -30,6 +30,7 @@ import {
   type TicketIn,
   type UnassignedRows,
 } from "@/lib/my-work";
+import { alsoOpenHere } from "@/lib/job-steps";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 import { AWAITS_INVOICE_OR, awaitsInvoice } from "@/lib/ticket-stage";
 import { normalizeWorkLayout, type WorkLayout } from "@/lib/work-layout";
@@ -145,7 +146,7 @@ export const listMyWork = createServerFn({ method: "GET" })
     let tq = sb
       .from("service_jobs")
       .select(
-        "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+        "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, site_id, from_opportunity_id, from_job_id",
       )
       .is("deleted_at", null)
       .in("stage", [...WORK_TICKET_STAGES])
@@ -434,6 +435,45 @@ export const listMyWork = createServerFn({ method: "GET" })
       techNames,
     ]);
     const oppStatus = new Map(opps.map((o) => [o.id, o.status]));
+    // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step
+    // made from it is not listed. Its inspection, repair or bid is the row, and says where it
+    // came from. Nothing is stored: the moment the step is finished, the opportunity is back.
+    const { openStepsFor } = await import("@/lib/job-steps.server");
+    const waiting = await openStepsFor(sb, oppIds);
+    const listed = (tickets.data ?? []) as (TicketIn & {
+      site_id?: string | null;
+      from_opportunity_id?: string | null;
+      from_job_id?: string | null;
+    })[];
+    const fromOppIds = [
+      ...new Set(listed.map((t) => t.from_opportunity_id).filter((x): x is string => !!x)),
+    ];
+    const siteIds = [...new Set(listed.map((t) => t.site_id).filter((x): x is string => !!x))];
+    // Both best effort, under the caller's own rights: a technician reads no opportunity and
+    // only their own tickets, and simply gets fewer notes.
+    const [fromOpps, atSites] = await Promise.all([
+      readInChunks(fromOppIds, (ids) =>
+        sb.from("crm_opportunities").select("id, title").in("id", ids),
+      ),
+      readInChunks(siteIds, (ids) =>
+        sb
+          .from("service_jobs")
+          .select("id, number, service_type, stage, site_id, from_opportunity_id, from_job_id")
+          .is("deleted_at", null)
+          .in("stage", [...WORK_TICKET_STAGES])
+          .in("site_id", ids),
+      ),
+    ]);
+    const oppTitle = new Map(fromOpps.map((o) => [o.id, o.title]));
+    const alsoHere = alsoOpenHere(atSites);
+    const withNotes = (t: (typeof listed)[number]): TicketIn => {
+      const title = t.from_opportunity_id ? oppTitle.get(t.from_opportunity_id) : undefined;
+      return {
+        ...t,
+        job_note: title ? `Opportunity: ${title}` : null,
+        also_here: alsoHere.get(t.id) ?? null,
+      };
+    };
     const buildingLabel = new Map(
       buildings.map((b) => [
         b.id,
@@ -455,28 +495,30 @@ export const listMyWork = createServerFn({ method: "GET" })
     names[context.userId] ??= nameOf(me);
 
     return {
-      tickets: (tickets.data ?? []) as TicketIn[],
+      tickets: listed.map(withNotes),
       tasks: (tasks.data ?? []).map(withBuilding),
-      followups: (followups.data ?? []).map((f) => ({
-        id: f.id,
-        title: f.title,
-        url: f.url,
-        due_at: f.due_at,
-        status: f.status,
-        kind: f.kind,
-        item_id: f.item_id,
-        assignee_id: f.assignee_id,
-        every_days: f.every_days,
-        snoozed_until: f.snoozed_until ?? null,
-        // The hold's record (owner, Oct 9; missing until 20261009150000_followup_holds.sql).
-        hold_reason: f.hold_reason ?? null,
-        held_by_name: f.held_by_name ?? null,
-        hold_count: f.hold_count ?? 0,
-        // When its last reminder went out (owner, Oct 15: shown on the row).
-        last_reminded_at: f.last_reminded_at ?? null,
-        account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
-        opportunity_status: f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,
-      })),
+      followups: (followups.data ?? [])
+        .filter((f) => !(f.kind === "opportunity" && waiting.has(f.item_id)))
+        .map((f) => ({
+          id: f.id,
+          title: f.title,
+          url: f.url,
+          due_at: f.due_at,
+          status: f.status,
+          kind: f.kind,
+          item_id: f.item_id,
+          assignee_id: f.assignee_id,
+          every_days: f.every_days,
+          snoozed_until: f.snoozed_until ?? null,
+          // The hold's record (owner, Oct 9; missing until 20261009150000_followup_holds.sql).
+          hold_reason: f.hold_reason ?? null,
+          held_by_name: f.held_by_name ?? null,
+          hold_count: f.hold_count ?? 0,
+          // When its last reminder went out (owner, Oct 15: shown on the row).
+          last_reminded_at: f.last_reminded_at ?? null,
+          account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
+          opportunity_status: f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,
+        })),
       names,
       people,
       rosterComplete: roster.complete,

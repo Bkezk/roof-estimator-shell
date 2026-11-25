@@ -133,6 +133,7 @@ import {
 import { followupForItem, getCrmSettings } from "@/lib/followups.functions";
 import { oppStatusStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
+import { LinkTicket } from "@/components/link-ticket";
 import { WorkChainLine } from "@/components/work-chain-line";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
@@ -359,7 +360,7 @@ function OppList({
     } else if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
     if (
       overdueOnly &&
-      !isOverdueOpp({ ...o, status: asStatus(o.status) }, today, isOppHeld(o, today))
+      !isOverdueOpp({ ...o, status: asStatus(o.status) }, today, isOppQuiet(o, today))
     )
       return false;
     if (q) {
@@ -623,10 +624,11 @@ function OppListRow({
             {OPP_STATUS_LABELS[status]}
           </Badge>
           <OverdueBadge
-            days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}
+            days={oppOverdueDays({ ...o, status }, today, isOppQuiet(o, today))}
             what="Expected to close"
           />
           <HoldBadge holdUntil={o.hold_until} today={today} />
+          <WaitingOn words={o.waiting_on} />
           {/* Nov 23: made from a public page and nobody has said whose it is yet. */}
           {!o.account_id && isOpenOppStatus(status) && (
             <Badge
@@ -680,13 +682,32 @@ function OppListRow({
             ) : (
               "No contact yet"
             )}
-            {isOpenOppStatus(status) && o.next_remind_at && !isOppHeld(o, today)
+            {isOpenOppStatus(status) && o.next_remind_at && !isOppQuiet(o, today)
               ? ` · Next reminder ${dayShort(o.next_remind_at)}`
               : ""}
           </p>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on its inspection,
+ * a repair or a draft bid is quiet, as one on hold is: not overdue, no next reminder.
+ */
+const isOppQuiet = (
+  o: { hold_until?: string | null; waiting_on?: string | null },
+  today: string,
+): boolean => isOppHeld(o, today) || !!o.waiting_on;
+
+/** "Waiting on inspection #6090, Dec 4, Garry Peters": why the opportunity is quiet. */
+function WaitingOn({ words }: { words: string | null | undefined }) {
+  if (!words) return null;
+  return (
+    <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal" data-opp-waiting>
+      {words}
+    </Badge>
   );
 }
 
@@ -1411,6 +1432,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         {/* Owner, Nov 13: what came of it, in one line — its inspection, the repair ticket or the
             bid after it — each part a link. Nothing while nothing was started from it. */}
         {opp && <WorkChainLine kind="opportunity" id={opp.id} />}
+        {/* Owner, Nov 25: a ticket made on its own joins this opportunity's job here. Shown only
+            while the customer has an open ticket to link, or one is linked (link-ticket.tsx). */}
+        {opp && !deleted && !!opp.account_id && dispatchesTickets(profile) && (
+          <LinkTicket opportunityId={opp.id} />
+        )}
         {opp?.deleted_at && (
           <div
             role="status"
@@ -1450,11 +1476,12 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               days={oppOverdueDays(
                 { status: asStatus(opp.status), expected_close: opp.expected_close },
                 localYmd(new Date()),
-                isOppHeld(opp, localYmd(new Date())),
+                isOppQuiet(opp, localYmd(new Date())),
               )}
               what="Expected to close"
             />
             <HoldBadge holdUntil={opp.hold_until} today={localYmd(new Date())} />
+            <WaitingOn words={opp.waiting_on} />
           </div>
         )}
         {opp && (

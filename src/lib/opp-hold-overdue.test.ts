@@ -105,12 +105,14 @@ describe("the screens carry the hold", () => {
     expect(fns).toContain("hold_until: holds.get(r.id) ?? null,");
   });
   it("the list row, the Overdue filter and the header pass the hold; an On hold tag replaces the red one", () => {
-    expect(page).toContain("days={oppOverdueDays({ ...o, status }, today, isOppHeld(o, today))}");
+    // Nov 25: isOppQuiet is the hold OR a step the opportunity waits on (job-steps.ts).
+    expect(page).toContain("isOppHeld(o, today) || !!o.waiting_on");
+    expect(page).toContain("days={oppOverdueDays({ ...o, status }, today, isOppQuiet(o, today))}");
     expect(page).toContain("<HoldBadge holdUntil={o.hold_until} today={today} />");
     expect(page).toContain(
-      "isOverdueOpp({ ...o, status: asStatus(o.status) }, today, isOppHeld(o, today))",
+      "isOverdueOpp({ ...o, status: asStatus(o.status) }, today, isOppQuiet(o, today))",
     );
-    expect(page).toContain("isOppHeld(opp, localYmd(new Date())),");
+    expect(page).toContain("isOppQuiet(opp, localYmd(new Date())),");
     expect(page).toContain("<HoldBadge holdUntil={opp.hold_until} today={localYmd(new Date())} />");
     expect(page).toContain("on hold until ${whenDay(f.snoozed_until)}");
     expect(badge).toContain("export function HoldBadge(");
@@ -119,8 +121,9 @@ describe("the screens carry the hold", () => {
   it("the Customers strip leaves held opportunities out of Overdue opportunities", () => {
     expect(counts).toContain('.in("kind", ["ticket", "opportunity"])');
     expect(counts).toContain("const oppsOnHold = heldOppIds(heldRows, today);");
-    expect(counts).toContain(
-      "overdueOpps: (overdueO.data ?? []).filter((o) => !oppsOnHold.has(o.id)).length,",
+    // Nov 25: and the ones that wait on a step made from them (job-steps.ts).
+    expect(counts).toMatch(
+      /overdueOpps: \(overdueO\.data \?\? \[\]\)\.filter\(\(o\) => !oppsOnHold\.has\(o\.id\) && !waiting\.has\(o\.id\)\)\s*\.length,/,
     );
     expect(counts).not.toContain("overdueOpps: overdueO.count ?? 0");
   });

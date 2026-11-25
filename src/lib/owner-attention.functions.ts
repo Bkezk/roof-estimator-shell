@@ -257,12 +257,22 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
     const care = await careVisitsOfPlans(sb, today);
     const cardBack = await careCardBackOwed(sb);
     const publicRequests = await publicRequestsWaiting(sb);
+    // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
+    // from it is not "not started". Somebody is on the step, and the step is what can be late.
+    const { openStepsFor } = await import("@/lib/job-steps.server");
+    const waitingOpps = await openStepsFor(
+      sb,
+      (untouched ?? []).filter((u) => u.kind === "opportunity").map((u) => u.item_id),
+    );
+    const untouchedLive = untouched
+      ? untouched.filter((u) => !(u.kind === "opportunity" && waitingOpps.has(u.item_id)))
+      : untouched;
     return attentionList({
       today,
       now: now.toISOString(),
       limits: attentionLimits(settings.data),
       tickets,
-      untouched,
+      untouched: untouchedLive,
       opps: must<AttOpp[]>("opportunities", opps),
       bids: must<AttBid[]>("bids", bids),
       invoices: must<AttInvoice[]>("invoices", invoices),

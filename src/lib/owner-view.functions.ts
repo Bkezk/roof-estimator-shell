@@ -234,11 +234,25 @@ export const listOwnerView = createServerFn({ method: "GET" })
       ]);
     const people = must("Profiles", profiles);
     const followupRows = must("Follow-ups", followups);
+    // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
+    // from it is not a row of its own and is not overdue. The step is the row.
+    const oppRows = must("Opportunities", opps);
+    const { openStepsFor } = await import("@/lib/job-steps.server");
+    const waitingOpps = new Set(
+      (
+        await openStepsFor(sb, [
+          ...oppRows.map((o) => o.id),
+          ...followupRows.filter((f) => f.kind === "opportunity").map((f) => f.item_id),
+        ])
+      ).keys(),
+    );
     const items = mergeWork(
       {
         tickets: must("Tickets", tickets) as TicketIn[],
         tasks: must("Tasks", tasks),
-        followups: followupRows.map(followupIn),
+        followups: followupRows
+          .filter((f) => !(f.kind === "opportunity" && waitingOpps.has(f.item_id)))
+          .map(followupIn),
         bids: must("Bids", bids),
       },
       (iso) => localYmd(new Date(iso)),
@@ -246,7 +260,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
     const buckets = bucketCounts(items, today);
     // An overdue opportunity with an open follow-up is already in the Overdue bucket as that
     // follow-up: counted once (owner-view.ts oppCounts).
-    const oppsBy = oppCounts(must("Opportunities", opps), today, followupRows);
+    const oppsBy = oppCounts(oppRows, today, followupRows, waitingOpps);
     const doneBy = doneThisWeek(
       must("Done tickets", doneTickets),
       must("Done tasks", doneTasks),
@@ -596,14 +610,26 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const oppById = new Map(oppRefs.map((o) => [o.id, o]));
     const label = (id: string | null) => (id ? (buildingLabel.get(id) ?? null) : null);
 
+    // One job, one row (Nov 25; job-steps.ts): a waiting opportunity is not this person's row.
+    const { openStepsFor } = await import("@/lib/job-steps.server");
+    const waitingOpps = new Set(
+      (
+        await openStepsFor(sb, [
+          ...oppRows.map((o) => o.id),
+          ...followupRows.filter((f) => f.kind === "opportunity").map((f) => f.item_id),
+        ])
+      ).keys(),
+    );
     const items = mergeWork(
       {
         tickets: ticketRows,
         tasks: taskRows.map((t) => ({ ...t, building_label: label(t.building_id) })),
-        followups: followupRows.map((f) => ({
-          ...followupIn(f),
-          account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
-        })),
+        followups: followupRows
+          .filter((f) => !(f.kind === "opportunity" && waitingOpps.has(f.item_id)))
+          .map((f) => ({
+            ...followupIn(f),
+            account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
+          })),
         bids: bidRows.map((b) => ({
           ...b,
           account_name: b.account_id ? (accountName.get(b.account_id) ?? null) : null,
@@ -620,6 +646,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
       })),
       today,
       followupRows,
+      waitingOpps,
     );
     const done = doneItemsFor(
       userId,

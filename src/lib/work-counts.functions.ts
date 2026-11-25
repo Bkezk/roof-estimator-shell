@@ -89,12 +89,20 @@ export const getWorkCounts = createServerFn({ method: "GET" })
     const heldRows = held.error ? [] : (held.data ?? []);
     const onHold = heldTicketIds(heldRows, today);
     const oppsOnHold = heldOppIds(heldRows, today);
+    // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
+    // from it is not overdue. Its inspection, repair or bid is what can be late.
+    const { openStepsFor } = await import("@/lib/job-steps.server");
+    const waiting = await openStepsFor(
+      sb,
+      (overdueO.data ?? []).map((o) => o.id),
+    );
     return {
       openTickets: openT.count ?? 0,
       overdueTickets: (overdueT.data ?? []).filter((j) => countsAsOverdueTicket(j, today, onHold))
         .length,
       openOpps: openO.count ?? 0,
-      overdueOpps: (overdueO.data ?? []).filter((o) => !oppsOnHold.has(o.id)).length,
+      overdueOpps: (overdueO.data ?? []).filter((o) => !oppsOnHold.has(o.id) && !waiting.has(o.id))
+        .length,
       today,
     };
   });

@@ -37,6 +37,7 @@ import {
   REFERRED_BY_MAX,
 } from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
+import { waitingWords } from "@/lib/job-steps";
 import { type MentionOutcome, NO_MENTIONS } from "@/lib/mentions";
 import { addDays } from "@/lib/my-work";
 import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
@@ -88,6 +89,13 @@ export type OpportunityWithNames = OpportunityRow & {
   hold_until: string | null;
   /** The open follow-up's next reminder (owner, Nov 4: the list row); null without one. */
   next_remind_at: string | null;
+  /**
+   * One job, one row (owner, Nov 25; job-steps.ts): what the opportunity waits on, in words
+   * ("Waiting on inspection #6090, Dec 4, Garry Peters"), while a step made from it is open
+   * with somebody on it. It is then not overdue and sends no reminder. Null when it waits on
+   * nothing.
+   */
+  waiting_on: string | null;
   /** The latest contact logged (called / texted / emailed / visited / other), or null. */
   last_contact: LastContact | null;
   /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
@@ -236,10 +244,22 @@ async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
         });
     }
   }
+  // What each waits on (Nov 25): read with the server's key where there is one, so a person
+  // who cannot read tickets still sees why their opportunity is quiet.
+  const { openStepsFor } = await import("@/lib/job-steps.server");
+  const open = rows.filter((r) => !OPP_CLOSING.includes(r.status as OppStatus));
+  const waiting = await openStepsFor(
+    sb,
+    open.map((r) => r.id),
+  );
+  // The names are every user's (crm_user_options), so a technician on a step is among them.
+  const nameOfPerson = Object.fromEntries(names);
   return rows.map((r) => {
     const bid = r.bid_id ? bidRows.get(r.bid_id) : undefined;
+    const steps = waiting.get(r.id);
     return {
       ...r,
+      waiting_on: steps?.length ? waitingWords(steps, nameOfPerson) : null,
       hold_until: holds.get(r.id) ?? null,
       next_remind_at: nextRemind.get(r.id) ?? null,
       last_contact: lastContact.get(r.id) ?? null,

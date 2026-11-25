@@ -289,6 +289,14 @@ export interface TicketIn {
   unassigned_at?: string | null;
   /** When it reached its stage (sent for Authorized tickets: "Waiting N days" to invoice). */
   stage_changed_at?: string | null;
+  /**
+   * One job, one row (owner, Nov 25; job-steps.ts): the opportunity this ticket was made from
+   * ("Opportunity: Leak at the dock"), and the other open tickets at its property that are not
+   * of the same job ("Also open at this property: repair #6070"). Each is one small line on
+   * the row; absent when there is nothing to say.
+   */
+  job_note?: string | null;
+  also_here?: string | null;
   /** When its close-out was finished (sent for Done tickets: "Waiting N days" to authorize). */
   completed_at?: string | null;
 }
@@ -466,6 +474,8 @@ export interface WorkItem {
    */
   done: boolean;
   href: string;
+  /** Small lines under the customer (Nov 25): where the work came from, what else is open here. */
+  notes?: string[];
   assigneeId: string | null;
   assigneeName: string | null;
   /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
@@ -568,6 +578,9 @@ export function ticketItem(
     assigneeId: t.technician_id,
     assigneeName: t.technician_id ? (names[t.technician_id] ?? null) : null,
     followup: followup ? workFollowup(followup) : null,
+    ...(t.job_note || t.also_here
+      ? { notes: [t.job_note, t.also_here].filter((x): x is string => !!x) }
+      : {}),
     ...(t.stage === TO_INVOICE_STAGE
       ? { toInvoice: true, waitingSince: t.stage_changed_at ?? null }
       : {}),

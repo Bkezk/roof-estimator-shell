@@ -708,7 +708,20 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     failed: 0,
     skipped: 0,
   };
+  // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
+  // from it (its inspection, a repair, a draft bid, each with somebody on it) is not reminded.
+  // It stays due and unclaimed, and is read again on every pass: the pass after its last step
+  // is finished, it is an opportunity like any other again.
+  const { openStepsFor, tellLateSteps } = await import("@/lib/job-steps.server");
+  const waiting = await openStepsFor(
+    admin,
+    (due ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),
+  );
   for (const f of due ?? []) {
+    if (f.kind === "opportunity" && waiting.has(f.item_id)) {
+      out.skipped++;
+      continue;
+    }
     // Nothing is sent on a Saturday or Sunday, except a ticket's or an opportunity's reminder on
     // its own date (reminderWaits): it stays due, unclaimed, and goes on Monday's first pass.
     const dueDay = officeDay(f.due_at);
@@ -795,6 +808,21 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     console.error("Reminder pass: the nobody-on-it step failed —", errText(e));
   }
 
+  // 5. A step that has just run late tells the person whose opportunity waits on it, once
+  // (job-steps.ts stepLateOn): the late step is the one overdue row, and they still hear of it.
+  try {
+    if (morningReached(now))
+      await tellLateSteps(
+        admin,
+        now,
+        (id) => personName(ctx, id),
+        (ids, url) => notToldToday(admin, ids, url, now),
+      );
+  } catch (e) {
+    out.failed++;
+    console.error("Reminder pass: the late-step step failed —", errText(e));
+  }
+
   // SECURITY DEFINER stamp (it arms the app's ten-minute throttle): the pass may run as an
   // office user who cannot edit settings, or as the service role (20261002090000). Since Oct 12
   // the stamp also keeps how many sends failed on this pass (crm_settings.last_dispatch_failed;
@@ -869,9 +897,17 @@ async function escalateUntouched(
   // A ticket crm_untouched() returns is already past its limit (the database counts the working
   // days); an opportunity is graded here, in working days from the day it was assigned.
   const today = officeDay(now);
-  const past = untouched.filter(
+  const overLimit = untouched.filter(
     (u) => u.kind === "ticket" || workingDaysSince(u, today) >= ctx.untouched.opportunity,
   );
+  // An opportunity that waits on a step made from it is not "not started" (Nov 25;
+  // job-steps.ts): somebody is on the step, and the step has its own clock.
+  const { openStepsFor } = await import("@/lib/job-steps.server");
+  const waiting = await openStepsFor(
+    admin,
+    overLimit.filter((u) => u.kind === "opportunity").map((u) => u.item_id),
+  );
+  const past = overLimit.filter((u) => !(u.kind === "opportunity" && waiting.has(u.item_id)));
   if (!past.length) return;
 
   // How often each kind repeats, when each item was last escalated, and its open follow-up (for

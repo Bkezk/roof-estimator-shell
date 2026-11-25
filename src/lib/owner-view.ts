@@ -212,8 +212,17 @@ export function followedOpps(followups: readonly OppFollowupIn[]): Set<string> {
 }
 
 /** An overdue opportunity that is not on Work Overview as its assignee's open follow-up. */
-const extraOverdueOpp = (o: OppIn, today: string, followed: ReadonlySet<string>) =>
-  !!o.assignee_id && isOverdueOpp(o, today) && !followed.has(followKey(o.id, o.assignee_id));
+const extraOverdueOpp = (
+  o: OppIn,
+  today: string,
+  followed: ReadonlySet<string>,
+  waiting: ReadonlySet<string>,
+) =>
+  !!o.assignee_id &&
+  // An opportunity that waits on a step made from it is not overdue (Nov 25; job-steps.ts).
+  !waiting.has(o.id) &&
+  isOverdueOpp(o, today) &&
+  !followed.has(followKey(o.id, o.assignee_id));
 
 /**
  * Open (not closing) opportunities per assignee: count, overdue (past expected close and not
@@ -224,6 +233,8 @@ export function oppCounts(
   opps: OppIn[],
   today: string,
   followups: readonly OppFollowupIn[] = [],
+  /** The opportunities that wait on a step made from them: open, never overdue (Nov 25). */
+  waiting: ReadonlySet<string> = new Set(),
 ): Record<string, OppCounts> {
   const followed = followedOpps(followups);
   const out: Record<string, OppCounts> = {};
@@ -231,7 +242,7 @@ export function oppCounts(
     if (!o.assignee_id || !isOpenOppStatus(o.status)) continue;
     const c = (out[o.assignee_id] ??= { open: 0, overdue: 0, value: 0 });
     c.open++;
-    if (extraOverdueOpp(o, today, followed)) c.overdue++;
+    if (extraOverdueOpp(o, today, followed, waiting)) c.overdue++;
     c.value += Number(o.est_value ?? 0) || 0;
   }
   return out;
@@ -578,6 +589,8 @@ export function detailGroups(
   opps: DetailOppIn[],
   today: string,
   followups: readonly OppFollowupIn[] = [],
+  /** The opportunities that wait on a step made from them: never an extra overdue row. */
+  waiting: ReadonlySet<string> = new Set(),
 ): { today: DetailItem[]; overdue: DetailItem[] } {
   const followed = followedOpps(followups);
   const due: DetailItem[] = [];
@@ -589,7 +602,8 @@ export function detailGroups(
     else if (b === "overdue") late.push(it);
   }
   for (const o of opps)
-    if (o.assignee_id === userId && extraOverdueOpp(o, today, followed)) late.push(oppItem(o));
+    if (o.assignee_id === userId && extraOverdueOpp(o, today, followed, waiting))
+      late.push(oppItem(o));
   return { today: due.sort(compareDetail), overdue: late.sort(compareDetail) };
 }
 

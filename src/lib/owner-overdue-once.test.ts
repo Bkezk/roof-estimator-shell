@@ -166,8 +166,9 @@ describe("the per-person opportunity links carry the person", () => {
     const fn = read("src/lib/owner-view.functions.ts");
     expect(fn).not.toContain("overdue: b.overdue + o.overdue");
     expect(fn).toContain("...personNumbers(bucketsFor(buckets, p.id), oppsBy[p.id])");
-    expect(fn).toContain('oppCounts(must("Opportunities", opps), today, followupRows)');
-    expect(fn).toMatch(/detailGroups\([\s\S]*?today,\s*followupRows,\s*\)/);
+    // Nov 25: both also get the opportunities that wait on a step (job-steps.ts).
+    expect(fn).toContain("oppCounts(oppRows, today, followupRows, waitingOpps)");
+    expect(fn).toMatch(/detailGroups\([\s\S]*?today,\s*followupRows,\s*waitingOpps,\s*\)/);
     expect(fn).toContain('.select("id, assignee_id, status, expected_close, est_value")');
   });
 });

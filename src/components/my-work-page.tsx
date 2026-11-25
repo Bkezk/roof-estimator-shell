@@ -328,6 +328,13 @@ function WorkRow({
       {item.where && (
         <div className="mt-1 break-words text-sm text-muted-foreground">{item.where}</div>
       )}
+      {/* One job, one row (Nov 25): the opportunity it came from, and what else is open at
+          the property. */}
+      {(item.notes ?? []).map((n) => (
+        <div key={n} className="mt-0.5 break-words text-xs text-muted-foreground" data-job-note>
+          {n}
+        </div>
+      ))}
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         <span>{item.date ? dayLabel(item.date) : "No date"}</span>
         <span>{item.status}</span>

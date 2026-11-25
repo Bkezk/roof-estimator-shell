@@ -495,6 +495,7 @@ describe("3. listMyWork, through the fake client", () => {
     expect(listed).not.toContain('.eq("stage", "done")');
     expect(fn).not.toContain("const dq =");
     expect(fn).not.toContain("doneNobody");
-    expect(fn).toContain("tickets: (tickets.data ?? []) as TicketIn[],");
+    // Nov 25: each listed ticket carries its two notes (job-steps.ts).
+    expect(fn).toContain("tickets: listed.map(withNotes),");
   });
 });
