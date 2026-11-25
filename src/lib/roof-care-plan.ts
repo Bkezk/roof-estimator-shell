@@ -264,7 +264,13 @@ export interface RoofCarePlan {
    * A card payment taken online (Nov 19, night): the day, the amount for those who see invoices
    * (null otherwise), and its reference. Null when there was none.
    */
-  card_paid?: { on: string; amount: number | null; ref: string | null } | null;
+  card_paid?: {
+    on: string;
+    amount: number | null;
+    ref: string | null;
+    /** Nov 26: paid online from a bank account, not by card. */
+    bank?: boolean;
+  } | null;
   /**
    * Card money to send back for this plan, sent or not (Nov 20). Null for a reader who does
    * not see invoices; absent on an older read.

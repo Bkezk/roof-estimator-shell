@@ -526,6 +526,8 @@ export async function plansOfSites(
   // types, so it is read on its own; a read that fails leaves the list out and nothing else.
   const changes = new Map<string, PlanSizeChange[]>();
   const settled = new Map<string, { paidPrice: number | null; refunds: SizeRefund[] }>();
+  // Nov 26: a plan year paid online from a bank account, not by card (roof_care_plans.paid_by_bank).
+  const byBank = new Set<string>();
   {
     const loose = sb as unknown as {
       from: (t: string) => {
@@ -540,6 +542,7 @@ export async function plansOfSites(
                   size_changes: unknown;
                   size_paid_price?: unknown;
                   size_refunds?: unknown;
+                  paid_by_bank?: unknown;
                 }[]
               | null;
             error: unknown;
@@ -549,13 +552,14 @@ export async function plansOfSites(
     };
     const { data: rows } = await loose
       .from("roof_care_plans")
-      .select("id, size_changes, size_paid_price, size_refunds")
+      .select("id, size_changes, size_paid_price, size_refunds, paid_by_bank")
       .in(
         "id",
         plans.map((p) => p.id),
       );
     for (const r of rows ?? []) {
       changes.set(r.id, readSizeChanges(r.size_changes));
+      if (r.paid_by_bank === true) byBank.add(r.id);
       const paid = r.size_paid_price == null ? null : Number(r.size_paid_price);
       settled.set(r.id, {
         paidPrice: paid != null && Number.isFinite(paid) ? paid : null,
@@ -745,6 +749,7 @@ export async function plansOfSites(
             on: p.card_paid_on,
             amount: money ? Number(p.card_paid_amount) || 0 : null,
             ref: p.card_paid_ref ?? null,
+            bank: byBank.has(p.id),
           }
         : null,
       email: {
@@ -951,6 +956,21 @@ async function signUpPlan(
     }
     if (!made) throw new PlanSignedNotRead(planId);
     return made;
+  }
+}
+
+/**
+ * Close the card payment pages still open for a plan (Nov 26; expirePlanCardPages in
+ * roof-care-checkout.server.ts). With the server's key when there is one; without it the pages
+ * are read with the caller's own sign-in and close by themselves within 75 minutes. Never throws.
+ */
+async function closeCardPages(sb: Sb, planId: string): Promise<void> {
+  try {
+    const { expirePlanCardPages } = await import("@/lib/roof-care-checkout.server");
+    const { serverClient } = await import("@/lib/notify.server");
+    await expirePlanCardPages(await serverClient(sb), planId);
+  } catch (e) {
+    console.error("Roof Care: plan", planId, "its card pages were not closed —", e);
   }
 }
 
@@ -1408,6 +1428,10 @@ export const correctRoofCareSize = createServerFn({ method: "POST" })
     const p = await sizeManager(context);
     const sb = context.supabase;
     if (!(data.sqft > 0)) throw new Error(SIZE_NEEDED);
+    // Nov 26 (the audit of Nov 25, number 1): a card payment page opened before the correction
+    // asks for the old price. It is closed before the price changes, so nobody pays the old
+    // amount on it. It never throws; a page it could not close still closes by itself.
+    await closeCardPages(sb, data.plan_id);
     const { data: answer, error } = await databaseRpc(sb)("roof_care_correct_size", {
       p_plan: data.plan_id,
       p_sqft: data.sqft,
@@ -1515,6 +1539,8 @@ export const endRoofCarePlan = createServerFn({ method: "POST" })
       ...(data.refund == null ? {} : { p_refund: data.refund }),
     });
     if (error) throw new Error(error.message);
+    // Nov 26: an ended plan takes no payment, so a card page still open for it is closed.
+    await closeCardPages(context.supabase, data.plan_id);
     const confirmed = Number((worked as { confirmed?: unknown } | null)?.confirmed);
     return { ok: true, refund: Number.isFinite(confirmed) ? confirmed : 0 };
   });

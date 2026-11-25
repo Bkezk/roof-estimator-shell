@@ -52,7 +52,12 @@ import {
   checkoutReadyKey,
   PAY_CARD_NOTE_ONLINE,
 } from "@/lib/roof-care-checkout";
-import { carePrefillNote, carePrefillWords, type CareSignUpPrefill } from "@/lib/public-requests";
+import {
+  CARE_SIGNED_NOT_READ,
+  carePrefillNote,
+  carePrefillWords,
+  type CareSignUpPrefill,
+} from "@/lib/public-requests";
 import { handlePublicRequest, publicCarePrefill } from "@/lib/public-requests.functions";
 import { roofCareCheckoutReady, startPlanCheckout } from "@/lib/roof-care-checkout.functions";
 import { PAY_HELD_SIZE, SIGNED_PAY_BY_LINK, SIGNED_SIZE_FIRST } from "@/lib/roof-care-pay-link";
@@ -2991,6 +2996,12 @@ function SignUpDialog({
     },
     onError: (e) => {
       const message = errText(e);
+      // Nov 26: the plan is signed and only the read back failed. It is not "could not sign".
+      if (message.includes(CARE_SIGNED_NOT_READ)) {
+        toast.warning(CARE_SIGNED_NOT_READ, { duration: 20_000 });
+        onClose();
+        return;
+      }
       toast.error(`Could not sign them up: ${message}`, { duration: 20_000 });
       // The price moved since it was shown: read the prices again, so the form shows the new
       // one and the tick has to be given again for it.
