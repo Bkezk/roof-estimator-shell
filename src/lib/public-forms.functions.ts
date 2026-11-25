@@ -196,9 +196,39 @@ const rpcOf =
  * their own plain sentences under two codes; anything else (a fault of ours) is never shown.
  */
 function plainRefusal(error: { message: string; code?: string }): Error {
-  if (error.code === "22023" || error.code === "P0001") return new Error(error.message);
+  if (visitorCanFix(error)) return new Error(error.message);
   console.error("Public form: the database refused —", error.code ?? "", error.message);
   return new Error(PUBLIC_TRY_AGAIN);
+}
+
+/** A refusal in words written for the visitor: something they typed, or a price that moved. */
+export const visitorCanFix = (error: { code?: string }): boolean =>
+  error.code === "22023" || error.code === "P0001";
+
+/**
+ * A request the database turned down for a reason the visitor can fix is not counted against
+ * them (Nov 26; the audit of Nov 25). It was counted before it was checked, so someone putting
+ * right "the price changed" or "the address changed after the prices" used up their five an
+ * hour and was told to call. The count is given back to this connection's own hour and day
+ * (public_form_give_back), at most 20 times a day; after that a refusal counts as before. The
+ * day's count for everyone is not given back. Best effort: the visitor is told the same reason
+ * whether or not the count went back.
+ */
+async function giveBack(
+  deps: PublicDeps & { admin: Client },
+  error: { message: string; code?: string },
+): Promise<void> {
+  if (!visitorCanFix(error)) return;
+  try {
+    const back = await rpcOf(deps.admin)("public_form_give_back", {
+      p_kind: "request",
+      p_key: deps.key,
+    });
+    if (back.error)
+      console.error("Public form: a refused request was not given back —", back.error.message);
+  } catch (e) {
+    console.error("Public form: a refused request was not given back —", e);
+  }
 }
 
 /**
@@ -426,7 +456,10 @@ export async function sendCare(dataIn: unknown, deps: PublicDeps): Promise<Publi
     p_key: deps.key,
     p: { kind: "care", ...kept } as unknown as Json,
   });
-  if (error) throw plainRefusal(error);
+  if (error) {
+    await giveBack({ ...deps, admin: deps.admin }, error);
+    throw plainRefusal(error);
+  }
   if (typeof data !== "string" || !data) throw new Error(PUBLIC_TRY_AGAIN);
   await deps
     .tell(deps.admin)
@@ -454,7 +487,10 @@ export async function sendService(dataIn: unknown, deps: PublicDeps): Promise<Pu
     p_key: deps.key,
     p: { kind: "service", ...kept } as unknown as Json,
   });
-  if (error) throw plainRefusal(error);
+  if (error) {
+    await giveBack({ ...deps, admin: deps.admin }, error);
+    throw plainRefusal(error);
+  }
   if (typeof data !== "string" || !data) throw new Error(PUBLIC_TRY_AGAIN);
   await deps
     .tell(deps.admin)

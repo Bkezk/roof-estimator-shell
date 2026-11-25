@@ -1828,6 +1828,10 @@ export function planSizeWords(p: Pick<RoofCarePlan, "roof_sqft" | "size">): stri
   const s = p.size;
   if (!s) return "";
   const size = `${sqftWords(p.roof_sqft)} sq ft`;
+  // Nov 26: a size from the public page that the map does not agree with (a plan started from
+  // a request). The map's own number is said, so nobody confirms 200,000 on a 20,000 roof.
+  if (s.unchecked && s.map_sqft != null)
+    return `Roof size ${size}, typed on the public page. The map shows about ${sqftWords(Math.round(s.map_sqft / 100) * 100)} sq ft, so check it. A manager or an admin confirms it.`;
   if (s.unchecked)
     return `Roof size ${size}: typed by hand, not checked against the map. A manager or an admin confirms it.`;
   if (s.confirmed)

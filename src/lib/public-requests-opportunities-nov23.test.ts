@@ -475,7 +475,10 @@ describe("the opportunity is Won the day the plan is paid, not the day it is sig
     expect(out.plan_status).toBe("awaiting_payment");
     const strip = flat(read("src/components/opportunity-request-strip.tsx"));
     expect(strip).toContain("const step = requestStep(r, opp, q.data?.plan_status);");
-    expect(strip).toContain('{(step === "signed" || step === "paid") && opp.site_id && (');
+    // Nov 26, 2026: a plan that was ended has the same way to its property.
+    expect(strip).toContain(
+      '{(step === "signed" || step === "paid" || step === "ended") && opp.site_id && (',
+    );
   });
   it("the sign-up tells the office what to do by hand if the request could not be tied", () => {
     const card = flat(read("src/components/roof-care/plan-card.tsx"));

@@ -24,6 +24,10 @@ import {
   cleanServices,
   readMatches,
   readUsage,
+  requestBuilding,
+  sameBuilding,
+  siteAddressWords,
+  siteBuilding,
   type CareSignUpPrefill,
   type PublicFormSettings,
   type PublicMatch,
@@ -36,6 +40,12 @@ export const PUBLIC_SETTINGS_NEED = "Only an admin or a manager changes the QR p
 
 type Ctx = { supabase: Parameters<typeof readProfile>[0]; userId: string };
 
+/** A database function the generated types do not list yet. */
+type LooseRpc = (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message: string } | null }>;
+
 async function office(ctx: Ctx) {
   const p = await readProfile(ctx.supabase, ctx.userId);
   if (!p || !canAccess(p, "customers")) throw new Error(PUBLIC_REQUESTS_NEED);
@@ -44,6 +54,16 @@ async function office(ctx: Ctx) {
 
 const REQUEST_SELECT =
   "id, reference, kind, created_at, status, contact_name, company, phone, email, address, city, state, zip, building_name, referred_by, plan, sqft, size_range, sqft_source, shown_price, quote, pay_method, terms_version, agreed_by, several_buildings, notes, services, details, handled_at, handled_by_name, dismiss_reason, account_id, site_id, opportunity_id, roof_care_plan_id" as const;
+
+/** The property a request was put on, beside the address the request itself names (Nov 26). */
+export interface RequestSite {
+  id: string;
+  name: string;
+  /** "120 Main St, London, KY 40741" */
+  address: string;
+  /** Is it the building the request names (sameBuilding)? */
+  same_address: boolean;
+}
 
 export interface OpportunityRequest {
   request: PublicRequestRow;
@@ -54,6 +74,66 @@ export interface OpportunityRequest {
    * null: the strip says whether the plan still waits for its payment.
    */
   plan_status: string | null;
+  /** Nov 26: the day a plan that was ended was ended, and whether it was ever paid. */
+  plan_ended_on?: string | null;
+  plan_paid?: boolean;
+  /** Nov 26: the property the request is on, once somebody said whose it is. */
+  site?: RequestSite | null;
+}
+
+type SiteRow = {
+  id: string;
+  account_id: string | null;
+  name: string | null;
+  address1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+};
+const SITE_COLUMNS = "id, account_id, name, address1, city, state, zip" as const;
+
+/**
+ * Each possible match with the property that is the request's own building, when the customer
+ * has one (Nov 26; the audit's number 17). The database's list is generous on purpose: a
+ * property is offered when its street starts with the same number and word. Here the customers'
+ * properties are read, and the one whose address IS the request's (sameBuilding) is the one
+ * offered; a match is marked `same_address` only then. A read that fails leaves every match
+ * marked "not the same", so nothing starts by itself on a guess.
+ */
+async function matchesWithAddress(
+  sb: Ctx["supabase"],
+  r: PublicRequestRow,
+  matches: PublicMatch[],
+): Promise<PublicMatch[]> {
+  if (!matches.length) return matches;
+  const { data, error } = await sb
+    .from("crm_sites")
+    .select(SITE_COLUMNS)
+    .in(
+      "account_id",
+      matches.map((m) => m.account_id),
+    )
+    .is("deleted_at", null)
+    .limit(1000);
+  if (error) {
+    console.error(`Request ${r.reference}: the matches' properties were not read —`, error.message);
+    return matches;
+  }
+  const sites = (data ?? []) as SiteRow[];
+  const asked = requestBuilding(r);
+  return matches.map((m) => {
+    const own = sites.filter((s) => s.account_id === m.account_id);
+    const exact = own.find((s) => sameBuilding(asked, siteBuilding(s)));
+    const shown = exact ?? own.find((s) => s.id === m.site_id);
+    if (!shown) return m;
+    return {
+      ...m,
+      site_id: shown.id,
+      site_name: (shown.name ?? "").trim() || null,
+      site_address: siteAddressWords(shown) || m.site_address,
+      same_address: !!exact,
+    };
+  });
 }
 
 /**
@@ -80,19 +160,61 @@ export const getOpportunityRequest = createServerFn({ method: "GET" })
     if (!r) return null;
     if (r.status !== "new") {
       let plan_status: string | null = null;
+      let plan_ended_on: string | null = null;
+      let plan_paid = false;
       if (r.roof_care_plan_id) {
         const plan = await sb
           .from("roof_care_plans")
-          .select("status")
+          .select("status, ended_on, paid_on")
           .eq("id", r.roof_care_plan_id)
           .maybeSingle();
         plan_status = plan.data?.status ?? null;
+        plan_ended_on = plan.data?.ended_on ?? null;
+        plan_paid = !!plan.data?.paid_on;
       }
-      return { request: r, matches: [], plan_status };
+      // Nov 26: the property it was put on, beside the address they typed. A plan starts by
+      // itself only at the same building; anywhere else the office looks at both first.
+      let site: RequestSite | null = null;
+      if (r.site_id && !r.roof_care_plan_id) {
+        const s = await sb.from("crm_sites").select(SITE_COLUMNS).eq("id", r.site_id).maybeSingle();
+        const row = (s.data ?? null) as SiteRow | null;
+        if (row)
+          site = {
+            id: row.id,
+            name: (row.name ?? "").trim(),
+            address: siteAddressWords(row),
+            same_address: sameBuilding(requestBuilding(r), siteBuilding(row)),
+          };
+      }
+      return { request: r, matches: [], plan_status, plan_ended_on, plan_paid, site };
     }
     const found = await sb.rpc("public_request_matches", { p_id: r.id });
     if (found.error) throw new Error(`The possible matches: ${found.error.message}`);
-    return { request: r, matches: readMatches(found.data), plan_status: null };
+    return {
+      request: r,
+      matches: await matchesWithAddress(sb, r, readMatches(found.data)),
+      plan_status: null,
+    };
+  });
+
+/**
+ * "I am answering this request" (Nov 26; the audit's number 15). The notice of a new request
+ * goes to every admin and manager at once, and two of them answering it made two customers and
+ * two plans. The page calls this before it makes a customer or a property: the database takes
+ * the request for this person, or refuses in plain words when somebody already answered it or
+ * is answering it right now (public_request_claim). The one refused has made nothing.
+ */
+export const claimPublicRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await office(context);
+    const { error } = await (context.supabase as unknown as { rpc: LooseRpc }).rpc(
+      "public_request_claim",
+      { p_id: data.id },
+    );
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 const handleInput = z.object({
@@ -156,6 +278,17 @@ export async function readCarePrefill(
   id: string,
   siteId?: string,
 ): Promise<CareSignUpPrefill | null> {
+  const r = await readRequest(context, id);
+  if (!r || r.status === "dismissed") return null;
+  if (siteId && r.site_id && r.site_id !== siteId) return null;
+  return carePrefill(r);
+}
+
+/**
+ * One request as it stands now, for the office (Nov 26): whose it is, and the plan it became.
+ * Starting a plan reads it fresh, so an answer somebody else gave a moment ago is seen.
+ */
+export async function readRequest(context: Ctx, id: string): Promise<PublicRequestRow | null> {
   await office(context);
   const { data: row, error } = await context.supabase
     .from("public_requests")
@@ -163,10 +296,7 @@ export async function readCarePrefill(
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  const r = row as unknown as PublicRequestRow | null;
-  if (!r || r.status === "dismissed") return null;
-  if (siteId && r.site_id && r.site_id !== siteId) return null;
-  return carePrefill(r);
+  return row as unknown as PublicRequestRow | null;
 }
 
 export interface PublicFormSettingsRead extends PublicFormSettings {
@@ -195,12 +325,6 @@ async function ownUrl(): Promise<string> {
 }
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-
-/** A database function the generated types do not list yet. */
-type LooseRpc = (
-  fn: string,
-  args?: Record<string, unknown>,
-) => Promise<{ data: unknown; error: { message: string } | null }>;
 
 async function readSettings(ctx: Ctx, canEdit: boolean): Promise<PublicFormSettingsRead> {
   const sb = ctx.supabase;

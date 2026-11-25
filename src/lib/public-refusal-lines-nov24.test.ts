@@ -166,8 +166,11 @@ describe("both pages use it at every send", () => {
   });
   it("the server passes on the database's sentence under the two codes, and nothing else", () => {
     const fns = flat("src/lib/public-forms.functions.ts");
+    // Nov 26, 2026: the two codes have a name now (visitorCanFix), because a request refused
+    // under them is also given back to the visitor's count.
+    expect(fns).toContain("if (visitorCanFix(error)) return new Error(error.message);");
     expect(fns).toContain(
-      'if (error.code === "22023" || error.code === "P0001") return new Error(error.message);',
+      'export const visitorCanFix = (error: { code?: string }): boolean => error.code === "22023" || error.code === "P0001";',
     );
     expect(fns).toContain("return new Error(PUBLIC_TRY_AGAIN);");
   });

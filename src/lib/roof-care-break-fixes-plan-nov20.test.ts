@@ -231,8 +231,9 @@ describe("4. the typed roof size against the map's", () => {
     );
     expect(calls).toEqual([]);
     // The plan is not in the made-up tables, so the read-back fails; the sign-up was sent.
+    // Nov 26, 2026: said as what it is, "The plan is signed. The page could not read it back".
     await expect(call(signUpRoofCare, env, signData({ size_ok: true }), MANAGER)).rejects.toThrow(
-      "could not be read back",
+      "could not read it back",
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ p_sqft: 1, p_size_ok: true });
@@ -255,9 +256,14 @@ describe("4. the typed roof size against the map's", () => {
       );
       // (The read-back of a technician asks the database's function, which is not stood in
       // for here: the sign-up was sent before it.)
+      // Nov 26, 2026: a read back that fails is no longer passed on in the database's words.
+      // The person is told the plan is signed and to reload.
+      const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
       await expect(call(signUpRoofCare, env, signData({ sqft }), TECH)).rejects.toThrow(
-        "roof_care_field_plans",
+        "The plan is signed. The page could not read it back: reload.",
       );
+      expect(String(quiet.mock.calls.at(-1))).toContain("roof_care_field_plans");
+      quiet.mockRestore();
       expect(calls).toHaveLength(1);
       expect(calls[0]).not.toHaveProperty("p_size_ok");
     }

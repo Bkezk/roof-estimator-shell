@@ -226,6 +226,9 @@ const world = (req = request(), rpcs: Rpcs = {}) =>
       rpcs: {
         roof_care_price: () => priced,
         roof_care_sign_up_await_payment: () => PLAN,
+        // Nov 26, 2026: a plan started from a request is signed and tied to its request in one
+        // step of the database (20261125300000).
+        roof_care_sign_up_from_request: () => PLAN,
         roof_care_set_email: () => null,
         public_request_handle: () => req,
         // The "signed, not paid" notice has nothing to tell in this made-up world.
@@ -241,6 +244,10 @@ const call = <T>(env: Env, data: unknown, userId = ADMIN) =>
     context: { supabase: env.db, userId },
   });
 const ASK = { request_id: REQUEST, site_id: SITE };
+/** Nov 26, 2026: neither door of the sign-up was asked. */
+const SIGN_UPS = ["roof_care_sign_up_await_payment", "roof_care_sign_up_from_request"];
+const signUpsAsked = (env: Env) =>
+  env.rpcCalls.map((c) => c.fn).filter((f) => SIGN_UPS.includes(f));
 
 beforeEach(() => {
   drive.mockReset();
@@ -257,8 +264,10 @@ beforeEach(() => {
 describe("starting the plan from the request", () => {
   it("signs the plan with what the customer picked, at today's price, and nothing is asked again", async () => {
     const signed: Record<string, unknown>[] = [];
+    // Nov 26, 2026: through roof_care_sign_up_from_request, which runs the same sign-up in the
+    // database and points the request at the plan in the same step.
     const env = world(request(), {
-      roof_care_sign_up_await_payment: (a) => {
+      roof_care_sign_up_from_request: (a) => {
         signed.push(a);
         return PLAN;
       },
@@ -266,6 +275,7 @@ describe("starting the plan from the request", () => {
     const out = await call<StartedFromRequest>(env, ASK);
     expect(signed).toHaveLength(1);
     expect(signed[0]).toMatchObject({
+      p_request: REQUEST,
       p_site: SITE,
       p_plan: "care",
       p_sqft: 26000,
@@ -277,7 +287,7 @@ describe("starting the plan from the request", () => {
       p_shown_price: 210,
       p_notes: "From the public Roof Care page, request R-4077.",
     });
-    expect(out.plan.id).toBe(PLAN);
+    expect(out.plan!.id).toBe(PLAN);
     expect(out.tied).toBe(true);
   });
   it("gives the plan the customer's email, and ties the request to the plan so the opportunity turns Won when it is paid", async () => {
@@ -287,18 +297,26 @@ describe("starting the plan from the request", () => {
     expect(fns).toContain("roof_care_set_email");
     const email = env.rpcCalls.find((c) => c.fn === "roof_care_set_email")!;
     expect(email.args).toEqual({ p_plan: PLAN, p_email: "pat@example.com" });
-    const tie = env.rpcCalls.find((c) => c.fn === "public_request_handle")!;
-    expect(tie.args).toEqual({ p_id: REQUEST, p_status: "matched", p_site: SITE, p_plan: PLAN });
+    // Nov 26, 2026: the request is pointed at the plan by the database in the step that signs
+    // it (it was a second call afterwards, which could fail and leave a plan nobody knew of).
+    const sign = env.rpcCalls.find((c) => c.fn === "roof_care_sign_up_from_request")!;
+    expect(sign.args).toMatchObject({ p_request: REQUEST, p_site: SITE });
+    expect(fns).not.toContain("public_request_handle");
   });
   it("the plan stands when the request could not be tied to it, and the answer says so", async () => {
+    // Nov 26, 2026: this can only happen now for a plan this request made before that day and
+    // was never pointed at: pressing again finds that plan by its note and ties it. When even
+    // that fails the plan stands, nothing is signed twice, and the answer says so.
     const env = world(request(), {
       public_request_handle: () => {
         throw new Error("the request is locked");
       },
     });
+    env.tables["roof_care_plans"]![0]!["notes"] = "From the public Roof Care page, request R-4077.";
     const out = await call<StartedFromRequest>(env, ASK);
-    expect(out.plan.id).toBe(PLAN);
+    expect(out.plan!.id).toBe(PLAN);
     expect(out.tied).toBe(false);
+    expect(signUpsAsked(env)).toEqual([]);
   });
   it("is refused in plain words, with nothing signed, when it cannot start by itself", async () => {
     for (const [req, why] of [
@@ -312,7 +330,7 @@ describe("starting the plan from the request", () => {
     ] as const) {
       const env = world(req);
       await expect(call(env, ASK)).rejects.toThrow(why);
-      expect(env.rpcCalls.map((c) => c.fn)).not.toContain("roof_care_sign_up_await_payment");
+      expect(signUpsAsked(env)).toEqual([]);
     }
   });
   it("is refused when the office's prices have no plain price for that roof", async () => {
@@ -320,19 +338,21 @@ describe("starting the plan from the request", () => {
       roof_care_price: () => ({ ready: true, custom_quote: true, plans: [] }),
     });
     await expect(call(env, ASK)).rejects.toThrow(CARE_START_NO_PRICE);
-    expect(env.rpcCalls.map((c) => c.fn)).not.toContain("roof_care_sign_up_await_payment");
+    expect(signUpsAsked(env)).toEqual([]);
   });
   it("is the office's: a technician is refused", async () => {
     const env = world();
     await expect(call(env, ASK, TECH)).rejects.toThrow();
-    expect(env.rpcCalls.map((c) => c.fn)).not.toContain("roof_care_sign_up_await_payment");
+    expect(signUpsAsked(env)).toEqual([]);
   });
   it("runs the same sign-up as the window does: one function for both", () => {
     const f = flat(read("src/lib/roof-care-plan.functions.ts"));
     expect(f).toContain(
       ".handler(({ data, context }): Promise<RoofCarePlan> => signUpPlan(context, data));",
     );
-    expect(f).toContain("const plan = await signUpPlan(context, {");
+    // Nov 26, 2026: the same function still, now told which request it is for.
+    expect(f).toContain("const plan = await signUpPlan( context, {");
+    expect(f).toContain("{ request_id: data.request_id }, );");
   });
 });
 
@@ -341,12 +361,22 @@ describe("the request box on the opportunity", () => {
   it("has one button that starts the plan, and still offers the window", () => {
     expect(CARE_START_BUTTON).toBe("Start the plan");
     expect(CARE_OPEN_SIGN_UP).toBe("Open the sign-up");
-    expect(strip).toContain('data-action="request-start-plan"');
-    expect(strip).toContain("onClick={() => start.mutate(opp.site_id!)}");
+    // Nov 26, 2026: still one button. It has a second name when the property is not the
+    // address they typed.
+    expect(strip).toContain(
+      'data-action={sameAddress ? "request-start-plan" : "request-start-plan-here"}',
+    );
+    // Nov 26, 2026: the press says whether the office looked at both addresses first.
+    expect(strip).toContain(
+      "onClick={() => start.mutate({ siteId: opp.site_id!, addressOk: !sameAddress })}",
+    );
     expect(strip).toContain('data-action="request-open-sign-up"');
   });
   it("starts the plan by itself once the office has said whose it is, and says so first", () => {
-    expect(strip).toContain("if (c.site_id && auto.ok) start.mutate(c.site_id);");
+    // Nov 26, 2026: by itself only at the building they typed.
+    expect(strip).toContain(
+      "if (c.site_id && auto.ok && c.same_address) start.mutate({ siteId: c.site_id });",
+    );
     expect(strip).toContain('{step === "who" && !readOnly && auto.ok && (');
     expect(strip).toContain("{CARE_START_AT_MATCH}");
     expect(CARE_START_AT_MATCH).toBe(
