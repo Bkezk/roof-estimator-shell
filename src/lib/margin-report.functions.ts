@@ -82,6 +82,7 @@ import {
   type RoofCareInForce,
 } from "@/lib/margin-lines";
 import { PAGE, afterId, readAll, type RowId } from "@/lib/read-all";
+import { readSizeRefunds } from "@/lib/roof-care-plan";
 
 type Sb = SupabaseClient<Database>;
 
@@ -459,6 +460,78 @@ export async function readCareRefunds(
   );
 }
 
+/**
+ * The refunds sent for a roof found smaller after a plan was paid (Nov 26;
+ * roof_care_plans.size_refunds, written by roof_care_size_refund_sent). Each is money that went
+ * back out of Roof Care's income, and until now none of them came off it: only the refund of a
+ * plan ended early did. One row for each refund, on the day it was sent, as revenue below
+ * nothing. Paid: it is recorded only once it is sent. The column is newer than the generated
+ * types, so the read is loose.
+ */
+export async function readCareSizeRefunds(
+  sb: Sb,
+  from: string,
+  to: string,
+): Promise<MarginInvoiceRow[]> {
+  const loose = sb as unknown as {
+    from: (t: string) => {
+      select: (c: string) => {
+        neq: (
+          c: string,
+          v: string,
+        ) => Promise<{
+          data:
+            | {
+                id: string;
+                plan_number: number | null;
+                account_id: string;
+                site_id: string;
+                size_refunds?: unknown;
+              }[]
+            | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  };
+  const { data, error } = await loose
+    .from("roof_care_plans")
+    .select("id, plan_number, account_id, site_id, size_refunds")
+    .neq("size_refunds", "[]");
+  if (error) throw new Error(`Roof Care roof size refunds: ${error.message}`);
+  const sent = (data ?? []).flatMap((p) =>
+    readSizeRefunds(p.size_refunds)
+      .map((r, n) => ({ plan: p, refund: r, n }))
+      .filter((x) => x.refund.on >= from && x.refund.on <= to),
+  );
+  if (!sent.length) return [];
+  const accounts = await readInChunks(uniq(sent.map((x) => x.plan.account_id)), (chunk) =>
+    sb.from("crm_accounts").select("id, name").in("id", chunk),
+  );
+  const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  return sent.map(({ plan: p, refund, n }) =>
+    toMarginInvoiceRow({
+      id: `size-refund:${p.id}:${n}`,
+      kind: "service",
+      carePlan: true,
+      refundSite: p.site_id,
+      number: `${p.plan_number != null ? `RC-${p.plan_number}` : "Roof Care"} roof size refund`,
+      day: refund.on,
+      status: "paid",
+      subtotal: -refund.amount,
+      customer: accountName.get(p.account_id) ?? "",
+      technician: null,
+      technicianId: null,
+      ticket: true,
+      hours: 0,
+      material: 0,
+      labor: 0,
+      other: 0,
+      purchaseOrders: 0,
+    }),
+  );
+}
+
 /** One period as Include asks for it: the invoices, the won bids, or both, in one list. */
 async function readPeriod(
   sb: Sb,
@@ -466,13 +539,14 @@ async function readPeriod(
   to: string,
   source: MarginSource,
 ): Promise<PeriodRead> {
-  const [invoices, refunds, bids] = await Promise.all([
+  const [invoices, refunds, sizeRefunds, bids] = await Promise.all([
     source !== "bids" ? readInvoices(sb, from, to) : [],
     source !== "bids" ? readCareRefunds(sb, from, to) : [],
+    source !== "bids" ? readCareSizeRefunds(sb, from, to) : [],
     source !== "service" ? readWonBids(sb, from, to) : { rows: [], bidsWithoutFigures: [] },
   ]);
   return {
-    rows: [...invoices, ...refunds, ...bids.rows],
+    rows: [...invoices, ...refunds, ...sizeRefunds, ...bids.rows],
     bidsWithoutFigures: bids.bidsWithoutFigures,
   };
 }

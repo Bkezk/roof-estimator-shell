@@ -361,6 +361,21 @@ export interface PlanSizeChange {
   paid?: boolean;
   /** For a paid plan: what the correction left owed. Above 0 to us, below 0 back to the customer. */
   owed?: number;
+  /**
+   * For a paid plan (Nov 26): what the payments covered when it was made. It differs from
+   * `from_price` only when a correction before this one was not settled yet, and then `owed`
+   * is everything owed, not what this correction added.
+   */
+  covered?: number;
+  /** Which correction of the plan this is, counted from 1 (Nov 26). Absent on an older record. */
+  nth?: number;
+}
+
+/** A correction made while one before it was still not settled: its `owed` is the whole of it. */
+export function replacesEarlier(
+  c: Pick<PlanSizeChange, "paid" | "covered" | "from_price">,
+): boolean {
+  return c.paid === true && c.covered != null && Math.round((c.covered - c.from_price) * 100) !== 0;
 }
 
 /** The database's record of one correction, read strictly: null for anything odd. */
@@ -398,6 +413,8 @@ export function readSizeChange(x: unknown): PlanSizeChange | null {
     repriced: o["repriced"] === true,
     note: note || null,
     ...(o["paid"] === true ? { paid: true, owed: n(o["owed"]) ?? 0 } : {}),
+    ...(o["paid"] === true && n(o["covered"]) != null ? { covered: n(o["covered"])! } : {}),
+    ...((n(o["nth"]) ?? 0) >= 1 ? { nth: Math.round(n(o["nth"])!) } : {}),
   };
 }
 
@@ -825,6 +842,15 @@ export interface RefundWorked {
    */
   card_fee: number;
   refund: number;
+  /**
+   * A bigger roof's difference that was not paid (Nov 26): `size_off` is the part of it, for the
+   * inspections done, that comes off this refund; `size_left` is what the refund could not
+   * cover, which stays owed on the ended plan. Absent on an answer made before them.
+   */
+  size_off?: number;
+  size_left?: number;
+  /** Still owed back for a smaller roof (Nov 26): sent by itself, not part of this refund. */
+  size_back?: number;
 }
 
 /** The database's answer, or null when it is not one. */
@@ -852,6 +878,10 @@ export function readRefundWorked(x: unknown): RefundWorked | null {
     travel: n("travel") ?? 0,
     card_fee: n("card_fee") ?? 0,
     refund,
+    // The three of Nov 26 read as nothing from an answer made before them.
+    size_off: n("size_off") ?? 0,
+    size_left: n("size_left") ?? 0,
+    size_back: n("size_back") ?? 0,
   };
 }
 
@@ -860,7 +890,12 @@ const cents = (n: number) =>
 
 /** The sum, a line at a time, as the End plan box shows it. */
 export function refundLines(w: RefundWorked): string[] {
-  if (!(w.paid > 0)) return ["Nothing was paid for this plan year, so there is nothing to refund."];
+  const sizeBack = w.size_back ?? 0;
+  if (!(w.paid > 0))
+    return [
+      "Nothing was paid for this plan year, so there is nothing to refund.",
+      ...(sizeBack > 0 ? [sizeBackLine(sizeBack)] : []),
+    ];
   const out = [
     `Paid for the year: ${cents(w.paid)}`,
     `Inspections done: ${w.inspections_done} of 2${w.storm_counted > 0 ? " (a storm inspection counts as one)" : ""}`,
@@ -868,10 +903,26 @@ export function refundLines(w: RefundWorked): string[] {
   ];
   if (w.repairs > 0) out.push(`Minor repairs the plan already covered: ${cents(w.repairs)} off`);
   if (w.travel > 0) out.push(`Leak call travel that was not charged: ${cents(w.travel)} off`);
+  // A roof found bigger whose difference was not paid (Nov 26): the inspections done were done
+  // at the bigger roof's price, so their part of it comes off the refund.
+  const sizeOff = w.size_off ?? 0;
+  const sizeLeft = w.size_left ?? 0;
+  if (sizeOff > 0)
+    out.push(
+      `Less the part of the bigger roof not yet paid, for the inspections done: ${cents(sizeOff)}`,
+    );
   if (w.card_fee > 0) out.push(`Card fee on the amount refunded: ${cents(w.card_fee)} off`);
   out.push(`Refund: ${cents(w.refund)}`);
+  if (sizeLeft > 0)
+    out.push(
+      `Still owed for the bigger roof after this: ${cents(sizeLeft)}. It stays on the plan, with the button that makes its invoice.`,
+    );
+  if (sizeBack > 0) out.push(sizeBackLine(sizeBack));
   return out;
 }
+/** Under the refund in the End plan box, when a smaller roof's money is still owed back. */
+export const sizeBackLine = (amount: number): string =>
+  `Plus ${cents(amount)} still owed back for the smaller roof, sent separately.`;
 
 /**
  * "Refund owed: $612.00." / "Refund of $612.00 sent Nov 20, 2026 (check 2001)." / "No refund is
@@ -902,6 +953,20 @@ export function otherRefundsOwed<
         p.refund.due > 0 &&
         !p.refund.sent_on,
     )
+    .sort((a, b) => (a.ended_on ?? "").localeCompare(b.ended_on ?? ""));
+}
+
+/**
+ * The property's plans whose year is over and whose corrected roof size is still not settled
+ * (Nov 26): a refund for a smaller roof not sent, or a bigger roof's difference not paid. Until
+ * now the difference was shown only on the plan in force, so it dropped off every screen the
+ * day the plan was ended, renewed or ran out. Oldest first.
+ */
+export function sizeBalancesOwed<
+  T extends Pick<RoofCarePlan, "id" | "status" | "size" | "ended_on">,
+>(plans: readonly T[]): T[] {
+  return plans
+    .filter((p) => p.status === "ended" && (p.size?.balance?.owed ?? 0) !== 0)
     .sort((a, b) => (a.ended_on ?? "").localeCompare(b.ended_on ?? ""));
 }
 
@@ -1708,7 +1773,29 @@ export const SIZE_CORRECT_LEAD_WAITING =
   "Type the size you measured. The plan's price follows it, and its invoice is made again at the new price. Nothing changes until you press Save.";
 export const SIZE_CORRECT_LEAD_PAID =
   "Type the size you measured. This plan year is already paid. A bigger roof is billed the difference on an invoice of its own. A smaller roof is owed the difference back. Nothing changes until you press Save.";
+/**
+ * Two reasons a plan in force is not corrected, in the database's own words
+ * (roof_care_size_worked), said in the window before a size is typed (Nov 26).
+ */
+export const SIZE_CORRECT_RENEWAL_WAITS =
+  "This plan has a renewal waiting to be paid. Cancel the renewal, correct the size here, then renew again.";
+export const SIZE_CORRECT_RENEWAL_CREDIT =
+  "This plan year was renewed with money taken off for an inspection we did not do, so its roof size is not corrected here. Correct the size on next year's plan once its renewal is paid, or ask an admin if it cannot wait.";
+/** Why the window cannot correct this plan's size, or null when it can. */
+export function sizeCorrectHeld(
+  plan: Pick<RoofCarePlan, "id" | "status" | "renewal_credit">,
+  plans: readonly Pick<RoofCarePlan, "status" | "renewed_from">[],
+): string | null {
+  if (plan.status !== "active") return null;
+  if (plans.some((p) => p.status === "awaiting_payment" && p.renewed_from === plan.id))
+    return SIZE_CORRECT_RENEWAL_WAITS;
+  if (plan.renewal_credit > 0) return SIZE_CORRECT_RENEWAL_CREDIT;
+  return null;
+}
 export const SIZE_REFUND_RECORD = "Record the refund";
+/** Record the refund pressed with no amount shown: a page left open from before Nov 26. */
+export const SIZE_REFUND_RELOAD =
+  "The amount owed back did not come with the press. Reload the page, check the plan and press Record the refund again.";
 export const SIZE_INVOICE_MAKE = "Make the invoice for the difference";
 export const SIZE_REFUND_LEAD =
   "Send the customer the amount by check or back to their card, then record it here: the day it was sent and its check number or reference.";
@@ -1717,6 +1804,51 @@ export const sizeCorrectEmailLabel = (card: boolean): string =>
   card
     ? "Email the customer the new price, with the payment link"
     : "Email the customer the new price";
+
+/** What a corrected size would do, before anything is saved (roof_care_size_offer). */
+export interface SizeOffer {
+  from_sqft: number;
+  to_sqft: number;
+  from_price: number;
+  /**
+   * The plan's price at the corrected size: its price now, moved by what the size alone
+   * changes at today's prices (owner, Nov 25). Save is refused at any other price.
+   */
+  to_price: number;
+  /** True for a plan that waits for its payment: its price follows the size. */
+  repriced: boolean;
+  /** True for a plan year already paid: its price follows too, and the difference is settled. */
+  paid: boolean;
+  /** For a paid plan: what saving would leave owed. Above 0 to us, below 0 back. */
+  owed: number;
+}
+
+/** The database's answer, read strictly: null for anything odd. */
+export function readSizeOffer(x: unknown): SizeOffer | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const n = (k: string) => {
+    const raw = o[k];
+    const v = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const from_sqft = n("from_sqft");
+  const to_sqft = n("to_sqft");
+  const from_price = n("from_price");
+  const to_price = n("to_price");
+  if (from_sqft == null || to_sqft == null || from_price == null || to_price == null) return null;
+  if (!(to_price > 0)) return null;
+  const paid = o["paid"] === true;
+  return {
+    from_sqft,
+    to_sqft,
+    from_price,
+    to_price,
+    repriced: !paid,
+    paid,
+    owed: paid ? (n("owed") ?? 0) : 0,
+  };
+}
 
 const dollars0 = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const dollars2 = (n: number) =>
@@ -1791,13 +1923,25 @@ export function sizeSavedWords(r: {
 export function sizeChangeWords(c: PlanSizeChange, money: boolean): string {
   const head = `Roof size corrected from ${sqftWords(c.from_sqft)} to ${sqftWords(c.to_sqft)} sq ft by ${c.by_name || "a manager"} on ${longDay(c.on)}.`;
   const owed = c.paid ? (c.owed ?? 0) : 0;
+  // Made while the correction before it was not settled (Nov 26): what it left owed is the
+  // whole of it, from what the payments covered, and takes the place of the amount before.
+  // Until now two such lines read "$200.00 more was billed" and "$300.00 more was billed",
+  // which adds up to $500 when $300 is owed.
   const settled = !c.paid
     ? ""
-    : owed > 0
-      ? ` The plan year was already paid: ${dollars2(owed)} more was billed.`
-      : owed < 0
-        ? ` The plan year was already paid: ${dollars2(-owed)} was owed back.`
-        : "";
+    : replacesEarlier(c)
+      ? ` The payments so far covered ${dollars2(c.covered ?? 0)}, so ${
+          owed > 0
+            ? `${dollars2(owed)} was owed in all`
+            : owed < 0
+              ? `${dollars2(-owed)} was owed back in all`
+              : "nothing more was owed either way"
+        }. This took the place of the amount before it.`
+      : owed > 0
+        ? ` The plan year was already paid: ${dollars2(owed)} more was billed.`
+        : owed < 0
+          ? ` The plan year was already paid: ${dollars2(-owed)} was owed back.`
+          : "";
   const price = !money
     ? ""
     : c.repriced
@@ -1807,15 +1951,20 @@ export function sizeChangeWords(c: PlanSizeChange, money: boolean): string {
 }
 
 /** What a corrected size on a paid plan still leaves to settle, for someone who sees prices. */
-export function sizeBalanceWords(b: PlanSizeBalance): string {
+export function sizeBalanceWords(b: PlanSizeBalance, ended = false): string {
   if (b.owed > 0) {
     const inv = b.invoice
       ? `Invoice #${b.invoice.number} for it is ${b.invoice.status === "draft" ? "a draft: finalise it and send it" : "sent and not paid yet"}.`
       : "The invoice for it is not made yet.";
-    return `The corrected roof size costs ${dollars2(b.owed)} more this plan year. ${inv}`;
+    // A plan whose year is over (Nov 26): still owed, and still said.
+    return ended
+      ? `The corrected roof size cost ${dollars2(b.owed)} more for that plan year, and it is still owed. ${inv}`
+      : `The corrected roof size costs ${dollars2(b.owed)} more this plan year. ${inv}`;
   }
   if (b.owed < 0)
-    return `The corrected roof size costs ${dollars2(-b.owed)} less this plan year. That is owed back to the customer.`;
+    return ended
+      ? `The corrected roof size cost ${dollars2(-b.owed)} less for that plan year. That is still owed back to the customer.`
+      : `The corrected roof size costs ${dollars2(-b.owed)} less this plan year. That is owed back to the customer.`;
   return "";
 }
 

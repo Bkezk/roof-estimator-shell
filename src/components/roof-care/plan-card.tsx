@@ -143,6 +143,8 @@ import {
   SIZE_NEEDED,
   sizeChangeWords,
   sizeBalanceWords,
+  sizeBalancesOwed,
+  sizeCorrectHeld,
   sizeRefundWords,
   SIZE_INVOICE_MAKE,
   SIZE_REFUND_LEAD,
@@ -938,6 +940,25 @@ export function RoofCareCard({
           label={refundPlanWords(p)}
         />
       ))}
+      {/* A corrected roof size not settled on a plan whose year is over (Nov 26): ended,
+          renewed or run out, the difference was shown nowhere any more. Each has its own line,
+          named, with the same buttons as on a plan in force, until it is settled. */}
+      {!short &&
+        seesInvoices(profile) &&
+        sizeBalancesOwed(q.data).map((p) => (
+          <div key={p.id} className="space-y-1 text-xs" data-size-balance-ended={p.id}>
+            <p className="font-medium" data-size-balance-for>
+              {refundPlanWords(p)}
+            </p>
+            <SizeBalance
+              siteId={siteId}
+              plan={p}
+              balance={p.size!.balance!}
+              manager={manager}
+              ended
+            />
+          </div>
+        ))}
       {/* Card money that has to go back, of any plan of this property (Nov 20). */}
       {q.data
         .flatMap((p) => p.card_back ?? [])
@@ -1663,11 +1684,14 @@ function SizeBalance({
   plan,
   balance,
   manager,
+  ended = false,
 }: {
   siteId: string;
   plan: RoofCarePlan;
   balance: PlanSizeBalance;
   manager: boolean;
+  /** The plan year is over (Nov 26): what is not settled is still owed, and still shown. */
+  ended?: boolean;
 }) {
   const refresh = useRefresh(siteId);
   const [ref, setRef] = useState("");
@@ -1682,17 +1706,28 @@ function SizeBalance({
   });
   const sentFn = useServerFn(recordRoofCareSizeRefund);
   const sent = useMutation({
+    // `shown`: what this screen says is owed back (Nov 26). The database refuses when the size
+    // was corrected again since, so a refund is never recorded at a figure nobody is looking at.
     mutationFn: () =>
       sentFn({
-        data: { plan_id: plan.id, on: easternYmd(), ...(ref.trim() ? { ref: ref.trim() } : {}) },
+        data: {
+          plan_id: plan.id,
+          on: easternYmd(),
+          shown: -balance.owed,
+          ...(ref.trim() ? { ref: ref.trim() } : {}),
+        },
       }),
     onSuccess: () => {
       refresh();
       toast.success("Refund recorded");
     },
-    onError: (e) => toast.error(`Could not record the refund: ${errText(e)}`, { duration: 20_000 }),
+    onError: (e) => {
+      toast.error(`Could not record the refund: ${errText(e)}`, { duration: 20_000 });
+      // The amount may have changed: the plan is read again, so the screen shows what is owed.
+      refresh();
+    },
   });
-  const words = sizeBalanceWords(balance);
+  const words = sizeBalanceWords(balance, ended);
   if (!words && !balance.refunds.length) return null;
   return (
     <div
@@ -1766,9 +1801,10 @@ function SizeBalance({
 
 /**
  * The box that corrects a plan's roof size (owner, Nov 24). The measured size is typed, the new
- * price is shown, and nothing changes until Save. A plan that waits for its payment is priced
- * again; a plan in force keeps the price it was paid at. Saving can email the customer the new
- * price, with the payment link for a card plan.
+ * price is shown, and nothing changes until Save. The price moves by what the size alone
+ * changes (Nov 26): a plan that waits has its invoice made again, a plan in force has the
+ * difference settled. Saving can email the customer the new price, with the payment link for a
+ * card plan. A plan that cannot be corrected says why before anything is typed.
  */
 function CorrectSizeDialog({
   siteId,
@@ -1785,6 +1821,11 @@ function CorrectSizeDialog({
   const waiting = plan.status === "awaiting_payment";
   const card = plan.pay_method === "card";
   const to = plan.email?.to ?? null;
+  // A renewal that waits copied this year's size and price, and a year renewed with money
+  // taken off was priced from the size too (Nov 26): said here, before a size is typed, and
+  // not only when Save is refused. The database refuses the same, in the same words.
+  const plans = usePlans(siteId);
+  const held = sizeCorrectHeld(plan, plans.data ?? []);
   // Number boxes start blank.
   const [text, setText] = useState("");
   const [note, setNote] = useState("");
@@ -1845,6 +1886,15 @@ function CorrectSizeDialog({
               ? ` The map showed about ${(Math.round(plan.size.map_sqft / 100) * 100).toLocaleString("en-US")} sq ft.`
               : " The map has no size for this roof."}
           </p>
+          {held && (
+            <p
+              className="rounded-md border border-amber-300 bg-amber-50 p-2 font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+              role="alert"
+              data-size-held
+            >
+              {held}
+            </p>
+          )}
           <div className="space-y-1">
             <Label htmlFor="correct-size">The measured roof size, in square feet</Label>
             <div className="flex flex-wrap items-center gap-2">
@@ -1853,6 +1903,7 @@ function CorrectSizeDialog({
                 inputMode="numeric"
                 className="h-9 w-40"
                 value={text}
+                disabled={!!held}
                 onChange={(e) => setText(e.target.value)}
                 data-size-box
               />
@@ -1860,7 +1911,7 @@ function CorrectSizeDialog({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={!(sqft != null && sqft > 0) || show.isPending}
+                disabled={!!held || !(sqft != null && sqft > 0) || show.isPending}
                 onClick={() => show.mutate()}
                 data-action="roof-care-size-show"
               >
@@ -1909,7 +1960,7 @@ function CorrectSizeDialog({
           </Button>
           <Button
             type="button"
-            disabled={!shown || save.isPending}
+            disabled={!!held || !shown || save.isPending}
             onClick={() => save.mutate()}
             data-action="roof-care-size-save"
           >

@@ -55,7 +55,9 @@ import {
   readSizeRefunds,
   type PlanSizeBalance,
   type SizeRefund,
-  SIZE_CORRECT_SAME,
+  readSizeOffer,
+  SIZE_REFUND_RELOAD,
+  type SizeOffer,
   readRefundChanges,
   readsPlanTables,
   readRefundWorked,
@@ -1200,20 +1202,7 @@ export const confirmRoofCareSize = createServerFn({ method: "POST" })
 
 // ── Correcting a plan's roof size (owner, Nov 24) ───────────────────────────────────────────
 
-/** What a corrected size would do, before anything is saved. */
-export interface SizeOffer {
-  from_sqft: number;
-  to_sqft: number;
-  from_price: number;
-  /** A year at the corrected size, by today's prices. */
-  to_price: number;
-  /** True for a plan that waits for its payment: its price follows the size. */
-  repriced: boolean;
-  /** True for a plan year already paid: its price follows too, and the difference is settled. */
-  paid: boolean;
-  /** For a paid plan: what saving would leave owed. Above 0 to us, below 0 back. */
-  owed: number;
-}
+export type { SizeOffer };
 
 /** A manager's or an admin's, said in plain words before the database says it. */
 async function sizeManager(ctx: Ctx) {
@@ -1222,73 +1211,30 @@ async function sizeManager(ctx: Ctx) {
   return p;
 }
 
-/** The price a plan would have at another roof size: the drive it was signed at, today's prices. */
+/**
+ * What a corrected roof size would do to a plan, before anything is saved. The database
+ * answers it (roof_care_size_offer, Nov 26): the same arithmetic and the same refusals as Save,
+ * so the price shown is the price Save keeps. Until then this asked today's price list for the
+ * whole year at the new size, and a change of the list since the sign-up was billed or refunded
+ * with the size. Now only the part that comes from the size moves the price (owner, Nov 25).
+ * What Save would refuse is said here, in the database's own words: a renewal that waits, a
+ * year renewed with a credit, a payment on the invoice, a bank payment on its way.
+ */
 export const roofCareSizeOffer = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid(), sqft: sqftInput }).parse(d))
   .handler(async ({ data, context }): Promise<SizeOffer> => {
     await sizeManager(context);
-    const sb = context.supabase;
     if (!(data.sqft > 0)) throw new Error(SIZE_NEEDED);
-    const { data: plan, error } = await sb
-      .from("roof_care_plans")
-      .select("id, plan, status, roof_sqft, price, drive_hours, drive_miles")
-      .eq("id", data.plan_id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    const key = plan ? asPlanKey(plan.plan) : null;
-    if (!plan || !key) throw new Error("That plan was not found");
-    if (plan.status !== "awaiting_payment" && plan.status !== "active")
-      throw new Error("This plan has ended, so its roof size is not changed");
-    // Said here, before a price is shown that Save would then refuse.
-    if (Number(plan.roof_sqft) === data.sqft) throw new Error(SIZE_CORRECT_SAME);
-    const { data: priced, error: pErr } = await sb.rpc("roof_care_price", {
+    const { data: answer, error } = await databaseRpc(context.supabase)("roof_care_size_offer", {
+      p_plan: data.plan_id,
       p_sqft: data.sqft,
-      p_hours: Number(plan.drive_hours),
-      p_miles: Number(plan.drive_miles),
     });
-    if (pErr) throw new Error(pErr.message);
-    const answer = readPriceAnswer(priced);
-    if (!answer.ready)
-      throw new Error("The Roof Care plan prices are not set up yet. Ask an admin.");
-    if (answer.custom_quote)
-      throw new Error(
-        "A roof this size gets a custom quote, so the plan cannot be priced at it here. End the plan and quote it by hand.",
-      );
-    const now = answer.plans.find((o) => o.plan === key);
-    if (!now) throw new Error("The price for this plan could not be worked out. Ask an admin.");
-    const paid = plan.status === "active";
-    // What the payments cover so far: the price, unless an earlier correction is not settled.
-    const covered = paid ? ((await sizePaidPrice(sb, plan.id)) ?? Number(plan.price)) : 0;
-    return {
-      from_sqft: Number(plan.roof_sqft),
-      to_sqft: data.sqft,
-      from_price: Number(plan.price),
-      to_price: now.price,
-      repriced: !paid,
-      paid,
-      owed: paid ? Math.round((now.price - covered) * 100) / 100 : 0,
-    };
+    if (error) throw new Error(error.message);
+    const offer = readSizeOffer(answer);
+    if (!offer) throw new Error("The new price could not be read. Press Show the new price again.");
+    return offer;
   });
-
-/** roof_care_plans.size_paid_price, read loose (newer than the generated types): null when unset. */
-async function sizePaidPrice(sb: Sb, planId: string): Promise<number | null> {
-  try {
-    const loose = sb as unknown as {
-      from: (t: string) => {
-        select: (c: string) => {
-          eq: (c: string, v: string) => Promise<{ data: { size_paid_price?: unknown }[] | null }>;
-        };
-      };
-    };
-    const { data } = await loose.from("roof_care_plans").select("size_paid_price").eq("id", planId);
-    const v = data?.[0]?.size_paid_price;
-    const n = v == null ? null : Number(v);
-    return n != null && Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
 
 /** What saving a corrected size answers. */
 export interface SizeCorrected {
@@ -1376,6 +1322,9 @@ export const correctRoofCareSize = createServerFn({ method: "POST" })
 /**
  * The refund for a smaller roof was sent (Nov 24). The database works what is owed, keeps the
  * day and the reference, and settles the plan (roof_care_size_refund_sent): no amount is typed.
+ * `shown` is the amount the screen said was owed back (Nov 26): the database refuses when that
+ * is no longer what is owed, so a size corrected again after the refund was mailed is not
+ * recorded at the wrong amount from a screen left open.
  */
 export const recordRoofCareSizeRefund = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1385,6 +1334,11 @@ export const recordRoofCareSizeRefund = createServerFn({ method: "POST" })
         plan_id: z.string().uuid(),
         on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         ref: z.string().trim().max(80).optional(),
+        // A page left open from before this was asked for sends none: said in plain words.
+        shown: z
+          .number({ required_error: SIZE_REFUND_RELOAD, invalid_type_error: SIZE_REFUND_RELOAD })
+          .finite(SIZE_REFUND_RELOAD)
+          .positive(SIZE_REFUND_RELOAD),
       })
       .parse(d),
   )
@@ -1392,7 +1346,12 @@ export const recordRoofCareSizeRefund = createServerFn({ method: "POST" })
     await sizeManager(context);
     const { data: entry, error } = await databaseRpc(context.supabase)(
       "roof_care_size_refund_sent",
-      { p_plan: data.plan_id, p_on: data.on, p_ref: data.ref ?? null },
+      {
+        p_plan: data.plan_id,
+        p_on: data.on,
+        p_ref: data.ref ?? null,
+        p_shown_amount: data.shown,
+      },
     );
     if (error) throw new Error(error.message);
     const amount = Number((entry as { amount?: unknown } | null)?.amount);

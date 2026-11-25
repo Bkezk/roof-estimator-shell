@@ -75,6 +75,11 @@ export interface InvoicePlan {
   status: string;
   plan_number: number | null;
   refund_due: number | string | null;
+  /**
+   * The invoice is the plan's invoice for a roof size difference (invoices.plan_part = 'size'),
+   * not the plan year's own (Nov 26). The plan does not run on its payment.
+   */
+  size_invoice?: boolean;
 }
 
 const planLabel = (n: number | null) => `RC-${n ?? ""}`;
@@ -101,6 +106,10 @@ export function planHoldsInvoice(
   const wasPaid = before.status === "paid";
   const had = num(before.paid_amount);
   if (plan.status === "active" && wasPaid) {
+    // The invoice of a size difference (Nov 26): a payment marked on it by mistake could not be
+    // taken off, with "the plan is running on this invoice's payment", which is not true of
+    // it. The plan runs on its own invoice; this one settles a difference and nothing else.
+    if (plan.size_invoice) return null;
     if (!after || after.status !== "paid" || after.paid_amount + 0.005 < num(before.total))
       return planRunsOnPayment(plan.plan_number);
     return null;

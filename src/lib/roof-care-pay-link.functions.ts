@@ -294,6 +294,9 @@ export async function emailSizeCorrected(
     /** A plan year already paid: the difference the correction left to settle. */
     paid?: boolean;
     owed?: number;
+    /** What the payments covered when it was made, and which correction of the plan it is. */
+    covered?: number;
+    nth?: number;
   },
 ): Promise<{ to: string; with_link: boolean }> {
   const { admin, plan } = await seenPlan(context, planId);
@@ -345,6 +348,14 @@ export async function emailSizeCorrected(
     pay_method: plan.pay_method === "card" || plan.pay_method === "check" ? plan.pay_method : null,
     pay_link: link,
     ...(settled ? { settle: change.owed ?? 0 } : {}),
+    // A correction made while the one before it was not settled (Nov 26): the amount is from
+    // what the payments cover, so the email says that, and that it replaces the earlier note.
+    ...(settled &&
+    change.covered != null &&
+    Math.round((change.covered - change.from_price) * 100) !== 0
+      ? { covered: change.covered }
+      : {}),
+    ...((change.nth ?? 1) > 1 ? { again: true } : {}),
     company: (co?.company_name ?? "").trim() || "JBK Commercial Roofing",
     contact: [co?.phone, co?.email]
       .map((x) => (x ?? "").trim())

@@ -113,18 +113,42 @@ export async function makePlanInvoice(
   if (!plan) throw new Error("That plan was not found");
   if (plan.status !== "awaiting_payment" || !plan.pay_first || plan.plan_number == null)
     throw new Error(PLAN_INVOICE_NOT_AWAITING);
-  const live = async () => {
-    const { data, error: lErr } = await sb
+  // The plan year's own invoices, in the order they were made (Nov 26): never the invoice of a
+  // size difference, which is the plan's too (invoices.plan_part, read loose: it is newer than
+  // the generated types).
+  const own = async () => {
+    const loose = sb as unknown as {
+      from: (t: string) => {
+        select: (c: string) => {
+          eq: (
+            c: string,
+            v: string,
+          ) => Promise<{
+            data: Record<string, unknown>[] | null;
+            error: { message: string } | null;
+          }>;
+        };
+      };
+    };
+    const { data, error: lErr } = await loose
       .from("invoices")
-      .select("id")
-      .eq("roof_care_plan_id", plan.id)
-      .neq("status", "void")
-      .limit(1);
+      .select("id, status, plan_part, created_at")
+      .eq("roof_care_plan_id", plan.id);
     if (lErr) throw new Error(lErr.message);
-    return data?.[0]?.id ?? null;
+    return (data ?? [])
+      .filter((i) => i["plan_part"] !== "size")
+      .sort((a, b) => String(a["created_at"] ?? "").localeCompare(String(b["created_at"] ?? "")));
   };
-  const already = await live();
-  if (already) return { id: already, made: false };
+  const live = async () => {
+    const one = (await own()).find((i) => i["status"] !== "void");
+    return one ? String(one["id"]) : null;
+  };
+  const before = await own();
+  const already = before.find((i) => i["status"] !== "void");
+  if (already) return { id: String(already["id"]), made: false };
+  // Only a finalised invoice is ever void (a draft is deleted), so each void one is a number a
+  // customer may hold.
+  const voided = before.filter((i) => i["status"] === "void").length;
 
   const [{ data: account, error: aErr }, { data: site, error: sErr }] = await Promise.all([
     sb.from("crm_accounts").select("*").eq("id", plan.account_id).maybeSingle(),
@@ -160,7 +184,7 @@ export async function makePlanInvoice(
       service_job_id: null,
       bid_id: null,
       number: null,
-      display_number: planNumberLabel(plan.plan_number),
+      display_number: planInvoiceNumber(plan.plan_number, voided),
       status: "draft",
       bill_to: accountBillTo(account, null) as unknown as Json,
       bill_to_vendor_id: null,
@@ -195,6 +219,16 @@ export async function makePlanInvoice(
   }
   return { id: made.id, made: true };
 }
+
+/**
+ * The number of a plan year's own invoice (Nov 26). The first is the plan's number, "RC-1001".
+ * One made again after a finalised invoice was voided is "RC-1001-R1", then "-R2": until now it
+ * took "RC-1001" again at a new amount (a corrected roof size re-prices a plan that waits), so
+ * a customer could hold two different invoices with one number. `voided`: how many of the
+ * plan's own invoices are void. A draft that was deleted was never sent, and frees its number.
+ */
+export const planInvoiceNumber = (planNumber: number, voided: number): string =>
+  planNumberLabel(planNumber) + (voided > 0 ? "-R" + String(Math.round(voided)) : "");
 
 /** "RC-1001-S1": the plan's number, then which size invoice of the plan it is. */
 export const sizeInvoiceNumber = (planNumber: number, nth: number): string =>
@@ -280,7 +314,10 @@ export async function makeSizeInvoice(
   const number = Number(plan["plan_number"]);
   const paidPrice = plan["size_paid_price"] == null ? null : Number(plan["size_paid_price"]);
   const owed = paidPrice == null ? 0 : Math.round((Number(plan["price"]) - paidPrice) * 100) / 100;
-  if (plan["status"] !== "active" || !Number.isFinite(number) || !(owed > 0))
+  // A plan in force, or one whose year is over with the difference still owed (Nov 26): ended,
+  // renewed or run out, it was refused here and the difference could no longer be billed.
+  const billable = plan["status"] === "active" || plan["status"] === "ended";
+  if (!billable || !Number.isFinite(number) || !(owed > 0))
     throw new Error(SIZE_INVOICE_NOTHING_OWED);
 
   const { data: mine, error: mErr } = await loose

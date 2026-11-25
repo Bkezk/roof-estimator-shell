@@ -25,7 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { tradeJobLabel, type InvoiceBidRef } from "@/lib/bid-invoices";
-import { planName, planNumberLabel } from "@/lib/roof-care-plan";
+import { isSizeInvoice, planName, planNumberLabel } from "@/lib/roof-care-plan";
 import { isPlanLine } from "@/lib/roof-care-travel";
 import { databaseRpc } from "@/lib/database-rpc";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
@@ -1477,6 +1477,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
 async function planOfInvoice(
   sb: SupabaseClient<Database>,
   planId: string | null,
+  invoiceId: string,
 ): Promise<InvoicePlan | null> {
   if (!planId) return null;
   const { data } = await sb
@@ -1484,7 +1485,25 @@ async function planOfInvoice(
     .select("status, plan_number, refund_due")
     .eq("id", planId)
     .maybeSingle();
-  return data ?? null;
+  if (!data) return null;
+  // The invoice of a roof size difference (Nov 26): the plan does not run on its payment, so a
+  // payment marked on it by mistake can be taken off. Its mark is newer than the generated
+  // types, so it is read loose; a read that fails leaves the invoice held, as before.
+  let size_invoice = false;
+  try {
+    const loose = sb as unknown as {
+      from: (t: string) => {
+        select: (c: string) => {
+          eq: (c: string, v: string) => Promise<{ data: { plan_part?: unknown }[] | null }>;
+        };
+      };
+    };
+    const { data: rows } = await loose.from("invoices").select("plan_part").eq("id", invoiceId);
+    size_invoice = isSizeInvoice(rows?.[0]);
+  } catch {
+    size_invoice = false;
+  }
+  return { ...data, size_invoice };
 }
 
 /**
@@ -1525,7 +1544,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
     const off = clearsPayment(cur.total, data.amount);
     // A Roof Care plan's payment is not taken off or lowered while the plan runs on it, nor
     // while a refund worked from it stands (Nov 20): said here, and refused by the database.
-    const held = planHoldsInvoice(await planOfInvoice(sb, cur.roof_care_plan_id), cur, {
+    const held = planHoldsInvoice(await planOfInvoice(sb, cur.roof_care_plan_id, cur.id), cur, {
       status: off ? "final" : paidStatusFor(cur.total, data.amount),
       paid_amount: off ? 0 : data.amount,
     });
@@ -1599,7 +1618,11 @@ export const voidInvoice = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     // The invoice a Roof Care plan runs on, or one a refund was worked from (Nov 20): the plan
     // is ended first. Said before the plainer refusals below, so the office knows what to do.
-    const held = planHoldsInvoice(await planOfInvoice(sb, inv.roof_care_plan_id), inv, null);
+    const held = planHoldsInvoice(
+      await planOfInvoice(sb, inv.roof_care_plan_id, inv.id),
+      inv,
+      null,
+    );
     if (held) throw new Error(held);
     // The screen never offers Void on a paid invoice; the server says the same (Nov 4, bug 8).
     if (inv.status === "paid")
