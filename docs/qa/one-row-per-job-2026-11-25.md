@@ -96,6 +96,5 @@ part of the job until it is linked.
 ## Left with the owner
 
 - Publishing. Until then the live site is as it was.
-- On the calendar, a ticket's chip is its number and its description, so a ticket with an empty
-  description shows only its number. Suggested, not built: every ticket chip leads with the
-  customer.
+- The calendar's ticket chips were built the same day at his word:
+  `docs/qa/calendar-ticket-chips-2026-11-25.md`.

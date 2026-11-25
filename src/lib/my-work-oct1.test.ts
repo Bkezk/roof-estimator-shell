@@ -285,7 +285,9 @@ describe("Calendar: whole width, one screen, the day's items beside it, five ite
     expect(cal).toContain("+{more} more");
     expect(cal).toContain("border-l-4");
     expect(cal).toContain("${KIND_BAR[i.kind]}");
-    expect(cal).toContain('<span className="min-w-0 flex-1 truncate">{i.title}</span>');
+    // Nov 25: the chip's words come from calendarChip (a ticket leads with its customer).
+    expect(cal).toMatch(/className="min-w-0 flex-\[1_1_4\.5rem\] truncate"\s+data-chip="lead"/);
+    expect(cal).toContain("{chip.lead}");
     expect(cal).toMatch(/\{showWho && \(\s*<span[^>]*>\s*\{initials\(i\.assigneeName\)\}/);
     // Today stays highlighted; the day list stays.
     expect(cal).toContain('d === today ? "bg-primary font-semibold text-primary-foreground" : ""');

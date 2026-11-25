@@ -476,6 +476,12 @@ export interface WorkItem {
   href: string;
   /** Small lines under the customer (Nov 25): where the work came from, what else is open here. */
   notes?: string[];
+  /**
+   * A ticket's customer and number by themselves (Nov 25), for the calendar's chip
+   * (`calendarChip`). Absent on everything that is not a ticket.
+   */
+  customer?: string | null;
+  number?: number;
   assigneeId: string | null;
   assigneeName: string | null;
   /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
@@ -567,6 +573,8 @@ export function ticketItem(
     kind: ticketKind(t.service_type),
     title: `#${t.number}${what ? ` ${what}` : ""}`,
     where: joinWhere(t.customer_name, t.site_name, t.site_address),
+    customer: (t.customer_name ?? "").trim() || null,
+    number: t.number,
     // The ticket's day; an undated ticket (from before dates were required) takes its open
     // follow-up's due day, so a row whose state line reads "Overdue 3 days" sits under Overdue,
     // not under Later as undated (owner, Oct 1: "why does this show no date but overdue?").
@@ -585,6 +593,27 @@ export function ticketItem(
       ? { toInvoice: true, waitingSince: t.stage_changed_at ?? null }
       : {}),
   };
+}
+
+/**
+ * What a calendar chip says (owner, Nov 25: "why does ticket 6058 just show the number but others
+ * show the customers and sometimes they show other things?"). A ticket's chip was its number and
+ * its description, so a ticket with an empty description showed only "#6058", and the others
+ * showed whatever had been typed. Now every ticket's chip leads with the customer (`lead`). Its
+ * number (`tail`) follows only when the day is wide enough for both: with the number always
+ * there, a normal screen left one or two letters of the customer. The hover text says all of
+ * it, number and description included, and so does the day's list. A ticket with no customer on
+ * it, and everything that is not a ticket (an opportunity's title, a bid's name, a task), reads
+ * as before.
+ */
+export function calendarChip(i: Pick<WorkItem, "title" | "customer" | "number">): {
+  lead: string;
+  tail: string | null;
+  hover: string;
+} {
+  const customer = (i.customer ?? "").trim();
+  if (!customer || i.number == null) return { lead: i.title, tail: null, hover: i.title };
+  return { lead: customer, tail: `#${i.number}`, hover: `${customer} · ${i.title}` };
 }
 
 /**

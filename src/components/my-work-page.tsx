@@ -59,6 +59,7 @@ import {
   itemsByDay,
   listGroups,
   localYmd,
+  calendarChip,
   mergeWork,
   monthGrid,
   nextPicked,
@@ -1043,28 +1044,51 @@ function CalendarView({
                             {more > 0 && <span className="text-[10px] leading-none">+{more}</span>}
                           </span>
                           <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
-                            {shown.map((i) => (
-                              // Owner, Oct 15: an assigned ticket or task is dragged to another
-                              // day from its cell (whoever may move it: actions.movable).
-                              <span
-                                key={i.key}
-                                title={showWho ? `${i.title} — ${i.assigneeName ?? ""}` : i.title}
-                                draggable={!!actions?.movable(i)}
-                                onDragStart={
-                                  actions?.movable(i) ? (e) => startDrag(e, i) : undefined
-                                }
-                                className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
-                                  i.done ? "opacity-60" : ""
-                                } ${actions?.movable(i) ? "cursor-grab active:cursor-grabbing" : ""}`}
-                              >
-                                <span className="min-w-0 flex-1 truncate">{i.title}</span>
-                                {showWho && (
-                                  <span className="shrink-0 rounded bg-background px-1 text-[9px] font-semibold leading-3 text-muted-foreground">
-                                    {initials(i.assigneeName)}
+                            {shown.map((i) => {
+                              // Owner, Nov 25: every ticket's chip leads with the customer and
+                              // ends with its number (my-work.ts calendarChip).
+                              const chip = calendarChip(i);
+                              return (
+                                // Owner, Oct 15: an assigned ticket or task is dragged to another
+                                // day from its cell (whoever may move it: actions.movable).
+                                <span
+                                  key={i.key}
+                                  title={
+                                    showWho ? `${chip.hover} — ${i.assigneeName ?? ""}` : chip.hover
+                                  }
+                                  draggable={!!actions?.movable(i)}
+                                  onDragStart={
+                                    actions?.movable(i) ? (e) => startDrag(e, i) : undefined
+                                  }
+                                  className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
+                                    i.done ? "opacity-60" : ""
+                                  } ${actions?.movable(i) ? "cursor-grab active:cursor-grabbing" : ""}`}
+                                >
+                                  {/* The customer gets the room. The number sits on the same
+                                      line only when at least 4.5rem is left for the customer;
+                                      otherwise it wraps onto a second line that is not shown.
+                                      It is always in the hover text and in the day's list. */}
+                                  <span className="flex h-4 min-w-0 flex-1 flex-wrap gap-x-1 overflow-hidden">
+                                    <span
+                                      className="min-w-0 flex-[1_1_4.5rem] truncate"
+                                      data-chip="lead"
+                                    >
+                                      {chip.lead}
+                                    </span>
+                                    {chip.tail && (
+                                      <span className="shrink-0 tabular-nums" data-chip="number">
+                                        {chip.tail}
+                                      </span>
+                                    )}
                                   </span>
-                                )}
-                              </span>
-                            ))}
+                                  {showWho && (
+                                    <span className="shrink-0 rounded bg-background px-1 text-[9px] font-semibold leading-3 text-muted-foreground">
+                                      {initials(i.assigneeName)}
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })}
                             {more > 0 && (
                               <span className="text-[11px] text-muted-foreground">
                                 +{more} more
