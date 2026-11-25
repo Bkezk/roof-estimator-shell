@@ -844,6 +844,100 @@ export async function movedByTicket(ctx: Ctx, jobId: string): Promise<Opportunit
   }
 }
 
+/** What Unlink did to the opportunity (job-link.functions.ts), for the words that say so. */
+export interface OpportunityUnlinked {
+  /** The status went back: from where, to where. */
+  back?: { from: string; to: string };
+  /** It was left where it stands: its status, and whether this ticket had ever moved it. */
+  left?: { status: string; byTicket: boolean };
+  /** The link is off, the status was not looked at: why, to be said out loud. */
+  error?: string;
+}
+
+/**
+ * Unlink takes the opportunity back (Nov 26, 2026, the audit's 21). A linked repair marked the
+ * opportunity Won, and Unlink only cleared the link: the opportunity stayed Won, off every
+ * list, with no reminder, and could not be linked again. The database function
+ * undo_opportunity_from_ticket (20261125400000) puts the status back when THIS ticket's move
+ * is the opportunity's last status step and it still stands there; anything else is somebody's
+ * later decision and is left. The follow-up reopens here as for a status set by hand
+ * (syncOppFollowup), from what the function answers: the caller may not be able to read the
+ * opportunity. Never thrown: the link is already off, and what happened is said. Before the
+ * migration is applied there is no function, and the status stays (as before Nov 26).
+ */
+export async function undoOpportunityFromTicket(
+  ctx: Ctx,
+  jobId: string,
+  opportunityId: string,
+): Promise<OpportunityUnlinked> {
+  try {
+    const { databaseRpc } = await import("@/lib/database-rpc");
+    const { data, error } = await databaseRpc(ctx.supabase)("undo_opportunity_from_ticket", {
+      p_job: jobId,
+      p_opp: opportunityId,
+    });
+    if (error) {
+      if (isMissingDatabaseFunction(error)) return {};
+      throw new Error(error.message);
+    }
+    const out = (data ?? { action: "none" }) as {
+      action: string;
+      opportunity_id?: string;
+      title?: string;
+      from?: string;
+      to?: string;
+      status?: string;
+      by_ticket?: boolean;
+      account_id?: string | null;
+      assignee_id?: string | null;
+      expected_close?: string | null;
+    };
+    if (out.action === "unchanged" && out.status)
+      return { left: { status: out.status, byTicket: !!out.by_ticket } };
+    if (out.action !== "updated" || !out.opportunity_id || !out.to || !out.from) return {};
+    const p = await me(ctx);
+    await syncOppFollowup(
+      {
+        id: out.opportunity_id,
+        account_id: out.account_id ?? null,
+        assignee_id: out.assignee_id ?? null,
+        title: out.title ?? "",
+        status: out.to,
+        expected_close: out.expected_close ?? null,
+      },
+      out.from,
+      ctx,
+      nameOf(p),
+    );
+    return { back: { from: out.from, to: out.to } };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Did this opportunity come from a public Roof Care request (Nov 26, the audit's 21)? Such a
+ * one turns Won the day its plan is paid (20261123300000), so a linked ticket must not mark it
+ * Won first. Asked of the database's own function, because the people who link tickets cannot
+ * all read the requests. `null` when it could not be asked: the caller then moves nothing.
+ * Before the migration is applied there is no function, and the answer is No (as before).
+ */
+export async function opportunityFromCareRequest(
+  ctx: Ctx,
+  opportunityId: string,
+): Promise<boolean | null> {
+  try {
+    const { databaseRpc } = await import("@/lib/database-rpc");
+    const { data, error } = await databaseRpc(ctx.supabase)("opportunity_from_care_request", {
+      p_opp: opportunityId,
+    });
+    if (error) return isMissingDatabaseFunction(error) ? false : null;
+    return data === true;
+  } catch {
+    return null;
+  }
+}
+
 export const setOpportunityStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>

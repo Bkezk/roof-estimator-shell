@@ -260,11 +260,14 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
     const publicRequests = await publicRequestsWaiting(sb);
     // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
     // from it is not "not started". Somebody is on the step, and the step is what can be late.
+    // Nov 26 (the audit's 24): the opportunities nobody is on are asked too, so this list and
+    // Work Overview give one answer. One that waits on a step is not "Nobody is on it" here.
+    const oppRows = must<AttOpp[]>("opportunities", opps);
     const { openStepsFor } = await import("@/lib/job-steps.server");
-    const waitingOpps = await openStepsFor(
-      sb,
-      (untouched ?? []).filter((u) => u.kind === "opportunity").map((u) => u.item_id),
-    );
+    const waitingOpps = await openStepsFor(sb, [
+      ...(untouched ?? []).filter((u) => u.kind === "opportunity").map((u) => u.item_id),
+      ...oppRows.map((o) => o.id),
+    ]);
     const untouchedLive = untouched
       ? untouched.filter((u) => !(u.kind === "opportunity" && waitingOpps.has(u.item_id)))
       : untouched;
@@ -274,7 +277,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       limits: attentionLimits(settings.data),
       tickets,
       untouched: untouchedLive,
-      opps: must<AttOpp[]>("opportunities", opps),
+      opps: oppRows.filter((o) => !waitingOpps.has(o.id)),
       bids: must<AttBid[]>("bids", bids),
       invoices: must<AttInvoice[]>("invoices", invoices),
       followups: must<AttFollowup[]>("follow-ups", followups),

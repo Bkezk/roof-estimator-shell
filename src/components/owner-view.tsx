@@ -43,9 +43,10 @@ import { localYmd, ymdParts } from "@/lib/my-work";
 import { taskMapHref } from "@/lib/my-work-actions";
 import { getOwnerPersonDetail, listOwnerView } from "@/lib/owner-view.functions";
 import {
-  DETAIL_KIND_LABELS,
   activityLabel,
   activityWhen,
+  detailLabel,
+  detailTone,
   digestLine,
   dueTotal,
   myWorkHref,
@@ -53,6 +54,7 @@ import {
   ownerTotals,
   visibleToOwner,
   type DetailKind,
+  type DetailTone,
   type DueCounts,
 } from "@/lib/owner-view";
 import { Badge } from "@/components/ui/badge";
@@ -439,7 +441,7 @@ function DetailSkeleton() {
   );
 }
 
-const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
+const DETAIL_KIND_CLASS: Record<DetailTone, string> = {
   ticket:
     "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
   inspection:
@@ -452,6 +454,10 @@ const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
   // Draft bids due today / overdue (owner, Oct 12): sky, the same chip as Work Overview's
   // (my-work-page.tsx KIND_CLASS), dark-paired; the row's link opens the estimator (`href`).
   bid: "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200",
+  // A trade bid (Nov 26, the audit's 24): lime, Work Overview's own (my-work-page.tsx
+  // KIND_CLASS). It was the roofing bid's orange here, under the word "Bid".
+  trade_bid:
+    "border-lime-300 bg-lime-50 text-lime-800 dark:border-lime-800 dark:bg-lime-950 dark:text-lime-200",
 };
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (a calendar day, no time zone shift). */
@@ -485,6 +491,8 @@ function ItemLink({ href, children }: { href: string; children: ReactNode }) {
 interface DetailLine {
   key: string;
   kind: DetailKind;
+  /** A trade bid (my-work.ts bidItem): its badge says so, in its own colour. */
+  trade?: boolean;
   title: string;
   where: string | null;
   when: string;
@@ -527,8 +535,11 @@ function DetailGroup({
               key={l.key}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2 text-sm"
             >
-              <Badge variant="outline" className={`mt-0.5 shrink-0 ${DETAIL_KIND_CLASS[l.kind]}`}>
-                {DETAIL_KIND_LABELS[l.kind]}
+              <Badge
+                variant="outline"
+                className={`mt-0.5 shrink-0 ${DETAIL_KIND_CLASS[detailTone(l)]}`}
+              >
+                {detailLabel(l)}
               </Badge>
               <span className="min-w-0">
                 <span className="block truncate leading-snug" title={l.title}>

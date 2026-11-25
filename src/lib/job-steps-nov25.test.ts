@@ -22,13 +22,14 @@ import {
   LINK_NO_CUSTOMER,
   LINK_NOT_OPEN,
   LINK_OTHER_CUSTOMER,
+  lateTellDue,
   linkedWords,
   linkProblem,
   linkRows,
   openStepsByOpportunity,
   stepDoneNotice,
+  stepIsLate,
   stepLateNotice,
-  stepLateOn,
   ticketIsOpenStep,
   waitingWords,
   type LinkTicketIn,
@@ -78,6 +79,10 @@ describe("what an opportunity waits on", () => {
         label: "inspection #7090",
         date: "2026-12-04",
         personId: GARRY,
+        // Nov 26, 2026 (the audit's 22): a step also says the day it counts as due (its own
+        // day here) and the day it was made, when that is known.
+        due: "2026-12-04",
+        made: null,
       },
     ]);
   });
@@ -168,14 +173,16 @@ describe("the words", () => {
     );
   });
 
-  it("an unknown name and a missing date are left out, never guessed", () => {
+  // Nov 26, 2026 (the audit's 22): a missing date was left out. It is now said, "no date
+  // set": the step with no date is the one that can sit unseen.
+  it("an unknown name is left out, never guessed, and a missing date is said", () => {
     expect(waitingWords(steps)).toBe("Waiting on inspection #7090, Dec 4");
     const noDay = openStepsByOpportunity({
       tickets: [ticket({ stage: "open", scheduled_date: null })],
       bids: [],
     }).get(OPP)!;
     expect(waitingWords(noDay, { [GARRY]: "Garry Peters" })).toBe(
-      "Waiting on inspection #7090, Garry Peters",
+      "Waiting on inspection #7090, no date set, Garry Peters",
     );
   });
 
@@ -221,29 +228,40 @@ describe("the step is finished: two working days to follow up", () => {
   });
 });
 
-describe("a step runs late: said once", () => {
-  it("the first working day after its date, and only that day", () => {
-    expect(stepLateOn("2026-11-24", "2026-11-25")).toBe(true);
-    expect(stepLateOn("2026-11-24", "2026-11-26")).toBe(false);
-    expect(stepLateOn("2026-11-25", "2026-11-25")).toBe(false);
-    expect(stepLateOn("2026-11-26", "2026-11-25")).toBe(false);
+// Nov 26, 2026 (the audit's 22): the rule here was "the first working day after its date, and
+// only that day" (stepLateOn), and "a step with no date is never late". That is the fault that
+// was fixed: a missed morning lost the notice for good and nothing was said twice. The same
+// days are asked of the new rule (job-steps-late-nov26.test.ts has the rest).
+describe("a step runs late: said the next working day, then every third", () => {
+  const late = (due: string | null, today: string) => [{ due }].filter((x) => stepIsLate(x, today));
+  it("the first working day after its date, and not on its own day or before", () => {
+    expect(lateTellDue(late("2026-11-24", "2026-11-25"), null, "2026-11-25")).toBe(true);
+    expect(lateTellDue(late("2026-11-25", "2026-11-25"), null, "2026-11-25")).toBe(false);
+    expect(lateTellDue(late("2026-11-26", "2026-11-25"), null, "2026-11-25")).toBe(false);
+  });
+  it("a morning that was missed is caught up on the next one", () => {
+    expect(lateTellDue(late("2026-11-24", "2026-11-26"), null, "2026-11-26")).toBe(true);
   });
   it("a Friday step is said on the Monday, never at the weekend", () => {
-    expect(stepLateOn("2026-11-27", "2026-11-28")).toBe(false);
-    expect(stepLateOn("2026-11-27", "2026-11-29")).toBe(false);
-    expect(stepLateOn("2026-11-27", "2026-11-30")).toBe(true);
-    expect(stepLateOn("2026-11-27", "2026-12-01")).toBe(false);
+    expect(lateTellDue(late("2026-11-27", "2026-11-28"), null, "2026-11-28")).toBe(false);
+    expect(lateTellDue(late("2026-11-27", "2026-11-29"), null, "2026-11-29")).toBe(false);
+    expect(lateTellDue(late("2026-11-27", "2026-11-30"), null, "2026-11-30")).toBe(true);
   });
-  it("a step with no date is never late", () => {
-    expect(stepLateOn(null, "2026-11-25")).toBe(false);
+  it("a step with no day known at all is never late", () => {
+    expect(stepIsLate({ due: null }, "2026-11-25")).toBe(false);
   });
   it("the notice says what was late, for when and with whom", () => {
     expect(
       stepLateNotice({
-        label: "inspection #7090",
+        steps: [
+          {
+            label: "inspection #7090",
+            was: "Tuesday 11/24/2026",
+            made: null,
+            who: "Garry Peters",
+          },
+        ],
         opportunity: "Leak at the dock",
-        was: "Tuesday 11/24/2026",
-        who: "Garry Peters",
       }),
     ).toEqual({
       title: "Inspection #7090 is late: Leak at the dock",
@@ -375,6 +393,9 @@ describe("link an existing ticket", () => {
         day: "Dec 4",
         place: "North plant",
         linked: true,
+        // Nov 26, 2026 (the audit's 21): a row says when linking it would mark the
+        // opportunity Won. An inspection does not.
+        ask: null,
       },
       {
         id: "a",
@@ -383,6 +404,7 @@ describe("link an existing ticket", () => {
         day: "Dec 4",
         place: "North plant",
         linked: false,
+        ask: null,
       },
     ]);
   });
@@ -409,7 +431,9 @@ const db: {
   service_jobs: Row[];
   bids: Row[];
   crm_contact_log: Row[];
-} = { crm_opportunities: [], service_jobs: [], bids: [], crm_contact_log: [] };
+  // Nov 26, 2026: when the last late-step notice went (20261125400000).
+  step_late_marks: Row[];
+} = { crm_opportunities: [], service_jobs: [], bids: [], crm_contact_log: [], step_late_marks: [] };
 const tables = db as unknown as Record<string, Row[]>;
 const sent: { to: string[]; title: string; body: string; url: string; kind: string }[] = [];
 const synced: Row[] = [];
@@ -433,6 +457,8 @@ function fakeClient() {
       not: (c: string, _op: string, v: unknown) => (filters.push((r) => (r[c] ?? null) !== v), q),
       limit: () => q,
       order: () => q,
+      // Nov 26, 2026: a full page is read on by id.
+      gt: (c: string, v: string) => (filters.push((r) => String(r[c]) > v), q),
       update: (p: Row) => ((patch = p), q),
       insert: (r: Row) => {
         (tables[table] ??= []).push(r);
@@ -475,6 +501,7 @@ const seed = () => {
   db.service_jobs = [{ ...ticket() }];
   db.bids = [];
   db.crm_contact_log = [];
+  db.step_late_marks = [];
   sent.length = 0;
   synced.length = 0;
 };
@@ -643,18 +670,14 @@ describe("job-steps.server", () => {
     expect(sent[0]?.title).toBe("Bid Dock re-roof is submitted: follow up on Leak at the dock");
   });
 
+  // Nov 26, 2026 (the audit's 22 and 24): the late notice no longer asks "already told
+  // today" of the other notices. It has a claim of its own (step_late_marks), it is said again
+  // every third working day, and the person is told even when they have the step themselves.
   it("the morning after a missed inspection, the opportunity's person is told once", async () => {
     const { tellLateSteps } = await import("@/lib/job-steps.server");
     db.service_jobs[0]!.scheduled_date = "2026-11-24";
-    const asked: string[] = [];
-    const told = await tellLateSteps(
-      fakeClient(),
-      WED,
-      (id) => (id === GARRY ? "Garry Peters" : null),
-      async (ids, url) => (asked.push(url), ids),
-    );
-    expect(told).toBe(1);
-    expect(asked).toEqual([`/opportunities?id=${OPP}`]);
+    const names = (id: string | null) => (id === GARRY ? "Garry Peters" : null);
+    expect(await tellLateSteps(fakeClient(), WED, names)).toEqual({ told: 1, failed: 0 });
     expect(sent).toEqual([
       {
         to: [RO],
@@ -664,26 +687,33 @@ describe("job-steps.server", () => {
         url: `/opportunities?id=${OPP}`,
       },
     ]);
+    // A second pass the same morning finds the claim and sends nothing.
+    expect(await tellLateSteps(fakeClient(), WED, names)).toEqual({ told: 0, failed: 0 });
+    expect(sent).toHaveLength(1);
   });
 
-  it("already told today, two days late, or the same person on both: nothing is sent", async () => {
+  it("two days late and never told: told now. The same person on both: told too", async () => {
     const { tellLateSteps } = await import("@/lib/job-steps.server");
     const names = () => null;
-    db.service_jobs[0]!.scheduled_date = "2026-11-24";
-    expect(await tellLateSteps(fakeClient(), WED, names, async () => [])).toBe(0);
     db.service_jobs[0]!.scheduled_date = "2026-11-23";
-    expect(await tellLateSteps(fakeClient(), WED, names, async (ids) => ids)).toBe(0);
+    expect((await tellLateSteps(fakeClient(), WED, names)).told).toBe(1);
+    seed();
     db.service_jobs[0]!.scheduled_date = "2026-11-24";
     db.service_jobs[0]!.technician_id = RO;
-    expect(await tellLateSteps(fakeClient(), WED, names, async (ids) => ids)).toBe(0);
-    expect(sent).toHaveLength(0);
+    expect((await tellLateSteps(fakeClient(), WED, names)).told).toBe(1);
+    expect(sent[0]?.body).toBe(
+      "It was set for Tuesday 11/24/2026 with you. Your opportunity is waiting on it.",
+    );
   });
 });
 
 describe("every screen and the reminder run ask the one rule", () => {
   it("Work Overview leaves a waiting opportunity out and gives its ticket the two notes", () => {
     const s = src("src/lib/my-work.functions.ts");
-    expect(s).toContain("const waiting = await openStepsFor(sb, oppIds);");
+    // Nov 26, 2026 (the audit's 24): the opportunities nobody is on are asked in the same call.
+    expect(s).toContain(
+      "const waiting = await openStepsFor(sb, [...oppIds, ...(unOpps.data ?? []).map((o) => o.id)]);",
+    );
     expect(s).toContain('.filter((f) => !(f.kind === "opportunity" && waiting.has(f.item_id)))');
     expect(s).toContain("job_note: title ? `Opportunity: ${title}` : null,");
     expect(s).toContain("also_here: alsoHere.get(t.id) ?? null,");
@@ -696,13 +726,16 @@ describe("every screen and the reminder run ask the one rule", () => {
     );
   });
 
-  it("the reminder run skips it unclaimed, and tells the late step once a morning", () => {
+  // Nov 26, 2026 (the audit's 23): a waiting one was skipped inside the loop and counted in
+  // `skipped`; it is now left out when the due follow-ups are read, counted in `waiting`, and
+  // takes no place among the 200. The late notice has its own claim, not notToldToday.
+  it("the reminder run leaves it unclaimed, and tells the late step with the morning pass", () => {
     const s = src("src/lib/notify.server.ts");
     expect(s).toMatch(
-      /if \(f\.kind === "opportunity" && waiting\.has\(f\.item_id\)\) \{\s+out\.skipped\+\+;\s+continue;/,
+      /if \(f\.kind === "opportunity" && waiting\.has\(f\.item_id\)\) out\.waiting\+\+;\s+else if \(due\.length < DUE_PAGE\) due\.push\(f\);/,
     );
     expect(s).toContain("await tellLateSteps(");
-    expect(s).toContain("(ids, url) => notToldToday(admin, ids, url, now),");
+    expect(s).not.toContain("(ids, url) => notToldToday(admin, ids, url, now),");
     expect(s).toContain(
       'const past = overLimit.filter((u) => !(u.kind === "opportunity" && waiting.has(u.item_id)));',
     );
@@ -726,7 +759,10 @@ describe("every screen and the reminder run ask the one rule", () => {
 
   it("a ticket marked Done and a bid that leaves Draft hand the opportunity back", () => {
     const t = src("src/lib/ticket-events.server.ts");
-    expect(t).toMatch(/if \(becameDone\) \{\s+const \{ afterStepDone \}/);
+    // Nov 26, 2026 (the audit's 24): every way out of Open / Scheduled, and a delete, too.
+    expect(t).toMatch(
+      /if \(becameDone \|\| leftOpen \|\| deletedOpen\) \{\s+const \{ afterStepDone \}/,
+    );
     const b = src("src/lib/bids.functions.ts");
     expect(b.match(/await bidLeftDraft\(/g)).toHaveLength(2);
     expect(b).toContain('if (asBidStatus(prevStatus) !== "draft") return;');

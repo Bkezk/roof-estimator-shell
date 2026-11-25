@@ -131,6 +131,18 @@ type RpcContracts = {
     Args: { p_plan: string; p_sqft: number };
     Returns: unknown;
   };
+  // 20261125400000_job_link_undo.sql (Nov 26, the audit's 21). Unlink takes the opportunity's
+  // status back when that ticket's link was what moved it and nothing has moved it since.
+  undo_opportunity_from_ticket: {
+    Args: { p_job: string; p_opp: string };
+    Returns: unknown;
+  };
+  // The same migration: did this opportunity come from a public Roof Care request? Such a one
+  // turns Won when its plan is paid, never by a linked ticket.
+  opportunity_from_care_request: {
+    Args: { p_opp: string };
+    Returns: boolean;
+  };
 };
 type RpcDatabase = Omit<Database, "public"> & {
   public: Omit<Database["public"], "Functions"> & {
@@ -171,4 +183,29 @@ type NoticeChoicesDatabase = Omit<Database, "public"> & {
  */
 export function profilesWithNotifyOff(client: SupabaseClient<Database>) {
   return (client as unknown as SupabaseClient<NoticeChoicesDatabase>).from("profiles");
+}
+
+type StepLateMark = { opportunity_id: string; told_at: string };
+type StepLateDatabase = Omit<Database, "public"> & {
+  public: Omit<Database["public"], "Tables"> & {
+    Tables: Tables & {
+      step_late_marks: {
+        Row: StepLateMark;
+        Insert: StepLateMark;
+        Update: Partial<StepLateMark>;
+        Relationships: [];
+      };
+    };
+  };
+};
+
+/**
+ * `step_late_marks` (20261125400000_job_link_undo.sql): when the last "a step it waits on is
+ * late" notice went for an opportunity, one row each, which the generated types do not list
+ * yet. The server's alone to read and write (the reminder run). Until the migration is applied
+ * a read of it is an error, and the late-step part of the reminder run says so and sends
+ * nothing (job-steps.server.ts tellLateSteps).
+ */
+export function stepLateMarks(client: SupabaseClient<Database>) {
+  return (client as unknown as SupabaseClient<StepLateDatabase>).from("step_late_marks");
 }

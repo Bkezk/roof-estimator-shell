@@ -194,14 +194,24 @@ export async function afterTicketStage(
   }
   // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that was waiting on this
   // ticket, and now waits on nothing, is handed back to its person with two working days.
-  if (becameDone) {
+  // Nov 26, 2026 (the audit's 24): only a ticket marked Done handed it back. A manager may
+  // send a ticket straight from Open or Scheduled to Authorized, Invoiced or Closed, and a
+  // ticket can be deleted while it is still to be done: the opportunity came back with no word
+  // and no two working days. Now every way out of Open / Scheduled hands it back, and so does
+  // the delete of a ticket the opportunity was waiting on (still to be done, with somebody on
+  // it). A technician taken off frees the opportunity at once and needs no notice.
+  const { ticketLeftOpen, ticketOutcome, ticketStepLabel } = await import("@/lib/job-steps");
+  const leftOpen = live && ticketLeftOpen(prevStage, row.stage);
+  const deletedOpen =
+    !!opts.deleted && ["open", "scheduled"].includes(row.stage) && !!row.technician_id;
+  if (becameDone || leftOpen || deletedOpen) {
     const { afterStepDone } = await import("@/lib/job-steps.server");
-    const { ticketStepLabel } = await import("@/lib/job-steps");
     await afterStepDone(
       admin,
       {
         kind: "ticket",
         label: ticketStepLabel({ number: row.number, service_type: row.service_type ?? "" }),
+        outcome: deletedOpen ? "deleted" : ticketOutcome(row.stage),
         from_opportunity_id: row.from_opportunity_id ?? null,
         from_job_id: row.from_job_id ?? null,
       },
