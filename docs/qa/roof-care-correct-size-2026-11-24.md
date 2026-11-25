@@ -165,6 +165,24 @@ plans of our own that carried his own address:
 - Both temporary plans, their properties, three invoices and seven history lines were removed.
   The Pay by card button in his copy of the first email leads to a plan that is gone.
 
+### What the owner said of the emails, Nov 25
+
+They arrived. He found them "a bit abrupt, like youve already paid … now were asking for … more
+or you anticipating a certain cost then its quoted much higher". Seven softenings were offered
+and he picked two: "i like number 3, 5". He also said the size is likely read from the state's
+aerial pictures, not measured by somebody on the roof, so the email must not say we were there.
+
+- **Not committed.** An unpaid plan whose price went up now reads, before the payment is asked
+  for: "You have not been charged. If you would rather not go ahead at this price, reply to this
+  email and we will cancel the plan at no cost."
+- **Nothing due today.** A paid plan that owes a difference now reads: "Your plan year is already
+  paid, and nothing is due today. We will send you an invoice for the difference of …".
+- **The subject** is "Your roof measurement and your … plan". The heading is "Your roof
+  measurement." Nothing in the email says anyone visited the roof.
+
+The four rules for paid plans in section 6 stay as they are: "i think i may just leave it as it
+is an unlikely edge case at this point. we can also refund if we have to and redo."
+
 ## 8. Not proven yet
 
-- Whether the two emails arrived and read well: the owner has them and has not said yet.
+- The softer words in a real inbox: the two emails he read were sent before the change.

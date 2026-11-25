@@ -200,7 +200,8 @@ function settleBlocks(settle: number): Block[] {
     return [
       {
         kind: "p",
-        text: `Your plan year is already paid. We will send you an invoice for the difference of ${money2(settle)}.`,
+        // "Nothing is due today" (owner, Nov 25: the email "comes across a bit abrupt").
+        text: `Your plan year is already paid, and nothing is due today. We will send you an invoice for the difference of ${money2(settle)}.`,
       },
     ];
   if (settle < 0)
@@ -239,6 +240,11 @@ export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
         ? `The yearly price of your plan stays ${money0(f.to_price)}.`
         : `The yearly price of your plan is now ${money0(f.to_price)}. It was ${money0(f.from_price)}. As your agreement says, the price is an estimate until we measure the roof.`,
     },
+    // A plan not yet paid whose price went up (owner, Nov 25, of "you anticipating a certain
+    // cost then its quoted much higher"): said before the payment is asked for.
+    ...(f.settle == null && Math.round(f.to_price) > Math.round(f.from_price)
+      ? [{ kind: "p" as const, text: SIZE_EMAIL_NOT_CHARGED }]
+      : []),
     ...(f.settle != null
       ? settleBlocks(f.settle)
       : f.pay_link
@@ -262,11 +268,21 @@ export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
     ...signOff(f),
   ];
   return render(
-    `We measured your roof: your ${f.company} ${planName(f.plan)} plan${label(f)}`,
-    { company: f.company, title: "We measured your roof.", lead: `${name}${label(f)}` },
+    `${SIZE_EMAIL_SUBJECT} your ${f.company} ${planName(f.plan)} plan${label(f)}`,
+    { company: f.company, title: SIZE_EMAIL_TITLE, lead: `${name}${label(f)}` },
     blocks,
   );
 }
+
+/**
+ * The email's softer words (owner, Nov 25: "i like number 3, 5"). The subject no longer leads
+ * with what we did, and nothing in it says anyone was on the roof: the size is as likely read
+ * from the state's aerial pictures as measured on site.
+ */
+export const SIZE_EMAIL_SUBJECT = "Your roof measurement and";
+export const SIZE_EMAIL_TITLE = "Your roof measurement.";
+export const SIZE_EMAIL_NOT_CHARGED =
+  "You have not been charged. If you would rather not go ahead at this price, reply to this email and we will cancel the plan at no cost.";
 
 /**
  * What the plan includes and the terms that were agreed to, word for word: in the agreement,

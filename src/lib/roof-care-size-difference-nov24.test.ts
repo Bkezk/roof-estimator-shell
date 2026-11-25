@@ -17,7 +17,11 @@ vi.mock("@tanstack/react-start", async () => ({
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
-import { sizeCorrectedEmail, type SizeCorrectedFacts } from "@/lib/roof-care-email";
+import {
+  SIZE_EMAIL_NOT_CHARGED,
+  sizeCorrectedEmail,
+  type SizeCorrectedFacts,
+} from "@/lib/roof-care-email";
 import {
   isSizeInvoice,
   planInvoicePaidNote,
@@ -309,7 +313,7 @@ describe("the email for a plan year already paid", () => {
     const m = sizeCorrectedEmail({ ...facts, settle: 60 });
     expect(m.text).toContain("The yearly price of your plan is now $470. It was $410.");
     expect(m.text).toContain(
-      "Your plan year is already paid. We will send you an invoice for the difference of $60.00.",
+      "Your plan year is already paid, and nothing is due today. We will send you an invoice for the difference of $60.00.",
     );
     expect(m.text).not.toContain("Pay by card");
     expect(m.text).not.toContain("/pay/");
@@ -321,6 +325,33 @@ describe("the email for a plan year already paid", () => {
   });
   it("a plan that waits is as it was: the payment is asked for in the same email", () => {
     expect(sizeCorrectedEmail({ ...facts, owed: 470 }).text).toContain("Pay by card");
+  });
+  // The owner, Nov 25, of the two emails he was sent: it "comes across a bit abrupt, like
+  // youve already paid … now were asking for … more or you anticipating a certain cost then
+  // its quoted much higher". He picked two of the softenings offered.
+  it("a plan not yet paid whose price went up is told it is not committed, before the payment", () => {
+    const t = sizeCorrectedEmail({ ...facts, owed: 470 }).text;
+    expect(t).toContain(SIZE_EMAIL_NOT_CHARGED);
+    expect(SIZE_EMAIL_NOT_CHARGED).toBe(
+      "You have not been charged. If you would rather not go ahead at this price, reply to this email and we will cancel the plan at no cost.",
+    );
+    expect(t.indexOf(SIZE_EMAIL_NOT_CHARGED)).toBeLessThan(t.indexOf("Pay by card"));
+  });
+  it("that line is left out when the price did not go up, and for a plan already paid", () => {
+    expect(sizeCorrectedEmail({ ...facts, to_price: 380, owed: 380 }).text).not.toContain(
+      SIZE_EMAIL_NOT_CHARGED,
+    );
+    expect(sizeCorrectedEmail({ ...facts, to_price: 410, owed: 410 }).text).not.toContain(
+      SIZE_EMAIL_NOT_CHARGED,
+    );
+    expect(sizeCorrectedEmail({ ...facts, settle: 60 }).text).not.toContain(SIZE_EMAIL_NOT_CHARGED);
+  });
+  it("the subject and the heading name the measurement, not what we did", () => {
+    const m = sizeCorrectedEmail({ ...facts, owed: 470 });
+    expect(m.subject).toBe("Your roof measurement and your JBK Roofing Roof Care plan (RC-1077)");
+    expect(m.html ?? "").toContain("Your roof measurement.");
+    expect(m.html ?? "").not.toContain("We measured your roof.");
+    expect(m.subject).not.toContain("We measured");
   });
 });
 

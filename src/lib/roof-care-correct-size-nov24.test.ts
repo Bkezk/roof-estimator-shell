@@ -441,7 +441,7 @@ describe("a plan year already paid", () => {
     expect(out.emailed_to).toBe("pat@example.com");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain(
-      "Your plan year is already paid. We will send you an invoice for the difference of $60.00.",
+      "Your plan year is already paid, and nothing is due today. We will send you an invoice for the difference of $60.00.",
     );
     expect(sent[0]!.text).not.toContain("Pay by card");
     expect(sent[0]!.text).not.toContain("/pay/");
@@ -506,7 +506,10 @@ describe("the email", () => {
   };
   it("says the measured size, the old and the new price, and asks for the payment in the same email", () => {
     const m = sizeCorrectedEmail(facts);
-    expect(m.subject).toBe("We measured your roof: your JBK Roofing Roof Care plan (RC-1077)");
+    // Nov 25 (owner: "i like number 3, 5"): a softer subject, and nothing says we were on
+    // the roof. Before that day it read "We measured your roof: your …".
+    expect(m.subject).toBe("Your roof measurement and your JBK Roofing Roof Care plan (RC-1077)");
+    expect(m.text).not.toMatch(/on your roof|visited|came out/i);
     expect(m.text).toContain(
       "We measured the roof at Main plant, 120 Mill St, London, KY 40741. It is 26,000 sq ft. Your Roof Care plan (RC-1077) was signed at 20,000 sq ft.",
     );
