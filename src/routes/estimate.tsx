@@ -229,6 +229,7 @@ import {
   buildEstimateInputsWithMetalsPrices,
   markMetalsAfterUpdate,
   metalsMaterialLabel,
+  metalsQtyNotices,
   metalsTypedCount,
   metalsZeroNotices,
   readMetalsTypedPrices,
@@ -2800,7 +2801,13 @@ function EstimatePage() {
       }),
       // The engine's notices, then one for each metals price that was 0 at the last "Update
       // pricing & labor" and still is (owner, Nov 24): same list, same triangle, same dismiss.
-      warnings: [...warnings, ...metalsZeroNotices(build.metalsScreen, metalsTypedPrices)],
+      // Then one for each metals price whose line no longer has the quantity it was typed for
+      // (Nov 26: the typed amount stays as typed, the notice says to check it).
+      warnings: [
+        ...warnings,
+        ...metalsZeroNotices(build.metalsScreen, metalsTypedPrices),
+        ...metalsQtyNotices(build.metalsScreen, metalsTypedPrices),
+      ],
       parapetMaterial,
       metalsMaterial,
       adhesiveMaterial,
@@ -6282,6 +6289,13 @@ function EstimatePage() {
                 result={result?.metalsScreen}
                 prices={metalsTypedPrices}
                 onPricesChange={setMetalsTypedPrices}
+                onListNotes={(notes) => {
+                  // A typed price that was cleared is said out loud; a quantity notice the
+                  // change brought shows again even if it was dismissed before (Nov 26).
+                  for (const line of notes.cleared) toast.warning(line, { duration: 15_000 });
+                  if (notes.qtyNotices.length)
+                    setDismissedNotices((prev) => restoreNotices(prev, notes.qtyNotices));
+                }}
               />
             </CardContent>
           </Card>

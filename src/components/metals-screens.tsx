@@ -14,12 +14,17 @@
  * Cost/Quote amount of a row is a box. A typed amount is the row's whole amount on this bid
  * only (lib/metals-price-override.ts); the row is marked "Your price" with "Use the list price"
  * beside it, and an emptied box goes back to the list price too.
+ *
+ * Nov 26 (the audit of Nov 25, number 20): Remove takes the row that was pressed and every
+ * other row keeps its own typed price (removeMetalsRow); closing an entry screen carries each
+ * typed price with its own line (metalsAfterEntryScreen); a typed price that could not be kept
+ * on its line is cleared and named in a yellow line; a price is typed with the line's quantity
+ * kept beside it; and an amount pasted with a comma is read instead of dropping the price.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  removeMetalsLine,
   type MetalsLineSource,
   type DownspoutEntryState,
   type GutterEntryState,
@@ -29,9 +34,13 @@ import {
 } from "@/lib/engine/metals";
 import {
   MAX_METALS_TYPED_PRICE,
+  METALS_PRICE_NOT_READ,
   clearMetalsTypedPrice,
-  pruneMetalsTypedPrices,
+  metalsAfterEntryScreen,
+  pastedMetalsAmount,
+  removeMetalsRow,
   setMetalsTypedPrice,
+  type MetalsListChange,
   type MetalsTypedPrice,
   type PricedMetalsResult,
 } from "@/lib/metals-price-override";
@@ -120,6 +129,12 @@ interface MetalsScreensProps {
   /** The prices typed on this bid, and what to do when one is typed, cleared or dropped. */
   prices: readonly MetalsTypedPrice[];
   onPricesChange: (next: MetalsTypedPrice[]) => void;
+  /**
+   * A change of the list had something to say (Nov 26): `cleared` are the yellow sentences of
+   * typed prices that were cleared, `qtyNotices` the quantity notices the change brought (the
+   * bid shows those again even if one was dismissed before).
+   */
+  onListNotes?: (notes: Pick<MetalsListChange, "cleared" | "qtyNotices">) => void;
 }
 
 /** Above the list: how a price is changed, and that it goes no further than this bid. */
@@ -149,6 +164,11 @@ function PriceBox(props: {
   onListPrice: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // What was pasted or typed is not an amount (Nov 26): said under the box, the price is kept.
+  const [note, setNote] = useState<string | null>(null);
+  // A number box answers "" both when it is emptied and when it holds text it cannot read (a
+  // comma typed in Safari or Firefox). Only an emptied box means "back to the list price".
+  const unread = useRef(false);
   // The column stays as wide as it was with a plain amount (the page is already wider than a
   // phone here): the cell's side padding moved inside the box (PRICE_CELL), and what sits under
   // or in place of the amount takes the column's width instead of setting it (FILL). On a phone
@@ -162,14 +182,41 @@ function PriceBox(props: {
       onKeyDown={(e) => {
         if (e.key === "Enter" && e.target instanceof HTMLElement) e.target.blur();
       }}
+      onChangeCapture={(e) => {
+        unread.current = e.target instanceof HTMLInputElement && e.target.validity.badInput;
+      }}
+      onPasteCapture={(e) => {
+        if (!editing) return;
+        // "1,234.50" or "$1,234.50": read here, the number box would take it for nothing.
+        const got = pastedMetalsAmount(e.clipboardData.getData("text"));
+        if (got.kind === "plain") return;
+        e.preventDefault();
+        if (got.kind === "bad") {
+          setNote(METALS_PRICE_NOT_READ);
+          return;
+        }
+        setNote(null);
+        props.onAmount(got.amount);
+        setEditing(false);
+      }}
     >
       {editing ? (
         <div className={FILL}>
           <NumberField
             autoFocus
             value={Math.round(props.amount * 100) / 100}
-            onChange={props.onAmount}
-            onBlank={props.onListPrice}
+            onChange={(v) => {
+              setNote(null);
+              props.onAmount(v);
+            }}
+            onBlank={() => {
+              if (unread.current) {
+                setNote(METALS_PRICE_NOT_READ);
+                return;
+              }
+              setNote(null);
+              props.onListPrice();
+            }}
             onBlur={() => setEditing(false)}
             blankZero={false}
             max={MAX_METALS_TYPED_PRICE}
@@ -186,10 +233,22 @@ function PriceBox(props: {
           title="Tap to type your own price for this bid"
           aria-label={`Price of ${props.item}: ${usd(props.amount)}. Tap to change it on this bid.`}
           data-metals-price={props.typed ? "typed" : "list"}
-          onClick={() => setEditing(true)}
+          onClick={() => {
+            setNote(null);
+            setEditing(true);
+          }}
         >
           {usd(props.amount)}
         </button>
+      )}
+      {note && (
+        <p
+          role="alert"
+          className={`${FILL} whitespace-normal text-right text-xs font-medium text-destructive`}
+          data-metals-price-not-read
+        >
+          {note}
+        </p>
       )}
       {props.typed && (
         <div
@@ -220,27 +279,38 @@ export function MetalsScreens({
   result,
   prices,
   onPricesChange,
+  onListNotes,
 }: MetalsScreensProps) {
   const [openTile, setOpenTile] = useState<TileId | null>(null);
+  // The Metals state when an entry screen was opened: what its close is compared with.
+  const atOpen = useRef<MetalsState | null>(null);
+  // The typed prices the last change cleared, said in yellow above the list.
+  const [cleared, setCleared] = useState<string[]>([]);
   // The summary row being edited: its dialog opens on that gutter style/size, downspout size
   // or scupper option instead of the first one.
   const [focus, setFocus] = useState<MetalsLineSource | null>(null);
   const openFor = (tile: TileId | undefined, src: MetalsLineSource | null) => {
     if (!tile) return;
+    atOpen.current = state;
     setFocus(src);
     setOpenTile(tile);
   };
   // A typed price belongs to its line: once the line is off the bid the price goes with it, so
   // the same item added again starts at the list price. Checked when a line is removed and when
-  // an entry screen is closed (not while a quantity is being retyped in it).
-  const dropGonePrices = (after: MetalsState, removedKey?: string) => {
-    const list = removedKey ? clearMetalsTypedPrice(prices, removedKey) : prices;
-    const kept = pruneMetalsTypedPrices(list, after);
-    if (kept.length !== prices.length) onPricesChange(kept);
+  // an entry screen is closed (not while a quantity is being retyped in it). Nov 26: a price
+  // also stays on its own line when the lines of an item that is on the bid twice shift, and
+  // what could not be kept on its line is cleared and said (lib/metals-price-override.ts).
+  const afterListChange = (change: MetalsListChange) => {
+    if (JSON.stringify(change.prices) !== JSON.stringify(prices)) onPricesChange(change.prices);
+    setCleared(change.cleared);
+    if (change.cleared.length || change.qtyNotices.length)
+      onListNotes?.({ cleared: change.cleared, qtyNotices: change.qtyNotices });
   };
   const closeTile = () => {
     setOpenTile(null);
-    dropGonePrices(state);
+    const before = atOpen.current;
+    atOpen.current = null;
+    if (refData) afterListChange(metalsAfterEntryScreen(prices, before ?? state, state, refData));
   };
 
   if (!refData) {
@@ -274,6 +344,18 @@ export function MetalsScreens({
           </button>
         ))}
       </div>
+
+      {cleared.length > 0 && (
+        <div
+          role="status"
+          className="space-y-1 rounded-md border border-amber-500 bg-amber-50 p-3 text-sm dark:bg-amber-300/10"
+          data-metals-price-cleared
+        >
+          {cleared.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      )}
 
       {/* Legacy lvSummary grid */}
       {lines.length === 0 ? (
@@ -324,7 +406,8 @@ export function MetalsScreens({
                         listAmount={ln.listMaterialCost}
                         typed={ln.priceTyped}
                         onAmount={(v) =>
-                          onPricesChange(setMetalsTypedPrice(prices, ln.priceKey, v))
+                          // With the line's quantity, so a later change of it is told.
+                          onPricesChange(setMetalsTypedPrice(prices, ln.priceKey, v, ln.qtyOrLf))
                         }
                         onListPrice={() =>
                           onPricesChange(clearMetalsTypedPrice(prices, ln.priceKey))
@@ -352,9 +435,10 @@ export function MetalsScreens({
                           className="h-7 px-2 text-xs text-destructive"
                           title="Remove this item from the bid"
                           onClick={() => {
-                            const next = removeMetalsLine(state, ln.source);
-                            onChange(next);
-                            dropGonePrices(next, ln.priceKey);
+                            // The row that was pressed, and every other row keeps its price.
+                            const change = removeMetalsRow(state, refData, prices, i, ln.source);
+                            onChange(change.state);
+                            afterListChange(change);
                           }}
                         >
                           Remove
