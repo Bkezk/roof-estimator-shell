@@ -96,6 +96,12 @@ export interface PublicMatch {
   site_address: string | null;
   phone: string | null;
   email: string | null;
+  /**
+   * Nov 26: is the matched property the building the request names (sameBuilding)? Worked out
+   * by the server from the property's own street and zip. False until it is: a match that is
+   * only alike never starts a plan by itself.
+   */
+  same_address: boolean;
 }
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -119,6 +125,7 @@ export function readMatches(x: unknown): PublicMatch[] {
       site_address: text(r["site_address"]) || null,
       phone: text(r["phone"]) || null,
       email: text(r["email"]) || null,
+      same_address: false,
     });
   }
   return out;
@@ -382,6 +389,302 @@ export const CARE_START_AT_MATCH =
 /** The first inspection of a plan started from a request: the usual choice. */
 export const CARE_START_FIRST_VISIT = "window" as const;
 
+// ── One answer to a request, and the same building (Nov 26; the audit of Nov 25) ─────────────
+
+/** Said to the second person who answers a request (the database says the same sentence). */
+export const REQUEST_ALREADY_ANSWERED =
+  "Someone already said whose this request is. Reload the page to see it.";
+/** Said when a plan is asked for a request that already has one waiting or in force. */
+export const REQUEST_HAS_PLAN = "This request already has its plan. Reload the page to see it.";
+/** Said when the plan is asked at a property the request is not on. */
+export const REQUEST_OTHER_PROPERTY =
+  "This request is not on this property. Reload the page to see whose it is.";
+/** A plan asked before anyone said whose the request is. */
+export const REQUEST_SAY_WHO_FIRST =
+  "Say whose this request is first. The plan is started after that.";
+/** The plan is signed and the page could not read it back: the truth, not "it was not started". */
+export const CARE_SIGNED_NOT_READ = "The plan is signed. The page could not read it back: reload.";
+/** The button under two addresses that are not the same: one more press, on purpose. */
+export const CARE_START_HERE_BUTTON = "Start the plan at this property";
+/** The server's refusal when the plan is asked at another address with no such press. */
+export const CARE_START_OTHER_ADDRESS = `The property's address is not the one they typed. Check both addresses, then press ${CARE_START_HERE_BUTTON}.`;
+/** Under the two addresses, side by side. */
+export const CARE_ADDRESS_DIFFERS =
+  "These are not the same address. Start the plan here only if this is the building they mean. If it is not, pick the right property on this opportunity and save it.";
+/** Beside a possible match whose property is only alike. */
+export const CARE_MATCH_ADDRESS_DIFFERS =
+  "Not the same address as they typed: the plan is not started until you have checked it.";
+
+/** A building's address, as far as it is compared: the street line, the city and the zip. */
+export interface BuildingAddress {
+  street: string | null | undefined;
+  city?: string | null | undefined;
+  zip?: string | null | undefined;
+}
+export const requestBuilding = (
+  r: Pick<PublicRequestRow, "address" | "city" | "zip">,
+): BuildingAddress => ({ street: r.address, city: r.city, zip: r.zip });
+export const siteBuilding = (s: {
+  address1?: string | null;
+  city?: string | null;
+  zip?: string | null;
+}): BuildingAddress => ({ street: s.address1, city: s.city, zip: s.zip });
+
+/** The usual street words, each as its short form. A word not here is kept as typed. */
+const STREET_WORDS: Readonly<Record<string, string>> = {
+  street: "st",
+  str: "st",
+  saint: "st",
+  road: "rd",
+  avenue: "ave",
+  av: "ave",
+  aven: "ave",
+  boulevard: "blvd",
+  boul: "blvd",
+  blv: "blvd",
+  drive: "dr",
+  drv: "dr",
+  lane: "ln",
+  highway: "hwy",
+  hiway: "hwy",
+  hway: "hwy",
+  hgwy: "hwy",
+  parkway: "pkwy",
+  pkway: "pkwy",
+  pky: "pkwy",
+  court: "ct",
+  crt: "ct",
+  place: "pl",
+  circle: "cir",
+  circ: "cir",
+  terrace: "ter",
+  terr: "ter",
+  trail: "trl",
+  tr: "trl",
+  wy: "way",
+  square: "sq",
+  expressway: "expy",
+  expwy: "expy",
+  freeway: "fwy",
+  route: "rt",
+  rte: "rt",
+  turnpike: "tpke",
+  pk: "pike",
+  alley: "aly",
+  crossing: "xing",
+  point: "pt",
+  heights: "hts",
+  mount: "mt",
+  mountain: "mtn",
+  fort: "ft",
+  center: "ctr",
+  centre: "ctr",
+  plaza: "plz",
+  bypass: "byp",
+  cove: "cv",
+  hollow: "holw",
+  ridge: "rdg",
+  creek: "crk",
+  branch: "br",
+  spring: "spg",
+  springs: "spgs",
+  valley: "vly",
+  view: "vw",
+  extension: "ext",
+  junction: "jct",
+  station: "sta",
+  north: "n",
+  south: "s",
+  east: "e",
+  west: "w",
+  northeast: "ne",
+  northwest: "nw",
+  southeast: "se",
+  southwest: "sw",
+  first: "1",
+  second: "2",
+  third: "3",
+  fourth: "4",
+  fifth: "5",
+  sixth: "6",
+  seventh: "7",
+  eighth: "8",
+  ninth: "9",
+  tenth: "10",
+  eleventh: "11",
+  twelfth: "12",
+};
+/** The words a street ends with: one side may leave its own off ("200 S Main"). */
+const STREET_ENDS: ReadonlySet<string> = new Set([
+  "st",
+  "rd",
+  "ave",
+  "blvd",
+  "dr",
+  "ln",
+  "hwy",
+  "pkwy",
+  "ct",
+  "pl",
+  "cir",
+  "ter",
+  "trl",
+  "way",
+  "sq",
+  "expy",
+  "fwy",
+  "pike",
+  "tpke",
+  "aly",
+  "xing",
+  "loop",
+  "run",
+  "cv",
+  "byp",
+]);
+/** The words before a unit, a suite or a building: they and what they name are left out. */
+const UNIT_WORDS: ReadonlySet<string> = new Set([
+  "apt",
+  "apartment",
+  "unit",
+  "suite",
+  "ste",
+  "bldg",
+  "building",
+  "rm",
+  "room",
+  "fl",
+  "floor",
+  "lot",
+  "space",
+  "spc",
+  "trlr",
+  "trailer",
+  "dept",
+  "office",
+  "ofc",
+]);
+/** What a unit is called: "200", "B", "4C", "A-1". A plain word after "Building" is a street. */
+const unitName = (t: string): boolean => /\d/.test(t) || t.length === 1;
+
+/**
+ * A street line as it is compared: lower case, no punctuation, single spaces, the usual street
+ * and compass words in their short form, "1st" and "First" as 1, and no unit, suite, floor or
+ * building. "120 N. Maple Street, Suite 4" and "120 north maple st" both read "120 n maple st".
+ * Forgiving on purpose (owner, Nov 26: "just ensure its not too strict to match at all").
+ */
+export function streetKey(street: string | null | undefined): string {
+  const flat = (street ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[.'’`]/g, "")
+    .replace(/#/g, " unit ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\bu s\b/g, "us")
+    .trim();
+  if (!flat) return "";
+  // The unit and what it names, after the number and one word of the street. A unit word with
+  // a plain word after it ("Office Park Dr", "Parking Lot Rd") is part of the street's name.
+  const kept: string[] = [];
+  const raw = flat.split(" ");
+  for (let i = 0; i < raw.length; i++) {
+    const t = raw[i]!;
+    if (i >= 2 && UNIT_WORDS.has(t)) {
+      const next = raw[i + 1];
+      // "2nd Floor": the number stands before the word.
+      const before =
+        (t === "floor" || t === "fl") &&
+        kept.length > 2 &&
+        /^\d+(st|nd|rd|th)$/.test(kept.at(-1) ?? "");
+      if (before || next === undefined || unitName(next)) {
+        if (before) kept.pop();
+        let taken = 0;
+        while (taken < 2 && i + 1 < raw.length && unitName(raw[i + 1]!)) {
+          i++;
+          taken++;
+        }
+        continue;
+      }
+    }
+    kept.push(t);
+  }
+  const words: string[] = [];
+  for (const t0 of kept) {
+    // "5th" is 5; "25e" is 25 and e; "ky80" is ky and 80.
+    const t = t0.replace(/^(\d+)(st|nd|rd|th)$/, "$1");
+    const split = /^(\d+)([a-z]+)$/.exec(t) ?? /^([a-z]+)(\d+)$/.exec(t);
+    for (const part of split ? [split[1]!, split[2]!] : [t]) words.push(STREET_WORDS[part] ?? part);
+  }
+  // "US Highway 25" is "US 25", and "KY Route 80" is "KY 80": the road's number says it all.
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    const numbered = /^\d+$/.test(words[i + 1] ?? "");
+    const prev = out.at(-1) ?? "";
+    if ((w === "hwy" || w === "rt") && numbered && /^[a-z]{2}$/.test(prev)) continue;
+    out.push(w);
+  }
+  return out.join(" ");
+}
+
+const zip5 = (z: string | null | undefined): string => {
+  const d = (z ?? "").replace(/\D/g, "");
+  return d.length >= 5 ? d.slice(0, 5) : "";
+};
+const cityKey = (c: string | null | undefined): string =>
+  (c ?? "")
+    .toLowerCase()
+    .replace(/[.'’`]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => STREET_WORDS[w] ?? w)
+    .join(" ");
+
+/**
+ * Is this the same building (Nov 26; the audit's number 17)? The list of possible matches is
+ * as generous as it was: this is only what lets a plan start by itself at a matched property.
+ * The street lines read the same (streetKey), where one side may leave the street's last word
+ * off ("200 S Main" and "200 S Main St"). The first five digits of the zip are the same when
+ * both have one. With a zip missing on either side, the cities are the same when both have
+ * one. A missing city or zip never blocks. Two empty streets are never the same building.
+ * A street line with no plain letter or digit in it is compared as it was typed, so a property
+ * made from the request's own address is always the same building.
+ */
+export function sameBuilding(a: BuildingAddress, b: BuildingAddress): boolean {
+  const asTyped = (s: string | null | undefined) =>
+    (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const ka = streetKey(a.street) || asTyped(a.street);
+  const kb = streetKey(b.street) || asTyped(b.street);
+  if (!ka || !kb) return false;
+  if (ka !== kb) {
+    const [short, long] = ka.length < kb.length ? [ka, kb] : [kb, ka];
+    const rest = long.startsWith(`${short} `) ? long.slice(short.length + 1) : "";
+    if (!STREET_ENDS.has(rest) || short.split(" ").length < 2) return false;
+  }
+  const za = zip5(a.zip);
+  const zb = zip5(b.zip);
+  if (za && zb) return za === zb;
+  const ca = cityKey(a.city);
+  const cb = cityKey(b.city);
+  return !ca || !cb || ca === cb;
+}
+
+/** "120 Main St, London, KY 40741" for a property, as requestAddress says a request's. */
+export function siteAddressWords(s: {
+  address1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}): string {
+  return requestAddress({
+    address: s.address1 ?? "",
+    city: s.city ?? "",
+    state: s.state ?? "",
+    zip: s.zip ?? "",
+  });
+}
+
 /** The search word the property page reads to open the sign-up prefilled from a request. */
 export const CARE_REQUEST_SEARCH = "care_request";
 
@@ -561,14 +864,17 @@ export function requestStripTitle(r: Pick<PublicRequestRow, "kind" | "shown_pric
  * ("paid"), a Roof Care request whose opportunity has a customer but no property yet
  * ("property"), or nothing more is asked of anyone ("done").
  */
-export type RequestStep = "who" | "property" | "sign_up" | "quote" | "signed" | "paid" | "done";
+export type RequestStep =
+  "who" | "property" | "sign_up" | "quote" | "signed" | "paid" | "ended" | "done";
 export function requestStep(
   r: Pick<PublicRequestRow, "kind" | "shown_price" | "plan" | "roof_care_plan_id">,
   opp: { account_id: string | null; site_id: string | null },
   /** The status of the plan the request became, when it became one. */
   planStatus?: string | null,
 ): RequestStep {
-  if (r.roof_care_plan_id) return planStatus === "active" ? "paid" : "signed";
+  // Nov 26: a plan that was ended is said so. It read "signed and waits for its payment".
+  if (r.roof_care_plan_id)
+    return planStatus === "active" ? "paid" : planStatus === "ended" ? "ended" : "signed";
   if (!opp.account_id) return "who";
   if (r.kind !== "care") return "done";
   if (isCustomQuoteAsk(r)) return "quote";
@@ -576,8 +882,26 @@ export function requestStep(
   return opp.site_id ? "sign_up" : "property";
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Nov 25, 2026" from "2026-11-25"; "" when it is not a day. */
+function dayWords(ymd: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd ?? "");
+  const month = m ? MONTHS[Number(m[2]) - 1] : undefined;
+  return m && month ? `${month} ${Number(m[3])}, ${m[1]}` : "";
+}
+
+/** What is known of a plan that was ended: the day, and whether it was ever paid. */
+export interface EndedPlanFacts {
+  ended_on?: string | null | undefined;
+  paid?: boolean | undefined;
+}
+
 /** What the strip tells the office to do next. */
-export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "kind">): string {
+export function requestStepWords(
+  step: RequestStep,
+  r: Pick<PublicRequestRow, "kind">,
+  ended?: EndedPlanFacts,
+): string {
   switch (step) {
     case "who":
       return "Say whose this is. Nothing else on this opportunity is saved until it has a customer.";
@@ -591,6 +915,11 @@ export function requestStepWords(step: RequestStep, r: Pick<PublicRequestRow, "k
       return "The plan is signed and waits for its payment. Work down the steps below. This opportunity turns Won the day the payment is received.";
     case "paid":
       return "The plan is paid and has started. This opportunity was set to Won.";
+    case "ended": {
+      // Nov 26: it read "signed and waits for its payment" for ever.
+      const on = dayWords(ended?.ended_on);
+      return `The plan made from this request was ended${on ? ` on ${on}` : ""}${ended?.paid ? "" : ", before it was paid"}. Nothing waits here.`;
+    }
     case "done":
       return r.kind === "care"
         ? "The customer is on this opportunity."

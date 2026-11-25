@@ -89,7 +89,21 @@ import {
   type VisitKind,
   type VisitTicket,
 } from "@/lib/roof-care-plan";
-import { CARE_START_FIRST_VISIT, carePrefillNote, careStartsItself } from "@/lib/public-requests";
+import {
+  CARE_SIGNED_NOT_READ,
+  CARE_START_FIRST_VISIT,
+  CARE_START_NOT_A_PLAN,
+  CARE_START_OTHER_ADDRESS,
+  REQUEST_HAS_PLAN,
+  REQUEST_OTHER_PROPERTY,
+  REQUEST_SAY_WHO_FIRST,
+  carePrefill,
+  carePrefillNote,
+  careStartsItself,
+  requestBuilding,
+  sameBuilding,
+  siteBuilding,
+} from "@/lib/public-requests";
 import { NOT_PLACED_LINE, placedRoughly } from "@/lib/roof-care-locate";
 import { PLAN_KEYS } from "@/lib/roof-care-price";
 import { isTripLine, tripLineSource } from "@/lib/roof-care-no-access";
@@ -831,7 +845,16 @@ export const signUpRoofCare = createServerFn({ method: "POST" })
  * The sign-up itself: every rule of it, for the sign-up window and for a plan started straight
  * from a public request (startPlanFromRequest). One place, so the two cannot drift apart.
  */
-async function signUpPlan(context: Ctx, data: z.infer<typeof signUpInput>): Promise<RoofCarePlan> {
+async function signUpPlan(
+  context: Ctx,
+  data: z.infer<typeof signUpInput>,
+  /**
+   * Nov 26: the public request the plan is started from. The database then signs the plan and
+   * points the request at it in one step, refuses a request that already has its plan, and
+   * marks a size the map does not agree with "not checked" (roof_care_sign_up_from_request).
+   */
+  from?: { request_id: string },
+): Promise<RoofCarePlan> {
   {
     const p = await signedIn(context);
     const sb = context.supabase;
@@ -860,7 +883,7 @@ async function signUpPlan(context: Ctx, data: z.infer<typeof signUpInput>): Prom
       throw new Error(priceChangedLine(data.shown_price, now.price));
     // Signed, and waiting for its payment (Nov 19): no inspection is made until the plan's
     // invoice is paid. The older roof_care_sign_up is left for a page published before this.
-    const { data: planId, error } = await sb.rpc("roof_care_sign_up_await_payment", {
+    const signing = {
       p_site: site.id,
       p_plan: data.plan,
       p_sqft: data.sqft,
@@ -876,11 +899,17 @@ async function signUpPlan(context: Ctx, data: z.infer<typeof signUpInput>): Prom
       p_terms: ROOF_CARE_TERMS_VERSION,
       p_pay_method: data.pay_method,
       p_pay_note: data.pay_note ?? "",
-      ...(data.size_ok ? { p_size_ok: true } : {}),
       // The database checks it again (Nov 20): saved at the price shown, or not at all.
       p_shown_price: data.shown_price,
-    });
+    };
+    const { data: planId, error } = from
+      ? await signFromRequest(sb, { p_request: from.request_id, ...signing })
+      : await sb.rpc("roof_care_sign_up_await_payment", {
+          ...signing,
+          ...(data.size_ok ? { p_size_ok: true } : {}),
+        });
     if (error) throw new Error(error.message);
+    if (!planId) throw new Error("The plan was not signed. Reload the page and try again.");
     // Where the agreement and the receipt go. A failure here does not undo the sign-up: the
     // plan then says it has no email address, and the office adds it.
     const email = (data.email ?? "").trim();
@@ -910,20 +939,45 @@ async function signUpPlan(context: Ctx, data: z.infer<typeof signUpInput>): Prom
     // they should"): the admins and the managers, now. It is told again every two days while
     // it waits (roof-care-pay-notice.ts).
     await tellSignedNotPaid(sb, planId, context.userId);
-    const made = (await plansOfSites(sb, [site.id], { money, field: !readsPlanTables(p) })).find(
-      (x) => x.id === planId,
-    );
-    if (!made)
-      throw new Error("The plan was saved, but it could not be read back. Reload the page.");
+    // Nov 26: the plan is signed by now, whatever the read back does. A read that fails is
+    // said as what it is, and never as "the plan was not started".
+    let made: RoofCarePlan | undefined;
+    try {
+      made = (await plansOfSites(sb, [site.id], { money, field: !readsPlanTables(p) })).find(
+        (x) => x.id === planId,
+      );
+    } catch (e) {
+      console.error("Plan sign-up: plan", planId, "was not read back —", e);
+    }
+    if (!made) throw new PlanSignedNotRead(planId);
     return made;
   }
 }
 
+/** The plan is signed and the page could not read it back. Carries the plan, so it is tied. */
+export class PlanSignedNotRead extends Error {
+  constructor(readonly planId: string) {
+    super(CARE_SIGNED_NOT_READ);
+    this.name = "PlanSignedNotRead";
+  }
+}
+
+/** roof_care_sign_up_from_request (20261125300000): not in the generated types. */
+type SignFromRequest = (
+  fn: "roof_care_sign_up_from_request",
+  args: Record<string, unknown>,
+) => Promise<{ data: string | null; error: { message: string } | null }>;
+const signFromRequest = (sb: Sb, args: Record<string, unknown>) =>
+  (sb as unknown as { rpc: SignFromRequest }).rpc("roof_care_sign_up_from_request", args);
+
 /** What starting a plan from a request answers. */
 export interface StartedFromRequest {
-  plan: RoofCarePlan;
+  /** Null when the plan is signed and could not be read back (`unread`): the page reloads. */
+  plan: RoofCarePlan | null;
   /** False when the plan is signed and the request could not be pointed at it. */
   tied: boolean;
+  /** True when the plan is signed and the page could not read it back. */
+  unread?: boolean;
 }
 
 /**
@@ -940,18 +994,60 @@ export interface StartedFromRequest {
 export const startPlanFromRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ request_id: z.string().uuid(), site_id: z.string().uuid() }).parse(d),
+    z
+      .object({
+        request_id: z.string().uuid(),
+        site_id: z.string().uuid(),
+        // Nov 26: the office looked at both addresses and pressed "Start the plan at this
+        // property". Without it a plan starts only at the building the request names.
+        address_ok: z.boolean().optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<StartedFromRequest> => {
-    await signedIn(context);
+    const p = await signedIn(context);
     const sb = context.supabase;
-    const { readCarePrefill, handleRequest } = await import("@/lib/public-requests.functions");
-    const prefill = await readCarePrefill(context, data.request_id, data.site_id);
-    const can = careStartsItself(prefill, ROOF_CARE_TERMS_VERSION);
+    const { readRequest, handleRequest } = await import("@/lib/public-requests.functions");
+    // The request as it stands this moment (Nov 26; the audit's number 15): an answer somebody
+    // else gave while this page sat open is seen here, before anything is signed.
+    const r = await readRequest(context, data.request_id);
+    if (!r || r.status === "dismissed") throw new Error(CARE_START_NOT_A_PLAN);
+    const can = careStartsItself(carePrefill(r), ROOF_CARE_TERMS_VERSION);
     if (!can.ok) throw new Error(can.why);
-    const ask = prefill!;
-    // The price today, for the size they typed: the plan is saved at it or not at all.
+    const ask = carePrefill(r)!;
+    if (r.roof_care_plan_id) {
+      const { data: has, error: hErr } = await sb
+        .from("roof_care_plans")
+        .select("status")
+        .eq("id", r.roof_care_plan_id)
+        .maybeSingle();
+      if (hErr) throw new Error(hErr.message);
+      if (has?.status === "awaiting_payment" || has?.status === "active")
+        throw new Error(REQUEST_HAS_PLAN);
+    }
+    if (r.status !== "matched" || !r.account_id) throw new Error(REQUEST_SAY_WHO_FIRST);
+    if (r.site_id !== data.site_id) throw new Error(REQUEST_OTHER_PROPERTY);
     const site = await siteOf(sb, data.site_id);
+    // Number 17: by itself only at the building they wrote. At an address that is only alike,
+    // a person looks at both and presses once more.
+    if (!data.address_ok && !sameBuilding(requestBuilding(r), siteBuilding(site)))
+      throw new Error(CARE_START_OTHER_ADDRESS);
+    // A try that failed half way, pressed again: the plan this request already made here is
+    // found by its note and the request is pointed at it. Nothing is signed a second time.
+    const { data: here, error: lErr } = await sb
+      .from("roof_care_plans")
+      .select("id, notes, status")
+      .eq("site_id", data.site_id)
+      .in("status", ["awaiting_payment", "active"]);
+    if (lErr) throw new Error(lErr.message);
+    const mine = (here ?? []).find((x) => (x.notes ?? "").includes(carePrefillNote(ask)));
+    if (mine) {
+      const tied = await tieRequest(context, handleRequest, data, mine.id);
+      return { ...(await readSignedPlan(sb, p, data.site_id, mine.id)), tied };
+    }
+    // The price today, for the size they typed: the plan is saved at it or not at all. This is
+    // where the price they were shown (`ask.shown_price`) and today's (`now.price`) are both
+    // in hand, for the day the two are to be compared.
     const drive = await siteDrive(sb, site);
     if (!drive) throw new Error(NOT_PLACED_LINE);
     const { data: priced, error: pErr } = await sb.rpc("roof_care_price", {
@@ -963,34 +1059,74 @@ export const startPlanFromRequest = createServerFn({ method: "POST" })
     const answer = readPriceAnswer(priced);
     const now = answer.ready ? answer.plans.find((o) => o.plan === ask.plan) : undefined;
     if (!now) throw new Error(CARE_START_NO_PRICE);
-    const plan = await signUpPlan(context, {
-      site_id: data.site_id,
-      plan: ask.plan,
-      sqft: ask.sqft!,
-      first: CARE_START_FIRST_VISIT,
-      pay_method: ask.pay_method,
-      agreed_by: ask.agreed_by,
-      notes: carePrefillNote(ask),
-      email: looksLikeEmail(ask.customer_email) ? ask.customer_email : "",
-      terms_agreed: true,
-      shown_price: now.price,
-    });
-    // The request points at the plan it became, so its opportunity turns Won by itself the day
-    // the plan is paid (Nov 23). The plan is signed either way.
-    let tied = true;
+    // Signed and pointed at by the request in one step of the database, so the opportunity
+    // turns Won by itself the day the plan is paid (Nov 23) and no second press signs again.
     try {
-      await handleRequest(context, {
-        id: data.request_id,
-        status: "matched",
-        site_id: data.site_id,
-        plan_id: plan.id,
-      });
+      const plan = await signUpPlan(
+        context,
+        {
+          site_id: data.site_id,
+          plan: ask.plan,
+          sqft: ask.sqft!,
+          first: CARE_START_FIRST_VISIT,
+          pay_method: ask.pay_method,
+          agreed_by: ask.agreed_by,
+          notes: carePrefillNote(ask),
+          email: looksLikeEmail(ask.customer_email) ? ask.customer_email : "",
+          terms_agreed: true,
+          shown_price: now.price,
+        },
+        { request_id: data.request_id },
+      );
+      return { plan, tied: true };
     } catch (e) {
-      tied = false;
-      console.error("Plan from a request: request", data.request_id, "was not tied —", e);
+      // The plan is signed and tied; only the read back failed. Said as that.
+      if (e instanceof PlanSignedNotRead) return { plan: null, tied: true, unread: true };
+      throw e;
     }
-    return { plan, tied };
   });
+
+/** Points a request at the plan it became. False, never a throw, when that did not go. */
+async function tieRequest(
+  context: Ctx,
+  handle: (
+    c: Ctx,
+    d: { id: string; status: "matched"; site_id: string; plan_id: string },
+  ) => Promise<unknown>,
+  data: { request_id: string; site_id: string },
+  planId: string,
+): Promise<boolean> {
+  try {
+    await handle(context, {
+      id: data.request_id,
+      status: "matched",
+      site_id: data.site_id,
+      plan_id: planId,
+    });
+    return true;
+  } catch (e) {
+    console.error("Plan from a request: request", data.request_id, "was not tied —", e);
+    return false;
+  }
+}
+
+/** A plan that is already signed, read for the page; `unread` when it could not be. */
+async function readSignedPlan(
+  sb: Sb,
+  p: Awaited<ReturnType<typeof signedIn>>,
+  siteId: string,
+  planId: string,
+): Promise<{ plan: RoofCarePlan | null; unread?: boolean }> {
+  try {
+    const plan = (
+      await plansOfSites(sb, [siteId], { money: seesInvoices(p), field: !readsPlanTables(p) })
+    ).find((x) => x.id === planId);
+    if (plan) return { plan };
+  } catch (e) {
+    console.error("Plan from a request: plan", planId, "was not read back —", e);
+  }
+  return { plan: null, unread: true };
+}
 
 /** A roof the page priced, but the office's prices have no plain price for today. */
 export const CARE_START_NO_PRICE =

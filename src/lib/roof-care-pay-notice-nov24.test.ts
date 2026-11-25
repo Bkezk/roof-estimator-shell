@@ -275,8 +275,10 @@ describe("where it is called from", () => {
   it("the sign-up and a renewal that waits for its payment", () => {
     expect(plans.match(/await tellSignedNotPaid\(sb, planId, context\.userId\);/g)).toHaveLength(2);
     // After the agreement email, before the plan is read back.
+    // Nov 26, 2026: the read back is in a try now (a plan that is signed and cannot be read
+    // back is said as that), so a few lines stand between the notice and the read.
     expect(plans).toMatch(
-      /if \(email\) await sendPlanEmailsNow\(sb, planId\);.{0,400}await tellSignedNotPaid\(sb, planId, context\.userId\); const made =/,
+      /if \(email\) await sendPlanEmailsNow\(sb, planId\);.{0,400}await tellSignedNotPaid\(sb, planId, context\.userId\);.{0,300}made = \(await plansOfSites\(/,
     );
     // A renewal at no charge started by itself: it returned before this line.
     expect(plans).toMatch(

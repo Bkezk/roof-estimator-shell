@@ -1044,6 +1044,9 @@ describe("the office's list of requests", () => {
         site_address: null,
         phone: null,
         email: null,
+        // Nov 26, 2026: each match says whether its property is the building they typed. One
+        // with no property is not.
+        same_address: false,
       },
     ]);
     // An opportunity that did not come from a public page has no request behind it.
