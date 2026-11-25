@@ -138,11 +138,25 @@ Decided by the session, for the owner to change if he wants:
 - **Tests:** 34 in `src/lib/roof-care-correct-size-nov24.test.ts` and 29 in
   `src/lib/roof-care-size-difference-nov24.test.ts`. 30 of the 63 fail on the code before this step.
 
+### The size invoice on the invoice page, Nov 25
+
+The owner, Nov 25: "go on 1, 2". On a temporary paid plan of our own:
+
+- A bigger roof made the draft. It was opened from the plan, finalised and marked paid by check
+  on the invoice page. The plan then showed nothing left to settle, and the database had it
+  settled at its price.
+- Two sentences on that page were wrong for this invoice and were changed. Mark paid said the
+  payment "starts the plan year": it now says it settles the difference for the corrected roof
+  size. A final invoice said to choose "Make the invoice": it now names the button "Make the
+  invoice for the difference".
+- The temporary property, plan, both invoices, the stored PDF and six history lines were removed.
+
 ## 8. Not proven yet
 
 - The "We measured your roof" email in a real inbox. No real email is sent without the owner's
   asking.
 - The Pay by card button of that email on the published site.
-- The size invoice opened on the invoice page, finalised and marked paid from there. It has
-  the shape of the plan year's invoice, which that page already handles.
 - The email of a paid plan in a real inbox.
+- On Nov 25 the published site was still on the code from before this work: it had no "Correct
+  the roof size" button. A real email can only be sent from the published site, so the email
+  the owner asked for waits for a publish.

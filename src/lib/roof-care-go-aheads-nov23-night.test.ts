@@ -39,6 +39,8 @@ import {
   firstVisitWords,
   PLAN_INVOICE_PAID_NOTE,
   PLAN_INVOICE_REMAKE,
+  planInvoicePaidNote,
+  planInvoiceRemake,
   PLAN_MAKE_INVOICE,
   renewalStartsOn,
 } from "@/lib/roof-care-plan";
@@ -217,8 +219,12 @@ describe("3 and 4. a plan's invoice does not talk of a ticket or of a button it 
       "Records the payment here (Sage stays the ledger). A payment that covers the total starts the plan year.",
     );
     expect(PLAN_INVOICE_PAID_NOTE).not.toMatch(/ticket|stage/i);
+    // Nov 25: the page asks which of the plan's invoices it is. The plan year's own invoice
+    // still gets these words; the invoice of a size difference gets its own.
+    expect(planInvoicePaidNote({ roof_care_plan_id: "p" })).toBe(PLAN_INVOICE_PAID_NOTE);
+    expect(planInvoiceRemake({ roof_care_plan_id: "p" })).toBe(PLAN_INVOICE_REMAKE);
     expect(editor).toContain(
-      "{inv.roof_care_plan_id ? ( PLAN_INVOICE_PAID_NOTE ) : inv.bid_id ? (",
+      "{inv.roof_care_plan_id ? ( planInvoicePaidNote(inv) ) : inv.bid_id ? (",
     );
   });
 
@@ -227,9 +233,9 @@ describe("3 and 4. a plan's invoice does not talk of a ticket or of a button it 
       `To bill the plan again, open the plan on its property and choose ${PLAN_MAKE_INVOICE}.`,
     );
     expect(editor).toContain(
-      "so it can't be edited. To change it, Void it below. {PLAN_INVOICE_REMAKE}",
+      "so it can't be edited. To change it, Void it below. {planInvoiceRemake(inv)}",
     );
-    expect(editor).toContain("left out of the Sage export. {PLAN_INVOICE_REMAKE}");
+    expect(editor).toContain("left out of the Sage export. {planInvoiceRemake(inv)}");
     // The plan's branch comes before the trade bid's words, which name Another invoice.
     expect(editor.match(/\) : bid\?\.plan \? \(/g)).toHaveLength(2);
   });

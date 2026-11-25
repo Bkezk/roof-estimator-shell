@@ -97,7 +97,7 @@ import {
   type InvoiceTravel,
 } from "@/lib/roof-care-travel";
 import { getInvoiceTravel, setInvoiceTravel } from "@/lib/roof-care-travel.functions";
-import { PLAN_INVOICE_PAID_NOTE, PLAN_INVOICE_REMAKE, planName } from "@/lib/roof-care-plan";
+import { planInvoicePaidNote, planInvoiceRemake, planName } from "@/lib/roof-care-plan";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import type { InvoiceBidRef } from "@/lib/bid-invoices";
 import { createBidInvoice, listBidInvoices } from "@/lib/bid-invoices.functions";
@@ -2579,7 +2579,7 @@ function FinalInvoice({
             // A plan year is billed once (Nov 23): there is no Another invoice on its invoice.
             <>
               This invoice is void. It stays on record under its number and is left out of the Sage
-              export. {PLAN_INVOICE_REMAKE}
+              export. {planInvoiceRemake(inv)}
             </>
           ) : (
             <>
@@ -2599,7 +2599,7 @@ function FinalInvoice({
           ) : bid?.plan ? (
             <>
               This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To
-              change it, Void it below. {PLAN_INVOICE_REMAKE}
+              change it, Void it below. {planInvoiceRemake(inv)}
             </>
           ) : (
             <>
@@ -3232,7 +3232,7 @@ function PaidDialog(props: {
             {/* A trade bid's invoice has no ticket and no stage (Nov 17). Nor has a Roof Care
                 plan year's (Nov 23): its payment starts the plan. */}
             {inv.roof_care_plan_id ? (
-              PLAN_INVOICE_PAID_NOTE
+              planInvoicePaidNote(inv)
             ) : inv.bid_id ? (
               "Records the payment here (Sage stays the ledger)."
             ) : (

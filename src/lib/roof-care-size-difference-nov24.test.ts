@@ -19,6 +19,9 @@ vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupa
 
 import { sizeCorrectedEmail, type SizeCorrectedFacts } from "@/lib/roof-care-email";
 import {
+  isSizeInvoice,
+  planInvoicePaidNote,
+  planInvoiceRemake,
   readSizeChange,
   readSizeRefunds,
   SIZE_CORRECT_LEAD_PAID,
@@ -346,6 +349,29 @@ describe("on the screen", () => {
   it("the customer of a paid plan can be emailed too, with no payment link in the label", () => {
     expect(card).toContain("const [emailIt, setEmailIt] = useState(!!to);");
     expect(card).toContain("{sizeCorrectEmailLabel(waiting && card)} ({to})");
+  });
+});
+
+describe("the size invoice on the invoice page (Nov 25)", () => {
+  // Found on the first real run of that page: Mark paid said the payment "starts the plan
+  // year", and a final invoice said to choose "Make the invoice". Neither is true of it.
+  const size = { roof_care_plan_id: "p", plan_part: "size" };
+  it("is told apart by its mark, which the generated types do not know", () => {
+    expect(isSizeInvoice(size)).toBe(true);
+    expect(isSizeInvoice({ roof_care_plan_id: "p", plan_part: null })).toBe(false);
+    expect(isSizeInvoice({ roof_care_plan_id: "p" })).toBe(false);
+    expect(isSizeInvoice(null)).toBe(false);
+  });
+  it("its payment settles the difference and starts nothing", () => {
+    expect(planInvoicePaidNote(size)).toBe(
+      "Records the payment here (Sage stays the ledger). A payment that covers the total settles the difference for the corrected roof size.",
+    );
+    expect(planInvoicePaidNote(size)).not.toContain("starts the plan year");
+  });
+  it("a voided one is made again with its own button", () => {
+    expect(planInvoiceRemake(size)).toBe(
+      "To bill the difference again, open the plan on its property and choose Make the invoice for the difference.",
+    );
   });
 });
 

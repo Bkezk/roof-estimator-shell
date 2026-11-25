@@ -714,6 +714,26 @@ export const PLAN_INVOICE_PAID_NOTE =
   "Records the payment here (Sage stays the ledger). A payment that covers the total starts the plan year.";
 export const PLAN_INVOICE_REMAKE = `To bill the plan again, open the plan on its property and choose ${PLAN_MAKE_INVOICE}.`;
 export const PLAN_INVOICE_EXISTS = "This plan already has an invoice.";
+
+/**
+ * The invoice of a roof size corrected after the plan was paid (invoices.plan_part = 'size',
+ * Nov 24). It is the plan's too, and the plan year's words do not fit it: its payment settles a
+ * difference and starts nothing, and a voided one is made again with its own button.
+ */
+export const isSizeInvoice = (inv: unknown): boolean =>
+  !!inv && typeof inv === "object" && (inv as { plan_part?: unknown }).plan_part === "size";
+export const SIZE_INVOICE_PAID_NOTE =
+  "Records the payment here (Sage stays the ledger). A payment that covers the total settles the difference for the corrected roof size.";
+/** What the Mark paid box says under its title, for either invoice of a plan. */
+export const planInvoicePaidNote = (inv: unknown): string =>
+  isSizeInvoice(inv) ? SIZE_INVOICE_PAID_NOTE : PLAN_INVOICE_PAID_NOTE;
+/** Where a plan's invoice is made again from, for either invoice of a plan. */
+export const planInvoiceRemake = (inv: unknown): string =>
+  isSizeInvoice(inv)
+    ? "To bill the difference again, open the plan on its property and choose " +
+      SIZE_INVOICE_MAKE +
+      "."
+    : PLAN_INVOICE_REMAKE;
 export const PLAN_INVOICE_NOT_AWAITING =
   "Only a plan that is waiting for its payment gets an invoice made for it.";
 
