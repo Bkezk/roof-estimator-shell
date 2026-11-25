@@ -113,6 +113,11 @@ const tables = (p = plan()) => ({
   company_settings: [
     { company_name: "JBK Roofing", phone: "888-555-0100", email: "office@example.com" },
   ],
+  // Nov 26, 2026: the link is the office's to read and send (the audit of Nov 25, number 18),
+  // so the signed-in person of these tests is one of the office.
+  profiles: [
+    { id: "u1", role: "manager", access: [], technician: false, full_name: "Mo", email: "m@x.co" },
+  ],
 });
 
 const made: CheckoutAsk[] = [];
@@ -123,6 +128,8 @@ const deps = (db: unknown, over: Partial<PayDeps> = {}): PayDeps => ({
   base: "https://portal.example.com",
   stripe: true,
   owed: planOwedCents,
+  // Nov 26, 2026: the page asks whether a bank payment is on its way. None is, in these tests.
+  card: async () => ({ bank_pending: null }),
   makePage: async (ask) => {
     made.push(ask);
     return { id: "cs_test_1", url: "https://card.example.com/pay/cs_test_1" };
@@ -424,6 +431,8 @@ describe("the office's Card payment link box", () => {
       to: "pat@example.com",
       sent_at: null,
       email_reason: null,
+      // Nov 26, 2026: and that no bank payment is on its way.
+      bank_pending: false,
     });
     expect(env.writes).toEqual([]);
   });
@@ -505,7 +514,9 @@ describe("the office's Card payment link box", () => {
     expect(card).toContain("{card && !held && (");
     expect(card).toContain("<PlanPayLinkBox planId={plan.id} />");
     const box = flat(read("src/components/roof-care/pay-link.tsx"));
-    expect(box).toContain("enabled: open,");
+    // Nov 26, 2026: the box is read as soon as it is on the screen, so a bank payment that is
+    // on its way is said without a press. It still sends nothing without one.
+    expect(box).not.toContain("enabled: open,");
     expect(box).toContain("onClick={() => email.mutate()}");
     expect(box).not.toContain("useEffect");
   });

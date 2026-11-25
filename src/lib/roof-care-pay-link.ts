@@ -52,20 +52,50 @@ export const payLinkFor = (base: string, token: string): string =>
 /**
  * What the page shows: the button ("pay"), thanks ("paid"), card payment not available on this
  * site just now ("offline"), or a link that opens nothing any more ("closed").
+ *
+ * Nov 26 (the audit of Nov 25, numbers 3 and 18), two more, each a sentence and no button: a
+ * payment from the customer's bank account is on its way ("bank"), and the roof size is not
+ * confirmed yet, so no payment is asked for ("held").
  */
-export type PayPageState = "pay" | "paid" | "offline" | "closed";
+export type PayPageState = "pay" | "paid" | "offline" | "closed" | "bank" | "held";
 
 export function payPageState(
   status: string | null | undefined,
   owedCents: number | null,
   ready: boolean,
+  more: { bank_pending?: boolean; size_unchecked?: boolean } = {},
 ): PayPageState {
   if (status === "active") return "paid";
   if (status !== "awaiting_payment") return "closed";
+  // Money is already on its way: nothing more is asked, whatever else is true of the plan.
+  if (more.bank_pending) return "bank";
+  // The price follows the roof size (owner, Nov 24: no payment before it is confirmed).
+  if (more.size_unchecked) return "held";
   // Nothing is owed although the plan has not started: the office is sorting it out.
   if (owedCents == null) return "closed";
   return ready ? "pay" : "offline";
 }
+
+/**
+ * What the page says, from its state and from whether the customer has just come back from the
+ * card page (`back`: the address ends in ?paid=1).
+ *
+ * Nov 26 (the audit's number 28): coming back used to say "Thank you ... your receipt is on its
+ * way" for good, and hide the button, whatever had happened: a payment that was short, one
+ * still on its way from a bank, or an address typed by hand. Now the thanks are said only
+ * while the page is still looking for the payment ("confirming"). When its looks are done and
+ * the plan is still not paid it says so and shows the button again ("unconfirmed").
+ */
+export type PayPageView = PayPageState | "confirming" | "unconfirmed";
+
+export function payPageView(state: PayPageState, back: boolean, looksDone: boolean): PayPageView {
+  if (state !== "pay" || !back) return state;
+  return looksDone ? "unconfirmed" : "confirming";
+}
+
+/** The views that show the Pay button. */
+export const payPageOffersPay = (view: PayPageView): boolean =>
+  view === "pay" || view === "unconfirmed";
 
 /** What the public page is told. Nothing of the customer beyond their own plan. */
 export interface PublicPayFacts {
@@ -97,6 +127,23 @@ export const PAY_JUST_PAID =
   "Thank you. Your payment is being confirmed. This page will say so in a moment, and your receipt is on its way by email.";
 /** How long after each look for the payment the next one is made, back from the card page. */
 export const PAID_LOOKS_MS = [1500, 2000, 3000, 4000, 4000, 4000, 4000, 4000] as const;
+/**
+ * Said once those looks are done and the plan is still not paid (Nov 26), with the Pay button
+ * under it again.
+ */
+export const PAY_NOT_CONFIRMED =
+  "We have not confirmed your payment yet. If you paid, give it a few minutes; otherwise call us.";
+/**
+ * After that the page keeps looking, slowly, so it says thank you by itself when the payment
+ * lands. Few looks: each one counts against the connection's hourly limit.
+ */
+export const PAID_LATE_LOOKS_MS = [30_000, 30_000, 30_000, 30_000] as const;
+/** In place of the button while a payment from the customer's bank account is on its way. */
+export const PAY_BANK_ON_ITS_WAY =
+  "A payment from your bank account is on its way. It takes a few business days, and there is nothing more to do.";
+/** In place of the button while the roof size is not confirmed (owner, Nov 24). */
+export const PAY_SIZE_NOT_READY =
+  "We are confirming your roof's size. We will email you when your payment page is ready.";
 export const PAY_SAMPLE_START = "Test server: this is a sample page, and nothing can be paid here.";
 
 /** Under the thanks: when the plan year runs to. `day` words a date. */
@@ -126,7 +173,20 @@ export interface PlanPayLink {
   sent_at: string | null;
   /** Why the site cannot email it just now (email not set up, no address), or null. */
   email_reason: string | null;
+  /**
+   * True while a payment from the customer's bank account is on its way (Nov 26): there is no
+   * link to give, `reason` says so, and the box says it without being opened.
+   */
+  bank_pending?: boolean;
 }
+
+/**
+ * Who reads and sends a plan's card payment link (Nov 26, the audit's number 18): the office.
+ * The link's page shows the plan's price, which a technician was cut off from on Nov 20, and
+ * the read gives the customer's email. A technician on a ticket keeps the card page there and
+ * nothing else. Said when anyone else asks.
+ */
+export const PAY_LINK_OFFICE_ONLY = "The card payment link is not yours to read or send.";
 
 /** "Emailed to pat@example.com on Monday, November 23, 2026." or "". */
 export function payLinkSentWords(

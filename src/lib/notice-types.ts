@@ -26,6 +26,12 @@
  * (Until Nov 24 a request from the public pages and the Roof Care plan notices were too: the
  * owner put them under the Opportunity and Service switches, each with a tick of its own.)
  *
+ * Nov 26 (the audit of Nov 25, number 26): a Roof Care plan's money alarms are under no switch
+ * and no tick either (`PLAN_MONEY_ALARM_KIND`, `ALWAYS_SENT_KINDS` below), like the notices
+ * about a limit. Until then they wore the kind of the ordinary "paid by card" notice, so a
+ * manager who unticked "Roof Care plan" to stop the every-two-days "still not paid" reminder
+ * stopped the alarms with it.
+ *
  * Pure: it imports only notice-categories.ts. Shared by the sender, the inbox reads, the
  * Account page and the tests.
  */
@@ -239,11 +245,13 @@ export const NOTICE_TYPES: readonly NoticeType[] = [
     help: "A customer sent the Roof Care or Request service form from a QR code.",
     match: [{ kinds: ["public_request"] }],
   },
+  // Nov 26: money to send back, a failed bank payment and a payment that could not be recorded
+  // left this tick. They are alarms now and always sent (PLAN_MONEY_ALARM_KIND).
   {
     key: "opportunities_care_plan",
     category: "opportunities",
     label: "Roof Care plan",
-    help: "A plan is signed and not paid, was paid by card, has a card payment to send back, or expired.",
+    help: "A plan is signed and not paid, was paid by card or from a bank account, or expired.",
     match: [{ kinds: ["plan_needs_payment", "plan_card_paid", "plan_expired"] }],
   },
   // ---- Bid notices ----------------------------------------------------------------------------
@@ -276,6 +284,23 @@ export const NOTICE_TYPES: readonly NoticeType[] = [
     match: [{ kinds: ["bid_watch"] }],
   },
 ];
+
+/**
+ * A Roof Care plan's money alarms (Nov 26; the words are in roof-care-checkout.ts): card or bank
+ * money that has to go back to a customer, a bank payment that failed, a payment the site could
+ * not record or could not match to a plan, and a payment notice that was refused. Money is at
+ * stake in each, so they sit under NO switch and NO tick: every admin and manager asked is
+ * told, whatever they turned off on My account. The ordinary "paid" notice is not one of
+ * these: it keeps its kind (plan_card_paid) and its tick.
+ */
+export const PLAN_MONEY_ALARM_KIND = "plan_money_alarm";
+
+/**
+ * The kinds that are sent whatever a person's switches and ticks say, by design and not by
+ * oversight. None of them may be given a switch (notice-categories.ts) or a tick above: a test
+ * says so.
+ */
+export const ALWAYS_SENT_KINDS: readonly string[] = [PLAN_MONEY_ALARM_KIND];
 
 /** Every key, in list order: what the save accepts and what the database's own list holds. */
 export const NOTICE_TYPE_KEYS: readonly string[] = NOTICE_TYPES.map((t) => t.key);

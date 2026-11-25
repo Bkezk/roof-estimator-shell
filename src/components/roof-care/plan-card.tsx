@@ -202,6 +202,7 @@ import {
   ROOF_CARE_TERMS_VERSION,
   roofCarePlansKey,
   runsLate,
+  readsPlanTables,
   SIZE_CONFIRM_LABEL,
   SIZE_OK_LABEL,
   SIZE_UNCHECKED_STAFF_NOTE,
@@ -266,8 +267,11 @@ const STALE_MS = 60_000;
  * Opened on a ticket (owner, Nov 24): the technician is on the roof and can measure it, so the
  * card page opens there though the roof size is not confirmed yet. Anywhere else no payment is
  * asked for until a manager or an admin has confirmed the size.
+ *
+ * Nov 26 (the audit of Nov 25, number 18): it holds the ticket's own id, not a yes or no. The
+ * server is handed the id and checks the ticket itself (startPlanCheckout, `job_id`).
  */
-const OnTicket = createContext(false);
+const OnTicket = createContext<string | null>(null);
 
 /** A whole number out of a box; null for a blank or anything that is not one. */
 function wholeNumber(text: string): number | null {
@@ -678,7 +682,7 @@ export function RoofCareButtons({
         <Plus className={`mr-1 ${big ? "h-5 w-5" : "h-4 w-4"}`} /> {ADDITIONAL_SERVICES_LABEL}
       </Button>
       {/* On a ticket (Nov 24): the plan and the sign-up know it, for the card page. */}
-      <OnTicket.Provider value={!!jobId}>
+      <OnTicket.Provider value={jobId ?? null}>
         {open === "plan" &&
           (active || waiting || lapsed ? (
             <PlanDialog siteId={siteId} visitId={visitId ?? null} onClose={() => setOpen(null)} />
@@ -2343,10 +2347,11 @@ function AwaitingPayment({
   const checkoutFn = useServerFn(startPlanCheckout);
   // On a ticket the technician can measure the roof, so the card page opens there though the
   // size is not confirmed. Anywhere else no payment is asked for until it is (owner, Nov 24).
-  const onSite = useContext(OnTicket);
+  const ticketId = useContext(OnTicket);
+  const onSite = !!ticketId;
   const checkout = useMutation({
     mutationFn: () =>
-      checkoutFn({ data: { plan_id: plan.id, ...(onSite ? { on_site: true } : {}) } }),
+      checkoutFn({ data: { plan_id: plan.id, ...(ticketId ? { job_id: ticketId } : {}) } }),
     onSuccess: (r) => {
       if (r.url) window.location.assign(r.url);
       else toast.error(r.reason ?? "The card payment page could not be made", { duration: 20_000 });
@@ -2404,8 +2409,9 @@ function AwaitingPayment({
             )}
             {/* Nov 23: the customer's own link, for one who is not at this screen (signed up
                 through the QR page, or wants to pay later from their own phone). Shown whenever
-                the plan pays by card: before card payment is set up the box says so. */}
-            <PlanPayLinkBox planId={plan.id} />
+                the plan pays by card: before card payment is set up the box says so.
+                Nov 26: the office's alone. A technician keeps the card page on a ticket. */}
+            {readsPlanTables(profile) && <PlanPayLinkBox planId={plan.id} />}
           </div>
         )}
         {money &&
@@ -2756,7 +2762,8 @@ function SignUpDialog({
 }) {
   const { profile } = useAuth();
   const refresh = useRefresh(siteId);
-  const onSite = useContext(OnTicket);
+  const ticketId = useContext(OnTicket);
+  const onSite = !!ticketId;
   const [sqft, setSqft] = useState(() =>
     prefill?.sqft != null && prefill.sqft > 0 ? String(Math.round(prefill.sqft)) : "",
   );
@@ -2890,7 +2897,9 @@ function SignUpDialog({
       if (payMethod === "card" && !prefill && !sizeFirst) {
         try {
           pay = (
-            await checkoutFn({ data: { plan_id: made.id, ...(onSite ? { on_site: true } : {}) } })
+            await checkoutFn({
+              data: { plan_id: made.id, ...(ticketId ? { job_id: ticketId } : {}) },
+            })
           ).url;
         } catch {
           pay = null;

@@ -42,6 +42,13 @@ vi.mock("@/lib/roof-care-checkout.server", () => ({
     pages.push(ask);
     return { id: "cs_test_1", url: "https://card.example.com/pay/cs_test_1" };
   },
+  // Nov 26, 2026: the card page is made through the door that keeps it on its plan, and the
+  // functions ask whether a bank payment is on its way (the audit of Nov 25, numbers 1 and 3).
+  openPlanCardPage: async (_admin: unknown, ask: unknown) => {
+    pages.push(ask);
+    return { id: "cs_test_1", url: "https://card.example.com/pay/cs_test_1" };
+  },
+  planCardState: async () => ({ sessions: [], bank_pending: null, paid_by_bank: false }),
 }));
 
 import { startPlanCheckout } from "@/lib/roof-care-checkout.functions";
@@ -70,6 +77,7 @@ const run = (fn: unknown, db: unknown, data: unknown, userId = "u1") =>
 const PLAN = "3d6a3c1e-1111-4222-8333-444455556677";
 const SITE = "2b6a3c1e-1111-4222-8333-444455556677";
 const TOKEN = "4f1c2a9e-7b3d-4c5e-9a1f-0b2c3d4e5f77";
+const JOB = "5e6a3c1e-1111-4222-8333-444455556677";
 const world = (over: Record<string, unknown> = {}) =>
   fakeSupabase(
     {
@@ -93,6 +101,18 @@ const world = (over: Record<string, unknown> = {}) =>
       ],
       crm_sites: [{ id: SITE, name: "Main plant", address1: "120 Mill St", city: "London" }],
       company_settings: [{ company_name: "JBK Roofing", phone: "888-555-0100", email: null }],
+      // Nov 26, 2026: the link is the office's, and "on a ticket" is a ticket the server reads.
+      profiles: [
+        {
+          id: "u1",
+          role: "manager",
+          access: [],
+          technician: false,
+          full_name: "Mo",
+          email: "m@x.co",
+        },
+      ],
+      service_jobs: [{ id: JOB, site_id: SITE, stage: "scheduled", deleted_at: null }],
     },
     { rpcs: { roof_care_plan_seen: () => true } },
   );
@@ -141,7 +161,9 @@ describe("the card page from the office's side", () => {
   });
   it("opens on a ticket: the technician can measure the roof there", async () => {
     const env = world();
-    expect(await run(startPlanCheckout, env.db, { plan_id: PLAN, on_site: true })).toEqual({
+    // Nov 26, 2026: the ticket is named, and the server checks it. `on_site: true` from the
+    // browser is no longer taken (roof-care-card-and-bank-nov26.test.ts).
+    expect(await run(startPlanCheckout, env.db, { plan_id: PLAN, job_id: JOB })).toEqual({
       url: "https://card.example.com/pay/cs_test_1",
       reason: null,
     });
@@ -158,9 +180,10 @@ describe("the card page from the office's side", () => {
 describe("the sign-up", () => {
   const card = flat(read("src/components/roof-care/plan-card.tsx"));
   it("knows it is on a ticket from the two buttons, which are given the ticket", () => {
-    expect(card).toContain("const OnTicket = createContext(false);");
-    expect(card).toContain("<OnTicket.Provider value={!!jobId}>");
-    expect(card).toContain("const onSite = useContext(OnTicket);");
+    // Nov 26, 2026: they are given the ticket's own id, which goes to the server to be checked.
+    expect(card).toContain("const OnTicket = createContext<string | null>(null);");
+    expect(card).toContain("<OnTicket.Provider value={jobId ?? null}>");
+    expect(card).toContain("const ticketId = useContext(OnTicket); const onSite = !!ticketId;");
   });
   it("asks for no card payment off a ticket while the size is not confirmed, and says so", () => {
     expect(card).toContain(
@@ -276,6 +299,8 @@ describe("back from the card page", () => {
     expect(page).toContain("{!facts && !problem && back && (");
     expect(PAID_LOOKS_MS[0]).toBeLessThan(4000);
     expect(PAID_LOOKS_MS.length).toBeGreaterThanOrEqual(6);
-    expect(page).toContain("timer = setTimeout(load, PAID_LOOKS_MS[tries.current]);");
+    // Nov 26, 2026: the looks are counted the same way; after the last one the page now says
+    // the payment is not confirmed (roof-care-pay-page-nov26.test.ts).
+    expect(page).toContain("timer = setTimeout(load, PAID_LOOKS_MS[n]);");
   });
 });
