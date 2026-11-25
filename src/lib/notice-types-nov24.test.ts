@@ -462,19 +462,32 @@ const SENT: Sent[] = [
     title: "No access for a Guard inspection: Acme",
     expect: "service_care_no_access",
   },
+  // Nov 26, 2026 (the audit of Nov 25, number 26): the ordinary "paid" notice keeps its kind
+  // and its tick. Money to send back and a payment that could not be recorded are alarms now,
+  // with a kind of their own under no switch and no tick, so they always go. Both are worded
+  // in roof-care-checkout.ts (the route no longer writes a notice of its own).
   {
     from: "src/lib/roof-care-checkout.ts",
     kind: "plan_card_paid",
     url: "/properties/p1",
-    title: "Card payment to send back: Acme",
+    title: "Roof Care plan paid by card: Acme",
     expect: "opportunities_care_plan",
   },
   {
-    from: "src/routes/api.stripe.webhook.ts",
-    kind: "plan_card_paid",
+    from: "src/lib/roof-care-checkout.ts",
+    kind: "plan_money_alarm",
+    url: "/properties/p1",
+    title: "Card payment to send back: Acme",
+    expect: "always",
+    pin: "kind: PLAN_MONEY_ALARM_KIND",
+  },
+  {
+    from: "src/lib/roof-care-checkout.ts",
+    kind: "plan_money_alarm",
     url: "/properties/p1",
     title: "A card payment could not be recorded: Acme",
-    expect: "opportunities_care_plan",
+    expect: "always",
+    pin: 'title: `A ${a.bank ? "bank" : "card"} payment could not be recorded: ${place}`',
   },
 ];
 
@@ -749,12 +762,15 @@ describe("takesNotice: the switch is on AND the type is not off", () => {
       notify_off: [...NOTICE_TYPE_KEYS],
     };
     const always = SENT.filter((s) => s.expect === "always");
+    // Nov 26, 2026: and a Roof Care plan's money alarms (two of them are in the walk).
     expect(always.map((s) => s.kind)).toEqual([
       "task",
       "task_today",
       "task_overdue",
       "mention",
       "test",
+      "plan_money_alarm",
+      "plan_money_alarm",
     ]);
     for (const s of always) expect(takesNotice(hermit, s), s.kind).toBe(true);
   });

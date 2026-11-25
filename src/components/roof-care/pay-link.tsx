@@ -35,10 +35,11 @@ export function PlanPayLinkBox({ planId }: { planId: string }) {
   const read = useServerFn(planPayLink);
   const send = useServerFn(emailPlanPayLink);
   const key = ["roof-care-pay-link", planId] as const;
+  // Nov 26: read as soon as the box is on the screen, not only when it is opened, so a payment
+  // from the customer's bank account that is on its way is said without a press.
   const q = useQuery({
     queryKey: key,
     queryFn: () => read({ data: { plan_id: planId } }),
-    enabled: open,
     staleTime: 30_000,
     retry: false,
   });
@@ -61,6 +62,14 @@ export function PlanPayLinkBox({ planId }: { planId: string }) {
     }
   };
   const l = q.data;
+  // Nov 26: money is on its way from the customer's bank. There is no link to give and nothing
+  // to press, so the box is this one sentence (BANK_PENDING_OFFICE, from the server).
+  if (l?.bank_pending)
+    return (
+      <p className="font-medium" role="status" data-roof-care-pay-link="bank">
+        {l.reason}
+      </p>
+    );
   return (
     <div className="space-y-1.5" data-roof-care-pay-link={open ? "open" : "closed"}>
       <Button

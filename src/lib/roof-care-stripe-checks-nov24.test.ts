@@ -197,7 +197,8 @@ describe("the route Stripe calls keeps test and live apart", () => {
     const res = await post(body, sign(body, nowS()));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, handled: true, result: "started" });
-    expect(calls).toEqual([{ p_plan: PLAN, p_amount: 840, p_ref: "pi_9" }]);
+    // Nov 26, 2026: and whether it came from a bank account (the audit of Nov 25, number 3).
+    expect(calls).toEqual([{ p_plan: PLAN, p_amount: 840, p_ref: "pi_9", p_bank: false }]);
     expect(logged).toEqual([]);
   });
 
@@ -234,7 +235,8 @@ describe("the route Stripe calls keeps test and live apart", () => {
     expect(told).toHaveLength(1);
     expect(told[0]![0]).toEqual(["a1", "m1"]);
     expect(told[0]![1]).toEqual({
-      kind: "plan_card_paid",
+      // Nov 26, 2026: an alarm, which no tick turns off (the audit of Nov 25, number 26).
+      kind: "plan_money_alarm",
       title: "A card payment notice was refused: Main Plant",
       body: "Stripe sent a test payment notice, but the site is set up with a live Stripe key. Nothing was recorded and the plan is not changed. Reference pi_9. In Lovable Cloud › Secrets, the Stripe key and the Stripe webhook secret must both come from the same side of Stripe: both test, or both live.",
       url: "/properties/s1",

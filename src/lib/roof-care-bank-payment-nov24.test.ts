@@ -109,11 +109,21 @@ const world = (status = "awaiting_payment") => {
         { id: "t1", role: "user" },
       ],
       roof_care_card_payments: [],
+      notifications: [],
     },
     {
       rpcs: {
         roof_care_card_paid: () => "started",
         roof_care_pay_notice_release: () => null,
+        // Nov 26, 2026: the database follows a bank payment on the plan and says whether the
+        // plan was waiting (the audit of Nov 25, number 3). This stands in for it.
+        roof_care_bank_pending: (a) =>
+          a["p_step"] === "failed"
+            ? "none"
+            : status === "awaiting_payment"
+              ? "started"
+              : "not_waiting",
+        roof_care_card_sessions_closed: () => 0,
       },
     },
   );
@@ -185,7 +195,8 @@ describe("the words", () => {
   });
   it("failed", () => {
     expect(bankPaymentNotice({ ...base, step: "failed" })).toEqual({
-      kind: "plan_card_paid",
+      // Nov 26, 2026: an alarm, which no tick turns off (the audit of Nov 25, number 26).
+      kind: "plan_money_alarm",
       title: "Bank payment failed: Main Plant",
       body: "The customer's bank payment of $840.00 for the Roof Care plan did not go through, so the plan has not started. Reach out to the customer: the payment link on the plan still works, or take a check. Reference pi_9.",
       url: "/properties/s1",
@@ -226,9 +237,15 @@ describe("what the site does with each step", () => {
     const fns = env.rpcCalls.map((c) => c.fn);
     expect(fns).not.toContain("roof_care_card_paid");
     // So "signed, not paid: no card payment has come through" does not follow in half an hour.
-    const mark = env.rpcCalls.find((c) => c.fn === "roof_care_pay_notice_release")!;
-    expect(mark.args["p_plan"]).toBe(PLAN);
-    expect(Date.now() - Date.parse(String(mark.args["p_was"]))).toBeLessThan(5000);
+    // Nov 26, 2026: one step in the database stamps the plan as told and as having a bank
+    // payment on its way (roof_care_bank_pending sets pay_notified_at with the stamp), in
+    // place of the call that only marked it as told.
+    expect(fns).not.toContain("roof_care_pay_notice_release");
+    const mark = env.rpcCalls.find((c) => c.fn === "roof_care_bank_pending")!;
+    expect(mark.args).toEqual({ p_plan: PLAN, p_ref: "pi_9", p_amount: 840, p_step: "started" });
+    expect(
+      readFileSync("supabase/migrations/20261125100000_card_and_bank_payments.sql", "utf8"),
+    ).toContain("pay_notified_at = now()");
     expect(env.writes).toEqual([]);
   });
   it("failed: they are told, nothing is recorded, and the plan's reminders go on as they were", async () => {
@@ -237,7 +254,13 @@ describe("what the site does with each step", () => {
     expect(await res.json()).toEqual({ ok: true, handled: true, result: "bank_failed" });
     expect(told[0]![0]).toEqual(["a1", "m1"]);
     expect(told[0]![1]).toMatchObject({ title: "Bank payment failed: Main Plant" });
-    expect(env.rpcCalls).toEqual([]);
+    // Nov 26, 2026: the "on its way" stamp of that payment is taken off, and nothing else.
+    expect(env.rpcCalls).toEqual([
+      {
+        fn: "roof_care_bank_pending",
+        args: { p_plan: PLAN, p_ref: "pi_9", p_amount: 840, p_step: "failed" },
+      },
+    ]);
     expect(env.writes).toEqual([]);
   });
   it("cleared: recorded as the payment, and told as a bank payment", async () => {
@@ -251,7 +274,13 @@ describe("what the site does with each step", () => {
     const env = world("active");
     await post(STARTED);
     expect(told).toHaveLength(1);
-    expect(env.rpcCalls).toEqual([]);
+    // Nov 26, 2026: told in other words. It used to say "The plan starts when it clears" of a
+    // plan that could not start. The database is asked and stamps nothing for it.
+    expect(told[0]![1]).toMatchObject({
+      kind: "plan_money_alarm",
+      title: "Bank payment started for a plan that is not waiting: Main Plant",
+    });
+    expect(env.rpcCalls.map((c) => c.fn)).toEqual(["roof_care_bank_pending"]);
   });
   it("a step for a plan that is not there is answered and tells nobody", async () => {
     world();

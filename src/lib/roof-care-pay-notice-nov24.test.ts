@@ -300,8 +300,10 @@ describe("under the Roof Care plan tick", () => {
     expect(type.match).toEqual([
       { kinds: ["plan_needs_payment", "plan_card_paid", "plan_expired"] },
     ]);
+    // Nov 26, 2026: money to send back is an alarm now, under no tick (the audit of Nov 25,
+    // number 26), so it is no longer in this tick's words. The kinds are as they were.
     expect(type.help).toBe(
-      "A plan is signed and not paid, was paid by card, has a card payment to send back, or expired.",
+      "A plan is signed and not paid, was paid by card or from a bank account, or expired.",
     );
     const on = {
       notify_leads: false,

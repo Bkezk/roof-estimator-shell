@@ -374,11 +374,22 @@ export interface ReceiptFacts extends PlanEmailFacts {
   starts_on: string;
   renews_on: string;
   invoice_number: string | null;
+  /**
+   * The year was paid from a bank account online (Nov 26; roof_care_plans.paid_by_bank). The
+   * plan's way of paying still reads "card" for it, so the receipt is told here and says bank.
+   */
+  paid_by_bank?: boolean;
 }
 
 /** The receipt: what was paid and when, and the plan year it bought. */
 export function receiptEmail(f: ReceiptFacts): Email {
   const name = PLAN_NAMES[f.plan];
+  // Nov 26: a payment from a bank account is not said to be a card's.
+  const paidBy = f.paid_by_bank
+    ? "Bank payment"
+    : f.pay_method
+      ? PAY_METHOD_WORDS[f.pay_method]
+      : null;
   const blocks: Block[] = [
     { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
     {
@@ -391,7 +402,7 @@ export function receiptEmail(f: ReceiptFacts): Email {
       items: [
         `Amount paid: ${money0(f.paid)}`,
         `Received: ${longDay(f.paid_on)}`,
-        ...(f.pay_method ? [`Paid by: ${PAY_METHOD_WORDS[f.pay_method].toLowerCase()}`] : []),
+        ...(paidBy ? [`Paid by: ${paidBy.toLowerCase()}`] : []),
         ...(f.invoice_number ? [`Invoice: #${f.invoice_number}`] : []),
         `Plan: ${name}${label(f)}`,
       ],
@@ -402,7 +413,7 @@ export function receiptEmail(f: ReceiptFacts): Email {
         rows: [
           { label: "Plan", value: `${name}${label(f)}` },
           { label: "Property", value: place(f) },
-          ...(f.pay_method ? [{ label: "Paid by", value: PAY_METHOD_WORDS[f.pay_method] }] : []),
+          ...(paidBy ? [{ label: "Paid by", value: paidBy }] : []),
           ...(f.invoice_number ? [{ label: "Invoice", value: `#${f.invoice_number}` }] : []),
         ],
       },

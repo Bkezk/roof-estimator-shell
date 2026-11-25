@@ -83,6 +83,24 @@ type RpcContracts = {
     Args: { p_plan: string; p_was: string | null };
     Returns: undefined;
   };
+  // 20261125100000_card_and_bank_payments.sql (the audit of Nov 25, number 3): a payment that
+  // came from a bank account is recorded as one (p_bank). The server's alone.
+  roof_care_card_paid: {
+    Args: {
+      p_plan: string;
+      p_amount: number;
+      p_ref: string;
+      p_on?: string | null;
+      p_bank?: boolean | null;
+    };
+    Returns: string;
+  };
+  // The same file: a bank payment that started ('started') or did not go through ('failed').
+  // Answers 'started', 'already', 'not_waiting', 'cleared' or 'none'. The server's alone.
+  roof_care_bank_pending: {
+    Args: { p_plan: string; p_ref: string; p_amount: number | null; p_step: string };
+    Returns: string;
+  };
   // 20261124980000: a manager corrects a plan's roof size. The answer is the record of the
   // change, read strictly by readSizeChange.
   roof_care_correct_size: {

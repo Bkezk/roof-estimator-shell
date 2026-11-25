@@ -195,6 +195,8 @@ export async function dispatchPlanEmails(
         0;
       // A renewal at no charge has nothing to receipt.
       if (paid <= 0) continue;
+      // Nov 26: a year paid online from a bank account says so on its receipt, not "card".
+      const { planPaidByBank } = await import("@/lib/roof-care-checkout.server");
       const mail = receiptEmail({
         ...facts,
         paid,
@@ -202,6 +204,7 @@ export async function dispatchPlanEmails(
         starts_on: p.starts_on,
         renews_on: p.renews_on,
         invoice_number: inv?.[0]?.display_number ?? null,
+        paid_by_bank: Number(p.card_paid_amount) > 0 ? await planPaidByBank(admin, p.id) : false,
       });
       if (await sendClaimed(admin, p.id, "receipt", to, mail, stamp, send)) out.receipts_sent++;
       else out.email_errors++;

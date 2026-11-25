@@ -4,6 +4,13 @@
  * card payment page. Paid, it says thank you. A link that is over, or made up, says to call.
  *
  * The same look as the two QR pages (the flyer's), so the customer knows it is ours.
+ *
+ * Nov 26 (the audit of Nov 25, numbers 3, 18 and 28):
+ *   - Back from the card page, the thanks are said only while the page is still looking for
+ *     the payment. When its looks are done and the plan is still not paid, it says so and
+ *     shows the button again. It used to say "your receipt is on its way" for good.
+ *   - A payment from the customer's bank account that is on its way, and a roof size that is
+ *     not confirmed yet, are each a sentence and no button.
  */
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
@@ -14,14 +21,20 @@ import { FLYER_HEAD } from "@/components/roof-care/flyer-look";
 import { longDay } from "@/lib/followup-rules";
 import { PUBLIC_TRY_AGAIN } from "@/lib/public-forms";
 import {
+  PAID_LATE_LOOKS_MS,
   PAID_LOOKS_MS,
+  PAY_BANK_ON_ITS_WAY,
   PAY_BUTTON,
   PAY_CLOSED,
   PAY_JUST_PAID,
+  PAY_NOT_CONFIRMED,
   PAY_OFFLINE,
   PAY_PAGE_LEAD,
   PAY_PAGE_TITLE,
+  PAY_SIZE_NOT_READY,
   PAY_THANKS_TITLE,
+  payPageOffersPay,
+  payPageView,
   payThanksWords,
   type PublicPayFacts,
 } from "@/lib/roof-care-pay-link";
@@ -47,6 +60,9 @@ export function PublicPayPage({ token }: { token: string }) {
   // browser's agree.
   const [back, setBack] = useState(false);
   useEffect(() => setBack(cameBackPaid()), []);
+  // Nov 26: true once the quick looks are done and the plan is still not paid. The thanks are
+  // taken down then, and the button comes back.
+  const [looksDone, setLooksDone] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -58,11 +74,18 @@ export function PublicPayPage({ token }: { token: string }) {
           setFacts(f);
           setProblem(null);
           // Back from the card page: the payment company tells us a moment later. Look again a
-          // few times, soon at first, then leave the "being confirmed" words standing.
-          if (cameBackPaid() && f.state === "pay" && tries.current < PAID_LOOKS_MS.length) {
-            timer = setTimeout(load, PAID_LOOKS_MS[tries.current]);
-            tries.current += 1;
+          // few times, soon at first. Nov 26: then say the payment is not confirmed, and keep
+          // looking a few more times, slowly, so the page says thank you by itself if it lands.
+          if (!cameBackPaid() || f.state !== "pay") return;
+          const n = tries.current;
+          tries.current += 1;
+          if (n < PAID_LOOKS_MS.length) {
+            timer = setTimeout(load, PAID_LOOKS_MS[n]);
+            return;
           }
+          setLooksDone(true);
+          const late = n - PAID_LOOKS_MS.length;
+          if (late < PAID_LATE_LOOKS_MS.length) timer = setTimeout(load, PAID_LATE_LOOKS_MS[late]);
         })
         .catch((e) => {
           if (live) setProblem(errText(e));
@@ -87,7 +110,9 @@ export function PublicPayPage({ token }: { token: string }) {
       });
   };
 
-  const confirming = !!facts && facts.state === "pay" && cameBackPaid();
+  // What the page says (payPageView): the server's answer, and for a customer who has just
+  // come back, whether the page is still looking for the payment.
+  const view = facts ? payPageView(facts.state, cameBackPaid(), looksDone) : null;
   return (
     <PublicSheet
       title={PAY_PAGE_TITLE}
@@ -95,6 +120,7 @@ export function PublicPayPage({ token }: { token: string }) {
       footTitle="Questions about your plan?"
       data-public-page="pay"
       data-pay-state={facts?.state ?? (problem ? "problem" : "loading")}
+      data-pay-view={view ?? ""}
     >
       {!facts && !problem && !back && (
         <p className="flex items-center gap-2 text-base text-[var(--flyer-ink)]" role="status">
@@ -126,13 +152,22 @@ export function PublicPayPage({ token }: { token: string }) {
           )}
         </section>
       )}
-      {facts?.state === "pay" && !confirming && (
+      {view === "unconfirmed" && (
+        <p
+          className="text-base font-semibold text-[var(--flyer-ink)]"
+          role="status"
+          data-pay="unconfirmed"
+        >
+          {PAY_NOT_CONFIRMED}
+        </p>
+      )}
+      {view && payPageOffersPay(view) && (
         <PublicButton type="button" disabled={opening} onClick={pay} data-action="pay-by-card">
           {opening && <Loader2 className="mr-2 inline h-5 w-5 animate-spin" />}
           {PAY_BUTTON}
         </PublicButton>
       )}
-      {confirming && (
+      {view === "confirming" && (
         <p
           className="text-base font-semibold text-[var(--flyer-ink)]"
           role="status"
@@ -141,20 +176,38 @@ export function PublicPayPage({ token }: { token: string }) {
           {PAY_JUST_PAID}
         </p>
       )}
-      {facts?.state === "paid" && (
+      {view === "bank" && (
+        <p
+          className="text-base font-semibold text-[var(--flyer-ink)]"
+          role="status"
+          data-pay="bank"
+        >
+          {PAY_BANK_ON_ITS_WAY}
+        </p>
+      )}
+      {view === "held" && (
+        <p
+          className="text-base font-semibold text-[var(--flyer-ink)]"
+          role="status"
+          data-pay="held"
+        >
+          {PAY_SIZE_NOT_READY}
+        </p>
+      )}
+      {view === "paid" && (
         <section className="space-y-2" role="status" data-pay="thanks">
           <h2 className={`${FLYER_HEAD} flyer-h2 text-[var(--jbk-blue)]`}>{PAY_THANKS_TITLE}</h2>
           <p className="text-base text-[var(--flyer-ink)]">
-            {payThanksWords(facts.runs_until, longDay)}
+            {payThanksWords(facts?.runs_until ?? null, longDay)}
           </p>
         </section>
       )}
-      {facts?.state === "offline" && (
+      {view === "offline" && (
         <p className="text-base font-semibold text-[var(--flyer-ink)]" data-pay="offline">
           {PAY_OFFLINE}
         </p>
       )}
-      {facts?.state === "closed" && (
+      {view === "closed" && (
         <p className="text-base font-semibold text-[var(--flyer-ink)]" data-pay="closed">
           {PAY_CLOSED}
         </p>

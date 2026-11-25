@@ -6,10 +6,19 @@
  * reach the database with the site's own key, as the two QR pages do, so nothing is ever given
  * to the anonymous role. Each takes one thing from the visitor, the token, and answers only
  * about the one plan that token belongs to: its name, its property's name and the amount. A
- * token that matches nothing, and a plan that is over, get the same answer. Every call is
- * counted against the connection (public_form_take, kind "pay").
+ * token that matches nothing, and a plan that is over, get the same answer. Every call for a
+ * real plan's link is counted against the connection (public_form_take, kind "pay").
  *
  * The other two are the office's: read a plan's link to copy, and email it to the customer.
+ *
+ * Nov 26 (the audit of Nov 25, numbers 1, 3, 18 and 28):
+ *   - The page takes no payment while the roof size is not confirmed, or while a payment from
+ *     the customer's bank account is on its way. Each is a sentence and no button.
+ *   - A call whose token is not a plan's reads nothing more and is not counted: it used to use
+ *     up the day's count that every customer shares.
+ *   - The office's two functions are the office's: a technician no longer reads the link or
+ *     the customer's email through them, and cannot email the customer.
+ *   - The card page is made through openPlanCardPage, which keeps it on the plan.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,24 +27,30 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Client } from "@/lib/notify.server";
 import { PUBLIC_NOT_READY, PUBLIC_TOO_MANY, PUBLIC_TRY_AGAIN } from "@/lib/public-forms";
 import {
+  BANK_PENDING_OFFICE,
+  bankPendingNow,
   CHECKOUT_NO_SITE_ADDRESS,
   CHECKOUT_NOT_SET_UP,
   CHECKOUT_NOT_WAITING,
+  type BankPending,
   type CheckoutAsk,
 } from "@/lib/roof-care-checkout";
 import {
   cleanPayToken,
+  PAY_BANK_ON_ITS_WAY,
   PAY_CLOSED,
   PAY_HELD_SIZE,
   PAY_LINK_NO_EMAIL,
+  PAY_LINK_OFFICE_ONLY,
   PAY_OFFLINE,
   PAY_SAMPLE_START,
+  PAY_SIZE_NOT_READY,
   payLinkFor,
   payPageState,
   type PlanPayLink,
   type PublicPayFacts,
 } from "@/lib/roof-care-pay-link";
-import { asPlanKey, planNumberLabel } from "@/lib/roof-care-plan";
+import { asPlanKey, planNumberLabel, readsPlanTables } from "@/lib/roof-care-plan";
 import { PLAN_NAMES } from "@/lib/roof-care-price";
 
 /** What the two public functions need from the server, so a test can stand in for each. */
@@ -51,6 +66,8 @@ export interface PayDeps {
   /** Is paying by card online set up? */
   stripe: boolean;
   owed: (admin: Client, plan: PlanRead) => Promise<number | null>;
+  /** Nov 26: is a payment from the customer's bank account on its way? */
+  card: (admin: Client, planId: string) => Promise<{ bank_pending: BankPending | null }>;
   makePage: (ask: CheckoutAsk) => Promise<{ id: string; url: string }>;
 }
 
@@ -65,10 +82,12 @@ interface PlanRead {
   customer_email: string | null;
   renews_on: string | null;
   pay_token: string;
+  /** Nov 26: read here too. A size nobody confirmed takes no payment on this page either. */
+  size_unchecked: boolean | null;
 }
 
 const PLAN_SELECT =
-  "id, plan, plan_number, site_id, status, price, renewal_credit, customer_email, renews_on, pay_token" as const;
+  "id, plan, plan_number, site_id, status, price, renewal_credit, customer_email, renews_on, pay_token, size_unchecked" as const;
 
 const CLOSED: PublicPayFacts = {
   state: "closed",
@@ -125,6 +144,16 @@ async function siteName(admin: Client, siteId: string): Promise<string> {
   return (data?.name ?? "").trim();
 }
 
+/** Is a payment from the bank on its way for this plan? A read that fails is "try again". */
+async function bankOnItsWay(d: PayDeps, admin: Client, planId: string): Promise<boolean> {
+  try {
+    return bankPendingNow((await d.card(admin, planId)).bank_pending?.at);
+  } catch (e) {
+    console.error("Payment link: the plan's payments could not be read —", e);
+    throw new Error(PUBLIC_TRY_AGAIN);
+  }
+}
+
 /** What a payment link's page shows. */
 export async function payPageFor(tokenIn: unknown, d: PayDeps): Promise<PublicPayFacts> {
   const token = cleanPayToken(tokenIn);
@@ -132,14 +161,23 @@ export async function payPageFor(tokenIn: unknown, d: PayDeps): Promise<PublicPa
     if (d.sample) return token ? SAMPLE_PAY_FACTS : CLOSED;
     throw new Error(PUBLIC_NOT_READY);
   }
-  await withinLimit(d.admin, d.key);
+  // Nov 26 (the audit's number 28): a call with no whole token, or with one that is no plan's,
+  // is answered at once and not counted. Counted, anybody could use up the day's count that
+  // every customer shares, and the real links would stop opening. Only a real plan's page is.
   if (!token) return CLOSED;
   const plan = await planByToken(d.admin, token);
   const key = plan ? asPlanKey(plan.plan) : null;
   if (!plan || !key) return CLOSED;
+  await withinLimit(d.admin, d.key);
   const waiting = plan.status === "awaiting_payment";
-  const cents = waiting ? await d.owed(d.admin, plan) : null;
-  const state = payPageState(plan.status, cents, d.stripe && !!d.base);
+  const pending = waiting ? await bankOnItsWay(d, d.admin, plan.id) : false;
+  const held = waiting && plan.size_unchecked === true;
+  // The amount is shown only where it can be paid: a size not confirmed may still change it.
+  const cents = waiting && !pending && !held ? await d.owed(d.admin, plan) : null;
+  const state = payPageState(plan.status, cents, d.stripe && !!d.base, {
+    bank_pending: pending,
+    size_unchecked: held,
+  });
   if (state === "closed") return CLOSED;
   return {
     state,
@@ -158,10 +196,15 @@ export async function payStartFor(tokenIn: unknown, d: PayDeps): Promise<{ url: 
     if (d.sample) throw new Error(PAY_SAMPLE_START);
     throw new Error(PUBLIC_NOT_READY);
   }
-  await withinLimit(d.admin, d.key);
   if (!token) throw new Error(PAY_CLOSED);
   const plan = await planByToken(d.admin, token);
-  if (!plan || plan.status !== "awaiting_payment") throw new Error(PAY_CLOSED);
+  if (!plan) throw new Error(PAY_CLOSED);
+  await withinLimit(d.admin, d.key);
+  if (plan.status !== "awaiting_payment") throw new Error(PAY_CLOSED);
+  // Nov 26: the page says these two and shows no button. The server holds the same line for a
+  // page left open from before, and for anyone who calls it by hand.
+  if (await bankOnItsWay(d, d.admin, plan.id)) throw new Error(PAY_BANK_ON_ITS_WAY);
+  if (plan.size_unchecked === true) throw new Error(PAY_SIZE_NOT_READY);
   if (!d.stripe || !d.base) throw new Error(PAY_OFFLINE);
   const cents = await d.owed(d.admin, plan);
   if (cents == null) throw new Error(PAY_CLOSED);
@@ -195,14 +238,21 @@ async function realDeps(): Promise<PayDeps> {
     import("@/lib/roof-care-checkout.server"),
     import("@/lib/notify.server"),
   ]);
+  const admin = await server.publicAdmin();
   return {
-    admin: await server.publicAdmin(),
+    admin,
     key: server.connectionKey(getRequest().headers),
     sample: server.publicSampleMode(),
     base: notify.appUrl(),
     stripe: checkout.stripeConfigured(),
     owed: checkout.planOwedCents,
-    makePage: (ask) => checkout.createCheckoutSession(ask),
+    card: checkout.planCardState,
+    // Nov 26: through the one door that keeps the page on its plan, so it can be closed when
+    // the plan's price changes. With no server key no page is ever asked for.
+    makePage: (ask) => {
+      if (!admin) throw new Error(PAY_OFFLINE);
+      return checkout.openPlanCardPage(admin, ask);
+    },
   };
 }
 
@@ -244,15 +294,22 @@ async function seenPlan(ctx: Ctx, planId: string) {
   return { admin, plan };
 }
 
-/** Why there is no link to give for this plan just now, or null. */
-async function linkHeld(plan: {
-  status: string;
-  size_unchecked?: boolean | null;
-}): Promise<{ reason: string | null; base: string }> {
+/**
+ * Why there is no link to give for this plan just now, or null. `bankPending` (Nov 26): a
+ * payment from the customer's bank account is on its way, so no other is asked for.
+ */
+async function linkHeld(
+  plan: {
+    status: string;
+    size_unchecked?: boolean | null;
+  },
+  bankPending = false,
+): Promise<{ reason: string | null; base: string }> {
   const { stripeConfigured } = await import("@/lib/roof-care-checkout.server");
   const { appUrl } = await import("@/lib/notify.server");
   const base = appUrl();
   if (plan.status !== "awaiting_payment") return { reason: CHECKOUT_NOT_WAITING, base };
+  if (bankPending) return { reason: BANK_PENDING_OFFICE, base };
   // Nov 24 (owner): no payment is asked for until the roof size is confirmed.
   if (plan.size_unchecked === true) return { reason: PAY_HELD_SIZE, base };
   if (!stripeConfigured()) return { reason: CHECKOUT_NOT_SET_UP, base };
@@ -260,13 +317,34 @@ async function linkHeld(plan: {
   return { reason: null, base };
 }
 
+/**
+ * The link is the office's to read and to send (Nov 26, the audit's number 18). Until then
+ * anyone the database let see the plan passed, and a technician with a ticket at the property
+ * does: they read the customer's email and a link whose page shows the plan's price, and could
+ * email the customer.
+ */
+async function officeOnly(ctx: Ctx): Promise<void> {
+  const { readProfile } = await import("@/lib/profile-cache.server");
+  if (!readsPlanTables(await readProfile(ctx.supabase, ctx.userId)))
+    throw new Error(PAY_LINK_OFFICE_ONLY);
+}
+
+/** Is a payment from the bank on its way for a plan that waits? Read with the server's key. */
+async function planBankPending(admin: Client, plan: { id: string; status: string }) {
+  if (plan.status !== "awaiting_payment") return false;
+  const { planCardState } = await import("@/lib/roof-care-checkout.server");
+  return bankPendingNow((await planCardState(admin, plan.id)).bank_pending?.at);
+}
+
 /** A plan's card payment link, to copy, and whether the site can email it. */
 export const planPayLink = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<PlanPayLink> => {
-    const { plan } = await seenPlan(context, data.plan_id);
-    const { reason, base } = await linkHeld(plan);
+    await officeOnly(context);
+    const { admin, plan } = await seenPlan(context, data.plan_id);
+    const bank_pending = await planBankPending(admin, plan);
+    const { reason, base } = await linkHeld(plan, bank_pending);
     const to = (plan.customer_email ?? "").trim() || null;
     const { planEmailHeld } = await import("@/lib/roof-care-email.server");
     return {
@@ -275,6 +353,7 @@ export const planPayLink = createServerFn({ method: "GET" })
       to,
       sent_at: plan.pay_link_sent_at,
       email_reason: planEmailHeld() ?? (to ? null : PAY_LINK_NO_EMAIL),
+      bank_pending,
     };
   });
 
@@ -372,8 +451,9 @@ export const emailPlanPayLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ plan_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<{ to: string; sent_at: string }> => {
+    await officeOnly(context);
     const { admin, plan } = await seenPlan(context, data.plan_id);
-    const { reason, base } = await linkHeld(plan);
+    const { reason, base } = await linkHeld(plan, await planBankPending(admin, plan));
     if (reason) throw new Error(reason);
     const key = asPlanKey(plan.plan);
     if (!key) throw new Error("That plan was not found");

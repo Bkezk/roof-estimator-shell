@@ -395,6 +395,8 @@ describe("the card payment page", () => {
       "line_items[0][price_data][product_data][name]":
         "Roof Guard plan, one year (RC-1234): Main Plant",
       customer_email: "pat@example.com",
+      // Nov 26, 2026: the price is in US dollars for everyone (the audit of Nov 25, number 4).
+      "adaptive_pricing[enabled]": "false",
     });
   });
   describe("made at Stripe", () => {
@@ -468,6 +470,11 @@ describe("the card payment page", () => {
           customer_email: null,
         },
       ],
+      // Nov 26, 2026: the card page is the office's to open from a plan (the audit of Nov 25,
+      // number 18), so the signed-in person here is one of the office.
+      profiles: [
+        { id: "u1", role: "manager", access: [], technician: false, full_name: "Mo", email: "m" },
+      ],
     };
     // Nov 20: the database is asked whether the person sees the plan (a technician no longer
     // reads the plans table), and the plan is read with the server's own key.
@@ -494,7 +501,9 @@ describe("the card payment page", () => {
       // screen and pays from their own link (roof-care-pay-link-nov23.test.ts).
       // Nov 24: nor off a ticket while the roof size is not confirmed
       // (roof-care-size-before-payment-nov24.test.ts).
-      'if (payMethod === "card" && !prefill && !sizeFirst) { try { pay = ( await checkoutFn({ data: { plan_id: made.id, ...(onSite ? { on_site: true } : {}) } }) ).url; } catch { pay = null; } }',
+      // Nov 26, 2026: the ticket's own id goes with it, for the server to check (the audit of
+      // Nov 25, number 18). The browser's "on_site: true" is no longer taken.
+      'if (payMethod === "card" && !prefill && !sizeFirst) { try { pay = ( await checkoutFn({ data: { plan_id: made.id, ...(ticketId ? { job_id: ticketId } : {}) }, }) ).url; } catch { pay = null; } }',
     );
     expect(card).toContain("window.location.assign(pay); return;");
     expect(card).toContain("{cardOnline ? PAY_CARD_NOTE_ONLINE : PAY_CARD_NOTE_CUSTOMER}");
@@ -615,7 +624,8 @@ describe("the route Stripe calls", () => {
     const res = await post(body, sign(body, nowS()));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, handled: true, result: "started" });
-    expect(calls).toEqual([{ p_plan: PLAN, p_amount: 1840, p_ref: "pi_1" }]);
+    // Nov 26, 2026: and whether it came from a bank account (the audit of Nov 25, number 3).
+    expect(calls).toEqual([{ p_plan: PLAN, p_amount: 1840, p_ref: "pi_1", p_bank: false }]);
     expect(told).toHaveLength(1);
     expect(told[0]![0]).toEqual(["a1", "m1"]);
     expect((told[0]![1] as { title: string }).title).toBe(

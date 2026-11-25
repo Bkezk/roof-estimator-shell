@@ -485,7 +485,9 @@ describe("26. card payments", () => {
     expect(
       cardPaidNotice({ ...base, result: "send_back", payment: { ...row, reason: "paid_already" } }),
     ).toEqual({
-      kind: "plan_card_paid",
+      // Nov 26, 2026: money to send back is an alarm, which no tick turns off (the audit of
+      // Nov 25, number 26). The words are as they were.
+      kind: "plan_money_alarm",
       title: "Card payment to send back: Main Plant",
       body: "A card payment of $840.00 came in online for a Roof Care plan that was already paid. The plan is not changed. Send the $840.00 back to the customer. Reference pi_9.",
       url: "/properties/s1",
