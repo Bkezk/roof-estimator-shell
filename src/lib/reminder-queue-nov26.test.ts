@@ -154,6 +154,8 @@ function watched(env: ReturnType<typeof world>, failLaterPagesOf?: string) {
 
 let errorLog: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
+  // Every test starts at 10:00 in the office on the Wednesday, whatever the one before did.
+  vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-placeholder-not-a-key");
   vi.stubEnv("RESEND_API_KEY", "");
   errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -251,8 +253,8 @@ describe("waiting opportunities never take the pass's 200 places", () => {
     vi.setSystemTime(new Date("2026-11-11T11:30:00Z"));
     const env = world({ crm_followups: [followup(1)] });
     const r = await dispatchDueReminders(env.db as unknown as Client);
-    expect(r).toMatchObject({ checked: 0, reminded: 0, waiting: 0 });
-    vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
+    expect(r).toMatchObject({ checked: 0, reminded: 0 });
+    expect(env.tables["notifications"]).toEqual([]);
   });
 });
 
