@@ -687,6 +687,8 @@ describe("11. a refund for a smaller roof comes off Roof Care's income", () => {
           plan_number: 1077,
           account_id: ACCOUNT,
           site_id: SITE,
+          // Settled: what the payments cover is the price again once the refund is recorded.
+          size_paid_price: 760,
           size_refunds: [
             { amount: 80, on: "2027-06-10", ref: "check 9", by_name: "Ann" },
             { amount: 35.5, on: "2027-06-28", ref: null, by_name: "Ann" },
@@ -694,8 +696,23 @@ describe("11. a refund for a smaller roof comes off Roof Care's income", () => {
             { amount: 20, on: "2027-07-02", ref: null, by_name: "Ann" },
           ],
         },
-        { id: OLD, plan_number: 1002, account_id: ACCOUNT, site_id: SITE, size_refunds: [] },
-        { id: "p3", plan_number: 1003, account_id: ACCOUNT, site_id: SITE },
+        // Corrected bigger, with nothing ever sent back; and one never corrected.
+        {
+          id: OLD,
+          plan_number: 1002,
+          account_id: ACCOUNT,
+          site_id: SITE,
+          size_paid_price: 840,
+          size_refunds: [],
+        },
+        {
+          id: "p3",
+          plan_number: 1003,
+          account_id: ACCOUNT,
+          site_id: SITE,
+          size_paid_price: null,
+          size_refunds: [],
+        },
       ],
       crm_accounts: [{ id: ACCOUNT, name: "Made Up Storage Co" }],
     });

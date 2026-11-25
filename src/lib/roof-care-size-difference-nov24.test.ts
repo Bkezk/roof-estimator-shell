@@ -454,6 +454,10 @@ describe("the database", () => {
       "Part of the invoice for the last correction is paid. Record the rest of that payment or take it off, then correct the size.",
     );
   });
+  // Nov 26, 2026: this is the rule as it was written on Nov 24, and this file of that day is
+  // not edited. It is replaced by 20261125200000: a size invoice settles what it was paid and
+  // no more, the refund is told the amount shown, and the end refund takes off an unpaid
+  // bigger roof (roof-care-size-fixes-nov26.test.ts).
   it("a size invoice paid in full settles the plan at its price", () => {
     expect(sql).toContain(
       "update public.roof_care_plans set size_paid_price = price, updated_at = now() where id = new.roof_care_plan_id and size_paid_price is not null;",

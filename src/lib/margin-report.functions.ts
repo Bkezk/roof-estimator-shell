@@ -473,12 +473,15 @@ export async function readCareSizeRefunds(
   from: string,
   to: string,
 ): Promise<MarginInvoiceRow[]> {
+  // Only a plan whose size was corrected after it was paid can have one, and such a plan has a
+  // settled price (roof_care_size_refund_sent asks for it): the read is narrowed by that.
   const loose = sb as unknown as {
     from: (t: string) => {
       select: (c: string) => {
-        neq: (
+        not: (
           c: string,
-          v: string,
+          op: string,
+          v: null,
         ) => Promise<{
           data:
             | {
@@ -497,7 +500,7 @@ export async function readCareSizeRefunds(
   const { data, error } = await loose
     .from("roof_care_plans")
     .select("id, plan_number, account_id, site_id, size_refunds")
-    .neq("size_refunds", "[]");
+    .not("size_paid_price", "is", null);
   if (error) throw new Error(`Roof Care roof size refunds: ${error.message}`);
   const sent = (data ?? []).flatMap((p) =>
     readSizeRefunds(p.size_refunds)
