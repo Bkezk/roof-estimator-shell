@@ -97,7 +97,7 @@ plan as running late.
   commission plan for reps, based on the minimum roof size and drive. Choices were put to him
   and nothing is built or decided; the working is in the office's private note. Nov 25: he
   asked how a flat amount for each plan works out against the profit and was given the numbers
-  in the session; still nothing is built or decided (private note, key
+  in the session; he leans to one set of amounts and nothing is built (private note, key
   `roof-care-commission-2026-11-25`). Both names show
   on the Customers page's Care plans tab (`docs/qa/care-plans-tab-2026-11-23.md`).
 - **The list of services is on hold.** The owner will come back to it. Until then a request for an
