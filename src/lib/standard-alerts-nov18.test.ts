@@ -1416,7 +1416,9 @@ describe("Each step: opportunities and bids, off until someone picks people", ()
     expect(bids).toContain(
       "await tellBidStep(context, bid, { prevStatus: cur.status }, bid.updated_by_name);",
     );
-    expect(bids).toMatch(/await tellBidStep\( context, [^)]*\{ deleted: true \}/);
+    // Nov 26, 2026: the call now sits on one line (the name is read once, for the hand-back
+    // of a deleted draft too), so the space after the bracket is no longer there.
+    expect(bids).toMatch(/await tellBidStep\( ?context, [^)]*\{ deleted: true \}/);
     expect(bids).toContain('key: "bid.steps", kind: BID_WATCH_KIND,');
     const trade = flat(read("src/lib/trade-bids.functions.ts"));
     expect(trade).toContain('key: "bid.steps", kind: BID_WATCH_KIND, notice: bidStepNotice({');
@@ -1627,7 +1629,11 @@ describe("every reminder goes at 8:00 in the office (the audit, Nov 18)", () => 
     expect(fu).toContain("undatedDueDay(");
     expect(fu).not.toMatch(/now\.getTime\(\) \+ [^;]*86_?400_?000/);
     const pass = flat(read("src/lib/notify.server.ts"));
-    expect(pass).toContain("const { data: due, error } = morningReached(now) ? await admin");
+    // Nov 26, 2026 (the audit's 23): the read of the due follow-ups is a function of its own
+    // (dueFollowups, which reads on past the waiting opportunities). Still only from 8:00.
+    expect(pass).toContain(
+      "const due = morningReached(now) ? await dueFollowups(admin, now, out) : [];",
+    );
     const sql = read("supabase/migrations/20261118150000_reminders_at_8_on_working_days.sql");
     expect(flat(sql)).toContain(
       "when p_kind = 'opportunity' then public.reminder_morning(public.add_working_days(v_today + v_close, 0))",

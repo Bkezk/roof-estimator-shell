@@ -438,8 +438,11 @@ export const listMyWork = createServerFn({ method: "GET" })
     // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step
     // made from it is not listed. Its inspection, repair or bid is the row, and says where it
     // came from. Nothing is stored: the moment the step is finished, the opportunity is back.
+    // Nov 26 (the audit's 24): the opportunities nobody is on are asked the same rule. One
+    // that waits on a step somebody has is not an "Unassigned" row here while every other
+    // screen said it waits; when the step is finished it is "nobody is on it" again.
     const { openStepsFor } = await import("@/lib/job-steps.server");
-    const waiting = await openStepsFor(sb, oppIds);
+    const waiting = await openStepsFor(sb, [...oppIds, ...(unOpps.data ?? []).map((o) => o.id)]);
     const listed = (tickets.data ?? []) as (TicketIn & {
       site_id?: string | null;
       from_opportunity_id?: string | null;
@@ -532,15 +535,17 @@ export const listMyWork = createServerFn({ method: "GET" })
               ...t,
               unassigned_at: leftAt.get(`ticket:${t.id}`) ?? null,
             })),
-            opportunities: (unOpps.data ?? []).map((o): OppIn => ({
-              id: o.id,
-              title: o.title,
-              status: o.status,
-              expected_close: o.expected_close,
-              account_name: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
-              created_at: o.created_at,
-              unassigned_at: leftAt.get(`opportunity:${o.id}`) ?? null,
-            })),
+            opportunities: (unOpps.data ?? [])
+              .filter((o) => !waiting.has(o.id))
+              .map((o): OppIn => ({
+                id: o.id,
+                title: o.title,
+                status: o.status,
+                expected_close: o.expected_close,
+                account_name: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
+                created_at: o.created_at,
+                unassigned_at: leftAt.get(`opportunity:${o.id}`) ?? null,
+              })),
             tasks: (unTasks.data ?? []).map(withBuilding),
           }
         : null,

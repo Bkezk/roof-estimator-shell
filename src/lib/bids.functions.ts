@@ -698,8 +698,12 @@ export const listBidFolders = createServerFn({ method: "GET" })
 /**
  * One job, one row (owner, Nov 25; job-steps.ts): a draft bid is a step its opportunity waits
  * on. The moment it is no longer a draft, an opportunity that now waits on nothing is handed
- * back to its person with two working days. Won and Lost close the opportunity, so nobody is
- * told then. Best effort: the bid is saved either way.
+ * back to its person with two working days. Won and Lost close the opportunity the bid drives,
+ * so nobody is told then. Best effort: the bid is saved either way.
+ *
+ * Nov 26, 2026 (the audit's 24): the outcome is said as it was. A second bid of the job (a
+ * copy, an option for the customer) does not drive the opportunity, so marking it Won or Lost
+ * leaves the opportunity open, and its person was told the bid "is submitted".
  */
 async function bidLeftDraft(
   context: Parameters<typeof syncOpportunityFromBid>[0],
@@ -711,11 +715,11 @@ async function bidLeftDraft(
   try {
     const { data: b } = await context.supabase
       .from("bids")
-      .select("name, status, opportunity_id, from_job_id")
+      .select("name, status, opportunity_id, from_job_id, account_id")
       .eq("id", bidId)
       .maybeSingle();
     if (!b || asBidStatus(b.status) === "draft") return;
-    const [{ afterStepDone }, { bidStepLabel }] = await Promise.all([
+    const [{ afterStepDone }, { bidOutcome, bidStepLabel }] = await Promise.all([
       import("@/lib/job-steps.server"),
       import("@/lib/job-steps"),
     ]);
@@ -724,8 +728,10 @@ async function bidLeftDraft(
       {
         kind: "bid",
         label: bidStepLabel(b),
+        outcome: bidOutcome(b.status),
         from_opportunity_id: b.opportunity_id,
         from_job_id: b.from_job_id,
+        account_id: b.account_id,
       },
       { id: context.userId, name: actorName },
     );
@@ -926,7 +932,9 @@ export const deleteBid = createServerFn({ method: "POST" })
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", data.id)
       .is("deleted_at", null)
-      .select("id, name, kind, status, updated_by_name, from_job_id");
+      .select(
+        "id, name, kind, status, updated_by_name, from_job_id, opportunity_id, account_id, created_by",
+      );
     if (error) throw new Error(error.message);
     const gone = rows?.[0];
     if (!gone) throw new Error("Bid not found (it may already have been deleted).");
@@ -937,12 +945,32 @@ export const deleteBid = createServerFn({ method: "POST" })
         .select("full_name, email")
         .eq("id", context.userId)
         .maybeSingle();
-      await tellBidStep(
-        context,
-        gone,
-        { deleted: true },
-        (me?.full_name ?? "").trim() || me?.email || null,
-      );
+      const myName = (me?.full_name ?? "").trim() || me?.email || null;
+      await tellBidStep(context, gone, { deleted: true }, myName);
+      // One job, one row (Nov 26, the audit's 24): a draft its opportunity was waiting on is
+      // gone, so the opportunity is handed back to its person, as when a bid leaves Draft.
+      // Best effort: the bid is deleted either way.
+      if (asBidStatus(gone.status) === "draft" && gone.created_by)
+        try {
+          const [{ afterStepDone }, { bidStepLabel }] = await Promise.all([
+            import("@/lib/job-steps.server"),
+            import("@/lib/job-steps"),
+          ]);
+          await afterStepDone(
+            context.supabase,
+            {
+              kind: "bid",
+              label: bidStepLabel(gone),
+              outcome: "deleted",
+              from_opportunity_id: gone.opportunity_id,
+              from_job_id: gone.from_job_id,
+              account_id: gone.account_id,
+            },
+            { id: context.userId, name: myName },
+          );
+        } catch (e) {
+          console.error("A deleted draft bid:", e instanceof Error ? e.message : e);
+        }
     }
     // The inspection it was started from follows (owner, Nov 10): with no live bid left its
     // "Outcome: Bid" is cleared, so the ticket asks what happens next again.

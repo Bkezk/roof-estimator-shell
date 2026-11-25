@@ -10,6 +10,14 @@
  * create tickets may link one (access.ts dispatchesTickets), the same people who see Start a
  * ticket. A linked ticket moves its opportunity by the rule a started one follows (an inspection
  * makes an Open one Contacted, a repair makes it Won): the answer says so out loud.
+ *
+ * Nov 26, 2026 (the audit's 21):
+ *   - a link that would mark the opportunity Won is asked first (`confirmed`): the window
+ *     asks, and the server refuses to do it unasked, whatever the screen sent;
+ *   - an opportunity that came from a public Roof Care request is never marked Won by a link
+ *     (it turns Won when its plan is paid). The link is still made;
+ *   - Unlink puts the opportunity's status back when that link was what moved it and nothing
+ *     has moved it since, reopens its follow-up, and says what happened either way.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,13 +26,18 @@ import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import { dispatchesTickets } from "@/lib/access";
 import {
+  LINK_CARE_NOT_WON,
   LINK_CLOSED,
   LINK_NOT_ALLOWED,
   LINK_NOT_HERE,
+  LINK_WON_NOT_CHECKED,
   linkProblem,
   linkRows,
+  linkWinsAsk,
+  linkWouldWin,
   linkedWords,
   ticketStepLabel,
+  unlinkNotChecked,
   unlinkedWords,
   type LinkTicketIn,
   type LinkTicketRow,
@@ -35,19 +48,26 @@ const COLS =
 const CLOSED = ["won", "lost", "no_response"];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/** What the link window shows: the rows, and whether a link can ever mark this one Won. */
+export interface LinkTicketList {
+  rows: LinkTicketRow[];
+  /** The opportunity came from a Roof Care request: a link never marks it Won. */
+  care: boolean;
+}
+
 /** The tickets this opportunity can link, and the ones it already has. */
 export const listLinkTickets = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<LinkTicketRow[]> => {
+  .handler(async ({ data, context }): Promise<LinkTicketList> => {
     const sb = context.supabase;
     const { data: opp, error: oErr } = await sb
       .from("crm_opportunities")
-      .select("id, account_id, deleted_at")
+      .select("id, account_id, status, deleted_at")
       .eq("id", data.id)
       .maybeSingle();
     if (oErr) throw new Error(oErr.message);
-    if (!opp || opp.deleted_at) return [];
+    if (!opp || opp.deleted_at) return { rows: [], care: false };
     const [mine, open] = await Promise.all([
       sb
         .from("service_jobs")
@@ -70,7 +90,14 @@ export const listLinkTickets = createServerFn({ method: "GET" })
     if (open.error) throw new Error(open.error.message);
     const all = new Map<string, LinkTicketIn>();
     for (const t of [...(mine.data ?? []), ...(open.data ?? [])]) all.set(t.id, t as LinkTicketIn);
-    return linkRows(opp, [...all.values()]);
+    // Asked only when a row could mark it Won. When it cannot be asked (null) the rows ask
+    // nothing: the press itself asks again, moves nothing, and says so.
+    const mayWin = [...all.values()].some(
+      (t) => t.from_opportunity_id !== opp.id && linkWouldWin(t.service_type, opp),
+    );
+    const { opportunityFromCareRequest } = await import("@/lib/opportunities.functions");
+    const care = mayWin ? await opportunityFromCareRequest(context, opp.id) : false;
+    return { rows: linkRows({ ...opp, care: care !== false }, [...all.values()]), care: !!care };
   });
 
 /** Link one ticket to the opportunity, or take it off again. */
@@ -82,10 +109,12 @@ export const linkOpportunityTicket = createServerFn({ method: "POST" })
         opportunityId: z.string().uuid(),
         ticketId: z.string().uuid(),
         link: z.boolean(),
+        /** The person was asked, and said yes, to a link that marks the opportunity Won. */
+        confirmed: z.boolean().optional(),
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<{ message: string; moved: boolean }> => {
+  .handler(async ({ data, context }): Promise<LinkAnswer> => {
     const sb = context.supabase;
     const { data: prof } = await sb
       .from("profiles")
@@ -125,7 +154,25 @@ export const linkOpportunityTicket = createServerFn({ method: "POST" })
         id: context.userId,
         name: who,
       });
-      return { message: unlinkedWords(label), moved: false };
+      // The opportunity goes back to where it stood when this link was what moved it and
+      // nothing has moved it since. Never thrown: the link is off either way.
+      const { undoOpportunityFromTicket, OPP_STATUS_LABELS } =
+        await import("@/lib/opportunities.functions");
+      const undone = await undoOpportunityFromTicket(context, t.id, opp.id);
+      const said = (status: string) =>
+        (OPP_STATUS_LABELS as Record<string, string>)[status] ?? status;
+      // "Still Won" is said when the ticket had moved it, or it is closed: the person would
+      // otherwise think Unlink reopened it.
+      const still =
+        undone.left && (undone.left.byTicket || CLOSED.includes(undone.left.status))
+          ? said(undone.left.status)
+          : null;
+      return {
+        message:
+          unlinkedWords(label, { back: undone.back ? said(undone.back.to) : null, still }) +
+          (undone.error ? ` ${unlinkNotChecked(undone.error)}` : ""),
+        moved: !!undone.back,
+      };
     }
 
     if (opp.deleted_at || CLOSED.includes(opp.status)) throw new Error(LINK_CLOSED);
@@ -141,6 +188,15 @@ export const linkOpportunityTicket = createServerFn({ method: "POST" })
     const problem = linkProblem(opp, t, parentOpp);
     if (problem) throw new Error(problem);
     if (t.from_opportunity_id === opp.id) return { message: linkedWords(label), moved: false };
+    const { movedByTicket, opportunityFromCareRequest, OPP_STATUS_LABELS } =
+      await import("@/lib/opportunities.functions");
+    // Would this link mark the opportunity Won? Then it is from a Roof Care request or not:
+    // such a one is not moved (null, not known: not moved either), and any other is asked
+    // first. Nothing is written until the answer is yes.
+    const wouldWin = linkWouldWin(t.service_type, opp);
+    const care = wouldWin ? await opportunityFromCareRequest(context, opp.id) : false;
+    if (wouldWin && care === false && !data.confirmed)
+      return { message: linkWinsAsk(t.service_type), moved: false, ask: true };
     // Only a ticket that still belongs to no opportunity is taken: two people pressing at once
     // cannot both link it.
     const { data: done, error } = await sb
@@ -157,9 +213,13 @@ export const linkOpportunityTicket = createServerFn({ method: "POST" })
       id: context.userId,
       name: who,
     });
+    if (care !== false)
+      return {
+        message: `${linkedWords(label)} ${care ? LINK_CARE_NOT_WON : LINK_WON_NOT_CHECKED}`,
+        moved: false,
+      };
     // The linked ticket moves its opportunity as a started one does. Never thrown: the link is
     // made either way, and what happened is said.
-    const { movedByTicket, OPP_STATUS_LABELS } = await import("@/lib/opportunities.functions");
     const out = await movedByTicket(context, t.id);
     const to = out.opportunity_move?.to;
     const toLabel = to ? ((OPP_STATUS_LABELS as Record<string, string>)[to] ?? to) : null;
@@ -172,6 +232,13 @@ export const linkOpportunityTicket = createServerFn({ method: "POST" })
       moved: !!to,
     };
   });
+
+/** What a press answers. `ask`: nothing was changed, and `message` is the question to ask. */
+export interface LinkAnswer {
+  message: string;
+  moved: boolean;
+  ask?: boolean;
+}
 
 /** One line on the ticket's own history. Best effort: the link itself is already saved. */
 async function logLink(

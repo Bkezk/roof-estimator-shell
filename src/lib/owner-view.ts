@@ -39,6 +39,8 @@ import { holdsOfficePage, isAdmin, type AccessLike } from "@/lib/access";
 import { taskMapHref } from "@/lib/my-work-actions";
 import {
   KIND_LABELS,
+  kindLabel,
+  workTone,
   addDays,
   bucketOf,
   ticketKind,
@@ -47,6 +49,7 @@ import {
   type FollowupIn,
   type WorkItem,
   type WorkKind,
+  type WorkTone,
 } from "@/lib/my-work";
 import { TASK_TZ, localYmd as easternYmd } from "@/lib/tasks";
 import { OPP_ALL_OPEN, isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
@@ -530,6 +533,17 @@ export const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
   ...KIND_LABELS,
   opportunity: "Opportunity",
 };
+
+/**
+ * What a line's badge says and the colour it wears: Work Overview's own two answers (Nov 26,
+ * 2026, the audit's 24). On Work Overview a trade bid says "Trade bid" in lime since Nov 25;
+ * here a person's list still named it "Bid" in the roofing bid's orange, because this page
+ * named and coloured a line by its kind alone. Anything that names or colours a line asks
+ * these two, and they ask `kindLabel` and `workTone` (my-work.ts).
+ */
+export type DetailTone = WorkTone;
+export const detailLabel = (i: Pick<WorkItem, "kind" | "trade">): string => kindLabel(i);
+export const detailTone = (i: Pick<WorkItem, "kind" | "trade">): DetailTone => workTone(i);
 
 /** A Work Overview item, or an opportunity past expected close (Overdue only). */
 export type DetailItem = Omit<WorkItem, "kind"> & { kind: DetailKind };

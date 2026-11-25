@@ -28,6 +28,7 @@ import {
 } from "@/lib/alert-who.server";
 import { shortDay } from "@/lib/followup-rules";
 import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
+import { chunkIds } from "@/lib/chunk-ids";
 import { databaseRpc } from "@/lib/database-rpc";
 import { SETUP_QR_PATH } from "@/lib/menu-places";
 import { takesNotice } from "@/lib/notice-types";
@@ -467,6 +468,92 @@ export interface DispatchResult {
   failed: number;
   /** Due follow-ups or escalations another pass claimed first (the cron and a page load at once). */
   skipped: number;
+  /**
+   * Due opportunity follow-ups left alone because the opportunity waits on a step made from it
+   * (Nov 26, the audit's 23). They are not among `checked`, and never fill the pass.
+   */
+  waiting: number;
+}
+
+/**
+ * A read by a list of ids, 100 to a request (chunk-ids.ts: the ids ride in the request's
+ * address, and a long list is refused). Nov 26, 2026 (the audit's 23): the reminder run's own
+ * reads sent every id at once, so past a few hundred the read failed and its whole step was
+ * skipped on every pass, with one line in the log. The first error is the answer: part of a
+ * list is never handed on as the whole. No ids, no request.
+ */
+async function byIds<T>(
+  ids: readonly string[],
+  read: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const parts = await Promise.all(chunkIds([...new Set(ids)]).map((chunk) => read(chunk)));
+  const bad = parts.find((r) => r.error);
+  return { data: bad ? [] : parts.flatMap((r) => r.data ?? []), error: bad?.error ?? null };
+}
+
+/** How many due follow-ups one pass handles. */
+export const DUE_PAGE = 200;
+/**
+ * The most pages of due follow-ups one pass reads to find `DUE_PAGE` that are not waiting:
+ * 5,000 rows. Past that the pass handles what it has, and the log says it stopped.
+ */
+export const DUE_MAX_PAGES = 25;
+
+/**
+ * The due follow-ups this pass handles, oldest first, and how many were left alone because
+ * their opportunity waits on a step (job-steps.ts).
+ *
+ * Nov 26, 2026 (the audit's 23): the pass read the 200 oldest due follow-ups and then skipped
+ * the waiting ones. A waiting opportunity's reminder is never claimed, so it stays due and
+ * stays among the oldest: every one took a place of the 200 on every pass, and with 200
+ * waiting at once the pass read only those, skipped them all and reported nothing wrong. Now
+ * the pass reads on, a page at a time, until it has 200 that are NOT waiting or the list ends.
+ * The first page is the read the pass always made; a later page that cannot be read keeps the
+ * pages before it, counts one failure and says so in the log.
+ */
+async function dueFollowups(admin: Client, now: Date, out: DispatchResult): Promise<FollowupRow[]> {
+  const { openStepsFor } = await import("@/lib/job-steps.server");
+  const due: FollowupRow[] = [];
+  const seen = new Set<string>();
+  for (let page = 0; page < DUE_MAX_PAGES; page++) {
+    const q = admin
+      .from("crm_followups")
+      .select("*")
+      .eq("status", "open")
+      .lte("next_remind_at", now.toISOString())
+      .order("next_remind_at")
+      .order("id");
+    const { data, error } = await (page === 0
+      ? q.limit(DUE_PAGE)
+      : q.range(page * DUE_PAGE, (page + 1) * DUE_PAGE - 1));
+    if (error) {
+      if (page === 0) throw new Error(error.message);
+      out.failed++;
+      console.error(
+        `Reminder pass: the due follow-ups after the first ${page * DUE_PAGE} could not be read (${error.message}). The pass goes on with the ${due.length} it has; the rest are read on the next pass.`,
+      );
+      return due;
+    }
+    const rows = (data ?? []).filter((f) => !seen.has(f.id));
+    for (const f of rows) seen.add(f.id);
+    // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
+    // from it (its inspection, a repair, a draft bid, each with somebody on it) is not
+    // reminded. It stays due and unclaimed: the pass after its last step is finished, it is an
+    // opportunity like any other again.
+    const waiting = await openStepsFor(
+      admin,
+      rows.filter((f) => f.kind === "opportunity").map((f) => f.item_id),
+    );
+    for (const f of rows) {
+      if (f.kind === "opportunity" && waiting.has(f.item_id)) out.waiting++;
+      else if (due.length < DUE_PAGE) due.push(f);
+    }
+    if ((data ?? []).length < DUE_PAGE || due.length >= DUE_PAGE) return due;
+  }
+  console.error(
+    `Reminder pass: stopped reading after ${DUE_MAX_PAGES * DUE_PAGE} due follow-ups, ${out.waiting} of them waiting on a step. The pass goes on with the ${due.length} it has.`,
+  );
+  return due;
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -691,37 +778,20 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   // next reminder is set for 8:00, but one that waited over a weekend, or came due overnight,
   // was sent on the day's first run at 7. Before 8:00 the pass reads no reminders and claims
   // none; the 8:00 run sends them.
-  const { data: due, error } = morningReached(now)
-    ? await admin
-        .from("crm_followups")
-        .select("*")
-        .eq("status", "open")
-        .lte("next_remind_at", now.toISOString())
-        .order("next_remind_at")
-        .limit(200)
-    : { data: [], error: null };
-  if (error) throw new Error(error.message);
   const out: DispatchResult = {
-    checked: due?.length ?? 0,
+    checked: 0,
     reminded: 0,
     escalated: 0,
     failed: 0,
     skipped: 0,
+    waiting: 0,
   };
-  // One job, one row (owner, Nov 25; job-steps.ts): an opportunity that waits on a step made
-  // from it (its inspection, a repair, a draft bid, each with somebody on it) is not reminded.
-  // It stays due and unclaimed, and is read again on every pass: the pass after its last step
-  // is finished, it is an opportunity like any other again.
-  const { openStepsFor, tellLateSteps } = await import("@/lib/job-steps.server");
-  const waiting = await openStepsFor(
-    admin,
-    (due ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),
-  );
-  for (const f of due ?? []) {
-    if (f.kind === "opportunity" && waiting.has(f.item_id)) {
-      out.skipped++;
-      continue;
-    }
+  // The due follow-ups that are not waiting on a step (dueFollowups; the waiting ones are
+  // counted in out.waiting and never take a place among the 200).
+  const due = morningReached(now) ? await dueFollowups(admin, now, out) : [];
+  out.checked = due.length;
+  const { tellLateSteps } = await import("@/lib/job-steps.server");
+  for (const f of due) {
     // Nothing is sent on a Saturday or Sunday, except a ticket's or an opportunity's reminder on
     // its own date (reminderWaits): it stays due, unclaimed, and goes on Monday's first pass.
     const dueDay = officeDay(f.due_at);
@@ -808,16 +878,23 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     console.error("Reminder pass: the nobody-on-it step failed —", errText(e));
   }
 
-  // 5. A step that has just run late tells the person whose opportunity waits on it, once
-  // (job-steps.ts stepLateOn): the late step is the one overdue row, and they still hear of it.
+  // 5. A step that has run late tells the person whose opportunity waits on it: the first
+  // working day after its date, and again every third working day while it is still late
+  // (job-steps.ts lateTellDue). The late step is the one overdue row, and they still hear of
+  // it. It has a claim of its own (step_late_marks), which only the server's key can write, so
+  // a pass without the key sends none, as with the nobody-on-it alerts. It is not held back by
+  // another notice about the same opportunity that day (it was, through notToldToday).
   try {
-    if (morningReached(now))
-      await tellLateSteps(
+    if (hasServiceRole() && morningReached(now)) {
+      const late = await tellLateSteps(
         admin,
         now,
         (id) => personName(ctx, id),
-        (ids, url) => notToldToday(admin, ids, url, now),
+        recipientsFor(ctx, "opportunity.nobody", null),
       );
+      out.escalated += late.told;
+      out.failed += late.failed;
+    }
   } catch (e) {
     out.failed++;
     console.error("Reminder pass: the late-step step failed —", errText(e));
@@ -913,24 +990,21 @@ async function escalateUntouched(
   // How often each kind repeats, when each item was last escalated, and its open follow-up (for
   // the link and to record a failure).
   const ids = (kind: string) => past.filter((u) => u.kind === kind).map((u) => u.item_id);
+  // 100 ids to a request (byIds; Nov 26, the audit's 23).
   const [jobs, opps, fus] = await Promise.all([
-    ids("ticket").length
-      ? admin
-          .from("service_jobs")
-          .select("id, escalated_at, scheduled_date, assigned_at")
-          .in("id", ids("ticket"))
-      : Promise.resolve({ data: [], error: null }),
-    ids("opportunity").length
-      ? admin.from("crm_opportunities").select("id, escalated_at").in("id", ids("opportunity"))
-      : Promise.resolve({ data: [], error: null }),
-    admin
-      .from("crm_followups")
-      .select("*")
-      .eq("status", "open")
-      .in(
-        "item_id",
-        past.map((u) => u.item_id),
-      ),
+    byIds(ids("ticket"), (chunk) =>
+      admin
+        .from("service_jobs")
+        .select("id, escalated_at, scheduled_date, assigned_at")
+        .in("id", chunk),
+    ),
+    byIds(ids("opportunity"), (chunk) =>
+      admin.from("crm_opportunities").select("id, escalated_at").in("id", chunk),
+    ),
+    byIds(
+      past.map((u) => u.item_id),
+      (chunk) => admin.from("crm_followups").select("*").eq("status", "open").in("item_id", chunk),
+    ),
   ]);
   const readErr = jobs.error ?? opps.error;
   if (readErr) {
@@ -1049,6 +1123,10 @@ async function escalateUntouched(
   }
 }
 
+/** The nobody-on-it marks are read this many at a time, to their end. */
+const MARK_PAGE = 1000;
+const MARK_MAX_PAGES = 50;
+
 /**
  * Work with nobody on it (owner, Nov 18: "nobody on it should send alerts too"). Until then an
  * unassigned ticket or opportunity only turned red on Work Overview; nobody was told.
@@ -1072,16 +1150,35 @@ async function alertUnassigned(
 ): Promise<void> {
   if (!hasServiceRole() || !morningReached(now)) return;
   const today = officeDay(now);
-  const { data: marks, error } = await admin
-    .from("unassigned_marks")
-    .select("kind, item_id, since, alerted_at")
-    .limit(1000);
-  if (error) {
-    // Before 20261118120000 is applied there is no such table: nothing to alert.
-    console.error("Reminder pass: no nobody-on-it alerts this pass —", error.message);
-    return;
+  // Every mark, a page at a time in the order of its key (Nov 26, the audit's 23: one read
+  // with no order stopped at 1,000 rows, and a mark outlives a finished item, so the table
+  // only grows). A page that fails after the first keeps the pages before it.
+  type Mark = { kind: string; item_id: string; since: string; alerted_at: string | null };
+  const marks: Mark[] = [];
+  for (let page = 0; page < MARK_MAX_PAGES; page++) {
+    const q = admin
+      .from("unassigned_marks")
+      .select("kind, item_id, since, alerted_at")
+      .order("kind")
+      .order("item_id");
+    const { data, error } = await (page === 0
+      ? q.limit(MARK_PAGE)
+      : q.range(page * MARK_PAGE, (page + 1) * MARK_PAGE - 1));
+    if (error) {
+      // Before 20261118120000 is applied there is no such table: nothing to alert.
+      console.error(
+        marks.length
+          ? `Reminder pass: the nobody-on-it marks after the first ${marks.length} could not be read (${error.message}). Those are checked on the next pass.`
+          : `Reminder pass: no nobody-on-it alerts this pass — ${error.message}`,
+      );
+      if (!marks.length) return;
+      out.failed++;
+      break;
+    }
+    marks.push(...(data ?? []));
+    if ((data ?? []).length < MARK_PAGE) break;
   }
-  const due = (marks ?? []).filter((m) =>
+  const due = marks.filter((m) =>
     nobodyAlertDue({
       since: officeDay(m.since),
       last: m.alerted_at ? officeDay(m.alerted_at) : null,
@@ -1096,30 +1193,41 @@ async function alertUnassigned(
   if (!due.length) return;
   const idsOf = (kind: string) => due.filter((m) => m.kind === kind).map((m) => m.item_id);
   // Only what is still open with nobody on it (a mark outlives a deleted or finished item).
+  // 100 ids to a request (byIds; Nov 26, the audit's 23): the marks of finished items stay,
+  // so this list only grows, and one request with all of them would be refused.
   const [jobs, opps] = await Promise.all([
-    idsOf("ticket").length
-      ? admin
-          .from("service_jobs")
-          .select("id, number, customer_name, description, scheduled_date")
-          .in("id", idsOf("ticket"))
-          .is("technician_id", null)
-          .is("deleted_at", null)
-          .in("stage", ["open", "scheduled"])
-      : Promise.resolve({ data: [], error: null }),
-    idsOf("opportunity").length
-      ? admin
-          .from("crm_opportunities")
-          .select("id, title, expected_close, status")
-          .in("id", idsOf("opportunity"))
-          .is("assignee_id", null)
-          .is("deleted_at", null)
-      : Promise.resolve({ data: [], error: null }),
+    byIds(idsOf("ticket"), (chunk) =>
+      admin
+        .from("service_jobs")
+        .select("id, number, customer_name, description, scheduled_date")
+        .in("id", chunk)
+        .is("technician_id", null)
+        .is("deleted_at", null)
+        .in("stage", ["open", "scheduled"]),
+    ),
+    byIds(idsOf("opportunity"), (chunk) =>
+      admin
+        .from("crm_opportunities")
+        .select("id, title, expected_close, status")
+        .in("id", chunk)
+        .is("assignee_id", null)
+        .is("deleted_at", null),
+    ),
   ]);
   const readErr = jobs.error ?? opps.error;
   if (readErr) {
     console.error("Reminder pass: no nobody-on-it alerts this pass —", readErr.message);
     return;
   }
+  // One answer everywhere (Nov 26, the audit's 24; job-steps.ts): an opportunity with nobody
+  // on it that waits on a step somebody has is not alerted as "nobody is on it". The step is
+  // the row, and its late notice goes to these same people (tellLateSteps). When the step is
+  // finished it is "nobody is on it" again, as before.
+  const { openStepsFor } = await import("@/lib/job-steps.server");
+  const waitingOpps = await openStepsFor(
+    admin,
+    (opps.data ?? []).map((o) => o.id),
+  );
   const items = new Map<string, { title: string; url: string; date: string | null }>();
   for (const j of jobs.data ?? [])
     items.set(`ticket:${j.id}`, {
@@ -1129,6 +1237,7 @@ async function alertUnassigned(
     });
   for (const o of opps.data ?? []) {
     if (["won", "lost", "no_response"].includes(o.status)) continue;
+    if (waitingOpps.has(o.id)) continue;
     items.set(`opportunity:${o.id}`, {
       title: o.title,
       url: `/opportunities?id=${o.id}`,
