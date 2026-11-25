@@ -48,7 +48,6 @@ import { claimServiceJob } from "@/lib/service.functions";
 import { claimOpportunity } from "@/lib/opportunities.functions";
 import { claimTask } from "@/lib/tasks.functions";
 import {
-  KIND_LABELS,
   activeTab,
   addMonths,
   cellItems,
@@ -57,6 +56,7 @@ import {
   flagUnassigned,
   initials,
   itemsByDay,
+  kindLabel,
   listGroups,
   localYmd,
   calendarChip,
@@ -72,6 +72,7 @@ import {
   defaultWho,
   presetBucket,
   waitingDays,
+  workTone,
   ymdParts,
   splitEmptyGroups,
   BUCKET_EMPTY,
@@ -83,6 +84,7 @@ import {
   type WorkGroup,
   type WorkItem,
   type WorkKind,
+  type WorkTone,
 } from "@/lib/my-work";
 import {
   NEW_OPPORTUNITY_HREF,
@@ -169,7 +171,7 @@ const followLink =
 /** A ticket or an inspection: the kinds whose person is a technician. */
 const isTicketKind = (k: WorkKind) => k === "ticket" || k === "inspection";
 
-const KIND_CLASS: Record<WorkKind, string> = {
+const KIND_CLASS: Record<WorkTone, string> = {
   ticket:
     "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
   inspection:
@@ -183,23 +185,30 @@ const KIND_CLASS: Record<WorkKind, string> = {
   // (owner: the sky Bid chip and the blue Ticket chip were "a bit too similar"); it is the
   // customer page's Bids tint too (section-tints.ts).
   bid: "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200",
+  // A trade bid (owner, Nov 25: the chips "dont differentiate between trade bids and normal
+  // bids"). Lime: teal sat too close to the follow-up's green, and a light blue is what he
+  // found too close to the Ticket chip on Nov 6.
+  trade_bid:
+    "border-lime-300 bg-lime-50 text-lime-800 dark:border-lime-800 dark:bg-lime-950 dark:text-lime-200",
 };
-const KIND_DOT: Record<WorkKind, string> = {
+const KIND_DOT: Record<WorkTone, string> = {
   ticket: "bg-blue-500",
   inspection: "bg-violet-500",
   task: "bg-amber-500",
   followup: "bg-emerald-500",
   opportunity: "bg-rose-500",
   bid: "bg-orange-500",
+  trade_bid: "bg-lime-500",
 };
 /** A calendar item's left bar: its kind's badge colour. */
-const KIND_BAR: Record<WorkKind, string> = {
+const KIND_BAR: Record<WorkTone, string> = {
   ticket: "border-l-blue-500",
   inspection: "border-l-violet-500",
   task: "border-l-amber-500",
   followup: "border-l-emerald-500",
   opportunity: "border-l-rose-500",
   bid: "border-l-orange-500",
+  trade_bid: "border-l-lime-500",
 };
 
 /** How many columns the desktop List grid needs for the columns shown (one to eight). */
@@ -321,8 +330,12 @@ function WorkRow({
   const body = (
     <>
       <div className="flex items-start gap-2">
-        <Badge variant="outline" className={`shrink-0 ${KIND_CLASS[item.kind]}`}>
-          {KIND_LABELS[item.kind]}
+        <Badge
+          variant="outline"
+          className={`shrink-0 ${KIND_CLASS[workTone(item)]}`}
+          data-kind={workTone(item)}
+        >
+          {kindLabel(item)}
         </Badge>
         <span className="min-w-0 flex-1 break-words font-medium leading-snug">{item.title}</span>
       </div>
@@ -1038,7 +1051,7 @@ function CalendarView({
                             {shown.map((i) => (
                               <span
                                 key={i.key}
-                                className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[i.kind]}`}
+                                className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[workTone(i)]}`}
                               />
                             ))}
                             {more > 0 && <span className="text-[10px] leading-none">+{more}</span>}
@@ -1056,11 +1069,12 @@ function CalendarView({
                                   title={
                                     showWho ? `${chip.hover} — ${i.assigneeName ?? ""}` : chip.hover
                                   }
+                                  data-kind={workTone(i)}
                                   draggable={!!actions?.movable(i)}
                                   onDragStart={
                                     actions?.movable(i) ? (e) => startDrag(e, i) : undefined
                                   }
-                                  className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
+                                  className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[workTone(i)]} ${
                                     i.done ? "opacity-60" : ""
                                   } ${actions?.movable(i) ? "cursor-grab active:cursor-grabbing" : ""}`}
                                 >

@@ -12,7 +12,7 @@
  * else's work or everyone's; anyone else always gets their own, whatever they ask for.
  */
 import { seesEveryone } from "@/lib/access";
-import { bidHref } from "@/lib/bid-kind";
+import { bidHref, isTradeBid } from "@/lib/bid-kind";
 import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 import { notificationPath } from "@/lib/notification-link";
 import { nobodyFlagged } from "@/lib/alert-rules";
@@ -29,6 +29,23 @@ export const KIND_LABELS: Record<WorkKind, string> = {
   // overdue, etc").
   bid: "Bid",
 };
+
+/**
+ * A trade bid's badge (owner, Nov 25, 2026: "the chips on the work overview dont differentiate
+ * between trade bids and normal bids, can you remedy that?"). Both kinds said "Bid" in one
+ * orange. A trade bid is still a bid everywhere a bid is counted, grouped, ordered or filtered:
+ * only what it is called and its colour are its own.
+ */
+export const TRADE_BID_LABEL = "Trade bid";
+
+/** What an item's badge says: its kind, and "Trade bid" for a trade bid. */
+export const kindLabel = (i: Pick<WorkItem, "kind" | "trade">): string =>
+  i.kind === "bid" && i.trade ? TRADE_BID_LABEL : KIND_LABELS[i.kind];
+
+/** The colour an item wears: its kind's, and one of its own for a trade bid. */
+export type WorkTone = WorkKind | "trade_bid";
+export const workTone = (i: Pick<WorkItem, "kind" | "trade">): WorkTone =>
+  i.kind === "bid" && i.trade ? "trade_bid" : i.kind;
 
 /** Same-day order: tickets, inspections, tasks, follow-ups, opportunities, bids. */
 const KIND_ORDER: Record<WorkKind, number> = {
@@ -482,6 +499,8 @@ export interface WorkItem {
    */
   customer?: string | null;
   number?: number;
+  /** A trade bid (Nov 25): its badge says so and it has a colour of its own. Bids only. */
+  trade?: boolean;
   assigneeId: string | null;
   assigneeName: string | null;
   /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
@@ -604,14 +623,20 @@ export function ticketItem(
  * there, a normal screen left one or two letters of the customer. The hover text says all of
  * it, number and description included, and so does the day's list. A ticket with no customer on
  * it, and everything that is not a ticket (an opportunity's title, a bid's name, a task), reads
- * as before.
+ * as before. A trade bid's hover text starts with "Trade bid" (Nov 25): on a chip the colour is
+ * all that tells it from a roofing bid.
  */
-export function calendarChip(i: Pick<WorkItem, "title" | "customer" | "number">): {
+export function calendarChip(
+  i: Pick<WorkItem, "title" | "customer" | "number"> & Partial<Pick<WorkItem, "kind" | "trade">>,
+): {
   lead: string;
   tail: string | null;
   hover: string;
 } {
   const customer = (i.customer ?? "").trim();
+  if (i.kind === "bid" && i.trade) {
+    return { lead: i.title, tail: null, hover: `${TRADE_BID_LABEL} · ${i.title}` };
+  }
   if (!customer || i.number == null) return { lead: i.title, tail: null, hover: i.title };
   return { lead: customer, tail: `#${i.number}`, hover: `${customer} · ${i.title}` };
 }
@@ -776,6 +801,7 @@ export function bidItem(b: BidIn, names: Record<string, string> = {}): WorkItem 
   return {
     key: `bid:${b.id}`,
     kind: "bid",
+    ...(isTradeBid(b) ? { trade: true } : {}),
     title: b.name,
     where: joinWhere(b.account_name),
     date: b.due_date,

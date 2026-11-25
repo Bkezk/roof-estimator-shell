@@ -284,7 +284,8 @@ describe("Calendar: whole width, one screen, the day's items beside it, five ite
     expect(cal).not.toMatch(/list\.slice\(0, [0-9]\)/);
     expect(cal).toContain("+{more} more");
     expect(cal).toContain("border-l-4");
-    expect(cal).toContain("${KIND_BAR[i.kind]}");
+    // Nov 25, 2026: the bar asks the item for its tone, so a trade bid has a colour of its own.
+    expect(cal).toContain("${KIND_BAR[workTone(i)]}");
     // Nov 25: the chip's words come from calendarChip (a ticket leads with its customer).
     expect(cal).toMatch(/className="min-w-0 flex-\[1_1_4\.5rem\] truncate"\s+data-chip="lead"/);
     expect(cal).toContain("{chip.lead}");

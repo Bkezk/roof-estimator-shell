@@ -45,6 +45,7 @@ import {
   KIND_LABELS,
   bidItem,
   bidItems,
+  kindLabel,
   bucketOf,
   compareWork,
   groupWork,
@@ -595,8 +596,11 @@ describe("4. the page and the Owner view", () => {
     expect(dot).toContain('bid: "bg-orange-500",');
     const bar = page.slice(page.indexOf("const KIND_BAR"), page.indexOf("const GRID_COLS"));
     expect(bar).toContain('bid: "border-l-orange-500",');
-    // The row's chip reads the label table, so "Bid" shows without a special case.
-    expect(page).toContain("{KIND_LABELS[item.kind]}");
+    // The row's chip reads the label table, so "Bid" shows without a special case. Since
+    // Nov 25, 2026 it asks kindLabel, which reads that table and says "Trade bid" for a trade
+    // bid (work-trade-bid-chip-nov25.test.ts).
+    expect(page).toContain("{kindLabel(item)}");
+    expect(kindLabel(bidItem(bid())!)).toBe("Bid");
     expect(read("src/components/owner-view.tsx")).toMatch(/bid:\s*"border-orange-300[^"]*dark:/);
   });
   it("the Owner view counts draft bids (owner, later Oct 12): Due today / Overdue and the detail groups", () => {
