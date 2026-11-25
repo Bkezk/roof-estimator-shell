@@ -147,7 +147,8 @@ import { shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
-import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
+import { listTicketInvoices, RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
+import { ticketInvoicesKey } from "@/components/service/invoice-utils";
 import { SiteSelect } from "@/components/crm/site-select";
 import { PropertySiteSelect } from "@/components/crm/property-site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
@@ -156,9 +157,13 @@ import { RoofCareButtons } from "@/components/roof-care/plan-card";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import {
   autoSiteId,
+  CUSTOMER_CHANGE_NEEDS_INVOICES,
+  customerChangeWarnings,
   customerTakenOffProblem,
+  invoiceStopsCustomerChange,
   keepCustomerLabel,
   siteProblem,
+  ticketCustomerChange,
   TICKET_STAGE_HINT,
 } from "@/lib/ticket-form";
 import type { ServiceSearch, StageFilter, TicketFrom, TypeValue } from "@/lib/service-search";
@@ -1657,6 +1662,41 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     : null;
   // The × on the customer block: the search box comes back, focused.
   const [changingCustomer, setChangingCustomer] = useState(false);
+  // The ticket's invoices follow its customer (the audit of Nov 25, number 19;
+  // lib/ticket-form.ts). Another customer or property is picked on a saved ticket: what the
+  // save will do to its invoices is said under the customer before it is sent. A final invoice
+  // stops a change of customer, a draft is changed with the ticket, and someone who cannot
+  // work with invoices does not move a ticket that has one. The server holds the same rule.
+  const whomChange =
+    job && draft.customer && !fieldPage
+      ? ticketCustomerChange(job, {
+          account_id: draft.customer.account_id,
+          site_id: draft.customer.site_id,
+        })
+      : null;
+  const worksInvoices = seesInvoices(profile);
+  const ticketInvoicesFn = useServerFn(listTicketInvoices);
+  const ticketInvoicesQ = useQuery({
+    // The same list (and cache) as the invoice card's chips.
+    queryKey: ticketInvoicesKey(job?.id ?? "new"),
+    queryFn: () => ticketInvoicesFn({ data: { job_id: job!.id } }),
+    enabled: !!session && !!job && worksInvoices && !!whomChange,
+  });
+  const liveTicketInvoices = (ticketInvoicesQ.data ?? []).filter((i) => i.status !== "void");
+  const invoiceStop = !whomChange
+    ? null
+    : worksInvoices
+      ? invoiceStopsCustomerChange(whomChange, liveTicketInvoices)
+      : job?.invoice_id
+        ? CUSTOMER_CHANGE_NEEDS_INVOICES
+        : null;
+  const invoiceWarnings = !whomChange
+    ? []
+    : worksInvoices
+      ? customerChangeWarnings(whomChange, liveTicketInvoices)
+      : invoiceStop
+        ? [invoiceStop]
+        : [];
 
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -1774,6 +1814,15 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         void qc.invalidateQueries({ queryKey: fieldKeys.events(row.id) });
         setSavedKey(draftKey(draft));
         toast.success(`Ticket #${row.number} saved`);
+        // The customer or the property changed on a ticket with an invoice (Nov 26): what
+        // became of each invoice is said, and a draft that did not follow is said loudly.
+        for (const note of row.invoice_notes ?? []) toast.success(note, { duration: 15_000 });
+        if (row.invoice_problem) toast.error(row.invoice_problem, { duration: 30_000 });
+        if (row.invoice_notes || row.invoice_problem) {
+          void qc.invalidateQueries({ queryKey: ticketInvoicesKey(row.id) });
+          void qc.invalidateQueries({ queryKey: ["ticket-invoice", row.id] });
+          void qc.invalidateQueries({ queryKey: ["invoice-page"] });
+        }
       } else {
         toast.success(`Ticket #${row.number} created`);
         // The opportunity's header lists it ("Ticket #6004").
@@ -1834,6 +1883,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         : null;
       if (takenOff) {
         toast.error(takenOff, { duration: 15_000 });
+        return;
+      }
+      // An invoice that is already final stops a change of customer (Nov 26). Not sent.
+      if (invoiceStop) {
+        toast.error(invoiceStop, { duration: 15_000 });
         return;
       }
       if (siteMessage) {
@@ -2072,6 +2126,21 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             }
             onContact={(v) => set("contact_id", v)}
           />
+          {/* What this save will do to the ticket's invoices (Nov 26), before it is sent. */}
+          {invoiceWarnings.map((line) => (
+            <p
+              key={line}
+              role="status"
+              className={
+                invoiceStop
+                  ? "text-xs font-medium text-destructive"
+                  : "text-xs font-medium text-amber-700 dark:text-amber-400"
+              }
+              data-ticket-invoice-warning={invoiceStop ? "stop" : "follow"}
+            >
+              {line}
+            </p>
+          ))}
           {/* What happened here before (owner, Oct 21): one line, a tap opens the fold below. */}
           {job?.site_id && <HistoryStrip jobId={job.id} onOpen={openHistory} />}
         </>

@@ -543,8 +543,9 @@ describe("the zero note (owner: 'you set the price of x to 0 before the last pri
   it("the estimator puts it in the bid's one list of yellow notices and shows it again at each update", () => {
     const src = flat("src/routes/estimate.tsx");
     // The same list the "Check inputs" box shows and the yellow triangles count.
+    // Nov 26, 2026: the quantity notices follow in the same list (metals-typed-price-nov26).
     expect(src).toContain(
-      "warnings: [...warnings, ...metalsZeroNotices(build.metalsScreen, metalsTypedPrices)],",
+      "warnings: [ ...warnings, ...metalsZeroNotices(build.metalsScreen, metalsTypedPrices),",
     );
     expect(src).toContain(
       "const openInputWarnings = result ? splitNotices(result.warnings, dismissedNotices).open : [];",
@@ -588,8 +589,14 @@ describe("a typed price belongs to its line", () => {
   });
   it("the screen drops it at Remove and when an entry screen is closed, not while a quantity is retyped", () => {
     const src = flat("src/components/metals-screens.tsx");
-    expect(src).toContain("dropGonePrices(next, ln.priceKey);");
-    expect(src).toContain("const closeTile = () => { setOpenTile(null); dropGonePrices(state); };");
+    // Nov 26, 2026: the same two moments, through the rules that also keep a typed price on its
+    // own line when an item is on the bid twice (removeMetalsRow, metalsAfterEntryScreen).
+    expect(src).toContain(
+      "const change = removeMetalsRow(state, refData, prices, i, ln.source); onChange(change.state); afterListChange(change);",
+    );
+    expect(src).toContain(
+      "const closeTile = () => { setOpenTile(null); const before = atOpen.current; atOpen.current = null; if (refData) afterListChange(metalsAfterEntryScreen(prices, before ?? state, state, refData)); };",
+    );
     expect(src.match(/onClose=\{closeTile\}/g)).toHaveLength(4);
     expect(src).not.toContain("onClose={() => setOpenTile(null)}");
   });
@@ -649,8 +656,10 @@ describe("the Metals list shows a box for each amount and marks a typed one", ()
     const at = src.indexOf("<NumberField autoFocus");
     expect(at).toBeGreaterThan(0);
     const box = src.slice(at, src.indexOf("/>", at));
-    expect(box).toContain("onChange={props.onAmount}");
-    expect(box).toContain("onBlank={props.onListPrice}");
+    // Nov 26, 2026: both also take away or set the "not an amount" line under the box, and a
+    // box whose text cannot be read is not an emptied box.
+    expect(box).toContain("onChange={(v) => { setNote(null); props.onAmount(v); }}");
+    expect(box).toContain("setNote(null); props.onListPrice(); }}");
     expect(box).toContain("blankZero={false}");
     expect(box).toContain("max={MAX_METALS_TYPED_PRICE}");
     expect(box).toContain('inputMode="decimal"');

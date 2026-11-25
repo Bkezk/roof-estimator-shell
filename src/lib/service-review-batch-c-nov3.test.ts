@@ -182,7 +182,10 @@ describe("44. a ticket save: the roster once, the notices only when the stage mo
   it("saveServiceJob reads the customer, the property (or its count) and the site together", () => {
     const save = service.slice(
       service.indexOf("const { id, ...fields } = data;"),
-      service.indexOf('if (!customer_name.trim()) throw new Error("Pick or add the customer");'),
+      // Nov 26, 2026: a technician's save does not name the customer (keepsCustomer).
+      service.indexOf(
+        'if (!keepsCustomer && !customer_name.trim()) throw new Error("Pick or add the customer");',
+      ),
     );
     expect(save).toContain(
       "const [accountRead, siteRead, siteCountRead, locationRead] = await Promise.all([",

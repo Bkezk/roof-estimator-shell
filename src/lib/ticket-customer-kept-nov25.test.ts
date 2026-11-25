@@ -181,8 +181,13 @@ describe("the screen", () => {
   });
   it("the server asks the same rule, with the ticket as it is saved", () => {
     const fn = flat("src/lib/service.functions.ts");
+    // Nov 26, 2026: asked of `whom`, which is the patch for the office and the ticket's own
+    // customer on a technician's save (that save no longer writes the customer at all).
     expect(fn).toContain(
-      "const takenOff = customerTakenOffProblem(cur, patch); if (takenOff) throw new Error(takenOff);",
+      "const takenOff = customerTakenOffProblem(cur, whom); if (takenOff) throw new Error(takenOff);",
+    );
+    expect(fn).toContain(
+      "const whom = keepsCustomer ? { ...patch, account_id: cur.account_id, site_id: cur.site_id } : patch;",
     );
   });
 });
