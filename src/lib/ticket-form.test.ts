@@ -39,10 +39,9 @@ describe("the footer hint", () => {
 describe("saveServiceJob refuses a multi-site customer without a site", () => {
   const src = read("./service.functions.ts");
   it("counts the customer's live sites and applies siteProblem", () => {
-    expect(src).toMatch(
-      // Nov 25: the same import now also brings the rule that a ticket keeps its customer.
-      /import \{ (customerTakenOffProblem, )?siteProblem(, TICKET_DESCRIPTION_MAX)? \} from "@\/lib\/ticket-form"/,
-    );
+    // Nov 25: the same import now also brings the rule that a ticket keeps its customer.
+    // Nov 26, 2026: and the rule that its invoices follow the customer, over several lines.
+    expect(src).toMatch(/import \{[^}]*\bsiteProblem,[^}]*\} from "@\/lib\/ticket-form"/);
     expect(src).toMatch(
       /count: "exact", head: true \}\)\s*\.eq\("account_id", fields\.account_id\)\s*\.is\("deleted_at", null\)/,
     );

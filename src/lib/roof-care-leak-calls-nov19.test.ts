@@ -314,7 +314,8 @@ describe("keeping a repair invoice's plan lines in step", () => {
 
   it("is what every invoice path calls: a new draft, a save and a rebuild", () => {
     const f = flat("src/lib/invoices.functions.ts");
-    expect(f.match(/syncPlanLines\(sb, /g)).toHaveLength(2);
+    // Nov 26, 2026: and a draft whose ticket is given another customer or property (three).
+    expect(f.match(/syncPlanLines\(sb, /g)).toHaveLength(3);
     expect(f).not.toContain("await syncAllowance(");
     // On the customer's copy: the work, then the leak call's travel, then the credit.
     const pdf = flat("src/lib/invoices.server.ts");

@@ -440,14 +440,15 @@ describe("invoices.functions.ts: billing a vendor", () => {
     expect(create).toContain(
       "const vendor = billToVendorId ? await billableVendor(sb, billToVendorId) : null;",
     );
-    expect(create).toContain("const bill_to = billToFor(vendor, account, job.customer_name);");
+    // Nov 26, 2026: the invoice's copy of its customer is taken in customerCopy, which a draft
+    // whose ticket changes customer asks too (ticket-customer-invoice-nov26.test.ts).
+    expect(create).toContain("bill_to: billToFor(vendor, account, job.customer_name),");
     expect(create).toContain("bill_to_vendor_id: vendor?.id ?? null,");
     // The account's own snapshot moved to accountBillTo (vendors.ts), not copied here.
     expect(create).not.toContain("account?.billing_instructions");
     // The customer's tax exemption does not carry to the vendor's invoice.
-    expect(create).toContain(
-      "const taxRate = !vendor && account?.tax_exempt ? 0 : Number(settings.tax_rate);",
-    );
+    expect(create).toContain("taxRate: !vendor && account?.tax_exempt ? 0 : standardTaxRate,");
+    expect(create).toContain("Number(settings.tax_rate),");
   });
   it("billableVendor refuses a missing, archived or non-billable vendor (vendorBillProblem)", () => {
     const fn = between(src, "async function billableVendor(", "\n}\n");

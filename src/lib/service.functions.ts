@@ -47,7 +47,12 @@ import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import type { SyncResult } from "@/lib/followups.server";
 import type { OpportunityMove } from "@/lib/opportunities.functions";
-import { customerTakenOffProblem, siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
+import {
+  customerTakenOffProblem,
+  siteProblem,
+  ticketCustomerChange,
+  TICKET_DESCRIPTION_MAX,
+} from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import {
@@ -126,6 +131,14 @@ export type ServiceJobWithTech = ServiceJobRow & {
   opportunity_move?: OpportunityMove;
   /** The ticket is saved but its opportunity did not move: why, said out loud by the page. */
   opportunity_move_error?: string;
+  /**
+   * A save that changed the ticket's customer or property (Nov 26; ticket-form.ts): one
+   * sentence for each of its invoices, saying what became of it ("Draft invoice 6100 now
+   * bills …").
+   */
+  invoice_notes?: string[];
+  /** The ticket is saved but a draft invoice did not follow: why and what to do, said loudly. */
+  invoice_problem?: string;
 };
 
 /**
@@ -486,6 +499,19 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (!data.id && !dispatcher) throw new Error("Only the office or a manager creates tickets");
     const sb = context.supabase;
     const { id, ...fields } = data;
+    // A technician's save never writes the customer (the audit of Nov 25, number 19). The field
+    // page saves the notes and sends the customer back as the page loaded it: opened before
+    // the office changed the customer, that save moved the ticket back to the old one without
+    // a word. The customer, property, contact and site of a ticket are the office's: whatever
+    // a technician-only login sends for them is not read, checked or written.
+    const keepsCustomer = !!id && isFieldOnly(p);
+    if (keepsCustomer) {
+      delete fields.account_id;
+      delete fields.site_id;
+      delete fields.contact_id;
+      delete fields.location_id;
+      delete fields.customer_name;
+    }
     let customer_name = fields.customer_name ?? "";
     let site_name: string | null = null;
     let site_address: string | null = null;
@@ -548,7 +574,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         throw new Error("That site is not at this property — pick the site again");
       location_name = loc.name;
     }
-    if (!customer_name.trim()) throw new Error("Pick or add the customer");
+    if (!keepsCustomer && !customer_name.trim()) throw new Error("Pick or add the customer");
     // Every ticket has a date (owner, Oct 1); a technician's save leaves it as it is.
     const dateProblem = ticketDateProblem({ id, scheduled_date: fields.scheduled_date });
     if (dateProblem) throw new Error(dateProblem);
@@ -609,9 +635,14 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Owner, Oct 6: a technician cannot change a ticket once it is Authorized, Invoiced or
       // Closed (RLS service_jobs_update says the same, 20261006190000); the office still may.
       if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);
+      // Whom the ticket is for after this save: what was sent, or, on a technician's save, what
+      // the ticket has (keepsCustomer above).
+      const whom = keepsCustomer
+        ? { ...patch, account_id: cur.account_id, site_id: cur.site_id }
+        : patch;
       // A linked ticket keeps a customer (Nov 25, ticket 6069): changed to another, never just
       // taken off. The form says the same before the save is sent (ticket-form.ts).
-      const takenOff = customerTakenOffProblem(cur, patch);
+      const takenOff = customerTakenOffProblem(cur, whom);
       if (takenOff) throw new Error(takenOff);
       // Audit, Nov 16 (fix 1): to or from Inspection is a manager's once the ticket is Authorized
       // or has an invoice (ticket-stage.ts typeChangeProblem; trigger service_jobs_type_rule).
@@ -619,8 +650,33 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       if (typeProblem) throw new Error(typeProblem);
       // A plan's inspection stays at its property, with its customer, an inspection (break test
       // Nov 20, number 18; care-plan-guards.ts; trigger service_jobs_care_ticket_stays).
-      const moveOffPlan = careTicketMoveProblem(cur, patch);
+      const moveOffPlan = careTicketMoveProblem(cur, whom);
       if (moveOffPlan) throw new Error(moveOffPlan);
+      // The ticket's invoices follow its customer (the audit of Nov 25, number 19;
+      // ticket-form.ts). Another customer or property: an invoice already final stops a change
+      // of customer, and everything a draft needs is read, all before anything is written. The
+      // drafts are then changed once the ticket is saved (`invoicesFollow`, below). Someone who
+      // cannot work with invoices does not move a ticket that has one (refused in there).
+      const whomChange = keepsCustomer ? null : ticketCustomerChange(cur, patch);
+      let invoicesFollow: (() => Promise<string[]>) | null = null;
+      if (whomChange) {
+        const { ticketCustomerOnInvoices } = await import("@/lib/invoices.functions");
+        ({ follow: invoicesFollow } = await ticketCustomerOnInvoices(sb, {
+          job_id: id,
+          by: p,
+          // The ticket's own word that it has an invoice, for someone who may not read them.
+          has_invoice: !!cur.invoice_id,
+          change: whomChange,
+          next: {
+            account_id: patch.account_id,
+            site_id: patch.site_id,
+            customer_name: patch.customer_name,
+            site_name: patch.site_name,
+            site_address: patch.site_address,
+          },
+          by_name: nameOf(p) ?? "",
+        }));
+      }
       // Owner, Oct 1: once a ticket has a date, a technician does not move it; Oct 9: the office
       // and managers do (logged on the Timeline below and in History by the database).
       const moveProblem = dateMoveProblem({
@@ -655,7 +711,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       const { data: written, error } = await sb
         .from("service_jobs")
         .update({
-          ...patch,
+          ...(keepsCustomer ? withoutCustomer(patch) : patch),
           ...instructionsPatch(instructions),
           ...(scheduledNow ? { stage: "scheduled" } : {}),
         })
@@ -674,7 +730,17 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // technician through set_job_crew, so the crew, is_on_crew and the invoice follow.
       const saved = await saveCrew(sb, row, manager ? crew : undefined);
       await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
-      return withTechName(sb, saved);
+      const out = await withTechName(sb, saved);
+      if (!invoicesFollow) return out;
+      // The ticket is saved: its draft invoices now take the new customer or property. A draft
+      // that could not be changed is said by the page, loudly, with what to do; the ticket's
+      // own save is not undone or reported as failed.
+      try {
+        const invoice_notes = await invoicesFollow();
+        return invoice_notes.length ? { ...out, invoice_notes } : out;
+      } catch (e) {
+        return { ...out, invoice_problem: e instanceof Error ? e.message : String(e) };
+      }
     }
     const createProblem = stageProblem(p, stage);
     if (createProblem) throw new Error(createProblem);
@@ -721,6 +787,26 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     const { movedByTicket } = await import("@/lib/opportunities.functions");
     return { ...out, ...(await movedByTicket(context, saved.id)) };
   });
+
+/** The columns that say whom a ticket is for and where: the office's (keepsCustomer). */
+const CUSTOMER_COLUMNS: readonly string[] = [
+  "account_id",
+  "site_id",
+  "contact_id",
+  "customer_name",
+  "site_name",
+  "site_address",
+  "site_city",
+  "site_state",
+  "location_id",
+  "location_name",
+];
+/** A ticket's patch with none of them: a technician's save leaves each exactly as it is. */
+function withoutCustomer<T extends Record<string, unknown>>(patch: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(patch).filter(([k]) => !CUSTOMER_COLUMNS.includes(k)),
+  ) as Partial<T>;
+}
 
 /**
  * After a ticket save: write the crew the office sent (the lead at row 0 = technician_id), or

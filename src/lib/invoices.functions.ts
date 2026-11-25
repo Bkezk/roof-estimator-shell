@@ -67,6 +67,15 @@ import {
 } from "@/lib/roof-care-allowance";
 import { mergeSendTo } from "@/lib/invoice-send-to";
 import {
+  CUSTOMER_CHANGE_NEEDS_INVOICES,
+  draftFollowedLine,
+  draftNotFollowedMessage,
+  invoiceStopsCustomerChange,
+  issuedNotFollowedLine,
+  planLinesNotCheckedLine,
+  type TicketCustomerChange,
+} from "@/lib/ticket-form";
+import {
   canShareInvoice,
   SHARE_TOKEN_BYTES,
   shareBase,
@@ -682,16 +691,15 @@ async function createInvoiceFor(
     buildLinesFromJob(sb, job.id, { poMarkup: true }),
     loadSettings(sb),
   ]);
-  // The customer's tax exemption is the customer's: an invoice to a vendor takes the standard
-  // rate (the draft's Tax % can still be changed).
-  const taxRate = !vendor && account?.tax_exempt ? 0 : Number(settings.tax_rate);
+  // The invoice's own copy of whom it bills, where, and at what tax (customerCopy below).
+  const { taxRate, bill_to, property } = customerCopy(
+    vendor,
+    account,
+    site,
+    job,
+    Number(settings.tax_rate),
+  );
   const t = totals(lines, taxRate);
-  // Who it is billed to, snapshotted: the vendor, or the customer account (as always).
-  const bill_to = billToFor(vendor, account, job.customer_name);
-  const property = {
-    name: site?.name ?? job.site_name ?? "",
-    address: site ? siteAddressLine(site) : (job.site_address ?? ""),
-  };
   const insert = async () => {
     const { data: siblings, error: sErr } = await sb
       .from("invoices")
@@ -757,6 +765,162 @@ async function createInvoiceFor(
   if (pErr)
     throw new Error(`The invoice was made, but the ticket was not updated: ${pErr.message}`);
   return withPlanAllowance(sb, inv);
+}
+
+/**
+ * What an invoice keeps of its ticket's customer: whom it bills, the property and the tax rate.
+ * Taken when the invoice is made (createInvoiceFor) and again when the ticket of a draft is
+ * given another customer or property (ticketCustomerOnInvoices), from this one place.
+ * The customer's tax exemption is the customer's: an invoice to a vendor takes the standard
+ * rate (the draft's Tax % can still be changed). Who it is billed to is the vendor, or the
+ * customer account (as always).
+ */
+function customerCopy(
+  vendor: Parameters<typeof billToFor>[0],
+  account: (Parameters<typeof billToFor>[1] & { tax_exempt?: boolean | null }) | null | undefined,
+  site: (Parameters<typeof siteAddressLine>[0] & { name?: string | null }) | null | undefined,
+  job: { customer_name: string | null; site_name: string | null; site_address: string | null },
+  standardTaxRate: number,
+) {
+  return {
+    taxRate: !vendor && account?.tax_exempt ? 0 : standardTaxRate,
+    bill_to: billToFor(vendor, account, job.customer_name),
+    property: {
+      name: site?.name ?? job.site_name ?? "",
+      address: site ? siteAddressLine(site) : (job.site_address ?? ""),
+    },
+  };
+}
+
+/**
+ * A ticket is about to be saved with another customer or property (the audit of Nov 25, number
+ * 19; the rule is lib/ticket-form.ts). Called by saveServiceJob BEFORE it writes the ticket:
+ *
+ *  - someone who cannot work with invoices does not move a ticket that has one, and an invoice
+ *    already final or paid stops a change to another customer (both thrown here, so nothing
+ *    is written);
+ *  - everything a draft needs is read here, so a failed read also stops the save;
+ *  - `follow`, called once the ticket is saved, gives each draft its Bill To, property and tax
+ *    rate again from the new customer (customerCopy), totals it with the invoice's own
+ *    `totals`, and lets the property's Roof Care plan lines follow (syncPlanLines). A draft
+ *    billed to a vendor keeps its Bill To and tax and takes the property only. A change of
+ *    property alone leaves Bill To and tax as they are. It answers one sentence for each
+ *    invoice, for the screen to say.
+ *
+ * The caller's own client throughout: who may read and change invoices is the database's rule.
+ */
+export async function ticketCustomerOnInvoices(
+  sb: SupabaseClient<Database>,
+  input: {
+    job_id: string;
+    /** Who is saving the ticket, and whether the ticket says it has an invoice. */
+    by: Parameters<typeof seesInvoices>[0];
+    has_invoice: boolean;
+    change: TicketCustomerChange;
+    /** The ticket as this save leaves it. */
+    next: {
+      account_id: string | null;
+      site_id: string | null;
+      customer_name: string | null;
+      site_name: string | null;
+      site_address: string | null;
+    };
+    by_name: string;
+  },
+): Promise<{ follow: () => Promise<string[]> }> {
+  const { change, next } = input;
+  // Invoices are a manager's or sales' (office, above): anyone else can neither read nor
+  // change them, so they do not move a ticket that has one. With no invoice there is nothing
+  // to follow.
+  if (!seesInvoices(input.by)) {
+    if (input.has_invoice) throw new Error(CUSTOMER_CHANGE_NEEDS_INVOICES);
+    return { follow: async () => [] };
+  }
+  const live = await liveInvoices(sb, input.job_id);
+  const label = (inv: InvoiceRow) => invoiceLabel(inv);
+  const stop = invoiceStopsCustomerChange(
+    change,
+    live.map((inv) => ({ label: label(inv), status: inv.status })),
+  );
+  if (stop) throw new Error(stop);
+  const drafts = live.filter((inv) => inv.status === "draft");
+  const issued = live.filter((inv) => inv.status !== "draft");
+  if (!drafts.length)
+    return { follow: async () => issued.map((i) => issuedNotFollowedLine(label(i))) };
+  const { loadSettings, totals } = await import("@/lib/invoices.server");
+  const [accountRead, siteRead, settings, linesRead] = await Promise.all([
+    next.account_id
+      ? sb.from("crm_accounts").select("*").eq("id", next.account_id).maybeSingle()
+      : null,
+    next.site_id ? sb.from("crm_sites").select("*").eq("id", next.site_id).maybeSingle() : null,
+    loadSettings(sb),
+    sb
+      .from("invoice_lines")
+      .select("*")
+      .in(
+        "invoice_id",
+        drafts.map((d) => d.id),
+      )
+      .order("sort"),
+  ]);
+  const readError = accountRead?.error ?? siteRead?.error ?? linesRead.error;
+  if (readError) throw new Error(readError.message);
+  const copy = customerCopy(
+    null,
+    accountRead?.data ?? null,
+    siteRead?.data ?? null,
+    next,
+    Number(settings.tax_rate),
+  );
+  const { pctLabel } = await import("@/lib/invoice-format");
+  const follow = async (): Promise<string[]> => {
+    const said: string[] = [];
+    for (const inv of drafts) {
+      const vendor = !!inv.bill_to_vendor_id;
+      // Whom it bills and at what tax: the new customer's, unless a vendor is billed or only
+      // the property changed.
+      const rebill = change.customer && !vendor;
+      const taxFrom = Number(inv.tax_rate);
+      const taxTo = rebill ? copy.taxRate : taxFrom;
+      const lines = (linesRead.data ?? []).filter((l) => l.invoice_id === inv.id);
+      const { error } = await sb
+        .from("invoices")
+        .update({
+          property: copy.property as unknown as Json,
+          ...(rebill ? { bill_to: copy.bill_to as unknown as Json, tax_rate: taxTo } : {}),
+          ...totals(lines, taxTo),
+          updated_by_name: input.by_name,
+        })
+        .eq("id", inv.id)
+        .eq("status", "draft")
+        .select("id")
+        .single();
+      if (error) throw new Error(draftNotFollowedMessage(label(inv), error.message));
+      // The plan's lines belong to the property the ticket is at now: the leak call's travel
+      // and the minor repairs credit are worked again there, and the draft totalled with them.
+      // Not followed is said, never dropped: saving the invoice works them again.
+      let planNote: string | null = null;
+      try {
+        const { syncPlanLines } = await import("@/lib/roof-care-travel.functions");
+        await syncPlanLines(sb, { ...inv, tax_rate: taxTo }, lines);
+      } catch (e) {
+        planNote = planLinesNotCheckedLine(label(inv), e instanceof Error ? e.message : String(e));
+      }
+      said.push(
+        draftFollowedLine({
+          label: label(inv),
+          billTo: rebill ? copy.bill_to.name : null,
+          vendor,
+          property: change.property ? copy.property.name || copy.property.address : null,
+          taxFrom: pctLabel(taxFrom),
+          taxTo: pctLabel(taxTo),
+        }),
+      );
+      if (planNote) said.push(planNote);
+    }
+    return [...said, ...issued.map((i) => issuedNotFollowedLine(label(i)))];
+  };
+  return { follow };
 }
 
 /**
