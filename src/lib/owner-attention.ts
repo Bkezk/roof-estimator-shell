@@ -63,6 +63,8 @@ import {
   RENEW_LABEL,
   RENEWAL_OPEN_DAYS,
   SIZE_CONFIRM_LABEL,
+  SIZE_INVOICE_MAKE,
+  SIZE_REFUND_RECORD,
   SIZE_UNCHECKED_WORDS,
 } from "@/lib/roof-care-plan";
 import { requestOpportunityPath } from "@/lib/public-requests";
@@ -96,6 +98,8 @@ export type AttentionKind =
   | "care_plan_refund"
   | "care_plan_no_payment"
   | "care_plan_size"
+  | "care_plan_size_refund"
+  | "care_plan_size_owed"
   | "care_plan_card_back"
   | "public_request"
   | "care_plan_renewal"
@@ -344,6 +348,28 @@ export interface AttCareRefund {
 }
 
 /**
+ * A roof size corrected after a Roof Care plan was paid, with the difference not settled
+ * (Nov 26). Two cases are listed: money owed back for a smaller roof that is not recorded as
+ * sent, on any plan; and a bigger roof's difference still owed on a plan whose year is over,
+ * which no screen showed once the plan was ended, renewed or ran out. A bigger roof's
+ * difference on a plan in force is on the plan itself and is not listed here.
+ */
+export interface AttCareSizeBalance {
+  plan_id: string;
+  site_id: string;
+  /** "Roof Guard · Plant 2 (Acme)". */
+  title: string;
+  /** Above 0: the customer owes it. Below 0: it is owed back. */
+  owed: number;
+  /** The plan year is over. */
+  ended: boolean;
+  /** The day of the last correction, or the day the plan ended when that is later. */
+  since: string | null;
+  /** The open invoice for a difference owed to us, when it is made. */
+  invoice: { id: string; number: string; status: string } | null;
+}
+
+/**
  * Card money that has to go back to a customer and is not marked sent back (owner, Nov 20:
  * "go with ... new issue 1"). A card payment for a plan already paid, for one that had ended,
  * one that did not cover what was owed, or the part of a payment over what was owed. Listed
@@ -489,6 +515,8 @@ export interface AttentionIn {
   careNoPayment?: readonly AttCareNoPayment[];
   /** Roof Care plans priced on a size nobody checked against the map (Nov 20). */
   careSizes?: readonly AttCareSize[];
+  /** A corrected roof size whose difference is not settled (Nov 26). */
+  careSizeBalances?: readonly AttCareSizeBalance[];
   /** Card money still to send back to a customer (Nov 20). */
   careCardBack?: readonly AttCareCardBack[];
   /**
@@ -1112,6 +1140,50 @@ export function attentionList(i: AttentionIn): AttentionList {
       tone: age > 14 ? "red" : "amber",
       amount: v.amount,
       href: `/properties/${v.site_id}`,
+    });
+  }
+
+  // A corrected roof size not settled (Nov 26). Money owed back for a smaller roof, until it is
+  // recorded as sent; and a bigger roof's difference still owed once the plan year is over,
+  // until its invoice is paid.
+  for (const v of i.careSizeBalances ?? []) {
+    const age = v.since && YMD.test(v.since) ? Math.max(0, daysBetween(v.since, today)) : 0;
+    if (v.owed < 0) {
+      rows.push({
+        key: `care_plan_size_refund:${v.plan_id}`,
+        group: "office",
+        kind: "care_plan_size_refund",
+        tag: "Roof Care",
+        title: v.title,
+        why: `The roof was found smaller after the plan was paid, and the difference is owed back to the customer. Send it, then open the property and press ${SIZE_REFUND_RECORD}.`,
+        ...office,
+        age,
+        ageText: days(age),
+        tone: age > 14 ? "red" : "amber",
+        amount: -v.owed,
+        href: `/properties/${v.site_id}`,
+      });
+      continue;
+    }
+    if (!(v.owed > 0) || !v.ended) continue;
+    const next = !v.invoice
+      ? `No invoice is made for it: open the property and press ${SIZE_INVOICE_MAKE}.`
+      : v.invoice.status === "draft"
+        ? `Invoice #${v.invoice.number} for it is a draft: finalise it and send it.`
+        : `Invoice #${v.invoice.number} for it is sent and not paid yet.`;
+    rows.push({
+      key: `care_plan_size_owed:${v.plan_id}`,
+      group: "office",
+      kind: "care_plan_size_owed",
+      tag: "Roof Care",
+      title: v.title,
+      why: `The plan year is over, and the difference for the bigger roof is still owed. ${next}`,
+      ...office,
+      age,
+      ageText: days(age),
+      tone: age > 14 ? "red" : "amber",
+      amount: v.owed,
+      href: v.invoice ? `/service/invoices?id=${v.invoice.id}` : `/properties/${v.site_id}`,
     });
   }
 

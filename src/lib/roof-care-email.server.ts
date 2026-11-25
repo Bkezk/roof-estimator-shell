@@ -182,15 +182,11 @@ export async function dispatchPlanEmails(
     }
 
     if (!p.receipt_sent_at && p.paid_on && p.paid_on >= since && p.starts_on) {
-      const { data: inv } = await admin
-        .from("invoices")
-        .select("display_number, paid_amount, status")
-        .eq("roof_care_plan_id", p.id)
-        .neq("status", "void");
-      // What the invoices say was paid; else a card payment taken online whose invoice is
-      // not marked paid yet.
+      const inv = await planYearInvoices(admin, p.id);
+      // What the plan year's own invoice says was paid; else a card payment taken online whose
+      // invoice is not marked paid yet.
       const paid =
-        (inv ?? []).reduce((n, i) => n + (Number(i.paid_amount) || 0), 0) ||
+        inv.reduce((n, i) => n + (Number(i.paid_amount) || 0), 0) ||
         Number(p.card_paid_amount) ||
         0;
       // A renewal at no charge has nothing to receipt.
@@ -203,7 +199,7 @@ export async function dispatchPlanEmails(
         paid_on: p.paid_on,
         starts_on: p.starts_on,
         renews_on: p.renews_on,
-        invoice_number: inv?.[0]?.display_number ?? null,
+        invoice_number: inv[0]?.display_number ?? null,
         paid_by_bank: Number(p.card_paid_amount) > 0 ? await planPaidByBank(admin, p.id) : false,
       });
       if (await sendClaimed(admin, p.id, "receipt", to, mail, stamp, send)) out.receipts_sent++;
@@ -211,6 +207,50 @@ export async function dispatchPlanEmails(
     }
   }
   return out;
+}
+
+/**
+ * The plan year's own invoices that are not void, oldest first (Nov 26). Never the invoice of a
+ * roof size difference, which is the plan's too (invoices.plan_part = 'size', newer than the
+ * generated types, so read loose): a receipt sent again after one was paid added its payment
+ * to "paid" and could name it, "Invoice #RC-1001-S1", since the rows came in no order.
+ */
+export async function planYearInvoices(
+  admin: Client,
+  planId: string,
+): Promise<{ display_number: string | null; paid_amount: unknown }[]> {
+  const loose = admin as unknown as {
+    from: (t: string) => {
+      select: (c: string) => {
+        eq: (
+          c: string,
+          v: string,
+        ) => {
+          neq: (
+            c: string,
+            v: string,
+          ) => Promise<{
+            data:
+              | {
+                  display_number: string | null;
+                  paid_amount: unknown;
+                  plan_part?: string | null;
+                  created_at?: string | null;
+                }[]
+              | null;
+          }>;
+        };
+      };
+    };
+  };
+  const { data } = await loose
+    .from("invoices")
+    .select("display_number, paid_amount, status, plan_part, created_at")
+    .eq("roof_care_plan_id", planId)
+    .neq("status", "void");
+  return (data ?? [])
+    .filter((i) => i.plan_part !== "size")
+    .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
 }
 
 /** The numbers a plan's description needs, straight from the settings (this pass is not signed in). */

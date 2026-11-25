@@ -219,6 +219,22 @@ const priced = {
   ],
 };
 type Rpcs = Record<string, (a: Record<string, unknown>) => unknown>;
+/** The database's own answer for "what would this size do" (roof_care_size_offer). */
+const offered = (over: Record<string, unknown> = {}) => ({
+  plan: "care",
+  plan_number: 1077,
+  from_sqft: 20000,
+  to_sqft: 26000,
+  from_price: 410,
+  to_price: 470,
+  would_be: 470,
+  repriced: true,
+  paid: false,
+  covered: null,
+  owed: null,
+  nth: 1,
+  ...over,
+});
 const world = (plan: Record<string, unknown> = {}, rpcs: Rpcs = {}) =>
   fakeSupabase(
     {
@@ -259,6 +275,9 @@ const world = (plan: Record<string, unknown> = {}, rpcs: Rpcs = {}) =>
     {
       rpcs: {
         roof_care_price: () => priced,
+        // Nov 26, 2026: the window's price is the database's own answer (roof_care_size_offer),
+        // the same arithmetic as Save. Its rules are tried in roof-care-size-fixes-nov26.test.ts.
+        roof_care_size_offer: (a) => offered({ to_sqft: a["p_sqft"] }),
         roof_care_correct_size: () => answer(),
         roof_care_plan_seen: () => true,
         ...rpcs,
@@ -283,7 +302,10 @@ beforeEach(() => {
 });
 
 describe("showing the new price", () => {
-  it("is the plan's own drive at today's prices, and changes nothing", async () => {
+  // Nov 26, 2026: the price is no longer worked here from today's whole price list. The
+  // database answers it for the plan and the size (roof_care_size_offer), so the window and Save
+  // can never disagree, and only the part that comes from the size moves the price.
+  it("is the database's own answer for the plan and the size, and changes nothing", async () => {
     const env = world();
     const o = await call<SizeOffer>(roofCareSizeOffer, env, { plan_id: PLAN, sqft: 26000 });
     expect(o).toEqual({
@@ -296,29 +318,38 @@ describe("showing the new price", () => {
       paid: false,
       owed: 0,
     });
-    const price = env.rpcCalls.find((c) => c.fn === "roof_care_price")!;
-    expect(price.args).toEqual({ p_sqft: 26000, p_hours: 1, p_miles: 50 });
+    const asked = env.rpcCalls.find((c) => c.fn === "roof_care_size_offer")!;
+    expect(asked.args).toEqual({ p_plan: PLAN, p_sqft: 26000 });
+    expect(env.rpcCalls.filter((c) => c.fn === "roof_care_price")).toEqual([]);
     expect(env.writes).toEqual([]);
   });
   // Until the paid plans' step (Nov 24, "then build the rest") a plan in force was told its
   // price would stay. It now takes the price of the right size, and the difference is said.
   it("a plan in force is told the difference it will owe or be owed", async () => {
-    const env = world({ status: "active" });
+    // Nov 26, 2026: what is owed is the database's to work (from what the payments cover);
+    // the server passes its answer on. The sums are tried in the Nov 26 test.
+    const paid = (owed: number) => ({
+      roof_care_size_offer: () => offered({ paid: true, repriced: true, covered: 410, owed }),
+    });
+    const env = world({ status: "active" }, paid(60));
     const o = await call<SizeOffer>(roofCareSizeOffer, env, { plan_id: PLAN, sqft: 26000 });
     expect(o).toMatchObject({ paid: true, repriced: false, to_price: 470, owed: 60 });
-    // An earlier correction not settled yet: owed from what the payments cover, not the price.
-    const open = world({ status: "active", size_paid_price: 400 });
-    expect(
-      (await call<SizeOffer>(roofCareSizeOffer, open, { plan_id: PLAN, sqft: 26000 })).owed,
-    ).toBe(70);
     // A smaller roof: owed back.
-    const less = world({ status: "active", price: 500 });
+    const less = world({ status: "active" }, paid(-30));
     expect(
       (await call<SizeOffer>(roofCareSizeOffer, less, { plan_id: PLAN, sqft: 26000 })).owed,
     ).toBe(-30);
   });
   it("the size the plan already has is said before any price is shown, in the database's words", async () => {
-    const env = world();
+    // Nov 26, 2026: said by the database's offer itself, before any price.
+    const env = world(
+      {},
+      {
+        roof_care_size_offer: () => {
+          throw new Error(SIZE_CORRECT_SAME);
+        },
+      },
+    );
     await expect(call(roofCareSizeOffer, env, { plan_id: PLAN, sqft: 20000 })).rejects.toThrow(
       SIZE_CORRECT_SAME,
     );
@@ -331,13 +362,37 @@ describe("showing the new price", () => {
     await expect(
       call(roofCareSizeOffer, world(), { plan_id: PLAN, sqft: 26000 }, OFFICE),
     ).rejects.toThrow(SIZE_CORRECT_MANAGERS);
+    // Nov 26, 2026: an ended plan and a custom quote are refused by the database's offer, in
+    // its own words, and passed on as they are.
+    const refuses = (words: string) =>
+      world(
+        {},
+        {
+          roof_care_size_offer: () => {
+            throw new Error(words);
+          },
+        },
+      );
     await expect(
-      call(roofCareSizeOffer, world({ status: "ended" }), { plan_id: PLAN, sqft: 26000 }),
+      call(roofCareSizeOffer, refuses("This plan has ended, so its roof size is not changed"), {
+        plan_id: PLAN,
+        sqft: 26000,
+      }),
     ).rejects.toThrow("This plan has ended");
-    const custom = world({}, { roof_care_price: () => ({ ready: true, custom_quote: true }) });
-    await expect(call(roofCareSizeOffer, custom, { plan_id: PLAN, sqft: 26000 })).rejects.toThrow(
-      "A roof this size gets a custom quote",
+    await expect(
+      call(
+        roofCareSizeOffer,
+        refuses(
+          "A roof this size gets a custom quote, so the plan cannot be priced at it here. End the plan and quote it by hand.",
+        ),
+        { plan_id: PLAN, sqft: 26000 },
+      ),
+    ).rejects.toThrow("A roof this size gets a custom quote");
+    const sql = read("supabase/migrations/20261125200000_roof_care_size_fixes.sql");
+    expect(sql).toContain(
+      "raise exception 'This plan has ended, so its roof size is not changed';",
     );
+    expect(sql).toContain("A roof this size gets a custom quote");
   });
 });
 
@@ -473,17 +528,24 @@ describe("a plan year already paid", () => {
       { roof_care_size_refund_sent: () => ({ amount: 30, on: "2026-11-24", ref: "check 9" }) },
     );
     await expect(
-      call(recordRoofCareSizeRefund, env, { plan_id: PLAN, on: "2026-11-24" }, OFFICE),
+      call(recordRoofCareSizeRefund, env, { plan_id: PLAN, on: "2026-11-24", shown: 30 }, OFFICE),
     ).rejects.toThrow(SIZE_CORRECT_MANAGERS);
     const out = await call<{ amount: number }>(recordRoofCareSizeRefund, env, {
       plan_id: PLAN,
       on: "2026-11-24",
       ref: "check 9",
+      shown: 30,
     });
     expect(out).toEqual({ amount: 30 });
     const sentCall = env.rpcCalls.find((c) => c.fn === "roof_care_size_refund_sent")!;
-    // No amount is handed over: what is owed is the database's to work.
-    expect(sentCall.args).toEqual({ p_plan: PLAN, p_on: "2026-11-24", p_ref: "check 9" });
+    // What is owed is still the database's to work. Nov 26, 2026: it is also told the amount
+    // the screen showed, and refuses when the two differ; it never records the shown amount.
+    expect(sentCall.args).toEqual({
+      p_plan: PLAN,
+      p_on: "2026-11-24",
+      p_ref: "check 9",
+      p_shown_amount: 30,
+    });
   });
 });
 
@@ -557,7 +619,8 @@ describe("where it is on the screen", () => {
     expect(card).toContain(
       "const shown = offer && sqft != null && offer.to_sqft === sqft ? offer : null;",
     );
-    expect(card).toContain("disabled={!shown || save.isPending}");
+    // Nov 26, 2026: Save is also off for a plan that cannot be corrected (`held`).
+    expect(card).toContain("disabled={!!held || !shown || save.isPending}");
     expect(card).toContain("shown_price: shown!.to_price,");
   });
   it("every correction is listed under the size", () => {

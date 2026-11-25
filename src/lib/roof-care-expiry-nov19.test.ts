@@ -381,7 +381,8 @@ describe("a refund comes off Roof Care's income", () => {
   it("is counted with the invoices, and opens the property", () => {
     const fn = flat("src/lib/margin-report.functions.ts");
     expect(fn).toContain('source !== "bids" ? readCareRefunds(sb, from, to) : [],');
-    expect(fn).toContain("rows: [...invoices, ...refunds, ...bids.rows],");
+    // Nov 26, 2026: the refunds sent for a smaller roof come off with them (sizeRefunds).
+    expect(fn).toContain("rows: [...invoices, ...refunds, ...sizeRefunds, ...bids.rows],");
     const page = flat("src/components/margin-report.tsx");
     expect(page).toContain(") : i.refundSite ? (");
     expect(page).toContain('to="/properties/$id" params={{ id: i.refundSite }}');

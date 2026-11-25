@@ -38,6 +38,7 @@ import {
   type AttCareExpired,
   type AttCareNoPayment,
   type AttCareSize,
+  type AttCareSizeBalance,
   type AttCareRefund,
   type AttCareRenewal,
   type AttCareUnbilled,
@@ -287,6 +288,7 @@ export const listOwnerAttention = createServerFn({ method: "GET" })
       careRefunds: care.refunds,
       careNoPayment: care.noPayment,
       careSizes: care.sizes,
+      careSizeBalances: care.sizeBalances,
       careCardBack: cardBack,
       publicRequests,
       careRenewals: care.renewals,
@@ -389,6 +391,40 @@ export async function careCardBackOwed(sb: Sb): Promise<AttCareCardBack[]> {
   });
 }
 
+/**
+ * The properties of the plans whose corrected roof size is not settled (Nov 26): the payments
+ * cover more or less than the plan's price (roof_care_plans.size_paid_price, newer than the
+ * generated types, so read loose). A plan that was ended, renewed or ran out is still read.
+ */
+export async function sizeUnsettledSites(sb: Sb): Promise<string[]> {
+  const loose = sb as unknown as {
+    from: (t: string) => {
+      select: (c: string) => {
+        not: (
+          c: string,
+          op: string,
+          v: null,
+        ) => Promise<{
+          data: { site_id: string; price: unknown; size_paid_price?: unknown }[] | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  };
+  const { data, error } = await loose
+    .from("roof_care_plans")
+    .select("site_id, price, size_paid_price")
+    .not("size_paid_price", "is", null);
+  if (error) throw new Error(`Roof Care plans: ${error.message}`);
+  return (data ?? [])
+    .filter((p) => {
+      if (p.size_paid_price == null) return false;
+      const owed = Math.round((Number(p.price) - Number(p.size_paid_price)) * 100);
+      return Number.isFinite(owed) && owed !== 0;
+    })
+    .map((p) => p.site_id);
+}
+
 async function careVisitsOfPlans(
   sb: Sb,
   today: string,
@@ -400,6 +436,7 @@ async function careVisitsOfPlans(
   refunds: AttCareRefund[];
   noPayment: AttCareNoPayment[];
   sizes: AttCareSize[];
+  sizeBalances: AttCareSizeBalance[];
   renewals: AttCareRenewal[];
   carried: AttCareCarried[];
   expired: AttCareExpired[];
@@ -425,11 +462,14 @@ async function careVisitsOfPlans(
     .eq("ended_reason", "Expired")
     .gte("ended_on", plusDays(today, -EXPIRED_LISTED_DAYS));
   if (rErr) throw new Error(`Roof Care plans: ${rErr.message}`);
+  // A corrected roof size not settled (Nov 26), whatever became of the plan since.
+  const unsettledSites = await sizeUnsettledSites(sb);
   const siteIds = [
     ...new Set([
       ...(active ?? []).map((p) => p.site_id),
       ...(owed ?? []).map((p) => p.site_id),
       ...(ran ?? []).map((p) => p.site_id),
+      ...unsettledSites,
     ]),
   ];
   if (!siteIds.length)
@@ -441,6 +481,7 @@ async function careVisitsOfPlans(
       refunds: [],
       noPayment: [],
       sizes: [],
+      sizeBalances: [],
       renewals: [],
       carried: [],
       expired: [],
@@ -453,6 +494,12 @@ async function careVisitsOfPlans(
     (p) => isExpired(p) && !p.closed_out && !live.some((x) => x.site_id === p.site_id),
   );
   const plans = live.filter((p) => p.status === "active");
+  // Owed back for a smaller roof, on any plan; or still owed for a bigger roof on a plan whose
+  // year is over (Nov 26). A bigger roof's difference on a plan in force is said on the plan.
+  const unsettled = all.filter((p) => {
+    const o = p.size?.balance?.owed ?? 0;
+    return o < 0 || (o > 0 && p.status === "ended");
+  });
   const [sites, accounts] = await Promise.all([
     readInChunks(siteIds, (chunk) => sb.from("crm_sites").select("id, name").in("id", chunk)),
     readInChunks(
@@ -460,6 +507,7 @@ async function careVisitsOfPlans(
         ...new Set([
           ...live.map((p) => p.account_id),
           ...ranOut.map((p) => p.account_id),
+          ...unsettled.map((p) => p.account_id),
           ...(owed ?? []).map((p) => p.account_id),
         ]),
       ],
@@ -537,6 +585,21 @@ async function careVisitsOfPlans(
       roof_sqft: p.roof_sqft,
       signed_on: p.signed_on,
     }));
+  const sizeBalances: AttCareSizeBalance[] = unsettled.map((p) => {
+    const corrected = (p.size?.changes ?? []).at(-1)?.on ?? null;
+    const owedNow = p.size?.balance?.owed ?? 0;
+    const ended = p.status === "ended";
+    return {
+      plan_id: p.id,
+      site_id: p.site_id,
+      title: titleOf(p),
+      owed: owedNow,
+      ended,
+      // A bigger roof's difference is listed from the day the plan year was over.
+      since: ended && owedNow > 0 ? (p.ended_on ?? corrected) : corrected,
+      invoice: p.size?.balance?.invoice ?? null,
+    };
+  });
   for (const p of plans) {
     const title = titleOf(p);
     const last = [...p.visits].filter((v) => v.kind === "visit1" || v.kind === "visit2").pop();
@@ -643,6 +706,7 @@ async function careVisitsOfPlans(
     refunds,
     noPayment,
     sizes,
+    sizeBalances,
     renewals,
     carried,
     expired,

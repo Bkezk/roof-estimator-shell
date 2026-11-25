@@ -190,12 +190,39 @@ export interface SizeCorrectedFacts {
    * for a plan that waits for its payment.
    */
   settle?: number;
+  /**
+   * What the customer's payments cover so far, in dollars (Nov 26). Given only when a
+   * correction before this one was not settled yet: `settle` is then worked from this, not
+   * from `from_price`, and the email says so. Until now a second correction read "now $1,300.
+   * It was $1,200 ... an invoice for the difference of $300.00", which does not add up.
+   */
+  covered?: number;
+  /**
+   * The size was corrected before (Nov 26): `from_sqft` is then the size we had, not the size
+   * the plan was signed at.
+   */
+  again?: boolean;
   company: string;
   contact: string;
 }
 
+/** Said after the amount when it replaces one the customer was told before. */
+export const SIZE_EMAIL_REPLACES =
+  "This takes the place of what we wrote to you before about the price.";
+
 /** What is said of the money when the plan year was already paid. */
-function settleBlocks(settle: number): Block[] {
+function settleBlocks(settle: number, covered?: number): Block[] {
+  // An earlier correction was not settled yet: the amount is from what the payments cover.
+  if (covered != null) {
+    const cover = `Your payments so far cover ${money2(covered)}`;
+    const text =
+      settle > 0
+        ? `Your plan year is already paid, and nothing is due today. ${cover}, so we will send you one invoice for the difference of ${money2(settle)}.`
+        : settle < 0
+          ? `${cover}, so we are sending ${money2(-settle)} back to you.`
+          : `${cover}, so nothing more is owed.`;
+    return [{ kind: "p", text: `${text} ${SIZE_EMAIL_REPLACES}` }];
+  }
   if (settle > 0)
     return [
       {
@@ -232,7 +259,9 @@ export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
     { kind: "p", text: `Hello ${f.agreed_by.trim() || "there"},` },
     {
       kind: "p",
-      text: `We measured the roof at ${place(f)}. It is ${sqft(f.to_sqft)} sq ft. Your ${name} plan${label(f)} was signed at ${sqft(f.from_sqft)} sq ft.`,
+      text: f.again
+        ? `We measured the roof at ${place(f)}. It is ${sqft(f.to_sqft)} sq ft. Until now we had your ${name} plan${label(f)} at ${sqft(f.from_sqft)} sq ft.`
+        : `We measured the roof at ${place(f)}. It is ${sqft(f.to_sqft)} sq ft. Your ${name} plan${label(f)} was signed at ${sqft(f.from_sqft)} sq ft.`,
     },
     {
       kind: "p",
@@ -246,7 +275,7 @@ export function sizeCorrectedEmail(f: SizeCorrectedFacts): Email {
       ? [{ kind: "p" as const, text: SIZE_EMAIL_NOT_CHARGED }]
       : []),
     ...(f.settle != null
-      ? settleBlocks(f.settle)
+      ? settleBlocks(f.settle, f.covered)
       : f.pay_link
         ? [
             { kind: "h" as const, text: "Pay by card" },

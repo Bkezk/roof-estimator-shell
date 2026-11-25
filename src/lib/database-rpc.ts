@@ -114,8 +114,21 @@ type RpcContracts = {
   };
   // 20261124990000: the refund for a roof found smaller after the plan was paid was sent. The
   // database works the amount; the answer is the record it kept.
+  // 20261125200000: it is told the amount the screen showed, and refuses when what is owed has
+  // changed since.
   roof_care_size_refund_sent: {
-    Args: { p_plan: string; p_on: string; p_ref?: string | null };
+    Args: {
+      p_plan: string;
+      p_on: string;
+      p_ref?: string | null;
+      p_shown_amount?: number | null;
+    };
+    Returns: unknown;
+  };
+  // 20261125200000: what a corrected size would do, before Save: the same arithmetic and the
+  // same refusals as roof_care_correct_size. Read strictly by readSizeOffer.
+  roof_care_size_offer: {
+    Args: { p_plan: string; p_sqft: number };
     Returns: unknown;
   };
 };

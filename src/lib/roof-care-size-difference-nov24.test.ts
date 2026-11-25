@@ -270,12 +270,15 @@ describe("the size invoice", () => {
     );
   });
 
-  it("is not made when nothing is owed to us, or the plan is not in force", async () => {
+  // Nov 26, 2026: a plan whose year is over can still owe a bigger roof's difference, and
+  // its invoice is made then too (it was refused, so the difference could not be billed). A
+  // plan that waits for its payment still gets none.
+  it("is not made when nothing is owed to us, or the plan still waits for its payment", async () => {
     for (const plan of [
       { size_paid_price: null },
       { size_paid_price: 470 },
       { size_paid_price: 500 },
-      { status: "ended" },
+      { status: "ended", size_paid_price: 470 },
       { status: "awaiting_payment" },
     ]) {
       const env = world(plan);
@@ -375,7 +378,10 @@ describe("on the screen", () => {
     expect(card).toContain('data-action="roof-care-size-refund-sent"');
     expect(SIZE_REFUND_RECORD).toBe("Record the refund");
     const fn = card.slice(card.indexOf("const sentFn = useServerFn(recordRoofCareSizeRefund);"));
+    // Nov 26, 2026: the screen hands over what it showed (`shown`), for the database to
+    // check against what is owed. Nothing is typed, and the database still works the amount.
     expect(fn.slice(0, fn.indexOf("onSuccess"))).not.toContain("amount");
+    expect(fn.slice(0, fn.indexOf("onSuccess"))).toContain("shown: -balance.owed,");
   });
   it("the customer of a paid plan can be emailed too, with no payment link in the label", () => {
     expect(card).toContain("const [emailIt, setEmailIt] = useState(!!to);");
@@ -448,6 +454,10 @@ describe("the database", () => {
       "Part of the invoice for the last correction is paid. Record the rest of that payment or take it off, then correct the size.",
     );
   });
+  // Nov 26, 2026: this is the rule as it was written on Nov 24, and this file of that day is
+  // not edited. It is replaced by 20261125200000: a size invoice settles what it was paid and
+  // no more, the refund is told the amount shown, and the end refund takes off an unpaid
+  // bigger roof (roof-care-size-fixes-nov26.test.ts).
   it("a size invoice paid in full settles the plan at its price", () => {
     expect(sql).toContain(
       "update public.roof_care_plans set size_paid_price = price, updated_at = now() where id = new.roof_care_plan_id and size_paid_price is not null;",

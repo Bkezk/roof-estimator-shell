@@ -343,6 +343,11 @@ describe("the refund when a plan ends early", () => {
       // (Nov 19, night: the card fee on a refund is its own line; none here.)
       card_fee: 0,
       refund: 520,
+      // Nov 26, 2026: the three parts of a corrected roof size read as nothing from an answer
+      // made before them.
+      size_off: 0,
+      size_left: 0,
+      size_back: 0,
     });
     expect(readRefundWorked({ paid: 1840 })).toBeNull();
     expect(readRefundWorked(null)).toBeNull();
