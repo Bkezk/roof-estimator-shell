@@ -16,17 +16,67 @@
  * has come PLAN_CARD_WAIT_MINUTES after the sign-up, the next pass sends the notice of the
  * sign-up, at any hour, and the reminders follow as for any other plan.
  *
- * Pure: the words. The sending is roof-care-notify.server.ts; the database's side is
- * 20261124960000_roof_care_pay_notice.sql.
+ * When the reminder goes (Nov 26, 2026; the audit of Nov 25, fix 27). By the office's days, not
+ * by hours: a plan last told on day D is due again on the first working day that is at least
+ * PLAN_PAY_REMIND_DAYS days after D, and the first pass from 8:00 that day sends it. Before,
+ * the rule was "48 hours since it was last told", so a plan signed on a Monday at 2:15 PM was
+ * reminded on Wednesday afternoon, and one told at night was reminded at night two days on.
+ * And a plan whose bank payment is clearing is not told while it clears: the notice says "no
+ * payment is recorded … reach out to the customer", which is wrong of a payment on its way.
+ * If the bank payment fails its stamp is cleared and the reminder starts again by itself.
+ *
+ * Pure: the words and the day rule. The sending is roof-care-notify.server.ts; the database
+ * claims each plan (roof_care_pay_notice_claim) and holds the same day rule
+ * (roof_care_pay_remind_due, 20261125500000_email_count_and_pay_reminder.sql).
  */
 import { shortDay } from "@/lib/followup-rules";
 import { planName } from "@/lib/roof-care-plan";
+import { addWorkingDays, isWeekend, morningReached, officeDay, plusDays } from "@/lib/working-days";
 
 export const PLAN_NEEDS_PAYMENT_KIND = "plan_needs_payment";
 /** A waiting plan is told again after this many days with no movement. */
 export const PLAN_PAY_REMIND_DAYS = 2;
 /** A card plan's "signed, not paid" waits this long for the card payment to come through. */
 export const PLAN_CARD_WAIT_MINUTES = 30;
+/**
+ * A bank payment holds the notice back for this many days at most. One still "on its way"
+ * after that needs somebody to look, so the plan is told again. The database's claim holds
+ * the same number.
+ */
+export const PLAN_BANK_CLEARING_DAYS = 10;
+
+const remindDays = (days: number): number =>
+  Number.isFinite(days) && days >= 1 ? Math.floor(days) : PLAN_PAY_REMIND_DAYS;
+
+/**
+ * The office day a plan's next reminder is due: the first working day that is at least `days`
+ * days after the day it was last told, or its payment link was last sent. Thursday gives
+ * Monday (two days on is a Saturday); Monday gives Wednesday.
+ */
+export const planPayReminderDay = (
+  lastMoved: Date | string,
+  days: number = PLAN_PAY_REMIND_DAYS,
+): string => addWorkingDays(plusDays(officeDay(lastMoved), remindDays(days)), 0);
+
+/**
+ * May the pass send reminders at all at this instant? From 8:00 on the office's clock on a
+ * working day, as every reminder does.
+ */
+export const planPayRemindersOpen = (now: Date): boolean =>
+  morningReached(now) && !isWeekend(officeDay(now));
+
+/**
+ * Is the reminder due now? The database's roof_care_pay_remind_due is the twin of this, and
+ * the one that decides: it claims the plan in the same step.
+ */
+export function planPayReminderDue(
+  lastMoved: Date | string | null | undefined,
+  now: Date,
+  days: number = PLAN_PAY_REMIND_DAYS,
+): boolean {
+  if (!lastMoved) return false;
+  return planPayRemindersOpen(now) && officeDay(now) >= planPayReminderDay(lastMoved, days);
+}
 
 /** One plan to tell, as roof_care_pay_notice_claim hands it back. */
 export interface PlanWaitingForPayment {

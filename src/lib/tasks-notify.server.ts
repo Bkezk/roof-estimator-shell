@@ -82,7 +82,14 @@ export async function sendTaskNotice(
   if (outside.length) {
     const msg = buildTaskEmail(task, kind, { audience: "outside", buildingLabel: label });
     for (const addr of outside) {
-      const r = await sendEmail({ to: addr, subject: msg.subject, text: msg.text });
+      // An outside person has no bell: this email is all they get, so it is never held for
+      // the day's count as a notice to staff is (Nov 26; before, it waited and was never sent).
+      const r = await sendEmail({
+        to: addr,
+        subject: msg.subject,
+        text: msg.text,
+        kind: "customer",
+      });
       if (r.ok) emails++;
       else errors.push(`email to ${addr}: ${r.error}`);
     }

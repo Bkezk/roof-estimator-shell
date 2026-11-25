@@ -22,6 +22,7 @@ import {
   PLAN_CARD_WAIT_MINUTES,
   PLAN_PAY_REMIND_DAYS,
   planNeedsPaymentNotice,
+  planPayRemindersOpen,
 } from "@/lib/roof-care-pay-notice";
 import { planName } from "@/lib/roof-care-plan";
 import { localYmd, TASK_TZ } from "@/lib/tasks";
@@ -162,6 +163,13 @@ export interface PlanPayNoticeResult {
  * PLAN_PAY_REMIND_DAYS days goes only from 8:00 on the office's clock on a working day, as
  * every reminder does.
  *
+ * Nov 26 (the audit of Nov 25, fix 27): the two days are office days, not 48 hours. A plan
+ * last told on a Monday afternoon is due from 8:00 on Wednesday, so the morning's first pass
+ * sends it; it used to go on Wednesday afternoon, or at night when a page was opened. The
+ * database decides which plans are due (roof_care_pay_remind_due; planPayReminderDue in
+ * roof-care-pay-notice.ts is the same rule). A plan whose bank payment is clearing is not told
+ * while it clears.
+ *
  * The database claims each plan before anything is sent (roof_care_pay_notice_claim), so two
  * passes at once send one notice between them. A send that fails puts the stamp back.
  */
@@ -171,7 +179,7 @@ export async function dispatchPlanPayNotices(
 ): Promise<PlanPayNoticeResult> {
   const out: PlanPayNoticeResult = { plans_notified: 0, plans_errors: 0 };
   const now = opts.now ?? new Date();
-  const reminders = !opts.planId && morningReached(now) && !isWeekend(localYmd(now, TASK_TZ));
+  const reminders = !opts.planId && planPayRemindersOpen(now);
   const admin = await serverClient(sb);
   const { data: plans, error } = await databaseRpc(admin)("roof_care_pay_notice_claim", {
     p_plan: opts.planId ?? null,

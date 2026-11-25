@@ -134,11 +134,24 @@ async function emailSignature(admin: Client): Promise<string> {
 // the limit, emails to staff about notices wait, so the rest is kept for customers: agreements,
 // receipts, invoices, payment links. A notice that is not emailed is still in the bell and on
 // the phone. The admins are told once at four fifths, and once when the service refuses.
+//
+// Nov 26, 2026 (the audit of Nov 25, fix 25):
+//   - Only an email the service accepted counts. The count is taken before the send, as
+//     before, and given back when the send fails (email_give_back): a service that refuses
+//     every email no longer fills the day with emails nobody got.
+//   - An email to somebody who has no bell (a customer, a task's outside person) is never
+//     held: every call of sendEmail says who it is for.
+//   - A staff email that waited is not a failure: nothing is written on the notice for it
+//     (it used to sit under Recent failures on Admin, Reminders). It is counted on Setup, QR
+//     pages, with the day's emails.
 
 /** Who an email is for: one of us (a notice), or a customer. */
 export type EmailKind = "staff" | "customer";
 
-/** Said on a staff notice that was not emailed because the day's count is nearly used. */
+/**
+ * What a staff notice's email answers when it waited because the day's count is nearly used.
+ * It is not kept on the notice as an error (Nov 26): notify() leaves it out.
+ */
 export const EMAIL_HELD =
   "Not emailed: most of today's email limit is used, so emails to staff wait and the rest is kept for customers. The notice is in the bell.";
 /** Said when the email service itself refuses because the day's limit is reached. */
@@ -193,25 +206,61 @@ async function tellEmailLimit(admin: Client, level: "near" | "full", used: numbe
 /**
  * One email through the email service, counted. `post` makes the call. Without the server's
  * own key (the preview, the tests) nothing is counted and the email simply goes. A count that
- * cannot be read never stops an email.
+ * cannot be read, or cannot be given back, never stops an email.
+ *
+ * Only an email the service accepted stays counted (Nov 26). The count is taken first, so two
+ * emails at once cannot both slip under the limit; a send that is refused, or never reaches the
+ * service, gives its count back, and the "four fifths" notice to the admins goes only once the
+ * email that reached it was accepted. The one refusal that stays counted is the service's own
+ * "the day is full": its count is the higher one then, and ours is behind it.
  */
 export async function countedEmail(
   kind: EmailKind,
   post: () => Promise<Response>,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const admin = await adminOrNull();
+  /** This email's own row in the count, to give back when it does not go. */
+  let taken: number | null = null;
+  /** The count reached four fifths with this email: said once it is accepted. */
+  let near: { used: number; cap: number } | null = null;
   if (admin) {
     try {
       const { data, error } = await looseRpc(admin)("email_take", { p_kind: kind });
       if (error) console.error("Email count: not read —", error.message);
       const o = (data ?? {}) as Record<string, unknown>;
       if (!error && o["send"] === false) return { ok: false, error: EMAIL_HELD };
-      if (!error && o["alert"] === "near")
-        await tellEmailLimit(admin, "near", Number(o["used"]) || 0, Number(o["cap"]) || 0);
+      if (!error) {
+        const id = Number(o["id"]);
+        taken = o["id"] != null && Number.isSafeInteger(id) && id > 0 ? id : null;
+        if (o["alert"] === "near")
+          near = { used: Number(o["used"]) || 0, cap: Number(o["cap"]) || 0 };
+      }
     } catch (e) {
       console.error("Email count: not read —", e);
     }
+    // A database from before Nov 26 names no row: nothing can be given back, so the admins are
+    // told at once, as they were.
+    if (near && taken == null) {
+      await tellEmailLimit(admin, "near", near.used, near.cap);
+      near = null;
+    }
   }
+  /** The email did not go: its count is given back, and the notice it would have set off. */
+  const giveBack = async () => {
+    if (!admin || taken == null) return;
+    try {
+      const { error } = await looseRpc(admin)("email_give_back", {
+        p_id: taken,
+        p_alerted: near != null,
+      });
+      if (error) console.error("Email count: a failed email stayed counted —", error.message);
+    } catch (e) {
+      console.error("Email count: a failed email stayed counted —", e);
+    }
+  };
+  const tellNear = async () => {
+    if (admin && near) await tellEmailLimit(admin, "near", near.used, near.cap);
+  };
   try {
     const res = await post();
     const body = res.ok ? "" : await res.text().catch(() => "");
@@ -234,10 +283,19 @@ export async function countedEmail(
         }
       }
     }
-    if (dayFull) return { ok: false, error: EMAIL_DAY_FULL };
-    if (!res.ok) return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
+    if (dayFull) {
+      // The service says the day is used up: this one stays counted, as before.
+      await tellNear();
+      return { ok: false, error: EMAIL_DAY_FULL };
+    }
+    if (!res.ok) {
+      await giveBack();
+      return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
+    }
+    await tellNear();
     return { ok: true };
   } catch (e) {
+    await giveBack();
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
@@ -247,7 +305,11 @@ export async function sendEmail(input: {
   subject: string;
   text: string;
   html?: string;
-  /** Who it is for (Nov 24). A notice to one of us unless said: those wait first. */
+  /**
+   * Who it is for (Nov 24). "staff" is a notice to one of us, who also has it in the bell:
+   * those wait first. Anybody with no bell (a customer, a task's outside person) is
+   * "customer" and is never held. Every call says which (Nov 26; a test reads them).
+   */
   kind?: EmailKind;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = process.env["RESEND_API_KEY"];
@@ -413,9 +475,11 @@ export async function notify(userIds: string[], sent: Outgoing, sb: Client): Pro
       if (emailProblem) patch.email_error = emailProblem;
       else {
         const text = emailText(msg, link, signature);
-        const r = await sendEmail({ to: p.email, subject: msg.title, text });
+        const r = await sendEmail({ to: p.email, subject: msg.title, text, kind: "staff" });
         if (r.ok) patch.email_sent_at = new Date().toISOString();
-        else patch.email_error = r.error;
+        // An email that waited for the day's count is not a failure (Nov 26): the notice is
+        // in the bell and on the phone, and Admin › Reminders lists only what needs fixing.
+        else if (r.error !== EMAIL_HELD) patch.email_error = r.error;
       }
     }
     if (p.notify_push) {
